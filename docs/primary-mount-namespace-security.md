@@ -1,10 +1,16 @@
 # Primary manager mount-namespace admission contract (issue #94)
 
 **Status: blocking until production passes.** This contract is independent of
-any copied formatter parser. The executable fixture is
-`tests/runtime/native/userspace/swapz-primary-mount-namespace.c`, linked by
-including the *production* `src/userspace/swapz-primary.c` without defining
-`SWAPZ_PRIMARY_ROOTLESS_TEST` (that test mode disables the real reader).
+any copied formatter parser. The executable fixture
+`tests/runtime/native/userspace/swapz-primary-mount-namespace.c` includes the
+*production* `src/userspace/swapz-primary.c` without defining
+`SWAPZ_PRIMARY_ROOTLESS_TEST` (that test mode disables the real readers). The
+fixture is a checkpoint behavior test, not an architectural requirement that
+cross-PID scanning live inside `swapz_primary_read_mount_facts()`. The
+architecture-neutral source guard in
+`tests/runtime/native/primary-lifecycle-audit-test.py` discovers the
+production cross-PID scanner by its behavior and requires the coordinator to
+reach it at the final safe pre-mutation boundary.
 
 ## Source boundary and independent checks
 
@@ -49,37 +55,48 @@ It must recheck stable selected partition/parent and descriptor identity; retain
 the same current-root identity, compare the target and parent against the newly
 scanned tables, and refuse before *any* destructive side effect if the scan has
 become busy or uncertain. A once-clean initial scan does not authorize a later
-mutation. A rootless regression for this boundary requires exercising the
-production lifecycle path with an injected late mount change and a write/ioctl
-sentinel; source-order inspection alone does not qualify that behavior.
+mutation. The lifecycle source guard is only a blocking structural regression:
+it dynamically locates the cross-PID production scanner and requires a fresh
+reachable scan after the exact target descriptor is opened and before the first
+partition write. It does **not** qualify the no-side-effect behavior. Before
+issue #94 can close, a rootless behavioral lifecycle regression must inject a
+late mount change into the production mutation path and prove zero partition
+writes/ioctls/swapon/DM mutation after that refusal.
 
 ## Rootless regression expectations
 
 The native test uses regular temporary files and mocked procfs path resolution,
-never `mount`, `unshare`, a block device, or a physical card. It calls
-`swapz_primary_read_mount_facts()` from production code and checks a sentinel
-for attempts at destructive writes. Its baseline root is `259:0`; the other
-PID's root is `259:9` and must never change that identity.
+never `mount`, `unshare`, a block device, or a physical card. It executes
+production mount-fact and swap-inventory functions directly. Its baseline root
+is `259:0`; the other PID's root is `259:9` and must never change that
+identity whenever production returns mount facts. Because this fixture does not
+run a mutating lifecycle coordinator, it makes no claim that a pwrite sentinel
+alone proves the required refusal-before-mutation contract.
 
 | Synthetic observation | Expected result |
 | --- | --- |
 | Local root only; unrelated PID or sibling `8:2` | Admit; preserve root `259:0` |
 | Selected partition `8:1` only in PID `3031` | Refuse |
 | Selected parent `8:0` only in PID `3031` | Refuse |
-| Local or other PID mountinfo malformed or missing while namespace lives | Refuse |
+| Local or other PID mountinfo malformed, empty or missing while namespace lives | Refuse |
 | PID inventory or mountinfo permission denied | Refuse |
 | Opened PID mountinfo has an I/O error | Refuse |
 | `EINVAL`, `ENOENT`, `ESRCH` opening PID mountinfo, namespace still present | Refuse |
 | Same errors, namespace proven absent | Admit if every other check is clean |
 | Mountinfo missing while PID mount namespace remains | Refuse |
 | Namespace stat itself permission denied or uncertain | Refuse |
+| Active regular swapfile with filesystem `st_dev` equal to selected partition or parent | Refuse; unrelated swapfiles remain permitted |
 | Active selected raw swap alias; matching DM ownership; nonempty holder directory | Independent refusal checks remain effective |
-| Any refused admission | No destructive write |
+| Any refused admission | No destructive mutation; requires separate lifecycle-path proof |
 
-The test is deliberately red against the verified `/proc/self/mountinfo`-only
-implementation. Its failure is a useful P0 regression signal, **not** a
-qualification PASS. Publication of a test does not close issue #94. The
-remaining risks include hidden/inaccessible PID namespaces, detached mount
-namespace FDs, stacked-filesystem aliases, cloned/reused device identities, and
-time-of-check/time-of-use races; visible process scanning is not an atomic,
-whole-host proof of physical device identity.
+The tests are deliberately red against the verified
+`/proc/self/mountinfo`-only implementation and against a swap inventory that
+ignores regular-file `st_dev`. Their failure is a useful P0 regression signal,
+**not** a qualification PASS. Once the coordinator separates current-root facts
+from a cross-PID scanner, the C behavior fixture must be wired to the actual
+production admission boundary rather than keeping an obsolete dependency on
+`swapz_primary_read_mount_facts()`. Publication of a test does not close issue
+#94. The remaining risks include hidden/inaccessible PID namespaces, detached
+mount namespace FDs, stacked-filesystem aliases, cloned/reused device
+identities, and time-of-check/time-of-use races; visible process scanning is not
+an atomic, whole-host proof of physical device identity.

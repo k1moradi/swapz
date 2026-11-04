@@ -27,7 +27,8 @@ static int fixture_inventory_error;
 static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
 static int fixture_mount_fd = -1;
-static unsigned int fixture_destructive_calls;
+static const char *fixture_regular_swap_path;
+static dev_t fixture_regular_swap_device;
 
 static const char *fixture_path(const char *path, char converted[PATH_MAX])
 {
@@ -109,6 +110,13 @@ static ssize_t fixture_read(int fd, void *buffer, size_t length)
 	return read(fd, buffer, length);
 }
 
+static int fixture_close(int fd)
+{
+	if (fd == fixture_mount_fd)
+		fixture_mount_fd = -1;
+	return close(fd);
+}
+
 static FILE *fixture_fopen(const char *path, const char *mode)
 	__attribute__((unused));
 static FILE *fixture_fopen(const char *path, const char *mode)
@@ -143,6 +151,14 @@ static int fixture_stat(const char *path, struct stat *info)
 		errno = fixture_namespace_stat_error;
 		return -1;
 	}
+	if (fixture_regular_swap_path &&
+	    !strcmp(path, fixture_regular_swap_path)) {
+		memset(info, 0, sizeof(*info));
+		info->st_mode = S_IFREG | 0600;
+		info->st_dev = fixture_regular_swap_device;
+		info->st_nlink = 1;
+		return 0;
+	}
 	return stat(fixture_path(path, converted), info);
 }
 
@@ -155,38 +171,22 @@ static int fixture_lstat(const char *path, struct stat *info)
 	return lstat(fixture_path(path, converted), info);
 }
 
-/* A destructive write during an inventory test is always a test failure. */
-static ssize_t fixture_pwrite(int fd, const void *buffer, size_t length,
-			      off_t offset)
-	__attribute__((unused));
-static ssize_t fixture_pwrite(int fd, const void *buffer, size_t length,
-			      off_t offset)
-{
-	(void)fd;
-	(void)buffer;
-	(void)length;
-	(void)offset;
-	++fixture_destructive_calls;
-	errno = EPERM;
-	return -1;
-}
-
 #define open(...) fixture_open(__VA_ARGS__)
 #define openat(...) fixture_openat(__VA_ARGS__)
 #define read(...) fixture_read(__VA_ARGS__)
+#define close(...) fixture_close(__VA_ARGS__)
 #define fopen(...) fixture_fopen(__VA_ARGS__)
 #define opendir(...) fixture_opendir(__VA_ARGS__)
 #define stat(...) fixture_stat(__VA_ARGS__)
 #define lstat(...) fixture_lstat(__VA_ARGS__)
-#define pwrite(...) fixture_pwrite(__VA_ARGS__)
 #define main swapz_primary_program_main
 #include "../../../../src/userspace/swapz-primary.c"
 #undef main
-#undef pwrite
 #undef lstat
 #undef stat
 #undef opendir
 #undef fopen
+#undef close
 #undef read
 #undef openat
 #undef open
@@ -222,6 +222,8 @@ static void fixture_reset(void)
 	fixture_namespace_stat_error = 0;
 	fixture_mount_read_error = 0;
 	fixture_mount_fd = -1;
+	fixture_regular_swap_path = NULL;
+	fixture_regular_swap_device = 0;
 	fixture_file("self/mountinfo",
 		     "36 25 259:0 / / rw - ext4 /dev/root rw\n");
 	fixture_file("3031/mountinfo",
@@ -241,8 +243,8 @@ static void expect_mount_admission(const char *case_name, int should_allow)
 	result = swapz_primary_read_mount_facts(&facts);
 	allowed = result == 0 && !facts.target_mounted;
 	if (allowed != should_allow ||
-	    (allowed && (!facts.root_mount_seen ||
-			 facts.root_device != makedev(259U, 0U)))) {
+	    (result == 0 && (!facts.root_mount_seen ||
+			    facts.root_device != makedev(259U, 0U)))) {
 		fprintf(stderr, "FAIL: %s: result=%d errno=%d target=%d "
 			"root_seen=%d root=%u:%u (expected %s)\n",
 			case_name, result, errno, facts.target_mounted,
@@ -251,9 +253,12 @@ static void expect_mount_admission(const char *case_name, int should_allow)
 			should_allow ? "admitted" : "refused");
 		++fixture_failures;
 	}
-	if (fixture_destructive_calls) {
-		fprintf(stderr, "FAIL: inventory attempted destructive write\n");
+	if (fixture_mount_fd != -1) {
+		fprintf(stderr, "FAIL: %s: remote mountinfo descriptor leaked\n",
+			case_name);
 		++fixture_failures;
+		(void)close(fixture_mount_fd);
+		fixture_mount_fd = -1;
 	}
 }
 
@@ -264,6 +269,65 @@ static int fixture_remove_entry(const char *path, const struct stat *info,
 	(void)type;
 	(void)tree;
 	return remove(path);
+}
+
+static void test_active_swapfile_gate(void)
+{
+	static const char swapfile_path[] = "/synthetic-selected-swapfile";
+	int active;
+
+	fixture_reset();
+	fixture_file("swaps",
+		     "Filename Type Size Used Priority\n"
+		     "/synthetic-selected-swapfile file 8192 1 -2\n");
+	fixture_regular_swap_path = swapfile_path;
+
+	/* Unrelated host swapfiles remain permitted. */
+	fixture_regular_swap_device = makedev(259U, 9U);
+	errno = 0;
+	if (swapz_primary_original_swap_is_quiescent() < 0) {
+		fprintf(stderr,
+			"FAIL: unrelated regular swapfile was rejected: errno=%d\n",
+			errno);
+		++fixture_failures;
+	}
+	active = swapz_primary_swap_device_active(makedev(8U, 1U));
+	if (active != 0) {
+		fprintf(stderr,
+			"FAIL: unrelated regular swapfile matched selected device: %d\n",
+			active);
+		++fixture_failures;
+	}
+
+	/*
+	 * Regular /proc/swaps entries carry no block st_rdev. Production must use
+	 * the file's filesystem st_dev so a directly backed active swapfile cannot
+	 * bypass the independent selected-storage gate.
+	 */
+	fixture_regular_swap_device = makedev(8U, 1U);
+	errno = 0;
+	if (swapz_primary_original_swap_is_quiescent() == 0) {
+		fprintf(stderr,
+			"FAIL: active swapfile on selected filesystem was admitted\n");
+		++fixture_failures;
+	}
+	active = swapz_primary_swap_device_active(makedev(8U, 1U));
+	if (active != 1) {
+		fprintf(stderr,
+			"FAIL: selected-filesystem swapfile active result=%d errno=%d\n",
+			active, errno);
+		++fixture_failures;
+	}
+
+	/* The same stat identity rule applies when independently checking parent. */
+	fixture_regular_swap_device = makedev(8U, 0U);
+	active = swapz_primary_swap_device_active(makedev(8U, 0U));
+	if (active != 1) {
+		fprintf(stderr,
+			"FAIL: parent-filesystem swapfile active result=%d errno=%d\n",
+			active, errno);
+		++fixture_failures;
+	}
 }
 
 static void test_independent_admission_gates(void)
@@ -318,8 +382,11 @@ int main(void)
 	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031/ns", fixture_proc_root) > 0);
 	assert(mkdir(path, 0700) == 0);
+	strcpy(swapz_primary_selected_target.partuuid, "f13428f6-01");
 	swapz_primary_selected_target.device_major = 8U;
 	swapz_primary_selected_target.device_minor = 1U;
+	swapz_primary_selected_target.device_bytes =
+		16ULL * 1024ULL * 1024ULL * 1024ULL;
 	fixture_reset();
 	expect_mount_admission("only local root mount", 1);
 	fixture_file("3031/mountinfo",
@@ -344,6 +411,9 @@ int main(void)
 	fixture_reset();
 	fixture_file("3031/mountinfo", "malformed\n");
 	expect_mount_admission("malformed remote mount table", 0);
+	fixture_reset();
+	fixture_file("3031/mountinfo", "");
+	expect_mount_admission("empty remote mount table", 0);
 	fixture_reset();
 	fixture_mount_read_error = EIO;
 	expect_mount_admission("opened remote table read error", 0);
@@ -372,6 +442,7 @@ int main(void)
 	fixture_unlink("3031/mountinfo");
 	fixture_unlink("3031/ns/mnt");
 	expect_mount_admission("missing table and vanished namespace", 1);
+	test_active_swapfile_gate();
 	test_independent_admission_gates();
 	assert(nftw(fixture_proc_root, fixture_remove_entry, 16,
 		    FTW_DEPTH | FTW_PHYS) == 0);

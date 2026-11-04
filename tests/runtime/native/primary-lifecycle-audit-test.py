@@ -53,6 +53,58 @@ def c_function_body(source: str, symbol: str, *, code_only: bool = True) -> str:
     raise AssertionError("unclosed production function " + symbol)
 
 
+def c_primary_function_names(source: str) -> tuple[str, ...]:
+    """Return production primary function symbols without trusting comments."""
+    parsed_source = _c_code_only(source)
+    return tuple(dict.fromkeys(re.findall(
+        r"(?:static\s+)?(?:int|long)\s+(swapz_primary_[A-Za-z0-9_]+)"
+        r"\s*\(",
+        parsed_source)))
+
+
+def c_function_calls(source: str, symbol: str,
+                     available: set[str]) -> set[str]:
+    body = c_function_body(source, symbol)
+    return {
+        candidate for candidate in available
+        if candidate != symbol and
+        re.search(r"\b" + re.escape(candidate) + r"\s*\(", body)
+    }
+
+
+def c_function_reaches(source: str, start: str, target: str,
+                       available: set[str],
+                       seen: set[str] | None = None) -> bool:
+    """Follow only executable production calls; never comments/diagnostics."""
+    if start == target:
+        return True
+    visited = set() if seen is None else set(seen)
+    if start in visited:
+        return False
+    visited.add(start)
+    return any(
+        c_function_reaches(source, called, target, available, visited)
+        for called in c_function_calls(source, start, available))
+
+
+def cross_namespace_mount_scanner(source: str) -> str:
+    """Locate the production PID mount-table scanner by behavior, not name."""
+    candidates = []
+    for symbol in c_primary_function_names(source):
+        executable = c_function_body(source, symbol)
+        raw = c_function_body(source, symbol, code_only=False)
+        enumerates = re.search(
+            r"\b(?:readdir|fdopendir|getdents|getdents64)\s*\(",
+            executable)
+        if "mountinfo" in raw and enumerates:
+            candidates.append(symbol)
+    if len(candidates) != 1:
+        raise AssertionError(
+            "expected exactly one production cross-PID mountinfo scanner, "
+            f"found {candidates}")
+    return candidates[0]
+
+
 def _primary_preprocessor(definitions=(), source_text=None):
     command = ["cc", "-std=c11", "-E", "-dM"]
     command.extend(f"-D{definition}" for definition in definitions)
@@ -650,6 +702,80 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertLess(
             recover.index("swapz_primary_deactivate_mapper_swap("),
             recover.index("swapz_primary_dm_remove_mapper("))
+
+    def test_cross_namespace_mount_scan_revalidates_before_first_mutation(self):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        functions = set(c_primary_function_names(source))
+        scanner = cross_namespace_mount_scanner(source)
+
+        # Root identity remains a current-namespace fact. The cross-PID
+        # inventory is a separate production scanner, not a replacement root.
+        self.assertNotEqual(scanner, "swapz_primary_read_mount_facts")
+        current_mounts_raw = c_function_body(
+            source, "swapz_primary_read_mount_facts", code_only=False)
+        self.assertIn("/proc/self/mountinfo", current_mounts_raw)
+
+        scanner_raw = c_function_body(source, scanner, code_only=False)
+        namespace_helpers = {
+            symbol for symbol in functions
+            if "ns/mnt" in c_function_body(
+                source, symbol, code_only=False)
+        }
+        self.assertTrue(
+            "ns/mnt" in scanner_raw or
+            any(c_function_reaches(
+                source, scanner, helper, functions)
+                for helper in namespace_helpers),
+            "PID scanner does not classify vanished mount namespaces")
+
+        # The scanner or one of its wrappers must be used in initial metadata
+        # admission, but the critical requirement is a fresh call after the
+        # exact target descriptor is opened and before the first partition
+        # write. This permits the scanner to be wrapped without pinning a name.
+        prepare = c_function_body(source, "swapz_primary_prepare_metadata")
+        start = c_function_body(source, "swapz_primary_start_prepared")
+        write_checked = c_function_body(
+            source, "swapz_primary_write_header_checked_fd")
+
+        def text_reaches_scanner(text: str) -> bool:
+            for symbol in functions:
+                if re.search(r"\b" + re.escape(symbol) + r"\s*\(", text):
+                    if c_function_reaches(
+                            source, symbol, scanner, functions):
+                        return True
+            return False
+
+        self.assertTrue(
+            text_reaches_scanner(prepare),
+            "prepare admission does not reach the cross-PID mount scanner")
+
+        target_open = start.index("swapz_primary_target_open_exclusive(")
+        target_open_complete = start.index(";", target_open) + 1
+        first_partition_write = start.index(
+            "swapz_primary_write_header_checked_fd(")
+        self.assertLess(target_open_complete, first_partition_write)
+        final_window = start[target_open_complete:first_partition_write]
+        revalidated_in_start = text_reaches_scanner(final_window)
+
+        pwrite_position = write_checked.find("pwrite(")
+        self.assertGreaterEqual(
+            pwrite_position, 0,
+            "checked header writer no longer exposes the mutation boundary")
+        revalidated_in_writer = text_reaches_scanner(
+            write_checked[:pwrite_position])
+
+        self.assertTrue(
+            revalidated_in_start or revalidated_in_writer,
+            "cross-PID mount inventory is not revalidated at the final "
+            "safe pre-mutation boundary")
+
+        # The mount scanner supplements rather than replaces independent
+        # active-swap, DM and holder/topology gates.
+        for body in (prepare, start):
+            self.assertIn("swapz_primary_recovery_source_chain(", body)
+            self.assertIn("swapz_primary_read_module_mapper_inventory(", body)
+        self.assertIn("swapz_primary_original_swap_is_quiescent()", prepare)
+        self.assertIn("swapz_primary_swap_device_active(", start)
 
     def test_recovery_persists_fail_closed_interruption_order(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
