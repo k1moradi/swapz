@@ -3352,7 +3352,7 @@ class PairReplayContract(unittest.TestCase):
 
         corruptions = (
             lambda item: item["samples"].pop(),
-            lambda item: item["samples"][10].update(phase="baseline"),
+            lambda item: item["samples"][11].update(phase="baseline"),
             lambda item: item["samples"][13].update(monotonic_ns=1),
             lambda item: item["samples"][13].update(
                 timestamp_utc="2026-11-03T00:00:00Z"),
