@@ -308,6 +308,13 @@ static void test_dm_reply_boundaries_and_identity(void)
 	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0, &snapshot) == 1);
 	assert(snapshot.ratio_state == STATUS_READY);
 	assert(snapshot.device_id == 1);
+	/*
+	 * The terminal next offset is only metadata: Linux may align it beyond
+	 * the final used byte. Parsing must not require those padding bytes.
+	 */
+	assert(parse_dm_target_snapshot(buffer, (size_t)header.data_size,
+					"fixture", 0, &snapshot) == 1);
+	assert(snapshot.ratio_state == STATUS_READY);
 	assert(parse_dm_target_snapshot(buffer, (size_t)header.data_size - 1U,
 					"fixture", 0, &snapshot) < 0);
 	assert(!strcmp(snapshot.problem.field, "dm_ioctl.data_start/data_size"));

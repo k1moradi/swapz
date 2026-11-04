@@ -796,7 +796,6 @@ static int parse_dm_target_snapshot(const unsigned char *buffer,
 	const char *data_end;
 	const char *selected_params = NULL;
 	size_t payload_size;
-	size_t payload_capacity;
 	size_t terminal_next;
 	uint32_t target;
 	unsigned int swapz_index = 0;
@@ -819,16 +818,15 @@ static int parse_dm_target_snapshot(const unsigned char *buffer,
 		return -1;
 	}
 	payload_size = (size_t)header.data_size - header.data_start;
-	payload_capacity = buffer_size - header.data_start;
-	if ((header.target_count &&
+		if ((header.target_count &&
 	     (payload_size < sizeof(struct dm_target_spec) + 1U ||
 	      header.target_count >
 		      payload_size / (sizeof(struct dm_target_spec) + 1U))) ||
 	    status_align_target_offset(payload_size, &terminal_next) < 0 ||
-	    terminal_next > payload_capacity || terminal_next > UINT32_MAX) {
+	    terminal_next > UINT32_MAX) {
 		status_set_problem(&snapshot->problem, "dm_target_spec.next",
-				   "bounded aligned target records inside the DM reply capacity",
-				   "target count or aligned terminal offset exceeds the reply");
+				   "bounded target count and a representable aligned terminal offset",
+				   "target count is impossible or terminal offset exceeds uint32");
 		return -1;
 	}
 	if (!memchr(header.name, '\0', sizeof(header.name)) ||
