@@ -7302,6 +7302,176 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.audit_constructor(injected)
 
+    def audit_partial_constructor_ownership(self, constructor, destruction):
+        """Bounded source fault-site audit, not a loaded kernel allocation test.
+
+        Each of the 47 direct allocation attempts must have an -ENOMEM path;
+        partially built slots and worker lanes must remain zero-initialized
+        until their buffers exist. Only the final admitted constructor may
+        enable BIO acceptance. Loaded null_blk injection remains mandatory.
+        """
+        self.audit_constructor(constructor)
+        index_end = max(
+            offset for _, _, offset in self.allocation_inventory(constructor))
+        index_guard = constructor[
+            index_end:constructor.index("error = swapz_authority_init(")]
+        for name in self.INDEXES:
+            self.assertEqual(
+                len(re.findall(r"!ctx->" + re.escape(name) + r"\b",
+                               index_guard)), 1,
+                f"{name} is not checked before authority initialization")
+        self.assertRegex(index_guard, r"error\s*=\s*-ENOMEM;\s*goto fail;")
+
+        core_start = constructor.index("ctx->batch_bytes = vzalloc(")
+        core_end = constructor.index(
+            "SWAPZ_CONSTRUCTOR_FAIL_AFTER_CORE_SCRATCH", core_start)
+        core = constructor[core_start:core_end]
+        read_start = constructor.index(
+            "for (read_slot = 0; ctx->read_grouping_enabled", core_end)
+        read_end = constructor.index(
+            "SWAPZ_CONSTRUCTOR_FAIL_AFTER_READ_SLOTS", read_start)
+        read_slots = constructor[read_start:read_end]
+        preparation_start = constructor.index(
+            "if (ctx->async_prepare) {", read_end)
+        preparation_end = constructor.index(
+            "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_SCRATCH",
+            preparation_start)
+        preparation = constructor[preparation_start:preparation_end]
+
+        # Audit all fixed heap sites, including the optional delta64 scratch
+        # and the per-slot/per-lane partial failures, not just the 17 indexes.
+        for expression, _ in self.FIXED_ALLOCATIONS:
+            if expression == "ctx":
+                self.assertRegex(
+                    constructor[:constructor.index("ti->private = ctx;")],
+                    r"if \(!ctx\)\s*return -ENOMEM;")
+                continue
+            if expression.startswith("slot->"):
+                scope = read_slots
+            elif expression.startswith("lane->"):
+                scope = preparation
+            elif expression in (
+                    "ctx->preparation_pages", "ctx->preparation_lanes",
+                    "ctx->submitter_lanes"):
+                scope = preparation
+            else:
+                scope = core
+            self.assertIn("!" + expression, scope,
+                          f"missing partial-allocation guard: {expression}")
+        self.assertRegex(read_slots, r"error\s*=\s*-ENOMEM;\s*goto fail;")
+        self.assertRegex(preparation, r"error\s*=\s*-ENOMEM;\s*goto fail;")
+        self.assertEqual(
+            len(re.findall(r"!lane->predictor_page\b", preparation)), 2)
+        self.assertEqual(
+            len(re.findall(r"!lane->delta64_candidate_page\b", preparation)),
+            2)
+        self.assertEqual(
+            len(re.findall(r"!lane->lz4_workmem\b", preparation)), 2)
+
+        # The constructor may INIT work items, but must never queue a worker
+        # before DM publishes a successfully constructed target.
+        self.assertNotRegex(
+            constructor,
+            r"\b(?:queue_work|queue_delayed_work|mod_delayed_work|"
+            r"kthread_run|schedule_work)\s*\(")
+        self.assertLess(
+            constructor.index("INIT_DELAYED_WORK(&ctx->worker"),
+            constructor.index("dm_get_device("))
+        self.assertLess(
+            constructor.index("hrtimer_init(&ctx->retention_timer"),
+            constructor.index("dm_get_device("))
+        self.assertLess(
+            preparation.index("INIT_WORK(&lane->work"),
+            preparation.index("ctx->preparation_workqueue")
+            if "ctx->preparation_workqueue" in preparation
+            else len(preparation))
+        self.assertLess(
+            constructor.index("ctx->preparation_lanes = kcalloc("),
+            constructor.index("for (prep_lane = 0; prep_lane < "
+                              "ctx->preparation_worker_count"))
+        self.assertLess(
+            constructor.index("if (!ctx->preparation_pages ||"),
+            constructor.index("for (prep_lane = 0; prep_lane < "
+                              "ctx->preparation_worker_count"))
+        self.assertLess(
+            constructor.index("ctx->preparation_workqueue = alloc_workqueue("),
+            constructor.index(
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE"))
+
+        # All eight post-acquisition fault injections explicitly return
+        # ENOMEM via the common idempotent cleanup, never by falling through.
+        for stage in (
+                "BACKING", "IO_CLIENT", "AUTHORITY", "CORE_SCRATCH",
+                "READ_SLOTS", "WORKQUEUE", "PREPARATION_SCRATCH",
+                "PREPARATION_WORKQUEUE"):
+            marker = constructor.index("SWAPZ_CONSTRUCTOR_FAIL_AFTER_" + stage)
+            self.assertRegex(
+                constructor[marker:marker + 180],
+                r"\)\)\s*\{\s*error = -ENOMEM;\s*goto fail;\s*\}")
+
+        self.assertEqual(constructor.count("ti->private = ctx;"), 1)
+        self.assertEqual(constructor.count("WRITE_ONCE(ctx->accepting, true)"),
+                         1)
+        success = constructor.index("WRITE_ONCE(ctx->accepting, true)")
+        self.assertLess(constructor.index("dm_set_target_max_io_len("),
+                        success)
+        self.assertLess(constructor.index(
+            "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE"), success)
+        self.assertRegex(
+            constructor[constructor.rindex("fail:"):],
+            r"fail:\s*swapz_free\(ctx\);\s*ti->private = NULL;\s*return error;")
+        self.assertLess(constructor.index("ti->private = ctx;"),
+                        constructor.index("dm_get_device("))
+
+        # Resource dependencies determine teardown order: cancel/drain both
+        # workqueues before freeing lane/read scratch; free the host IO client
+        # and backing reference once; release ctx last. This is safe for
+        # partially initialized, zero-filled arrays, including a failed lane.
+        for worker in ("ctx->workqueue", "ctx->preparation_workqueue"):
+            self.assertIn("if (" + worker + ")", destruction)
+            self.assertEqual(
+                destruction.count("destroy_workqueue(" + worker + ")"), 1)
+        self.assertLess(
+            destruction.index("destroy_workqueue(ctx->workqueue)"),
+            destruction.index("kvfree(ctx->read_slots);"))
+        self.assertLess(
+            destruction.index("destroy_workqueue(ctx->preparation_workqueue)"),
+            destruction.index("kfree(ctx->preparation_lanes);"))
+        self.assertLess(
+            destruction.index("destroy_workqueue(ctx->preparation_workqueue)"),
+            destruction.index("kvfree(ctx->submitter_lanes);"))
+        for resource, release in (
+                ("ctx->backing", "dm_put_device(ctx->target, ctx->backing)"),
+                ("ctx->io_client", "dm_io_client_destroy(ctx->io_client)"),
+                ("ctx->read_slots", "kvfree(ctx->read_slots)"),
+                ("ctx->preparation_lanes", "kfree(ctx->preparation_lanes)"),
+                ("ctx->submitter_lanes", "kvfree(ctx->submitter_lanes)")):
+            self.assertIn("if (" + resource + ")", destruction)
+            self.assertEqual(destruction.count(release), 1)
+        self.assertTrue(destruction.rstrip().endswith("kfree(ctx);"))
+        self.assertIn("if (!ctx)\n\t\treturn;", destruction)
+
+    def test_all_constructor_fault_sites_and_unwind_are_fail_closed(self):
+        constructor = body("swapz_ctr")
+        destruction = body("swapz_free")
+        self.audit_partial_constructor_ownership(constructor, destruction)
+        # Mutations prove that each failure path is an enforced contract,
+        # rather than a source-presence assertion against unrelated code.
+        with self.assertRaises(AssertionError):
+            self.audit_partial_constructor_ownership(
+                constructor.replace("!ctx->segment_roles", "ctx->segment_roles",
+                                    1), destruction)
+        with self.assertRaises(AssertionError):
+            self.audit_partial_constructor_ownership(
+                constructor.replace(
+                    "ti->private = NULL;\n\treturn error;",
+                    "return error;", 1), destruction)
+        with self.assertRaises(AssertionError):
+            self.audit_partial_constructor_ownership(
+                constructor, destruction.replace(
+                    "destroy_workqueue(ctx->preparation_workqueue);",
+                    "/* missing worker teardown */", 1))
+
     def test_selected_card_allocation_free_bytes_and_addressability(self):
         # Independently compute the current admission result and page-rounded
         # allocation footprint. These estimates exclude vmalloc metadata, PTEs,
