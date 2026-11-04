@@ -10,7 +10,6 @@ import fcntl
 import importlib.util
 import json
 import os
-import shutil
 import tempfile
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -1558,7 +1557,7 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                 self.assertIn(f"errno={errno.ESTALE}", result.stderr)
         self._assert_cleanup_allowed(clean_package)
 
-    def test_committed_journal_then_verified_test_cleanup_allows_reentry(self):
+    def test_committed_journal_then_verified_package_recovery_allows_reentry(self):
         package = self._package_fixture()
         transaction = self._crash_and_reacquire(
             package, "install", "committed")
@@ -1566,18 +1565,17 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
         self.assertEqual(state["schema"], "swapz-package-install-v1")
         self.assertEqual(state["phase"], "committed")
         package.assert_installed_exact()  # verified installed payload, not a guess
-        unavailable_recovery = package.invoke("install")
-        self.assertNotEqual(unavailable_recovery.returncode, 0)
-        self.assertIn(
-            "incomplete package transaction retained",
-            unavailable_recovery.stderr)
-        # This is deliberately test-only trusted cleanup, not package recovery.
-        # Production currently exposes no crash-recovery command; the P0
-        # recovery-interface gap is reported separately rather than fabricated
-        # by this fixture. Verify the terminal journal and exact installed bytes
-        # before removing only the private sandbox transaction.
-        shutil.rmtree(transaction)
+        # Normal package mutation remains gated until explicit recovery verifies
+        # the retained journal and exact installed package under package.lock.
+        blocked = package.invoke("install")
+        self.assertNotEqual(blocked.returncode, 0)
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+        recovered = package.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        package.assert_installed_exact()
+        self.assertFalse(transaction.exists())
         self.assertEqual(list((package.home / "transactions").iterdir()), [])
+        self.assertEqual(package.invoke("recover").returncode, 0)
         for _ in range(2):
             self._assert_clean_admission(package)
             self._assert_cleanup_allowed(package)
