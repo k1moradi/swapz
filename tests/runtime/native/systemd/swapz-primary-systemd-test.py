@@ -1676,6 +1676,12 @@ class RuntimeHealthTests(unittest.TestCase):
         ambiguous = self.run_helper("hibernate-guard", env)
         self.assertEqual(ambiguous.returncode, 1, ambiguous.stderr)
 
+        # A dangling sysfs device link is not an existing captured identity.
+        block_link = self.sys / "dev" / "block" / "8:7"
+        block_link.symlink_to(self.root / "missing-sysfs-device")
+        dangling = self.run_helper("hibernate-guard", env)
+        self.assertEqual(dangling.returncode, 1, dangling.stderr)
+
     def test_unresolved_resume_alias_blocks_when_selected_media_is_absent(self) -> None:
         (self.dev / "disk" / "by-partuuid" / PARTUUID).unlink()
 

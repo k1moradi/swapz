@@ -520,7 +520,7 @@ active_swapz_swap()
 			if [ -e "$dm_dir" ] || [ -L "$dm_dir" ]; then
 				exit 11
 			fi
-			[ -e "$block_sysfs" ] || [ -L "$block_sysfs" ] || exit 11
+			[ -e "$block_sysfs" ] || exit 11
 		fi
 	done; then
 		status=0
