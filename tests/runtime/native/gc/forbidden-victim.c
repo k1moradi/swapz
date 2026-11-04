@@ -148,6 +148,61 @@ static int test_forged_empty_reserves_fail_without_recycling(void)
 	return 0;
 }
 
+
+/* A single corrupted physical witness must not allow GC to reclaim a reserve
+ * that still owns an authoritative logical mapping. Test each witness alone,
+ * then retry without repairing the corruption. */
+static int test_single_witness_reserve_corruption_is_fail_closed(void)
+{
+	struct swapz_tx tx;
+	struct swapz_map original_maps[32];
+	swapz_u16 original_live[1024];
+	swapz_u8 original_classes[1024];
+	swapz_u32 page;
+	unsigned int index, attempt, witness;
+
+	for (witness = 0U; witness < 2U; ++witness) {
+		CHECK(initialize_gc() == 0);
+		for (page = 0U; page < 2U; ++page) {
+			for (index = 0U; index < SWAPZ_SEGMENT_BLOCKS; ++index) {
+				CHECK(swapz_stage(&a, &page, 1U, 1U, &tx) == 0);
+				CHECK(swapz_finish_raw(
+					      &a, &tx, raw_page, 1U, 0) == 0);
+			}
+		}
+		CHECK(maps[0].valid && maps[1].valid);
+		CHECK(maps[0].start_block ==
+		      3U * SWAPZ_SEGMENT_BLOCKS - 1U &&
+		      maps[1].start_block ==
+		      4U * SWAPZ_SEGMENT_BLOCKS - 1U);
+		a.dead_segment_recycle = unexpected_recycle;
+		a.dead_segment_recycle_opaque = &unexpected_recycle_calls;
+		unexpected_recycle_calls = 0;
+		if (witness == 0U)
+			memset(live, 0, sizeof(live));
+		else
+			memset(classes, 0, sizeof(classes));
+		memcpy(original_maps, maps, sizeof(maps));
+		memcpy(original_live, live, sizeof(live));
+		memcpy(original_classes, classes, sizeof(classes));
+
+		page = 2U;
+		for (attempt = 0U; attempt < 3U; ++attempt) {
+			CHECK(swapz_stage(&a, &page, 1U, 1U, &tx) == -ENOSPC);
+			CHECK(!memcmp(original_maps, maps, sizeof(maps)));
+			CHECK(!memcmp(original_live, live, sizeof(live)));
+			CHECK(!memcmp(original_classes, classes, sizeof(classes)));
+			CHECK(a.next_block == 4U * SWAPZ_SEGMENT_BLOCKS &&
+			      a.open_segment == 3U && !a.in_flight);
+			CHECK(a.gc_allocation && a.gc_forbidden_open == 0U &&
+			      a.gc_forbidden_victim == 1U);
+			CHECK(unexpected_recycle_calls == 0 &&
+			      a.recycled_dead_segments == 0U);
+		}
+	}
+	return 0;
+}
+
 static int test_idle_mode_allows_dead_segment_without_gc_guards(void)
 {
 	struct swapz_tx tx;
@@ -172,6 +227,8 @@ int main(void)
 	CHECK(test_fail_closed_when_only_forbidden_segments_are_free() == 0);
 	passed++;
 	CHECK(test_forged_empty_reserves_fail_without_recycling() == 0);
+	passed++;
+	CHECK(test_single_witness_reserve_corruption_is_fail_closed() == 0);
 	passed++;
 	CHECK(test_idle_mode_allows_dead_segment_without_gc_guards() == 0);
 	passed++;

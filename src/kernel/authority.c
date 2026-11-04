@@ -5,6 +5,7 @@
 #ifdef __KERNEL__
 #include <linux/errno.h>
 #include <linux/ktime.h>
+#include <linux/printk.h>
 #include <linux/stddef.h>
 #include <linux/string.h>
 #else
@@ -996,11 +997,27 @@ int swapz_gc_advance_rotation_destination(struct swapz_authority *a,
 		 * destination. Treat contradictory maps/liveness as corruption, not
 		 * as a candidate to skip and silently route around.
 		 */
-		error = swapz_verify_recovery_victim_dead(a, segment, 0);
-		if (error)
+		/*
+		 * A destination-role change must not conceal a corrupted physical
+		 * descriptor on any surviving logical map, including other segments.
+		 */
+		error = swapz_verify_recovery_victim_dead(a, segment, 1);
+		if (error) {
+#ifdef __KERNEL__
+			pr_err_ratelimited(
+				"swapz: GC advance blocked=%u candidate=%u victim=%u map_proof=%d; roles intact\n",
+				blocked_destination, segment,
+				a->gc_forbidden_victim, error);
+#endif
 			return error;
+		}
 		error = swapz_claim_dead_segment(a, segment, probe_start);
 		if (error) {
+#ifdef __KERNEL__
+			pr_err_ratelimited(
+				"swapz: GC advance blocked=%u candidate=%u claim=%d; restoring cursor\n",
+				blocked_destination, segment, error);
+#endif
 			a->next_block = old_next;
 			a->open_segment = old_open;
 			a->next_segment_probe = old_probe;
@@ -1053,12 +1070,24 @@ int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 	 */
 	error = swapz_verify_recovery_victim_dead(
 		a, evacuated_victim, 1);
-	if (error)
+	if (error) {
+#ifdef __KERNEL__
+		pr_err_ratelimited(
+			"swapz: GC roll-forward victim=%u exhausted=%u map_proof=%d; roles intact\n",
+			evacuated_victim, exhausted_destination, error);
+#endif
 		return error;
+	}
 	probe_start = swapz_authority_now_ns();
 	error = swapz_claim_dead_segment(a, evacuated_victim, probe_start);
-	if (error)
+	if (error) {
+#ifdef __KERNEL__
+		pr_err_ratelimited(
+			"swapz: GC roll-forward victim=%u exhausted=%u claim=%d; roles intact\n",
+			evacuated_victim, exhausted_destination, error);
+#endif
 		return error;
+	}
 
 	a->segment_foreground[exhausted_destination] = 1;
 	a->segment_foreground[evacuated_victim] = 0;
@@ -1076,6 +1105,7 @@ int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 {
 	swapz_u32 dest, logical, block, live_total = 0;
+	int error;
 
 	if (!a || !a->segment_foreground || !a->gc_allocation ||
 	    a->in_flight || a->batch_pending || victim >= a->segment_count ||
@@ -1121,8 +1151,20 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 		return -EUCLEAN;
 	/* Cached zero sidecars are not proof of zero authoritative maps.
 	 * Verify the primary mapping table before publishing a new GC role. */
-	if (swapz_verify_recovery_victim_dead(a, victim, 0))
+	/*
+	 * A successful role exchange can immediately expose destination data to
+	 * foreground reads. Authenticate class/liveness for EVERY surviving map
+	 * before exchanging roles, not just the old victim's deadness.
+	 */
+	error = swapz_verify_recovery_victim_dead(a, victim, 1);
+	if (error) {
+#ifdef __KERNEL__
+		pr_err_ratelimited(
+			"swapz: GC commit victim=%u dest=%u cursor=%u map_proof=%d; roles intact\n",
+			victim, dest, a->next_block, error);
+#endif
 		return -EUCLEAN;
+	}
 	/* Commit both roles without further lower I/O or fallible work. */
 	a->segment_foreground[dest] = 1;
 	a->segment_foreground[victim] = 0;

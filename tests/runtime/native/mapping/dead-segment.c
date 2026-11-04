@@ -584,6 +584,248 @@ static int test_roll_forward_rejects_unrelated_map_sidecar_corruption(void)
  * valid map remains, neither RAW nor compressed publication may zero the
  * cached count and authorize the caller's closed-segment early-TRIM.
  */
+
+/*
+ * Recovery checks must authenticate physical start witnesses for all valid
+ * logical maps, not only maps in the dead victim or blocked destination.
+ * Corrupt one unrelated survivor witness at a time and retry the same
+ * transition: neither retry may expose an unsafe role exchange.
+ */
+static int test_gc_commit_rejects_unrelated_survivor_corruption(void)
+{
+	const swapz_u32 survivor = 7U;
+	const swapz_u32 destination_page = 8U;
+	int corruption, attempt;
+
+	for (corruption = 0; corruption < 2; ++corruption) {
+		swapz_u32 survivor_start, destination, destination_start;
+
+		CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+		a.next_segment_probe = 1U;
+		CHECK(write_page(survivor) == 0);
+		survivor_start = maps[survivor].start_block;
+		CHECK(survivor_start / SWAPZ_SEGMENT_BLOCKS == 1U);
+		CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+		destination = a.gc_destination;
+		CHECK(destination == 2U);
+		CHECK(write_page(destination_page) == 0);
+		destination_start = maps[destination_page].start_block;
+		CHECK(destination_start / SWAPZ_SEGMENT_BLOCKS == destination);
+		CHECK(a.next_block < (destination + 1U) * SWAPZ_SEGMENT_BLOCKS);
+
+		if (corruption == 0)
+			classes[survivor_start] = 0U;
+		else
+			live[survivor_start] = 0U;
+		snapshot_integrity();
+		for (attempt = 0; attempt < 3; ++attempt) {
+			CHECK(swapz_gc_commit_rotation(&a, 0U) == -EUCLEAN);
+			CHECK(integrity_unchanged());
+			CHECK(a.gc_allocation && a.gc_forbidden_victim == 0U &&
+			      a.gc_destination == destination);
+			CHECK(roles[0] == 1U && roles[destination] == 0U);
+			CHECK(maps[survivor].valid &&
+			      maps[survivor].start_block == survivor_start &&
+			      maps[destination_page].valid &&
+			      maps[destination_page].start_block == destination_start);
+			CHECK(live[destination_start] == 1U &&
+			      classes[destination_start] == 1U);
+			CHECK(!recycle_hook_calls);
+		}
+	}
+	return 0;
+}
+
+static int test_gc_advance_rejects_unrelated_survivor_corruption(void)
+{
+	const swapz_u32 survivor = 7U;
+	int corruption, attempt;
+
+	for (corruption = 0; corruption < 2; ++corruption) {
+		swapz_u32 survivor_start, blocked_destination;
+
+		CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+		a.next_segment_probe = 1U;
+		CHECK(write_page(survivor) == 0);
+		survivor_start = maps[survivor].start_block;
+		CHECK(survivor_start / SWAPZ_SEGMENT_BLOCKS == 1U);
+		CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+		blocked_destination = a.gc_destination;
+		CHECK(blocked_destination == 2U);
+		/* One final unusable block remains for a two-block relocation. */
+		a.next_block = (blocked_destination + 1U) *
+			SWAPZ_SEGMENT_BLOCKS - 1U;
+		if (corruption == 0)
+			classes[survivor_start] = 0U;
+		else
+			live[survivor_start] = 0U;
+		snapshot_integrity();
+		for (attempt = 0; attempt < 3; ++attempt) {
+			CHECK(swapz_gc_advance_rotation_destination(
+				      &a, blocked_destination) == -EUCLEAN);
+			CHECK(integrity_unchanged());
+			CHECK(a.gc_allocation && a.gc_forbidden_victim == 0U &&
+			      a.gc_destination == blocked_destination);
+			CHECK(roles[0] == 1U &&
+			      roles[blocked_destination] == 0U && roles[3] == 0U);
+			CHECK(maps[survivor].valid &&
+			      maps[survivor].start_block == survivor_start);
+			CHECK(!recycle_hook_calls);
+		}
+	}
+	return 0;
+}
+
+/* A full destination never relinquishes recovery ownership on hook failure.
+ * The repeated -EIO attempts may call the hook only for a proved-dead victim;
+ * no role or surviving physical mapping can change before its success. */
+static int test_gc_roll_forward_recycle_failure_preserves_ownership(void)
+{
+	swapz_u32 destination, surviving_start;
+	int index, attempt;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_page(0U) == 0);
+	for (index = 1; index < (int)SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(write_page(1U) == 0);
+	CHECK(write_page(2U) == 0);
+	surviving_start = maps[2].start_block;
+	CHECK(surviving_start / SWAPZ_SEGMENT_BLOCKS == 1U);
+	CHECK(swapz_discard_page(&a, 0U) == 0);
+	CHECK(swapz_discard_page(&a, 1U) == 0);
+	CHECK(mapped_pages[0] == 0U && mapped_pages[1] == 1U);
+	CHECK(program_counts[0] > 0U);
+	CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+	destination = a.gc_destination;
+	CHECK(destination == 2U);
+	/* Model an uncertain final lower write in the owned destination. */
+	a.next_block = (destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
+	recycle_hook_error = -EIO;
+	for (attempt = 0; attempt < 3; ++attempt) {
+		int previous_calls = recycle_hook_calls;
+
+		snapshot_integrity();
+		CHECK(swapz_gc_roll_forward_rotation(&a, destination) == -EIO);
+		CHECK(recycle_hook_calls == previous_calls + 1 &&
+		      recycle_hook_last_segment == 0U);
+		/* Only the safe, attempted recycle callback may change its counters. */
+		integrity_before.recycle_hook_calls = recycle_hook_calls;
+		integrity_before.recycle_hook_last_segment =
+			recycle_hook_last_segment;
+		CHECK(integrity_unchanged());
+		CHECK(a.gc_allocation && a.gc_forbidden_victim == 0U &&
+		      a.gc_destination == destination);
+		CHECK(roles[0] == 1U && roles[destination] == 0U);
+		CHECK(maps[2].valid && maps[2].start_block == surviving_start &&
+		      live[surviving_start] == 1U &&
+		      classes[surviving_start] == 1U);
+	}
+	recycle_hook_error = 0;
+	CHECK(swapz_gc_roll_forward_rotation(&a, destination) == 0);
+	CHECK(recycle_hook_calls == 4 && recycle_hook_last_segment == 0U);
+	CHECK(roles[0] == 0U && roles[destination] == 1U);
+	CHECK(a.gc_allocation && a.gc_forbidden_victim == destination &&
+	      a.gc_destination == 0U && a.open_segment == 0U &&
+	      a.next_block == 0U);
+	CHECK(maps[2].valid && maps[2].start_block == surviving_start &&
+	      live[surviving_start] == 1U && classes[surviving_start] == 1U);
+	return 0;
+}
+
+/* Set up two surviving source mappings and an owned GC destination so
+ * failure after validating an early relocation record remains testable. */
+static int setup_gc_with_live_victim(void)
+{
+	int index;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_page(0U) == 0);
+	for (index = 1; index < (int)SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(write_page(1U) == 0);
+	CHECK(write_page(2U) == 0);
+	CHECK(a.open_segment == 1U && mapped_pages[0] == 2U);
+	CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+	CHECK(a.gc_destination == 2U && a.gc_forbidden_victim == 0U);
+	return 0;
+}
+
+/*
+ * A valid first compressed relocation record cannot publish when a later
+ * record's payload fails CRC. Repeat after an abandoned destination extent.
+ */
+static int test_gc_partial_relocation_bad_payload_is_atomic(void)
+{
+	const swapz_u32 logical_pages[2] = { 0U, 1U };
+	int attempt;
+
+	CHECK(setup_gc_with_live_victim() == 0);
+	for (attempt = 0; attempt < 3; ++attempt) {
+		struct swapz_builder builder;
+		struct swapz_tx tx;
+
+		CHECK(swapz_stage(&a, logical_pages, 2U, 1U, &tx) == 0);
+		CHECK(tx.start_block / SWAPZ_SEGMENT_BLOCKS ==
+		      a.gc_destination);
+		memset(data, 0x5b, sizeof(data));
+		CHECK(swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES,
+				  tx.sequence) == 0);
+		CHECK(swapz_append(&builder, logical_pages[0],
+				   tx.records[0].generation,
+				   data, sizeof(data)) == 0);
+		CHECK(swapz_append(&builder, logical_pages[1],
+				   tx.records[1].generation,
+				   data, sizeof(data)) == 0);
+		CHECK(swapz_seal(&builder) == 0);
+		/* The second record precedes the first payload in the image. */
+		bytes[SWAPZ_BLOCK_BYTES - sizeof(data) - 1U] ^= 1U;
+		snapshot_integrity();
+		CHECK(swapz_finish(&a, &tx, bytes, SWAPZ_BLOCK_BYTES,
+				   1U, 0) == -EBADMSG);
+		CHECK(integrity_unchanged());
+		CHECK(!a.in_flight && a.gc_allocation &&
+		      a.gc_forbidden_victim == 0U && a.gc_destination == 2U);
+		CHECK(maps[0].valid && maps[0].start_block == 0U &&
+		      maps[1].valid &&
+		      maps[1].start_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+		CHECK(live[0] == 1U && classes[0] == 1U &&
+		      live[SWAPZ_SEGMENT_BLOCKS - 1U] == 1U &&
+		      classes[SWAPZ_SEGMENT_BLOCKS - 1U] == 1U);
+		CHECK(mapped_pages[0] == 2U && mapped_pages[2] == 0U);
+		CHECK(!recycle_hook_calls);
+	}
+	return 0;
+}
+
+/* A stale logical generation after staging is not permission to publish an
+ * already-reserved GC extent. Each retry independently owns and abandons its
+ * new destination block, preserving the source physical mapping. */
+static int test_gc_stale_generation_relocation_rejected(void)
+{
+	const swapz_u32 logical_page = 0U;
+	struct swapz_tx tx;
+	int attempt;
+
+	CHECK(setup_gc_with_live_victim() == 0);
+	for (attempt = 0; attempt < 3; ++attempt) {
+		CHECK(swapz_stage(&a, &logical_page, 1U, 1U, &tx) == 0);
+		CHECK(tx.start_block / SWAPZ_SEGMENT_BLOCKS ==
+		      a.gc_destination);
+		/* Fault-inject a generation change between stage and publish. */
+		maps[logical_page].generation++;
+		snapshot_integrity();
+		CHECK(swapz_finish_raw(&a, &tx, bytes, 1U, 0) == -EUCLEAN);
+		CHECK(integrity_unchanged());
+		CHECK(!a.in_flight && a.gc_allocation &&
+		      a.gc_forbidden_victim == 0U && a.gc_destination == 2U);
+		CHECK(maps[logical_page].valid &&
+		      maps[logical_page].start_block == 0U &&
+		      live[0] == 1U && classes[0] == 1U);
+		CHECK(mapped_pages[0] == 2U && mapped_pages[2] == 0U);
+		CHECK(!recycle_hook_calls);
+	}
+	return 0;
+}
+
 static int test_false_final_mapping_overwrite_is_rejected(void)
 {
 	struct swapz_builder builder;
@@ -821,6 +1063,11 @@ int main(void)
 	CHECK(test_forged_virgin_witness_still_requires_full_map_proof() == 0); passed++;
 	CHECK(test_false_final_mapping_discard_is_rejected() == 0); passed++;
 	CHECK(test_roll_forward_rejects_unrelated_map_sidecar_corruption() == 0); passed++;
+	CHECK(test_gc_commit_rejects_unrelated_survivor_corruption() == 0); passed++;
+	CHECK(test_gc_advance_rejects_unrelated_survivor_corruption() == 0); passed++;
+	CHECK(test_gc_roll_forward_recycle_failure_preserves_ownership() == 0); passed++;
+	CHECK(test_gc_partial_relocation_bad_payload_is_atomic() == 0); passed++;
+	CHECK(test_gc_stale_generation_relocation_rejected() == 0); passed++;
 	CHECK(test_false_final_mapping_overwrite_is_rejected() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
