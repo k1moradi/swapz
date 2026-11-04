@@ -1265,8 +1265,11 @@ that relabels byte values or silently treats KiB integers as bytes is invalid.
 Mapper-present means the exact source-bound mapper UUID named by the trace, not
 merely some Device Mapper node. The qualifying
 peak is derived from the raw samples as baseline-median
-\`MemAvailable\` minus the minimum \`MemAvailable\` while the mapper is
-present; an asserted replay scalar is diagnostic only. The final target-absent
+\`MemAvailable\` minus the minimum \`MemAvailable\` from the first
+initialization sample through the last mapper-present teardown sample. This
+charges constructor allocations that occur before Device Mapper publishes the
+exact mapper UUID while excluding unrelated post-removal recovery dips; an
+asserted replay scalar is diagnostic only. The final target-absent
 second must return the median \`MemAvailable\` to the baseline envelope
 without leaving \`SUnreclaim\` or \`VmallocUsed\` above their pre-create
 envelope. Repeat the same whole-host sampler for the raw control when collecting
