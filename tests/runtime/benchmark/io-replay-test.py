@@ -3240,6 +3240,9 @@ class PairReplayContract(unittest.TestCase):
             lambda item: item.update(source_sha="b" * 40),
             lambda item: item["samples"][12].update(mapper_present=False),
             lambda item: item.update(scope="target-owned-estimate"),
+            lambda item: item["samples"][12].update(
+                mem_available_bytes=(
+                    item["samples"][12]["mem_available_bytes"] // 1024)),
             lambda item: item.update(sampling_interval_ns=1_000_000_000),
             corrupt_recovery,
         )
