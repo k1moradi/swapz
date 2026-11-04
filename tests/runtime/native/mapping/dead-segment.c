@@ -244,6 +244,90 @@ static int test_dead_recycle_rejects_stale_gc_score(void)
 	return 0;
 }
 
+/*
+ * The primary logical map remains authoritative even when every indexed
+ * zero/empty sidecar is fault-injected into mutual agreement. These tests
+ * deliberately leave valid mapped extents and their class bytes intact.
+ */
+static void forge_false_empty_indexed_segment(void)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+
+	mapped_pages[0] = 0;
+	gc_live_bytes[0] = 0;
+	gc_io_cost[0] = 0;
+	gc_min_live_blocks[0] = 0;
+	first_page[0] = none;
+	last_page[0] = none;
+	prev_page[0] = none;
+	next_page[0] = none;
+	prev_page[1] = none;
+	next_page[1] = none;
+	live[0] = 0;
+	live[SWAPZ_SEGMENT_BLOCKS - 1U] = 0;
+}
+
+static int test_indexed_false_empty_reclaim_preserves_live_extents(void)
+{
+	swapz_u32 generation, start_block;
+	int index;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_page(0) == 0);
+	for (index = 1; index < (int)SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(write_page(1) == 0);
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(mapped_pages[0] == 2U && classes[0] == 1U &&
+	      classes[SWAPZ_SEGMENT_BLOCKS - 1U] == 1U);
+	generation = maps[0].generation;
+	start_block = maps[0].start_block;
+	forge_false_empty_indexed_segment();
+	a.next_segment_probe = 0U;
+	CHECK(write_page(2) == -EUCLEAN);
+	CHECK(!recycle_hook_calls && !a.recycled_dead_segments);
+	CHECK(a.open_segment == 0U && a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(maps[0].valid && maps[0].start_block == start_block &&
+	      maps[0].generation == generation);
+	CHECK(maps[1].valid && maps[1].start_block ==
+	      SWAPZ_SEGMENT_BLOCKS - 1U && !maps[2].valid);
+	CHECK(classes[0] == 1U && classes[SWAPZ_SEGMENT_BLOCKS - 1U] == 1U);
+	return 0;
+}
+
+static int test_indexed_false_empty_victim_cannot_exchange_gc_roles(void)
+{
+	struct swapz_tx tx;
+	swapz_u32 extra_page = 3U, destination, next_block;
+	swapz_u32 generation, start_block;
+	int index;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_page(0) == 0);
+	for (index = 1; index < (int)SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(write_page(1) == 0);
+	CHECK(write_page(2) == 0);
+	CHECK(a.open_segment == 1U);
+	CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+	destination = a.gc_destination;
+	CHECK(destination == 2U);
+	CHECK(swapz_stage(&a, &extra_page, 1U, 1U, &tx) == 0);
+	CHECK(swapz_abort(&a, &tx) == 0);
+	next_block = a.next_block;
+	generation = maps[0].generation;
+	start_block = maps[0].start_block;
+	forge_false_empty_indexed_segment();
+	CHECK(swapz_gc_commit_rotation(&a, 0U) == -EUCLEAN);
+	CHECK(a.gc_allocation && a.gc_forbidden_victim == 0U &&
+	      a.gc_destination == destination);
+	CHECK(roles[0] == 1U && roles[destination] == 0U);
+	CHECK(a.open_segment == destination && a.next_block == next_block);
+	CHECK(!recycle_hook_calls && !a.recycled_dead_segments);
+	CHECK(maps[0].valid && maps[0].start_block == start_block &&
+	      maps[0].generation == generation);
+	CHECK(classes[start_block] == 1U && !maps[extra_page].valid);
+	return 0;
+}
+
 static int test_two_block_class_respects_segment_edges(void)
 {
 	swapz_u32 logical = 0;
@@ -428,6 +512,8 @@ int main(void)
 	CHECK(test_live_segment_is_never_overwritten() == 0); passed++;
 	CHECK(test_corrupted_liveness_never_reclaims_live_map() == 0); passed++;
 	CHECK(test_dead_recycle_rejects_stale_gc_score() == 0); passed++;
+	CHECK(test_indexed_false_empty_reclaim_preserves_live_extents() == 0); passed++;
+	CHECK(test_indexed_false_empty_victim_cannot_exchange_gc_roles() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
 	CHECK(test_circular_allocator_fairness_probes_sequentially() == 0); passed++;

@@ -2025,9 +2025,14 @@ count per physical segment. Every successful compressed/raw publication and
 logical discard updates it in the same serialized authority phase as
 `live_records`. Dead-segment selection and victim-role commit cross-check the
 segment count against the sum of the segment's 256 physical live-record
-refcounts; disagreement is corruption and fails closed. This sidecar replaces
-production full-logical-map validation scans at dead-segment allocation and
-post-evacuation role commit, while portable callers without the sidecar retain
+refcounts; disagreement is corruption and fails closed. The sidecar keeps nonzero candidates on the O(1) rejection path and still
+requires an O(256) physical-liveness check for zero candidates. Before
+irreversibly recycling a previously programmed segment or exchanging the
+role of an evacuated victim, independently scan the authoritative logical
+map: falsely zeroed counts, reverse links and GC costs must not permit a
+live extent to be discarded or declared free. This O(logical_pages) safety
+proof occurs only at the reclaim/role-exchange boundary, never on a normal
+write into the open segment. Portable callers without the sidecar retain
 the conservative full-map fallback. Victim discovery/evacuation may still scan
 the logical map until a separately qualified reverse index exists.
 

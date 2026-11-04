@@ -581,6 +581,11 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
  * map scan before entering this common reclaim gate. No segment in the fixed
  * reserve tail is used. One ordered worker owns all authority state.
  */
+/* Reuse the independent map proof at irreversible ordinary reclaim and
+ * normal role exchange, not on every open-segment allocation. */
+static int swapz_verify_recovery_victim_dead(
+	const struct swapz_authority *a, swapz_u32 segment);
+
 static int swapz_claim_dead_segment(struct swapz_authority *a,
 				    swapz_u32 segment,
 				    unsigned long long probe_start)
@@ -600,6 +605,12 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 	used = used_mask != 0;
 	if (a->segment_mapped_pages) {
 		if (live_total)
+			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
+		/* A false-zero cached count and live index must not authorize
+		 * DISCARD or overwrite of a previously programmed segment.
+		 * This independent full-map proof is outside the normal OPEN
+		 * segment write path and runs only for a reclaim candidate. */
+		if (used && swapz_verify_recovery_victim_dead(a, segment))
 			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
 	} else {
 		if (live_total)
@@ -1078,6 +1089,10 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 			   live_total != a->segment_mapped_pages[victim]))
 		return -EUCLEAN;
 	if (swapz_dead_segment_sidecars_validate(a, victim))
+		return -EUCLEAN;
+	/* Cached zero sidecars are not proof of zero authoritative maps.
+	 * Verify the primary mapping table before publishing a new GC role. */
+	if (swapz_verify_recovery_victim_dead(a, victim))
 		return -EUCLEAN;
 	/* Commit both roles without further lower I/O or fallible work. */
 	a->segment_foreground[dest] = 1;

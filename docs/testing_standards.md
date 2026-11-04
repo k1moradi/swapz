@@ -3116,9 +3116,16 @@ failing check without publishing host paths.
 
 Native GC scale evidence compares the previous per-probed-segment 256-entry
 dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
-logical pages. Loaded qualification still requires the full zero-mapped
-candidate liveness scan, repeated live-GC correctness, exact readback, and
-nonfatal DISCARD semantics.
+logical pages. Production-C fault injection must also forge *all* indexed
+empty-segment views (mapped count, physical liveness, reverse-list headers and
+GC costs) while retaining authoritative logical maps, and prove that both
+dead-segment recycle and normal victim role exchange reject the false zero
+before any recycle hook, role change, generation change or extent clearing.
+The independent logical-map proof is confined to irreversible reclaim and
+role-exchange boundaries; it must not enter per-page allocation/publication.
+Loaded qualification still requires the full zero-mapped candidate liveness
+scan, repeated live-GC correctness, exact readback, and nonfatal DISCARD
+semantics.
 
 Logical segment-open spread is allocator telemetry, not flash-wear evidence.
 The terminal loaded ID72 experiment on owned RAM null_blk has been completed,
