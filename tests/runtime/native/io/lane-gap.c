@@ -88,11 +88,11 @@ static int test_bins(void)
 			dwell_bin[index]);
 	return 0;
 }
-/* Production lane-gap histograms are passive even at queue saturation. */
-static int test_extreme_timestamps_and_lane_counts(void)
+/* Production successor counts are bounded by the 64-record submitted run. */
+static int test_extreme_timestamps_and_successor_counts(void)
 {
 	struct swapz_lane_gap_parts part = { .seal_ns = 987 };
-	const unsigned int lane_counts[] = { 0U, 1U, 8U, 64U, UINT_MAX };
+	const unsigned int successor_counts[] = { 0U, 1U, 8U, 64U };
 	unsigned int index;
 
 	CHECK(swapz_lane_gap_partition(1, UINT64_MAX, UINT64_MAX,
@@ -111,10 +111,13 @@ static int test_extreme_timestamps_and_lane_counts(void)
 		UINT64_MAX - 1U, &part));
 	CHECK(sum(&part) == 0);
 
-	for (index = 0; index < sizeof(lane_counts) /
-					 sizeof(lane_counts[0]); ++index)
-		CHECK(swapz_lane_gap_successor_bin(lane_counts[index]) <
+	for (index = 0; index < sizeof(successor_counts) /
+					 sizeof(successor_counts[0]); ++index)
+		CHECK(swapz_lane_gap_successor_bin(successor_counts[index]) <
 			SWAPZ_LANE_SUCCESSOR_BINS);
+	/* Keep the total helper defined even for a defensive out-of-contract count. */
+	CHECK(swapz_lane_gap_successor_bin(UINT_MAX) <
+		SWAPZ_LANE_SUCCESSOR_BINS);
 	CHECK(swapz_lane_gap_dwell_bin(UINT64_MAX) <
 		SWAPZ_LANE_DWELL_BINS);
 	return 0;
@@ -122,8 +125,8 @@ static int test_extreme_timestamps_and_lane_counts(void)
 int main(void)
 {
 	if (test_partitions() || test_invalid() || test_bins() ||
-	    test_extreme_timestamps_and_lane_counts())
+	    test_extreme_timestamps_and_successor_counts())
 		return 1;
-	puts("PASS lane-gap: 59049 timestamp grids, invalids, queue and 64-bit edges");
+	puts("PASS lane-gap: 59049 timestamp grids, invalids, successor and 64-bit edges");
 	return 0;
 }

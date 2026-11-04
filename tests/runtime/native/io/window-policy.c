@@ -16,11 +16,15 @@
 } } while (0)
 
 /* Diagnostics are emitted only on a failed bounded-pressure invariant. */
-#define CHECK_PRESSURE(condition, lanes, staged, queued, reserve_error) do { \
+#define CHECK_PRESSURE(condition, constraint, lane_capacity, lanes_in_use, \
+		       staged, queued, reserve_error) do { \
 	if (!(condition)) { \
-		fprintf(stderr, "%s:%d failed %s (lanes=%u staged=%u queued=%u reserve_errno=%d)\n", \
-			__FILE__, __LINE__, #condition, (unsigned int)(lanes), \
-			(unsigned int)(staged), (unsigned int)(queued), (int)(reserve_error)); \
+		fprintf(stderr, \
+			"%s:%d failed %s (constraint=%s lane_capacity=%u lanes_in_use=%u staged=%u queued=%u reserve_errno=%d)\n", \
+			__FILE__, __LINE__, #condition, (constraint), \
+			(unsigned int)(lane_capacity), (unsigned int)(lanes_in_use), \
+			(unsigned int)(staged), (unsigned int)(queued), \
+			(int)(reserve_error)); \
 		return 1; \
 	} \
 } while (0)
@@ -737,18 +741,33 @@ static int test_submitter_dispatch_requires_proven_idle_singleton(void)
 /*
  * Production bounds: one background preparation worker, at most eight
  * submitter lanes, 64 accepted BIOs per ordered quantum and a 64-slot window.
- * This fixture tests the pure policy gates, not the caller's slot atomics,
- * ENOSPC/GC recovery loop or shutdown drain_workqueue() synchronization.
+ * The lane claim itself is caller-owned; model its source-derived capacity
+ * separately from queued-follower state before exercising the pure window
+ * predicate. ENOSPC is likewise a caller-owned errno converted to blocked.
  */
 static int test_bounded_queue_pressure_and_retry(void)
 {
 	struct swapz_pending_bio staged[SWAPZ_MAX_RECORDS] = { 0 };
-	const unsigned int submitter_lane_counts[] = { 0U, 1U, 8U };
+	static const struct {
+		unsigned int capacity;
+		unsigned int in_use;
+		int available;
+	} lane_cases[] = {
+		{ 0U, 0U, 0 },
+		{ 1U, 0U, 1 },
+		{ 1U, 1U, 0 },
+		{ 8U, 0U, 1 },
+		{ 8U, 7U, 1 },
+		{ 8U, 8U, 0 },
+	};
+	const unsigned int queued_follower_counts[] = {
+		0U, 1U, SWAPZ_MAX_RECORDS,
+	};
 	const swapz_u8 hand_counts[] = { 8U, 16U, SWAPZ_MAX_RECORDS };
 	const unsigned long long first_ns = 1000000ULL;
 	const unsigned long long deadline_ns =
 		swapz_window_retention_deadline_ns(first_ns, 2U);
-	unsigned int index, lane_index, hand_index, count;
+	unsigned int index, lane_index, queue_index, hand_index, count;
 	int reserve_error = -ENOSPC;
 
 	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index) {
@@ -780,41 +799,56 @@ static int test_bounded_queue_pressure_and_retry(void)
 	CHECK(!swapz_window_compressed_extent_fits(staged,
 					SWAPZ_MAX_RECORDS + 1U, 2, 0, 4, 2));
 
-	for (lane_index = 0;
-	     lane_index < sizeof(submitter_lane_counts) /
-			   sizeof(submitter_lane_counts[0]); ++lane_index) {
-		unsigned int occupied_lanes = submitter_lane_counts[lane_index];
-		unsigned int queued_followers = occupied_lanes;
-		int direct_dispatch = swapz_window_submitter_dispatch_ready(
-			2, 1, 0, 0, 0, 0, queued_followers);
+	for (lane_index = 0; lane_index < sizeof(lane_cases) /
+					      sizeof(lane_cases[0]); ++lane_index) {
+		const unsigned int lane_capacity = lane_cases[lane_index].capacity;
+		const unsigned int lanes_in_use = lane_cases[lane_index].in_use;
+		const int lane_available = lane_cases[lane_index].available;
 
-		/* The mapper separately requires a claimed lane; zero lanes do
-		 * not authorize submission even with an otherwise empty FIFO. */
-		CHECK_PRESSURE(direct_dispatch == !queued_followers,
-			occupied_lanes, 0, queued_followers, reserve_error);
-		CHECK_PRESSURE(!swapz_window_submitter_dispatch_ready(
-			2, 1, 0, 0, 0, 0, SWAPZ_MAX_RECORDS),
-			occupied_lanes, 0, SWAPZ_MAX_RECORDS, reserve_error);
-		CHECK_PRESSURE(swapz_retention_timer_needs_arm(
-			2, queued_followers != 0) == !queued_followers,
-			occupied_lanes, 1, queued_followers, reserve_error);
-		/* Shutdown/failure and ENOSPC are supplied as caller fences.
-		 * Once reserve recovery succeeds, the pure read check reopens. */
-		CHECK_PRESSURE(!swapz_window_read_independent(
-			staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error),
-			occupied_lanes, SWAPZ_MAX_RECORDS,
-			queued_followers, reserve_error);
-		CHECK_PRESSURE(!swapz_window_read_independent(
-			staged, SWAPZ_MAX_RECORDS, 999U, 2, -EIO),
-			occupied_lanes, SWAPZ_MAX_RECORDS,
-			queued_followers, -EIO);
-		reserve_error = 0;
-		CHECK_PRESSURE(swapz_window_read_independent(
-			staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error),
-			occupied_lanes, SWAPZ_MAX_RECORDS,
-			queued_followers, reserve_error);
-		reserve_error = -ENOSPC;
+		CHECK_PRESSURE(lane_available ==
+			(lane_capacity && lanes_in_use < lane_capacity),
+			"submitter-lane", lane_capacity, lanes_in_use,
+			0, 0, reserve_error);
+		for (queue_index = 0;
+		     queue_index < sizeof(queued_follower_counts) /
+				   sizeof(queued_follower_counts[0]); ++queue_index) {
+			const unsigned int queued_followers =
+				queued_follower_counts[queue_index];
+			const int helper_ready = swapz_window_submitter_dispatch_ready(
+				2, 1, 0, 0, 0, 0, queued_followers);
+			const int dispatch = lane_available && helper_ready;
+
+			CHECK_PRESSURE(helper_ready == !queued_followers,
+				"accepted-queue", lane_capacity, lanes_in_use,
+				0, queued_followers, reserve_error);
+			CHECK_PRESSURE(dispatch ==
+				(lane_available && !queued_followers),
+				"submitter-dispatch", lane_capacity, lanes_in_use,
+				0, queued_followers, reserve_error);
+		}
 	}
+
+	/* Timer queue state is independent of accepted-work queue occupancy. */
+	CHECK_PRESSURE(swapz_retention_timer_needs_arm(2, 0),
+		"retention-timer", 8, 0, 1, SWAPZ_MAX_RECORDS, reserve_error);
+	CHECK_PRESSURE(!swapz_retention_timer_needs_arm(2, 1),
+		"retention-timer", 8, 0, 1, 0, reserve_error);
+	CHECK_PRESSURE(!swapz_retention_timer_needs_arm(0, 0),
+		"retention-disabled", 8, 0, 1, 0, reserve_error);
+
+	/* Reserve recovery is a caller fence: preserve the errno in diagnostics,
+	 * but pass only the caller's blocked predicate into the helper. */
+	CHECK_PRESSURE(!swapz_window_read_independent(
+		staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error != 0),
+		"reserve-enospc", 8, 0, SWAPZ_MAX_RECORDS, 0, reserve_error);
+	reserve_error = -EIO;
+	CHECK_PRESSURE(!swapz_window_read_independent(
+		staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error != 0),
+		"terminal-error", 8, 0, SWAPZ_MAX_RECORDS, 0, reserve_error);
+	reserve_error = 0;
+	CHECK_PRESSURE(swapz_window_read_independent(
+		staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error != 0),
+		"reserve-retry", 8, 0, SWAPZ_MAX_RECORDS, 0, reserve_error);
 
 	for (hand_index = 0;
 	     hand_index < sizeof(hand_counts) / sizeof(hand_counts[0]);
@@ -823,30 +857,40 @@ static int test_bounded_queue_pressure_and_retry(void)
 		const swapz_u8 hand = hand_counts[hand_index];
 
 		for (count = 0; count <= SWAPZ_MAX_RECORDS; ++count) {
-			int queued_plain_write = count < SWAPZ_MAX_RECORDS;
-			int pressure_close = swapz_window_work_conserving_close_ready(
-				2, qualified_pack_seen, (swapz_u8)count,
-				SWAPZ_MAX_RECORDS, 0, hand, 1);
+			const int next_local_is_plain_write =
+				count < SWAPZ_MAX_RECORDS;
+			const unsigned int queued_followers =
+				next_local_is_plain_write ? 1U : 0U;
+			int pressure_close;
+
+			/* Production records current-admission geometry before testing
+			 * worker close predicates. Preserve that order in the fixture. */
 			if (count &&
 			    swapz_window_pack_ready(staged, (swapz_u8)count, 2, 0))
 				qualified_pack_seen = 1;
+			pressure_close = swapz_window_work_conserving_close_ready(
+				2, qualified_pack_seen, (swapz_u8)count,
+				SWAPZ_MAX_RECORDS, 0, hand,
+				next_local_is_plain_write);
 			/* An accepted WRITE cannot split the learned 64-page wave
 			 * before its target, even with a smaller pressure hand. */
 			CHECK_PRESSURE(pressure_close ==
 				(count == SWAPZ_MAX_RECORDS),
-				8, count, queued_plain_write, reserve_error);
+				"window-target", 8, 0, count,
+				queued_followers, reserve_error);
 			/* Once both accepted FIFOs are dry, a latched 4-page pack
 			 * is finite work, rather than a wait for future arrivals. */
 			CHECK_PRESSURE(swapz_window_work_conserving_close_ready(
 				2, qualified_pack_seen, (swapz_u8)count,
 				SWAPZ_MAX_RECORDS, 0, hand, 0) ==
 				(count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS),
-				8, count, 0, reserve_error);
+				"service-dry", 8, 0, count, 0, reserve_error);
 			/* Neither a retry nor growing the staged batch can move the
 			 * first-record deadline later. */
 			CHECK_PRESSURE(swapz_window_retention_deadline_ns(
 				first_ns, 2U) == deadline_ns,
-				8, count, queued_plain_write, reserve_error);
+				"retention-deadline", 8, 0, count,
+				queued_followers, reserve_error);
 		}
 	}
 	return 0;
