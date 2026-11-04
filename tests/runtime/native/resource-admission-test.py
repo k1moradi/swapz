@@ -264,6 +264,11 @@ sample_host_memory_admission
         self.assertIn("observed:missing", result.stderr)
 
         memory_events.unlink()
+        result = self.run_shell(
+            script + 'read_memory_event_inventory\n', directory)
+        self.assert_blocked(result, "memory.events telemetry unreadable")
+        self.assertIn("observed:unavailable", result.stderr)
+
         memory_events.mkdir()
         result = self.run_shell(
             script + 'read_memory_event_inventory\n', directory)
@@ -299,6 +304,10 @@ sample_host_memory_admission
         self.assertEqual(result.stdout, "7\n")
 
         cpu_pressure.unlink()
+        result = self.run_shell(script + 'cpu_some_total\n', directory)
+        self.assert_blocked(result, "cpu.pressure some telemetry unreadable")
+        self.assertIn("observed:unavailable", result.stderr)
+
         cpu_pressure.mkdir()
         result = self.run_shell(script + 'cpu_some_total\n', directory)
         self.assert_blocked(result, "cpu.pressure some telemetry unreadable")
@@ -778,6 +787,7 @@ swapz_clear_tmp_before_memory_check
         self.assertIn(
             'refuse BLOCKED completed_owned_tmp_cleanup unavailable',
             preflight)
+        self.assertIn("helper_status=$cleanup_status", preflight)
         self.assertLess(
             preflight.index("if swapz_clear_tmp_before_memory_check; then"),
             preflight.index("cleanup_status=$?"))

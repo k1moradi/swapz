@@ -3186,6 +3186,13 @@ at least 1 GiB MemAvailable before this destructive-to-performance but RAM-only
 stress begins;
 otherwise qualification is BLOCKED rather than silently weakened.
 
+ID36 must classify absent, non-regular, or unreadable child `memory.events`
+and `cpu.pressure` files as unavailable telemetry and stop with BLOCKED before
+parsing counters. Present but missing, duplicate, malformed, overflowing, or
+regressing counters remain distinct invalid-evidence failures. Rootless
+resource-admission fixtures cover both unavailable paths and malformed
+contents; never convert an I/O or permission error into a counter-format result.
+
 Before the loaded-preflight diagnostic read and ID36 admission sampling,
 both scripts resolve the checkout-owned temporary-cleanup helper without an
 external `dirname` bootstrap dependency, require it to be readable, and refuse

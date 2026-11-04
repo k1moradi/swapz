@@ -593,7 +593,13 @@ require_monotonic_counter() {
 # Read memory.events once per decision so high/OOM/OOM-kill are one coherent
 # observation rather than independent samples that can straddle an event.
 read_memory_event_inventory() {
+    local events_path="$CGROUP/memory.events"
     local observation status detail first_value second_value
+
+    if [[ ! -f $events_path || ! -r $events_path ]]; then
+        printf '%s\n' 'BLOCKED: ID36 memory.events telemetry unreadable: observed:unavailable expected:readable cgroup v2 high/oom/oom_kill counters; restore readable cgroup memory-event telemetry' >&2
+        return 2
+    fi
 
     if ! observation="$(awk '
         $1 == "high" || $1 == "oom" || $1 == "oom_kill" {
@@ -614,7 +620,7 @@ read_memory_event_inventory() {
             printf "value %s %s %s\n",
                 values["high"], values["oom"], values["oom_kill"]
         }
-    ' "$CGROUP/memory.events" 2>/dev/null)"; then
+    ' "$events_path" 2>/dev/null)"; then
         printf '%s\n' 'BLOCKED: ID36 memory.events telemetry unreadable: observed:unavailable expected:readable cgroup v2 high/oom/oom_kill counters; restore readable cgroup memory-event telemetry' >&2
         return 2
     fi
@@ -637,7 +643,13 @@ read_memory_event_inventory() {
 }
 
 cpu_some_total() {
+    local pressure_path="$CGROUP/cpu.pressure"
     local observation status detail
+
+    if [[ ! -f $pressure_path || ! -r $pressure_path ]]; then
+        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some telemetry unreadable: observed:unavailable expected:readable some total/avg10/avg60/avg300; restore readable CPU PSI telemetry' >&2
+        return 2
+    fi
 
     if ! observation="$(awk '
         $1 == "some" {
@@ -693,7 +705,7 @@ cpu_some_total() {
             if (averages["avg300"] != 1) { print "missing avg300"; exit }
             print "value " total
         }
-    ' "$CGROUP/cpu.pressure" 2>/dev/null)"; then
+    ' "$pressure_path" 2>/dev/null)"; then
         printf '%s\n' 'BLOCKED: ID36 cpu.pressure some telemetry unreadable: observed:unavailable expected:readable some total/avg10/avg60/avg300; restore readable CPU PSI telemetry' >&2
         return 2
     fi
