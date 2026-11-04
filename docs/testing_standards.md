@@ -721,12 +721,14 @@ or completed GC relocation, and compare every generation alongside byte/CRC
 readback after each rotation. A generation read from the authoritative map
 cannot serve as its own expectation. Full-destination roll-forward additionally
 requires a subsequent foreground publication, not just a successful role swap;
-while a GC lower write awaits replay, commit and destination-advance attempts
-must fail without changing the retained forbidden foreground, victim,
-destination, circular probe, allocation cursor or any segment role. Failure
-diagnostics must derive victim/destination roles from the actual retained IDs
-and safely represent invalid/sentinel IDs rather than pairing a changed ID with
-a hard-coded role slot.
+while a GC lower write awaits replay, the fixture must first prove its
+deterministic forbidden-foreground, victim, destination, open-segment and role
+identities, then snapshot the recovery token. Commit and destination-advance
+attempts must fail without changing that retained token, circular probe,
+allocation cursor or any segment role. Failure diagnostics must derive
+victim/destination roles from the actual retained IDs and safely represent
+invalid/sentinel IDs rather than pairing a changed ID with a hard-coded role
+slot.
 Every successful reserve rotation must permit at least one subsequent foreground
 overwrite before the next `-ENOSPC`; at worst-case RAW occupancy the next
 exhaustion must occur within one 256-block segment of successful foreground

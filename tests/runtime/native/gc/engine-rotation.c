@@ -405,6 +405,12 @@ static int test_delayed_gc_completion_fences_mutation(void)
 	CHECK(swapz_stage(&a, &logical, 1, 1, &blocked) == -EBUSY);
 	CHECK(swapz_discard_page(&a, logical) == -EBUSY);
 	CHECK(maps[0].start_block == previous && maps[0].valid);
+	/* Authenticate the deterministic recovery identity before snapshotting
+	 * it, so preparation-time corruption cannot become the expected state. */
+	CHECK(a.gc_allocation && a.gc_forbidden_open == 1U &&
+	      a.gc_forbidden_victim == 0U && a.gc_destination == 2U &&
+	      a.open_segment == 2U);
+	CHECK(roles[0] && roles[1] && !roles[2] && !roles[3]);
 	/* A concurrent-looking GC role transition is also fenced until the
 	 * pending lower write is replayed; the other reserve stays untouched. */
 	pending_cursor = a.next_block;
