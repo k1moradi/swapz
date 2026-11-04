@@ -1518,25 +1518,7 @@ static int format_inventory_device_conflicts(dev_t observed_device,
 	return observed_device == device || observed_device == parent_device;
 }
 
-/*
- * Swapfiles name regular files, not block nodes. Their filesystem st_dev
- * still identifies a directly mounted target/parent backing device even if
- * that mount is absent from this process's mount namespace.
- */
-static int format_swap_entry_conflicts(const struct stat *info, dev_t device,
-				       dev_t parent_device)
-{
-	if (!info)
-		return 1;
-	if (S_ISBLK(info->st_mode))
-		return format_inventory_device_conflicts(info->st_rdev, device,
-						  parent_device);
-	if (S_ISREG(info->st_mode))
-		return format_inventory_device_conflicts(info->st_dev, device,
-						  parent_device);
-	/* /proc/swaps cannot legitimately name another file type. */
-	return 1;
-}
+
 
 /*
  * Mounts in another process's namespace still use the same backing device.
@@ -1636,27 +1618,7 @@ static int format_mount_identifier_compare(const void *left, const void *right)
 	return (first > second) - (first < second);
 }
 
-struct format_swap_inventory_identity {
-	dev_t device;
-	ino_t inode;
-	int block_entry;
-};
 
-static int format_swap_inventory_identity_compare(const void *left,
-						   const void *right)
-{
-	const struct format_swap_inventory_identity *first = left;
-	const struct format_swap_inventory_identity *second = right;
-
-	if (first->block_entry != second->block_entry)
-		return (first->block_entry > second->block_entry) -
-		       (first->block_entry < second->block_entry);
-	if (first->device != second->device)
-		return (first->device > second->device) -
-		       (first->device < second->device);
-	return (first->inode > second->inode) -
-	       (first->inode < second->inode);
-}
 
 static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 					 dev_t parent_device)
@@ -2002,18 +1964,24 @@ static int format_swap_inventory_entry_parse(const char *line,
 	return 0;
 }
 
+/*
+ * /proc/swaps proves swap activity, but exports no kernel st_dev/st_ino or
+ * block dev_t for its entries. Its pathname can belong to another mount
+ * namespace or be replaced after swapon. lstat() here authenticates only
+ * our own current pathname, not the active kernel swap object. Require an
+ * entirely empty, complete table rather than trusting pathname resolution.
+ */
 static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 					      dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
-	void *swap_identities = NULL;
-	size_t swap_count = 0;
-	size_t swap_capacity = 0;
 	size_t total_bytes = 0;
 	int saw_header = 0;
 	int read_result;
-	int saved_errno;
 
+	/* Kept for the shared inventory interface; no pathname can prove either. */
+	(void)device;
+	(void)parent_device;
 	if (!stream) {
 		errno = EINVAL;
 		return -1;
@@ -2021,14 +1989,12 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 	while ((read_result = format_inventory_read_line(
 			stream, line, sizeof(line), &total_bytes)) > 0) {
 		char swap_path[PATH_MAX];
-		struct stat info;
-		struct format_swap_inventory_identity identity;
 		int block_entry;
 
 		if (!saw_header) {
 			if (!format_swap_inventory_header_valid(line)) {
 				errno = EPROTO;
-				goto failed;
+				return -1;
 			}
 			saw_header = 1;
 			continue;
@@ -2036,60 +2002,28 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 		if (format_swap_inventory_entry_parse(line, swap_path,
 						      &block_entry) < 0) {
 			errno = EPROTO;
-			goto failed;
+			return -1;
 		}
 		/*
-		 * The kernel row names the already-open swap object. Refuse a
-		 * final-component symlink instead of following a substituted path.
+		 * Even a locally matching inode or block-device node does not
+		 * bind this row to the active kernel swap object. This includes
+		 * apparently unrelated sibling devices and hard-link aliases.
 		 */
-		if (lstat(swap_path, &info) < 0)
-			goto failed;
-		if ((block_entry && !S_ISBLK(info.st_mode)) ||
-		    (!block_entry && !S_ISREG(info.st_mode))) {
-			errno = EPROTO;
-			goto failed;
-		}
-		if (format_swap_entry_conflicts(&info, device, parent_device)) {
-			errno = EBUSY;
-			goto failed;
-		}
-		/* Duplicate aliases of the same active swap are ambiguous. */
-		identity.device = block_entry ? info.st_rdev : info.st_dev;
-		identity.inode = block_entry ? 0 : info.st_ino;
-		identity.block_entry = block_entry;
-		if (format_inventory_append(&swap_identities,
-					    &swap_count, &swap_capacity,
-					    &identity, sizeof(identity)) < 0)
-			goto failed;
+		errno = EOPNOTSUPP;
+		return -1;
 	}
 	if (read_result < 0)
-		goto failed;
+		return -1;
 	if (!saw_header) {
 		errno = EPROTO;
-		goto failed;
+		return -1;
 	}
-	if (swap_count > 1U)
-		qsort(swap_identities, swap_count,
-		      sizeof(struct format_swap_inventory_identity),
-		      format_swap_inventory_identity_compare);
-	for (size_t index = 1; index < swap_count; ++index) {
-		const struct format_swap_inventory_identity *sorted =
-			swap_identities;
-
-		if (!format_swap_inventory_identity_compare(
-				&sorted[index - 1U], &sorted[index])) {
-			errno = EPROTO;
-			goto failed;
-		}
-	}
-	free(swap_identities);
+	/*
+	 * A completed empty snapshot is not a lock: concurrent swapon or
+	 * mount changes can race the final inventory and header write.
+	 * Rechecking does not make admission-to-write atomic.
+	 */
 	return 0;
-
-failed:
-	saved_errno = errno;
-	free(swap_identities);
-	errno = saved_errno;
-	return -1;
 }
 
 static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
@@ -2101,6 +2035,10 @@ static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
 		return -1;
 	if (format_swap_inventory_stream_clear(stream, device, parent_device) < 0) {
 		saved_errno = errno;
+		if (saved_errno == EOPNOTSUPP)
+			fputs("swapzctl format: REFUSED: /proc/swaps has an active "
+			      "entry without a verifiable kernel backing identity; "
+			      "deactivate active swap (swapoff) before retry\n", stderr);
 		(void)fclose(stream);
 		errno = saved_errno;
 		return -1;
