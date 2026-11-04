@@ -249,14 +249,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1725,
+"inverse_ns_per_page": 1763,
 "name": "scalar",
-"transform_ns_per_page": 1840
+"transform_ns_per_page": 1815
 },
 {
-"inverse_ns_per_page": 1398,
+"inverse_ns_per_page": 1565,
 "name": "sse2",
-"transform_ns_per_page": 1197
+"transform_ns_per_page": 1370
 }
 ],
 "classifier": {
@@ -266,9 +266,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 900,
+"ns_per_page": 662,
 "sample_pairs": 32,
-"scalar_ns_per_page": 900,
+"scalar_ns_per_page": 662,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -283,7 +283,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 12522
+"wall_ns_per_page": 12354
 },
 {
 "acceleration": 2,
@@ -291,7 +291,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11655
+"wall_ns_per_page": 11061
 },
 {
 "acceleration": 3,
@@ -299,7 +299,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10526
+"wall_ns_per_page": 10441
 },
 {
 "acceleration": 4,
@@ -307,7 +307,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10064
+"wall_ns_per_page": 10426
 }
 ],
 "negative_pages": 256,
@@ -324,9 +324,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6984,
-"modeled_wall_ns_total": 4022784,
-"ns_per_saved_block": 77361,
+"modeled_wall_ns_per_page": 6691,
+"modeled_wall_ns_total": 3854080,
+"ns_per_saved_block": 74116,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -351,29 +351,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 1236,
+"baseline_ns_per_page": 1466,
 "order": "baseline_first",
-"unrolled_ns_per_page": 895
+"unrolled_ns_per_page": 1340
 },
 {
-"baseline_ns_per_page": 1128,
+"baseline_ns_per_page": 1340,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 930
+"unrolled_ns_per_page": 1338
 },
 {
-"baseline_ns_per_page": 1471,
+"baseline_ns_per_page": 1113,
 "order": "baseline_first",
-"unrolled_ns_per_page": 1194
+"unrolled_ns_per_page": 820
 },
 {
-"baseline_ns_per_page": 1297,
+"baseline_ns_per_page": 944,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 1410
+"unrolled_ns_per_page": 821
 },
 {
-"baseline_ns_per_page": 1470,
+"baseline_ns_per_page": 956,
 "order": "baseline_first",
-"unrolled_ns_per_page": 1186
+"unrolled_ns_per_page": 834
 }
 ],
 "repeats_per_arm": 64,
@@ -422,14 +422,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 78630,
+"ns_per_saved_block": 75564,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 7781,
-"routed_cpu_ns_total": 4481946,
+"routed_cpu_ns_per_page": 7477,
+"routed_cpu_ns_total": 4307203,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -477,14 +477,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 79213,
+"ns_per_saved_block": 76065,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 7563,
-"routed_cpu_ns_total": 4356720,
+"routed_cpu_ns_per_page": 7263,
+"routed_cpu_ns_total": 4183624,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -532,14 +532,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 77361,
+"ns_per_saved_block": 74116,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6984,
-"routed_cpu_ns_total": 4022784,
+"routed_cpu_ns_per_page": 6691,
+"routed_cpu_ns_total": 3854080,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -587,14 +587,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 77361,
+"ns_per_saved_block": 74116,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6984,
-"routed_cpu_ns_total": 4022784,
+"routed_cpu_ns_per_page": 6691,
+"routed_cpu_ns_total": 3854080,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -642,14 +642,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 77361,
+"ns_per_saved_block": 74116,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6984,
-"routed_cpu_ns_total": 4022784,
+"routed_cpu_ns_per_page": 6691,
+"routed_cpu_ns_total": 3854080,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -666,17 +666,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1398,
+"inverse_ns_per_page": 1565,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1725,
-"scalar_transform_ns_per_page": 1840,
-"second_lz4_ns_per_page": 12717,
+"scalar_inverse_ns_per_page": 1763,
+"scalar_transform_ns_per_page": 1815,
+"second_lz4_ns_per_page": 12361,
 "transform_backend": "sse2",
-"transform_ns_per_page": 1197
+"transform_ns_per_page": 1370
 }
 ]
 }
@@ -690,23 +690,23 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "1b9b32514c5189b1b8cc0d335f42d2e073dd6571396617edf836abc5ba45e161",
-"module_sha256": "3e712cf909d89f8fd7b6f9233f590e21c016a79a8dceb3a498eda3ac1ed77ecc",
+"formatter_sha256": "a42560bc3d6b11ec600c227b64c579339e5f35d3d6185bd0c4272f77772f0c64",
+"module_sha256": "085db469fc02c569f9c51b138e3beeecc295c02f3636885d446ebb3e2649b406",
 "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "9e187df7b09c67becf86c5b5aced5f1cdb3e3e86",
+"source_sha": "7200a460d77adbfe2597a0929ee4e03060c68256",
 "stages": [
 {
-"elapsed_s": 13.402,
+"elapsed_s": 13.253,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_strict_json_rejects_nonfinite_and_overflow_exponents",
-"elapsed_s": 317.875,
+"diagnostic": "Unit test failed: test_sigkill_after_upgrade_package_files_retains_recovery_gate",
+"elapsed_s": 1710.709,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -718,5 +718,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "9e187df7b09c67becf86c5b5aced5f1cdb3e3e86"
+"tested_commit_sha": "7200a460d77adbfe2597a0929ee4e03060c68256"
 }
