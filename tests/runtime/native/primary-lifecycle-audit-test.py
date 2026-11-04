@@ -1008,7 +1008,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             package.index("assert_no_primary_recovery_authority upgrade"))
         self.assertLess(
             lifecycle.index("swapz_primary_mutation_lock()"),
-            lifecycle.index("swapz_primary_prepare_metadata()"))
+            lifecycle.index("swapz_primary_prepare_metadata("))
         self.assertLess(
             lifecycle.index("swapz_primary_mutation_lock()"),
             lifecycle.index("swapz_primary_start_prepared()"))
@@ -1043,7 +1043,7 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             lifecycle.index("swapz_primary_package_transactions_clear_at("))
         self.assertLess(
             lifecycle.index("swapz_primary_package_transactions_clear_at("),
-            lifecycle.index("swapz_primary_prepare_metadata()"))
+            lifecycle.index("swapz_primary_prepare_metadata("))
         self.assertLess(
             lifecycle.index("swapz_primary_package_transactions_clear_at("),
             lifecycle.index("swapz_primary_start_prepared()"))
@@ -1058,10 +1058,17 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertIn("O_NONBLOCK", transaction_guard)
         self.assertIn("AT_SYMLINK_NOFOLLOW", transaction_guard)
         self.assertIn("STATX_MNT_ID", transaction_guard)
+        self.assertIn("STATX_BASIC_STATS | STATX_MNT_ID", transaction_guard)
         self.assertIn("stx_mnt_id", transaction_guard)
         self.assertIn("named_transaction_mount", transaction_guard)
         self.assertIn(
             "named_transaction_mount.stx_mnt_id !=",
+            transaction_guard)
+        self.assertIn(
+            "named_transaction_mount.stx_ino != transaction_info.st_ino",
+            transaction_guard)
+        self.assertIn(
+            "named_transaction_mount.stx_dev_major !=",
             transaction_guard)
         self.assertLess(
             transaction_guard.index("readdir(entries)"),
@@ -1220,6 +1227,8 @@ class PackageCrashToPrimaryAdmissionTest(unittest.TestCase):
         if lock_name_match is None:
             raise AssertionError("missing production mutation-lock name macro")
         mutation_lock_name = lock_name_match.group(1)
+        codec_header = (ROOT / "src/kernel/codec.h").read_text(
+            encoding="utf-8")
         symbols = (
             "swapz_primary_mutation_lock_at",
             "swapz_primary_mutation_lock",
@@ -1273,12 +1282,20 @@ class PackageCrashToPrimaryAdmissionTest(unittest.TestCase):
                     1))
         constants = {}
         for name in ("SWAPZ_PRIMARY_PARTUUID_LENGTH",
-                     "SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX"):
+                     "SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX",
+                     "SWAPZ_PRIMARY_RUN_ID_LENGTH",
+                     "SWAPZ_PRIMARY_SOURCE_SHA_LENGTH"):
             match = re.search(r"(?m)^#define\s+" + name +
                               r"\s+(\d+U?)\s*$", headers)
             if not match:
                 raise AssertionError("missing source-derived constant " + name)
             constants[name] = match.group(1)
+        block_bytes = re.search(
+            r"(?m)^#define\s+SWAPZ_BLOCK_BYTES\s+(\d+U?)\s*$",
+            codec_header)
+        if not block_bytes:
+            raise AssertionError("missing source-derived SWAPZ_BLOCK_BYTES")
+        constants["SWAPZ_BLOCK_BYTES"] = block_bytes.group(1)
         preamble = f'''/* Source-extracted production C, unprivileged test linkage. */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -1287,19 +1304,28 @@ class PackageCrashToPrimaryAdmissionTest(unittest.TestCase):
 #include <limits.h>
 #include <linux/stat.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <unistd.h>
 #define SWAPZ_PRIMARY_PARTUUID_LENGTH {constants["SWAPZ_PRIMARY_PARTUUID_LENGTH"]}
 #define SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX {constants["SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX"]}
 #define SWAPZ_PRIMARY_MUTATION_LOCK_NAME {mutation_lock_name}
+#define SWAPZ_PRIMARY_RUN_ID_LENGTH {constants["SWAPZ_PRIMARY_RUN_ID_LENGTH"]}
+#define SWAPZ_PRIMARY_SOURCE_SHA_LENGTH {constants["SWAPZ_PRIMARY_SOURCE_SHA_LENGTH"]}
+#define SWAPZ_PRIMARY_BLOCK_BYTES ((uint64_t){constants["SWAPZ_BLOCK_BYTES"]})
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY getenv("SWAPZ_TEST_LOCK_DIRECTORY")
 #define SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY getenv("SWAPZ_TEST_PACKAGE_TRANSACTIONS")
 {mutating_action_enum}
-int swapz_primary_prepare_metadata(void);
+int swapz_primary_prepare_metadata(char *prepared_run_id,
+    char *prepared_source_sha, uint64_t *prepared_logical_pages);
+static uint64_t swapz_primary_linux_swap_size_kib(uint64_t logical_pages) {{
+    return logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES / 1024U - 4U;
+}}
 int swapz_primary_start_prepared(void);
 int swapz_primary_stop_active(void);
 int swapz_primary_recover(void);
@@ -1373,11 +1399,28 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
             [str(executable or self.executable), action],
             cwd=package.repo_root, env=environment, text=True,
             capture_output=True, timeout=10, check=False)
+        simulation_lines = [
+            line for line in result.stdout.splitlines()
+            if line.startswith("SIMULATION ")]
+        self.assertEqual(len(simulation_lines), 1,
+                         f"invalid primary fixture trace: {result!r}")
         match = re.fullmatch(
             r"SIMULATION prepare=(\d+) start=(\d+) stop=(\d+) "
             r"recover=(\d+) header=(\d+) mapper=(\d+) "
-            r"mkswap=(\d+) swapon=(\d+)\n", result.stdout)
+            r"mkswap=(\d+) swapon=(\d+)", simulation_lines[0])
         self.assertIsNotNone(match, f"invalid primary fixture trace: {result!r}")
+        ready_lines = [
+            line for line in result.stdout.splitlines()
+            if line.startswith("PRIMARY_PREPARE=READY ")]
+        if action == "prepare" and result.returncode == 0:
+            self.assertEqual(len(ready_lines), 1, result)
+            self.assertRegex(
+                ready_lines[0],
+                r"^PRIMARY_PREPARE=READY run_id=[0-9a-f]{32} "
+                r"source=[0-9a-f]{40} logical_pages=[1-9][0-9]* "
+                r"logical_bytes=[1-9][0-9]* swap_kib=[1-9][0-9]*$")
+        else:
+            self.assertEqual(ready_lines, [], result)
         return result, dict(zip(
             ("prepare", "start", "stop", "recover", "header", "mapper",
              "mkswap", "swapon"), map(int, match.groups())))
@@ -1395,32 +1438,33 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
             self.assertIn("PRIMARY_PREPARE=FAILED", result.stderr)
             if expected_errno is not None:
                 self.assertIn(f"errno={expected_errno}", result.stderr)
-        else:
+        elif action == "start":
+            self.assertIn("PRIMARY_START=FAILED "
+                          "phase=package-transaction-preflight", result.stderr)
             self.assertIn("BLOCKED: primary-swap start failed:", result.stderr)
             if expected_errno is not None:
+                self.assertIn(f"errno={expected_errno}", result.stderr)
                 self.assertIn(os.strerror(expected_errno), result.stderr)
 
     def _assert_cleanup_allowed(self, package, *, executable=None):
         for action in ("stop", "recover"):
-            with self.subTest(action=action):
-                result, calls = self._primary(
-                    package, action, executable=executable)
-                self.assertEqual(result.returncode, 0, result)
-                self.assertEqual(calls[action], 1, result)
-                self.assertEqual(sum(calls.values()), 1, result)
+            result, calls = self._primary(
+                package, action, executable=executable)
+            self.assertEqual(result.returncode, 0, f"{action}: {result}")
+            self.assertEqual(calls[action], 1, f"{action}: {result}")
+            self.assertEqual(sum(calls.values()), 1, f"{action}: {result}")
 
     def _assert_clean_admission(self, package, *, executable=None):
         for action, forbidden in (
                 ("prepare", {"mkswap", "swapon"}),
                 ("start", {"header"})):
-            with self.subTest(action=action):
-                result, calls = self._primary(
-                    package, action, executable=executable)
-                self.assertEqual(result.returncode, 0, result)
-                self.assertEqual(calls[action], 1, result)
-                self.assertGreater(sum(calls.values()), 1, result)
-                for name in forbidden:
-                    self.assertEqual(calls[name], 0, result)
+            result, calls = self._primary(
+                package, action, executable=executable)
+            self.assertEqual(result.returncode, 0, f"{action}: {result}")
+            self.assertEqual(calls[action], 1, f"{action}: {result}")
+            self.assertGreater(sum(calls.values()), 1, f"{action}: {result}")
+            for name in forbidden:
+                self.assertEqual(calls[name], 0, f"{action}: {result}")
 
     def _crash_and_reacquire(self, package, action, phase, extra=None):
         transaction = package.kill_at_durable_phase(action, phase, extra)
@@ -1482,10 +1526,11 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
         result, calls = self._primary(package, "start")
         self.assertEqual(result.returncode, 2, result)
         self.assertEqual(set(calls.values()), {0}, result)
-        # P0 admission diagnostics must identify the durable package gate,
-        # not collapse it into a generic lifecycle failure.
+        # Admission diagnostics identify the durable package gate instead of
+        # collapsing it into a generic lifecycle failure.
         self.assertIn(
-            "phase=package-transaction-preflight", result.stderr)
+            "PRIMARY_START=FAILED phase=package-transaction-preflight",
+            result.stderr)
 
     def test_directory_substitution_during_named_recheck_fails_closed(self):
         for action in ("prepare", "start"):

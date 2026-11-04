@@ -4211,7 +4211,8 @@ static int swapz_primary_package_transactions_clear_at(
 		goto verify_parent;
 	}
 	if (fstat(transaction_fd, &transaction_info) < 0 ||
-	    statx(transaction_fd, "", AT_EMPTY_PATH, STATX_MNT_ID,
+	    statx(transaction_fd, "", AT_EMPTY_PATH,
+		  STATX_BASIC_STATS | STATX_MNT_ID,
 		  &transaction_mount) < 0)
 		goto out;
 	if (!S_ISDIR(transaction_info.st_mode) ||
@@ -4240,13 +4241,23 @@ static int swapz_primary_package_transactions_clear_at(
 	if (fstatat(parent_fd, directory_name, &named_transaction_info,
 		    AT_SYMLINK_NOFOLLOW) < 0 ||
 	    statx(parent_fd, directory_name, AT_SYMLINK_NOFOLLOW,
-		  STATX_MNT_ID, &named_transaction_mount) < 0)
+		  STATX_BASIC_STATS | STATX_MNT_ID,
+		  &named_transaction_mount) < 0)
 		goto out;
 	if (!S_ISDIR(named_transaction_info.st_mode) ||
 	    named_transaction_info.st_dev != transaction_info.st_dev ||
 	    named_transaction_info.st_ino != transaction_info.st_ino ||
 	    named_transaction_info.st_uid != expected_owner ||
 	    (named_transaction_info.st_mode & 0777U) != 0700U ||
+	    !(named_transaction_mount.stx_mask & STATX_INO) ||
+	    !(named_transaction_mount.stx_mask & STATX_TYPE) ||
+	    named_transaction_mount.stx_ino != transaction_info.st_ino ||
+	    named_transaction_mount.stx_dev_major !=
+		    major(transaction_info.st_dev) ||
+	    named_transaction_mount.stx_dev_minor !=
+		    minor(transaction_info.st_dev) ||
+	    named_transaction_mount.stx_uid != transaction_info.st_uid ||
+	    (named_transaction_mount.stx_mode & S_IFMT) != S_IFDIR ||
 	    !(named_transaction_mount.stx_mask & STATX_MNT_ID) ||
 	    named_transaction_mount.stx_mnt_id !=
 		    transaction_mount.stx_mnt_id) {
@@ -4259,7 +4270,8 @@ verify_parent:
 	if (fstatat(AT_FDCWD, parent_path, &named_parent_info,
 		    AT_SYMLINK_NOFOLLOW) < 0 ||
 	    statx(AT_FDCWD, parent_path, AT_SYMLINK_NOFOLLOW,
-		  STATX_MNT_ID, &named_parent_mount) < 0) {
+		  STATX_BASIC_STATS | STATX_MNT_ID,
+		  &named_parent_mount) < 0) {
 		result = -1;
 		goto out;
 	}
@@ -4268,6 +4280,13 @@ verify_parent:
 	    named_parent_info.st_ino != parent_info.st_ino ||
 	    named_parent_info.st_uid != expected_owner ||
 	    (named_parent_info.st_mode & 0022U) != 0U ||
+	    !(named_parent_mount.stx_mask & STATX_INO) ||
+	    !(named_parent_mount.stx_mask & STATX_TYPE) ||
+	    named_parent_mount.stx_ino != parent_info.st_ino ||
+	    named_parent_mount.stx_dev_major != major(parent_info.st_dev) ||
+	    named_parent_mount.stx_dev_minor != minor(parent_info.st_dev) ||
+	    named_parent_mount.stx_uid != parent_info.st_uid ||
+	    (named_parent_mount.stx_mode & S_IFMT) != S_IFDIR ||
 	    !(named_parent_mount.stx_mask & STATX_MNT_ID) ||
 	    named_parent_mount.stx_mnt_id != parent_mount.stx_mnt_id) {
 		errno = ESTALE;
@@ -8977,8 +8996,18 @@ out:
 #endif
 }
 
-static int swapz_primary_prepare_metadata(void)
+static int swapz_primary_prepare_metadata(
+	char *prepared_run_id, char *prepared_source_sha,
+	uint64_t *prepared_logical_pages)
 {
+	if (!prepared_run_id || !prepared_source_sha ||
+	    !prepared_logical_pages) {
+		errno = EINVAL;
+		return -1;
+	}
+	prepared_run_id[0] = '\0';
+	prepared_source_sha[0] = '\0';
+	*prepared_logical_pages = 0;
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
 	errno = ENODEV;
 	return -1;
@@ -9351,17 +9380,11 @@ static int swapz_primary_prepare_metadata(void)
 	memset(verified_header, 0, sizeof(verified_header));
 	memset(proposed_header, 0, sizeof(proposed_header));
 	if (result == 0) {
-		uint64_t logical_pages = swapz_primary_maximum_logical_pages(
+		memcpy(prepared_run_id, run_id, sizeof(run_id));
+		memcpy(prepared_source_sha, manifest.source_sha,
+		       sizeof(manifest.source_sha));
+		*prepared_logical_pages = swapz_primary_maximum_logical_pages(
 			SWAPZ_PRIMARY_PHYSICAL_BLOCKS);
-
-		printf("PRIMARY_PREPARE=READY run_id=%s source=%s logical_pages=%llu "
-		       "logical_bytes=%llu swap_kib=%llu\n",
-		       run_id, manifest.source_sha,
-		       (unsigned long long)logical_pages,
-		       (unsigned long long)(
-			       logical_pages * SWAPZ_PRIMARY_BLOCK_BYTES),
-		       (unsigned long long)
-			       swapz_primary_linux_swap_size_kib(logical_pages));
 	}
 	if (result < 0 && claimed)
 		fprintf(stderr,
@@ -10518,6 +10541,9 @@ enum swapz_primary_mutating_action {
 static int swapz_primary_run_mutating_action(
 	enum swapz_primary_mutating_action action)
 {
+	char prepared_run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U] = {0};
+	char prepared_source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 1U] = {0};
+	uint64_t prepared_logical_pages = 0;
 	int mutation_lock_fd;
 	int result;
 	int saved_errno;
@@ -10544,12 +10570,17 @@ static int swapz_primary_run_mutating_action(
 	     action == SWAPZ_PRIMARY_MUTATING_START) &&
 	    swapz_primary_package_transactions_clear_at(
 		    SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY, 0) < 0) {
-		if (action == SWAPZ_PRIMARY_MUTATING_PREPARE) {
+		if (action == SWAPZ_PRIMARY_MUTATING_PREPARE ||
+		    action == SWAPZ_PRIMARY_MUTATING_START) {
 			int failure_errno = errno ? errno : EIO;
+			const char *action_name =
+				action == SWAPZ_PRIMARY_MUTATING_PREPARE ?
+					"PRIMARY_PREPARE" : "PRIMARY_START";
 
 			fprintf(stderr,
-				"PRIMARY_PREPARE=FAILED phase=package-transaction-"
-				"preflight errno=%d error=%s\n",
+				"%s=FAILED phase=package-transaction-preflight "
+				"errno=%d error=%s\n",
+				action_name,
 				failure_errno, strerror(failure_errno));
 			errno = failure_errno;
 		}
@@ -10558,7 +10589,9 @@ static int swapz_primary_run_mutating_action(
 	}
 	switch (action) {
 	case SWAPZ_PRIMARY_MUTATING_PREPARE:
-		result = swapz_primary_prepare_metadata();
+		result = swapz_primary_prepare_metadata(
+			prepared_run_id, prepared_source_sha,
+			&prepared_logical_pages);
 		break;
 	case SWAPZ_PRIMARY_MUTATING_START:
 		result = swapz_primary_start_prepared();
@@ -10579,7 +10612,34 @@ unlock:
 	if (close(mutation_lock_fd) < 0 && result == 0) {
 		result = -1;
 		saved_errno = errno;
+		if (action == SWAPZ_PRIMARY_MUTATING_PREPARE) {
+			fprintf(stderr,
+				"PRIMARY_PREPARE=FAILED phase=global-mutation-lock-"
+				"close claim=retained target_unchanged=true errno=%d "
+				"error=%s\n",
+				saved_errno, strerror(saved_errno));
+		} else {
+			const char *action_name =
+				action == SWAPZ_PRIMARY_MUTATING_START ?
+					"PRIMARY_START" :
+				action == SWAPZ_PRIMARY_MUTATING_STOP ?
+					"PRIMARY_STOP" : "PRIMARY_RECOVER";
+
+			fprintf(stderr,
+				"%s=FAILED phase=global-mutation-lock-close "
+				"errno=%d error=%s\n",
+				action_name, saved_errno, strerror(saved_errno));
+		}
 	}
+	if (result == 0 && action == SWAPZ_PRIMARY_MUTATING_PREPARE)
+		printf("PRIMARY_PREPARE=READY run_id=%s source=%s logical_pages=%llu "
+		       "logical_bytes=%llu swap_kib=%llu\n",
+		       prepared_run_id, prepared_source_sha,
+		       (unsigned long long)prepared_logical_pages,
+		       (unsigned long long)(prepared_logical_pages *
+					    SWAPZ_PRIMARY_BLOCK_BYTES),
+		       (unsigned long long)swapz_primary_linux_swap_size_kib(
+			       prepared_logical_pages));
 	errno = saved_errno;
 	return result;
 }

@@ -150,7 +150,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             'package_lock="/run/lock/swapz/package.lock"', PACKAGE_DKMS)
         lock_position = mutation.index("swapz_primary_mutation_lock()")
         for operation in (
-                "swapz_primary_prepare_metadata()",
+                "swapz_primary_prepare_metadata(",
                 "swapz_primary_start_prepared()",
                 "swapz_primary_stop_active()",
                 "swapz_primary_recover()"):
@@ -162,7 +162,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "SWAPZ_PRIMARY_MUTATING_STOP",
                 "SWAPZ_PRIMARY_MUTATING_RECOVER"):
             self.assertIn(action, command)
-        self.assertNotIn("swapz_primary_prepare_metadata()", command)
+        self.assertNotIn("swapz_primary_prepare_metadata(", command)
         self.assertNotIn("swapz_primary_start_prepared()", command)
         self.assertNotIn("swapz_primary_stop_active()", command)
         self.assertNotIn("swapz_primary_recover()", command)
@@ -1778,6 +1778,7 @@ static swapz_u16 swapz_probe_set(
         submit = body("swapz_submit_inflight_write")
         discard = body("swapz_discard_dead_segment")
         validator = body("swapz_validate_physical_superblock")
+        fail_at = body("swapz_fail_at")
         fail = body("swapz_fail")
         process = body("swapz_process")
 
@@ -1824,7 +1825,12 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("ctx->data_start_block +", async_read)
         self.assertIn("ctx->data_start_block + inflight->run.start_block", submit)
         self.assertIn("ctx->data_start_block * SWAPZ_SECTORS", discard)
+        # Per-WRITE authority capacity exhaustion is filtered by the generic
+        # failure wrapper. Any errno reaching fail_at is terminal, including
+        # a device-originated ENOSPC.
+        self.assertIn("terminal_error = error < 0 ? error : -EIO", fail_at)
         self.assertIn("if (error == -ENOSPC)", fail)
+        self.assertIn("swapz_fail_at(ctx, error", fail)
         self.assertIn("error != -ENOSPC", process)
         self.assertGreaterEqual(process.count("op == REQ_OP_READ && error == -ENOSPC"),
                                 2)
@@ -1847,11 +1853,16 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("sync_unsupported_bits", wrapper)
         self.assertIn("&unsupported_bits", wrapper)
         self.assertIn("return -EOPNOTSUPP", wrapper)
+        self.assertIn("if (!error && unsupported_bits)", wrapper)
         self.assertIn("dm_io(req, 1, region, sync_error_bits,", wrapper)
         self.assertIn("SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context)", DM)
         self.assertIn("do { (error_name) |= unsupported; } while (0)", DM)
         self.assertIn("SWAPZ_DM_IO_MERGE_UNSUPPORTED(error)", write_done)
         self.assertIn("SWAPZ_DM_IO_MERGE_UNSUPPORTED(error)", read_done)
+        self.assertIn("bool unsupported_only = !error && unsupported", write_done)
+        self.assertIn("bool unsupported_only = !error && unsupported", read_done)
+        self.assertIn("if (unsupported_only)", write_done)
+        self.assertIn("if (unsupported_only)", read_done)
         self.assertIn(".fn = swapz_async_lower_write_done",
                       body("swapz_submit_inflight_write"))
         self.assertIn(".fn = swapz_async_lower_read_done",
@@ -2086,7 +2097,8 @@ int main(void) {
         self.assertIn("swapz_issue_flush(ctx)", raw)
         self.assertIn("swapz_issue_flush(ctx)", drain)
         self.assertIn("swapz_flush_accounted(&ctx->flush_meter", lower)
-        self.assertIn("swapz_fail(ctx, error)", lower)
+        self.assertIn('swapz_fail_at(ctx, error, "flush"', lower)
+        self.assertIn('"durability-fence"', lower)
         status = status_format_sequence()
         self.assertIn("flush_calls=%llu flush_ok=%llu flush_err=%llu", status)
         self.assertIn("flush_injected=%llu flush_fault_nth=%u", status)
@@ -2709,16 +2721,22 @@ static void mod_delayed_work(void *queue,int *worker,unsigned delay) {
     (void)worker; assert(alive&&queue&&delay==0); ++notified;
 }
 #define EIO 5
+#define EOPNOTSUPP 95
 '''
         signatures = (
-            ("unsigned long error, void *context", "", "0, &inflight", "1, &inflight"),
+            ("unsigned long error, void *context",
+             "#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_bits) do { } while (0)\n",
+             "0, &inflight", "1, &inflight", "-EIO"),
             ("unsigned long error, unsigned long unsupported, void *context",
-             "error |= unsupported;", "0, 0, &inflight", "0, 1, &inflight"))
+             "#define SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS 1\n"
+             "#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_bits) do { (error_bits) |= unsupported; } while (0)\n",
+             "0, 0, &inflight", "0, 1, &inflight", "-EOPNOTSUPP"))
         with tempfile.TemporaryDirectory(prefix="swapz-lower-lifetime-") as temp:
             path = Path(temp)
-            for index, (params, merge, success, failure) in enumerate(signatures):
+            for index, (params, notify_macro, success, failure,
+                        expected_failure) in enumerate(signatures):
                 unit = source + (
-                    "#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error) do { " + merge + " } while(0)\n"
+                    notify_macro +
                     "static void callback(" + params + ") {\n" + callback + "\n}\n")
                 unit += r'''
 static void init(struct swapz_dm *ctx, struct swapz_inflight_write *inflight) {
@@ -2737,11 +2755,12 @@ int main(void) {
     init(&ctx,&inflight);ctx.preparation_queued=0;
     callback(FAILURE);
     assert(!alive&&blocked==1&&notified==1&&inflight.lower_done.done);
-    assert(inflight.lower_error==-EIO&&!ctx.lower_write_active);
+    assert(inflight.lower_error==EXPECT_ERR&&!ctx.lower_write_active);
     assert(!ctx.prep_lower_write_end_queued&&!ctx.prep_lower_write_end_nonempty);
     return 0;
 }
 '''.replace("SUCCESS", success).replace("FAILURE", failure)
+                unit = unit.replace("EXPECT_ERR", expected_failure)
                 (path / "probe.c").write_text(unit)
                 built = subprocess.run(
                     ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
@@ -5122,8 +5141,9 @@ int main(void)
         self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
                         bypass.index("ctx->retained_wave_read_seen = true"))
         self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
-                        bypass.index("swapz_fail(ctx, error)"))
-        self.assertLess(bypass.index("swapz_fail(ctx, error)"),
+                        bypass.index('swapz_fail_at(ctx, error, "read"'))
+        self.assertIn('"independent-read"', bypass)
+        self.assertLess(bypass.index('swapz_fail_at(ctx, error, "read"'),
                         bypass.index("swapz_flush_window(ctx)"))
         self.assertIn("u64 read_start_ns = ktime_get_ns()", bypass)
         self.assertIn("u64 lower_reqs_before = ctx->lower_read_submitted_reqs", bypass)
@@ -6052,7 +6072,12 @@ int main(void)
         self.assertIn('""|0*|*[!0-9]*) return 1', preflight)
         self.assertIn("is_hex16()", preflight)
         self.assertNotIn("=~", preflight)
-        self.assertNotIn("((", preflight)
+        # This is the sole arithmetic comparison. Its operand is parsed from
+        # /proc/meminfo only after strict decimal and width validation, so
+        # signs, leading zeroes, and oversized values never reach Bash math.
+        self.assertEqual(preflight.count("(("), 1)
+        self.assertIn("length($2) > 18", preflight)
+        self.assertIn("elif (( early_available_kib < 1048576 )); then", preflight)
         self.assertIn('for attempt in {1..30}; do', recovery)
         self.assertIn("preflight_internal_error()", preflight)
         self.assertIn(

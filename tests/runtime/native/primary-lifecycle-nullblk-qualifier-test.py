@@ -4,6 +4,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import os
+import re
 import subprocess
 import unittest
 
@@ -285,9 +286,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 
     def test_preparation_phase_matches_each_explicit_refusal_gate(self):
         prepare = self.primary[
-            self.primary.index("static int swapz_primary_prepare_metadata(void)"):
+            self.primary.index("static int swapz_primary_prepare_metadata("):
             self.primary.index("static int swapz_primary_unload_owned_module(", 
-                               self.primary.index("static int swapz_primary_prepare_metadata(void)"))]
+                               self.primary.index("static int swapz_primary_prepare_metadata("))]
         owner_claim = prepare.index("swapz_primary_claim_partition_owner_at(")
         # Every early refusal must precede durable claim or target mutation.
         for phase in (
@@ -338,9 +339,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 
     def test_prepare_preclaim_revalidation_has_distinct_failure_phases(self):
         prepare = self.primary[
-            self.primary.index("static int swapz_primary_prepare_metadata(void)"):
+            self.primary.index("static int swapz_primary_prepare_metadata("):
             self.primary.index("static int swapz_primary_unload_owned_module(",
-                               self.primary.index("static int swapz_primary_prepare_metadata(void)"))]
+                               self.primary.index("static int swapz_primary_prepare_metadata("))]
         final_check = prepare[
             prepare.index('failure_phase = "final-raw-target-swap-inventory";'):
             prepare.index('failure_phase = "run-id-and-header-construction";')]
@@ -370,9 +371,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 
     def test_preparation_failure_formats_do_not_expose_transaction_ids(self):
         preparation = self.primary[
-            self.primary.index("static int swapz_primary_prepare_metadata(void)"):
+            self.primary.index("static int swapz_primary_prepare_metadata("):
             self.primary.index("static int swapz_primary_unload_owned_module(",
-                               self.primary.index("static int swapz_primary_prepare_metadata(void)"))]
+                               self.primary.index("static int swapz_primary_prepare_metadata("))]
         failure_format = preparation[preparation.index("if (result < 0 && claimed)"):
                                      preparation.index("if (result < 0)\n\t\terrno = saved_errno;")]
         # Recovery claims can be retained, but their 32-hex IDs belong in
@@ -393,15 +394,19 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "if (close(mutation_lock_fd) < 0 && result == 0) {")
         close_gate = action[
             close_gate_start:action.index("return result;", close_gate_start)]
+        close_gate = re.sub(r'"\s*"', "", close_gate)
         self.assertIn(
             "PRIMARY_PREPARE=FAILED phase=global-mutation-lock-close ",
             close_gate)
         self.assertIn("claim=retained target_unchanged=true", close_gate)
+        self.assertGreater(
+            action.index('printf("PRIMARY_PREPARE=READY'),
+            action.index("if (close(mutation_lock_fd) < 0 && result == 0) {"))
 
         # A successful inner prepare must not publish a run ID before the
         # outer global mutation lock is known to have closed successfully.
         prepare_start = self.primary.index(
-            "static int swapz_primary_prepare_metadata(void)")
+            "static int swapz_primary_prepare_metadata(")
         prepare_end = self.primary.index(
             "static int swapz_primary_unload_owned_module(", prepare_start)
         prepare = self.primary[prepare_start:prepare_end]

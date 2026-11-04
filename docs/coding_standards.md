@@ -443,6 +443,20 @@ than retried across mutable installed artifacts. Owned-null_blk qualification
 redirects only this global lock to its token-bound private directory; physical
 and ordinary production use the installed package lock.
 
+Shell option changes are process-wide, even when issued inside a function. A
+helper that disables pathname expansion to parse command output must restore
+the caller's prior option state before returning. Later safety checks may rely
+on bounded, intentional pathname expansion to find retained transaction
+records; leaked `set -f` state can silently turn those globs into literal paths.
+
+When a package transaction revalidates a pinned directory by name, compare the
+named object with the already-open descriptor by inode, device, owner and type,
+as well as mount identity. A same-mount directory replacement is still a path
+substitution and must fail closed. Mutating primary commands must not emit a
+success marker such as `PRIMARY_PREPARE=READY` until every required mutation
+lock has closed successfully; a lock-close error is a failed operation, not a
+successful result with a cleanup warning.
+
 The primary manager must use the same structural PARTUUID grammar as the
 standalone formatter: 8..64 characters, at least eight hexadecimal digits,
 single internal hyphens only, no leading/trailing/consecutive hyphen, ASCII

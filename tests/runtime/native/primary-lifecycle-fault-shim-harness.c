@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/stat.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,8 +41,21 @@ int swapz_primary_cleanup_execution_enabled(void)
 	return 1;
 }
 
-int swapz_primary_prepare_metadata(void)
+int swapz_primary_prepare_metadata(char *prepared_run_id,
+	char *prepared_source_sha, uint64_t *prepared_logical_pages)
 {
+	if (!prepared_run_id || !prepared_source_sha ||
+	    !prepared_logical_pages) {
+		errno = EINVAL;
+		return -1;
+	}
+	memcpy(prepared_run_id,
+	       "0123456789abcdef0123456789abcdef",
+	       sizeof("0123456789abcdef0123456789abcdef"));
+	memcpy(prepared_source_sha,
+	       "0123456789abcdef0123456789abcdef01234567",
+	       sizeof("0123456789abcdef0123456789abcdef01234567"));
+	*prepared_logical_pages = 2;
 	++prepare_calls;
 	++prepared_headers;
 	++mapper_changes;

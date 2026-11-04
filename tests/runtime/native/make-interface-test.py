@@ -1215,7 +1215,12 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn('is_hex16 "$token"', preflight)
         self.assertIn('""|0*|*[!0-9]*) return 1', preflight)
         self.assertNotIn("=~", preflight)
-        self.assertNotIn("((", preflight)
+        self.assertIn('length($2) > 18', preflight)
+        self.assertIn('elif (( early_available_kib < 1048576 )); then', preflight)
+        self.assertLess(
+            preflight.index('if ! is_uint "$early_available_kib"; then'),
+            preflight.index('elif (( early_available_kib < 1048576 )); then'))
+        self.assertEqual(preflight.count("(("), 1)
         self.assertIn('"SWAPZ-TEST-$token"', preflight)
         self.assertIn('"SWAPZ-TEST-$token-packed"', preflight)
         self.assertIn('case "$uuid" in', preflight)

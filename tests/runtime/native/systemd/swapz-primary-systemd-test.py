@@ -1615,6 +1615,11 @@ class BootVerifierTests(unittest.TestCase):
                 env = self.env.copy()
                 env["MOCK_DM_STATUS_OVERRIDE_SET"] = "1"
                 env["MOCK_DM_STATUS_OVERRIDE"] = ambiguous
+                # Every observation consumes/revokes the one-use preflight
+                # authorization, including an INCOMPLETE result. Reissue it
+                # before each independent malformed-status case.
+                preflight = self.run_verifier("preflight")
+                self.assertEqual(preflight.returncode, 0, preflight.stderr)
                 observed = self.run_verifier("observe", env=env)
                 self.assertEqual(observed.returncode, 2, observed.stderr)
                 self.assertIn("status=INCOMPLETE", (self.report / "latest.env").read_text())

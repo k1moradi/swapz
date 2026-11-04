@@ -600,6 +600,14 @@ control/module snapshots needed to reconcile an interrupted primary lifecycle.
 The rootless package suite must exercise both durable-state and ownership-marker
 refusals and prove the installed bytes remain unchanged.
 
+The package admission suite must replace a pinned transaction directory with a
+different directory on the same mount between descriptor and named-path
+revalidation; compare inode, device, owner, type and mount identity and require
+the substitution to fail before mutation. The primary prepare fixture must
+inject global-lock close failure and verify that it emits a phase-specific
+failure with no `PRIMARY_PREPARE=READY` marker. A successful prepare marker is
+valid only after the outer mutation lock closes successfully.
+
 Package mutation and every mutating primary command, including
 `qualification-import` and `prepare/start/stop/recover`, must contend on the
 exact same global `/run/lock/swapz/package.lock` before either side inspects
@@ -5583,6 +5591,13 @@ reject a physical-block geometry outside the kernel's `swapz_u32` address
 domain. Target health failures must remain observable rather than causing the
 monitor service to restart the primary lifecycle; only monitor-process failure
 is eligible for `Restart=on-failure`.
+
+Boot-verifier contracts must prove that a retained package transaction is
+detected by both preflight and post-boot observation after selector parsing.
+Malformed kernel-status cases must obtain a fresh preflight authorization for
+each observation because every observation consumes or revokes that one-use
+token, including an `INCOMPLETE` result. Do not weaken the expected status to
+hide a missing authorization or a journal that the verifier failed to find.
 
 Rootless transactions must retain missing-media no-swap behavior, interrupted
 startup, failed native stop, and service-restart contracts. A failed stop must

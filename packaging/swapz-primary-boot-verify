@@ -286,12 +286,20 @@ manager_target_identity()
 	*'
 '*) return 1 ;;
 	esac
+	case $- in
+	*f*) restore_globbing=0 ;;
+	*) restore_globbing=1 ;;
+	esac
 	set -f
 	old_ifs=$IFS
 	IFS=' '
 	# shellcheck disable=SC2086 # Strict split is checked by exact reconstruction.
 	set -- $units
 	IFS=$old_ifs
+	# `set -f` changes shell-wide state. Restore the caller's prior setting so
+	# later safety guards that intentionally expand fixed transaction globs
+	# still see retained package journals.
+	[ "$restore_globbing" -eq 0 ] || set +f
 	[ "$#" -eq 2 ] && [ "$1 $2" = "$units" ] || return 1
 	selected_device_unit=$1
 	selected_raw_swap_unit=$2
