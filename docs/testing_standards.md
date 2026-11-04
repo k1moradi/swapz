@@ -3471,8 +3471,11 @@ failure, and device disappearance before and after the write. The swap-inventory
 regular-file and block-device entries nonconflicting; unknown entry types must
 fail closed. A rootless proc-directory fixture must prove that a selected partition or
 parent mounted only in another visible PID's namespace blocks formatting,
-while unrelated sibling mounts remain nonconflicting; missing or malformed
-visible PID mountinfo must fail closed. The mountinfo parser must accept normal major-zero pseudo-filesystem
+while unrelated sibling mounts remain nonconflicting. Missing or malformed
+mountinfo for a PID whose ns/mnt marker is still present must fail closed;
+the fixture must also model EINVAL/ENOENT/ESRCH from an exiting or zombie task
+with ns/mnt absent and require that process-churn case to be ignored without
+weakening EACCES or opened-table failures. The mountinfo parser must accept normal major-zero pseudo-filesystem
 entries (including `0:0`) while still rejecting malformed/overflowed rows;
 major zero must remain forbidden for a configured physical partition or parent.
 For every ownership/identity uncertainty before publication, the test
