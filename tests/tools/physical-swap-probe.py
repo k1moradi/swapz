@@ -1351,19 +1351,25 @@ def _final_observations(results, state_dir, state, target):
     try:
         results["lower_io_delta"] = _lower_io_delta(
             results.get("block_stats_before"), results["block_stats_after"])
-        results["lower_io_evidence_gate"] = "AVAILABLE"
+        # Final observations run both before and after releasing the durable
+        # partition marker. Once evidence was unavailable, a later retry must
+        # not erase that blocker and fabricate an AVAILABLE final gate.
+        if results.get("lower_io_evidence_gate") != "BLOCKED":
+            results["lower_io_evidence_gate"] = "AVAILABLE"
     except ProbeError as exc:
         results["lower_io_delta"] = None
         results["lower_io_evidence_gate"] = "BLOCKED"
-        results["lower_io_evidence_error"] = _bounded_text(exc)
+        results.setdefault("lower_io_evidence_error", _bounded_text(exc))
     results["kernel_swapz_messages"] = _kernel_swapz_messages(
         results.get("start_timestamp", "now"))
     diagnostics = results["kernel_swapz_messages"]
     diagnostics_error = _kernel_diagnostics_error(diagnostics)
-    results["kernel_diagnostics_gate"] = (
-        "AVAILABLE" if diagnostics_error is None else "BLOCKED")
-    if diagnostics_error is not None:
-        results["kernel_diagnostics_error"] = diagnostics_error
+    if diagnostics_error is None:
+        if results.get("kernel_diagnostics_gate") != "BLOCKED":
+            results["kernel_diagnostics_gate"] = "AVAILABLE"
+    else:
+        results["kernel_diagnostics_gate"] = "BLOCKED"
+        results.setdefault("kernel_diagnostics_error", diagnostics_error)
     row = results.get("final_swap_row")
     # The identity-only recovery target omits original swap parameters.
     # Compare with the durable saved state, including after standalone recovery.

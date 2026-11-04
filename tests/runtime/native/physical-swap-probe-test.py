@@ -2404,6 +2404,70 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(result["kernel_diagnostics_gate"], "BLOCKED")
         self.assertIn("complete", result["kernel_diagnostics_error"])
 
+    def test_final_evidence_blocker_is_sticky_across_teardown_reobservation(self):
+        target = {
+            "device": "/dev/synthetic", "major": 8, "minor": 17,
+            "size_bytes": 64 << 20, "parent_major_minor": "8:16",
+        }
+        state = {
+            "partuuid": "deadbeef-01", "run_id": "a" * 32,
+            "stage": "COMPLETE", "swap_was_active": True,
+            "swap_size_kib": 65532, "swap_priority": -1,
+            "dm_name": "swapz-demo-physical-1234567890abcdef",
+            "dm_uuid": "SWAPZ-TEST-PHYSICAL-1234567890abcdef",
+        }
+        header = b"Z" * probe.PAGE_BYTES
+        values = [0] * probe.MIN_BLOCK_STAT_FIELDS
+        available = {
+            "available": True, "values": values,
+            "device_major_minor": "8:16", "sector_bytes": 512,
+        }
+        unavailable = {"available": False, "error": "first stat missing",
+                       "device_major_minor": "8:16"}
+        truncated = {
+            "available": True, "source": "journalctl",
+            "time_filter_applied": True, "truncated": True,
+            "matching_line_count": 0, "messages": "",
+        }
+        healthy = {
+            "available": True, "source": "journalctl",
+            "time_filter_applied": True, "truncated": False,
+            "matching_line_count": 0, "messages": "",
+        }
+        inventory = {
+            "other_mapper_count": 0,
+            "other_mapper_sha256": hashlib.sha256(b"[]").hexdigest(),
+        }
+        result = {
+            "original_header_sha256": hashlib.sha256(header).hexdigest(),
+            "block_stats_before": available,
+            "dm_inventory_before": inventory,
+        }
+        with mock.patch.object(probe, "_read_block0", return_value=header), \
+                mock.patch.object(probe, "_active_swap_for", return_value={
+                    "kind": "partition", "size_kib": 65532,
+                    "priority": -1}), \
+                mock.patch.object(
+                    probe, "_block_stat_snapshot",
+                    side_effect=[unavailable, available]), \
+                mock.patch.object(
+                    probe, "_kernel_swapz_messages",
+                    side_effect=[truncated, healthy]), \
+                mock.patch.object(probe, "_mapper_exists", return_value=False), \
+                mock.patch.object(
+                    probe, "_dm_inventory_snapshot", return_value=inventory), \
+                mock.patch.object(probe.Path, "exists", return_value=False), \
+                mock.patch.object(probe, "_save_results"):
+            probe._final_observations(
+                result, self.recovery_base, state, target)
+            probe._final_observations(
+                result, self.recovery_base, state, target)
+        self.assertEqual(result["lower_io_evidence_gate"], "BLOCKED")
+        self.assertIn("first stat missing", result["lower_io_evidence_error"])
+        self.assertEqual(result["kernel_diagnostics_gate"], "BLOCKED")
+        self.assertIn("complete", result["kernel_diagnostics_error"])
+        self.assertIsNotNone(result["lower_io_delta"])
+
     def test_kernel_diagnostics_rejects_failure_warning_and_unusable_trace(self):
         base = {
             "available": True, "source": "journalctl",
