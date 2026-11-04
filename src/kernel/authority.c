@@ -1002,7 +1002,7 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
  * next GC victim and the verified-dead original victim the next destination.
  * No mapping, generation or live refcount changes here.
  */
-static int swapz_verify_recovery_victim_dead(
+static int swapz_verify_recovery_victim_dead_for_transition(
 	const struct swapz_authority *a, swapz_u32 segment,
 	int verify_global_map_physical_metadata, const char *transition)
 {
@@ -1027,6 +1027,19 @@ static int swapz_verify_recovery_victim_dead(
 			return swapz_map_proof_refuse(
 				transition, "dead_segment_physical_live", -EUCLEAN);
 	return 0;
+}
+
+/*
+ * Keep recovery advance's original three-argument validation boundary.
+ * The other role transitions identify themselves explicitly to the common
+ * full-map verifier for category-specific refusal diagnostics.
+ */
+static int swapz_verify_recovery_victim_dead(
+	const struct swapz_authority *a, swapz_u32 segment,
+	int verify_global_map_physical_metadata)
+{
+	return swapz_verify_recovery_victim_dead_for_transition(
+		a, segment, verify_global_map_physical_metadata, "gc_advance");
 }
 
 /*
@@ -1085,8 +1098,7 @@ int swapz_gc_advance_rotation_destination(struct swapz_authority *a,
 		 * A destination-role change must not conceal a corrupted physical
 		 * descriptor on any surviving logical map, including other segments.
 		 */
-		error = swapz_verify_recovery_victim_dead(
-			a, segment, 1, "gc_advance");
+		error = swapz_verify_recovery_victim_dead(a, segment, 1);
 		if (error) {
 #ifdef __KERNEL__
 			pr_err_ratelimited(
@@ -1153,7 +1165,7 @@ int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 	 * dead-segment metadata and performs the only externally fallible hook.
 	 * Roles remain unchanged until every check and the hook have succeeded.
 	 */
-	error = swapz_verify_recovery_victim_dead(
+	error = swapz_verify_recovery_victim_dead_for_transition(
 		a, evacuated_victim, 1, "gc_roll_forward");
 	if (error) {
 #ifdef __KERNEL__
@@ -1247,7 +1259,7 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 	 * foreground reads. Authenticate class/liveness for EVERY surviving map
 	 * before exchanging roles, not just the old victim's deadness.
 	 */
-	error = swapz_verify_recovery_victim_dead(
+	error = swapz_verify_recovery_victim_dead_for_transition(
 		a, victim, 1, "gc_commit");
 	if (error) {
 #ifdef __KERNEL__
