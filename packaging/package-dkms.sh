@@ -567,6 +567,13 @@ if operation not in ("install", "uninstall"):
 backup = transaction / "backup"
 if not backup.is_dir() or backup.is_symlink():
     raise SystemExit("missing backup directory")
+final = transaction / "state.json"
+temporary = transaction / "state.json.tmp"
+# The prepared state is the first durable point after the complete rollback
+# snapshot is copied. Installer code does not modify the snapshot afterward.
+# Later phase updates must still hash and metadata-check every entry, but
+# re-fsyncing unchanged files and parent directories adds no durability.
+snapshot_previously_journaled = final.exists() or final.is_symlink()
 
 entries = []
 # Fsync the transaction parent too: the rollback directory entry itself must
@@ -585,7 +592,8 @@ for path in sorted(backup.rglob("*")):
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
-        os.fsync(stream.fileno())
+        if not snapshot_previously_journaled:
+            os.fsync(stream.fileno())
     entries.append({
         "path": str(path.relative_to(backup)),
         "sha256": digest.hexdigest(),
@@ -595,12 +603,13 @@ for path in sorted(backup.rglob("*")):
         "gid": metadata.st_gid,
     })
 
-for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
-    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+if not snapshot_previously_journaled:
+    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 state = {
     "schema": f"swapz-package-{operation}-v1",
@@ -609,8 +618,6 @@ state = {
     "kernel_release": kernel_release,
     "backup_files": entries,
 }
-temporary = transaction / "state.json.tmp"
-final = transaction / "state.json"
 # Never silently rebaseline a backed-up file after the prepared checkpoint.
 if final.exists() or final.is_symlink():
     if final.is_symlink() or not final.is_file():

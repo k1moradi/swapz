@@ -4984,9 +4984,15 @@ queries fail closed.
 Uninstall is a destructive transaction rather than a sequence of best-effort
 deletions. Before the first removal it must persist a private rollback snapshot
 of the verified source, userspace/systemd files and exact installed module,
-fsync that material, and atomically publish an independently verifiable state
-manifest containing hashes of every recovery file. Activation-capable entry
-points are removed before DKMS/module mutation. Every destructive transition,
+fsync every snapshot file and its containing directories at the initial
+`prepared` checkpoint, then atomically publish an independently verifiable
+state manifest containing hashes of every recovery file. The prepared
+checkpoint must also durably record the new transaction-directory entry before
+any removal. The installer must not modify the snapshot after preparation:
+every later phase must recheck its file hashes and metadata, fsync its new
+journal file and the transaction directory, and need not re-fsync the unchanged
+snapshot files, backup directories or transaction parent. Activation-capable
+entry points are removed before DKMS/module mutation. Every destructive transition,
 including DKMS removal, source/module removal, depmod and systemd reload, has a
 durable phase. Failure or a caught HUP/INT/TERM must restore the exact verified
 installation; rollback restores DKMS and the exact module and completes depmod

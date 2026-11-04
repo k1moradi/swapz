@@ -150,11 +150,15 @@ partial transaction succeeded.
 Uninstall is transactional too. It refuses active/enabled deployment state,
 active mapper/module use, recovery ownership, or any ownership/digest mismatch,
 then makes and fsyncs a private exact rollback snapshot plus a hash manifest
-before deleting anything. Activation entry points are removed first; DKMS,
-source/module removal, depmod and daemon-reload are journaled destructive
-transitions. A failure restores the exact source, DKMS registration, qualified
-module and package files, with `swapzctl` restored atomically only after depmod,
-the remaining files and systemd reload are valid. An interrupted or failed
+before deleting anything. Snapshot bytes and their directory entries are
+fsynced at the initial `prepared` checkpoint. Later phase updates recheck every
+snapshot hash and metadata record, then fsync the new journal and transaction
+directory without repeating fsyncs of the unchanged snapshot. Activation entry
+points are removed first; DKMS, source/module removal, depmod and daemon-reload
+are journaled destructive transitions. A failure restores the exact source,
+DKMS registration, qualified module and package files, with `swapzctl` restored
+atomically only after depmod, the remaining files and systemd reload are valid.
+An interrupted or failed
 rollback retains its independently verifiable transaction state and blocks all
 later package operations rather than permitting uncertain activation.
 
