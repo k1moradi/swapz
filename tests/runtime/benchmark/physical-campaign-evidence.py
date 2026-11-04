@@ -674,6 +674,36 @@ def artifact(path: Path, data: bytes) -> dict:
     }
 
 
+def metadata_ram_trace_matches_swapz_arm(
+        trace: dict, swapz_arm: dict) -> bool:
+    """Bind labeled RAM phases to the sustained swapz replay chronology."""
+    started = swapz_arm.get("arm_started_monotonic_ns")
+    finished = swapz_arm.get("arm_finished_monotonic_ns")
+    samples = trace.get("samples") if isinstance(trace, dict) else None
+    if (
+            type(started) is not int or type(finished) is not int or
+            started <= 0 or finished <= started or
+            not isinstance(samples, list) or not samples):
+        return False
+    phases = {
+        phase: [
+            sample["monotonic_ns"] for sample in samples
+            if isinstance(sample, dict) and sample.get("phase") == phase and
+            type(sample.get("monotonic_ns")) is int
+        ]
+        for phase in ("baseline", "initialization", "steady", "gc", "teardown")
+    }
+    if any(not values for values in phases.values()):
+        return False
+    return (
+        max(phases["baseline"]) < min(phases["initialization"]) and
+        max(phases["initialization"]) <= started and
+        all(started <= value <= finished
+            for phase in ("steady", "gc") for value in phases[phase]) and
+        min(phases["teardown"]) >= finished
+    )
+
+
 def campaign_capacity_and_ram(
         pair_records: list[dict], target_device_bytes: int,
         source_sha: str, metadata_ram_trace: dict | None = None) -> dict | None:
@@ -710,6 +740,8 @@ def campaign_capacity_and_ram(
         ram_summary = RAM_VALIDATOR["validate_metadata_ram_trace"](
             trace, source_sha=source_sha, mapper_uuid=mapper_uuid)
     except ValueError:
+        return None
+    if not metadata_ram_trace_matches_swapz_arm(trace, swapz):
         return None
     peak_ram_bytes = ram_summary["peak_ram_bytes"]
     limit = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"][
