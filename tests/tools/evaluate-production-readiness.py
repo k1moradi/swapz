@@ -113,6 +113,21 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _bounded_json_integer(value: str) -> int:
+    digits = value[1:] if value.startswith("-") else value
+    if len(digits) > 20:
+        raise EvidenceError(
+            "JSON integer exceeds evidence bound: "
+            f"metric=decimal_digits observed={len(digits)} maximum=20")
+    parsed = int(value, 10)
+    maximum = RAM_TRACE_VALIDATOR["MAX_UINT64"]
+    if not -maximum <= parsed <= maximum:
+        raise EvidenceError(
+            "JSON integer exceeds evidence bound: "
+            f"metric=absolute_value observed={abs(parsed)} maximum={maximum}")
+    return parsed
+
+
 def _finite_json_float(value: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed):
@@ -133,6 +148,7 @@ def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
     try:
         value = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_unique_object,
+            parse_int=_bounded_json_integer,
             parse_float=_finite_json_float,
             parse_constant=_reject_json_constant)
     except (UnicodeDecodeError, ValueError, OverflowError) as exc:
@@ -218,6 +234,23 @@ def _same_hashes(left: Any, right: Any) -> bool:
         left[key] == right[key] for key in ARTIFACT_KEYS)
 
 
+def _same_json_value(left: Any, right: Any) -> bool:
+    """Compare parsed JSON without Python's bool/int or int/float coercion."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return (
+            set(left) == set(right) and
+            all(_same_json_value(left[key], right[key]) for key in left)
+        )
+    if isinstance(left, list):
+        return (
+            len(left) == len(right) and
+            all(_same_json_value(a, b) for a, b in zip(left, right))
+        )
+    return left == right
+
+
 def _valid_source(value: Any) -> bool:
     return isinstance(value, str) and bool(GIT_SHA_RE.fullmatch(value))
 
@@ -268,6 +301,51 @@ def _normalize_campaign_target(value: Any) -> tuple[str, int] | None:
         "partuuid": value.get("partuuid"),
         "size_bytes": value.get("device_bytes"),
     })
+
+
+def _capacity_index_prediction(
+        target: tuple[str, int] | None) -> dict[str, Any]:
+    """Return allocation arithmetic only; never infer loaded-host success."""
+    unavailable = {
+        "status": "NOT_AVAILABLE",
+        "logical_pages": None,
+        "logical_mapper_bytes": None,
+        "physical_blocks": None,
+        "segment_count": None,
+        "array_count": None,
+        "payload_bytes": None,
+        "page_rounded_bytes": None,
+    }
+    if target is None:
+        return unavailable
+    partition_bytes = target[1]
+    logical_pages = RAM_TRACE_VALIDATOR[
+        "maximum_logical_pages_for_partition"](
+            partition_bytes, size_t_max=RAM_TRACE_VALIDATOR["MAX_UINT64"])
+    if logical_pages is None:
+        return unavailable
+    block_bytes = RAM_TRACE_VALIDATOR["BLOCK_BYTES"]
+    segment_blocks = RAM_TRACE_VALIDATOR["SEGMENT_BLOCKS"]
+    total_blocks = partition_bytes // block_bytes
+    physical_blocks = (
+        (total_blocks - 1) // segment_blocks) * segment_blocks
+    logical_mapper_bytes = RAM_TRACE_VALIDATOR["_checked_product"](
+        logical_pages, block_bytes, RAM_TRACE_VALIDATOR["MAX_UINT64"])
+    estimate = RAM_TRACE_VALIDATOR["capacity_index_estimate"](
+        logical_pages, physical_blocks,
+        size_t_max=RAM_TRACE_VALIDATOR["MAX_UINT64"])
+    if (
+            logical_mapper_bytes is None or estimate is None or
+            estimate.get("array_count") != 17):
+        return unavailable
+    return {
+        "status": "PREDICTED_ONLY",
+        "logical_pages": logical_pages,
+        "logical_mapper_bytes": logical_mapper_bytes,
+        "physical_blocks": physical_blocks,
+        "segment_count": physical_blocks // segment_blocks,
+        **estimate,
+    }
 
 
 def _valid_campaign_artifact(value: Any) -> bool:
@@ -502,12 +580,13 @@ def validate_physical_campaign_evidence(
         try:
             serialized_campaign = json.loads(
                 raw.decode("utf-8"), object_pairs_hook=_unique_object,
+                parse_int=_bounded_json_integer,
                 parse_float=_finite_json_float,
                 parse_constant=_reject_json_constant)
         except (UnicodeDecodeError, ValueError, OverflowError):
             reject("sealed campaign evidence bytes are malformed")
         else:
-            if serialized_campaign != campaign:
+            if not _same_json_value(serialized_campaign, campaign):
                 reject("sealed campaign object differs from artifact bytes")
     if campaign.get("source_sha") != source_sha:
         reject("sealed campaign source binding mismatch")
@@ -1029,6 +1108,7 @@ def evaluate_release(
     target = _normalize_target(evidence.get("authorized_target"))
     if target is None:
         block_code("canonical authorized target identity is invalid")
+    capacity_prediction = _capacity_index_prediction(target)
 
     release = evidence.get("release_evidence")
     if not isinstance(release, dict):
@@ -1183,6 +1263,9 @@ def evaluate_release(
         "initialization_peak_ram_bytes": None,
         "steady_peak_ram_bytes": None,
         "gc_peak_ram_bytes": None,
+        "teardown_recovery": "NOT_MEASURED",
+        "teardown_recovery_samples": None,
+        "teardown_recovery_span_ns": None,
     }
     campaign_issues = None
     if (physical_campaign_evidence is not None and
@@ -1248,6 +1331,9 @@ def evaluate_release(
                         summary["initialization_peak_ram_bytes"],
                     "steady_peak_ram_bytes": summary["steady_peak_ram_bytes"],
                     "gc_peak_ram_bytes": summary["gc_peak_ram_bytes"],
+                    "teardown_recovery": "MEASURED_RECOVERED",
+                    "teardown_recovery_samples": summary["recovery_samples"],
+                    "teardown_recovery_span_ns": summary["recovery_span_ns"],
                 })
 
     physical = pass_record("sustained_physical_performance")
@@ -1376,7 +1462,7 @@ def evaluate_release(
             "SAMPLED_LOADED_HOST"
             if memory_measurement["status"] != "NOT_MEASURED"
             else "NOT_MEASURED"),
-        "CAPACITY_INDEX_ESTIMATE": "PREDICTED_ONLY",
+        "CAPACITY_INDEX_ESTIMATE": capacity_prediction,
         "ALLOCATION_FAILURE_COVERAGE": "SEPARATE_NOT_CONSTRUCTION_EVIDENCE",
         "code_blockers": code_blockers,
         "deployment_blockers": deployment_blockers,
@@ -1457,9 +1543,21 @@ def main() -> int:
                 "status": "NOT_MEASURED", "observed_peak_ram_bytes": None,
                 "limit_bytes": None, "initialization_peak_ram_bytes": None,
                 "steady_peak_ram_bytes": None, "gc_peak_ram_bytes": None,
+                "teardown_recovery": "NOT_MEASURED",
+                "teardown_recovery_samples": None,
+                "teardown_recovery_span_ns": None,
             },
             "FULL_CAPACITY_LOADED_CONSTRUCTION": "NOT_MEASURED",
-            "CAPACITY_INDEX_ESTIMATE": "PREDICTED_ONLY",
+            "CAPACITY_INDEX_ESTIMATE": {
+                "status": "NOT_AVAILABLE",
+                "logical_pages": None,
+                "logical_mapper_bytes": None,
+                "physical_blocks": None,
+                "segment_count": None,
+                "array_count": None,
+                "payload_bytes": None,
+                "page_rounded_bytes": None,
+            },
             "ALLOCATION_FAILURE_COVERAGE":
                 "SEPARATE_NOT_CONSTRUCTION_EVIDENCE",
             "code_blockers": [str(exc)],
