@@ -7,10 +7,10 @@ umask 022
 
 transaction_active=0
 transaction_dir=""
-# Recovery preflight is read-only. Revoke activation files only after recovery
-# has crossed into rollback/final-state validation where an error can leave the
-# installed package ambiguous.
-recovery_quarantine_on_error=0
+# Recovery is fail-closed by default. Only an independently verified committed
+# install may temporarily preserve activation while read-only recovery admission
+# checks run.
+recovery_quarantine_on_error=1
 
 staging_abort() {
   local rc="${1:-1}" reason="${2:-failure}"
@@ -1444,6 +1444,16 @@ with open(sys.argv[1], encoding="utf-8") as stream:
 PY
   )" || blocked "recovery cannot read validated journal phase"
 
+  # A committed install is already the published final state. Preserve its
+  # activation files through read-only admission refusals only after proving
+  # that the installed bytes and ownership are still exact. Unknown,
+  # noncommitted or modified states remain quarantined on every failure.
+  if [[ "$recovery_phase" == committed && "$action" == install ]]; then
+    verify_owned ||
+      blocked "recovery committed install is not exact before preflight"
+    recovery_quarantine_on_error=0
+  fi
+
   # These preflight checks happen under the existing package lock before any
   # DKMS --all or cleanup. A foreign kernel must not be silently erased.
   assert_single_kernel_dkms_scope
@@ -1460,10 +1470,8 @@ PY
   cleanup_temporary_activation_files ||
     blocked "recovery temporary CLI provenance or durability invalid"
 
-  # Everything above is admission-only. A refusal there must not destroy a
-  # complete committed installation merely because its crash journal remains.
-  # From this point onward, rollback or final verification can expose an
-  # ambiguous package, so any failure again quarantines activation entry points.
+  # From this point onward rollback or final verification can expose an
+  # ambiguous package, so failures quarantine activation entry points again.
   recovery_quarantine_on_error=1
   if [[ "$recovery_phase" != committed ]]; then
     # Do not normalize substituted live destinations during rollback.
