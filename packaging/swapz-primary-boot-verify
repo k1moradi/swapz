@@ -1118,6 +1118,14 @@ SWAPS
 		swap_active_state=$(systemctl show --property=ActiveState --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
 		swap_sub_state=$(systemctl show --property=SubState --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
 		swap_result=$(systemctl show --property=Result --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
+		# A successful but empty systemctl response is not proof of failure.
+		# Classify it as an unavailable observation, like a failed query.
+		[ -n "$mapper_active_state" ] || mapper_active_state=unavailable
+		[ -n "$mapper_sub_state" ] || mapper_sub_state=unavailable
+		[ -n "$mapper_result" ] || mapper_result=unavailable
+		[ -n "$swap_active_state" ] || swap_active_state=unavailable
+		[ -n "$swap_sub_state" ] || swap_sub_state=unavailable
+		[ -n "$swap_result" ] || swap_result=unavailable
 		if [ "$observation_expected" -eq 1 ]; then
 			case "$mapper_active_state" in
 			active) ;;
