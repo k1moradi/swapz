@@ -161,8 +161,8 @@ static const char *const scenario_names[] = {
     "root initially on selected parent", "holder initially active",
     "unrelated /swapfile late", "wrong-device mount alias late",
     "oversized remote mountinfo late", "oversized local mountinfo late",
-    "unreadable PID inventory late", "symlink mountinfo late",
-    "PID inventory I/O failure late",
+    "unreadable PID inventory late", "PID inventory I/O failure late",
+    "symlink mountinfo late",
     "selected device identity changed before exclusive open",
     "truncated remote mountinfo late", "truncated local mountinfo late",
     "inaccessible PID namespace late", "stale PARTUUID on exclusive open",
@@ -915,7 +915,6 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_PARENT_MOUNT:
     case FIXTURE_FOREIGN_SELECTED:
     case FIXTURE_FOREIGN_PARENT:
-    case FIXTURE_FOREIGN_SELECTED_INITIAL:
     case FIXTURE_PID_REPLACED_SELECTED:
     case FIXTURE_SELECTED_SWAPFILE:
     case FIXTURE_PARENT_SWAPFILE:
@@ -955,6 +954,7 @@ static int check_case(enum fixture_scenario candidate)
         expected_error = ESTALE;
         break;
     case FIXTURE_ROOT_INITIAL:
+    case FIXTURE_FOREIGN_SELECTED_INITIAL:
         expected_error = EPERM;
         break;
     case FIXTURE_REMOTE_OVERSIZED:
