@@ -237,8 +237,9 @@ Normal teardown is requested only through `swapzctl primary stop`. An
 independent sampler must witness active mapper swap, then mapper-present but
 swap-inactive, then mapper absence in chronological order; out-of-order or
 regressing stable observations cannot qualify even if all states appear.
-Disappearance while still in the known swap inventory is FAIL. A definite stop/`swapoff` failure is FAIL and cannot
-be masked by sampling uncertainty. If correct teardown is too fast to prove
+Disappearance while still in the known swap inventory is FAIL. A definite stop/`swapoff` failure is FAIL and remains
+the primary teardown error, but a simultaneous stop-sampler failure must be
+appended rather than discarded. If correct teardown is too fast to prove
 the inactive-before-remove interval independently, the result is BLOCKED, not
 PASS. No force cleanup is allowed, including error paths. Oracle-child
 termination may use bounded TERM/KILL for the dedicated test processes only;
@@ -252,12 +253,16 @@ is unreadable, an ordinary rmdir is still attempted; the kernel refuses that
 operation for a non-empty cgroup, so an empty group is removed without treating
 missing process-inventory evidence as PASS. Failure cannot silently leave that
 directory behind. All parent pipe descriptors are closed even when
-admission fails. Bounded protocol reads retain multiple
-records from one read without blocking on partial records. Partial cgroup
+admission fails. A malformed or disconnected request before initial admission
+must also reap the still-unadmitted privileged child through bounded TERM/KILL
+cleanup; it may not fall through to an unbounded wait. Bounded protocol reads
+retain multiple records from one read without blocking on partial records. Partial cgroup
 creation, first-telemetry failures and evidence temporary-file failures must
 clean up explicitly or expose the cleanup error alongside the original
-failure. Failure to secure the private temporary workspace must explicitly
-remove it. Rootless regression cases inject cgroup removal failures independently
+failure. Oracle allocation close failure cannot turn a corrupt or otherwise
+failed oracle into PASS and cannot hide the earlier workload failure message.
+Failure to secure the private temporary workspace must explicitly remove it.
+Rootless regression cases inject cgroup removal failures independently
 from unreadable process-inventory recovery. The private source-admission channel also closes explicitly; failure to close
 it must retain the triggering qualification error. Workload interrupts and
 uncertain coordinator start/stop invocation failures must converge through the

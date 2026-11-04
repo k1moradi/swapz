@@ -2762,8 +2762,14 @@ def _normal_stop(swapzctl: Path, manifest: dict, active: dict | None,
     assert stopped is not None
     if stopped.returncode != 0:
         detail = (stopped.stderr or stopped.stdout).strip().replace("\n", "; ")
-        raise QualificationFailure(
-            f"primary stop/swapoff failed rc={stopped.returncode}; no force cleanup attempted: {detail}")
+        message = (
+            f"primary stop/swapoff failed rc={stopped.returncode}; "
+            f"no force cleanup attempted: {detail}")
+        if sampler_error is not None:
+            message += (
+                f"; stop sampler also failed: "
+                f"{_exception_text(sampler_error)}")
+        raise QualificationFailure(message)
     if sampler_error is not None:
         raise sampler_error
     _read_primary_output(stopped, f"PRIMARY_STOP=COMPLETE run_id={manifest['run_id']} ")

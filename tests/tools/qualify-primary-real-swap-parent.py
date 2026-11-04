@@ -289,6 +289,8 @@ def _serve_admission(server: socket.socket,
                 _reply(stream, request, "PASS", oracle_sha256)
                 passed_phases.append(request["phase"])
 
+    if not passed_phases and child.poll() is None:
+        _stop_unadmitted_child(child)
     result = child.wait()
     if result == 0 and passed_phases != expected_phases:
         print(

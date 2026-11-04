@@ -91,6 +91,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
 
     expected_digest = hashlib.blake2b(digest_size=32)
     fill_started = time.monotonic()
+    result = 1
     try:
         for page_index in range(pages):
             expected = page_pattern(seed_hex, page_index)
@@ -143,12 +144,20 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
             "expected_digest": expected_hex,
             "elapsed_seconds": round(time.monotonic() - verify_started, 6),
         })
-        return 0 if byte_mismatches == 0 and actual_digest == expected_hex else 1
+        result = (
+            0 if byte_mismatches == 0 and actual_digest == expected_hex else 1)
     except (OSError, RuntimeError) as exc:
         print(f"FAIL: oracle workload failed: {exc}", file=sys.stderr)
-        return 1
+        result = 1
     finally:
-        allocation.close()
+        try:
+            allocation.close()
+        except (OSError, BufferError, ValueError) as cleanup_error:
+            print(
+                f"FAIL: oracle allocation cleanup failed: {cleanup_error}",
+                file=sys.stderr)
+            result = 1
+    return result
 
 
 def main() -> int:

@@ -104,6 +104,57 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertEqual(len(verified["mismatch_samples"]), 1 if corrupt else 0)
                 self.assertTrue(allocation.closed)
 
+    def test_oracle_allocation_cleanup_failure_forces_failure_without_masking_workload(self):
+        class MemoryFixture:
+            def __init__(self):
+                self.contents = bytearray(oracle.PAGE_BYTES)
+
+            def __getitem__(self, key):
+                return self.contents[key]
+
+            def __setitem__(self, key, value):
+                self.contents[key] = value
+
+            def close(self):
+                raise BufferError("synthetic allocation cleanup failure")
+
+        allocation = MemoryFixture()
+        commands = iter(("FILL", "VERIFY"))
+        stderr = io.StringIO()
+        with mock.patch.object(oracle, "MIB", oracle.PAGE_BYTES), \
+                mock.patch.object(oracle, "MIN_MIB", 1), \
+                mock.patch.object(oracle, "MAX_MIB", 1), \
+                mock.patch.object(oracle, "_disable_dumps"), \
+                mock.patch.object(oracle, "_read_command",
+                                  side_effect=lambda: next(commands)), \
+                mock.patch.object(oracle.mmap, "mmap", return_value=allocation), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(stderr):
+            status = oracle.run_workload("34" * 16, 1)
+        self.assertEqual(status, 1)
+        self.assertIn(
+            "FAIL: oracle allocation cleanup failed: "
+            "synthetic allocation cleanup failure",
+            stderr.getvalue())
+
+        commands = iter(("FILL", "WRONG"))
+        stderr = io.StringIO()
+        with mock.patch.object(oracle, "MIB", oracle.PAGE_BYTES), \
+                mock.patch.object(oracle, "MIN_MIB", 1), \
+                mock.patch.object(oracle, "MAX_MIB", 1), \
+                mock.patch.object(oracle, "_disable_dumps"), \
+                mock.patch.object(oracle, "_read_command",
+                                  side_effect=lambda: next(commands)), \
+                mock.patch.object(oracle.mmap, "mmap", return_value=allocation), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(stderr):
+            status = oracle.run_workload("34" * 16, 1)
+        self.assertEqual(status, 1)
+        self.assertIn("FAIL: oracle workload failed: expected VERIFY command",
+                      stderr.getvalue())
+        self.assertIn("FAIL: oracle allocation cleanup failed",
+                      stderr.getvalue())
+
     def test_oracle_rejects_malformed_seed_and_negative_page(self):
         for seed in ("", "a" * 31, "A" * 32, "g" * 32):
             with self.subTest(seed=seed), self.assertRaises(ValueError):
@@ -669,6 +720,23 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     "source admission timeout; privileged child cleanup also "
                     "failed: synthetic child cleanup failure"):
             parent._stop_unadmitted_child_preserving(mock.Mock(), original)
+
+    def test_malformed_initial_admission_reaps_unadmitted_child(self):
+        server = mock.Mock()
+        connection = mock.MagicMock()
+        server.accept.return_value = (connection, None)
+        connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+        connection.makefile.return_value = io.BytesIO(b"not-json\n")
+        child = mock.Mock()
+        child.poll.return_value = None
+        child.wait.return_value = 1
+
+        with mock.patch.object(
+                    parent, "_stop_unadmitted_child") as stop_child:
+            result = parent._serve_admission(
+                server, child, "a" * 40, "/usr/bin/git", "b" * 64, 2)
+        self.assertEqual(result, 1)
+        stop_child.assert_called_once_with(child)
 
     def test_default_control_path_uses_installed_package_layout(self):
         args = qualify.build_parser().parse_args([
@@ -1240,10 +1308,15 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with mock.patch.object(qualify, "StopSampler", return_value=sampler), \
                 mock.patch.object(qualify, "_primary", return_value=stopped), \
                 mock.patch.object(qualify.time, "sleep", return_value=None), \
-                self.assertRaisesRegex(qualify.QualificationFailure, "stop/swapoff failed"):
+                self.assertRaises(qualify.QualificationFailure) as raised:
             qualify._normal_stop(
                 Path("/synthetic/swapzctl"), manifest, active, set(),
                 "f13428f6-01", 60)
+        message = str(raised.exception)
+        self.assertIn("primary stop/swapoff failed rc=2", message)
+        self.assertIn("no force cleanup attempted", message)
+        self.assertIn(
+            "stop sampler also failed: missed transition witness", message)
 
     def test_run_cycle_requires_parent_revalidation_before_prepare(self):
         admission = mock.Mock()
