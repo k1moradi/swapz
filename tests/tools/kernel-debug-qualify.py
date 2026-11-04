@@ -626,7 +626,11 @@ def verify_owned_run(
     # Defect evidence is monotonic only when its observation is attributable
     # to this bounded run. A missing/truncated dmesg baseline is incomplete
     # evidence, not proof that an arbitrary historical warning happened here.
-    dmesg_contiguous = bool(baseline and final and final.startswith(baseline))
+    # A partial baseline can match the prefix of a different final record.
+    # dmesg emits complete newline-terminated records; never trust fragments.
+    dmesg_contiguous = bool(
+        baseline and final and baseline.endswith("\n")
+        and final.startswith(baseline))
     if dmesg_contiguous:
         delta = final[len(baseline):]
         for line in delta.splitlines():
@@ -708,6 +712,8 @@ def verify_owned_run(
         if not final:
             return "BLOCKED", "dmesg final snapshot missing or unreadable"
         return "BLOCKED", "dmesg truncated or overwritten: final lacks baseline prefix"
+    if not final.endswith("\n"):
+        return "BLOCKED", "dmesg final snapshot truncated mid-line"
 
     # The caller's validated source marker is not a substitute for modinfo or
     # observable sanitizer references in the actual exact-source .ko artifact.

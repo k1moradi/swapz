@@ -416,6 +416,12 @@ class KernelDebugQualificationTests(unittest.TestCase):
         status, reason = self.verify(baseline=baseline, final="old\n")
         self.assertEqual(status, "BLOCKED")
         self.assertIn("dmesg truncated or overwritten", reason)
+        # A shared character prefix or half a final record is not continuity.
+        self.assertEqual(
+            self.verify(baseline="old", final="older\n")[0], "BLOCKED")
+        status, reason = self.verify(baseline="old\n", final="old\nclean")
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("truncated mid-line", reason)
         self.assertEqual(self.verify(
             baseline="", final="WARNING: old warning\n")[0], "BLOCKED")
 
