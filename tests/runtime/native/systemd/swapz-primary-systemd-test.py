@@ -585,6 +585,313 @@ class UnitSandboxContractTests(unittest.TestCase):
                     self.assert_secure_units(**changed)
 
 
+
+class EffectiveUnitContractTests(unittest.TestCase):
+    """Rootless effective-systemd model for generator and ordered local drop-ins.
+
+    Scalar settings are last-wins; dependencies and commands are accumulated
+    until an empty assignment resets the list. Filter/capability groups retain
+    all assignments: changes are refused conservatively rather than assuming
+    runtime sandbox support from syntax validation alone.
+    """
+
+    DEPENDENCY_KEYS = frozenset(
+        (section, key)
+        for section, keys in (
+            ("Unit", ("After", "Before", "Requires", "RequiresMountsFor",
+                      "Wants", "Conflicts", "BindsTo", "PartOf", "Requisite",
+                      "OnFailure", "Upholds")),
+            ("Install", ("WantedBy", "RequiredBy", "Alias", "Also")),
+        )
+        for key in keys
+    )
+    COMMAND_KEYS = frozenset(
+        ("Service", key) for key in (
+            "ExecCondition", "ExecStartPre", "ExecStart", "ExecStartPost",
+            "ExecStop", "ExecStopPost", "ExecReload",
+        )
+    )
+    FILTER_KEYS = frozenset((
+        ("Service", "CapabilityBoundingSet"),
+        ("Service", "SystemCallFilter"),
+    ))
+    UNIT_PATHS = {
+        "mapper": ("swapz-primary-mapper.service", MAPPER_SERVICE),
+        "verifier": ("swapz-primary-boot-verify.service", BOOT_VERIFY_SERVICE),
+        "health": ("swapz-primary-runtime-health.service", RUNTIME_HEALTH_SERVICE),
+        "passive_swap": (r"dev-mapper-swapz\x2dprimary.swap", PRIMARY_SWAP),
+    }
+
+    @classmethod
+    def merged_directives(
+        cls, base: str, dropins: dict[str, str]
+    ) -> tuple[dict[tuple[str, str], tuple[str, ...]], dict[tuple[str, str], str]]:
+        values: dict[tuple[str, str], list[str]] = {}
+        origins: dict[tuple[str, str], str] = {}
+        # Only .conf fragments are supplied, already scoped to this unit.
+        for filename, contents in (("vendor unit", base), *sorted(dropins.items())):
+            section = ""
+            for original_line in contents.splitlines():
+                line = original_line.strip()
+                if not line or line.startswith(("#", ";")):
+                    continue
+                if line.startswith("[") and line.endswith("]"):
+                    section = line[1:-1]
+                    continue
+                # Fixture assumption: one assignment per line. Fail closed on
+                # line continuations rather than claiming to model them.
+                if not section or "=" not in line or line.endswith("\\"):
+                    raise ValueError(f"invalid effective unit fragment in {filename}")
+                directive, value = line.split("=", 1)
+                key = (section, directive)
+                if key in cls.DEPENDENCY_KEYS:
+                    if not value:
+                        values[key] = []
+                    else:
+                        values.setdefault(key, []).extend(value.split())
+                elif key in cls.COMMAND_KEYS or key in cls.FILTER_KEYS:
+                    if not value:
+                        values[key] = []
+                    else:
+                        values.setdefault(key, []).append(value)
+                else:
+                    values[key] = [value]
+                # Report only a fixture drop-in basename, never private paths.
+                origins[key] = f"{filename}: {directive}={value}"
+        return {key: tuple(value) for key, value in values.items()}, origins
+
+    @staticmethod
+    def authorized_dropins() -> tuple[dict[str, dict[str, str]], str, str]:
+        encoded = PARTUUID.replace("-", r"\x2d")
+        selected_device = f"dev-disk-by\\x2dpartuuid-{encoded}.device"
+        selected_swap = f"dev-disk-by\\x2dpartuuid-{encoded}.swap"
+        return (
+            {
+                "mapper": {
+                    "50-selected-target.conf": (
+                        "[Unit]\n"
+                        f"Requires={selected_device}\nAfter={selected_device}\n"
+                        f"Conflicts={selected_swap}\nBefore={selected_swap}\n"
+                        "JobTimeoutSec=300s\nJobTimeoutAction=none\n"
+                    ),
+                },
+                "device": {
+                    "50-swapz-timeout.conf": (
+                        "[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n"
+                    ),
+                },
+            },
+            selected_device,
+            selected_swap,
+        )
+
+    def effective_fixture(
+        self, extra: dict[str, dict[str, str]] | None = None
+    ) -> tuple[
+        dict[str, dict[tuple[str, str], tuple[str, ...]]],
+        dict[str, dict[tuple[str, str], str]],
+    ]:
+        dropins, _, _ = self.authorized_dropins()
+        for unit, fragments in (extra or {}).items():
+            dropins.setdefault(unit, {}).update(fragments)
+        effective = {}
+        origins = {}
+        for unit, (_, path) in self.UNIT_PATHS.items():
+            effective[unit], origins[unit] = self.merged_directives(
+                read_text(path), dropins.get(unit, {})
+            )
+        # udev synthesizes the .device unit; only its generator drop-in exists.
+        effective["device"], origins["device"] = self.merged_directives(
+            "", dropins["device"]
+        )
+        return effective, origins
+
+    def assert_effective_security(
+        self, extra: dict[str, dict[str, str]] | None = None
+    ) -> None:
+        baseline, _ = self.effective_fixture()
+        actual, origins = self.effective_fixture(extra)
+        for unit in baseline:
+            for key in sorted(set(baseline[unit]) | set(actual[unit])):
+                if key == ("Unit", "Description"):
+                    continue
+                required = baseline[unit].get(key)
+                observed = actual[unit].get(key)
+                if required == observed:
+                    continue
+                section, directive = key
+                origin = origins[unit].get(key, "missing")
+                consequence = (
+                    "possible privilege widening or loss of required access"
+                    if section == "Service" and key not in self.COMMAND_KEYS
+                    else "lifecycle ownership, authorization or ordering changed"
+                )
+                self.fail(
+                    f"FAIL {unit} effective {section}.{directive}: "
+                    f"required={required!r}; observed={observed!r}; "
+                    f"override={origin}; safety={consequence}"
+                )
+
+    def test_authorized_generator_dependencies_preserve_lifecycle(self) -> None:
+        # An unchanged vendor unit is also checked by the static sandbox
+        # contract, independently of our effective-drop-in comparison.
+        UnitSandboxContractTests().assert_secure_units(
+            mapper=read_text(MAPPER_SERVICE),
+            verifier=read_text(BOOT_VERIFY_SERVICE),
+            health=read_text(RUNTIME_HEALTH_SERVICE),
+            passive_swap=read_text(PRIMARY_SWAP),
+        )
+        effective, _ = self.effective_fixture()
+        _, device, raw_swap = self.authorized_dropins()
+        mapper = effective["mapper"]
+        self.assertEqual(mapper[("Unit", "Requires")], ("-.mount", device))
+        self.assertEqual(
+            mapper[("Unit", "After")],
+            ("-.mount", "systemd-modules-load.service",
+             r"dev-mapper-swapz\x2dprimary.swap", device),
+        )
+        self.assertEqual(
+            mapper[("Unit", "Before")],
+            ("swap.target", "shutdown.target", raw_swap),
+        )
+        self.assertEqual(
+            mapper[("Unit", "Conflicts")], ("shutdown.target", raw_swap)
+        )
+        self.assertEqual(
+            mapper[("Service", "ExecStartPre")],
+            (
+                "@SWAPZ_SBINDIR@/swapz-primary-runtime-health activation-guard",
+                "@SWAPZ_SBINDIR@/swapz-primary-boot-verify preflight",
+                "-@SWAPZ_SBINDIR@/swapzctl primary recover",
+                "@SWAPZ_SBINDIR@/swapzctl primary prepare",
+            ),
+        )
+        self.assertEqual(
+            mapper[("Service", "ExecStart")],
+            ("@SWAPZ_SBINDIR@/swapzctl primary start",),
+        )
+        self.assertEqual(
+            mapper[("Service", "ExecStop")],
+            ("@SWAPZ_SBINDIR@/swapzctl primary stop",),
+        )
+        self.assertEqual(
+            mapper[("Service", "ExecStopPost")],
+            ("-@SWAPZ_SBINDIR@/swapz-primary-runtime-health stop-observe",),
+        )
+        self.assertEqual(mapper[("Unit", "JobTimeoutSec")], ("300s",))
+        self.assertEqual(mapper[("Unit", "JobTimeoutAction")], ("none",))
+        self.assertEqual(effective["device"][("Unit", "JobTimeoutSec")], ("30s",))
+        self.assertEqual(effective["device"][("Unit", "JobTimeoutAction")], ("none",))
+        self.assert_effective_security()
+
+    def test_last_wins_and_reset_restore_use_effective_values(self) -> None:
+        _, device, _ = self.authorized_dropins()
+        self.assert_effective_security({
+            "mapper": {
+                "60-temporary.conf": (
+                    "[Service]\nTimeoutStartSec=15s\nSystemCallFilter=\n"
+                    "[Unit]\nRequires=\n"
+                ),
+                "90-restore.conf": (
+                    "[Service]\nTimeoutStartSec=120s\nSystemCallFilter=~@mount\n"
+                    f"[Unit]\nRequires=-.mount {device}\n"
+                ),
+            },
+        })
+        with self.assertRaisesRegex(AssertionError, "effective Unit.Requires"):
+            self.assert_effective_security({
+                "mapper": {"90-erase.conf": "[Unit]\nRequires=\n"}
+            })
+
+    def test_untrusted_dropins_cannot_override_security_or_ownership(self) -> None:
+        mutations = (
+            ("mapper", "[Unit]\nRequiresMountsFor=\n", "Unit.RequiresMountsFor"),
+            ("mapper", "[Unit]\nAfter=\nAfter=swap.target\n", "Unit.After"),
+            ("mapper", "[Unit]\nBefore=\nBefore=shutdown.target\n", "Unit.Before"),
+            ("mapper", "[Unit]\nConflicts=\n", "Unit.Conflicts"),
+            ("mapper", "[Unit]\nRequires=\n", "Unit.Requires"),
+            ("mapper", "[Unit]\nJobTimeoutSec=infinity\n", "Unit.JobTimeoutSec"),
+            ("device", "[Unit]\nJobTimeoutSec=infinity\n", "Unit.JobTimeoutSec"),
+            ("mapper", "[Service]\nTimeoutStartSec=infinity\n", "Service.TimeoutStartSec"),
+            ("mapper", "[Service]\nTimeoutStopSec=infinity\n", "Service.TimeoutStopSec"),
+            ("mapper", "[Service]\nNoNewPrivileges=no\n", "Service.NoNewPrivileges"),
+            ("mapper", "[Service]\nProtectSystem=no\n", "Service.ProtectSystem"),
+            ("mapper", "[Service]\nProtectKernelModules=yes\n", "Service.ProtectKernelModules"),
+            ("mapper", "[Service]\nPrivateDevices=yes\n", "Service.PrivateDevices"),
+            ("mapper", "[Service]\nPrivateTmp=yes\n", "Service.PrivateTmp"),
+            ("mapper", "[Service]\nCapabilityBoundingSet=\nCapabilityBoundingSet=CAP_SYS_ADMIN\n", "Service.CapabilityBoundingSet"),
+            ("mapper", "[Service]\nSystemCallFilter=~@mount @swap\n", "Service.SystemCallFilter"),
+            ("mapper", "[Service]\nSystemCallFilter=\n", "Service.SystemCallFilter"),
+            ("mapper", "[Service]\nExecStartPre=\nExecStartPre=/usr/bin/true\n", "Service.ExecStartPre"),
+            ("mapper", "[Service]\nExecStart=\nExecStart=/usr/bin/true\n", "Service.ExecStart"),
+            ("mapper", "[Service]\nExecStop=\nExecStop=/usr/bin/true\n", "Service.ExecStop"),
+            ("mapper", "[Service]\nExecStopPost=\nExecStopPost=@SWAPZ_SBINDIR@/swapzctl primary stop\n", "Service.ExecStopPost"),
+            ("verifier", "[Service]\nProtectKernelModules=yes\n", "Service.ProtectKernelModules"),
+            ("verifier", "[Service]\nSystemCallFilter=\nSystemCallFilter=~@mount @module\n", "Service.SystemCallFilter"),
+            ("health", "[Service]\nSystemCallFilter=\nSystemCallFilter=~@mount\n", "Service.SystemCallFilter"),
+            ("health", "[Service]\nCapabilityBoundingSet=CAP_SYS_MODULE\n", "Service.CapabilityBoundingSet"),
+            ("health", "[Service]\nExecStop=@SWAPZ_SBINDIR@/swapzctl primary stop\n", "Service.ExecStop"),
+            ("verifier", "[Service]\nExecStart=\nExecStart=@SWAPZ_SBINDIR@/swapzctl primary start\n", "Service.ExecStart"),
+            ("verifier", "[Unit]\nRequires=swapz-primary-mapper.service\n", "Unit.Requires"),
+            ("health", "[Unit]\nWants=swapz-primary-mapper.service\n", "Unit.Wants"),
+            ("passive_swap", "[Install]\nWantedBy=swap.target\n", "Install.WantedBy"),
+            ("passive_swap", "[Install]\nAlias=dev-disk-by\\x2dpartuuid-unauthorized.swap\n", "Install.Alias"),
+            ("passive_swap", "[Unit]\nRefuseManualStart=no\n", "Unit.RefuseManualStart"),
+        )
+        for unit, fragment, directive in mutations:
+            with self.subTest(unit=unit, directive=directive, fragment=fragment):
+                with self.assertRaises(AssertionError) as caught:
+                    self.assert_effective_security({unit: {"99-untrusted.conf": fragment}})
+                diagnostic = str(caught.exception)
+                self.assertIn(f"{unit} effective {directive}", diagnostic)
+                self.assertIn("required=", diagnostic)
+                self.assertIn("observed=", diagnostic)
+                self.assertIn("99-untrusted.conf", diagnostic)
+                self.assertIn("safety=", diagnostic)
+
+    def test_unsupported_continuation_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid effective unit fragment"):
+            self.merged_directives("[Service]\nExecStart=/bin/true\n", {
+                "99-unsupported.conf": "[Service]\nExecStartPre=/bin/\\\n/usr/bin/true\n",
+            })
+
+    def test_systemd_analyze_accepts_authorized_fixture_syntax_only(self) -> None:
+        analyzer = shutil.which("systemd-analyze")
+        if analyzer is None:
+            self.skipTest("INCOMPLETE: systemd-analyze absent; contracts still run")
+        dropins, selected_device, _ = self.authorized_dropins()
+        with tempfile.TemporaryDirectory(prefix="swapz-effective-systemd-") as directory:
+            unit_dir = Path(directory)
+            units = []
+            for unit, (filename, source) in self.UNIT_PATHS.items():
+                installed = read_text(source).replace("@SWAPZ_SBINDIR@", "/usr/bin")
+                # Existing helpers need not exist: no service is executed.
+                for helper in ("swapzctl", "swapz-primary-boot-verify",
+                               "swapz-primary-runtime-health"):
+                    installed = installed.replace(f"/usr/bin/{helper}", "/usr/bin/true")
+                unit_path = unit_dir / filename
+                unit_path.write_text(installed, encoding="utf-8")
+                units.append(str(unit_path))
+                for dropin_name, contents in dropins.get(unit, {}).items():
+                    destination = unit_dir / f"{filename}.d"
+                    destination.mkdir(exist_ok=True)
+                    (destination / dropin_name).write_text(contents, encoding="utf-8")
+            device_dir = unit_dir / f"{selected_device}.d"
+            device_dir.mkdir()
+            for filename, contents in dropins["device"].items():
+                (device_dir / filename).write_text(contents, encoding="utf-8")
+            env = os.environ.copy()
+            env["SYSTEMD_UNIT_PATH"] = f"{unit_dir}:/usr/lib/systemd/system:/lib/systemd/system"
+            result = subprocess.run(
+                [analyzer, "verify", *units], check=False,
+                capture_output=True, text=True, env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Syntax is not evidence that the actual kernel and systemd
+            # support this sandbox with DM, module and swap syscalls.
+            self.assert_effective_security()
+
+
 class ControlledLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="swapz-lifecycle-")
@@ -1269,6 +1576,46 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("status=FAIL", report)
         self.assertIn("mapper_uuid_not_bound_to_active_run", report)
 
+    def test_missing_or_duplicated_one_use_preflight_authority_is_fail_closed(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        self.assertTrue(authorization.is_file())
+        authorization.unlink()
+        missing = self.run_verifier("observe")
+        self.assertEqual(missing.returncode, 1, missing.stderr)
+        self.assertIn(
+            "runtime_preflight_authorization_missing_or_invalid",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
+        preflight = self.run_verifier("preflight")
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        with authorization.open("a", encoding="ascii") as handle:
+            handle.write(f"boot_id={BOOT_B}\n")
+        duplicated = self.run_verifier("observe")
+        self.assertEqual(duplicated.returncode, 1, duplicated.stderr)
+        self.assertIn(
+            "runtime_preflight_authorization_missing_or_invalid",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
+        self.assertFalse(authorization.exists())
+
+    def test_successful_observation_revokes_one_use_preflight_token(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        self.assertTrue(authorization.is_file())
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertFalse(
+            authorization.exists(),
+            "FAIL: successful observer retained reusable preflight authorization",
+        )
+        repeat = self.run_verifier("observe")
+        self.assertEqual(repeat.returncode, 1, repeat.stderr)
+        self.assertIn(
+            "runtime_preflight_authorization_missing_or_invalid",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
+
     def test_foreign_mapper_uuid_with_valid_prefix_cannot_pass(self) -> None:
         self.arm_then_reboot()
         env = self.env.copy()
@@ -1623,6 +1970,7 @@ class BootVerifierTests(unittest.TestCase):
                 observed = self.run_verifier("observe", env=env)
                 self.assertEqual(observed.returncode, 2, observed.stderr)
                 self.assertIn("status=INCOMPLETE", (self.report / "latest.env").read_text())
+                self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
         env = self.env.copy()
         env["MOCK_DM_STATUS_OVERRIDE_SET"] = "1"
         env["MOCK_DM_STATUS_OVERRIDE"] = valid.replace("failed=0", "failed=1")

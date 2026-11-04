@@ -5638,6 +5638,28 @@ domain. Target health failures must remain observable rather than causing the
 monitor service to restart the primary lifecycle; only monitor-process failure
 is eligible for `Restart=on-failure`.
 
+Effective systemd unit qualification must inspect the merged deployed
+configuration, not just the vendor unit source. Rootless fixtures must layer
+generator-authorized selected-PARTUUID device/swap dependencies with sorted
+administrator drop-ins; repeated scalar settings are last-wins, while empty
+list assignments reset dependency and Exec command lists before later entries
+are added. Security-sensitive capability and syscall-filter group changes
+must fail closed rather than assuming the current systemd/kernel can enforce
+every syntactically valid sandbox directive. Reject overrides that relax
+observer @swap/@module denial, grant observer lifecycle commands, remove
+mapper DM/module/swap capability, reorder activation guard -> preflight ->
+recover -> prepare -> start, change the sole primary stop/swapoff owner,
+remove recovery-mount or selected-device requirements, weaken timeouts, or
+activate the passive swap alias. Report the effective directive, required
+value, observed override basename and safety consequence without host paths.
+systemd-analyze verify contributes syntax/dependency evidence when available;
+its absence is INCOMPLETE, not PASS, and its success is not proof of runtime
+sandbox support. The boot observer must revoke the single-use preflight
+authorization after PASS, FAIL or INCOMPLETE; armed observations with a
+missing, duplicated or mismatched token must FAIL rather than pass.
+Each malformed kernel-status observation must reissue its own token, then
+verify that non-PASS handling revoked it.
+
 Boot-verifier contracts must prove that a retained package transaction is
 detected by both preflight and post-boot observation after selector parsing.
 Malformed kernel-status cases must obtain a fresh preflight authorization for
