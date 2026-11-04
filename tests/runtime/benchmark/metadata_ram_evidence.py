@@ -224,7 +224,8 @@ def validate_metadata_ram_trace(
             elapsed_ns = monotonic_ns - previous_monotonic
             if (
                     elapsed_ns < SAMPLING_INTERVAL_NS // 2 or
-                    elapsed_ns > 3 * SAMPLING_INTERVAL_NS):
+                    elapsed_ns > SAMPLING_INTERVAL_NS +
+                                 SAMPLING_INTERVAL_NS // 2):
                 raise ValueError("metadata RAM sample cadence is invalid")
             wall_elapsed_ns = int(
                 (utc_time - previous_utc).total_seconds() * 1_000_000_000)
