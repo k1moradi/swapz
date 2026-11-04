@@ -16,6 +16,7 @@ SEGMENT_BLOCKS = 256
 FOREGROUND_HEADROOM_BLOCKS = SEGMENT_BLOCKS
 MINIMUM_GC_RESERVE_BLOCKS = 2 * SEGMENT_BLOCKS
 SAMPLING_INTERVAL_NS = 100_000_000
+MEMINFO_UNIT_BYTES = 1024
 SIZE_T_MAX = (1 << (8 * struct.calcsize("P"))) - 1
 PHASES = ("baseline", "initialization", "steady", "gc", "teardown")
 MINIMUM_PHASE_SAMPLES = {
@@ -166,8 +167,11 @@ def validate_metadata_ram_trace(
         if (
                 type(monotonic_ns) is not int or monotonic_ns <= 0 or
                 type(mem_available) is not int or mem_available <= 0 or
+                mem_available % MEMINFO_UNIT_BYTES or
                 type(s_unreclaim) is not int or s_unreclaim < 0 or
+                s_unreclaim % MEMINFO_UNIT_BYTES or
                 type(vmalloc_used) is not int or vmalloc_used < 0 or
+                vmalloc_used % MEMINFO_UNIT_BYTES or
                 type(sample["mapper_present"]) is not bool or
                 not isinstance(utc_text, str) or
                 not UTC_TIME.fullmatch(utc_text)):
