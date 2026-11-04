@@ -198,6 +198,82 @@
 },
 "write_saturation_sessions": []
 },
+"evidence": {
+"extent_geometry": {
+"logical_pages": 1024,
+"normal_windows": 64,
+"rows": [
+{
+"cold_read_blocks_x1000": 1473,
+"name": "aligned_1_2_4",
+"physical_blocks": 2089,
+"seq_4m_requests": 1144,
+"waste_blocks": 236,
+"write_runs": 209
+},
+{
+"cold_read_blocks_x1000": 1473,
+"name": "packed_1_2_4",
+"physical_blocks": 2089,
+"seq_4m_requests": 1144,
+"waste_blocks": 0,
+"write_runs": 80
+},
+{
+"cold_read_blocks_x1000": 1444,
+"name": "packed_1_2_3_4",
+"physical_blocks": 2087,
+"seq_4m_requests": 1146,
+"waste_blocks": 2,
+"write_runs": 80
+},
+{
+"cold_read_blocks_x1000": 1528,
+"name": "packed_1_2_4_8",
+"physical_blocks": 2075,
+"seq_4m_requests": 1144,
+"waste_blocks": 8,
+"write_runs": 78
+},
+{
+"cold_read_blocks_x1000": 1554,
+"name": "packed_1_2_4_8_16",
+"physical_blocks": 2067,
+"seq_4m_requests": 1144,
+"waste_blocks": 2,
+"write_runs": 77
+}
+],
+"scope": "OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY"
+},
+"gc_scan_scale": {
+"rows": [
+{
+"incremental_select_ns": 6489,
+"legacy_dead_probe_ns": 868583,
+"legacy_score_scan_ns": 5534007,
+"logical_pages": 262144,
+"mapped_dead_probe_ns": 3784,
+"relocation_list_ns": 2225,
+"relocation_scan_ns": 1670747,
+"segments": 1024,
+"victim_records": 256
+},
+{
+"incremental_select_ns": 24897,
+"legacy_dead_probe_ns": 3453493,
+"legacy_score_scan_ns": 22133089,
+"logical_pages": 1048576,
+"mapped_dead_probe_ns": 12767,
+"relocation_list_ns": 2556,
+"relocation_scan_ns": 6700625,
+"segments": 4096,
+"victim_records": 256
+}
+],
+"scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
+}
+},
 "host_identity": {
 "architecture": "x86_64",
 "id_sha256": "a1bff0d86667b9d4b97445e376e25078035d882f3edbbf6a126b6c092bb16fe5",
@@ -207,31 +283,33 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "cd12f0f42c7ad32cf7a58d49cdb29b30c353f7c6a13add2231b1bdd3ba715a66",
-"module_sha256": "06bd1efc2369ccbc5d1dacfcb1384a8b1e69d59bda4c735b78348bc600a10849",
+"formatter_sha256": "f3d679b98a83f7db57944b19a28721383c490a2dfd08015a2ea158cff8534fce",
+"module_sha256": "3d9269bb891f5a5e8a9f8e8298daef1f469f6e65b323bcf00d18d79479f03701",
 "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "6e112fc16ec90c70a5d12bb84e44f1b313c6de5e",
+"source_sha": "0023b318fe47b7650bdfdcb47d0f075b51e15894",
 "stages": [
 {
-"elapsed_s": 4.715,
+"elapsed_s": 18.439,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_id36_admission_inventory_and_phase_are_fail_closed",
-"elapsed_s": 71.94,
-"exit_code": 1,
+"diagnostic": "Native build error: result=0 errno=0 target=0 root_seen=1 root=259:0 (expected refused)",
+"elapsed_s": 5.317,
+"exit_code": 2,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
 "signals": [
+"PASS",
+"BLOCKED",
 "FAIL"
 ],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "6e112fc16ec90c70a5d12bb84e44f1b313c6de5e"
+"tested_commit_sha": "0023b318fe47b7650bdfdcb47d0f075b51e15894"
 }
