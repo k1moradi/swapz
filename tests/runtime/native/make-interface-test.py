@@ -1383,6 +1383,20 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertEqual(aborted["test"], "make:test-userspace")
         self.assertIn("Error 134", aborted["first_error"])
 
+        fixture_error = self.diagnostics.diagnose_ci_failure(
+            [
+                "ERROR: setUpClass (__main__.NativeFixture)",
+                "Traceback (most recent call last):",
+                "KeyError: 'missing fixture key'",
+                "FAILED (errors=1)",
+            ],
+            1, "runtime")
+        self.assertEqual(fixture_error["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(
+            fixture_error["test"], "__main__.NativeFixture.setUpClass")
+        self.assertEqual(
+            fixture_error["first_error"], "KeyError: 'missing fixture key'")
+
     def test_skips_and_cancellation_cannot_pass_workflow_aggregation(self):
         workflow = (ROOT / ".github/workflows/project-goals.yml").read_text()
         self.assertIn("if: always()", workflow)
