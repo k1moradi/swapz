@@ -152,6 +152,9 @@ class PackageLifecycle(unittest.TestCase):
                 self.module_lookup_saw_cli_marker),
             SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS="0",
             SWAPZ_FAKE_DKMS_MODULE_SUFFIX="",
+            SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX="",
+            SWAPZ_FAKE_DKMS_STATUS_OVERRIDE="",
+            SWAPZ_TEST_DKMS_VERSION=VERSION,
             SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS="0",
             SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
             SWAPZ_FAKE_FAIL_AT="never",
@@ -226,8 +229,11 @@ case "$cmd" in
       build_count="$(grep -c '^build$' "$SWAPZ_DKMS_LOG" 2>/dev/null || true)"
       (( build_count < status_threshold )) || exit 62
     fi
-    if [[ -f "$SWAPZ_DKMS_STATE" ]]; then
-      printf 'swapz, %s, x86_64: installed\n' "$SWAPZ_TEST_KERNEL_RELEASE"
+    if [[ -n "$SWAPZ_FAKE_DKMS_STATUS_OVERRIDE" ]]; then
+      printf '%s\n' "$SWAPZ_FAKE_DKMS_STATUS_OVERRIDE"
+    elif [[ -f "$SWAPZ_DKMS_STATE" ]]; then
+      printf 'swapz/%s, %s, x86_64: installed\n' \
+        "$SWAPZ_TEST_DKMS_VERSION" "$SWAPZ_TEST_KERNEL_RELEASE"
     fi
     ;;
   add) printf 'added\n' > "$SWAPZ_DKMS_STATE" ;;
@@ -240,6 +246,10 @@ case "$cmd" in
     module_path="$SWAPZ_TEST_INSTALLED_MODULE${SWAPZ_FAKE_DKMS_MODULE_SUFFIX:-}"
     mkdir -p "$(dirname "$module_path")"
     printf 'dkms-rebuilt-not-qualified\n' > "$module_path"
+    if [[ -n "$SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX" ]]; then
+      printf 'other-dkms-image\n' > \
+        "$SWAPZ_TEST_INSTALLED_MODULE$SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX"
+    fi
     ;;
   remove)
     rm -f "$SWAPZ_DKMS_STATE" "$SWAPZ_TEST_INSTALLED_MODULE"*
@@ -910,6 +920,66 @@ exec "{flock_binary}" "$@"
                 self.assertEqual(self.installed_module.read_bytes(), old_module)
                 self.assertFalse(
                     list((self.home / "transactions").glob("swapz-package.*")))
+
+    def test_dkms_installed_status_requires_exact_version_kernel_and_one_record(self):
+        installed = self.invoke("install")
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        correct_status = (
+            f"swapz/{VERSION}, {self.kernel_release}, x86_64: installed")
+        invalid_statuses = (
+            f"swapz/{VERSION}, {self.kernel_release}-other, x86_64: installed",
+            f"swapz/3.0.0-alpha.99999, {self.kernel_release}, x86_64: installed",
+            f"other/{VERSION}, {self.kernel_release}, x86_64: installed",
+            correct_status + "\n" + correct_status,
+            f"swapz/{VERSION}, {self.kernel_release}, x86_64: built",
+            f"swapz/{VERSION}, {self.kernel_release}, x86_64: installed (stale)",
+        )
+        for status in invalid_statuses:
+            with self.subTest(status=status):
+                overrides = {"SWAPZ_FAKE_DKMS_STATUS_OVERRIDE": status}
+                for action in ("install", "uninstall"):
+                    result = self.invoke(action, overrides)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn("current-kernel DKMS state", result.stderr)
+                    self.assert_installed_exact()
+        # Older DKMS comma-separated output is accepted only when exact.
+        accepted = self.invoke("install", {
+            "SWAPZ_FAKE_DKMS_STATUS_OVERRIDE":
+                f"swapz, {VERSION}, {self.kernel_release}, x86_64: installed"})
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+    def test_all_compressed_dkms_candidates_and_mixed_image_refusal(self):
+        for suffix in (".zst", ".xz", ".gz"):
+            with self.subTest(suffix=suffix):
+                installed = self.invoke(
+                    "install", {"SWAPZ_FAKE_DKMS_MODULE_SUFFIX": suffix})
+                self.assertEqual(installed.returncode, 0, installed.stderr)
+                self.assert_installed_exact()
+                self.assertFalse(Path(str(self.installed_module) + suffix).exists())
+                removed = self.invoke("uninstall")
+                self.assertEqual(removed.returncode, 0, removed.stderr)
+                self.assert_absent()
+
+        mixed = self.invoke("install", {
+            "SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX": ".xz"})
+        self.assertNotEqual(mixed.returncode, 0)
+        self.assertIn("unexpected DKMS module paths", mixed.stderr)
+        self.assert_absent()
+        self.assertFalse(list((self.home / "transactions").glob("swapz-package.*")))
+
+    def test_mixed_compressed_rollback_fails_closed(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        failed = self.invoke("install", {
+            "SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX": ".gz"})
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("previous package restoration failed", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertEqual(len(list(
+            (self.home / "transactions").glob("swapz-package.*"))), 1)
+        refused = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", refused.stderr)
 
     def test_compressed_dkms_image_is_normalized_during_rollbacks(self):
         compressed_module = Path(str(self.installed_module) + ".zst")
