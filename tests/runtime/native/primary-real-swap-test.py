@@ -815,8 +815,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         execute_end = source.index("\ndef execute(", execute_start)
         execute_source = source[execute_start:execute_end]
 
-        cleanup_index = execute_source.rindex("private_workspace.cleanup()")
-        result_index = execute_source.index('result = {', cleanup_index)
+        cleanup_complete_index = execute_source.index(
+            "workspace_cleanup_complete = True")
+        cleanup_index = execute_source.rfind(
+            "private_workspace.cleanup()", 0, cleanup_complete_index)
+        self.assertGreaterEqual(cleanup_index, 0)
+        result_index = execute_source.index('result = {', cleanup_complete_index)
         final_admission_index = execute_source.index(
             'admission.require("final")', result_index)
         pass_index = execute_source.index(
