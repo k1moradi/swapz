@@ -235,32 +235,74 @@ sample_host_memory_admission
     def test_oom_and_psi_missing_or_malformed_counter_blocks(self):
         directory = self.root / "pressure"
         directory.mkdir()
-        (directory / "memory.events").write_text("oom 0\noom_kill 0\nhigh 0\n")
-        (directory / "cpu.pressure").write_text(
-            "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n")
-        functions = (shell_function(QUALIFIER, "event_value") +
+        memory_events = directory / "memory.events"
+        cpu_pressure = directory / "cpu.pressure"
+        memory_events.write_text("high 0\noom 0\noom_kill 0\n", encoding="ascii")
+        cpu_pressure.write_text(
+            "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+            encoding="ascii")
+        functions = (shell_function(QUALIFIER, "read_memory_event_inventory") +
                      shell_function(QUALIFIER, "cpu_some_total"))
         script = 'CGROUP=$1\n' + functions
-        self.assertEqual(self.run_shell(script + 'event_value oom\ncpu_some_total\n',
-                                        directory).returncode, 0)
-        (directory / "memory.events").write_text("oom 0\noom 1\n")
-        result = self.run_shell(script + 'event_value oom\n', directory)
-        self.assert_blocked(result, "memory.events counter oom")
-        (directory / "cpu.pressure").write_text("some avg10=0.00 total=oops\n")
+
+        result = self.run_shell(
+            script + 'read_memory_event_inventory\ncpu_some_total\n', directory)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "0 0 0\n0\n")
+
+        memory_events.write_text(
+            "high 0\noom 0\noom 1\noom_kill 0\n", encoding="ascii")
+        result = self.run_shell(
+            script + 'read_memory_event_inventory\n', directory)
+        self.assert_blocked(result, "memory.events counter oom malformed")
+        self.assertIn("observed:malformed", result.stderr)
+
+        memory_events.write_text("high 0\noom 0\n", encoding="ascii")
+        result = self.run_shell(
+            script + 'read_memory_event_inventory\n', directory)
+        self.assert_blocked(result, "memory.events counter oom_kill missing")
+        self.assertIn("observed:missing", result.stderr)
+
+        memory_events.unlink()
+        memory_events.mkdir()
+        result = self.run_shell(
+            script + 'read_memory_event_inventory\n', directory)
+        self.assert_blocked(result, "memory.events telemetry unreadable")
+        self.assertIn("observed:unavailable", result.stderr)
+        memory_events.rmdir()
+        memory_events.write_text("high 0\noom 0\noom_kill 0\n",
+                                 encoding="ascii")
+
+        for invalid, expected in (
+                ("some avg10=-0.01 avg60=0.00 avg300=0.00 total=0\n",
+                 "cpu.pressure some avg10 negative"),
+                ("some avg10=0.00 avg60=0.00 avg300=0.00 total=-1\n",
+                 "cpu.pressure some total negative"),
+                ("some avg10=0.00 avg60=0.00 avg300=0.00 total=-oops\n",
+                 "cpu.pressure some telemetry malformed: observed:malformed prerequisite:total"),
+                ("some avg10=101 avg60=0.00 avg300=0.00 total=0\n",
+                 "cpu.pressure some avg10 outside percentage range"),
+                ("some avg10=0.00 avg60=0.00 total=0\n",
+                 "cpu.pressure some telemetry missing: observed:missing prerequisite:avg300")):
+            with self.subTest(invalid=invalid.strip()):
+                cpu_pressure.write_text(invalid, encoding="ascii")
+                result = self.run_shell(script + 'cpu_some_total\n', directory)
+                self.assert_blocked(result, expected)
+
+        # Ignore future unrelated PSI key/value extensions while retaining the
+        # required known fields and their ranges.
+        cpu_pressure.write_text(
+            "some avg10=0.00 avg60=0.00 avg300=0.00 total=7 future=1\n",
+            encoding="ascii")
         result = self.run_shell(script + 'cpu_some_total\n', directory)
-        self.assert_blocked(result, "cpu.pressure some total")
-        for invalid in (
-                "avg10=-0.01 avg60=0.00 avg300=0.00 total=0",
-                "avg10=0.00 avg60=-1.00 avg300=0.00 total=0",
-                "avg10=0.00 avg60=0.00 avg300=100.01 total=0",
-                "avg10=0.00 avg60=0.00 avg300=0.00 total=-1",
-                "avg10=0.00 avg60=0.00 avg300=0.00 total=0 total=0"):
-            with self.subTest(invalid=invalid):
-                (directory / "cpu.pressure").write_text(
-                    "some " + invalid + "\n", encoding="ascii")
-                self.assert_blocked(
-                    self.run_shell(script + 'cpu_some_total\n', directory),
-                    "cpu.pressure some total")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "7\n")
+
+        cpu_pressure.unlink()
+        cpu_pressure.mkdir()
+        result = self.run_shell(script + 'cpu_some_total\n', directory)
+        self.assert_blocked(result, "cpu.pressure some telemetry unreadable")
+        self.assertIn("observed:unavailable", result.stderr)
 
     def test_bounded_child_diagnostics_preserve_reason_without_private_paths(self):
         directory = self.root / "logs"
@@ -427,6 +469,15 @@ sample_host_memory_admission
         log_path.write_text("BLOCKED: kernel LZ4 compressor unavailable\n",
                             encoding="ascii")
         self.assertEqual(self.run_shell(script, 1, log_path).returncode, 0)
+
+        log_path.write_text("BLOCKED: pair verification rejected\n",
+                            encoding="ascii")
+        result = self.run_shell(script, 2, log_path)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "FAIL: ID36 owned-RAM pair failed: pair verification rejected",
+            result.stderr)
+
         result = self.run_shell(script, 143, log_path)
         self.assertEqual(result.returncode, 1)
         self.assertIn("FAIL: ID36 owned-RAM pair exited rc:143", result.stderr)
@@ -468,9 +519,11 @@ sample_host_memory_admission
                 self.stopped = True
 
         class FakeWorker:
-            def __init__(self, fail_start=False, die_after_start=False):
+            def __init__(self, fail_start=False, die_after_start=False,
+                         ignore_cleanup=False):
                 self.fail_start = fail_start
                 self.die_after_start = die_after_start
+                self.ignore_cleanup = ignore_cleanup
                 self.started = False
                 self.alive = False
                 self.join_count = 0
@@ -486,9 +539,11 @@ sample_host_memory_admission
                 self.join_count += 1
             def terminate(self):
                 self.terminated = True
-                self.alive = False
+                if not self.ignore_cleanup:
+                    self.alive = False
             def kill(self):
-                self.alive = False
+                if not self.ignore_cleanup:
+                    self.alive = False
 
         class FakeMapping:
             def __len__(self):
@@ -523,6 +578,7 @@ sample_host_memory_admission
                                        return_value=context), \
                      mock.patch.object(module.mmap, "mmap",
                                        return_value=FakeMapping()), \
+                     mock.patch.object(module.signal, "signal"), \
                      mock.patch.object(sys, "argv", argv), \
                      contextlib.redirect_stderr(stderr):
                     result = module.main()
@@ -536,6 +592,27 @@ sample_host_memory_admission
                 if workers[1].fail_start:
                     self.assertEqual(workers[1].join_count, 0)
                 self.assertFalse((self.root / "helper.ready").exists())
+
+        # A child that survives both owned TERM and KILL escalation is a
+        # cleanup failure, never a successful or merely blocked helper exit.
+        workers = [FakeWorker(ignore_cleanup=True), FakeWorker(fail_start=True)]
+        context = FakeContext(workers)
+        stderr = io.StringIO()
+        argv = ["pressure", "--memory-mib", "64",
+                "--cpu-workers", "2",
+                "--ready-file", str(self.root / "helper.ready"),
+                "--stop-file", str(self.root / "helper.stop")]
+        with mock.patch.object(module.multiprocessing, "get_context",
+                               return_value=context), \
+             mock.patch.object(module.signal, "signal"), \
+             mock.patch.object(sys, "argv", argv), \
+             contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as raised:
+                module.main()
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("CPU pressure child could not be reaped", stderr.getvalue())
+        self.assertTrue(workers[0].is_alive())
+        self.assertGreaterEqual(workers[0].join_count, 3)
 
     def test_prerequisite_command_failures_are_explicitly_guarded(self):
         source = QUALIFIER.read_text(encoding="utf-8")
@@ -676,6 +753,18 @@ swapz_clear_tmp_before_memory_check
         self.assertIn(
             'write_cgroup_control memory.high "$MEMORY_HIGH_BYTES" || exit 2',
             source)
+        self.assertNotIn("event_value() {", source)
+        self.assertEqual(source.count('="$(read_memory_event_inventory)" || exit 2'), 5)
+        self.assertIn(
+            "FAIL: ID36 pressure-boundary setup encountered OOM events",
+            source)
+        self.assertLess(
+            source.index('memory_events_ready="$(read_memory_event_inventory)"'),
+            source.index('memory_events_before="$(read_memory_event_inventory)"'))
+        self.assertLess(
+            source.index('memory_events_before="$(read_memory_event_inventory)"'),
+            source.index(
+                "FAIL: ID36 pressure-boundary setup encountered OOM events"))
         self.assertIn('rm -rf -- "$SESSION" 2>/dev/null', source)
         self.assertIn('printf -v PASS_EVIDENCE', source)
         self.assertIn('if (( result == 0 )) && [[ -n $PASS_EVIDENCE ]]; then', source)

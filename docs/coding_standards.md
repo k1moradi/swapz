@@ -1410,11 +1410,19 @@ A finite parent needs at least 1 GiB of checked unsigned-byte headroom;
 memory files are exempt only at a verified cgroup v2 mount root. Missing
 controllers, parent limit/current charge, OOM counters, PSI or exact readiness
 PID inventory are named BLOCKED prerequisites with safe observed values,
-bounds and required actions, never fabricated PASS. CPU PSI requires one
-monotonic total and valid nonnegative avg10/avg60/avg300 percentages.
+bounds and required actions, never fabricated PASS. Read high/oom/oom_kill
+from one memory.events observation per decision; distinguish unreadable
+telemetry from a missing or malformed required counter. Never establish a new
+zero-OOM baseline without proving it equals the preceding zero-OOM snapshot,
+so setup gaps cannot absorb an intervening event. CPU PSI requires one monotonic
+total and valid nonnegative avg10/avg60/avg300 percentages, with the specific
+negative, missing, malformed or out-of-range prerequisite named.
 
 An observed native replay/byte-exact read-write failure, OOM, signal death
 or unreaped owned child remains FAIL even if later evidence is unavailable.
+Before post-pair telemetry, only an explicitly recognized prerequisite may
+defer nonzero-child classification; an unclassified nonzero exit is already
+FAIL and cannot be masked by a later BLOCKED sample.
 Success requires both native and completed same-work pair markers. Print
 ID36 PASS only after bounded cgroup/scratch cleanup, and reap only started
 CPU burners against shared deadlines with owned-child TERM/KILL escalation.

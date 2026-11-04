@@ -443,7 +443,9 @@ verify_pair_cgroup_membership() {
 
 # Preserve a real child failure before later telemetry can become BLOCKED.
 preserve_pair_failure_before_telemetry() {
-    local pair_exit_code="$1" private_log="$2" failure_reason
+    local pair_exit_code="$1" private_log="$2"
+    local failure_reason blocked_reason
+
     (( pair_exit_code != 0 )) || return 0
     if ! failure_reason="$(bounded_safe_log_reason "$private_log" 'FAIL: ')"; then
         printf 'FAIL: ID36 owned-RAM pair exited rc:%s; private failure log unavailable, restore scratch access\n' "$pair_exit_code" >&2
@@ -453,18 +455,22 @@ preserve_pair_failure_before_telemetry() {
         printf 'FAIL: ID36 owned-RAM pair failed: %s\n' "$failure_reason" >&2
         return 1
     fi
-    if (( pair_exit_code == 1 )); then
-        local prerequisite_reason
-        if prerequisite_reason="$(bounded_safe_log_reason "$private_log" 'BLOCKED: ')" &&
-           [[ -n $prerequisite_reason ]] &&
-           pair_blocked_is_prerequisite "$prerequisite_reason"; then
-            return 0
+    if (( pair_exit_code == 1 || pair_exit_code == 2 )); then
+        if ! blocked_reason="$(bounded_safe_log_reason "$private_log" 'BLOCKED: ')"; then
+            printf 'FAIL: ID36 owned-RAM pair exited rc:%s; private blocked-reason log unavailable, restore scratch access\n' "$pair_exit_code" >&2
+            return 1
+        fi
+        if [[ -n $blocked_reason ]]; then
+            if (( pair_exit_code == 1 )) &&
+               pair_blocked_is_prerequisite "$blocked_reason"; then
+                return 0
+            fi
+            printf 'FAIL: ID36 owned-RAM pair failed: %s\n' "$blocked_reason" >&2
+            return 1
         fi
     fi
-    if (( pair_exit_code != 2 )); then
-        printf 'FAIL: ID36 owned-RAM pair exited rc:%s without a verified prerequisite; investigate replay, signal or timeout\n' "$pair_exit_code" >&2
-        return 1
-    fi
+    printf 'FAIL: ID36 owned-RAM pair exited rc:%s without a verified prerequisite; investigate replay, signal or timeout\n' "$pair_exit_code" >&2
+    return 1
 }
 
 cleanup() {
@@ -584,76 +590,147 @@ require_monotonic_counter() {
 }
 
 # Missing, duplicate, or malformed counters are not zero OOM/PSI evidence.
-# The caller inherits status 2 (BLOCKED) rather than silently passing.
-event_value() {
-    local name=$1
-    local value
-    if ! value="$(awk -v key="$name" '
-        $1 == key {
+# Read memory.events once per decision so high/OOM/OOM-kill are one coherent
+# observation rather than independent samples that can straddle an event.
+read_memory_event_inventory() {
+    local observation status detail first_value second_value
+
+    if ! observation="$(awk '
+        $1 == "high" || $1 == "oom" || $1 == "oom_kill" {
+            key = $1
             if (NF != 2 || $2 !~ /^(0|[1-9][0-9]*)$/ ||
-                length($2) > 18 || ++seen != 1)
-                invalid = 1
+                length($2) > 18 || ++seen[key] != 1)
+                malformed[key] = 1
             else
-                counter = $2
+                values[key] = $2
         }
         END {
-            if (invalid || seen != 1)
-                exit 1
-            print counter
+            if (malformed["high"]) { print "malformed high"; exit }
+            if (malformed["oom"]) { print "malformed oom"; exit }
+            if (malformed["oom_kill"]) { print "malformed oom_kill"; exit }
+            if (seen["high"] != 1) { print "missing high"; exit }
+            if (seen["oom"] != 1) { print "missing oom"; exit }
+            if (seen["oom_kill"] != 1) { print "missing oom_kill"; exit }
+            printf "value %s %s %s\n",
+                values["high"], values["oom"], values["oom_kill"]
         }
     ' "$CGROUP/memory.events" 2>/dev/null)"; then
-        printf 'BLOCKED: ID36 memory.events counter %s missing or malformed: observed:unavailable required:one canonical nonnegative counter up to 18 digits unit:events; restore readable OOM telemetry\n' "$name" >&2
+        printf '%s\n' 'BLOCKED: ID36 memory.events telemetry unreadable: observed:unavailable expected:readable cgroup v2 high/oom/oom_kill counters; restore readable cgroup memory-event telemetry' >&2
         return 2
     fi
-    printf '%s\n' "$value"
+
+    read -r status detail first_value second_value <<< "$observation"
+    case "$status" in
+        value)
+            printf '%s %s %s\n' "$detail" "$first_value" "$second_value"
+            ;;
+        missing|malformed)
+            printf 'BLOCKED: ID36 memory.events counter %s %s: observed:%s expected:one canonical nonnegative counter up to 18 digits unit:events; restore complete cgroup memory-event telemetry\n' \
+                "$detail" "$status" "$status" >&2
+            return 2
+            ;;
+        *)
+            printf '%s\n' 'BLOCKED: ID36 memory.events telemetry parse state invalid: observed:unavailable expected:canonical high/oom/oom_kill inventory; restore readable cgroup memory-event telemetry' >&2
+            return 2
+            ;;
+    esac
 }
+
 cpu_some_total() {
-    local value
-    if ! value="$(awk '
+    local observation status detail
+
+    if ! observation="$(awk '
         $1 == "some" {
             if (++seen != 1)
-                invalid = 1
+                duplicate_some = 1
             for (field = 2; field <= NF; ++field) {
                 count = split($field, parts, "=")
                 if (count != 2) {
-                    invalid = 1
+                    malformed_field = "some"
                     continue
                 }
                 key = parts[1]
                 candidate = parts[2]
                 if (key == "total") {
-                    if (++totals != 1 || candidate !~ /^(0|[1-9][0-9]*)$/ ||
-                        length(candidate) > 18)
-                        invalid = 1
+                    if (++totals != 1)
+                        malformed_field = "total"
+                    else if (candidate ~ /^-[1-9][0-9]*$/)
+                        negative = "total"
+                    else if (candidate !~ /^(0|[1-9][0-9]*)$/ ||
+                             length(candidate) > 18)
+                        malformed_field = "total"
                     else
                         total = candidate
                 } else if (key == "avg10" || key == "avg60" ||
                            key == "avg300") {
-                    if (++averages[key] != 1 ||
-                        candidate !~ /^([0-9]|[1-9][0-9]|100)(\.[0-9]+)?$/ ||
-                        candidate + 0 > 100)
-                        invalid = 1
-                } else {
-                    invalid = 1
+                    if (++averages[key] != 1)
+                        malformed_field = key
+                    else if (candidate ~ /^-(0|[1-9][0-9]*)(\.[0-9]+)?$/)
+                        negative = key
+                    else if (candidate !~ /^(0|[1-9][0-9]*)(\.[0-9]+)?$/ ||
+                             length(candidate) > 32)
+                        malformed_field = key
+                    else if (candidate + 0 > 100)
+                        out_of_range = key
                 }
             }
         }
         END {
-            if (invalid || seen != 1 || totals != 1 ||
-                averages["avg10"] != 1 || averages["avg60"] != 1 ||
-                averages["avg300"] != 1)
-                exit 1
-            print total
+            if (duplicate_some) { print "malformed some"; exit }
+            if (malformed_field != "") {
+                print "malformed " malformed_field
+                exit
+            }
+            if (seen == 0) { print "missing some"; exit }
+            if (negative != "") { print "negative " negative; exit }
+            if (out_of_range != "") {
+                print "out-of-range " out_of_range
+                exit
+            }
+            if (totals != 1) { print "missing total"; exit }
+            if (averages["avg10"] != 1) { print "missing avg10"; exit }
+            if (averages["avg60"] != 1) { print "missing avg60"; exit }
+            if (averages["avg300"] != 1) { print "missing avg300"; exit }
+            print "value " total
         }
     ' "$CGROUP/cpu.pressure" 2>/dev/null)"; then
-        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some total or averages missing or malformed: observed:unavailable required:nonnegative canonical total (usec) and avg10,avg60,avg300 in 0..100%; restore readable CPU PSI telemetry' >&2
+        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some telemetry unreadable: observed:unavailable expected:readable some total/avg10/avg60/avg300; restore readable CPU PSI telemetry' >&2
         return 2
     fi
-    printf '%s\n' "$value"
+
+    read -r status detail <<< "$observation"
+    case "$status" in
+        value)
+            printf '%s\n' "$detail"
+            ;;
+        negative)
+            if [[ $detail == total ]]; then
+                printf 'BLOCKED: ID36 cpu.pressure some total negative: observed:negative expected_min:0 unit:usec; restore nonnegative CPU PSI telemetry\n' >&2
+            else
+                printf 'BLOCKED: ID36 cpu.pressure some %s negative: observed:negative expected:0..100 unit:percent; restore nonnegative CPU PSI telemetry\n' \
+                    "$detail" >&2
+            fi
+            return 2
+            ;;
+        out-of-range)
+            printf 'BLOCKED: ID36 cpu.pressure some %s outside percentage range: observed:out-of-range expected:0..100 unit:percent; restore valid CPU PSI telemetry\n' \
+                "$detail" >&2
+            return 2
+            ;;
+        missing|malformed)
+            printf 'BLOCKED: ID36 cpu.pressure some telemetry %s: observed:%s prerequisite:%s expected:one canonical total and avg10/avg60/avg300; restore complete CPU PSI telemetry\n' \
+                "$status" "$status" "$detail" >&2
+            return 2
+            ;;
+        *)
+            printf '%s\n' 'BLOCKED: ID36 cpu.pressure some telemetry parse state invalid: observed:unavailable expected:canonical total/avg10/avg60/avg300; restore readable CPU PSI telemetry' >&2
+            return 2
+            ;;
+    esac
 }
 
-oom_start="$(event_value oom)"
-oom_kill_start="$(event_value oom_kill)"
+memory_events_start="$(read_memory_event_inventory)" || exit 2
+read -r high_start_unused oom_start oom_kill_start <<< "$memory_events_start"
 
 # Fault both memory-backed lowers before the pair enters ID36. The pair moves
 # itself into the cgroup after prewarm and waits at the private barrier, so the
@@ -764,8 +841,8 @@ pressure_current="$(cat "$CGROUP/memory.current" 2>/dev/null)" || {
         "$pressure_current" "$((READY_PRESSURE_MIB * 1024 * 1024))" >&2
     exit 1
 }
-oom_ready="$(event_value oom)"
-oom_kill_ready="$(event_value oom_kill)"
+memory_events_ready="$(read_memory_event_inventory)" || exit 2
+read -r high_ready_unused oom_ready oom_kill_ready <<< "$memory_events_ready"
 require_monotonic_counter 'memory.events oom' "$oom_start" "$oom_ready" events || exit 2
 require_monotonic_counter 'memory.events oom_kill' "$oom_kill_start" "$oom_kill_ready" events || exit 2
 (( oom_ready == oom_start && oom_kill_ready == oom_kill_start )) || {
@@ -798,9 +875,15 @@ write_cgroup_control memory.high "$MEMORY_HIGH_BYTES" || exit 2
 # The final anonymous working set remains 576 MiB; only its last 80 MiB is
 # faulted after memory.high is installed. This proves the cgroup is actually
 # reclaiming/throttling without depending on incidental replay allocations.
-high_before="$(event_value high)"
-oom_before="$(event_value oom)"
-oom_kill_before="$(event_value oom_kill)"
+memory_events_before="$(read_memory_event_inventory)" || exit 2
+read -r high_before oom_before oom_kill_before <<< "$memory_events_before"
+require_monotonic_counter 'memory.events oom' "$oom_ready" "$oom_before" events || exit 2
+require_monotonic_counter 'memory.events oom_kill' "$oom_kill_ready" "$oom_kill_before" events || exit 2
+(( oom_before == oom_ready && oom_kill_before == oom_kill_ready )) || {
+    printf 'FAIL: ID36 pressure-boundary setup encountered OOM events oom:%s oom_kill:%s; inspect legitimate ready-state charge before activation\n' \
+        "$((oom_before - oom_ready))" "$((oom_kill_before - oom_kill_ready))" >&2
+    exit 1
+}
 
 printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%s cpu_workers:%s ready_bytes:%s headroom_bytes:%s ready_pressure_mib:%s ramp_mib:%s\n' \
     "$MEMORY_HIGH_BYTES" "$MEMORY_MAX_BYTES" "$PRESSURE_MIB" "$cpu_workers" \
@@ -833,9 +916,8 @@ done
     exit 1
 }
 
-high_active="$(event_value high)"
-oom_active="$(event_value oom)"
-oom_kill_active="$(event_value oom_kill)"
+memory_events_active="$(read_memory_event_inventory)" || exit 2
+read -r high_active oom_active oom_kill_active <<< "$memory_events_active"
 require_monotonic_counter 'memory.events high' "$high_before" "$high_active" events || exit 2
 require_monotonic_counter 'memory.events oom' "$oom_before" "$oom_active" events || exit 2
 require_monotonic_counter 'memory.events oom_kill' "$oom_kill_before" "$oom_kill_active" events || exit 2
@@ -880,9 +962,8 @@ if (( pair_rc == 0 )); then
     }
 fi
 
-high_after="$(event_value high)"
-oom_after="$(event_value oom)"
-oom_kill_after="$(event_value oom_kill)"
+memory_events_after="$(read_memory_event_inventory)" || exit 2
+read -r high_after oom_after oom_kill_after <<< "$memory_events_after"
 cpu_some_after="$(cpu_some_total)"
 peak_bytes="$(cat "$CGROUP/memory.peak" 2>/dev/null)" || {
     printf '%s\n' 'BLOCKED: ID36 memory.peak unreadable; require kernel cgroup peak telemetry' >&2
