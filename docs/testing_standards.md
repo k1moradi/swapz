@@ -5621,7 +5621,13 @@ have exactly the verifier's fixed field set, retain a removable parent with at
 least one stable serial/WWN identity, and carry the exact 12-field production
 DM table bound to the computed logical sector count and the observed selected
 target major:minor. Unknown/missing fields, a substituted lower device or a
-self-declared PASS with inconsistent mapper geometry are BLOCKED. Before deployment may be
+self-declared PASS with inconsistent mapper geometry are BLOCKED. Rootless
+readiness parser regressions must assert exact duplicate-key refusal for
+known and unknown keys, reject malformed or non-lowercase-ASCII keys,
+and bound oversized identifiers and inputs. Syntactically valid but
+non-canonical fields remain BLOCKED; parser diagnostics must state the
+refusal without echoing private evidence values or unbounded key text.
+Before deployment may be
 declared ready for an owner reboot, the canonical evaluator must also ingest
 and SHA-256 bind the exact durable `swapz-primary-boot-arm-v1` record. That arm
 record must have its fixed canonical field set and bind the current owner

@@ -758,11 +758,99 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     for blocker in result["cold_boot_blockers"]))
 
     def test_cold_boot_evidence_parser_rejects_duplicate_keys(self):
-        raw = cold_boot_evidence_raw() + b"status=PASS\n"
-        with self.assertRaisesRegex(
-                EVALUATOR.EvidenceError,
-                "duplicate cold-boot evidence key: 'status'"):
-            EVALUATOR.parse_env_strict(raw)
+        canonical_raw = cold_boot_evidence_raw()
+        for key, suffix in (
+                ("status", b"status=FAIL\n"),
+                ("unrecognized_key",
+                 b"unrecognized_key=1\nunrecognized_key=2\n")):
+            with self.subTest(key=key):
+                with self.assertRaises(EVALUATOR.EvidenceError) as rejected:
+                    EVALUATOR.parse_env_strict(canonical_raw + suffix)
+                self.assertEqual(
+                    str(rejected.exception),
+                    f"duplicate cold-boot evidence key: {key!r}")
+
+    def test_cold_boot_evidence_parser_rejects_invalid_keys(self):
+        canonical_raw = cold_boot_evidence_raw()
+        line_number = canonical_raw.count(b"\n") + 1
+        for suffix, reason in (
+                (b"=value\n", "has invalid key"),
+                (b"Status=value\n", "has invalid key"),
+                (b"1status=value\n", "has invalid key"),
+                (b"bad-key=value\n", "has invalid key"),
+                (b"bad key=value\n", "has invalid key"),
+                (b"bad/path=/private/source/secret\n", "has invalid key"),
+                (b"bad\xc3\xa9=value\n", "has invalid key"),
+                (b"bad\x00key=value\n", "has invalid key"),
+                (b"missing_equals\n", "is malformed")):
+            with self.subTest(suffix=suffix[:24]):
+                with self.assertRaises(EVALUATOR.EvidenceError) as rejected:
+                    EVALUATOR.parse_env_strict(canonical_raw + suffix)
+                diagnostic = str(rejected.exception)
+                self.assertEqual(
+                    diagnostic, f"cold-boot evidence line {line_number} {reason}")
+                self.assertNotIn("/private/source/secret", diagnostic)
+                self.assertLess(len(diagnostic), 160)
+
+    def test_cold_boot_evidence_parser_bounds_identifiers_and_errors(self):
+        canonical_raw = cold_boot_evidence_raw()
+        oversized_key = "unrecognized_" + "x" * 4096
+        private_path = "/private/source/secret-evidence.txt"
+        for suffix, expected in (
+                (f"{oversized_key}=1\n{oversized_key}=2\n".encode("ascii"),
+                 "duplicate cold-boot evidence key: "
+                 f"{oversized_key[:80]!r} (truncated)"),
+                (f"status={private_path}\n".encode("ascii"),
+                 "duplicate cold-boot evidence key: 'status'")):
+            with self.subTest(expected=expected):
+                with self.assertRaises(EVALUATOR.EvidenceError) as rejected:
+                    EVALUATOR.parse_env_strict(canonical_raw + suffix)
+                diagnostic = str(rejected.exception)
+                self.assertEqual(diagnostic, expected)
+                self.assertLess(len(diagnostic), 160)
+                self.assertNotIn(oversized_key[80:], diagnostic)
+                self.assertNotIn(private_path, diagnostic)
+
+        for invalid_input in (
+                None, "", b"", bytearray(b"status=PASS\n"),
+                memoryview(b"status=PASS\n")):
+            with self.subTest(input_type=type(invalid_input).__name__):
+                with self.assertRaises(EVALUATOR.EvidenceError) as rejected:
+                    EVALUATOR.parse_env_strict(invalid_input)
+                self.assertEqual(
+                    str(rejected.exception),
+                    "cold-boot evidence bytes are empty or invalid")
+
+        with self.assertRaises(EVALUATOR.EvidenceError) as rejected:
+            EVALUATOR.parse_env_strict(
+                b"x" * (EVALUATOR.MAX_ENV_EVIDENCE_INPUT_BYTES + 1))
+        self.assertEqual(
+            str(rejected.exception),
+            "cold-boot evidence exceeds 1048576-byte input bound")
+
+    def test_cold_boot_report_rejects_missing_unknown_and_oversized_keys(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        canonical_raw = cold_boot_evidence_raw()
+        for label, raw in (
+                ("unknown", canonical_raw + b"unrecognized_key=PASS\n"),
+                ("oversized", canonical_raw +
+                 ("unrecognized_" + "x" * 4096 + "=PASS\n").encode("ascii")),
+                ("missing", canonical_raw.replace(
+                    b"swap_used_kib=0\n", b"", 1))):
+            with self.subTest(label=label):
+                evidence = current_evidence(encoded(report), encoded(policy))
+                evidence["release_evidence"]["owner_observed_reboot"].update(
+                    status="PASS", observed=True, overall="PASS",
+                    evidence_sha256=hashlib.sha256(raw).hexdigest())
+                result = evaluate(
+                    report, evidence, policy, cold_boot_raw=raw)
+                self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertIn(
+                    "owner_observed_reboot: persistent cold-boot report "
+                    "field set is non-canonical",
+                    result["cold_boot_blockers"])
 
     def test_cold_boot_report_field_set_and_dm_table_are_exact(self):
         report = owner_report()
