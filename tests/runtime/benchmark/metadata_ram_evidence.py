@@ -128,17 +128,15 @@ def maximum_logical_pages_for_partition(
     return maximum or None
 
 
-def _median(values: list[int]) -> int:
+def _median_twice(values: list[int]) -> int:
+    """Return exactly twice the integer-sample median without float rounding."""
     if not values or any(type(value) is not int for value in values):
         raise ValueError("metadata RAM median input is invalid")
     ordered = sorted(values)
     middle = len(ordered) // 2
     if len(ordered) % 2:
-        return ordered[middle]
-    total = ordered[middle - 1] + ordered[middle]
-    if total % 2:
-        raise ValueError("metadata RAM median is not integral")
-    return total // 2
+        return 2 * ordered[middle]
+    return ordered[middle - 1] + ordered[middle]
 
 
 def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
@@ -443,7 +441,8 @@ def validate_metadata_ram_trace(
 
     baseline_available_kib = [
         sample["mem_available_kib"] for sample in baseline]
-    baseline_median_available_kib = _median(baseline_available_kib)
+    baseline_median_available_twice_kib = _median_twice(
+        baseline_available_kib)
     mapper_present_samples = [
         sample for phase in PHASES[1:] for sample in phase_samples[phase]
         if sample["mapper_present"]]
@@ -452,8 +451,8 @@ def validate_metadata_ram_trace(
     minimum_sample = min(
         mapper_present_samples, key=lambda sample: sample["mem_available_kib"])
     peak_ram_bytes = (
-        baseline_median_available_kib - minimum_sample["mem_available_kib"]
-    ) * MEMINFO_UNIT_BYTES
+        baseline_median_available_twice_kib * (MEMINFO_UNIT_BYTES // 2) -
+        minimum_sample["mem_available_kib"] * MEMINFO_UNIT_BYTES)
     if peak_ram_bytes <= 0:
         raise ValueError(
             "metadata RAM peak was not observed while mapper was present")
@@ -476,19 +475,23 @@ def validate_metadata_ram_trace(
     if (
             recovery[-1]["monotonic_ns"] -
             recovery[0]["monotonic_ns"] < 1_000_000_000 or
-            _median([sample["mem_available_kib"] for sample in recovery]) <
-            min(baseline_available_kib) or
-            _median([sample["s_unreclaim_kib"] for sample in recovery]) >
-            max(sample["s_unreclaim_kib"] for sample in baseline) or
-            _median([sample["vmalloc_used_kib"] for sample in recovery]) >
-            max(sample["vmalloc_used_kib"] for sample in baseline)):
+            _median_twice([
+                sample["mem_available_kib"] for sample in recovery]) <
+            2 * min(baseline_available_kib) or
+            _median_twice([
+                sample["s_unreclaim_kib"] for sample in recovery]) >
+            2 * max(sample["s_unreclaim_kib"] for sample in baseline) or
+            _median_twice([
+                sample["vmalloc_used_kib"] for sample in recovery]) >
+            2 * max(sample["vmalloc_used_kib"] for sample in baseline)):
         raise ValueError(
             "metadata RAM teardown did not recover the pre-create envelope")
 
     return {
         "peak_ram_bytes": peak_ram_bytes,
         "baseline_median_mem_available_bytes":
-            baseline_median_available_kib * MEMINFO_UNIT_BYTES,
+            baseline_median_available_twice_kib *
+            (MEMINFO_UNIT_BYTES // 2),
         "minimum_mem_available_bytes":
             minimum_sample["mem_available_kib"] * MEMINFO_UNIT_BYTES,
         "baseline_samples": len(baseline),
