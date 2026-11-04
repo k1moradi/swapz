@@ -291,6 +291,7 @@ def block_device_snapshot(device: Path) -> dict:
         "resolved_path": str(resolved),
         "kernel_name": sys_path.name,
         "major_minor": major_minor,
+        "parent_major_minor": read_optional_text(block_root / "dev"),
         "size_bytes": int(size_text) * 512,
         "physical_disk": block_root.name,
         "model": read_optional_text(block_root / "device/model"),
@@ -424,6 +425,7 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
             r"[0-9]+:[0-9]+", str(device.get("major_minor") or "")) or \
             type(device.get("size_bytes")) is not int or \
             device["size_bytes"] <= 0 or \
+            not re.fullmatch(r"[0-9]+:[0-9]+", str(device.get("parent_major_minor") or "")) or \
             not all(isinstance(device.get(key), str) and device.get(key)
                     for key in ("physical_disk", "model", "transport", "partuuid")):
         raise ValueError("campaign physical-device identity is incomplete")
@@ -516,6 +518,9 @@ def qualification_target_identity(snapshot: dict) -> dict:
         "physical_partuuid": physical["partuuid"],
         "physical_device_bytes": physical["device_bytes"],
         "lower_major_minor": major_minor,
+        "parent_major_minor": snapshot["device"]["parent_major_minor"],
+        "parent_model": snapshot["device"]["model"],
+        "parent_transport": snapshot["device"]["transport"],
     }
 
 
@@ -587,6 +592,9 @@ def host_stability(before: dict, after: dict) -> dict:
         "device_size_bytes":
             (before.get("device") or {}).get("size_bytes") ==
             (after.get("device") or {}).get("size_bytes"),
+        "device_parent_major_minor":
+            (before.get("device") or {}).get("parent_major_minor") ==
+            (after.get("device") or {}).get("parent_major_minor"),
         "device_partuuid":
             (before.get("device") or {}).get("partuuid") ==
             (after.get("device") or {}).get("partuuid"),
@@ -744,7 +752,8 @@ def metadata_ram_trace_within_host_window(
 
 def campaign_status(summary_status: str, source_consistent: bool,
                     protocol_v2: bool, stability_status: str,
-                    target_consistent: bool = True) -> str:
+                    target_consistent: bool = True,
+                    arm_boot_consistent: bool = True) -> str:
     if summary_status != "PASS":
         return "FAIL_OR_INCOMPLETE"
     if not source_consistent:
@@ -753,6 +762,8 @@ def campaign_status(summary_status: str, source_consistent: bool,
         return "BLOCKED_PROTOCOL_NOT_V2"
     if not target_consistent:
         return "BLOCKED_TARGET_IDENTITY_CHANGED"
+    if not arm_boot_consistent:
+        return "BLOCKED_ARM_BOOT_IDENTITY_CHANGED"
     if stability_status != "STABLE":
         return "BLOCKED_HOST_IDENTITY_CHANGED"
     return "PASS"
@@ -900,9 +911,14 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
             capacity_and_ram, before, after):
         capacity_and_ram = None
     summary_status = summary.get("status")
+    admitted_boot_id = before["kernel"]["boot_id"]
+    arm_boot_consistent = all(
+        isinstance(pair.get(label), dict) and
+        pair[label].get("arm_boot_id") == admitted_boot_id
+        for pair in pair_records for label in ("raw", "swapz"))
     sealed_status = campaign_status(
         summary_status, source_consistent, protocol_v2, stability["status"],
-        target_binding["consistent"])
+        target_binding["consistent"], arm_boot_consistent)
     if sealed_status == "PASS" and capacity_and_ram is None:
         raise ValueError(
             "PASS campaign lacks exact maximum-capacity/peak-RAM evidence")
@@ -921,6 +937,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         "evaluation_protocol": summary.get("evaluation_protocol"),
         "target": target_identity,
         "qualification_target_binding": target_binding,
+        "arm_boot_consistent": arm_boot_consistent,
         "capacity_and_ram": capacity_and_ram,
         "host_stability": stability,
         "admitted_device_boundary": {

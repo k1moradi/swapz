@@ -236,9 +236,150 @@ def validate_module_provenance(arm: dict, label: str) -> list[str]:
     return []
 
 
+def measured_block_accounting_reasons(arm: dict, workload: str,
+                                      label: str) -> list[str]:
+    """Do not trust normalized columns detached from completed I/O counters."""
+    if workload == "anonymous-swap":
+        return []
+    reasons = []
+    try:
+        reads = metric(arm, "read_ops")
+        writes = metric(arm, "write_ops")
+        seconds = number(metric(arm, "seconds"), "seconds")
+        if (type(reads) is not int or type(writes) is not int or
+                reads <= 0 or writes <= 0 or seconds <= 0):
+            raise ValueError("read/write operation counts and seconds must be positive")
+        requested = workload_spec(workload).get("measure_operations")
+        if requested is not None and reads + writes != requested:
+            raise ValueError("measured operation count differs from fixed work")
+        useful_bytes = (reads + writes) * 4096
+        useful_write_bytes = writes * 4096
+        lower_bytes = metric(arm, "lower_io.lower_write_bytes")
+        lower_requests = metric(arm, "lower_io.lower_write_requests")
+        if (type(lower_bytes) is not int or type(lower_requests) is not int or
+                lower_bytes <= 0 or lower_requests <= 0):
+            raise ValueError("independent lower WRITE counters are missing or nonpositive")
+        expected = {
+            "throughput.logical_write_mbps": useful_write_bytes / seconds / 1_000_000,
+            "lower_io.lower_write_bytes_per_logical_write_byte":
+                lower_bytes / useful_write_bytes,
+            "lower_io.lower_write_requests_per_1000_logical_writes":
+                lower_requests * 1000 / writes,
+        }
+        for path, calculated in expected.items():
+            observed = number(metric(arm, path), path)
+            if not math.isclose(observed, calculated, rel_tol=1e-9, abs_tol=1e-12):
+                raise ValueError(f"{path} differs from independent measured counters")
+        replay_user = number(metric(arm, "cpu.replay_user_seconds"), "cpu.replay_user_seconds")
+        replay_system = number(metric(arm, "cpu.replay_system_seconds"), "cpu.replay_system_seconds")
+        worker = number(
+            metric(arm, "cpu.exported_swapz_worker_cpu_seconds"),
+            "cpu.exported_swapz_worker_cpu_seconds")
+        if min(replay_user, replay_system, worker) < 0 or (label == "raw" and worker != 0):
+            raise ValueError("measured CPU component is invalid")
+        observed_cpu = number(
+            metric(arm, "cpu.measured_cpu_seconds_per_useful_byte"),
+            "cpu.measured_cpu_seconds_per_useful_byte")
+        if not math.isclose(
+                observed_cpu, (replay_user + replay_system + worker) / useful_bytes,
+                rel_tol=1e-9, abs_tol=1e-15):
+            raise ValueError("normalized CPU differs from measured CPU components")
+        resources = metric(arm, "resources")
+        rss = metric(arm, "resources.replay_peak_rss_bytes")
+        process_rss = metric(arm, "resources.replay_process_maxrss_bytes")
+        start_rss = metric(arm, "resources.replay_measurement_start_maxrss_bytes")
+        growth = metric(arm, "resources.replay_measurement_peak_rss_growth_bytes")
+        if (not isinstance(resources, dict) or
+                any(type(value) is not int for value in
+                    (rss, process_rss, start_rss, growth)) or
+                not 0 <= start_rss <= rss or process_rss != rss or
+                growth != rss - start_rss):
+            raise ValueError("replay absolute RSS evidence is inconsistent")
+    except (ValueError, TypeError) as exc:
+        reasons.append(f"{label} measured accounting: {exc}")
+    return reasons
+
+
+def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
+    """Prove the hour of occupied, progressing work was actually measured."""
+    spec = CONTRACT["workloads"]["sd-high-occupancy-churn"]
+    reasons = []
+    try:
+        seconds = number(metric(arm, "seconds"), "seconds")
+        if seconds < spec["measure_seconds"]:
+            raise ValueError("one-hour measured duration not completed")
+        minutes = metric(arm, "minute_buckets")
+        if (not isinstance(minutes, list) or len(minutes) < 60 or
+                any(not isinstance(row, dict) or
+                    type(row.get("minute")) is not int or
+                    row["minute"] != index or
+                    not positive_counter(row.get("operations")) or
+                    not integer_at_least(row.get("read_operations"), 0) or
+                    not integer_at_least(row.get("write_operations"), 0) or
+                    row["read_operations"] + row["write_operations"] != row["operations"]
+                    for index, row in enumerate(minutes)) or
+                sum(row["read_operations"] for row in minutes) != arm.get("read_ops") or
+                sum(row["write_operations"] for row in minutes) != arm.get("write_ops")):
+            raise ValueError("minute bucket coverage or operation conservation is invalid")
+        intervals = metric(arm, "sustained_intervals")
+        if not isinstance(intervals, list) or not intervals:
+            raise ValueError("one-hour telemetry intervals are absent")
+        previous_end = 0.0
+        for index, row in enumerate(intervals):
+            if not isinstance(row, dict) or type(row.get("interval")) is not int or row["interval"] != index:
+                raise ValueError("telemetry interval indexing is invalid")
+            start = number(metric(row, "start_seconds"), "interval.start_seconds")
+            end = number(metric(row, "end_seconds"), "interval.end_seconds")
+            duration = number(metric(row, "duration_seconds"), "interval.duration_seconds")
+            gap = number(metric(row, "max_no_progress_seconds"), "interval.max_no_progress_seconds")
+            if (start < 0 or
+                    (start > 1.0 if index == 0 else
+                     not math.isclose(start, previous_end, abs_tol=1e-6)) or
+                    duration <= 0 or
+                    not math.isclose(end - start, duration, rel_tol=1e-9, abs_tol=1e-6) or
+                    gap < 0 or gap > CONTRACT["acceptance"]["sustained"]["max_no_progress_seconds"]):
+                raise ValueError("telemetry has a gap, negative duration or stalled forward progress")
+            if label == "swapz":
+                gc = row.get("gc")
+                if (not target_health_ok(gc) or
+                        type(gc.get("gc_no_headroom_skips")) is not int or
+                        gc["gc_no_headroom_skips"] != 0):
+                    raise ValueError("interval target failure or GC no-headroom skip")
+            previous_end = end
+        if previous_end < spec["measure_seconds"]:
+            raise ValueError("telemetry does not cover the full measured hour")
+        occupancy = metric(arm, "occupancy_transitions")
+        required_phases = ("initial", "post-fill", "post-warmup", "measured-end")
+        occupied = metric(arm, "occupied_pages")
+        if (type(occupied) is not int or occupied <= 0 or
+                type(arm.get("logical_pages")) is not int or
+                occupied != arm["logical_pages"] * spec["logical_occupancy_percent"] // 100 or
+                not isinstance(occupancy, list) or
+                len(occupancy) != len(required_phases) or
+                any(not isinstance(row, dict) or row.get("phase") != phase or
+                    type(row.get("occupied_pages")) is not int or
+                    row["occupied_pages"] != (0 if index == 0 else occupied)
+                    for index, (row, phase) in enumerate(zip(occupancy, required_phases))) or
+                not integer_at_least((arm.get("oracle") or {}).get("verified_pages"), occupied)):
+            raise ValueError("90% occupancy or final oracle coverage is missing")
+    except (ValueError, TypeError) as exc:
+        reasons.append(f"{label} sustained evidence: {exc}")
+    return reasons
+
+
 def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     spec = workload_spec(workload)
     reasons = validate_module_provenance(arm, label)
+    # Monotonic timestamps bind physical arm order; the campaign sealer pins boot ID.
+    started = arm.get("arm_started_monotonic_ns")
+    finished = arm.get("arm_finished_monotonic_ns")
+    boot_id = arm.get("arm_boot_id")
+    if (type(started) is not int or type(finished) is not int or
+            started <= 0 or finished <= started or
+            not isinstance(boot_id, str) or
+            not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", boot_id)):
+        reasons.append(f"{label} arm chronology/boot identity is missing or malformed")
+    reasons += measured_block_accounting_reasons(arm, workload, label)
     if workload == "anonymous-swap":
         for field, expected in (("bytes", spec["bytes"]),
                                 ("round_count", spec["rounds"]),
@@ -301,6 +442,20 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
         reasons.append("raw arm unexpectedly carries a DM UUID")
     if label == "swapz" and not identity.get("dm_uuid"):
         reasons.append("swapz arm has no pinned DM UUID")
+    if (not isinstance(identity.get("parent_major_minor"), str) or
+            not MAJOR_MINOR_RE.fullmatch(identity["parent_major_minor"]) or
+            not isinstance(identity.get("parent_model"), str) or
+            not identity["parent_model"] or
+            not isinstance(identity.get("parent_transport"), str) or
+            not identity["parent_transport"]):
+        reasons.append(f"{label} physical parent identity is missing or malformed")
+    if workload == "sd-high-occupancy-churn":
+        reasons += sustained_coverage_reasons(arm, label)
+        elapsed = arm.get("seconds")
+        if (type(elapsed) not in (int, float) or
+                not math.isfinite(elapsed) or
+                elapsed < spec["measure_seconds"]):
+            reasons.append(f"{label} sustained measured duration is shorter than one hour")
     resources = arm.get("resources") or {}
     rss = resources.get("replay_peak_rss_bytes")
     if type(rss) is not int or rss < 0:
@@ -332,6 +487,15 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
         reasons.append("pair order differs from prospective order")
     reasons += validate_arm(raw, workload, "raw")
     reasons += validate_arm(swapz, workload, "swapz")
+    if raw.get("arm_boot_id") != swapz.get("arm_boot_id"):
+        reasons.append("physical pair arm boot identity mismatch")
+    first, second = ((raw, swapz) if order == "raw-first" else
+                     (swapz, raw))
+    if (type(first.get("arm_finished_monotonic_ns")) is int and
+            type(second.get("arm_started_monotonic_ns")) is int and
+            first["arm_finished_monotonic_ns"] >=
+            second["arm_started_monotonic_ns"]):
+        reasons.append("physical pair arms overlap or violate counterbalanced order")
     immutable = ("source_sha", "bytes", "pages", "round_count", "required_swap_bytes", "content") \
         if workload == "anonymous-swap" else (
             "source_sha", "logical_pages", "occupied_pages", "hot_pages", "qd", "read_percent",
@@ -342,7 +506,8 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
     if mismatch:
         reasons.append("pair provenance mismatch: " + ", ".join(mismatch))
     if workload != "anonymous-swap":
-        for field in ("physical_partuuid", "physical_device_bytes", "lower_major_minor"):
+        for field in ("physical_partuuid", "physical_device_bytes", "lower_major_minor",
+                      "parent_major_minor", "parent_model", "parent_transport"):
             if (raw.get("device_identity") or {}).get(field) != (swapz.get("device_identity") or {}).get(field):
                 reasons.append("physical pair identity mismatch: " + field)
     else:
@@ -467,7 +632,8 @@ def pair_target_identity(pair: dict):
     raw_identity = raw.get("device_identity") or {}
     swapz_identity = swapz.get("device_identity") or {}
     fields = (
-        "physical_partuuid", "physical_device_bytes", "lower_major_minor")
+        "physical_partuuid", "physical_device_bytes", "lower_major_minor",
+        "parent_major_minor", "parent_model", "parent_transport")
     if any(raw_identity.get(field) != swapz_identity.get(field)
            for field in fields):
         return None
@@ -477,12 +643,20 @@ def pair_target_identity(pair: dict):
     if (normalize_partuuid(partuuid) != partuuid or
             type(device_bytes) is not int or device_bytes <= 0 or
             not isinstance(lower_major_minor, str) or
-            not MAJOR_MINOR_RE.fullmatch(lower_major_minor)):
+            not MAJOR_MINOR_RE.fullmatch(lower_major_minor) or
+            not isinstance(raw_identity.get("parent_major_minor"), str) or
+            not MAJOR_MINOR_RE.fullmatch(raw_identity["parent_major_minor"]) or
+            any(not isinstance(raw_identity.get(key), str) or
+                not raw_identity[key] for key in
+                ("parent_model", "parent_transport"))):
         return None
     return {
         "physical_partuuid": partuuid,
         "physical_device_bytes": device_bytes,
         "lower_major_minor": lower_major_minor,
+        "parent_major_minor": raw_identity["parent_major_minor"],
+        "parent_model": raw_identity["parent_model"],
+        "parent_transport": raw_identity["parent_transport"],
     }
 
 
@@ -508,7 +682,8 @@ def common_campaign_target(rows: list[dict]):
         return {"lower_major_minor": identities[0]["lower_major_minor"]}, True
     complete_keys = {
         (row["physical_partuuid"], row["physical_device_bytes"],
-         row["lower_major_minor"])
+         row["lower_major_minor"], row["parent_major_minor"],
+         row["parent_model"], row["parent_transport"])
         for row in complete
     }
     if len(complete_keys) != 1:

@@ -359,6 +359,7 @@ def latency_summary(values: array.array) -> dict:
 
 
 def run(args):
+    arm_started_monotonic_ns = time.monotonic_ns()
     if args.bytes % PAGE or not 64 * MIB <= args.bytes <= 4096 * MIB:
         raise ValueError("anonymous bytes must be page aligned and within 64..4096 MiB")
     if not 1 <= args.rounds <= 8:
@@ -374,6 +375,8 @@ def run(args):
     if args.candidate == "raw" and args.expected_dm_uuid:
         raise ValueError("raw anonymous qualification must not name a DM UUID")
 
+    arm_boot_id = (Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+                   if args.expected_swap_device else None)
     if args.expected_swap_device:
         require_source_identity(args.source_sha)
     rows_before = swap_inventory(args.expected_swap_device)
@@ -411,6 +414,8 @@ def run(args):
         "round_count": args.rounds, "required_swap_bytes": args.require_swap_bytes,
         "content": CONTENT_DEFINITION, "swap_inventory_before": rows_before,
         "swap_device_identity": identity,
+        "arm_started_monotonic_ns": arm_started_monotonic_ns,
+        "arm_boot_id": arm_boot_id,
     }
     if args.expected_swap_device:
         args._partial_report["loaded_module_provenance"] = (
@@ -616,6 +621,9 @@ def run(args):
         report = {
             "schema": SCHEMA, "verdict": "PASS", "workload_id": args.workload_id,
             "candidate": args.candidate, "source_sha": args.source_sha,
+            "arm_started_monotonic_ns": arm_started_monotonic_ns,
+            "arm_finished_monotonic_ns": time.monotonic_ns(),
+            "arm_boot_id": arm_boot_id,
             "bytes": args.bytes, "pages": page_count, "content": CONTENT_DEFINITION,
             "round_count": args.rounds, "rounds": rounds,
             "fill_seconds": fill_seconds, "observed_swap_bytes": max_observed,

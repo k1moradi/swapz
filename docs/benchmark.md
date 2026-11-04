@@ -535,6 +535,14 @@ The sustained evaluator must read the exact `gc_no_headroom_skips` status
 counter, require its presence as a nonnegative integer, and enforce the frozen
 `gc_no_headroom_skips_max` bound. Missing/negative counters cannot be treated
 as zero skips; this is fail-closed evidence validation, not a new threshold.
+It also verifies that each arm actually measured at least 3,600 seconds,
+preserved all consecutive one-minute operation buckets with matching whole-arm
+READ/WRITE counts, covered the full measured hour with gap-free telemetry,
+and recorded no greater than 10-second progress gap or target failure/no-
+headroom skip in any swapz interval. Logical occupancy transitions must prove
+the filled 90% region remained covered through the measured end; final byte
+oracle evidence must cover that occupied region. These checks cannot replace
+the final full-byte verification or imply 90% *physical-segment* occupancy.
 Each arm has a 14,400-second scheduler
 safety timeout to include the large initial fill and final oracle. One pair is
 directional evidence, never a significance claim.
@@ -646,9 +654,25 @@ attempt must match the same exact source SHA (including its raw/swapz arms),
 and mixed-source campaigns are incomplete rather than pooled. Pair artifacts
 are not trusted as editable summaries: the evaluator re-derives their deltas,
 intrinsic exclusions and PASS consistency from the embedded raw/swapz arms.
+For block replay, it independently recomputes useful WRITE throughput and
+normalized lower WRITE bytes/requests from elapsed measured seconds, completed
+READ/WRITE operation counts and parent-device WRITE counters. It reconstructs
+the CPU/useful-byte metric from measured process user/system plus exported
+worker seconds, and reconciles the absolute Linux VmHWM, process peak,
+measurement-start HWM and diagnostic growth. Missing, nonfinite, negative or
+contradictory counters never qualify, even when favorable normalized fields
+are supplied. Fixed-work service arms must complete the specified operation
+count, not just echo the requested count.
 Every accepted pair must also resolve to one exact physical lower identity
-(PARTUUID, byte size and major:minor where the block replay records them; exact
-lower major:minor for anonymous swap), and all accepted pairs must agree. The
+(PARTUUID, byte size, major:minor and parent major:minor/model/transport for block
+replay; exact lower major:minor for anonymous swap), and all accepted pairs
+must agree. Physical block replay arms now retain a monotonic begin/end interval
+and boot ID. The evaluator proves the selected raw-first/swapz-first order from
+non-overlapping actual intervals and requires matching boot IDs, not merely
+the user-supplied order label. The campaign sealer also compares each arm's
+boot ID with its host-boundary snapshots. Missing or malformed chronology and
+parent identity exclude the pair. Anonymous arms retain the same chronology
+and boot binding; they cannot borrow an earlier boot's measurements. The
 physical replay, evaluator and campaign snapshot use the same production
 PARTUUID grammar: 8..64 characters, hexadecimal groups separated only by
 single internal hyphens, at least eight hexadecimal digits, normalized to
@@ -712,8 +736,12 @@ provenance is inconsistent so the invalid campaign remains auditable; a PASS is
 blocked unless all pair/summary source identity matches the exact host source.
 Stable source/tree, full kernel identity including one unchanged boot ID and
 nondecreasing host uptime, CPU model/policy/affinity, total RAM, mount and swap
-inventories, device identity/queue/scheduler and swapz module cleanup state are
-independently required for PASS. The resulting
+inventories, device and parent identities/queue/scheduler and swapz module
+cleanup state are independently required for PASS. The sealer retains
+the separately validated target-RAM lifecycle trace including teardown, and
+requires the sustained mapper's logical page count to match the manager's
+source-derived *maximum*, rather than accepting merely a mapper that fits
+the physical partition. The resulting
 campaign JSON is the machine-readable provenance index; preserving the original
 arm/pair files remains mandatory.
 This methodology change intentionally does not add a second public test

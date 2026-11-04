@@ -2245,7 +2245,7 @@ class PairReplayContract(unittest.TestCase):
             "swapz_sustained_replay", sustained_path)
         sustained = importlib.util.module_from_spec(sustained_spec)
         sustained_spec.loader.exec_module(sustained)
-        self.assertEqual(sustained.maximum_logical_pages(124787884032), 27080448)
+        self.assertEqual(sustained.maximum_logical_pages(124787884032), 27080192)
         lane_pages = 17
         stride = sustained.coprime_stride(lane_pages, 0x1234)
         offset = sustained.sequence_offset(lane_pages, 0x5678)
@@ -2433,10 +2433,19 @@ class PairReplayContract(unittest.TestCase):
         qualification = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(qualification)
 
-        def arm(candidate, raw_write=100.0, screened=True):
+        def arm(candidate, raw_write=100.0, screened=True, order="raw-first"):
             swapz = candidate == "swapz"
+            writes, reads = 838860, 209716
+            write_mbps = raw_write * 1.06 if swapz else raw_write
+            lower_write_bytes = int(writes * PAGE * (.8 if swapz else 1.0))
+            lower_write_requests = int(83886 * (.8 if swapz else 1.0))
+            cpu_per_byte = 1.1e-9 if swapz else 1.0e-9
+            first = (candidate == "raw") == (order == "raw-first")
             return {
                 "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
+                "arm_started_monotonic_ns": 10 if first else 30,
+                "arm_finished_monotonic_ns": 20 if first else 40,
+                "arm_boot_id": "11111111-2222-3333-4444-555555555555",
                 "loaded_module_provenance": ({
                     "status": "LOADED",
                     "build_source_sha": "a" * 40,
@@ -2452,25 +2461,36 @@ class PairReplayContract(unittest.TestCase):
                 "operation_recipe_sha256": "r" * 64,
                 "warmup_operations": 65536, "warmup_seconds": None,
                 "measure_operations": 1048576, "measure_seconds_requested": None,
-                "read_ops": 209716,
-                "write_ops": 838860, "oracle": {"mismatches": 0},
+                "read_ops": reads,
+                "write_ops": writes, "oracle": {"mismatches": 0},
+                "seconds": writes * PAGE / write_mbps / 1_000_000,
                 "performance_screening": {
                     "status": "SCREENED" if screened else "EXCLUDED",
                     "reasons": [] if screened else ["synthetic noise"]},
-                "throughput": {"logical_write_mbps":
-                               raw_write * 1.06 if swapz else raw_write},
+                "throughput": {"logical_write_mbps": write_mbps},
                 "lower_io": {
-                    "lower_write_bytes_per_logical_write_byte": .80 if swapz else 1.0,
-                    "lower_write_requests_per_1000_logical_writes": 80 if swapz else 100},
+                    "lower_write_bytes": lower_write_bytes,
+                    "lower_write_requests": lower_write_requests,
+                    "lower_write_bytes_per_logical_write_byte":
+                        lower_write_bytes / (writes * PAGE),
+                    "lower_write_requests_per_1000_logical_writes":
+                        lower_write_requests * 1000 / writes},
                 "latency": {
                     "read_p95_ns": 105 if swapz else 100,
                     "read_p99_ns": 105 if swapz else 100,
                     "write_p95_ns": 105 if swapz else 100,
                     "write_p99_ns": 105 if swapz else 100},
-                "cpu": {"measured_cpu_seconds_per_useful_byte":
-                        1.1e-9 if swapz else 1.0e-9},
+                "cpu": {
+                    "measured_cpu_seconds_per_useful_byte": cpu_per_byte,
+                    "replay_user_seconds": cpu_per_byte * (reads + writes) * PAGE,
+                    "replay_system_seconds": 0.0,
+                    "exported_swapz_worker_cpu_seconds": 0.0,
+                },
                 "resources": {
                     "replay_peak_rss_bytes": 32 * 1024 * 1024,
+                    "replay_process_maxrss_bytes": 32 * 1024 * 1024,
+                    "replay_measurement_start_maxrss_bytes": 31 * 1024 * 1024,
+                    "replay_measurement_peak_rss_growth_bytes": 1024 * 1024,
                     "metadata_and_target_peak_ram_bytes":
                         512 * 1024 * 1024 if swapz else 0,
                 },
@@ -2479,6 +2499,9 @@ class PairReplayContract(unittest.TestCase):
                     "physical_partuuid": "f13428f6-01",
                     "physical_device_bytes": 124787884032,
                     "lower_major_minor": "8:1",
+                    "parent_major_minor": "8:0",
+                    "parent_model": "SD",
+                    "parent_transport": "usb",
                     "dm_uuid": "SWAPZ-BENCH-0123456789abcdef0123456789abcdef"
                         if swapz else None,
                 },
@@ -2497,7 +2520,8 @@ class PairReplayContract(unittest.TestCase):
         orders = ["raw-first", "swapz-first", "swapz-first", "raw-first", "raw-first"]
         raw_rates = [100.0, 100.0, 100.0, 100.0, 120.0]
         pairs = [qualification.compare_pair(
-            arm("raw", raw_write=rate), arm("swapz", raw_write=rate),
+            arm("raw", raw_write=rate, order=orders[index - 1]),
+            arm("swapz", raw_write=rate, order=orders[index - 1]),
             "sd-service-balanced", f"pair-{index}", index, orders[index - 1])
             for index, rate in enumerate(raw_rates, 1)]
         summary = qualification.evaluate(pairs)
@@ -2510,12 +2534,36 @@ class PairReplayContract(unittest.TestCase):
 
         stable_pairs = [
             qualification.compare_pair(
-                arm("raw"), arm("swapz"), "sd-service-balanced",
+                arm("raw", order=orders[index - 1]),
+                arm("swapz", order=orders[index - 1]), "sd-service-balanced",
                 f"stable-{index}", index, orders[index - 1])
             for index in range(1, 6)]
         stable = qualification.evaluate(stable_pairs)
         self.assertEqual(stable["campaign_source_sha"], "a" * 40)
         self.assertEqual(stable["decisions"]["sd-service-balanced"]["status"], "PASS")
+
+        # Forged derived columns, counters, RSS or arm chronology must never
+        # promote the otherwise successful five-pair cohort.
+        for corrupt in (
+                lambda row: row["raw"]["lower_io"].update(lower_write_bytes=1),
+                lambda row: row["swapz"]["cpu"].update(
+                    measured_cpu_seconds_per_useful_byte=1e-15),
+                lambda row: row["raw"]["resources"].update(
+                    replay_process_maxrss_bytes=0),
+                lambda row: row["raw"].update(arm_finished_monotonic_ns=99),
+                lambda row: row["swapz"]["device_identity"].update(
+                    parent_major_minor="8:16"),
+                lambda row: row["swapz"].pop("arm_boot_id"),
+                lambda row: row["swapz"]["lower_io"].update(
+                    lower_write_requests=True),
+        ):
+            tampered_pairs = json.loads(json.dumps(stable_pairs))
+            corrupt(tampered_pairs[0])
+            tampered = qualification.evaluate(tampered_pairs)
+            self.assertEqual(
+                tampered["decisions"]["sd-service-balanced"]["status"],
+                "INCOMPLETE")
+            self.assertFalse(tampered["records"][0]["analysis_usable"])
 
         self.assertTrue(stable["campaign_target_consistent"])
         self.assertEqual(
@@ -2524,6 +2572,9 @@ class PairReplayContract(unittest.TestCase):
                 "physical_partuuid": "f13428f6-01",
                 "physical_device_bytes": 124787884032,
                 "lower_major_minor": "8:1",
+                "parent_major_minor": "8:0",
+                "parent_model": "SD",
+                "parent_transport": "usb",
             })
 
         for failed_value, error_value in (
@@ -2602,8 +2653,11 @@ class PairReplayContract(unittest.TestCase):
             }
         mixed_target_pairs = list(stable_pairs)
         mixed_target_pairs[1] = qualification.compare_pair(
-            other_raw, other_swapz, "sd-service-balanced",
-            "other-target", 2, orders[1])
+            {**other_raw, "arm_started_monotonic_ns": 30,
+             "arm_finished_monotonic_ns": 40},
+            {**other_swapz, "arm_started_monotonic_ns": 10,
+             "arm_finished_monotonic_ns": 20},
+            "sd-service-balanced", "other-target", 2, orders[1])
         mixed_target = qualification.evaluate(mixed_target_pairs)
         self.assertFalse(mixed_target["campaign_target_consistent"])
         self.assertIsNone(mixed_target["campaign_target_identity"])
@@ -2635,8 +2689,8 @@ class PairReplayContract(unittest.TestCase):
         # All source revisions must match across the entire campaign.
         mixed_pairs = list(stable_pairs)
         mixed_pairs[1] = qualification.compare_pair(
-            {**arm("raw"), "source_sha": "b" * 40},
-            {**arm("swapz"), "source_sha": "b" * 40},
+            {**arm("raw", order=orders[1]), "source_sha": "b" * 40},
+            {**arm("swapz", order=orders[1]), "source_sha": "b" * 40},
             "sd-service-balanced", "mixed-revision", 2, orders[1])
         mixed = qualification.evaluate(mixed_pairs)
         self.assertIsNone(mixed["campaign_source_sha"])
@@ -2738,6 +2792,63 @@ class PairReplayContract(unittest.TestCase):
             qualification.sustained_decision(
                 {"raw": raw, "swapz": malformed_oracle})["status"],
             "FAIL")
+
+    def test_sustained_coverage_requires_full_hour_and_continuous_gc_evidence(self):
+        import importlib.util
+
+        path = SCRIPT.with_name("qualification.py")
+        spec = importlib.util.spec_from_file_location(
+            "swapz_hour_coverage_qualification", path)
+        qualification = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(qualification)
+
+        minute_buckets = [
+            {"minute": index, "read_operations": 1, "write_operations": 1,
+             "operations": 2}
+            for index in range(60)]
+        intervals = [
+            {"interval": index, "start_seconds": float(index * 60),
+             "end_seconds": float((index + 1) * 60),
+             "duration_seconds": 60.0, "max_no_progress_seconds": 1.0,
+             "gc": {"failed": 0, "error": 0, "gc_no_headroom_skips": 0}}
+            for index in range(60)]
+        raw = {
+            "seconds": 3600.0, "logical_pages": 100,
+            "occupied_pages": 90, "read_ops": 60, "write_ops": 60,
+            "minute_buckets": minute_buckets, "sustained_intervals": intervals,
+            "occupancy_transitions": [
+                {"phase": phase, "occupied_pages": 0 if index == 0 else 90}
+                for index, phase in enumerate((
+                    "initial", "post-fill", "post-warmup", "measured-end"))],
+            "oracle": {"verified_pages": 90},
+        }
+        self.assertEqual(
+            qualification.sustained_coverage_reasons(raw, "raw"), [])
+        self.assertEqual(
+            qualification.sustained_coverage_reasons(raw, "swapz"), [])
+        corruptions = (
+            lambda arm: arm.update(seconds=3599.0),
+            lambda arm: arm["minute_buckets"].pop(30),
+            lambda arm: arm["minute_buckets"][0].update(write_operations=0),
+            lambda arm: arm["sustained_intervals"].pop(),
+            lambda arm: arm["sustained_intervals"][1].update(start_seconds=61.0),
+            lambda arm: arm["sustained_intervals"][20].update(
+                max_no_progress_seconds=11.0),
+            lambda arm: arm["sustained_intervals"][20]["gc"].update(
+                gc_no_headroom_skips=1),
+            lambda arm: arm["sustained_intervals"][20]["gc"].pop(
+                "gc_no_headroom_skips"),
+            lambda arm: arm["occupancy_transitions"][3].update(
+                occupied_pages=0),
+            lambda arm: arm["oracle"].update(verified_pages=89),
+        )
+        for corrupt in corruptions:
+            tampered = copy.deepcopy(raw)
+            corrupt(tampered)
+            with self.subTest(corrupt=corrupt):
+                self.assertTrue(
+                    qualification.sustained_coverage_reasons(
+                        tampered, "swapz"))
 
     def test_sustained_interval_sampler_gc_and_trailing_gap(self):
         import importlib.util
@@ -2971,6 +3082,10 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(
             evidence.campaign_status("PASS", True, True, "STABLE"),
             "PASS")
+        self.assertEqual(
+            evidence.campaign_status(
+                "PASS", True, True, "STABLE", arm_boot_consistent=False),
+            "BLOCKED_ARM_BOOT_IDENTITY_CHANGED")
         source_sha = "a" * 40
         mapper_uuid = "SWAPZ-PRIMARY-" + "f" * 32
         trace = {
@@ -3035,7 +3150,7 @@ class PairReplayContract(unittest.TestCase):
         validator = evidence.RAM_VALIDATOR["validate_metadata_ram_trace"]
         validator(trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
                   expected_peak_ram_bytes=8192)
-        # A scalar-only pair cannot be sealed without the post-teardown trace.
+        # A scalar-only pair cannot be sealed without post-teardown RAM samples.
         self.assertIsNone(evidence.campaign_capacity_and_ram(
             [capacity_pair], target_bytes, source_sha))
         capacity = evidence.campaign_capacity_and_ram(
@@ -3113,7 +3228,8 @@ class PairReplayContract(unittest.TestCase):
                 "boot_id": "11111111-2222-3333-4444-555555555555",
                 "uptime_seconds": 1000.0},
             "device": {
-                "major_minor": "8:1", "size_bytes": 123456,
+                "major_minor": "8:1", "parent_major_minor": "8:0",
+                "size_bytes": 123456,
                 "physical_disk": "sda", "model": "SD", "transport": "usb",
                 "partuuid": "11111111-01", "serial": "serial-1",
                 "wwid": "wwid-1", "selected_scheduler": "mq-deadline",
@@ -3269,6 +3385,9 @@ class PairReplayContract(unittest.TestCase):
                     "physical_partuuid": "11111111-01",
                     "physical_device_bytes": 123456,
                     "lower_major_minor": "8:1",
+                    "parent_major_minor": "8:0",
+                    "parent_model": "SD",
+                    "parent_transport": "usb",
                 },
             }, host)
             self.assertTrue(expected_binding["consistent"])

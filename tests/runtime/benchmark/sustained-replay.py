@@ -35,6 +35,8 @@ SCHEMA = "swapz-sustained-replay-v1"
 REPLAY = runpy.run_path(str(Path(__file__).with_name("io-replay.py")))
 QUALIFICATION = runpy.run_path(
     str(Path(__file__).with_name("qualification.py")))
+RAM_VALIDATOR = runpy.run_path(
+    str(Path(__file__).with_name("metadata_ram_evidence.py")))
 
 
 class BenchmarkInterrupted(Exception):
@@ -212,22 +214,9 @@ def fixture_info(name: str, profile: str):
 
 
 def maximum_logical_pages(device_bytes: int) -> int:
-    if device_bytes < PAGE or device_bytes % PAGE:
-        return 0
-    physical = ((device_bytes // PAGE - 1) // 256) * 256
-
-    def fits(logical):
-        reserve = max((logical + 7) // 8, 512)
-        return reserve < physical and logical <= ((physical - reserve) // 256) * 256
-
-    low, high = 0, physical
-    while low < high:
-        candidate = low + (high - low + 1) // 2
-        if fits(candidate):
-            low = candidate
-        else:
-            high = candidate - 1
-    return low
+    # Share the manager-aligned foreground COW and reserve rule with the
+    # immutable campaign RAM/maximum-capacity evidence validator.
+    return RAM_VALIDATOR["maximum_logical_pages_for_partition"](device_bytes) or 0
 
 
 def dev_text(device: int) -> str:
@@ -423,7 +412,7 @@ def check_physical(args, logical_pages: int):
                                capture_output=True, check=True, timeout=10).stdout
         config = REPLAY["validate_swapz_table"](table, logical_pages, args.expected_lower_dev, lower_sys.name)
         fresh = mapper_status(target)
-        for field in ("logical_write", "physical_write", "gc_victims", "windows", "failed"):
+        for field in ("logical_write", "physical_write", "gc_victims", "windows", "failed", "error"):
             if status_value(fresh, field) != 0:
                 raise ValueError("swapz arm is not fresh: " + field)
         data_offset = 0
@@ -945,6 +934,7 @@ def stop_interval_sampler(interval_sampler, partial: dict,
 
 
 def run(args):
+    arm_started_monotonic_ns = time.monotonic_ns()
     if not 1 <= args.qd <= 32 or not 0 <= args.read_percent <= 100:
         raise ValueError("invalid queue depth/read percentage")
     if not 1 <= args.occupancy_percent <= 100 or not 1 <= args.hot_percent <= args.occupancy_percent:
@@ -954,6 +944,8 @@ def run(args):
     if args.warmup_operations is not None and args.warmup_seconds is not None:
         raise ValueError("select at most one warmup bound")
     physical = not args.regular_file_test
+    arm_boot_id = (Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+                   if physical else None)
     if physical and not re.fullmatch(r"[a-f0-9]{40}", args.source_sha or ""):
         raise ValueError("physical qualification requires exact source SHA")
     if physical and args.candidate == "swapz" and args.metadata_and_target_peak_ram_bytes is None:
@@ -982,7 +974,9 @@ def run(args):
         else check_physical(args, logical))
     partial = {"schema": SCHEMA, "workload_id": args.workload_id,
                "candidate": args.candidate, "source_sha": args.source_sha,
-               "device_identity": identity}
+               "device_identity": identity,
+               "arm_started_monotonic_ns": arm_started_monotonic_ns,
+               "arm_boot_id": arm_boot_id}
     args._partial_report = partial
     if physical:
         partial["loaded_module_provenance"] = (
@@ -1110,6 +1104,9 @@ def run(args):
                 "schema": SCHEMA, "verdict": "PASS",
                 "workload_id": args.workload_id, "candidate": args.candidate,
                 "source_sha": args.source_sha, "device_identity": identity,
+                "arm_started_monotonic_ns": arm_started_monotonic_ns,
+                "arm_finished_monotonic_ns": time.monotonic_ns(),
+                "arm_boot_id": arm_boot_id,
                 "loaded_module_provenance":
                     partial.get("loaded_module_provenance"),
                 "logical_pages": logical, "occupied_pages": occupied,
