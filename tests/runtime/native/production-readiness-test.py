@@ -409,6 +409,8 @@ def current_evidence(
                     "workflow": workflow,
                     "head_sha": SOURCE,
                     "result": "PASS",
+                    "status": "completed",
+                    "conclusion": "success",
                     "run_id": str(index + 1),
                 }
                 for index, workflow in enumerate(
@@ -767,6 +769,26 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "concrete run ID" in blocker
             for blocker in result["code_blockers"]))
+
+    def test_cancelled_or_pending_ci_never_satisfies_release_readiness(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        for field, value in (
+                ("status", "queued"),
+                ("status", "in_progress"),
+                ("status", "cancelled"),
+                ("conclusion", "cancelled"),
+                ("conclusion", "failure"),
+                ("conclusion", None),
+                ("status", None)):
+            evidence = current_evidence(encoded(report), encoded(policy))
+            evidence["release_evidence"]["required_ci"]["runs"][0][field] = value
+            result = evaluate(report, evidence, policy)
+            self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED",
+                             (field, value, result))
+            self.assertTrue(any(
+                "completed-success" in blocker
+                for blocker in result["code_blockers"]), (field, value))
 
     def test_zero_critical_count_requires_an_empty_issue_list(self):
         report = owner_report()

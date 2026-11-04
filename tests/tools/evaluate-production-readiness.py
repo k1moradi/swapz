@@ -1001,10 +1001,12 @@ def evaluate_release(
                     len(rows) != 1 or
                     rows[0].get("head_sha") != source_sha or
                     rows[0].get("result") != "PASS" or
+                    rows[0].get("status") != "completed" or
+                    rows[0].get("conclusion") != "success" or
                     not _valid_run_id(rows[0].get("run_id"))):
                 block_code(
                     f"required_ci: {workflow} is not an exact-source "
-                    "PASS with a concrete run ID")
+                    "completed-success PASS with a concrete run ID")
         if set(valid_runs) != set(REQUIRED_CI_WORKFLOWS):
             block_code("required_ci: workflow set is incomplete")
 
