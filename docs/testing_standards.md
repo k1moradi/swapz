@@ -2452,7 +2452,13 @@ misaligned, unsupported or failed discard evidence on that owned test device.
 Top-level qualification status follows the classified stage result, not a raw
 child exit-code convention. A stage classified FAIL remains overall FAIL even
 when its shell helper returned 2; BLOCKED is reserved for an explicit blocked
-stage marker.
+stage marker. An explicit primary-lifecycle FAIL takes precedence over a prior
+coordinator BLOCKED diagnostic even when a child exits zero. A PASS requires
+exactly five ordered PASS stages with integer-zero exits and valid final
+formatter/module/oracle artifact digests. An incomplete artifact identity
+must return nonzero and remain INCOMPLETE, preserving passed stage observations.
+The console cannot advertise loaded service as qualified unless the owner
+overall and final artifact identity both pass.
 
 
 ### Immutable one-slot lower-I/O qualification

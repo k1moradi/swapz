@@ -21,6 +21,13 @@ import product_goals  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 GIT_RESULT = "test_results.json"
 REPORT = ROOT / GIT_RESULT
+OFFICIAL_STAGE_NAMES = (
+    "Build module and helpers",
+    "Native and rootless contracts",
+    "Kernel warnings W=1",
+    "Kernel warnings W=2",
+    "Owned RAM smoke + mixed/QD pilot",
+)
 HOST_CPU_INT_FIELDS = ("wall_ns", "online_cpus", "affinity_cpus", "tick_hz")
 HOST_CPU_FLOAT_FIELDS = ("busy_fraction", "steal_fraction", "pressure_some_fraction")
 HOST_CPU_FIELDS = HOST_CPU_INT_FIELDS + HOST_CPU_FLOAT_FIELDS
@@ -148,6 +155,15 @@ def _readiness_artifact_hashes_valid(hashes):
     return isinstance(hashes, dict) and all(
         _valid_sha256(hashes.get(name))
         for name in ("formatter_sha256", "module_sha256", "oracle_sha256"))
+
+
+def owner_qualification_artifacts_available(artifacts):
+    """An owner PASS requires all three final artifact digests."""
+    return (isinstance(artifacts, dict) and
+            set(artifacts) == {"status", "formatter_sha256",
+                               "module_sha256", "oracle_sha256"} and
+            artifacts["status"] == "AVAILABLE" and
+            _readiness_artifact_hashes_valid(artifacts))
 
 
 def _readiness_target_key(target):
@@ -2588,7 +2604,15 @@ def run_stage(title, command, result, *, parse_bench=False):
             "BLOCKED:", "BLOCKED_LOADED_QUALIFICATION",
             "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:"))
         for line in output.splitlines()))
-    status = ("PASS" if rc == 0 else "BLOCKED" if blocked_marker else "FAIL")
+    # A coordinator BLOCKED diagnostic may precede a genuine lifecycle FAIL.
+    # An explicit qualifier FAIL wins even if its process exit is wrong.
+    explicit_primary_failure = parse_bench and any(
+        line.startswith("FAIL_PRIMARY_NULLBLK_LIFECYCLE:")
+        for line in output.splitlines())
+    if explicit_primary_failure and rc == 0:
+        rc = 1
+    status = ("PASS" if rc == 0 else "FAIL" if explicit_primary_failure
+              else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
     if rc:
@@ -6604,12 +6628,23 @@ def print_bench(result, *, detailed=False):
     benchmarks = result.get("benchmarks", {})
     verdict = benchmarks.get("verdicts", {})
     print("\n  Product decision snapshot — synthetic owned-RAM evidence only")
-    if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
+    owner_overall = result.get("overall")
+    artifacts = result.get("qualified_artifacts")
+    artifact_identity_valid = owner_qualification_artifacts_available(artifacts)
+    if (owner_overall != "PASS" or not artifact_identity_valid or
+            verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX"):
         stages = result.get("stages", [])
         passed = sum(stage.get("status") == "PASS" for stage in stages)
         print(f"  Stages passed: {passed}/5; loaded service: NOT QUALIFIED")
-        _print_table_note(
-            "Gate", verdict.get("reason", verdict.get("overall", "NOT_RUN")))
+        gate = verdict.get("reason", verdict.get("overall", "NOT_RUN"))
+        if verdict.get("overall") == "PASS_BOUNDED_RAM_MATRIX":
+            if not artifact_identity_valid:
+                reason = (artifacts.get("reason") if isinstance(artifacts, dict)
+                          else None)
+                gate = reason or "qualified artifact identity is incomplete"
+            else:
+                gate = f"overall qualification {owner_overall or 'INCOMPLETE'}"
+        _print_table_note("Gate", gate)
         _print_table_note(
             "Goal implication",
             "No new byte-exact loaded mixed/QD comparison against raw is qualified. "
@@ -8274,11 +8309,20 @@ def goal_scorecard(result):
 
 
 def qualification_overall(exit_code, stages):
-    if not exit_code:
-        return "PASS"
-    if stages and stages[-1].get("status") == "BLOCKED":
+    """Require the complete ordered owner matrix and integer-zero exits."""
+    if any(stage.get("status") == "FAIL" for stage in stages):
+        return "FAIL"
+    if any(stage.get("status") == "BLOCKED" for stage in stages):
         return "BLOCKED"
-    return "FAIL"
+    if exit_code:
+        return "FAIL"
+    if tuple(stage.get("name") for stage in stages) != OFFICIAL_STAGE_NAMES:
+        return "INCOMPLETE"
+    if any(stage.get("status") != "PASS" or
+           type(stage.get("exit_code")) is not int or
+           stage["exit_code"] != 0 for stage in stages):
+        return "INCOMPLETE"
+    return "PASS"
 
 
 def required_benchmark_gates_pass(benchmarks):
@@ -8392,6 +8436,13 @@ def main():
         if not required_benchmark_gates_pass(result["benchmarks"]):
             result["overall"] = "FAIL"
             exit_code = 1
+    if not exit_code and not owner_qualification_artifacts_available(
+            result["qualified_artifacts"]):
+        # Preserve passed stages; missing artifacts do not qualify source.
+        result["overall"] = "INCOMPLETE"
+        exit_code = 2
+    if not exit_code and result["overall"] != "PASS":
+        exit_code = 2
     result["benchmarks"]["lane_gap_attribution"] = lane_gap_attribution_rows(
         result["benchmarks"])
     result["benchmarks"]["goal_scorecard"] = goal_scorecard(result)

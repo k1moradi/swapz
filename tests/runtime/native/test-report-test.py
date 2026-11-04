@@ -2715,7 +2715,11 @@ class ReportContract(unittest.TestCase):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
             runner.parse_write_saturation(synthetic_log()))
-        report = {"evidence": {"predictor": predictor_evidence(),
+        report = {"overall": "PASS",
+                  "qualified_artifacts": {
+                      "status": "AVAILABLE", "formatter_sha256": "a" * 64,
+                      "module_sha256": "b" * 64, "oracle_sha256": "c" * 64},
+                  "evidence": {"predictor": predictor_evidence(),
                                 "gc_scan_scale": gc_scan_scale_evidence(),
                                 "extent_geometry": extent_geometry_evidence()},
                   "benchmarks": {
@@ -3173,8 +3177,19 @@ class ReportContract(unittest.TestCase):
         benchmarks["write_saturation"]["overall"] = "PASS_WRITE_SATURATION_EVIDENCE"
 
     def test_overall_status_follows_stage_semantics_not_raw_exit_code(self):
-        self.assertEqual(runner.qualification_overall(0, [{"status": "PASS"}]),
-                         "PASS")
+        stages = [
+            {"name": name, "status": "PASS", "exit_code": 0}
+            for name in runner.OFFICIAL_STAGE_NAMES
+        ]
+        self.assertEqual(runner.qualification_overall(0, stages), "PASS")
+        self.assertEqual(runner.qualification_overall(0, stages[:-1]),
+                         "INCOMPLETE")
+        self.assertEqual(runner.qualification_overall(0, stages[::-1]),
+                         "INCOMPLETE")
+        self.assertEqual(runner.qualification_overall(0, [
+            {**stages[0], "exit_code": True}, *stages[1:]]), "INCOMPLETE")
+        self.assertEqual(runner.qualification_overall(0, [
+            {**stages[0], "status": "FAIL"}, *stages[1:]]), "FAIL")
         self.assertEqual(runner.qualification_overall(2, [{"status": "FAIL"}]),
                          "FAIL")
         self.assertEqual(runner.qualification_overall(
@@ -3367,6 +3382,39 @@ class ReportContract(unittest.TestCase):
                          "owned RAM primary lifecycle setup")
         self.assertIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:",
                       stage["diagnostic"])
+
+    def test_primary_lifecycle_failure_overrides_prior_blocked_line(self):
+        log = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=start\n"
+            "BLOCKED: primary-swap start failed: No such file or directory\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator start failed\n"
+        )
+        report = {"schema": "swapz-test-results-v1", "stages": [],
+                  "benchmarks": {"sessions": [], "verdicts": {}}}
+        original_popen = runner.subprocess.Popen
+        try:
+            for child_exit in (1, 0):
+                runner.subprocess.Popen = lambda *args, **kwargs: (
+                    FakeStreamingProcess(log, returncode=child_exit))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    actual_exit = runner.run_stage(
+                        "Owned RAM smoke + mixed/QD pilot", ["unused"],
+                        report, parse_bench=True)
+                self.assertEqual(actual_exit, 1)
+                self.assertEqual(report["stages"][-1]["status"], "FAIL")
+                self.assertEqual(report["stages"][-1]["failed_phase"],
+                                 "owned RAM primary lifecycle start")
+        finally:
+            runner.subprocess.Popen = original_popen
+
+    def test_owner_artifact_digests_required(self):
+        hashes = {"status": "AVAILABLE", "formatter_sha256": "a" * 64,
+                  "module_sha256": "b" * 64, "oracle_sha256": "c" * 64}
+        self.assertTrue(runner.owner_qualification_artifacts_available(hashes))
+        for invalid in ({**hashes, "status": "UNAVAILABLE"},
+                        {**hashes, "module_sha256": "b" * 63},
+                        {**hashes, "extra": True}):
+            self.assertFalse(runner.owner_qualification_artifacts_available(invalid))
 
     def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
         # This was a real regression: privileged benchmarks created
