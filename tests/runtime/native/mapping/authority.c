@@ -1386,9 +1386,11 @@ static int test_maximum_capacity_raw_cow_and_gc_progress(void)
 
 /*
  * Model the exact 17 constructor capacity-index sites with tiny geometry.
- * Injection skips one calloc and destroys every earlier allocation; success
- * attaches the real production authority. This never allocates max-capacity
- * memory or claims to exercise the loaded DM constructor.
+ * The real constructor attempts all 17 allocations before testing the combined
+ * null predicate, so injection skips exactly one calloc but still allocates
+ * every later site before reverse-order cleanup. Success attaches the real
+ * production authority. This never allocates max-capacity memory or claims to
+ * exercise the loaded DM constructor.
  */
 static int test_small_index_failure_and_repeated_lifecycle(void)
 {
@@ -1438,15 +1440,13 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 		for (site = 0; site < allocation_count; ++site) {
 			if (site == failure_site) {
 				error = -ENOMEM;
-				break;
+				continue;
 			}
 			allocated_indexes[site] =
 				calloc(allocation_lengths[site],
 				       allocation_sizes[site]);
-			if (!allocated_indexes[site]) {
+			if (!allocated_indexes[site])
 				error = -ENOMEM;
-				break;
-			}
 		}
 		if (!error) {
 			allocated_all = true;
@@ -1506,6 +1506,12 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 		/* Model constructor unwind and normal teardown alike. */
 		for (site = allocation_count; site > 0U; --site)
 			free(allocated_indexes[site - 1U]);
+		if (failure_site < allocation_count) {
+			CHECK(!allocated_indexes[failure_site]);
+			for (site = 0; site < allocation_count; ++site)
+				if (site != failure_site)
+					CHECK(allocated_indexes[site]);
+		}
 		CHECK(failure_site == allocation_count ?
 		      allocated_all && !error :
 		      !allocated_all && error == -ENOMEM);
