@@ -179,6 +179,14 @@ and within trusted system executable directories.
 A kernel upgrade is deliberately not automatic deployment: because
 `AUTOINSTALL="no"` is retained, the new kernel needs matching headers, a
 qualified module for that kernel, and an explicit admission/install cycle.
+Additional hermetic regressions deliberately replace the package lock pathname
+between descriptor open and flock, reject mode-tampered rollback snapshots
+on interrupted upgrade, treat a failing uninstall DKMS status query as
+uncertainty, and retain a verifiable `rollback-incomplete` upgrade journal
+when the terminal rollback checkpoint cannot be persisted. These checks do
+not emulate power loss or prove real-host DKMS registration, kernel module
+loading, Secure Boot enforcement or signer acceptance by the running kernel.
+
 Rootless packaging tests exercise repeated install/uninstall, exact-kernel
 qualification binding, missing headers, cryptographic signature/enrollment
 mismatch, lock/path substitution, foreign and tampered artifacts (including

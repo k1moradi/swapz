@@ -447,6 +447,25 @@ esac
             self.home.chmod(0o700)
         self.assert_absent()
 
+    def test_package_lock_inode_swap_during_flock_is_refused(self):
+        # The descriptor still refers to the original lock after the pathname
+        # is replaced; no package mutation may use that obsolete lock inode.
+        flock_binary = shutil.which("flock")
+        self.assertIsNotNone(flock_binary)
+        package_lock = self.home / "package.lock"
+        package_lock.touch(mode=0o600)
+        package_lock.chmod(0o600)
+        self.tool("flock", f"""#!/usr/bin/env bash
+set -eu
+mv -- "$SWAPZ_PACKAGE_TEST_ROOT/package.lock" "$SWAPZ_PACKAGE_TEST_ROOT/old.package.lock"
+(umask 077; : > "$SWAPZ_PACKAGE_TEST_ROOT/package.lock")
+exec "{flock_binary}" "$@"
+""")
+        refused = self.invoke("install")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("package lock path changed while locked", refused.stderr)
+        self.assert_absent()
+
     def test_clean_repeat_uninstall_and_reinstall(self):
         first = self.invoke("install")
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -527,6 +546,15 @@ esac
         self.assertIn("does not have an installed current-kernel DKMS state",
                       missing_state_uninstall.stderr)
         self.assert_installed_exact()
+
+    def test_uninstall_dkms_status_query_failure_preserves_package(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed = self.invoke("uninstall", {"SWAPZ_FAKE_FAIL_AT": "status"})
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("cannot inspect current-kernel DKMS state before package removal",
+                      failed.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
 
     def test_missing_headers_signing_and_vermagic_refuse(self):
         self.headers_makefile.unlink()
@@ -886,7 +914,7 @@ esac
         self.assertEqual(upgraded.returncode, 0, upgraded.stderr)
         self.assert_installed_exact()
 
-    def interrupt_upgrade_with_snapshot(self, corrupt_backup):
+    def interrupt_upgrade_with_snapshot(self, corrupt_backup, corrupt_metadata=False):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_module = self.installed_module.read_bytes()
         self.module.write_bytes(b"replacement-qualified-module\n")
@@ -924,11 +952,15 @@ esac
             if corrupt_backup:
                 (transaction / "backup/source/dkms.conf").write_bytes(
                     b"corrupted-rollback-snapshot\n")
+            if corrupt_metadata:
+                # Byte-exact content is insufficient if snapshot permissions
+                # have changed since the prepared journal checkpoint.
+                (transaction / "backup/source/dkms.conf").chmod(0o666)
 
             os.killpg(process.pid, signal.SIGTERM)
             stdout, stderr = process.communicate(timeout=8)
             self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
-            if corrupt_backup:
+            if corrupt_backup or corrupt_metadata:
                 self.assertIn("rollback snapshot invalid", stderr)
                 self.assertFalse((self.prefix / "sbin/swapzctl").exists())
                 self.assertEqual(
@@ -953,6 +985,10 @@ esac
 
     def test_corrupt_upgrade_snapshot_quarantines_activation(self):
         self.interrupt_upgrade_with_snapshot(corrupt_backup=True)
+
+    def test_upgrade_snapshot_metadata_tamper_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, corrupt_metadata=True)
 
     def test_upgrade_rollback_resolves_module_before_restoring_cli(self):
         self.assertEqual(self.invoke("install").returncode, 0)
@@ -1147,6 +1183,29 @@ esac
         blocked = self.invoke("install")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
         self.assertFalse((self.prefix / "sbin/swapz-primary-runtime-health").exists())
+
+    def test_upgrade_terminal_rollback_journal_failure_quarantines(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        failed = self.invoke("install", {
+            "SWAPZ_TEST_INSTALL_FAIL_AFTER": "dkms-removed",
+            "SWAPZ_TEST_FAIL_TRANSACTION_PHASE": "rolled-back",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("previous package restoration failed", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        transactions = list((self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(transactions), 1)
+        state = json.loads((transactions[0] / "state.json").read_text())
+        self.assertEqual(state["phase"], "rollback-incomplete")
+        for entry in state["backup_files"]:
+            self.assertEqual(
+                sha256(transactions[0] / "backup" / entry["path"]),
+                entry["sha256"])
+        refused = self.invoke("uninstall")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("incomplete package transaction retained", refused.stderr)
 
     def test_uninstall_terminal_rollback_journal_failure_quarantines(self):
         self.assertEqual(self.invoke("install").returncode, 0)
