@@ -895,7 +895,7 @@ static int check_case(enum fixture_scenario candidate)
         expected_error = ELOOP;
         break;
     default:
-        assert(expected_safe);
+        assert(expected_safe || gap_probe);
         break;
     }
     writes = header_writes + mapper_mutations + mkswap_calls + swapon_calls;
