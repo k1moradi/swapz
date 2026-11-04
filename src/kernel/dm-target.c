@@ -2156,11 +2156,16 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx,
 	    inflight->active || !inflight->run.blocks ||
 	    inflight->run.start_block >= ctx->physical_blocks ||
 	    inflight->run.blocks >
-		ctx->physical_blocks - inflight->run.start_block)
+		ctx->physical_blocks - inflight->run.start_block) {
+		swapz_fail_at(ctx, -EINVAL, "write", "internal",
+			      "async-submit-validate");
 		return -EINVAL;
+	}
 	if (ctx->write_fault_nth &&
 	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
 		ctx->write_fault_injected++;
+		swapz_fail_at(ctx, -EIO, "write", "lower-io",
+			      "async-submit-injected");
 		return -EIO;
 	}
 	swapz_mark_segments_dirty(ctx, inflight->run.start_block,
@@ -2453,8 +2458,13 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	int error;
 
 	if (!blocks || block >= ctx->physical_blocks ||
-	    blocks > ctx->physical_blocks - block)
+	    blocks > ctx->physical_blocks - block) {
+		swapz_fail_at(ctx, -ERANGE,
+			      op == REQ_OP_READ ? "read" : "write",
+			      swapz_failure_category(-ERANGE),
+			      "sync-lower-range");
 		return -ERANGE;
+	}
 	region.bdev = ctx->backing->bdev;
 	region.sector = (sector_t)(ctx->data_start_block + block) * SWAPZ_SECTORS;
 	region.count = (sector_t)blocks * SWAPZ_SECTORS;
@@ -2464,12 +2474,18 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	if (op == REQ_OP_WRITE && ctx->write_fault_nth &&
 	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
 		ctx->write_fault_injected++;
+		swapz_fail_at(ctx, -EIO, "write", "lower-io",
+			      "sync-lower-injected");
 		return -EIO;
 	}
 	if (op == REQ_OP_READ) {
 		error = swapz_maybe_inject_read_fault(ctx);
-		if (error)
+		if (error) {
+			swapz_fail_at(ctx, error, "read",
+				      swapz_failure_category(error),
+				      "sync-lower-injected");
 			return error;
+		}
 	}
 	/* A submitted write may dirty media even if completion later fails. */
 	if (op == REQ_OP_WRITE)
