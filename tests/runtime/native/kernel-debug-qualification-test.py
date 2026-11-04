@@ -1021,6 +1021,13 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertIn('--runtime-after "$session/runtime-after.json"', source)
         self.assertIn("verify_rc=$?", source)
         self.assertIn("runtime_after_rc=$?", source)
+        root_guard = '(( EUID != 0 )) || fail "invoke from an unprivileged main checkout"'
+        self.assertIn(root_guard, source)
+        self.assertLess(
+            source.index(root_guard),
+            source.index('if [[ "${SWAPZ_KERNEL_DEBUG_REPLAY_ONLY:-}"'),
+        )
+        self.assertNotIn("id -u", source)
         self.assertNotIn("kcsan.enabled=0", source)
         self.assertNotIn("lockdep=off", source)
         instrumentation = source.index('undefined_symbols="$(nm -u "$module"')
@@ -1203,6 +1210,11 @@ class KernelDebugQualificationTests(unittest.TestCase):
         import os
         import textwrap
 
+        self.assertNotEqual(
+            os.geteuid(), 0,
+            "ROOTLESS_VALIDATOR_ONLY replay requires an unprivileged EUID",
+        )
+
         # One executable acts as all fake external commands. Only the existing
         # verifier's pure evidence parser is used; no sudo, load, dmesg or
         # device command from the host is ever invoked.
@@ -1244,6 +1256,12 @@ class KernelDebugQualificationTests(unittest.TestCase):
                 pass
             elif program == "modinfo":
                 field = arguments[1]
+                if (scenario == "module_source_query_failure" and
+                        field == "swapz_build_source_sha"):
+                    sys.exit(23)
+                if (scenario == "module_clean_query_failure" and
+                        field == "swapz_build_source_clean"):
+                    sys.exit(25)
                 if field == "swapz_build_source_sha":
                     print("b" * 40 if scenario == "wrong_module_build_sha" else source_sha)
                 elif field == "swapz_build_source_clean":
@@ -1251,6 +1269,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
                 else:
                     sys.exit(97)
             elif program == "nm":
+                if scenario == "instrumentation_query_failure":
+                    sys.exit(24)
                 print("__asan_load8 __tsan_read8")
             elif program == "sudo":
                 if arguments[:2] == ["-n", "true"]:
@@ -1375,6 +1395,9 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ("runtime_snapshot_failure", "kasan-lockdep", 2, "exit=19"),
             ("final_capture_failure", "kasan-lockdep", 2, "exit=5"),
             ("wrong_module_build_sha", "kasan-lockdep", 2, "module build source"),
+            ("module_source_query_failure", "kasan-lockdep", 2, "module build source metadata query failed (exit=23)"),
+            ("module_clean_query_failure", "kasan-lockdep", 2, "module clean-source metadata query failed (exit=25)"),
+            ("instrumentation_query_failure", "kasan-lockdep", 2, "module kasan-lockdep instrumentation query failed (exit=24)"),
             ("module_hash_mismatch", "kasan-lockdep", 2, "module SHA256 mismatch"),
             ("changed_boot_id", "kasan-lockdep", 2, "runtime-after boot mismatch"),
             ("truncated_dmesg", "kasan-lockdep", 2, "dmesg truncated"),
@@ -1442,7 +1465,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
                 preflight_cases = {
                     "missing_kconfig_option", "kcsan_unavailable_config",
                     "kcsan_disabled_runtime", "runtime_snapshot_failure",
-                    "wrong_module_build_sha",
+                    "wrong_module_build_sha", "module_source_query_failure",
+                    "module_clean_query_failure", "instrumentation_query_failure",
                 }
                 self.assertEqual(helper_pid.exists(),
                                  scenario not in preflight_cases)

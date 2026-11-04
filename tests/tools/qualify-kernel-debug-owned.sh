@@ -23,6 +23,7 @@ printf '%s\n' 'LOADED_HOST_CHECKLIST final_marker=PASS: loaded isolated swapz by
 printf '%s\n' 'LOADED_HOST_CHECKLIST diagnostics=complete-newline-dmesg-baseline-to-final-on-one-boot bounded_by=owned-helper-900s+5s-kill-after runtime=before-and-after-I/O'
 [[ "${SWAPZ_DEBUG_OWNED_COORDINATED:-}" == YES_OWNED_NULLBLK_ONLY ]] ||
     fail "explicit owner/Codex coordination token required"
+(( EUID != 0 )) || fail "invoke from an unprivileged main checkout"
 
 # The rootless unittest uses a private, generated PATH containing inert command
 # mocks. Never treat its observations as loaded-kernel qualification.
@@ -37,8 +38,6 @@ if [[ "${SWAPZ_KERNEL_DEBUG_REPLAY_ONLY:-}" == ROOTLESS_VALIDATOR_ONLY ]]; then
             fail "rootless replay requires isolated $mocked_command mock"
     done
     printf '%s\n' 'ROOTLESS_VALIDATOR_ONLY=ACTIVE; no kernel module or device operations'
-else
-    [[ "$(id -u)" != 0 ]] || fail "invoke from an unprivileged main checkout"
 fi
 [[ "$(git branch --show-current)" == main ]] || fail "main branch required"
 [[ "$(git rev-parse HEAD)" == "$source_sha" ]] || fail "source HEAD mismatch"
@@ -78,12 +77,28 @@ SWAPZ_SIGN_NONINTERACTIVE=1 make ||
    -z "$(git status --porcelain --untracked-files=all)" ]] ||
     fail "source changed during exact-source build"
 module=build/kernel/experimental/dm-swapz.ko
-[[ "$(modinfo -F swapz_build_source_sha "$module" 2>/dev/null)" == "$source_sha" ]] ||
-    fail "module build source does not match validated source"
-[[ "$(modinfo -F swapz_build_source_clean "$module" 2>/dev/null)" == 1 ]] ||
+module_source_sha=""
+module_source_rc=0
+module_source_sha="$(modinfo -F swapz_build_source_sha "$module" 2>/dev/null)" ||
+    module_source_rc=$?
+(( module_source_rc == 0 )) ||
+    fail "module build source metadata query failed (exit=$module_source_rc)"
+[[ "$module_source_sha" == "$source_sha" ]] ||
+    fail "module build source SHA does not match validated source"
+module_clean=""
+module_clean_rc=0
+module_clean="$(modinfo -F swapz_build_source_clean "$module" 2>/dev/null)" ||
+    module_clean_rc=$?
+(( module_clean_rc == 0 )) ||
+    fail "module clean-source metadata query failed (exit=$module_clean_rc)"
+[[ "$module_clean" == 1 ]] ||
     fail "module was not built from a clean validated source"
+undefined_symbols=""
+instrumentation_rc=0
 undefined_symbols="$(nm -u "$module" 2>/dev/null)" ||
-    fail "cannot inspect module sanitizer instrumentation"
+    instrumentation_rc=$?
+(( instrumentation_rc == 0 )) ||
+    fail "module $lane instrumentation query failed (exit=$instrumentation_rc)"
 case "$lane" in
     kasan-lockdep)
         grep -Eq '(__asan_|__hwasan_|kasan_report)' <<< "$undefined_symbols" ||

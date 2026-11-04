@@ -6032,8 +6032,12 @@ provenance mismatch, boot-ID change, lost diagnostic prefix, missing markers,
 helper exit/timeout/signal and a clean synthetic observation. Each case checks
 exit status, bounded messages, child reaping and temporary evidence cleanup.
 No replay output can be accepted as `LOADED_KERNEL_PASS`; successful
-synthetic evidence is `ROOTLESS_VALIDATOR_ONLY=PASS` only. This fixture does
-not boot a kernel, load swapz or test actual KASAN/KCSAN/lockdep execution.
+synthetic evidence is `ROOTLESS_VALIDATOR_ONLY=PASS` only. The replay guard
+still rejects EUID 0; replay variables never bypass the wrapper's unprivileged
+process requirement. Module source/clean metadata and sanitizer-symbol query
+failures preserve the original command exit status without echoing module
+paths. This fixture does not boot a kernel, load swapz or test actual
+KASAN/KCSAN/lockdep execution.
 
 Runtime verification binds the helper's exact `SOURCE_HEAD` marker to the
 validated SHA, requires each selected loaded PASS marker exactly once, requires
