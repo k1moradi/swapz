@@ -94,6 +94,27 @@ def _unique_json_object(pairs):
     return result
 
 
+def _exception_text(error: BaseException) -> str:
+    detail = str(error)
+    return detail if detail else type(error).__name__
+
+
+def _lstat_optional(path: Path, label: str,
+                    error_type: type[Exception] = Blocked) -> os.stat_result | None:
+    """Return identity or absence; never collapse an inspection error to absence."""
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise error_type(f"cannot inspect {label}: {exc}") from exc
+
+
+def _path_present(path: Path, label: str,
+                  error_type: type[Exception] = Blocked) -> bool:
+    return _lstat_optional(path, label, error_type) is not None
+
+
 class SourceAdmissionClient:
     """Authenticated channel to the unprivileged source-verification parent."""
 
@@ -800,10 +821,10 @@ def parse_manifest(text: str) -> dict:
 
 def read_state() -> dict | None:
     path = RECOVERY_BASE / "primary-state.json"
-    if not path.exists():
+    info = _lstat_optional(path, "primary state file")
+    if info is None:
         return None
     try:
-        info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or \
                 stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
             raise Blocked("primary state file identity/mode is unsafe")
@@ -871,14 +892,43 @@ def parse_dm_info(text: str) -> DmIdentity:
     return DmIdentity(name, uuid, major, minor, open_count)
 
 
+def _sysfs_dm_names() -> set[str]:
+    """Read the kernel's mapper-name inventory for an independent absence proof."""
+    root = Path("/sys/class/block")
+    try:
+        entries = list(root.iterdir())
+    except OSError as exc:
+        raise Blocked(f"cannot enumerate kernel Device Mapper inventory: {exc}") from exc
+
+    names: set[str] = set()
+    for entry in entries:
+        if not re.fullmatch(r"dm-[0-9]+", entry.name):
+            continue
+        try:
+            name = (entry / "dm/name").read_text(encoding="ascii").strip()
+        except OSError as exc:
+            raise Blocked(
+                f"cannot read kernel Device Mapper identity {entry.name}: {exc}") from exc
+        if not name or name in names:
+            raise Blocked("kernel Device Mapper name inventory is malformed")
+        names.add(name)
+    return names
+
+
 def _dm_identity() -> DmIdentity | None:
     result = _run([
         "dmsetup", "info", "-c", "--noheadings", "--separator", ":",
         "-o", "name,uuid,major,minor,open", MAPPER_NAME,
     ], check=False, timeout=10)
-    if result.returncode != 0:
-        return None
-    return parse_dm_info(result.stdout)
+    if result.returncode == 0:
+        return parse_dm_info(result.stdout)
+    # dmsetup uses a nonzero status both for an absent named mapper and for
+    # control/query failures. Only an independent kernel inventory may turn
+    # that ambiguous result into an absence observation.
+    if MAPPER_NAME in _sysfs_dm_names():
+        raise Blocked(
+            "dmsetup could not query a primary mapper that remains present in sysfs")
+    return None
 
 
 def parse_dm_table(text: str, manifest: dict,
@@ -933,17 +983,22 @@ def parse_status(text: str) -> dict[str, int]:
     if len(tokens) < 4 or tokens[2] != "swapz":
         raise QualificationFailure("dmsetup status is not a swapz target")
     values: dict[str, int] = {}
+    seen_keys: set[str] = set()
     for token in tokens[3:]:
         if "=" not in token:
             continue
         key, value = token.split("=", 1)
-        if key in values:
+        if key in seen_keys:
             raise QualificationFailure(f"duplicate swapz status token {key}")
+        seen_keys.add(key)
         if re.fullmatch(r"-?[0-9]+", value):
             values[key] = int(value)
-    for key in ("logical_write", "logical_read", "physical_write", "physical_read", "failed", "error"):
+    counter_keys = ("logical_write", "logical_read", "physical_write", "physical_read")
+    for key in (*counter_keys, "failed", "error"):
         if key not in values:
             raise QualificationFailure(f"swapz status lacks numeric token {key}")
+    if any(values[key] < 0 for key in counter_keys) or values["failed"] not in {0, 1}:
+        raise QualificationFailure("swapz status has invalid counter/failure values")
     return values
 
 
@@ -1008,29 +1063,44 @@ def _memory_events(path: Path) -> dict[str, int]:
 
 
 def _psi_total(path: Path, kind: str = "some") -> int:
+    observed: int | None = None
     try:
         for line in path.read_text(encoding="ascii").splitlines():
             fields = line.split()
-            if fields and fields[0] == kind:
-                for field in fields[1:]:
-                    if field.startswith("total="):
-                        value = field.split("=", 1)[1]
-                        if re.fullmatch(r"[0-9]+", value):
-                            return int(value)
-    except OSError as exc:
-        raise Blocked(f"cannot read cgroup PSI: {exc}") from exc
-    raise Blocked("cgroup PSI lacks total counter")
+            if not fields or fields[0] != kind:
+                continue
+            if observed is not None:
+                raise ValueError(f"duplicate PSI {kind} row")
+            totals = [
+                field.split("=", 1)[1]
+                for field in fields[1:] if field.startswith("total=")
+            ]
+            if len(totals) != 1 or not re.fullmatch(r"[0-9]+", totals[0]):
+                raise ValueError(f"malformed PSI {kind} total")
+            observed = int(totals[0])
+    except (OSError, ValueError) as exc:
+        raise Blocked(f"cannot parse cgroup PSI: {exc}") from exc
+    if observed is None:
+        raise Blocked("cgroup PSI lacks total counter")
+    return observed
 
 
 def _mem_available_mib() -> int:
+    observed_kib: int | None = None
     try:
         for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
             fields = line.split()
-            if fields[:1] == ["MemAvailable:"] and len(fields) >= 2:
-                return int(fields[1]) // 1024
+            if fields[:1] != ["MemAvailable:"]:
+                continue
+            if observed_kib is not None or len(fields) != 3 or fields[2] != "kB" or \
+                    not re.fullmatch(r"[0-9]+", fields[1]):
+                raise ValueError("malformed or duplicate MemAvailable")
+            observed_kib = int(fields[1])
     except (OSError, ValueError) as exc:
         raise Blocked(f"cannot read MemAvailable: {exc}") from exc
-    raise Blocked("MemAvailable is unavailable")
+    if observed_kib is None:
+        raise Blocked("MemAvailable is unavailable")
+    return observed_kib // 1024
 
 
 def _block_size(path: Path) -> int:
@@ -1382,13 +1452,13 @@ def _validate_precycle_state(
     if state is not None and state.get("stage") != "COMPLETE":
         raise Blocked(f"unresolved primary state {state.get('stage')}")
     marker = RECOVERY_BASE / f"partition-{partuuid}.active"
-    if marker.exists():
+    if _path_present(marker, "primary partition ownership marker"):
         raise Blocked("selected partition already has an active ownership marker")
     if _dm_identity() is not None:
         raise Blocked("primary mapper already exists before cycle")
     require_no_conflicting_raw_swap_aliases(
         baseline, target_device, parent_device)
-    if Path("/sys/module/dm_swapz").exists():
+    if _path_present(Path("/sys/module/dm_swapz"), "dm_swapz module sysfs state"):
         raise Blocked("dm_swapz is already loaded before primary cycle")
 
 
@@ -1514,12 +1584,16 @@ def _cgroup_create(token: str, resident_mib: int, swap_limit_mib: int,
             "memory.events", "memory.pressure",
         )
         for name in required:
-            if not (cgroup / name).exists():
+            if _lstat_optional(
+                    cgroup / name, f"cgroup control {name}",
+                    error_type) is None:
                 raise error_type(f"dedicated cgroup lacks required control {name}")
         _write_control(cgroup / "memory.max", str(resident_mib * MIB), admitted=admitted)
         _write_control(cgroup / "memory.swap.max", str(swap_limit_mib * MIB), admitted=admitted)
         _write_control(cgroup / "memory.zswap.max", "0", admitted=admitted)
-        if (cgroup / "memory.oom.group").exists():
+        if _lstat_optional(
+                cgroup / "memory.oom.group", "cgroup control memory.oom.group",
+                error_type) is not None:
             _write_control(cgroup / "memory.oom.group", "1", admitted=admitted)
         return cgroup
     except BaseException as original_error:
@@ -1599,7 +1673,9 @@ def preflight_workload_environment(workload_mib: int, resident_mib: int,
 
 
 def _remove_cgroup(cgroup: Path) -> None:
-    if not cgroup.exists():
+    if _lstat_optional(
+            cgroup, "dedicated real-swap cgroup",
+            QualificationFailure) is None:
         return
     try:
         procs = (cgroup / "cgroup.procs").read_text(encoding="ascii").split()
@@ -1888,10 +1964,12 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 original_error, [f"initial telemetry cgroup: {cleanup_error}"])
         raise
     pressure_started = time.monotonic()
+    last_psi_total = psi_before
     rounds: list[dict] = []
     active_processes: list[subprocess.Popen] = []
 
     def guard() -> None:
+        nonlocal last_psi_total
         events = _memory_events(cgroup / "memory.events")
         if events.get("oom", 0) > events_before.get("oom", 0) or \
                 events.get("oom_kill", 0) > events_before.get("oom_kill", 0):
@@ -1901,9 +1979,13 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         if _mem_available_mib() < MIN_AVAILABLE_MIB:
             raise QualificationFailure(
                 f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
+        current_psi_total = _psi_total(cgroup / "memory.pressure")
+        if current_psi_total < last_psi_total:
+            raise QualificationFailure("cgroup memory PSI total regressed during workload")
+        last_psi_total = current_psi_total
         elapsed = time.monotonic() - pressure_started
         if elapsed >= PSI_STOP_GRACE_SECONDS and (
-                _psi_total(cgroup / "memory.pressure") - psi_before >
+                current_psi_total - psi_before >
                 PSI_STOP_FRACTION * elapsed * 1_000_000):
             raise QualificationFailure("sustained cgroup memory PSI exceeded safe stop threshold")
 
@@ -1986,6 +2068,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
 
                 swap_current = _read_uint(cgroup / "memory.swap.current")
                 swap_peak = _read_uint(cgroup / "memory.swap.peak")
+                if swap_peak < swap_current:
+                    raise QualificationFailure(
+                        "cgroup swap peak is below current swap usage")
                 fill_status_after = read_status()
                 lower_after_fill = read_block_stats(
                     (manifest["device_major_int"], manifest["device_minor_int"]))
@@ -2138,6 +2223,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         reuse = evaluate_reuse_rounds(rounds)
         events_after = _memory_events(cgroup / "memory.events")
         psi_after = _psi_total(cgroup / "memory.pressure")
+        if psi_after < last_psi_total:
+            raise QualificationFailure("cgroup memory PSI total regressed at workload completion")
         return {
             "concurrent_workers": CONCURRENT_ORACLE_PROCESSES,
             "reuse_rounds": len(rounds),
@@ -2193,7 +2280,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
 
 def _mapper_sysfs_state(device: tuple[int, int], expected_uuid: str) -> tuple[bool, bool]:
     base = Path(f"/sys/dev/block/{device[0]}:{device[1]}")
-    if not base.exists():
+    if _lstat_optional(base, "primary mapper sysfs device") is None:
         return False, True
     uuid_path = base / "dm/uuid"
     try:
@@ -2297,14 +2384,19 @@ def _post_stop_verify(manifest: dict, active: dict, baseline_identity: set[tuple
         raise QualificationFailure("raw backing partition became active swap during teardown")
     if _swap_identity(rows) != baseline_identity:
         raise QualificationFailure("unrelated swap inventory changed across primary cycle")
-    if _dm_identity() is not None or Path(f"/sys/dev/block/{active['mapper_device'][0]}:{active['mapper_device'][1]}").exists():
+    mapper_sysfs = Path(
+        f"/sys/dev/block/{active['mapper_device'][0]}:{active['mapper_device'][1]}")
+    if _dm_identity() is not None or _path_present(
+            mapper_sysfs, "primary mapper sysfs device"):
         raise QualificationFailure("primary mapper remains after successful stop")
-    if Path("/sys/module/dm_swapz").exists():
+    if _path_present(Path("/sys/module/dm_swapz"), "dm_swapz module sysfs state"):
         raise QualificationFailure("transaction-owned dm_swapz module remains loaded after stop")
     state = read_state()
     if state is None or state.get("run_id") != manifest["run_id"] or state.get("stage") != "COMPLETE":
         raise QualificationFailure("durable primary state is not COMPLETE after stop")
-    if (RECOVERY_BASE / f"partition-{partuuid}.active").exists():
+    if _path_present(
+            RECOVERY_BASE / f"partition-{partuuid}.active",
+            "primary partition ownership marker"):
         raise QualificationFailure("partition ownership marker remains after COMPLETE")
 
 
@@ -2354,39 +2446,52 @@ def _verify_completed_cleanup(manifest: dict, baseline_identity: set[tuple], par
         raise QualificationFailure("swap inventory did not return to its pre-cycle identity")
     if _dm_identity() is not None:
         raise QualificationFailure("primary mapper remains after cleanup")
-    if Path("/sys/module/dm_swapz").exists():
+    if _path_present(
+            Path("/sys/module/dm_swapz"), "dm_swapz module sysfs state",
+            QualificationFailure):
         raise QualificationFailure("transaction-owned dm_swapz module remains after cleanup")
     state = read_state()
     if state is None or state.get("run_id") != manifest["run_id"] or state.get("stage") != "COMPLETE":
         raise QualificationFailure("durable primary state is not COMPLETE after cleanup")
-    if (RECOVERY_BASE / f"partition-{partuuid}.active").exists():
+    if _path_present(
+            RECOVERY_BASE / f"partition-{partuuid}.active",
+            "primary partition ownership marker", QualificationFailure):
         raise QualificationFailure("partition ownership marker remains after cleanup")
+
+
+def _reconcile_primary_cleanup(swapzctl: Path, manifest: dict,
+                               baseline_identity: set[tuple], partuuid: str,
+                               timeout_seconds: int) -> None:
+    """Converge an interrupted coordinator through normal stop/recover only."""
+    state = read_state()
+    if state is None or state.get("run_id") != manifest["run_id"]:
+        raise QualificationFailure(
+            "durable state cannot be reconciled automatically")
+    stage = state.get("stage")
+    cleanup = None
+    if stage == "ACTIVE":
+        cleanup = _primary(swapzctl, "stop", timeout_seconds, admitted=True)
+    elif stage in {
+            "STARTING", "STOPPING", "RECOVERY_REQUIRED", "RECOVERING", "RESTORED"}:
+        cleanup = _primary(swapzctl, "recover", timeout_seconds, admitted=True)
+    elif stage != "COMPLETE":
+        raise QualificationFailure(f"state {stage} requires manual review")
+    if cleanup is not None and cleanup.returncode != 0:
+        detail = (cleanup.stderr or cleanup.stdout).strip().replace("\n", "; ")
+        raise QualificationFailure(
+            f"normal recovery cleanup failed rc={cleanup.returncode}: {detail}")
+    _verify_completed_cleanup(manifest, baseline_identity, partuuid)
 
 
 def _cleanup_failed_start(swapzctl: Path, manifest: dict, baseline_identity: set[tuple],
                           partuuid: str, timeout_seconds: int, original_reason: str) -> None:
     try:
-        state = read_state()
-    except Exception as cleanup_error:
+        _reconcile_primary_cleanup(
+            swapzctl, manifest, baseline_identity, partuuid, timeout_seconds)
+    except BaseException as cleanup_error:
         raise QualificationFailure(
-            f"{original_reason}; cannot read cleanup state: {cleanup_error}") from cleanup_error
-    if state is None or state.get("run_id") != manifest["run_id"]:
-        raise QualificationFailure(original_reason + "; durable state cannot be reconciled automatically")
-    if state.get("stage") == "ACTIVE":
-        cleanup = _primary(swapzctl, "stop", timeout_seconds, admitted=True)
-    elif state.get("stage") in {"STARTING", "STOPPING", "RECOVERY_REQUIRED", "RECOVERING", "RESTORED"}:
-        cleanup = _primary(swapzctl, "recover", timeout_seconds, admitted=True)
-    else:
-        raise QualificationFailure(original_reason + f"; state {state.get('stage')} requires manual review")
-    if cleanup.returncode != 0:
-        detail = (cleanup.stderr or cleanup.stdout).strip().replace("\n", "; ")
-        raise QualificationFailure(original_reason + f"; normal recovery cleanup failed rc={cleanup.returncode}: {detail}")
-    try:
-        _verify_completed_cleanup(manifest, baseline_identity, partuuid)
-    except Exception as cleanup_error:
-        raise QualificationFailure(
-            f"{original_reason}; normal recovery verification also failed: "
-            f"{cleanup_error}") from cleanup_error
+            f"{original_reason}; normal recovery cleanup also failed: "
+            f"{_exception_text(cleanup_error)}") from cleanup_error
     raise QualificationFailure(original_reason)
 
 
@@ -2402,28 +2507,62 @@ def _normal_stop(swapzctl: Path, manifest: dict, active: dict | None,
             sampler.start()
             sampler_started = True
             time.sleep(0.02)
-        except Exception as exc:
-            # Sampling failure cannot strand an otherwise verified live mapper.
+        except BaseException as exc:
+            # Sampling failure or interruption cannot strand a verified live mapper.
             sampler_error = exc
-    primary_error = None
+    primary_error: BaseException | None = None
     stopped = None
     try:
         stopped = _primary(swapzctl, "stop", timeout_seconds, admitted=True)
-    except Exception as exc:
+    except BaseException as exc:
         primary_error = exc
     finally:
         if sampler_started:
-            time.sleep(0.05)
+            delay_error: BaseException | None = None
+            try:
+                time.sleep(0.05)
+            except BaseException as exc:
+                delay_error = exc
             try:
                 sampler_evidence = sampler.stop()
-            except Exception as exc:
+            except BaseException as exc:
+                cleanup_detail = _exception_text(exc)
+                if delay_error is not None:
+                    cleanup_detail = (
+                        f"{_exception_text(delay_error)}; sampler cleanup also "
+                        f"failed: {cleanup_detail}")
                 sampler_error = (
-                    Blocked(f"{sampler_error}; sampler cleanup also failed: {exc}")
-                    if sampler_error is not None else exc)
+                    Blocked(
+                        f"{_exception_text(sampler_error)}; "
+                        f"sampler cleanup also failed: {cleanup_detail}")
+                    if sampler_error is not None else
+                    Blocked(cleanup_detail))
+            else:
+                if delay_error is not None:
+                    sampler_error = (
+                        Blocked(
+                            f"{_exception_text(sampler_error)}; sampler final "
+                            f"observation delay was interrupted: "
+                            f"{_exception_text(delay_error)}")
+                        if sampler_error is not None else delay_error)
     if primary_error is not None:
+        try:
+            _reconcile_primary_cleanup(
+                swapzctl, manifest, baseline_identity, partuuid,
+                timeout_seconds)
+        except BaseException as cleanup_error:
+            details = (
+                f"{_exception_text(primary_error)}; normal stop/recovery also "
+                f"failed: {_exception_text(cleanup_error)}")
+            if sampler_error is not None:
+                details += (
+                    f"; stop sampler also failed: "
+                    f"{_exception_text(sampler_error)}")
+            raise QualificationFailure(details) from cleanup_error
         if sampler_error is not None:
             raise QualificationFailure(
-                f"{primary_error}; stop sampler also failed: {sampler_error}") from primary_error
+                f"{_exception_text(primary_error)}; stop sampler also failed: "
+                f"{_exception_text(sampler_error)}") from primary_error
         raise primary_error
     assert stopped is not None
     if stopped.returncode != 0:
@@ -2475,11 +2614,18 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
 
     try:
         started = _primary(swapzctl, "start", timeout_seconds, admitted=True)
-    except Exception as start_error:
-        # A timeout can occur after swapon has succeeded: reconcile first.
-        _cleanup_failed_start(
-            swapzctl, manifest, baseline_identity, selector_partuuid,
-            timeout_seconds, f"primary start invocation failed: {start_error}")
+    except BaseException as start_error:
+        # A timeout or interruption can occur after swapon has succeeded.
+        # Reconcile through the ordinary coordinator path before propagating it.
+        try:
+            _reconcile_primary_cleanup(
+                swapzctl, manifest, baseline_identity, selector_partuuid,
+                timeout_seconds)
+        except BaseException as cleanup_error:
+            raise QualificationFailure(
+                f"primary start invocation failed: {_exception_text(start_error)}; "
+                f"normal stop/recovery also failed: "
+                f"{_exception_text(cleanup_error)}") from cleanup_error
         raise
     if started.returncode != 0:
         detail = (started.stderr or started.stdout).strip().replace("\n", "; ")
@@ -2504,7 +2650,7 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
             manifest, active, oracle_path,
             workload_mib, resident_mib, swap_limit_mib, timeout_seconds,
         )
-    except Exception as exc:
+    except BaseException as exc:
         original_failure = exc
 
     try:
@@ -2519,15 +2665,16 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
             else:
                 _cleanup_failed_start(
                     swapzctl, manifest, baseline_identity, selector_partuuid, timeout_seconds,
-                    str(original_failure))
+                    _exception_text(original_failure))
             stop_evidence = None
         else:
             stop_evidence = _normal_stop(
                 swapzctl, manifest, active, baseline_identity, selector_partuuid, timeout_seconds)
-    except Exception as cleanup_error:
+    except BaseException as cleanup_error:
         if original_failure is not None:
             raise QualificationFailure(
-                f"{original_failure}; normal stop/recovery also failed: {cleanup_error}") from cleanup_error
+                f"{_exception_text(original_failure)}; normal stop/recovery also "
+                f"failed: {_exception_text(cleanup_error)}") from cleanup_error
         raise
     kernel_after = _kernel_log_snapshot()
     _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
@@ -2580,10 +2727,14 @@ def _execute_admitted(arguments: argparse.Namespace,
         raise Blocked("qualified swapzctl/oracle executable permission is missing")
     private_workspace = tempfile.TemporaryDirectory(
         prefix="swapz-primary-physical-")
-    private_parent = Path(private_workspace.name)
-    os.chmod(private_parent, 0o700)
-    private_directory = private_parent / "control"
     try:
+        private_parent = Path(private_workspace.name)
+        try:
+            os.chmod(private_parent, 0o700)
+        except OSError as exc:
+            raise Blocked(
+                f"cannot secure private physical workspace: {exc}") from exc
+        private_directory = private_parent / "control"
         swapzctl, execution_control_sha256 = build_physical_execution_control(
             arguments.validated_source, qualified_swapzctl, private_directory)
         oracle_path, oracle_sha256 = pin_real_swap_oracle(

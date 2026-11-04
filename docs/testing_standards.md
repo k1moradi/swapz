@@ -181,7 +181,13 @@ pages; swap-in checks every byte, counts all corrupt bytes and caps only the
 diagnostic samples. The cgroup's OOM event keys must be present and parseable.
 OOM, cgroup swap and PSI telemetry begin before FILL; guard checks enforce the
 1 GiB host MemAvailable floor and stop on sustained cgroup memory PSI "some"
-above 85% for at least five seconds.
+above 85% for at least five seconds. Kernel/cgroup evidence is parsed
+fail-closed: MemAvailable must retain its canonical kB unit, PSI has one
+monotonic numeric total, swapz byte counters are nonnegative, and failed= is
+boolean. A failed dmsetup-info query is never mapper-absence evidence by
+itself; absence requires an independent readable sysfs Device Mapper inventory.
+Path-inspection errors for durable state, mapper/module identity, ownership
+markers and cgroup teardown are errors, not silently equivalent to ENOENT.
 
 Once recovery-storage admission is proven and before `prepare`, the helper
 must durably create a root-owned 0600 attempt record under the validated
@@ -235,11 +241,14 @@ admission fails. Bounded protocol reads retain multiple
 records from one read without blocking on partial records. Partial cgroup
 creation, first-telemetry failures and evidence temporary-file failures must
 clean up explicitly or expose the cleanup error alongside the original
-failure. Rootless regression cases inject cgroup removal failures independently
+failure. Failure to secure the private temporary workspace must explicitly
+remove it. Rootless regression cases inject cgroup removal failures independently
 from unreadable process-inventory recovery. The private source-admission channel also closes explicitly; failure to close
-it must retain the triggering qualification error. A timed-out primary start
-must use only normal stop/recovery; a failed swapoff never authorizes forced
-mapper removal or module unload.
+it must retain the triggering qualification error. Workload interrupts and
+uncertain coordinator start/stop invocation failures must converge through the
+ordinary stop/recover coordinator path before the initiating exception is
+propagated. A definite returned swapoff failure remains a stop condition and
+never authorizes forced mapper removal or module unload.
 
 At least two passing cycles require new run IDs and Linux swap UUIDs, zero
 initial mapper usage, no stale mapper/module/ownership state, durable

@@ -427,6 +427,54 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify.execute(arguments)
         channel.close.assert_called_once_with()
 
+    def test_private_workspace_is_cleaned_when_mode_hardening_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            qualified = root / "prefix/sbin/swapzctl"
+            report = root / "qualification.json"
+            oracle_path = root / "oracle.py"
+            for path, contents in (
+                    (qualified, b"qualified"),
+                    (report, b"{}"),
+                    (oracle_path, b"#!/usr/bin/env python3\n")):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+                path.chmod(0o700)
+
+            workspace_path = root / "workspace"
+            workspace_path.mkdir()
+            cleanup_called = []
+
+            class FakeWorkspace:
+                name = str(workspace_path)
+
+                def cleanup(self):
+                    cleanup_called.append(True)
+
+            args = qualify.build_parser().parse_args([
+                "--validated-source", "a" * 40,
+                "--qualification-report", str(report),
+                "--swapzctl", str(qualified),
+                "--oracle", str(oracle_path),
+            ])
+            admission = mock.Mock()
+            with mock.patch.dict(os.environ, {}, clear=True), \
+                    mock.patch.object(os, "geteuid", return_value=0), \
+                    mock.patch.object(os, "sysconf", return_value=qualify.PAGE_BYTES), \
+                    mock.patch.object(qualify, "_ensure_commands"), \
+                    mock.patch.object(
+                        qualify.tempfile, "TemporaryDirectory",
+                        return_value=FakeWorkspace()), \
+                    mock.patch.object(
+                        qualify.os, "chmod",
+                        side_effect=OSError("synthetic chmod failure")):
+                with self.assertRaisesRegex(
+                        qualify.Blocked, "cannot secure private physical workspace"):
+                    qualify.execute(args, admission=admission)
+
+            admission.require.assert_called_once_with("initial")
+            self.assertEqual(cleanup_called, [True])
+
     def test_private_workspace_is_cleaned_when_admission_fails_before_evidence(self):
         completed = __import__("subprocess").CompletedProcess
         with tempfile.TemporaryDirectory() as directory:
@@ -709,6 +757,26 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(
             qualify.parse_dm_table(named, manifest, fake_stat)["backing_device"], (8, 1))
 
+    def test_dm_identity_requires_independent_absence_when_dmsetup_fails(self):
+        failed = __import__("subprocess").CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="query failed")
+        with mock.patch.object(qualify, "_run", return_value=failed), \
+                mock.patch.object(qualify, "_sysfs_dm_names", return_value=set()):
+            self.assertIsNone(qualify._dm_identity())
+        with mock.patch.object(qualify, "_run", return_value=failed), \
+                mock.patch.object(
+                    qualify, "_sysfs_dm_names",
+                    return_value={qualify.MAPPER_NAME}), \
+                self.assertRaisesRegex(
+                    qualify.Blocked, "remains present in sysfs"):
+            qualify._dm_identity()
+
+    def test_lstat_errors_are_not_treated_as_path_absence(self):
+        path = mock.Mock()
+        path.lstat.side_effect = PermissionError("synthetic denial")
+        with self.assertRaisesRegex(qualify.Blocked, "cannot inspect synthetic"):
+            qualify._lstat_optional(path, "synthetic")
+
     def test_dm_table_rejects_substituted_backing_or_parameters(self):
         manifest = qualify.parse_manifest(self.canonical_manifest())
         canonical = f"0 {manifest['logical_sectors_int']} swapz 8:1 0 64 0 2 0 1 0 0\n"
@@ -731,6 +799,43 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             qualify.parse_status("0 8192 linear logical_write=1 logical_read=1 physical_write=1 physical_read=1 failed=0 error=0")
         with self.assertRaises(qualify.QualificationFailure):
             qualify.parse_status("0 8192 swapz logical_write=1 logical_read=1 physical_write=1 failed=0 error=0")
+        for malformed in (
+            "0 8192 swapz logical_write=-1 logical_read=1 physical_write=1 "
+            "physical_read=1 failed=0 error=0",
+            "0 8192 swapz logical_write=1 logical_read=1 physical_write=1 "
+            "physical_read=1 failed=2 error=0",
+            "0 8192 swapz logical_write=bad logical_write=1 logical_read=1 "
+            "physical_write=1 physical_read=1 failed=0 error=0",
+        ):
+            with self.subTest(malformed=malformed), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.parse_status(malformed)
+
+    def test_psi_and_memavailable_parsers_fail_closed_on_malformed_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pressure = Path(directory) / "memory.pressure"
+            pressure.write_text(
+                "some avg10=0.00 avg60=0.00 avg300=0.00 total=17\n"
+                "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+                encoding="ascii")
+            self.assertEqual(qualify._psi_total(pressure), 17)
+            for payload in (
+                    "some avg10=0 total=1 total=2\n",
+                    "some avg10=0 total=1\nsome avg10=0 total=2\n",
+                    "some avg10=0 total=bad\n"):
+                with self.subTest(payload=payload):
+                    pressure.write_text(payload, encoding="ascii")
+                    with self.assertRaises(qualify.Blocked):
+                        qualify._psi_total(pressure)
+
+        for payload in (
+                "MemAvailable: 1048576 MB\n",
+                "MemAvailable: 1048576 kB\nMemAvailable: 1048576 kB\n",
+                "MemAvailable: unavailable kB\n"):
+            with self.subTest(payload=payload), \
+                    mock.patch.object(Path, "read_text", return_value=payload), \
+                    self.assertRaises(qualify.Blocked):
+                qualify._mem_available_mib()
 
     def positive_evidence(self):
         return dict(
@@ -911,6 +1016,51 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify._terminate_child(timed_out, cgroup)
             self.assertEqual(timed_out.wait.call_count, 2)
 
+    def test_stop_sampler_is_stopped_when_final_delay_is_interrupted(self):
+        run_id = "1" * 32
+        manifest = {"run_id": run_id}
+        active = {
+            "mapper_device": (252, 1),
+            "mapper_uuid": "SWAPZ-PRIMARY-" + run_id,
+            "swap_path": "/dev/dm-1",
+        }
+        stopped = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0,
+            stdout=f"PRIMARY_STOP=COMPLETE run_id={run_id} swapoff=true\n",
+            stderr="")
+        sampler = mock.Mock()
+        sampler.stop.return_value = {"normal": True}
+        with mock.patch.object(qualify, "StopSampler", return_value=sampler), \
+                mock.patch.object(qualify, "_primary", return_value=stopped), \
+                mock.patch.object(
+                    qualify.time, "sleep",
+                    side_effect=[None, KeyboardInterrupt()]), \
+                self.assertRaises(KeyboardInterrupt):
+            qualify._normal_stop(
+                Path("/synthetic/swapzctl"), manifest, active, set(),
+                "f13428f6-01", 60)
+        sampler.stop.assert_called_once_with()
+
+    def test_interrupted_primary_stop_reconciles_through_recover(self):
+        manifest = {"run_id": "1" * 32}
+        interrupted = qualify.QualificationFailure("synthetic stop timeout")
+        recovered = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.object(
+                    qualify, "_primary", side_effect=[interrupted, recovered]) as primary, \
+                mock.patch.object(qualify, "read_state", return_value={
+                    "run_id": manifest["run_id"], "stage": "STOPPING"}), \
+                mock.patch.object(qualify, "_verify_completed_cleanup") as verify, \
+                self.assertRaisesRegex(
+                    qualify.QualificationFailure, "synthetic stop timeout"):
+            qualify._normal_stop(
+                Path("/synthetic/swapzctl"), manifest, None, set(),
+                "f13428f6-01", 60)
+        self.assertEqual(
+            [call.args[1] for call in primary.call_args_list],
+            ["stop", "recover"])
+        verify.assert_called_once()
+
     def test_definite_primary_stop_failure_is_not_masked_by_sampler_blocked(self):
         manifest = {"run_id": "1" * 32}
         active = {"mapper_device": (252, 1), "mapper_uuid": "SWAPZ-PRIMARY-" + "1" * 32,
@@ -990,6 +1140,60 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         admission.require.assert_called_once_with("cycle-1")
         normal_stop.assert_called_once()
         self.assertIsNone(normal_stop.call_args.args[2])
+
+    def test_workload_keyboard_interrupt_still_requests_normal_stop(self):
+        run_id = "1" * 32
+        manifest = {"run_id": run_id}
+        active = {
+            "mapper_device": (252, 1),
+            "mapper_uuid": "SWAPZ-PRIMARY-" + run_id,
+            "swap_path": "/dev/dm-1",
+            "swap_uuid": "2" * 32,
+            "swap_priority": 5,
+        }
+        prepare = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0,
+            stdout=f"PRIMARY_PREPARE=READY run_id={run_id} source={'2' * 40} "
+                   "logical_pages=1 logical_bytes=4096 swap_kib=0\n",
+            stderr="")
+        start = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0,
+            stdout=f"PRIMARY_START=ACTIVE run_id={run_id} "
+                   "mapper=/dev/mapper/swapz-primary swapon=true\n",
+            stderr="")
+        normal_stop = mock.Mock(return_value={"normal": True})
+        admission = mock.Mock()
+        with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+                mock.patch.object(qualify, "_validate_precycle_state"), \
+                mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
+                mock.patch.object(qualify, "_reject_relevant_kernel_errors"), \
+                mock.patch.object(qualify, "_primary", side_effect=[prepare, start]), \
+                mock.patch.object(qualify, "read_state", side_effect=[
+                    {"run_id": run_id, "stage": "READY"},
+                    {"run_id": run_id, "stage": "ACTIVE"},
+                ]), \
+                mock.patch.object(qualify, "read_manifest", return_value=manifest), \
+                mock.patch.object(qualify, "_validate_prepared_manifest"), \
+                mock.patch.object(
+                    qualify, "verify_loaded_module_provenance",
+                    return_value={"build_source_sha": "2" * 40}), \
+                mock.patch.object(
+                    qualify, "verify_active_mapper", return_value=active), \
+                mock.patch.object(
+                    qualify, "_run_workload", side_effect=KeyboardInterrupt()), \
+                mock.patch.object(qualify, "_normal_stop", normal_stop), \
+                self.assertRaises(KeyboardInterrupt):
+            qualify.run_cycle(
+                1, swapzctl=Path("/synthetic/swapzctl"),
+                oracle_path=Path("/synthetic/oracle"),
+                validated_source="2" * 40,
+                plan={}, selector_partuuid="f13428f6-01",
+                target_device=(8, 1), target_parent_device=(8, 0),
+                workload_mib=384, resident_mib=128, swap_limit_mib=384,
+                timeout_seconds=60, prior_run_ids=set(),
+                prior_swap_uuids=set(), admission=admission)
+        normal_stop.assert_called_once()
+        self.assertEqual(normal_stop.call_args.args[2], active)
 
     def test_failed_start_in_recovery_state_uses_only_primary_recover(self):
         manifest = {"run_id": "1" * 32}
