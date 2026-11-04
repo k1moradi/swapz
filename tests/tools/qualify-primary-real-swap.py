@@ -292,7 +292,7 @@ class SourceAdmissionClient:
         raise Blocked("source admission response is oversized")
 
     def require(self, phase: str) -> str:
-        if not re.fullmatch(r"(?:initial|final|published|cycle-[1-4])", phase):
+        if not re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase):
             raise Blocked("source admission phase is invalid")
         if self._physical_control_inputs_sha256 is None:
             raise Blocked("physical control source inputs are not pinned")
@@ -638,6 +638,87 @@ def _read_stable_file_bytes(
                     error_type=error_type)
 
 
+def _read_stable_relative_file_bytes(
+        root: Path, relative: Path, label: str,
+        error_type: type[Exception] = Blocked) -> bytes:
+    """Read a bounded regular file beneath root without following symlinks."""
+    if relative.is_absolute() or not relative.parts or any(
+            part in {"", ".", ".."} for part in relative.parts):
+        raise error_type(f"{label} relative path is not canonical")
+
+    descriptors: list[int] = []
+    try:
+        named_root = root.lstat()
+        if not stat.S_ISDIR(named_root.st_mode):
+            raise error_type(f"{label} root is not a directory")
+        root_descriptor = os.open(
+            root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        descriptors.append(root_descriptor)
+        opened_root = os.fstat(root_descriptor)
+        if not stat.S_ISDIR(opened_root.st_mode) or \
+                opened_root.st_dev != named_root.st_dev or \
+                opened_root.st_ino != named_root.st_ino:
+            raise error_type(f"{label} root identity changed before open")
+
+        directory_descriptor = root_descriptor
+        for component in relative.parts[:-1]:
+            next_descriptor = os.open(
+                component,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=directory_descriptor,
+            )
+            descriptors.append(next_descriptor)
+            if not stat.S_ISDIR(os.fstat(next_descriptor).st_mode):
+                raise error_type(f"{label} parent is not a directory")
+            directory_descriptor = next_descriptor
+
+        file_descriptor = os.open(
+            relative.parts[-1],
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=directory_descriptor,
+        )
+        descriptors.append(file_descriptor)
+        opened_before = os.fstat(file_descriptor)
+        if not stat.S_ISREG(opened_before.st_mode):
+            raise error_type(f"{label} is not a regular file")
+
+        payload = bytearray()
+        while len(payload) <= MAX_PHYSICAL_SOURCE_BYTES:
+            chunk = os.read(file_descriptor, min(
+                1024 * 1024, MAX_PHYSICAL_SOURCE_BYTES + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        if len(payload) > MAX_PHYSICAL_SOURCE_BYTES:
+            raise error_type(f"{label} exceeds the bounded source input size")
+
+        opened_after = os.fstat(file_descriptor)
+        named_after = os.stat(
+            relative.parts[-1], dir_fd=directory_descriptor,
+            follow_symlinks=False)
+        root_after = root.lstat()
+        if _stable_file_identity(opened_after) != _stable_file_identity(opened_before) or \
+                _stable_file_identity(named_after) != _stable_file_identity(opened_after) or \
+                _stable_file_identity(root_after) != _stable_file_identity(opened_root) or \
+                len(payload) != opened_after.st_size:
+            raise error_type(f"{label} changed while being read")
+        return bytes(payload)
+    except (Blocked, QualificationFailure):
+        raise
+    except OSError as exc:
+        raise error_type(f"cannot read {label}: {exc}") from exc
+    finally:
+        original_error = sys.exc_info()[1]
+        cleanup_errors = []
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError as cleanup_error:
+                cleanup_errors.append(f"{label} descriptor: {cleanup_error}")
+        _raise_cleanup_errors(
+            original_error, cleanup_errors, error_type=error_type)
+
+
 def _sha256_file(
         path: Path, *, error_type: type[Exception] = Blocked) -> str:
     """Hash a stable regular file without buffering the entire artifact."""
@@ -689,52 +770,12 @@ def pin_real_swap_oracle(oracle_path: Path, private_directory: Path,
     """Pin exact commit-bound oracle bytes before admitted mutation."""
     if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
         raise Blocked("validated real-swap oracle digest is malformed")
-    try:
-        canonical = REAL_SWAP_ORACLE.resolve(strict=True)
-        supplied = oracle_path.resolve(strict=True)
-    except OSError as exc:
-        raise Blocked(f"cannot resolve real-swap oracle: {exc}") from exc
-    if supplied != canonical:
+    supplied = Path(os.path.abspath(os.fspath(oracle_path)))
+    if supplied != REAL_SWAP_ORACLE:
         raise Blocked("real-swap oracle must be the exact source-controlled oracle")
-
-    source_fd = -1
-    try:
-        named_before = canonical.stat()
-        source_fd = os.open(canonical, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-        opened = os.fstat(source_fd)
-        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 or \
-                opened.st_dev != named_before.st_dev or opened.st_ino != named_before.st_ino:
-            raise Blocked("real-swap oracle identity is unsafe")
-        payload = bytearray()
-        while True:
-            chunk = os.read(source_fd, 1024 * 1024)
-            if not chunk:
-                break
-            payload.extend(chunk)
-        opened_after = os.fstat(source_fd)
-        named_after = canonical.stat()
-        if (opened_after.st_dev, opened_after.st_ino, opened_after.st_size,
-                opened_after.st_mtime_ns, opened_after.st_ctime_ns) != (
-                    opened.st_dev, opened.st_ino, opened.st_size,
-                    opened.st_mtime_ns, opened.st_ctime_ns) or \
-                named_after.st_dev != opened.st_dev or \
-                named_after.st_ino != opened.st_ino:
-            raise Blocked("real-swap oracle changed while being pinned")
-        if len(payload) != opened.st_size:
-            raise Blocked("real-swap oracle read was incomplete")
-    except OSError as exc:
-        raise Blocked(f"cannot pin real-swap oracle: {exc}") from exc
-    finally:
-        original_error = sys.exc_info()[1]
-        if source_fd >= 0:
-            try:
-                os.close(source_fd)
-            except OSError as cleanup_error:
-                _raise_cleanup_errors(
-                    original_error,
-                    [f"real-swap oracle source descriptor: {cleanup_error}"],
-                    error_type=Blocked)
-
+    payload = _read_stable_relative_file_bytes(
+        ROOT, Path("tests/tools/primary-real-swap-oracle.py"),
+        "real-swap oracle")
     digest = hashlib.sha256(payload).hexdigest()
     if digest != expected_sha256:
         raise Blocked(
@@ -813,8 +854,8 @@ def pin_physical_control_inputs(
     hashes: dict[str, str] = {}
     for relative_text in PHYSICAL_CONTROL_INPUT_PATHS:
         relative = Path(relative_text)
-        payload = _read_stable_file_bytes(
-            ROOT / relative, f"physical control source {relative_text}")
+        payload = _read_stable_relative_file_bytes(
+            ROOT, relative, f"physical control source {relative_text}")
         digest = hashlib.sha256(payload).hexdigest()
         destination_parent = source_root
         for component in relative.parent.parts:
@@ -926,7 +967,10 @@ def require_pinned_physical_control_inputs(
                 stat.S_IMODE(identity.st_mode) != 0o400 or identity.st_nlink != 1:
             raise Blocked(
                 f"physical control source identity unsafe at {phase}: {relative}")
-        if _sha256_file(path) != expected:
+        payload = _read_stable_relative_file_bytes(
+            source_root, Path(relative),
+            f"private physical control source {relative}")
+        if hashlib.sha256(payload).hexdigest() != expected:
             raise Blocked(
                 f"physical control source differs from validated commit at "
                 f"{phase}: {relative}")
@@ -936,8 +980,9 @@ def require_pinned_physical_control_inputs(
     for relative in PHYSICAL_CONTROL_INPUT_PATHS:
         if not relative.endswith((".c", ".h")):
             continue
-        payload = _read_stable_file_bytes(
-            source_root / relative, f"private source include graph {relative}")
+        payload = _read_stable_relative_file_bytes(
+            source_root, Path(relative),
+            f"private source include graph {relative}")
         if hashlib.sha256(payload).hexdigest() != expected_hashes[relative]:
             raise Blocked(
                 f"physical control source differs from validated commit at "
@@ -968,6 +1013,47 @@ def require_pinned_physical_control_inputs(
                     f"{phase}: {relative} -> {header}")
 
 
+def _physical_control_expected_dependencies(source_root: Path) -> set[Path]:
+    return {
+        Path(os.path.normpath(os.fspath(source_root / relative)))
+        for relative in PHYSICAL_CONTROL_INPUT_PATHS
+        if relative.endswith((".c", ".h"))
+    }
+
+
+def _verify_physical_compile_dependencies(
+        source_root: Path, dependency_output: str) -> None:
+    """Require the compiler's actual non-system dependency closure to be pinned."""
+    if not isinstance(dependency_output, str) or "\x00" in dependency_output:
+        raise Blocked("physical compile dependency output is malformed")
+    logical_output = dependency_output.replace("\\\n", " ")
+    observed: set[Path] = set()
+    rule_count = 0
+    for raw_line in logical_output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if ":" not in line:
+            raise Blocked("physical compile dependency output is malformed")
+        target, dependencies = line.split(":", 1)
+        if not target.strip():
+            raise Blocked("physical compile dependency output is malformed")
+        rule_count += 1
+        for token in dependencies.split():
+            # The private tempfile source paths have no Make escaping. Reject
+            # escaped or relative paths rather than interpreting them loosely.
+            if "\\" in token:
+                raise Blocked("physical compile dependency path is escaped")
+            dependency = Path(os.path.normpath(token))
+            if not dependency.is_absolute():
+                raise Blocked("physical compile dependency path is not absolute")
+            observed.add(dependency)
+    expected = _physical_control_expected_dependencies(source_root)
+    if rule_count != 2 or observed != expected:
+        raise Blocked(
+            "physical compile dependency closure differs from pinned source inventory")
+
+
 def build_physical_execution_control(validated_source: str,
                                      qualified_swapzctl: Path,
                                      private_directory: Path,
@@ -988,11 +1074,12 @@ def build_physical_execution_control(validated_source: str,
     if qualified_control.name != "swapzctl" or qualified_control.parent.name != "sbin":
         raise Blocked("qualified control must use installed <prefix>/sbin/swapzctl layout")
 
+    version_payload = _read_stable_relative_file_bytes(
+        source_root, Path("src/kernel/VERSION"), "exact-source version")
     try:
-        version = (source_root / "src/kernel/VERSION").read_text(
-            encoding="ascii").strip()
-    except OSError as exc:
-        raise Blocked(f"cannot read exact-source version: {exc}") from exc
+        version = version_payload.decode("ascii").strip()
+    except UnicodeError as exc:
+        raise Blocked("exact-source version is not valid ASCII") from exc
     version_literal = _c_string_literal(version, "swapz version")
     control_literal = _c_string_literal(
         str(qualified_control), "qualified control path")
@@ -1001,17 +1088,32 @@ def build_physical_execution_control(validated_source: str,
     private_directory.mkdir(mode=0o700, parents=False, exist_ok=False)
     os.chmod(private_directory, 0o700)
     output = private_directory / "swapzctl"
-    command = [
-        "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
+    # These flags are part of the commit-bound helper bytes admitted by the
+    # unprivileged parent. Reuse the exact tuple for dependency discovery and
+    # compilation so include resolution cannot silently use different options.
+    compile_flags = [
+        "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
         f"-DSWAPZ_BUILD_SOURCE_SHA={source_literal}",
         "-DSWAPZ_BUILD_SOURCE_CLEAN=1",
         f"-DSWAPZ_VERSION={version_literal}",
         "-DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1",
         f"-DSWAPZ_PRIMARY_PHYSICAL_QUALIFIED_CONTROL={control_literal}",
+    ]
+    sources = [
         str(source_root / "src/userspace/swapzctl.c"),
         str(source_root / "src/userspace/swapz-primary.c"),
-        "-o", str(output),
     ]
+    dependency_result = _run(
+        ["cc", *compile_flags, "-MM", *sources],
+        check=False, timeout=120, cwd=private_directory)
+    if dependency_result.returncode != 0:
+        detail = (dependency_result.stderr or dependency_result.stdout).strip().replace(
+            "\n", "; ")
+        raise Blocked(
+            "cannot resolve exact-source physical compile dependencies: " + detail)
+    _verify_physical_compile_dependencies(
+        source_root, dependency_result.stdout)
+    command = ["cc", *compile_flags, *sources, "-o", str(output)]
     # The compiler must not resolve relative inputs against the mutable checkout.
     # System headers and toolchain are root-owned host prerequisites.
     result = _run(command, check=False, timeout=120, cwd=private_directory)
@@ -3831,19 +3933,15 @@ def _execute_admitted(
             "cycles": cycles,
         }
         # A long physical run must not qualify a source superseded on main.
-        # Perform the final Git/source proof after all result inputs and owned
-        # workspace cleanup have stabilized. Publish a non-PASS disposition,
-        # recheck main, then close the channel and commit PASS evidence.
+        # Stabilize every result input, persist a non-PASS publication marker,
+        # then use the existing final admission immediately before channel close.
         require_final_installed_artifact_identity(
             qualified_swapzctl, artifact_hashes)
+        evidence.update("FINAL_PUBLICATION_PENDING", cycles=cycles)
         # Policy and target authorization were consumed from commit-bound
-        # private snapshots. The final admission re-proves that exact source
+        # private snapshots. This final admission re-proves that exact source
         # commit is still canonical after the private workspace is removed.
         admission.require("final")
-        # Publish only a non-PASS pending disposition before the last parent
-        # source proof; a failed proof can never strand a durable false PASS.
-        evidence.update("FINAL_PUBLICATION_PENDING", cycles=cycles)
-        admission.require("published")
         if terminal_cleanup is not None:
             terminal_cleanup()
         evidence.finish("PASS", cycles=cycles, result=result)
