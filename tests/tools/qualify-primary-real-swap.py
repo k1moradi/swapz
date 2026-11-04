@@ -1797,7 +1797,9 @@ def preflight_workload_environment(workload_mib: int, resident_mib: int,
     try:
         _read_uint(cgroup / "memory.swap.current")
         _read_uint(cgroup / "memory.swap.peak")
-        _memory_events(cgroup / "memory.events")
+        initial_events = _memory_events(cgroup / "memory.events")
+        if any(initial_events[key] != 0 for key in ("oom", "oom_kill")):
+            raise Blocked("fresh preflight cgroup has preexisting OOM events")
         _psi_total(cgroup / "memory.pressure")
     finally:
         original_error = sys.exc_info()[1]
@@ -2132,6 +2134,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
     # The first telemetry read may fail before the workload's main try/finally.
     try:
         events_before = _memory_events(cgroup / "memory.events")
+        # A newly created dedicated cgroup must start at zero: accepting a
+        # nonzero baseline would conceal an OOM before the first fill sample.
+        if any(events_before[key] != 0 for key in ("oom", "oom_kill")):
+            raise QualificationFailure(
+                "fresh dedicated oracle cgroup already recorded OOM events")
         psi_before = _psi_total(cgroup / "memory.pressure")
     except BaseException as original_error:
         try:
