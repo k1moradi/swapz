@@ -31,7 +31,27 @@ No legacy, recall, NBD, pressure, alternate-module, or historical-model subsyste
 
 ## Supported commands
 
-The root Make interface is exactly `make`, `make install`, `make uninstall`, `make test` and the development-only `make fast_test`. `make fast_test` builds the working tree (dirty trees allowed), runs native/replay checks and three raw-versus-swapz pairs per default owned-`null_blk` scenario, and prints development tables; optional `SCENARIOS=fast-mixed,fast-w8` and `REPEAT=n` select scenarios and repeats. Every emulated scenario uses the production delta64 + `DELTA64_SHUF8` + LZ4 stack; there is no delta64-off development benchmark. Its noise-screened results are development observations only, not an exact-source qualification or the paired confidence-interval evidence required by `make test`. Installation consumes only the exact artifacts already qualified by `make test`; it does not rebuild or re-sign them, and it never loads the module, creates a mapper, or activates swap. Generic loaded qualification remains positively owned RAM-backed `null_blk`. Physical backing is disabled by default and still requires the explicit module opt-in plus a matching SWZ authorization header. The current dedicated SD-card production mission has standing owner authorization for bounded destructive/live-swap work as defined in [AGENT_CONTEXT.md](AGENT_CONTEXT.md); that standing authority does not permit reboot, force removal, device substitution or unrelated block-device mutation.
+The five root goals are `make` (build), `make install` (admit qualified
+artifacts), `make uninstall` (owned removal), `make test` (official
+qualification), and `make fast_test` (development only). Installation
+never rebuilds, re-signs, loads a module, creates a mapper, or activates
+swap. See [the root Make API](compile.md#root-make-api).
+
+`make fast_test` accepts dirty trees, runs native/replay checks and defaults
+to three raw-versus-swapz repeats per owned-RAM `null_blk` scenario.
+`make fast_test SCENARIOS=fast-mixed,fast-w8 REPEAT=3` narrows the loop.
+It needs noninteractive privilege for owned-device work; its noise-screened
+results are directional, not matched confidence-interval evidence. It
+never qualifies a source or publishes `test_results.json`. Every emulated
+scenario uses the fixed delta64 + `DELTA64_SHUF8` byte shuffle + LZ4 stack.
+
+A native/rootless or CI PASS is **not** a loaded/physical PASS. Only
+`make test` can qualify exact-source artifacts on positively owned RAM
+backing; physical acceptance is a separate gate under the
+[frozen policy](production-acceptance.json) and
+[current device authorization](AGENT_CONTEXT.md). A full `make test`
+must report BLOCKED (nonzero) when safe noninteractive loaded qualification
+is unavailable.
 
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
