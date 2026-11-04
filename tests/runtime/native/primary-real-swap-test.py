@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import sys
 import struct
@@ -669,6 +670,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                                 len(workspace_cleanup_calls) == 1:
                             raise OSError(
                                 "synthetic terminal workspace cleanup failure")
+                        shutil.rmtree(workspace_path)
 
                 terminal_cleanup_calls = []
 
@@ -781,6 +783,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "PersistentEvidence", FakeEvidence))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "require_final_installed_artifact_identity"))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "run_cycle",
@@ -1340,7 +1345,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             vm_before_verify={"pswpin": 0, "pswpout": 10},
             vm_after_verify={"pswpin": 10, "pswpout": 10},
             oracle={"verified_pages": 1024, "verified_bytes": 1024 * qualify.PAGE_BYTES,
-                    "mismatches": 0, "digest": "aa", "expected_digest": "aa"},
+                    "mismatches": 0, "digest": "aa" * 32, "expected_digest": "aa" * 32},
         )
 
     def test_workload_pass_requires_swap_usage_target_write_read_lower_io_and_byte_oracle(self):
@@ -2084,6 +2089,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             cgroup = Path(directory)
             membership = cgroup / "cgroup.procs"
             workers = [mock.Mock(pid=501), mock.Mock(pid=502)]
+            for worker in workers:
+                worker.poll.return_value = None
             membership.write_text("501\n502\n", encoding="ascii")
             qualify.require_oracle_worker_cgroup_ownership(cgroup, workers)
             membership.write_text("501\n", encoding="ascii")
@@ -2260,6 +2267,188 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             final = json.loads(evidence.path.read_text(encoding="utf-8"))
             self.assertEqual(final["status"], "BLOCKED")
             self.assertEqual(final["reason"], "synthetic evidence gap")
+
+
+    def test_exited_worker_pid_is_not_valid_live_cgroup_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            membership = cgroup / "cgroup.procs"
+            workers = [mock.Mock(pid=501), mock.Mock(pid=502)]
+            workers[0].poll.return_value = None
+            workers[1].poll.return_value = 0
+            membership.write_text("501\n502\n", encoding="ascii")
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "exited oracle PID"):
+                qualify.require_oracle_worker_cgroup_ownership(
+                    cgroup, workers, allow_worker_exit=True)
+            membership.write_text("501\n", encoding="ascii")
+            qualify.require_oracle_worker_cgroup_ownership(
+                cgroup, workers, allow_worker_exit=True)
+            workers[1].poll.return_value = None
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "live oracle worker"):
+                qualify.require_oracle_worker_cgroup_ownership(
+                    cgroup, workers, allow_worker_exit=True)
+
+    def test_oracle_short_read_fails_without_byte_exact_success(self):
+        class ShortReadMemory:
+            def __init__(self):
+                self.contents = bytearray(oracle.PAGE_BYTES)
+                self.closed = False
+
+            def __getitem__(self, key):
+                if isinstance(key, slice):
+                    return self.contents[key][:-1]
+                return self.contents[key]
+
+            def __setitem__(self, key, value):
+                self.contents[key] = value
+
+            def close(self):
+                self.closed = True
+
+        allocation = ShortReadMemory()
+        commands = iter(("FILL", "VERIFY"))
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(oracle, "MIB", oracle.PAGE_BYTES), \
+                mock.patch.object(oracle, "MIN_MIB", 1), \
+                mock.patch.object(oracle, "MAX_MIB", 1), \
+                mock.patch.object(oracle, "_disable_dumps"), \
+                mock.patch.object(oracle, "_read_command", side_effect=lambda: next(commands)), \
+                mock.patch.object(oracle.mmap, "mmap", return_value=allocation), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = oracle.run_workload("ab" * 16, 1)
+        self.assertEqual(result, 1)
+        self.assertTrue(allocation.closed)
+        self.assertIn("short oracle page read", stderr.getvalue())
+        self.assertNotIn("ORACLE_VERIFIED=", stdout.getvalue())
+
+    def test_nonfinite_oracle_records_are_not_accepted_as_json(self):
+        for malformed in (b'{"elapsed_seconds":NaN}', b'{"elapsed_seconds":1e999}'):
+            with self.subTest(malformed=malformed):
+                read_fd, write_fd = os.pipe()
+                try:
+                    with os.fdopen(read_fd, "rb", buffering=0) as output:
+                        process = mock.Mock(stdout=output)
+                        process.poll.return_value = None
+                        os.write(write_fd, b"ORACLE_FILLED=" + malformed + b"\n")
+                        with self.assertRaisesRegex(
+                                qualify.QualificationFailure, "malformed JSON"):
+                            qualify._oracle_event(
+                                process, "ORACLE_FILLED=",
+                                time.monotonic() + 1, lambda: None, bytearray())
+                finally:
+                    os.close(write_fd)
+
+    def test_verified_digest_must_be_canonical_and_complete(self):
+        valid_record = {
+            "verified_pages": 16,
+            "verified_bytes": 16 * qualify.PAGE_BYTES,
+            "mismatches": 0,
+            "digest": "ab" * 32,
+            "expected_digest": "ab" * 32,
+        }
+        self.assertEqual(
+            qualify.aggregate_oracle_verification([valid_record, valid_record])["mismatches"],
+            0)
+        for invalid in (
+                {"verified_pages": 16.0},
+                {"verified_bytes": str(16 * qualify.PAGE_BYTES)},
+                {"mismatches": False},
+                {"digest": ("AB" * 32)},
+                {"expected_digest": "ab " * 32},
+                {"digest": None},
+                {"digest": "00" * 31}):
+            with self.subTest(invalid=invalid), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.aggregate_oracle_verification([
+                    {**valid_record, **invalid}, valid_record])
+        evidence = self.positive_evidence()
+        evidence["oracle"] = {
+            **evidence["oracle"], "digest": None, "expected_digest": None}
+        with self.assertRaises(qualify.QualificationFailure):
+            qualify.evaluate_workload_evidence(**evidence)
+
+    def test_final_artifact_proof_rejects_stale_installed_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            paths = {
+                "formatter_sha256": prefix / "sbin/swapzctl",
+                "module_sha256": prefix / "libexec/swapz/dm-swapz.ko",
+                "oracle_sha256": prefix / "libexec/swapz/device-roundtrip",
+            }
+            for key, path in paths.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(key.encode("ascii"))
+            hashes = {
+                key: hashlib.sha256(path.read_bytes()).hexdigest()
+                for key, path in paths.items()
+            }
+            qualify.require_final_installed_artifact_identity(
+                paths["formatter_sha256"], hashes)
+            for key, path in paths.items():
+                with self.subTest(artifact=key):
+                    original = path.read_bytes()
+                    path.write_bytes(b"replaced artifact")
+                    with self.assertRaisesRegex(
+                            qualify.QualificationFailure, f"installed {key} bytes changed"):
+                        qualify.require_final_installed_artifact_identity(
+                            paths["formatter_sha256"], hashes)
+                    path.write_bytes(original)
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "inventory is incomplete"):
+                qualify.require_final_installed_artifact_identity(
+                    paths["formatter_sha256"], {"formatter_sha256": hashes["formatter_sha256"]})
+
+    def test_linux_swap_uuid_uses_wire_order_not_host_endianness(self):
+        header = bytearray(self.make_swap_header())
+        header[
+            qualify.SWAP_UUID_OFFSET:qualify.SWAP_UUID_OFFSET + qualify.SWAP_UUID_BYTES
+        ] = bytes(range(16))
+        self.assertEqual(
+            qualify.linux_swap_header(bytes(header), 1024)["uuid"],
+            "00010203-0405-0607-0809-0a0b0c0d0e0f")
+
+    def test_changed_qualification_report_cannot_pass_initial_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "qualified.json"
+            source_sha = "a" * 40
+            original = {
+                "schema": "swapz-test-results-v1",
+                "source_sha": source_sha,
+                "tested_commit_sha": source_sha,
+                "overall": "PASS",
+                "qualification": "RAM_BACKED_NULL_BLK_ONLY",
+                "qualified_artifacts": {
+                    "status": "AVAILABLE",
+                    "formatter_sha256": "1" * 64,
+                    "module_sha256": "2" * 64,
+                    "oracle_sha256": "3" * 64,
+                },
+            }
+            report_path.write_text(json.dumps(original), encoding="utf-8")
+            initial_digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            modified = {**original, "overall": "FAIL"}
+            report_path.write_text(json.dumps(modified), encoding="utf-8")
+            with mock.patch.object(
+                    qualify, "installed_artifact_paths",
+                    side_effect=AssertionError("must reject report before installed reads")):
+                with self.assertRaisesRegex(
+                        qualify.Blocked, "imported qualification report digest"):
+                    qualify.verify_provenance(
+                        {
+                            "control_build_source_clean": True,
+                            "qualification_report_valid": True,
+                            "qualification_source_matches_build": True,
+                            "live_artifact_hashes_read": True,
+                            "live_artifacts_match_qualification": True,
+                            "module_mapper_inventory_read": True,
+                            "swapz_mapper_absent": True,
+                            "dm_swapz_module_loaded": False,
+                            "control_build_source_sha": source_sha,
+                            "qualification_report_sha256": initial_digest,
+                        },
+                        source_sha, report_path, Path(directory) / "sbin/swapzctl")
 
 
 if __name__ == "__main__":
