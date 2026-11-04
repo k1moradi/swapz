@@ -235,6 +235,17 @@ def _median_twice(values: list[int]) -> int:
     return ordered[middle - 1] + ordered[middle]
 
 
+def _bounded_observed(value: Any) -> str:
+    """Bound malformed evidence diagnostics without exposing raw artifacts."""
+    if type(value) is int:
+        return str(value) if value.bit_length() <= 64 else "<integer_over_64_bits>"
+    if type(value) in (bool, float) or value is None:
+        return repr(value)
+    if isinstance(value, str):
+        return repr(value[:80]) + (" (truncated)" if len(value) > 80 else "")
+    return f"<{type(value).__name__}>"
+
+
 def _timedelta_ns(value: datetime.timedelta) -> int:
     """Convert a timedelta to nanoseconds without floating-point rounding."""
     return (
@@ -392,10 +403,13 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
             after < before):
         raise ValueError("metadata RAM host binding time envelope is invalid")
     samples = trace.get("samples") if isinstance(trace, dict) else None
-    if (
-            not isinstance(samples, list) or not samples or
-            trace.get("host_boot_id") != boot_id):
-        raise ValueError("metadata RAM trace host boot binding mismatch")
+    if not isinstance(samples, list) or not samples:
+        raise ValueError("metadata RAM trace host samples are missing")
+    if trace.get("host_boot_id") != boot_id:
+        raise ValueError(
+            "metadata RAM trace host boot binding mismatch: "
+            f"metric=host_boot_id observed={_bounded_observed(trace.get('host_boot_id'))} "
+            f"expected={boot_id} required=same_loaded_host_boot")
     try:
         first = datetime.datetime.fromisoformat(
             samples[0]["timestamp_utc"].replace("Z", "+00:00"))
@@ -436,20 +450,24 @@ def validate_metadata_ram_trace(
             trace["meminfo_unit"] != "kB" or
             not isinstance(source_sha, str) or
             not SOURCE_SHA.fullmatch(source_sha) or
-            trace["source_sha"] != source_sha or
             not isinstance(mapper_uuid, str) or
             not MAPPER_UUID.fullmatch(mapper_uuid) or
             trace["mapper_uuid"] != mapper_uuid or
             not isinstance(trace["host_boot_id"], str) or
             not BOOT_ID.fullmatch(trace["host_boot_id"])):
         raise ValueError("metadata RAM trace provenance is invalid")
+    if trace["source_sha"] != source_sha:
+        raise ValueError(
+            "metadata RAM trace source binding mismatch: "
+            f"metric=source_sha observed={_bounded_observed(trace['source_sha'])} "
+            f"expected={source_sha} required=exact_release_source")
     if (
             type(trace["sampling_interval_ns"]) is not int or
             trace["sampling_interval_ns"] != SAMPLING_INTERVAL_NS):
         raise ValueError(
             "metadata RAM trace sampling declaration is invalid: "
             f"metric=sampling_interval_ns "
-            f"observed={trace['sampling_interval_ns']!r} "
+            f"observed={_bounded_observed(trace['sampling_interval_ns'])} "
             f"required={SAMPLING_INTERVAL_NS}")
 
     samples = trace["samples"]
@@ -491,7 +509,7 @@ def validate_metadata_ram_trace(
                 not 0 < monotonic_ns <= MAX_UINT64):
             raise ValueError(
                 "metadata RAM sample counter is invalid: "
-                f"metric=monotonic_ns observed={monotonic_ns!r} "
+                f"metric=monotonic_ns observed={_bounded_observed(monotonic_ns)} "
                 f"minimum=1 maximum={MAX_UINT64}")
         for metric, value, minimum in (
                 ("MemAvailable_kib", mem_available_kib, 1),
@@ -502,17 +520,17 @@ def validate_metadata_ram_trace(
                     not minimum <= value <= maximum_kib):
                 raise ValueError(
                     "metadata RAM sample counter is invalid: "
-                    f"metric={metric} observed={value!r} "
+                    f"metric={metric} observed={_bounded_observed(value)} "
                     f"minimum={minimum} maximum={maximum_kib}")
         if type(sample["mapper_present"]) is not bool:
             raise ValueError(
                 "metadata RAM mapper-presence evidence is invalid: "
-                f"metric=mapper_present observed={sample['mapper_present']!r} "
+                f"metric=mapper_present observed={_bounded_observed(sample['mapper_present'])} "
                 "required=boolean")
         if not isinstance(utc_text, str) or not UTC_TIME.fullmatch(utc_text):
             raise ValueError(
                 "metadata RAM sample timestamp is invalid: "
-                f"metric=timestamp_utc observed={utc_text!r} "
+                f"metric=timestamp_utc observed={_bounded_observed(utc_text)} "
                 "required=canonical_UTC_Z")
         try:
             utc_time = datetime.datetime.fromisoformat(
