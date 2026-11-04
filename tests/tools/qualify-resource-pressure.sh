@@ -3,9 +3,28 @@
 set -Eeuo pipefail
 umask 077
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-cd "$ROOT"
-source "$ROOT/tests/tools/clear-tmp-before-memory-check.sh"
+script_source="${BASH_SOURCE[0]}"
+case "$script_source" in
+    */*) script_directory="${script_source%/*}" ;;
+    *) script_directory=. ;;
+esac
+ROOT="$(cd -- "$script_directory/../.." && pwd -P)" || {
+    printf '%s\n' 'BLOCKED: ID36 cannot resolve the qualification checkout root' >&2
+    exit 2
+}
+cd "$ROOT" || {
+    printf '%s\n' 'BLOCKED: ID36 cannot enter the qualification checkout root' >&2
+    exit 2
+}
+cleanup_helper="$ROOT/tests/tools/clear-tmp-before-memory-check.sh"
+[[ -r $cleanup_helper ]] || {
+    printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper unavailable; restore the readable checkout helper before admission' >&2
+    exit 2
+}
+if ! source "$cleanup_helper"; then
+    printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper could not be loaded safely' >&2
+    exit 2
+fi
 
 VALIDATED_SOURCE=""
 SHARED_PLAN=""
@@ -316,6 +335,19 @@ write_cgroup_control() {
             "$control" >&2
         return 2
     fi
+}
+
+pair_blocked_is_prerequisite() {
+    case "$1" in
+        'kernel LZ4 compressor unavailable'|\
+        'shared immutable replay plan missing or outside owned build root'|\
+        'retain all remaining resources for read-only investigation')
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 cleanup() {
@@ -732,12 +764,17 @@ if (( pair_rc != 0 )); then
         else
             pair_blocked_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'BLOCKED: ' 2>/dev/null || true)"
             if [[ -n $pair_blocked_reason ]]; then
-                printf 'BLOCKED: ID36 owned-RAM pair prerequisite after prewarm: %s\n' \
+                if pair_blocked_is_prerequisite "$pair_blocked_reason"; then
+                    printf 'BLOCKED: ID36 owned-RAM pair prerequisite after prewarm: %s\n' \
+                        "$pair_blocked_reason" >&2
+                    exit 2
+                fi
+                printf 'FAIL: ID36 owned-RAM pair failed: %s\n' \
                     "$pair_blocked_reason" >&2
-                exit 2
+            else
+                printf 'FAIL: ID36 owned-RAM pair failed rc:%s high:%s cpu_psi_usec:%s oom:%s oom_kill:%s without a bounded diagnostic\n' \
+                    "$pair_rc" "$high_delta" "$cpu_some_delta" "$oom_delta" "$oom_kill_delta" >&2
             fi
-            printf 'FAIL: ID36 owned-RAM pair failed rc:%s high:%s cpu_psi_usec:%s oom:%s oom_kill:%s without a bounded diagnostic\n' \
-                "$pair_rc" "$high_delta" "$cpu_some_delta" "$oom_delta" "$oom_kill_delta" >&2
         fi
     fi
     exit 1
