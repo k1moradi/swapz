@@ -155,6 +155,24 @@ static int test_raw_and_invalid_cost(void)
 	return 0;
 }
 
+static int test_invalid_compressed_extent_classes(void)
+{
+	struct swapz_map map = { .valid = 1, .extent_blocks = 1,
+				  .payload_length = 3258 };
+	unsigned int extent_blocks;
+
+	for (extent_blocks = 0; extent_blocks < 8; ++extent_blocks) {
+		int legal = extent_blocks == 1 || extent_blocks == 2 ||
+			    extent_blocks == 4;
+
+		map.extent_blocks = extent_blocks;
+		CHECK((swapz_gc_live_byte_cost(&map) != 0) == legal);
+		CHECK((swapz_gc_estimated_io_cost(&map) != 0) == legal);
+		CHECK((swapz_gc_min_live_blocks(&map) != 0) == legal);
+	}
+	return 0;
+}
+
 static int test_exact_committed_payload_lengths(void)
 {
 	struct swapz_tx tx;
@@ -202,13 +220,138 @@ static int test_exact_committed_payload_lengths(void)
 	return 0;
 }
 
+/* Captured by the single serialized authority owner; never shared with I/O. */
+struct gc_cost_snapshot {
+	struct swapz_map authoritative_map;
+	swapz_u32 mapped_count, live_bytes, io_cost;
+	swapz_u16 min_blocks;
+	swapz_u32 committed_blocks, abandoned_blocks;
+};
+
+static struct gc_cost_snapshot gc_cost_capture(swapz_u32 logical)
+{
+	const swapz_u32 segment = maps[logical].start_block /
+				 SWAPZ_SEGMENT_BLOCKS;
+
+	return (struct gc_cost_snapshot) {
+		.authoritative_map = maps[logical],
+		.mapped_count = segment_maps[segment],
+		.live_bytes = segment_bytes[segment],
+		.io_cost = segment_io[segment],
+		.min_blocks = segment_min_blocks[segment],
+		.committed_blocks = a.committed_blocks,
+		.abandoned_blocks = a.abandoned_blocks,
+	};
+}
+
+static int gc_cost_check_rejected_write(
+	const char *phase, swapz_u32 logical, swapz_u32 attempted_block,
+	const struct gc_cost_snapshot *expected, int actual_error)
+{
+	const swapz_u32 segment = expected->authoritative_map.start_block /
+				 SWAPZ_SEGMENT_BLOCKS;
+
+	if (actual_error == -EIO && !a.in_flight &&
+	    !memcmp(&maps[logical], &expected->authoritative_map,
+		    sizeof(expected->authoritative_map)) &&
+	    segment_maps[segment] == expected->mapped_count &&
+	    segment_bytes[segment] == expected->live_bytes &&
+	    segment_io[segment] == expected->io_cost &&
+	    segment_min_blocks[segment] == expected->min_blocks &&
+	    a.committed_blocks == expected->committed_blocks &&
+	    a.abandoned_blocks == expected->abandoned_blocks + 1U)
+		return 0;
+
+	fprintf(stderr,
+		"GC_COST_FAIL phase=%s logical=%u physical=%u "
+		"expected_authority=previous_mapping expected_block=%u "
+		"expected_generation=%u actual_generation=%u "
+		"expected_errno=%d actual_errno=%d\n",
+		phase, logical, attempted_block,
+		expected->authoritative_map.start_block,
+		expected->authoritative_map.generation,
+		maps[logical].generation, -EIO, actual_error);
+	return 1;
+}
+
+static int test_failed_lower_writes_preserve_committed_costs(void)
+{
+	struct swapz_tx tx;
+	struct swapz_builder builder;
+	struct gc_cost_snapshot expected;
+	const swapz_u32 logical = 7;
+	unsigned int failure_case;
+	int actual_error;
+
+	CHECK(swapz_authority_init(&a, maps, live, classes, 32, 1024) == 0);
+	a.reuse_dead_segments = 1;
+	CHECK(swapz_enable_segment_rotation(&a, segment_roles, 4) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(&a, segment_maps, 4) == 0);
+	CHECK(swapz_enable_segment_gc_accounting(
+	      &a, segment_bytes, segment_io, segment_min_blocks, 4) == 0);
+	memset(p0, 0x47, sizeof(p0));
+	memset(bytes, 0x6b, sizeof(bytes));
+
+	/* Publish the first generation before injecting failed lower writes. */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(swapz_begin(&builder, bytes, sizeof(bytes), tx.sequence) == 0);
+	CHECK(swapz_append(&builder, logical, tx.records[0].generation,
+			   p0, sizeof(p0)) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(swapz_finish(&a, &tx, bytes, sizeof(bytes), 1, 0) == 0);
+	CHECK(maps[logical].valid && !maps[logical].raw);
+	CHECK(segment_maps[0] == 1);
+	CHECK(segment_bytes[0] == sizeof(p0) + sizeof(struct swapz_record));
+
+	for (failure_case = 0; failure_case < 2; ++failure_case) {
+		const swapz_u8 completed = failure_case == 0 ? 1 : 0;
+		const int lower_error = failure_case == 0 ? -EIO : 0;
+		const char *phase = failure_case == 0 ?
+			"compressed_error" : "compressed_short_write";
+
+		expected = gc_cost_capture(logical);
+		CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+		CHECK(segment_bytes[0] == expected.live_bytes);
+		actual_error = swapz_finish(&a, &tx, bytes, sizeof(bytes),
+					    completed, lower_error);
+		CHECK(!gc_cost_check_rejected_write(
+			phase, logical, tx.start_block, &expected, actual_error));
+	}
+
+	/* RAW changes the live cost only after a successful publication. */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(swapz_finish_raw(&a, &tx, bytes, 1, 0) == 0);
+	CHECK(maps[logical].valid && maps[logical].raw);
+	CHECK(segment_bytes[0] == SWAPZ_BLOCK_BYTES);
+	CHECK(segment_io[0] == 2U * SWAPZ_BLOCK_BYTES);
+	CHECK(segment_min_blocks[0] == 1);
+
+	for (failure_case = 0; failure_case < 2; ++failure_case) {
+		const swapz_u8 completed = failure_case == 0 ? 1 : 0;
+		const int lower_error = failure_case == 0 ? -EIO : 0;
+		const char *phase = failure_case == 0 ?
+			"raw_error" : "raw_short_write";
+
+		expected = gc_cost_capture(logical);
+		CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+		CHECK(segment_io[0] == expected.io_cost);
+		actual_error = swapz_finish_raw(&a, &tx, bytes,
+						completed, lower_error);
+		CHECK(!gc_cost_check_rejected_write(
+			phase, logical, tx.start_block, &expected, actual_error));
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
 
 	CHECK(test_bytes_vs_count_victim_policy() == 0); passed++;
 	CHECK(test_raw_and_invalid_cost() == 0); passed++;
+	CHECK(test_invalid_compressed_extent_classes() == 0); passed++;
 	CHECK(test_exact_committed_payload_lengths() == 0); passed++;
+	CHECK(test_failed_lower_writes_preserve_committed_costs() == 0); passed++;
 	CHECK(test_io_aware_cost_corrects_loaded_gc_counterexample() == 0); passed++;
 	CHECK(test_reclaim_headroom_preflight() == 0); passed++;
 	CHECK(test_proven_large_record_gc_block_bound() == 0); passed++;

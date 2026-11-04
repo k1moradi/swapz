@@ -4,6 +4,13 @@
 
 #include "authority.h"
 
+/* Only 1/2/4-block extents can carry authoritative GC records. */
+static inline int swapz_gc_valid_extent_blocks(swapz_u8 extent_blocks)
+{
+	return extent_blocks == 1 || extent_blocks == 2 ||
+	       extent_blocks == 4;
+}
+
 /*
  * This estimator runs over authoritative volatile metadata: no extra
  * lower reads during victim selection. Zero denotes corrupt/not-live input.
@@ -13,7 +20,8 @@
  */
 static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 {
-	if (!m || !m->valid)
+	if (!m || !m->valid ||
+	    !swapz_gc_valid_extent_blocks(m->extent_blocks))
 		return 0;
 	if (m->raw)
 		return m->extent_blocks == 1 &&
@@ -33,8 +41,7 @@ static inline swapz_u32 swapz_gc_estimated_io_cost_with_bytes(
 {
 	swapz_u32 reads;
 
-	if (!bytes || (m->extent_blocks != 1 && m->extent_blocks != 2 &&
-		       m->extent_blocks != 4))
+	if (!bytes || !swapz_gc_valid_extent_blocks(m->extent_blocks))
 		return 0;
 	reads = m->extent_blocks == 4 ? 3 : m->extent_blocks;
 	return bytes + reads * SWAPZ_BLOCK_BYTES;
@@ -96,7 +103,8 @@ static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
 
 static inline swapz_u8 swapz_gc_min_live_blocks(const struct swapz_map *m)
 {
-	if (!m || !m->valid)
+	if (!m || !m->valid ||
+	    !swapz_gc_valid_extent_blocks(m->extent_blocks))
 		return 0;
 	if (m->raw)
 		return m->payload_length == SWAPZ_BLOCK_BYTES &&

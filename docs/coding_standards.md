@@ -2267,6 +2267,16 @@ the exact mapped-page count, and any local link/map disagreement fails closed.
 The list is never serialized into SWZ and research callers may omit it and use
 the legacy full-map fallback.
 
+GC score helpers must refuse illegal compressed physical extent classes
+(anything other than 1/2/4 blocks) with zero estimated cost, consistent with
+RAW validation; zero is an invalid-input sentinel, not cost-free live authority.
+Native GC cost oracles must keep the prior authoritative mapping, generation,
+per-segment mapped count, live-byte/I/O/min-block costs and committed-block
+count unchanged after failed or short lower writes, even when a failed lower
+callback reports completed physical blocks. These attempts quarantine reserved
+blocks but cannot earn durable relocation savings. A necessary headroom
+preflight is never evidence that a subsequent reserve rotation succeeded.
+
 
 ### Physical placement and reclaim evidence
 
