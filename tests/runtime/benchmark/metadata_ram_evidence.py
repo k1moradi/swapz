@@ -360,11 +360,20 @@ def validate_metadata_ram_arm_binding(trace: Any, binding: Any) -> None:
                 for phase in ("steady", "gc") for value in phases[phase]) or
             min(phases["teardown"]) < finished):
         raise ValueError("metadata RAM phases do not bind to sustained arm")
+    # Both the validated sample timeline and measured GC windows are ordered.
+    # Walk them once rather than scanning every window for every GC sample.
+    window_index = 0
+    previous_sample_time = None
     for sample_time in phases["gc"]:
-        if not any(
-                window["start_monotonic_ns"] <= sample_time <=
-                window["end_monotonic_ns"]
-                for window in windows):
+        if (previous_sample_time is not None and
+                sample_time <= previous_sample_time):
+            raise ValueError("metadata RAM GC sample chronology is invalid")
+        previous_sample_time = sample_time
+        while (window_index < len(windows) and
+               windows[window_index]["end_monotonic_ns"] < sample_time):
+            window_index += 1
+        if (window_index == len(windows) or
+                sample_time < windows[window_index]["start_monotonic_ns"]):
             raise ValueError(
                 "metadata RAM GC sample lacks measured target GC activity")
 
