@@ -584,9 +584,17 @@ for argument in sys.argv[1:]:
     # DKMS can create multiple nested directories in a single operation.
     directory = path.parent
     while True:
-        if directory.is_symlink() or not directory.is_dir():
-            raise SystemExit("unsafe package durability parent")
-        paths.add(directory)
+        if directory.is_symlink():
+            raise SystemExit("symlinked package durability parent")
+        # DKMS may fail before creating updates/dkms. For a deletion,
+        # synchronize the nearest existing ancestor without assuming that
+        # every intermediate component exists.
+        if directory.exists():
+            if not directory.is_dir():
+                raise SystemExit("unsafe package durability parent")
+            paths.add(directory)
+        elif directory == directory.parent:
+            raise SystemExit("missing package durability root")
         if directory == directory.parent:
             break
         directory = directory.parent
