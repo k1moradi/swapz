@@ -3639,12 +3639,15 @@ non-removable/held topology, missing sole-partition status,
 parent-model/USB-transport mismatch, an opened descriptor that becomes
 read-only, invalid SWZ UUID/reserved bytes, stale identity immediately before
 the write, truncated reads, unexpected permissions, USB/transport-style I/O
-failure, and device disappearance before and after the write. The swap-inventory gate must reject active regular swapfiles with filesystem
-`st_dev` matching the selected partition or parent, while leaving unrelated
-regular-file and block-device entries nonconflicting; unknown entry types must
-fail closed. Rootless stream fixtures must also reject an empty or headerless
-`/proc/swaps` inventory, malformed headers/rows and a row whose reported
-file/partition type disagrees with the stat identity. Native fixtures also
+failure, and device disappearance before and after the write. The swap-inventory gate must reject **every active** `/proc/swaps` row,
+including regular swapfiles and unrelated block devices, with `EOPNOTSUPP`.
+Resolving a reported pathname in the formatter's mount namespace cannot
+authenticate the kernel's already-active backing inode across namespaces;
+a matching local `st_dev`, `st_ino` or `st_rdev` is not admission authority.
+A complete well-formed zero-row snapshot alone clears this inventory gate;
+it is not a kernel exclusion lock. Rootless stream fixtures must reject
+empty or headerless tables and malformed headers/rows before treating the
+snapshot as clear. Native fixtures also
 cover the literal kernel header, canonical numeric fields, embedded NULs,
 missing final newlines, overlong rows, bounded table/row budgets, duplicate
 mount IDs and duplicate swap backing identities, malformed known mount
@@ -3664,6 +3667,20 @@ entry must fail closed, including when the malformed table is in another PID
 namespace. The mountinfo parser must accept normal major-zero pseudo-filesystem
 entries (including `0:0`) while still rejecting malformed/overflowed rows;
 major zero must remain forbidden for a configured physical partition or parent.
+Rootless formatter tests must also call the production `swapzctl format`
+CLI and its default callback chain through synthetic proc/sysfs and fake
+open/ioctl/read/write seams, not only a canned callback errno or a direct
+identity-helper assertion. The fixture must verify the exact prewrite refusal
+phase, specific errno, observed identity category and unmodified mock block
+zero for PARTUUID drift, changed parent, foreign-mounted parent, active
+swapfile, unreadable foreign mount namespace, vanished PID mount table with
+a still-live namespace, stale size, substituted alias, symlink, and same-dev_t
+inode replacement. Diagnostics must not expose private device paths or
+serials. A disappeared PID whose mount namespace is also absent is a separate
+permitted-exit negative control, not an unsafe PASS. Retain intentionally
+unsafe cloned-identity negative controls, and never equate successful
+rootless snapshots with a loaded kernel's post-snapshot exclusive-descriptor
+behavior: that remains **NOT PROVEN** until separate safe privileged testing.
 For every ownership/identity uncertainty before publication, the test
 must count zero destructive header writes. Final formatter-path symlinks, node ownership or mode drift,
 a same-`st_rdev` inode replacement, and a substituted symlink in a

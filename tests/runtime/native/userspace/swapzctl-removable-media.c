@@ -212,6 +212,47 @@ static void test_swap_inventory_never_trusts_local_path_identity(void)
 	}
 }
 
+/*
+ * Deliberately UNSAFE negative control: cloneable PARTUUID and dev_t alone
+ * do not prove the inode held by the opened descriptor. Keep this mutant
+ * visibly permissive so identity regression tests cannot silently degrade
+ * to copied strings or a same-number replacement node.
+ */
+static int unsafe_partuuid_and_device_number_only(
+	const struct format_expectation *expected, const struct stat *opened)
+{
+	return !strcmp(expected->partuuid, "f13428f6-01") &&
+	       opened->st_rdev ==
+		       makedev(expected->device_major, expected->device_minor);
+}
+
+static void test_unsafe_identity_negative_control(void)
+{
+	struct format_expectation expected = expectation("8:1", "8:0");
+	struct stat path_info = block_stat(8U, 1U);
+	struct stat opened_info = path_info;
+	struct stat alias_info = path_info;
+
+	path_info.st_dev = makedev(0U, 7U);
+	path_info.st_ino = 17U;
+	opened_info.st_dev = path_info.st_dev;
+	opened_info.st_ino = 19U; /* Same dev_t, substituted inode. */
+	alias_info.st_dev = path_info.st_dev;
+	alias_info.st_ino = path_info.st_ino;
+
+	assert(unsafe_partuuid_and_device_number_only(&expected, &opened_info));
+	assert(!format_identity_values_match(
+		&expected, &path_info, &opened_info, &alias_info,
+		expected.device_bytes, makedev(8U, 0U)));
+
+	/* A matching opened inode cannot rehabilitate a changed parent. */
+	opened_info = path_info;
+	assert(unsafe_partuuid_and_device_number_only(&expected, &opened_info));
+	assert(!format_identity_values_match(
+		&expected, &path_info, &opened_info, &alias_info,
+		expected.device_bytes, makedev(8U, 16U)));
+}
+
 int main(void)
 {
 	test_partuuid_canonicalization_rejects_weak_structures();
@@ -222,6 +263,7 @@ int main(void)
 	test_swap_inventory_never_trusts_local_path_identity();
 	test_same_device_number_is_not_inode_authority();
 	test_transport_path_must_still_be_usb();
+	test_unsafe_identity_negative_control();
 	puts("PASS: removable-media identity rejects substitution and topology drift");
 	return 0;
 }

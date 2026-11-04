@@ -4,6 +4,26 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <dirent.h>
+#include <fcntl.h>
+#include <ftw.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+
+/* Interpose only synthetic sysfs/proc and a fake block descriptor. */
+static int admission_open(const char *path, int flags, ...);
+static int admission_close(int fd);
+static int admission_stat(const char *path, struct stat *info);
+static int admission_lstat(const char *path, struct stat *info);
+static int admission_fstat(int fd, struct stat *info);
+static int admission_ioctl(int fd, unsigned long request, ...);
+static ssize_t admission_pread(int fd, void *buffer, size_t length, off_t offset);
+static int admission_fsync(int fd);
+static DIR *admission_opendir(const char *path);
+static char *admission_realpath(const char *path, char *resolved);
+
 /* Inject bounded I/O faults into the real formatter helpers. */
 static unsigned int test_pwrite_calls;
 static int test_pwrite_short;
@@ -12,6 +32,16 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 				  off_t offset);
 static FILE *test_format_fopen(const char *path, const char *mode);
 
+#define open(...) admission_open(__VA_ARGS__)
+#define close(...) admission_close(__VA_ARGS__)
+#define stat(...) admission_stat(__VA_ARGS__)
+#define lstat(...) admission_lstat(__VA_ARGS__)
+#define fstat(...) admission_fstat(__VA_ARGS__)
+#define ioctl(...) admission_ioctl(__VA_ARGS__)
+#define pread(...) admission_pread(__VA_ARGS__)
+#define fsync(...) admission_fsync(__VA_ARGS__)
+#define opendir(...) admission_opendir(__VA_ARGS__)
+#define realpath(...) admission_realpath(__VA_ARGS__)
 #define pwrite test_format_pwrite
 #define fopen test_format_fopen
 #define main swapzctl_program_main
@@ -19,8 +49,471 @@ static FILE *test_format_fopen(const char *path, const char *mode);
 #undef main
 #undef fopen
 #undef pwrite
+#undef realpath
+#undef opendir
+#undef fsync
+#undef pread
+#undef ioctl
+#undef fstat
+#undef lstat
+#undef stat
+#undef close
+#undef open
 
 #include <assert.h>
+
+
+/*
+ * Rootless CLI integration: default formatter callbacks consume actual
+ * source-extracted sysfs/proc parsers. Fake device FD is never an OS FD.
+ * Snapshot tests do not establish kernel-level BLK_EXCL / swapon exclusion.
+ */
+enum admission_change {
+	ADMISSION_BAD_PARTUUID,
+	ADMISSION_PARENT_CHANGED,
+	ADMISSION_SWAPFILE_ACTIVE,
+	ADMISSION_PARENT_MOUNTED,
+	ADMISSION_FOREIGN_DENIED,
+	ADMISSION_LIVE_PID_TABLE_MISSING,
+	ADMISSION_GEOMETRY_CHANGED,
+	ADMISSION_ALIAS_CHANGED,
+	ADMISSION_PATH_SYMLINK,
+	ADMISSION_PATH_INODE_CHANGED,
+	ADMISSION_EXITED_PID_CONTROL,
+};
+#define ADMISSION_DEVICE_FD 987654
+#define ADMISSION_DEVICE "/dev/swapz-synthetic-card"
+#define ADMISSION_ALIAS "/dev/disk/by-partuuid/f13428f6-01"
+#define ADMISSION_PARENT "/sys/devices/usb1/disk"
+#define ADMISSION_SWAP_HEADER \
+	"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"
+
+static struct {
+	char root[PATH_MAX];
+	unsigned char block_zero[SWAPZ_SUPERBLOCK_BYTES];
+	unsigned long long geometry_bytes;
+	dev_t alias_device;
+	ino_t path_inode;
+	enum admission_change change;
+	unsigned int opens, reads, writes, syncs, closes;
+	int enabled, path_is_symlink;
+} admission_fixture;
+
+static const char *admission_route(const char *path, char mapped[PATH_MAX])
+{
+	int size;
+
+	if (!admission_fixture.enabled ||
+	    (strcmp(path, "/proc") &&
+	     strncmp(path, "/proc/", 6U) &&
+	     strncmp(path, "/sys/", 5U)))
+		return path;
+	size = snprintf(mapped, PATH_MAX, "%s%s", admission_fixture.root, path);
+	if (size < 0 || size >= PATH_MAX) {
+		errno = ENAMETOOLONG;
+		return NULL;
+	}
+	return mapped;
+}
+
+static void admission_write_text(const char *virtual_path, const char *value)
+{
+	char mapped[PATH_MAX];
+	FILE *file;
+
+	assert(admission_route(virtual_path, mapped) == mapped);
+	file = fopen(mapped, "w");
+	assert(file != NULL);
+	assert(fputs(value, file) >= 0);
+	assert(fclose(file) == 0);
+}
+
+static void admission_unlink(const char *virtual_path)
+{
+	char mapped[PATH_MAX];
+
+	assert(admission_route(virtual_path, mapped) == mapped);
+	assert(unlink(mapped) == 0);
+}
+
+static void admission_after_first_read(void)
+{
+	switch (admission_fixture.change) {
+	case ADMISSION_BAD_PARTUUID:
+		admission_write_text("/sys/dev/block/8:1/uevent",
+				     "PARTUUID=deadbeef-01\n");
+		break;
+	case ADMISSION_PARENT_CHANGED:
+		admission_write_text(ADMISSION_PARENT "/dev", "8:16\n");
+		break;
+	case ADMISSION_SWAPFILE_ACTIVE:
+		admission_write_text("/proc/swaps", ADMISSION_SWAP_HEADER
+				     "/unresolvable/swapfile file 4 1 -2\n");
+		break;
+	case ADMISSION_PARENT_MOUNTED:
+		admission_write_text("/proc/3031/mountinfo",
+				     "37 25 8:0 / /card rw - ext4 /dev/parent rw\n");
+		break;
+	case ADMISSION_FOREIGN_DENIED:
+		test_fopen_denied_path = "/proc/3031/mountinfo";
+		break;
+	case ADMISSION_LIVE_PID_TABLE_MISSING:
+		admission_unlink("/proc/3031/mountinfo");
+		break;
+	case ADMISSION_GEOMETRY_CHANGED:
+		admission_fixture.geometry_bytes -= SWAPZ_SUPERBLOCK_BYTES;
+		break;
+	case ADMISSION_ALIAS_CHANGED:
+		admission_fixture.alias_device = makedev(8U, 2U);
+		break;
+	case ADMISSION_PATH_SYMLINK:
+		admission_fixture.path_is_symlink = 1;
+		break;
+	case ADMISSION_PATH_INODE_CHANGED:
+		++admission_fixture.path_inode;
+		break;
+	case ADMISSION_EXITED_PID_CONTROL:
+		admission_unlink("/proc/3031/mountinfo");
+		admission_unlink("/proc/3031/ns/mnt");
+		break;
+	}
+}
+
+static struct stat admission_block_stat(dev_t device, ino_t inode)
+{
+	const struct stat info = {
+		.st_mode = S_IFBLK | 0600, .st_uid = 0,
+		.st_dev = makedev(0U, 7U), .st_rdev = device, .st_ino = inode,
+	};
+	return info;
+}
+
+static int admission_stat(const char *path, struct stat *info)
+{
+	char mapped[PATH_MAX];
+	const char *actual;
+
+	if (admission_fixture.enabled && !strcmp(path, ADMISSION_ALIAS)) {
+		*info = admission_block_stat(admission_fixture.alias_device, 17U);
+		return 0;
+	}
+	if (admission_fixture.enabled && !strncmp(path, "/dev/", 5U)) {
+		errno = ENOENT;
+		return -1;
+	}
+	actual = admission_route(path, mapped);
+	return actual ? stat(actual, info) : -1;
+}
+
+static int admission_lstat(const char *path, struct stat *info)
+{
+	char mapped[PATH_MAX];
+	const char *actual;
+
+	if (admission_fixture.enabled && !strcmp(path, ADMISSION_DEVICE)) {
+		*info = admission_block_stat(makedev(8U, 1U),
+					    admission_fixture.path_inode);
+		if (admission_fixture.path_is_symlink)
+			info->st_mode = S_IFLNK | 0777;
+		return 0;
+	}
+	if (admission_fixture.enabled && !strncmp(path, "/dev/", 5U)) {
+		errno = ENOENT;
+		return -1;
+	}
+	actual = admission_route(path, mapped);
+	return actual ? lstat(actual, info) : -1;
+}
+
+static int admission_fstat(int fd, struct stat *info)
+{
+	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		*info = admission_block_stat(makedev(8U, 1U), 17U);
+		return 0;
+	}
+	return fstat(fd, info);
+}
+
+static int admission_open(const char *path, int flags, ...)
+{
+	char mapped[PATH_MAX];
+	const char *actual;
+	mode_t mode = 0;
+
+	if (flags & O_CREAT) {
+		va_list arguments;
+		va_start(arguments, flags);
+		mode = (mode_t)va_arg(arguments, int);
+		va_end(arguments);
+	}
+	if (admission_fixture.enabled && !strcmp(path, ADMISSION_DEVICE)) {
+		if ((flags & O_ACCMODE) != O_RDWR || !(flags & O_EXCL) ||
+		    !(flags & O_NOFOLLOW) || !(flags & O_CLOEXEC)) {
+			errno = EPERM;
+			return -1;
+		}
+		++admission_fixture.opens;
+		return ADMISSION_DEVICE_FD;
+	}
+	if (admission_fixture.enabled && !strncmp(path, "/dev/", 5U)) {
+		errno = EPERM;
+		return -1;
+	}
+	actual = admission_route(path, mapped);
+	if (!actual)
+		return -1;
+	return flags & O_CREAT ? open(actual, flags, mode) : open(actual, flags);
+}
+
+static int admission_close(int fd)
+{
+	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		++admission_fixture.closes;
+		return 0;
+	}
+	return close(fd);
+}
+
+static int admission_ioctl(int fd, unsigned long request, ...)
+{
+	va_list arguments;
+	void *argument;
+
+	va_start(arguments, request);
+	argument = va_arg(arguments, void *);
+	va_end(arguments);
+	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		if (request == BLKGETSIZE64) {
+			*(unsigned long long *)argument =
+				admission_fixture.geometry_bytes;
+			return 0;
+		}
+		if (request == BLKROGET) {
+			*(int *)argument = 0;
+			return 0;
+		}
+		errno = ENOTTY;
+		return -1;
+	}
+	return ioctl(fd, request, argument);
+}
+
+static ssize_t admission_pread(int fd, void *buffer, size_t length, off_t offset)
+{
+	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		if (offset != 0 || length != sizeof(admission_fixture.block_zero)) {
+			errno = EINVAL;
+			return -1;
+		}
+		memcpy(buffer, admission_fixture.block_zero, length);
+		if (++admission_fixture.reads == 1U)
+			admission_after_first_read();
+		return (ssize_t)length;
+	}
+	return pread(fd, buffer, length, offset);
+}
+
+static int admission_fsync(int fd)
+{
+	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		++admission_fixture.syncs;
+		return 0;
+	}
+	return fsync(fd);
+}
+
+static DIR *admission_opendir(const char *path)
+{
+	char mapped[PATH_MAX];
+	const char *actual = admission_route(path, mapped);
+	return actual ? opendir(actual) : NULL;
+}
+
+static char *admission_realpath(const char *path, char *resolved)
+{
+	char mapped[PATH_MAX], local[PATH_MAX];
+	const char *actual = admission_route(path, mapped);
+	size_t root_length;
+
+	if (!actual || !resolved)
+		return NULL;
+	if (!admission_fixture.enabled || strncmp(path, "/sys/", 5U))
+		return realpath(actual, resolved);
+	if (!realpath(actual, local))
+		return NULL;
+	root_length = strlen(admission_fixture.root);
+	if (strncmp(local, admission_fixture.root, root_length) ||
+	    strncmp(local + root_length, "/sys/", 5U)) {
+		errno = ENODEV;
+		return NULL;
+	}
+	strcpy(resolved, local + root_length); /* The shortened path fits. */
+	return resolved;
+}
+
+static int admission_cleanup(const char *path, const struct stat *info,
+			     int type, struct FTW *walk)
+{
+	(void)info;
+	(void)type;
+	(void)walk;
+	return remove(path);
+}
+
+static void admission_make_directory(const char *virtual_path)
+{
+	char mapped[PATH_MAX];
+	assert(admission_route(virtual_path, mapped) == mapped);
+	assert(mkdir(mapped, 0700) == 0);
+}
+
+static void admission_start(enum admission_change change)
+{
+	static const char *const dirs[] = {
+		"/sys", "/sys/dev", "/sys/dev/block", "/sys/devices",
+		"/sys/devices/usb1", ADMISSION_PARENT,
+		ADMISSION_PARENT "/part", ADMISSION_PARENT "/part/holders",
+		ADMISSION_PARENT "/part/slaves", ADMISSION_PARENT "/holders",
+		ADMISSION_PARENT "/slaves", ADMISSION_PARENT "/queue",
+		"/proc", "/proc/self", "/proc/3031", "/proc/3031/ns",
+	};
+	char path[PATH_MAX];
+
+	memset(&admission_fixture, 0, sizeof(admission_fixture));
+	assert(snprintf(admission_fixture.root, sizeof(admission_fixture.root),
+			"/tmp/swapzctl-admission-XXXXXX") > 0);
+	assert(mkdtemp(admission_fixture.root) != NULL);
+	admission_fixture.enabled = 1;
+	admission_fixture.change = change;
+	admission_fixture.geometry_bytes = 124787884032ULL;
+	admission_fixture.alias_device = makedev(8U, 1U);
+	admission_fixture.path_inode = 17U;
+	for (size_t index = 0; index < sizeof(dirs) / sizeof(dirs[0]); ++index)
+		admission_make_directory(dirs[index]);
+
+	assert(admission_route("/sys/dev/block/8:1", path) == path);
+	assert(symlink("../../devices/usb1/disk/part", path) == 0);
+	assert(admission_route(ADMISSION_PARENT "/device", path) == path);
+	assert(symlink("..", path) == 0);
+	admission_write_text(ADMISSION_PARENT "/part/dev", "8:1\n");
+	admission_write_text(ADMISSION_PARENT "/part/partition", "1\n");
+	admission_write_text("/sys/dev/block/8:1/uevent",
+			     "MAJOR=8\nMINOR=1\nPARTUUID=f13428f6-01\n");
+	admission_write_text(ADMISSION_PARENT "/dev", "8:0\n");
+	admission_write_text(ADMISSION_PARENT "/removable", "1\n");
+	admission_write_text("/sys/devices/usb1/model", "Multi-Card\n");
+	admission_write_text("/proc/self/mountinfo",
+			     "36 25 0:20 / /proc rw - proc proc rw\n");
+	admission_write_text("/proc/3031/mountinfo",
+			     "37 25 8:2 / /sibling rw - ext4 /dev/sibling rw\n");
+	admission_write_text("/proc/3031/ns/mnt", "namespace\n");
+	admission_write_text("/proc/swaps", ADMISSION_SWAP_HEADER);
+}
+
+static void admission_stop(void)
+{
+	test_fopen_denied_path = NULL;
+	admission_fixture.enabled = 0;
+	assert(nftw(admission_fixture.root, admission_cleanup, 8,
+		    FTW_DEPTH | FTW_PHYS) == 0);
+}
+
+static void test_real_cli_snapshots_refuse_before_first_header_write(void)
+{
+	static const struct {
+		enum admission_change change;
+		const char *observed_identity;
+		int expected_errno;
+	} cases[] = {
+		{ ADMISSION_BAD_PARTUUID, "sysfs-PARTUUID", ESTALE },
+		{ ADMISSION_PARENT_CHANGED, "parent-dev_t", ESTALE },
+		{ ADMISSION_SWAPFILE_ACTIVE, "active-swapfile-unauthenticated",
+		  EOPNOTSUPP },
+		{ ADMISSION_PARENT_MOUNTED, "foreign-parent-mount", EBUSY },
+		{ ADMISSION_FOREIGN_DENIED, "foreign-mount-namespace-EACCES",
+		  EACCES },
+		{ ADMISSION_LIVE_PID_TABLE_MISSING, "live-pid-mountinfo-missing",
+		  ENOENT },
+		{ ADMISSION_GEOMETRY_CHANGED, "BLKGETSIZE64", ESTALE },
+		{ ADMISSION_ALIAS_CHANGED, "by-partuuid-alias", ESTALE },
+		{ ADMISSION_PATH_SYMLINK, "path-symlink-substitution", ESTALE },
+		{ ADMISSION_PATH_INODE_CHANGED, "same-dev_t-new-inode", ESTALE },
+	};
+	char *argv[] = {
+		"swapzctl", "format", ADMISSION_DEVICE,
+		"--expect-major-minor", "8:1",
+		"--expect-bytes", "124787884032",
+		"--expect-partuuid", "f13428f6-01",
+		"--expect-parent-major-minor", "8:0",
+		"--expect-parent-model", "Multi-Card",
+		"--expect-parent-transport", "usb",
+	};
+	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
+
+	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
+	     ++index) {
+		FILE *diagnostics;
+		char report[512] = {0};
+		int saved_stderr, status, observed_errno;
+		size_t length;
+
+		admission_start(cases[index].change);
+		diagnostics = tmpfile();
+		assert(diagnostics != NULL);
+		assert(fflush(stderr) == 0);
+		saved_stderr = dup(STDERR_FILENO);
+		assert(saved_stderr >= 0);
+		assert(dup2(fileno(diagnostics), STDERR_FILENO) >= 0);
+		errno = 0;
+		status = swapzctl_program_main(15, argv);
+		observed_errno = errno;
+		assert(fflush(stderr) == 0);
+		assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+		assert(close(saved_stderr) == 0);
+		assert(fseek(diagnostics, 0L, SEEK_SET) == 0);
+		length = fread(report, 1U, sizeof(report) - 1U, diagnostics);
+		assert(!ferror(diagnostics));
+		report[length] = '\0';
+		assert(fclose(diagnostics) == 0);
+
+		if (status != 2 || observed_errno != cases[index].expected_errno ||
+		    !strstr(report, "REFUSED: target identity changed before "
+			    "header write") ||
+		    strstr(report, ADMISSION_DEVICE) ||
+		    admission_fixture.opens != 1U ||
+		    admission_fixture.reads != 1U ||
+		    admission_fixture.writes != 0U ||
+		    admission_fixture.syncs != 0U ||
+		    admission_fixture.closes != 1U ||
+		    memcmp(admission_fixture.block_zero, unchanged,
+			   sizeof(unchanged))) {
+			fprintf(stderr, "FAIL: phase=final-prewrite "
+				"reason=snapshot-refusal observed=%s errno=%d "
+				"expected=%d status=%d opens=%u reads=%u writes=%u\n",
+				cases[index].observed_identity,
+				observed_errno, cases[index].expected_errno,
+				status, admission_fixture.opens,
+				admission_fixture.reads, admission_fixture.writes);
+			abort();
+		}
+		admission_stop();
+	}
+
+	/*
+	 * Negative control: an exited PID whose mount namespace is gone is
+	 * skippable; absence of mountinfo with a LIVE namespace above is not.
+	 * The sole successful write here modifies in-memory fake block zero.
+	 */
+	admission_start(ADMISSION_EXITED_PID_CONTROL);
+	assert(swapzctl_program_main(15, argv) == 0);
+	assert(admission_fixture.opens == 1U);
+	assert(admission_fixture.writes == 1U);
+	assert(admission_fixture.syncs == 1U);
+	assert(swapz_sb_valid(admission_fixture.block_zero,
+			      admission_fixture.geometry_bytes));
+	admission_stop();
+	puts("PASS: rootless CLI snapshot admission; kernel exclusivity NOT PROVEN");
+}
 
 static const char *test_configured_partuuid = "f13428f6-01";
 static int test_config_error;
@@ -43,6 +536,16 @@ int swapz_primary_target_config_read(
 static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 				  off_t offset)
 {
+	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		++test_pwrite_calls;
+		++admission_fixture.writes;
+		if (offset != 0 || length != sizeof(admission_fixture.block_zero)) {
+			errno = EINVAL;
+			return -1;
+		}
+		memcpy(admission_fixture.block_zero, buffer, length);
+		return (ssize_t)length;
+	}
 	++test_pwrite_calls;
 	if (test_pwrite_short)
 		return pwrite(fd, buffer, length / 2U, offset);
@@ -51,11 +554,15 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 
 static FILE *test_format_fopen(const char *path, const char *mode)
 {
+	char mapped[PATH_MAX];
+	const char *actual;
+
 	if (test_fopen_denied_path && !strcmp(path, test_fopen_denied_path)) {
 		errno = EACCES;
 		return NULL;
 	}
-	return fopen(path, mode);
+	actual = admission_route(path, mapped);
+	return actual ? fopen(actual, mode) : NULL;
 }
 
 int swapz_primary_command(int argc, char **argv)
@@ -1852,6 +2359,7 @@ int main(void)
 	test_repeat_format_is_idempotent_and_non_destructive();
 	test_disappearance_after_write_is_never_success();
 	test_truncated_read_and_close_failure_are_not_success();
+	test_real_cli_snapshots_refuse_before_first_header_write();
 	puts("PASS: swapzctl formatter identity and destructive-action gates");
 	return 0;
 }
