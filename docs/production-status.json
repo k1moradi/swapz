@@ -1,7 +1,7 @@
 {
   "schema": "swapz-production-status-snapshot",
   "snapshot_kind": "SOURCE_BOUND_READ_ONLY_STATUS",
-  "captured_at_utc": "2026-11-04T04:19:02Z",
+  "captured_at_utc": "2026-11-04T04:35:59Z",
   "snapshot_semantics": {
     "is_live_monitor": false,
     "is_qualification_result": false,
@@ -11,10 +11,11 @@
   },
   "repository": {
     "branch": "main",
-    "local_main_sha_at_capture": "0c1d37524b32064b22170f07853aa799e74c28c2",
-    "origin_main_sha_at_capture": "0c1d37524b32064b22170f07853aa799e74c28c2",
+    "local_main_sha_at_capture": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
+    "origin_main_sha_at_capture": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
     "main_synchronized_at_capture": true,
     "worktree_clean_at_capture": false,
+    "uncommitted_paths_at_capture": ["docs/production-status.json"],
     "current_source_qualification": "NOT_QUALIFIED"
   },
   "latest_owner_make_test": {
@@ -22,7 +23,7 @@
     "report_commit_sha": "3d060dd5f734716869c7d13a732a3b068a30f660",
     "report_sha256": "5794527866b1c943688b6e085b5db56b467077a1533071fcadfa16ab7ce9fe60",
     "tested_source_sha": "888092cbcf6661a919091b7a0e8820255a9fa19b",
-    "current_main_sha_at_capture": "0c1d37524b32064b22170f07853aa799e74c28c2",
+    "current_main_sha_at_capture": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
     "overall": "BLOCKED",
     "qualification_scope": "RAM_BACKED_NULL_BLK_ONLY",
     "stages": [
@@ -42,34 +43,34 @@
     }
   },
   "current_head_ci_observation": {
-    "observed_at_utc": "2026-11-04T04:19:02Z",
-    "head_sha": "0c1d37524b32064b22170f07853aa799e74c28c2",
+    "observed_at_utc": "2026-11-04T04:35:59Z",
+    "head_sha": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
     "workflows": [
       {
         "name": "Native kernel-C project-goal regressions",
-        "run_id": 41772177488,
-        "status": "in_progress",
+        "run_id": 41773960510,
+        "status": "pending",
         "conclusion": null,
-        "url": "https://github.com/k1moradi/swapz/actions/runs/41772177488"
+        "url": "https://github.com/k1moradi/swapz/actions/runs/41773960510"
       },
       {
         "name": "Experimental swapz production C qualification",
-        "run_id": 41772177513,
+        "run_id": 41773960517,
         "status": "completed",
         "conclusion": "success",
-        "url": "https://github.com/k1moradi/swapz/actions/runs/41772177513"
+        "url": "https://github.com/k1moradi/swapz/actions/runs/41773960517"
       },
       {
         "name": "Systemd and package production-readiness",
-        "run_id": 41772177511,
+        "run_id": 41773960446,
         "status": "in_progress",
         "conclusion": null,
-        "url": "https://github.com/k1moradi/swapz/actions/runs/41772177511"
+        "url": "https://github.com/k1moradi/swapz/actions/runs/41773960446"
       }
     ]
   },
   "authorized_target_observation": {
-    "observed_at_utc": "2026-11-04T04:19:02Z",
+    "observed_at_utc": "2026-11-04T04:35:59Z",
     "selector": "PARTUUID=f13428f6-01",
     "path_at_observation": "/dev/sda1",
     "major_minor": "8:1",
@@ -83,20 +84,21 @@
     "source": "read-only selector, lsblk, findmnt, and kernel swap-inventory observations"
   },
   "host_observation": {
-    "observed_at_utc": "2026-11-04T04:19:02Z",
+    "observed_at_utc": "2026-11-04T04:35:59Z",
     "architecture": "x86_64",
     "kernel_release": "7.0.0-42-generic",
     "mem_total_kib": 3863624,
-    "mem_available_kib": 888148,
+    "mem_available_kib": 894992,
     "minimum_mem_available_kib_for_ID36": 1048576,
     "active_swap_inventory": [
-      {"name": "/swapfile", "type": "file", "used_kib": 524240, "unrelated_to_authorized_target": true}
+      {"name": "/swapfile", "type": "file", "used_kib": 524076, "unrelated_to_authorized_target": true}
     ],
     "authorized_partition_active_as_swap": false,
-    "observation_scope": "Read-only /proc/swaps, /proc/meminfo, and block-device inventory; unrelated swap was not modified"
+    "observation_scope": "Read-only /proc/swaps, /proc/meminfo, and block-device inventory; unrelated swap was not modified",
+    "preceding_host_action": "A safe sync and kernel page-cache drop were performed before capture; this is not qualification evidence."
   },
   "deployment_observation": {
-    "observed_at_utc": "2026-11-04T04:19:02Z",
+    "observed_at_utc": "2026-11-04T04:35:59Z",
     "swapz_mapper_present": false,
     "dm_swapz_loaded": false,
     "dm_swapz_found_by_modinfo": false,
@@ -139,7 +141,7 @@
     "sustained_physical_gc_and_churn": "NOT_RUN",
     "cold_boot_harness": "NOT_INSTALLED",
     "owner_observed_cold_boot": "NO_CURRENT_EVIDENCE",
-    "reason": "The latest owner report is blocked and source-stale; current-head CI was not complete at capture, no swapz artifacts or mapper were installed, and physical/full-capacity gates remain unqualified."
+    "reason": "The latest owner report is blocked and source-stale; native and systemd/package CI were incomplete at capture, no swapz artifacts or mapper were installed, and physical/full-capacity gates remain unqualified."
   },
-  "next_action": "After pending main work is committed and the checkout is synchronized, obtain at least 1 GiB MemAvailable and run the sole official make test on that exact clean main source. Then qualify full-capacity measured memory and bounded byte-exact real swap on the authorized card before deployment or reboot readiness."
+  "next_action": "Once the synchronized main source is stable and the host has at least 1 GiB MemAvailable, run the sole official make test on that exact clean source. Then qualify full-capacity measured memory and bounded byte-exact real swap on the authorized card before deployment or reboot readiness."
 }
