@@ -7447,6 +7447,18 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         private_assignments = re.findall(
             r"ti->private\s*=\s*([^;]+);", constructor)
         self.assertEqual(private_assignments, ["ctx", "NULL"])
+        acquired_context = constructor[
+            constructor.index("ti->private = ctx;"):]
+        self.assertEqual(
+            re.findall(r"\breturn\s+([^;]+);", acquired_context),
+            ["0", "error"],
+            "post-acquisition returns must not bypass common cleanup")
+        self.assertEqual(
+            set(re.findall(
+                r"\bgoto\s+([A-Za-z_][A-Za-z0-9_]*)\s*;",
+                acquired_context)),
+            {"fail"},
+            "post-acquisition failures must converge on the common unwind")
         publications = list(re.finditer(
             r"(?:WRITE_ONCE\(\s*ctx->accepting\s*,\s*true\s*\)|"
             r"ctx->accepting\s*=\s*true\s*;)",
@@ -7528,6 +7540,12 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                     "spin_lock_init(&ctx->queue_lock);",
                     "error = -EINVAL;\n\tgoto fail;\n\t"
                     "spin_lock_init(&ctx->queue_lock);", 1),
+                destruction)
+        with self.assertRaises(AssertionError):
+            self.audit_partial_constructor_ownership(
+                constructor.replace(
+                    "error = dm_get_device(",
+                    "return -ENOMEM;\n\terror = dm_get_device(", 1),
                 destruction)
 
     def test_capacity_index_fault_fixture_matches_constructor_order(self):
@@ -7636,7 +7654,9 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         logical = maximum(partition_bytes, size_t_max=(1 << 64) - 1)
         self.assertEqual((physical, segments, logical),
                          (30465536, 119006, 27080192))
-        self.assertEqual(logical * page_bytes, 110920466432)
+        logical_mapper_bytes = model["_checked_product"](
+            logical, page_bytes, model["MAX_UINT64"])
+        self.assertEqual(logical_mapper_bytes, 110920466432)
         reserve = max(logical // 8 + (logical % 8 != 0),
                       2 * segment_blocks)
         self.assertEqual(reserve, 3385024)
@@ -7666,17 +7686,39 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             for name, (scale, element_type, _) in self.INDEXES.items()
         ]
         self.assertEqual(len(lengths), 17)
-        self.assertEqual(sum(length for _, length in lengths), 776070968)
-        rounded_index_bytes = sum(
-            (length + page_bytes - 1) // page_bytes * page_bytes
-            for _, length in lengths)
+        payload_bytes = 0
+        rounded_index_bytes = 0
+        leaf_pte_pages = 0
+        for _, length in lengths:
+            payload_bytes = model["_checked_sum"](
+                payload_bytes, length, model["MAX_UINT64"])
+            self.assertIsNotNone(payload_bytes)
+            round_input = model["_checked_sum"](
+                length, page_bytes - 1, model["MAX_UINT64"])
+            self.assertIsNotNone(round_input)
+            rounded_length = model["_checked_product"](
+                round_input // page_bytes, page_bytes, model["MAX_UINT64"])
+            self.assertIsNotNone(rounded_length)
+            rounded_index_bytes = model["_checked_sum"](
+                rounded_index_bytes, rounded_length, model["MAX_UINT64"])
+            self.assertIsNotNone(rounded_index_bytes)
+            allocation_pages = rounded_length // page_bytes
+            leaf_round_input = model["_checked_sum"](
+                allocation_pages, 511, model["MAX_UINT64"])
+            self.assertIsNotNone(leaf_round_input)
+            leaf_pte_pages = model["_checked_sum"](
+                leaf_pte_pages, leaf_round_input // 512,
+                model["MAX_UINT64"])
+            self.assertIsNotNone(leaf_pte_pages)
+        self.assertEqual(payload_bytes, 776070968)
         self.assertEqual(rounded_index_bytes, 776114176)
         # Predicted index bytes are source accounting only. Do not compare
         # them with the measured-host peak-RAM acceptance ceiling.
         self.assertEqual(dict(lengths)["maps"], 433283072)
-        self.assertEqual(
-            sum(((length + page_bytes - 1) // page_bytes + 511) // 512
-                for _, length in lengths) * page_bytes, 1564672)
+        leaf_pte_bytes = model["_checked_product"](
+            leaf_pte_pages, page_bytes, model["MAX_UINT64"])
+        self.assertEqual(leaf_pte_pages, 382)
+        self.assertEqual(leaf_pte_bytes, 1564672)
         self.assertIsNone(maximum(partition_bytes + 1))
         exactly_three_data_segments = (
             (3 * segment_blocks + 1) * page_bytes)
