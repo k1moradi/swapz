@@ -63,6 +63,16 @@ static swapz_u64 round_up_4k(swapz_u64 bytes)
 	       ~((swapz_u64)SWAPZ_BLOCK_BYTES - 1U);
 }
 
+static swapz_u64 leaf_pte_pages_4k(swapz_u64 bytes)
+{
+	const swapz_u64 payload_pages =
+		round_up_4k(bytes) / SWAPZ_BLOCK_BYTES;
+
+	/* x86_64/arm64 qualification uses 4KiB pages with 512 8-byte PTEs/page.
+	 * This is a conservative independent-leaf-table sizing oracle only. */
+	return (payload_pages + 511U) / 512U;
+}
+
 static int test_initial_rejects_unsafe_capacity(void)
 {
 	struct swapz_authority_geometry geometry;
@@ -157,7 +167,7 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 		physical_blocks / SWAPZ_SEGMENT_BLOCKS;
 	struct swapz_authority_geometry geometry;
 	struct swapz_authority_geometry near_u32_geometry;
-	swapz_u64 index_bytes, rounded_bytes;
+	swapz_u64 index_bytes, rounded_bytes, leaf_pte_pages;
 	swapz_u32 reserve = 0;
 
 	CHECK(partition_bytes % SWAPZ_BLOCK_BYTES == 0);
@@ -215,6 +225,27 @@ static int test_selected_card_geometry_and_memory_scaling(void)
 				 sizeof(swapz_u8));
 	CHECK(rounded_bytes == expected_page_rounded_bytes);
 	CHECK(rounded_bytes - index_bytes == 43208ULL);
+
+	/* Count leaf PTE pages if all 17 current indexes are independently
+	 * vmalloc-backed. Actual vmalloc/slab metadata and shared upper page-table
+	 * levels remain loaded-host measurements. */
+	leaf_pte_pages =
+		leaf_pte_pages_4k((swapz_u64)expected_logical_pages *
+				   sizeof(struct swapz_map)) +
+		2U * leaf_pte_pages_4k((swapz_u64)expected_logical_pages *
+					 sizeof(swapz_u32)) +
+		leaf_pte_pages_4k((swapz_u64)physical_blocks *
+				   sizeof(swapz_u16)) +
+		2U * leaf_pte_pages_4k((swapz_u64)physical_blocks *
+					 sizeof(swapz_u8)) +
+		8U * leaf_pte_pages_4k((swapz_u64)segment_count *
+					 sizeof(swapz_u32)) +
+		leaf_pte_pages_4k((swapz_u64)segment_count *
+				   sizeof(swapz_u16)) +
+		2U * leaf_pte_pages_4k((swapz_u64)segment_count *
+					 sizeof(swapz_u8));
+	CHECK(leaf_pte_pages == 382ULL);
+	CHECK(leaf_pte_pages * SWAPZ_BLOCK_BYTES == 1564672ULL);
 
 	/* Exercise the top aligned u32 geometry without allocating it.
 	 * On 32-bit systems its physical liveness index is unaddressable even
