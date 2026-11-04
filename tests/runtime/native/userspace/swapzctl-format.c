@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
+#include <stdio.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-/* Inject a short successful system write into the real formatter helper. */
+/* Inject bounded I/O faults into the real formatter helpers. */
 static unsigned int test_pwrite_calls;
 static int test_pwrite_short;
+static const char *test_fopen_denied_path;
 static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 				  off_t offset);
+static FILE *test_format_fopen(const char *path, const char *mode);
 
 #define pwrite test_format_pwrite
+#define fopen test_format_fopen
 #define main swapzctl_program_main
 #include "../../../../src/userspace/swapzctl.c"
 #undef main
+#undef fopen
 #undef pwrite
 
 #include <assert.h>
-#include <stdio.h>
 
 static const char *test_configured_partuuid = "f13428f6-01";
 static int test_config_error;
@@ -43,6 +47,15 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 	if (test_pwrite_short)
 		return pwrite(fd, buffer, length / 2U, offset);
 	return pwrite(fd, buffer, length, offset);
+}
+
+static FILE *test_format_fopen(const char *path, const char *mode)
+{
+	if (test_fopen_denied_path && !strcmp(path, test_fopen_denied_path)) {
+		errno = EACCES;
+		return NULL;
+	}
+	return fopen(path, mode);
 }
 
 int swapz_primary_command(int argc, char **argv)
@@ -1274,8 +1287,17 @@ static void test_namespace_swap_ambiguity_never_writes(void)
 		assert(context.write_calls == 1U); /* In-memory callback only. */
 	}
 
-	/* Missing live /proc/PID/mountinfo and malformed rows fail closed. */
+	/*
+	 * An inaccessible live /proc/PID/mountinfo must fail through the
+	 * formatter gate with zero writes. Inject EACCES instead of chmod(000)
+	 * so this remains deterministic even when the native suite runs as root.
+	 */
 	test_mountinfo_fixture_path(path, proc_root, "3031/mountinfo");
+	test_fopen_denied_path = path;
+	test_mock_admission_refusal(proc_root, swap_header, EACCES);
+	test_fopen_denied_path = NULL;
+
+	/* Missing live /proc/PID/mountinfo and malformed rows fail closed too. */
 	assert(unlink(path) == 0);
 	test_mock_admission_refusal(proc_root, swap_header, ENOENT);
 	test_mountinfo_fixture_write(proc_root, "3031/mountinfo",
