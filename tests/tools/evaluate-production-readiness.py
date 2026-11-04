@@ -639,28 +639,30 @@ def validate_physical_campaign_evidence(
         reject("sealed campaign schema is invalid")
     if not isinstance(raw, bytes):
         reject("sealed campaign evidence bytes are invalid")
-    elif not raw:
+        return issues
+    if not raw:
         reject("sealed campaign evidence bytes are empty")
-    elif len(raw) > MAX_EVIDENCE_INPUT_BYTES:
+        return issues
+    if len(raw) > MAX_EVIDENCE_INPUT_BYTES:
         reject("sealed campaign evidence bytes exceed input bound")
-    else:
-        # The digest belongs to these exact serialized bytes, not a separate
-        # mutable Python object supplied by a caller.
-        try:
-            serialized_campaign = json.loads(
-                raw.decode("utf-8"), object_pairs_hook=_unique_object,
-                parse_int=_bounded_json_integer,
-                parse_float=_finite_json_float,
-                parse_constant=_reject_json_constant)
-        except (UnicodeDecodeError, ValueError, OverflowError):
-            reject("sealed campaign evidence bytes are malformed")
-        else:
-            if not isinstance(serialized_campaign, dict):
-                reject("sealed campaign evidence bytes have invalid top level")
-            else:
-                if not _same_json_value(serialized_campaign, campaign):
-                    reject("sealed campaign object differs from artifact bytes")
-                campaign = serialized_campaign
+        return issues
+    # The digest belongs to these exact serialized bytes, not a separate
+    # mutable Python object supplied by a caller.
+    try:
+        serialized_campaign = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=_unique_object,
+            parse_int=_bounded_json_integer,
+            parse_float=_finite_json_float,
+            parse_constant=_reject_json_constant)
+    except (UnicodeDecodeError, ValueError, OverflowError):
+        reject("sealed campaign evidence bytes are malformed")
+        return issues
+    if not isinstance(serialized_campaign, dict):
+        reject("sealed campaign evidence bytes have invalid top level")
+        return issues
+    if not _same_json_value(serialized_campaign, campaign):
+        reject("sealed campaign object differs from artifact bytes")
+    campaign = serialized_campaign
     if campaign.get("source_sha") != source_sha:
         reject("sealed campaign source binding mismatch")
 
@@ -732,7 +734,8 @@ def validate_physical_campaign_evidence(
                 target is None or logical_capacity_bytes > target[1] or
                 logical_pages != RAM_TRACE_VALIDATOR[
                     "maximum_logical_pages_for_partition"](
-                        target[1] if target is not None else None) or
+                        target[1] if target is not None else None,
+                        size_t_max=RAM_TRACE_VALIDATOR["MAX_UINT64"]) or
                 type(peak_ram_bytes) is not int or
                 not 0 < peak_ram_bytes <= RAM_TRACE_VALIDATOR["MAX_UINT64"]):
             reject("sealed campaign capacity/RAM evidence is invalid")
