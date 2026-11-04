@@ -4437,7 +4437,9 @@ partition's exact `DEVPATH` rule key and PARTUUID, reload the rules, and trigger
 partition again. Prove the link in udev's recorded `DEVLINKS` property as well
 as by block-device identity; never create the alias with a shell symlink.
 Remove the temporary rule after null_blk teardown and require its alias to be
-gone. Initialize only that RAM partition, compile a noninstalled exact-source
+gone. If publication fails, capture the exact fixture rule, relevant udev
+properties, and udev's event-rule diagnostic before cleanup. Initialize only
+that RAM partition, compile a noninstalled exact-source
 `swapzctl` under a root-owned private prefix, and generate a private
 parser-valid qualification record bound to the exact test binary/module/oracle
 hashes and live host identity. The production coordinator must then complete

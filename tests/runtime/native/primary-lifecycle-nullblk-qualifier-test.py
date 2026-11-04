@@ -124,6 +124,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                       self.script)
         self.assertIn('udevadm control --reload-rules', self.script)
         self.assertIn('udev_alias_remains_after_device_removal', self.script)
+        self.assertIn('UDEV_PARTUUID_DIAGNOSTIC=', self.script)
+        self.assertIn(
+            'udevadm test --verbose --action=add "$PART_SYSFS"', self.script)
         self.assertNotRegex(self.script, r"(?m)^\s*ln\s+-s\b")
 
     def test_partition_reread_is_locked_and_not_duplicated_after_sfdisk(self):

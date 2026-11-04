@@ -1368,6 +1368,15 @@ fi
 if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then
 	udev_alias_verified || fail "by-PARTUUID alias is not udev-recorded for the owned partition"
 else
+	note "UDEV_PARTUUID_DIAGNOSTIC=devpath:$UDEV_DEVPATH partuuid:$PARTUUID rule:$UDEV_RULE"
+	if [[ -n "$UDEV_RULE" && -f "$UDEV_RULE" && ! -L "$UDEV_RULE" ]]; then
+		sed -n '1p' "$UDEV_RULE" >&2
+	fi
+	udevadm info --query=property --path="$PART_SYSFS" 2>/dev/null |
+		grep -E '^(DEVPATH|DEVTYPE|ID_PART_ENTRY_UUID|DEVLINKS)=' >&2 || true
+	udevadm test --verbose --action=add "$PART_SYSFS" 2>&1 |
+		grep -E 'rules\.d|swapz-owned-nullblk|ID_PART_ENTRY_UUID|by-partuuid|DEVLINKS|DEVPATH' |
+		sed -n '1,80p' >&2 || true
 	blocked "udev did not publish the owned partition by-PARTUUID node"
 fi
 
