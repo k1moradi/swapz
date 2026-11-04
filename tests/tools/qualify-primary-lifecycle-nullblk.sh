@@ -78,7 +78,7 @@ verify_prepare_failure_diagnostic() {
 				[[ "$description" == "$expected_error claim=none" ]] ||
 					fail "preclaim refusal exposed private state or wrong disposition"
 				;;
-			original-header-backup-write|manifest-write|\
+			global-mutation-lock-close|original-header-backup-write|manifest-write|\
 			original-header-backup-readback|manifest-readback|\
 			partition-lock-close|recovery-directory-close)
 				[[ "$description" == "$expected_error claim=retained target_unchanged=true" ]] ||

@@ -382,6 +382,31 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertNotIn("run_id=%s", failure_format)
         self.assertNotIn("target=%s", failure_format)
 
+    def test_prepare_global_lock_close_has_phase_specific_diagnostic(self):
+        action_start = self.primary.index(
+            "static int swapz_primary_run_mutating_action(")
+        action_end = self.primary.index(
+            "static int swapz_primary_qualification_import_serialized(",
+            action_start)
+        action = self.primary[action_start:action_end]
+        close_gate_start = action.index(
+            "if (close(mutation_lock_fd) < 0 && result == 0) {")
+        close_gate = action[
+            close_gate_start:action.index("return result;", close_gate_start)]
+        self.assertIn(
+            "PRIMARY_PREPARE=FAILED phase=global-mutation-lock-close ",
+            close_gate)
+        self.assertIn("claim=retained target_unchanged=true", close_gate)
+
+        # A successful inner prepare must not publish a run ID before the
+        # outer global mutation lock is known to have closed successfully.
+        prepare_start = self.primary.index(
+            "static int swapz_primary_prepare_metadata(void)")
+        prepare_end = self.primary.index(
+            "static int swapz_primary_unload_owned_module(", prepare_start)
+        prepare = self.primary[prepare_start:prepare_end]
+        self.assertNotIn("PRIMARY_PREPARE=READY", prepare)
+
     def test_rootless_prepare_diagnostic_verifier_rejects_leaks_and_ambiguity(self):
         begin = self.script.index("verify_prepare_failure_diagnostic() {")
         end = self.script.index("\n}", begin) + 2
@@ -425,9 +450,16 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "PRIMARY_PREPARE=FAILED phase=package-transaction-preflight "
             f"errno=16 error={busy}"
         )
+        close_error = "Input/output error"
+        lock_close = (
+            "PRIMARY_PREPARE=FAILED phase=global-mutation-lock-close "
+            f"errno=5 error={close_error} "
+            "claim=retained target_unchanged=true"
+        )
         check(command_output(source_mismatch, permitted), True)
         check(command_output(retained_manifest, permitted), True)
         check(command_output(package_busy, busy), True)
+        check(command_output(lock_close, close_error), True)
 
         for output in (
             "",
@@ -438,6 +470,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             command_output(source_mismatch, permitted) + "\nsecret=private",
             command_output(source_mismatch, permitted) + "\ntransaction_id=private",
             command_output(source_mismatch, permitted) + "\nswap=/unrelated",
+            command_output(source_mismatch, permitted) + "\n"
+            "PRIMARY_PREPARE=READY run_id=" + "a" * 32 +
+            " source=" + "b" * 40,
             command_output(source_mismatch, permitted) + "\n"
             "BLOCKED: primary-swap preparation failed: " + permitted,
             command_output(
