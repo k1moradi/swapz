@@ -570,7 +570,8 @@ static inline int swapz_window_raw_hand_pays(
 {
 	if (!lz4_page_ewma_ns || !block_service_ewma_ns)
 		return 1;
-	return lz4_page_ewma_ns * 2U > block_service_ewma_ns;
+	/* Equivalent threshold without overflowing a 64-bit timing sample. */
+	return lz4_page_ewma_ns > block_service_ewma_ns / 2U;
 }
 
 /* 1/8 EWMA for ordered-owner lower service and observed LZ4 page samples. */

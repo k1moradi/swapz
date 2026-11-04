@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Pure ID178 accounting checks: no privileged device or BIO simulation. */
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include "lane-gap.h"
@@ -87,10 +88,42 @@ static int test_bins(void)
 			dwell_bin[index]);
 	return 0;
 }
+/* Production lane-gap histograms are passive even at queue saturation. */
+static int test_extreme_timestamps_and_lane_counts(void)
+{
+	struct swapz_lane_gap_parts part = { .seal_ns = 987 };
+	const unsigned int lane_counts[] = { 0U, 1U, 8U, 64U, UINT_MAX };
+	unsigned int index;
+
+	CHECK(swapz_lane_gap_partition(1, UINT64_MAX, UINT64_MAX,
+		UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX, &part));
+	CHECK(part.completion_wake_ns == UINT64_MAX - 1U);
+	CHECK(part.publication_ns == 0 && part.seal_ns == 0);
+	CHECK(sum(&part) == UINT64_MAX - 1U);
+	CHECK(swapz_lane_gap_partition(UINT64_MAX - 1U, 1, 1, 1, 1,
+		1, UINT64_MAX, &part));
+	CHECK(part.completion_wake_ns == 0 && part.seal_ns == 1);
+	CHECK(sum(&part) == 1);
+	CHECK(swapz_lane_gap_partition(UINT64_MAX, 1, 1, 1, 1, 1,
+		UINT64_MAX, &part));
+	CHECK(sum(&part) == 0);
+	CHECK(!swapz_lane_gap_partition(UINT64_MAX, 1, 1, 1, 1, 1,
+		UINT64_MAX - 1U, &part));
+	CHECK(sum(&part) == 0);
+
+	for (index = 0; index < sizeof(lane_counts) /
+					 sizeof(lane_counts[0]); ++index)
+		CHECK(swapz_lane_gap_successor_bin(lane_counts[index]) <
+			SWAPZ_LANE_SUCCESSOR_BINS);
+	CHECK(swapz_lane_gap_dwell_bin(UINT64_MAX) <
+		SWAPZ_LANE_DWELL_BINS);
+	return 0;
+}
 int main(void)
 {
-	if (test_partitions() || test_invalid() || test_bins())
+	if (test_partitions() || test_invalid() || test_bins() ||
+	    test_extreme_timestamps_and_lane_counts())
 		return 1;
-	puts("PASS lane-gap: 59049 timestamp grids, invalids, and bin edges");
+	puts("PASS lane-gap: 59049 timestamp grids, invalids, queue and 64-bit edges");
 	return 0;
 }

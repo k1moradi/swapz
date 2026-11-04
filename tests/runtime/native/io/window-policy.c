@@ -4,6 +4,7 @@
  * These tests cover bounded slot dependencies and nanosecond expiry;
  * they do not emulate Linux BIO completion, timers or loaded lower I/O.
  */
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,16 @@
 	fprintf(stderr, "%s:%d failed %s\n", __FILE__, __LINE__, #x); \
 	return 1; \
 } } while (0)
+
+/* Diagnostics are emitted only on a failed bounded-pressure invariant. */
+#define CHECK_PRESSURE(condition, lanes, staged, queued, reserve_error) do { \
+	if (!(condition)) { \
+		fprintf(stderr, "%s:%d failed %s (lanes=%u staged=%u queued=%u reserve_errno=%d)\n", \
+			__FILE__, __LINE__, #condition, (unsigned int)(lanes), \
+			(unsigned int)(staged), (unsigned int)(queued), (int)(reserve_error)); \
+		return 1; \
+	} \
+} while (0)
 
 static int test_independent_compressed_and_raw(void)
 {
@@ -614,6 +625,15 @@ static int test_raw_hand_pays_only_for_slow_compression(void)
 	CHECK(!swapz_window_raw_hand_pays(900ULL, 6500ULL));
 	/* Slow compression in front of a fast device prefers RAW. */
 	CHECK(swapz_window_raw_hand_pays(4000ULL, 6500ULL));
+	/* The 2*LZ4 comparison used to wrap above ULLONG_MAX/2. */
+	CHECK(!swapz_window_raw_hand_pays(ULLONG_MAX / 2ULL, ULLONG_MAX));
+	CHECK(swapz_window_raw_hand_pays(ULLONG_MAX / 2ULL + 1ULL,
+						 ULLONG_MAX));
+	CHECK(swapz_window_raw_hand_pays(ULLONG_MAX, ULLONG_MAX));
+	CHECK(!swapz_window_raw_hand_pays(3250ULL, 6500ULL));
+	CHECK(swapz_window_raw_hand_pays(3251ULL, 6500ULL));
+	CHECK(!swapz_window_raw_hand_pays(2ULL, 5ULL));
+	CHECK(swapz_window_raw_hand_pays(3ULL, 5ULL));
 	return 0;
 }
 
@@ -714,6 +734,124 @@ static int test_submitter_dispatch_requires_proven_idle_singleton(void)
 	return 0;
 }
 
+/*
+ * Production bounds: one background preparation worker, at most eight
+ * submitter lanes, 64 accepted BIOs per ordered quantum and a 64-slot window.
+ * This fixture tests the pure policy gates, not the caller's slot atomics,
+ * ENOSPC/GC recovery loop or shutdown drain_workqueue() synchronization.
+ */
+static int test_bounded_queue_pressure_and_retry(void)
+{
+	struct swapz_pending_bio staged[SWAPZ_MAX_RECORDS] = { 0 };
+	const unsigned int submitter_lane_counts[] = { 0U, 1U, 8U };
+	const swapz_u8 hand_counts[] = { 8U, 16U, SWAPZ_MAX_RECORDS };
+	const unsigned long long first_ns = 1000000ULL;
+	const unsigned long long deadline_ns =
+		swapz_window_retention_deadline_ns(first_ns, 2U);
+	unsigned int index, lane_index, hand_index, count;
+	int reserve_error = -ENOSPC;
+
+	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index) {
+		staged[index].logical = 1000U + index;
+		/* Four compressed records exactly fit an 8KiB extent. */
+		staged[index].length = 2028U;
+	}
+	CHECK(swapz_window_initial_burst_target(0) == 0);
+	CHECK(swapz_window_initial_burst_target(1) == 1);
+	CHECK(swapz_window_initial_burst_target(SWAPZ_MAX_RECORDS) == 4);
+	CHECK(swapz_window_grow_burst_target(4, SWAPZ_MAX_RECORDS,
+					SWAPZ_MAX_RECORDS, SWAPZ_MAX_RECORDS) ==
+		SWAPZ_MAX_RECORDS);
+	CHECK(!swapz_window_work_conserving_close_ready(
+		2, 1, 1, 1, 0, 8, 0));
+	CHECK(deadline_ns == 3000000ULL);
+	CHECK(!swapz_window_deadline_expired(deadline_ns, deadline_ns - 1ULL));
+	CHECK(swapz_window_deadline_expired(deadline_ns, deadline_ns));
+
+	/* A full batch must be scanned, never truncated or indexed past 64. */
+	CHECK(!swapz_window_read_independent(staged, SWAPZ_MAX_RECORDS,
+						1000U + SWAPZ_MAX_RECORDS - 1U, 2, 0));
+	CHECK(swapz_window_read_independent(staged, SWAPZ_MAX_RECORDS,
+					       999U, 2, 0));
+	CHECK(!swapz_window_read_independent(staged,
+					SWAPZ_MAX_RECORDS + 1U, 999U, 2, 0));
+	CHECK(!swapz_window_uniform_compressed(staged,
+					SWAPZ_MAX_RECORDS + 1U));
+	CHECK(!swapz_window_compressed_extent_fits(staged,
+					SWAPZ_MAX_RECORDS + 1U, 2, 0, 4, 2));
+
+	for (lane_index = 0;
+	     lane_index < sizeof(submitter_lane_counts) /
+			   sizeof(submitter_lane_counts[0]); ++lane_index) {
+		unsigned int occupied_lanes = submitter_lane_counts[lane_index];
+		unsigned int queued_followers = occupied_lanes;
+		int direct_dispatch = swapz_window_submitter_dispatch_ready(
+			2, 1, 0, 0, 0, 0, queued_followers);
+
+		/* The mapper separately requires a claimed lane; zero lanes do
+		 * not authorize submission even with an otherwise empty FIFO. */
+		CHECK_PRESSURE(direct_dispatch == !queued_followers,
+			occupied_lanes, 0, queued_followers, reserve_error);
+		CHECK_PRESSURE(!swapz_window_submitter_dispatch_ready(
+			2, 1, 0, 0, 0, 0, SWAPZ_MAX_RECORDS),
+			occupied_lanes, 0, SWAPZ_MAX_RECORDS, reserve_error);
+		CHECK_PRESSURE(swapz_retention_timer_needs_arm(
+			2, queued_followers != 0) == !queued_followers,
+			occupied_lanes, 1, queued_followers, reserve_error);
+		/* Shutdown/failure and ENOSPC are supplied as caller fences.
+		 * Once reserve recovery succeeds, the pure read check reopens. */
+		CHECK_PRESSURE(!swapz_window_read_independent(
+			staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error),
+			occupied_lanes, SWAPZ_MAX_RECORDS,
+			queued_followers, reserve_error);
+		CHECK_PRESSURE(!swapz_window_read_independent(
+			staged, SWAPZ_MAX_RECORDS, 999U, 2, -EIO),
+			occupied_lanes, SWAPZ_MAX_RECORDS,
+			queued_followers, -EIO);
+		reserve_error = 0;
+		CHECK_PRESSURE(swapz_window_read_independent(
+			staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error),
+			occupied_lanes, SWAPZ_MAX_RECORDS,
+			queued_followers, reserve_error);
+		reserve_error = -ENOSPC;
+	}
+
+	for (hand_index = 0;
+	     hand_index < sizeof(hand_counts) / sizeof(hand_counts[0]);
+	     ++hand_index) {
+		int qualified_pack_seen = 0;
+		const swapz_u8 hand = hand_counts[hand_index];
+
+		for (count = 0; count <= SWAPZ_MAX_RECORDS; ++count) {
+			int queued_plain_write = count < SWAPZ_MAX_RECORDS;
+			int pressure_close = swapz_window_work_conserving_close_ready(
+				2, qualified_pack_seen, (swapz_u8)count,
+				SWAPZ_MAX_RECORDS, 0, hand, 1);
+			if (count &&
+			    swapz_window_pack_ready(staged, (swapz_u8)count, 2, 0))
+				qualified_pack_seen = 1;
+			/* An accepted WRITE cannot split the learned 64-page wave
+			 * before its target, even with a smaller pressure hand. */
+			CHECK_PRESSURE(pressure_close ==
+				(count == SWAPZ_MAX_RECORDS),
+				8, count, queued_plain_write, reserve_error);
+			/* Once both accepted FIFOs are dry, a latched 4-page pack
+			 * is finite work, rather than a wait for future arrivals. */
+			CHECK_PRESSURE(swapz_window_work_conserving_close_ready(
+				2, qualified_pack_seen, (swapz_u8)count,
+				SWAPZ_MAX_RECORDS, 0, hand, 0) ==
+				(count >= SWAPZ_WINDOW_DRY_PACK_MIN_RECORDS),
+				8, count, 0, reserve_error);
+			/* Neither a retry nor growing the staged batch can move the
+			 * first-record deadline later. */
+			CHECK_PRESSURE(swapz_window_retention_deadline_ns(
+				first_ns, 2U) == deadline_ns,
+				8, count, queued_plain_write, reserve_error);
+		}
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -751,6 +889,7 @@ int main(void)
 	CHECK(test_backwards_clock_has_zero_age() == 0); passed++;
 	CHECK(test_late_clock_does_not_wrap_remaining_budget() == 0); passed++;
 	CHECK(test_submitter_dispatch_requires_proven_idle_singleton() == 0); passed++;
+	CHECK(test_bounded_queue_pressure_and_retry() == 0); passed++;
 	printf("SWAPZ_WINDOW_POLICY_TESTS_PASS=%d\n", passed);
 	return 0;
 }
