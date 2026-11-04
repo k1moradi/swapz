@@ -6711,5 +6711,150 @@ int main(void) {
         self.assertIn("mutex_init(&ctx->ordered_owner);", body("swapz_ctr"))
 
 
+class CapacityMemoryAccountingContracts(unittest.TestCase):
+    """Audit *current* capacity-sized constructor sites without allocation.
+
+    Compiled-type/admission checks also run in mapping/authority.c. This
+    independent source inventory detects an added, resized or leaked index
+    rather than continuing to report an obsolete fixed 740 MiB estimate.
+    """
+
+    INDEXES = {
+        "maps": ("logical", "struct swapz_map", 16),
+        "page_prev_in_segment": ("logical", "swapz_u32", 4),
+        "page_next_in_segment": ("logical", "swapz_u32", 4),
+        "live_records": ("physical", "swapz_u16", 2),
+        "extent_classes": ("physical", "swapz_u8", 1),
+        "extent_sequence_delta": ("physical", "swapz_u8", 1),
+        "gc_scores": ("ctx->segment_count", "swapz_u32", 4),
+        "gc_io_scores": ("ctx->segment_count", "swapz_u32", 4),
+        "gc_min_live_blocks": ("ctx->segment_count", "swapz_u16", 2),
+        "gc_segment_evictions": ("ctx->segment_count", "swapz_u32", 4),
+        "segment_mapped_pages": ("ctx->segment_count", "swapz_u32", 4),
+        "segment_program_counts": ("ctx->segment_count", "swapz_u32", 4),
+        "segment_first_page": ("ctx->segment_count", "swapz_u32", 4),
+        "segment_last_page": ("ctx->segment_count", "swapz_u32", 4),
+        "segment_sequence_base": ("ctx->segment_count", "swapz_u32", 4),
+        "segment_trimmed": ("ctx->segment_count", "swapz_u8", 1),
+        "segment_roles": ("ctx->segment_count", "swapz_u8", 1),
+    }
+
+    @staticmethod
+    def allocation_inventory(constructor):
+        # Require exactly the production kvcalloc count and sizeof expression.
+        pattern = re.compile(
+            r"ctx->([a-z_]+)\s*=\s*kvcalloc\(\s*"
+            r"(logical|physical|ctx->segment_count)\s*,\s*"
+            r"sizeof\(\*ctx->\1\)\s*,\s*GFP_KERNEL\s*\)", re.S)
+        return [(match.group(1), match.group(2), match.start())
+                for match in pattern.finditer(constructor)]
+
+    def audit_constructor(self, constructor):
+        inventory = self.allocation_inventory(constructor)
+        observed = {name: scale for name, scale, _ in inventory}
+        self.assertEqual(len(inventory), len(self.INDEXES),
+                         "capacity index site added, removed or malformed")
+        self.assertEqual(set(observed), set(self.INDEXES))
+        for name, (scale, _, _) in self.INDEXES.items():
+            self.assertEqual(observed[name], scale)
+
+        # Every physical/logical/segment-scaled allocation follows deterministic
+        # capacity rejection. An unsupported target may allocate only its small
+        # fixed context before this guard.
+        preflight = constructor.index("swapz_authority_validate_geometry(")
+        self.assertLess(preflight, min(position for _, _, position in inventory))
+        for token in ("logical", "physical", "ctx->segment_count"):
+            self.assertNotRegex(
+                constructor[:preflight],
+                r"(?:kvcalloc|kcalloc|kvmalloc|vzalloc)\(\s*" +
+                re.escape(token) + r"\b")
+        self.assertIn("goto fail;", constructor[preflight:])
+        self.assertLess(constructor.index("swapz_authority_validate_geometry("),
+                        constructor.index("swapz_authority_init("))
+        self.assertIn("swapz_free(ctx);", constructor)
+
+    def test_exact_allocations_widths_frees_and_rejection_order(self):
+        constructor = body("swapz_ctr")
+        destruction = body("swapz_free")
+        self.audit_constructor(constructor)
+        target_struct = DM.split("struct swapz_dm {", 1)[1].split("\n};", 1)[0]
+        for name, (_, element_type, _) in self.INDEXES.items():
+            self.assertRegex(
+                target_struct, re.escape(element_type) +
+                r"\s*\*\s*" + re.escape(name) + r"\s*;")
+            self.assertEqual(
+                len(re.findall(r"\bkvfree\(ctx->" + name + r"\);",
+                               destruction)), 1, "missing/duplicate index free")
+        self.assertIn("_Static_assert(sizeof(struct swapz_map) == 16",
+                      (ROOT / "src/kernel/authority.h").read_text())
+        authority = source_body(
+            "swapz_authority_validate_candidate", AUTH)
+        self.assertIn("sizeof(struct swapz_map)", authority)
+        self.assertIn("sizeof(swapz_u16)", authority)
+        self.assertIn("(size_t)-1", authority)
+
+    def test_new_or_early_index_allocation_fails_source_audit(self):
+        constructor = body("swapz_ctr")
+        guard = constructor.index("swapz_authority_validate_geometry(")
+        injected = (constructor[:guard] +
+                    "ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);\n" +
+                    constructor[guard:])
+        with self.assertRaises(AssertionError):
+            self.audit_constructor(injected)
+        injected = constructor.replace(
+            "ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);",
+            "ctx->maps = kvcalloc(physical, sizeof(*ctx->maps), GFP_KERNEL);")
+        with self.assertRaises(AssertionError):
+            self.audit_constructor(injected)
+
+    def test_selected_card_allocation_free_bytes_and_addressability(self):
+        # Independently compute the current admission result and page-rounded
+        # allocation footprint. These estimates exclude vmalloc metadata, PTEs,
+        # slab/workqueue overhead and fixed scratch: NOT host RAM evidence.
+        page = 4096
+        partition_bytes = 124787884032
+        total_blocks = partition_bytes // page
+        physical = ((total_blocks - 1) // 256) * 256
+        segments = physical // 256
+
+        def reserve(logical_pages):
+            return max((logical_pages + 7) // 8, 512)
+
+        def admitted(logical_pages):
+            available = ((physical - reserve(logical_pages)) // 256) * 256
+            return logical_pages + 256 <= available
+
+        self.assertEqual((physical, segments), (30465536, 119006))
+        logical = 27080192
+        self.assertTrue(admitted(logical))
+        self.assertFalse(admitted(logical + 1))
+        self.assertEqual(reserve(logical), 3385024)
+        self.assertEqual(logical * page, 110920466432)
+        self.assertEqual((logical - 1) * page, 110920462336)
+        dimensions = {
+            "logical": logical,
+            "physical": physical,
+            "ctx->segment_count": segments,
+        }
+        allocations = [
+            (dimensions[scale] * width, name)
+            for name, (scale, _, width) in self.INDEXES.items()
+        ]
+        self.assertEqual(sum(length for length, _ in allocations), 776070968)
+        self.assertEqual(sum((length + page - 1) // page * page
+                             for length, _ in allocations), 776114176)
+        self.assertEqual(max(allocations), (433283072, "maps"))
+        self.assertEqual(len(allocations), 17)
+        self.assertLess(logical * 16, (1 << 32))
+        self.assertLess(physical * 2, (1 << 32))
+        # At the top segment-aligned physical u32 geometry, 32-bit
+        # addressability rejects liveness before attempting any allocation.
+        self.assertGreater(0xffffff00 * 2, (1 << 32) - 1)
+        self.assertGreater(3817748224 * 16, (1 << 32) - 1)
+        self.assertIn("swapz_authority_validate_geometry(", constructor := body("swapz_ctr"))
+        self.assertLess(constructor.index("swapz_authority_validate_geometry("),
+                        constructor.index("ctx->maps = kvcalloc("))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
