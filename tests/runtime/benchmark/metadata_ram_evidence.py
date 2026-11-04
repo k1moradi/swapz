@@ -141,6 +141,116 @@ def _median(values: list[int]) -> int:
     return total // 2
 
 
+def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
+    """Extract the minimum sustained-arm chronology needed to revalidate RAM."""
+    if not isinstance(swapz_arm, dict):
+        raise ValueError("metadata RAM arm binding requires a swapz arm")
+    started = swapz_arm.get("arm_started_monotonic_ns")
+    finished = swapz_arm.get("arm_finished_monotonic_ns")
+    intervals = swapz_arm.get("sustained_intervals")
+    if (
+            type(started) is not int or started <= 0 or
+            type(finished) is not int or finished <= started or
+            not isinstance(intervals, list) or not intervals):
+        raise ValueError("metadata RAM arm chronology is missing")
+    gc_activity_intervals = []
+    for row in intervals:
+        if not isinstance(row, dict):
+            raise ValueError("metadata RAM arm telemetry interval is invalid")
+        interval_start = row.get("start_monotonic_ns")
+        interval_end = row.get("end_monotonic_ns")
+        gc = row.get("gc")
+        if (
+                type(interval_start) is not int or
+                type(interval_end) is not int or
+                interval_start < started or interval_end <= interval_start or
+                interval_end > finished or not isinstance(gc, dict)):
+            raise ValueError("metadata RAM arm telemetry chronology is invalid")
+        counters = {}
+        for field in ("gc_wall_ns", "gc_victims", "gc_pages"):
+            value = gc.get(field)
+            if type(value) is not int or value < 0:
+                raise ValueError(
+                    "metadata RAM arm GC counters are missing or malformed")
+            counters[field] = value
+        if any(counters.values()):
+            gc_activity_intervals.append({
+                "start_monotonic_ns": interval_start,
+                "end_monotonic_ns": interval_end,
+                **counters,
+            })
+    if not gc_activity_intervals:
+        raise ValueError("metadata RAM arm has no measured GC activity interval")
+    return {
+        "arm_started_monotonic_ns": started,
+        "arm_finished_monotonic_ns": finished,
+        "gc_activity_intervals": gc_activity_intervals,
+    }
+
+
+def validate_metadata_ram_arm_binding(trace: Any, binding: Any) -> None:
+    """Revalidate phase chronology against sealed sustained-arm GC evidence."""
+    if not isinstance(binding, dict) or set(binding) != {
+            "arm_started_monotonic_ns", "arm_finished_monotonic_ns",
+            "gc_activity_intervals"}:
+        raise ValueError("metadata RAM arm binding fields are invalid")
+    started = binding["arm_started_monotonic_ns"]
+    finished = binding["arm_finished_monotonic_ns"]
+    windows = binding["gc_activity_intervals"]
+    if (
+            type(started) is not int or started <= 0 or
+            type(finished) is not int or finished <= started or
+            not isinstance(windows, list) or not windows):
+        raise ValueError("metadata RAM arm binding chronology is invalid")
+    previous_end = None
+    for window in windows:
+        if not isinstance(window, dict) or set(window) != {
+                "start_monotonic_ns", "end_monotonic_ns",
+                "gc_wall_ns", "gc_victims", "gc_pages"}:
+            raise ValueError("metadata RAM GC activity window is invalid")
+        window_start = window["start_monotonic_ns"]
+        window_end = window["end_monotonic_ns"]
+        counters = [
+            window["gc_wall_ns"], window["gc_victims"], window["gc_pages"]]
+        if (
+                type(window_start) is not int or
+                type(window_end) is not int or
+                window_start < started or window_end <= window_start or
+                window_end > finished or
+                any(type(value) is not int or value < 0 for value in counters) or
+                not any(counters) or
+                (previous_end is not None and window_start < previous_end)):
+            raise ValueError("metadata RAM GC activity window is malformed")
+        previous_end = window_end
+
+    samples = trace.get("samples") if isinstance(trace, dict) else None
+    if not isinstance(samples, list) or not samples:
+        raise ValueError("metadata RAM trace samples are missing")
+    phases = {}
+    for phase in PHASES:
+        values = [
+            sample.get("monotonic_ns") for sample in samples
+            if isinstance(sample, dict) and sample.get("phase") == phase]
+        if (
+                not values or
+                any(type(value) is not int or value <= 0 for value in values)):
+            raise ValueError("metadata RAM trace phase chronology is incomplete")
+        phases[phase] = values
+    if (
+            max(phases["initialization"]) > started or
+            any(value < started or value > finished
+                for phase in ("steady", "gc") for value in phases[phase]) or
+            min(phases["teardown"]) < finished):
+        raise ValueError("metadata RAM phases do not bind to sustained arm")
+    for sample_time in phases["gc"]:
+        if not any(
+                window["start_monotonic_ns"] <= sample_time <=
+                window["end_monotonic_ns"]
+                for window in windows):
+            raise ValueError(
+                "metadata RAM GC sample lacks measured target GC activity")
+
+
 def validate_metadata_ram_trace(
         trace: Any, *, source_sha: str, mapper_uuid: str,
         expected_peak_ram_bytes: int | None = None) -> dict[str, int]:
