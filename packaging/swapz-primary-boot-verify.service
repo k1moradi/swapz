@@ -16,13 +16,19 @@ ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
-ProtectKernelModules=yes
+# observe authenticates the installed /lib/modules/.../dm-swapz.ko image.
+# ProtectKernelModules would hide that evidence; CAP_SYS_MODULE is absent and
+# module syscalls are denied below instead, preserving read-only provenance.
 ProtectClock=yes
 ProtectHostname=yes
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
+# CAP_SYS_ADMIN is retained only for read-only DM inspection. Prevent it from
+# undoing filesystem isolation, and independently forbid module mutation.
+SystemCallFilter=~@mount @module
+SystemCallErrorNumber=EPERM
 # Do not add ReadOnlyPaths bind mounts around recovery or package journals:
 # native preflight rejects mount substitution and needs the original mount IDs.
 # The verifier's observe command only writes its report and /run authorization.
