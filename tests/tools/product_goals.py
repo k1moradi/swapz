@@ -363,6 +363,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
     unittest_error = None
     unittest_category = None
     unittest_failure_active = False
+    unittest_contract_context = False
     contract_suite = any(name in suite for name in
                          ("contract", "policy", "interface", "layout"))
 
@@ -385,6 +386,11 @@ def diagnose_ci_failure(lines, exit_code, suite):
                 unittest_failure_active = False
             continue
 
+        if (unittest_failure_active and
+                re.search(r"(?:^|[/\\])(?:source-contract|make-interface)-"
+                          r"test\.py\b", safe_line)):
+            unittest_contract_context = True
+
         if make_target is None:
             make_match = re.search(
                 r"make(?:\[\d+\])?: \*\*\* "
@@ -399,7 +405,9 @@ def diagnose_ci_failure(lines, exit_code, suite):
                 safe_line):
             fallback = safe_line
 
-        category = _ci_failure_category(safe_line, contract_suite)
+        category = _ci_failure_category(
+            safe_line, contract_suite or
+            (unittest_failure_active and unittest_contract_context))
         if (unittest_failure_active and unittest_error is None and
                 category is not None):
             unittest_error = safe_line
