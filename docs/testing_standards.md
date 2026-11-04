@@ -2978,15 +2978,16 @@ at least 1 GiB MemAvailable before this destructive-to-performance but RAM-only
 stress begins;
 otherwise qualification is BLOCKED rather than silently weakened.
 
-Immediately before reading the ID36 host-memory inventory, the helper removes
-only `fixture.bin`, `plan/trace.jsonl`, and `plan/manifest.json` from benchmark
-session directories carrying matching root-owned owner/completion markers.
-The completion marker is emitted only after a successful pair and ordinary
-teardown. A live, malformed, incomplete, failed, or quarantined owned session
-blocks admission and remains intact. Session logs and result JSON remain
-available. Other `/tmp` entries, including desktop sockets and files owned by
-unrelated applications, are never removed. This releases duplicated tmpfs
-inputs without weakening the 1 GiB admission threshold.
+Immediately before the loaded-preflight diagnostic read and the ID36 admission
+sampling loop, the helpers verify that `/tmp` itself is a real, root-owned
+mode-1777 directory with no nested mountpoints, remove every direct child
+(including dotfiles) recursively, and verify the directory is empty. A
+nonstandard or uninspectable `/tmp`, a nested mountpoint, a removal error, or
+concurrent repopulation fails closed before the observation. ID36 repeats the
+cleanup because earlier loaded stages may have created temporary files after
+preflight. This may remove temporary data belonging to any process; run the
+privileged qualification only in the owner's serialized test window. Clearing
+`/tmp` does not weaken the 1 GiB `MemAvailable` threshold or drop kernel caches.
 
 The owned pair first creates and fully faults both 64MiB memory-backed
 `null_blk` devices outside the ID36 cgroup. It then migrates its benchmark

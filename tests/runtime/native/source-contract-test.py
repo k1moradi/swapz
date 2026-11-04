@@ -5578,7 +5578,7 @@ int main(void)
         start = pressure.index("read_host_memory_inventory() {")
         end = pressure.index("\n}\n", start) + 2
         helper = pressure[start:end].replace("/proc/meminfo", '"$1"')
-        command = helper + "\nread_host_memory_inventory\n"
+        command = helper + "\nread_host_memory_inventory \"$1\"\n"
         sample = (
             "MemTotal: 3863624 kB\n"
             "MemAvailable: 894992 kB\n"
