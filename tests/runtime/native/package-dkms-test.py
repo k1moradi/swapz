@@ -1135,9 +1135,12 @@ exec "{flock_binary}" "$@"
                 state_path.write_text(
                     json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
             if substitute_directory:
-                transaction.rename(transaction.with_name(
-                    transaction.name + ".original"))
-                transaction.mkdir(mode=0o700)
+                original = transaction.with_name(
+                    transaction.name + ".original")
+                transaction.rename(original)
+                # A private, same-owner directory behind the symlink must not
+                # make rollback accept a substituted transaction anchor.
+                transaction.symlink_to(original, target_is_directory=True)
 
             os.killpg(process.pid, signal.SIGTERM)
             stdout, stderr = process.communicate(timeout=8)
