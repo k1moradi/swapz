@@ -36,6 +36,7 @@ static unsigned int extent_calls, run_calls, read_calls;
 static unsigned int fail_on_run;
 static unsigned int partial_fail_on_run;
 static unsigned int unsupported_on_run;
+static unsigned int nospace_on_run;
 static unsigned int corrupt_on_run;
 static unsigned int short_on_run;
 static unsigned int maps_visible_during_run;
@@ -154,6 +155,8 @@ static int write_run(void *opaque, swapz_u32 block, swapz_u16 blocks,
 		return -EIO;
 	if (unsupported_on_run && run_calls == unsupported_on_run)
 		return -EOPNOTSUPP;
+	if (nospace_on_run && run_calls == nospace_on_run)
+		return -ENOSPC;
 	if (short_on_run && run_calls == short_on_run) {
 		*completed = blocks - 1;
 		memcpy(media + (size_t)block * SWAPZ_BLOCK_BYTES, src,
@@ -203,7 +206,7 @@ static int setup(void)
 	e.bulk_enabled = 1;
 	extent_calls = run_calls = read_calls = 0;
 	fail_on_run = partial_fail_on_run = unsupported_on_run = 0;
-	short_on_run = corrupt_on_run = 0;
+	nospace_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
 	ownership_violation = 0;
 	sealed_calls = sealed_pages = 0;
@@ -917,11 +920,15 @@ static int test_mixed_lower_failures_quarantine_unpublished_raw(void)
 {
 	unsigned int failure_mode;
 
-	/* Independent EIO, successful-short, unsupported and partial-EIO
-	 * callbacks must quarantine the entire failed run. */
-	for (failure_mode = 0; failure_mode < 4; ++failure_mode) {
+	/*
+	 * Independent EIO, successful-short, unsupported, partial-EIO and a
+	 * device-originated ENOSPC must quarantine the entire failed run. The
+	 * last case is deliberately distinct from swapz authority exhaustion.
+	 */
+	for (failure_mode = 0; failure_mode < 5; ++failure_mode) {
 		swapz_u8 committed = 77;
-		int expected_error = failure_mode == 2 ? -EOPNOTSUPP : -EIO;
+		int expected_error = failure_mode == 2 ? -EOPNOTSUPP :
+			failure_mode == 4 ? -ENOSPC : -EIO;
 
 		CHECK(setup() == 0);
 		prepare_raw_tail(8, 32);
@@ -931,8 +938,10 @@ static int test_mixed_lower_failures_quarantine_unpublished_raw(void)
 			short_on_run = 1;
 		else if (failure_mode == 2)
 			unsupported_on_run = 1;
-		else
+		else if (failure_mode == 3)
 			partial_fail_on_run = 1;
+		else
+			nospace_on_run = 1;
 		CHECK(swapz_engine_write_window_batched(&e, pages, 32,
 						     &committed) == expected_error);
 		CHECK(committed == 0);
