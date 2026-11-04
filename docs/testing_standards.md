@@ -693,8 +693,9 @@ batched engine/authority paths for one finite mixed replacement at the
 logical-generation limit: an existing RAW page becomes compressed, an existing
 compressed page becomes RAW, and a previously unmapped compressed sibling
 shares a run. The serialized fixture must explicitly enable the rotating
-allocator before registering segment roles so batch pause owns the staged
-reservations. One prefix block must actually reach isolated test media before
+allocator before staging the batched run so batch pause owns the staged
+reservations; segment-role registration order is not itself publication
+authority. One prefix block must actually reach isolated test media before
 the lower callback returns its original -EIO. While the immutable batch is
 paused, staging and DISCARD must both return -EBUSY. A failed completion must
 report zero committed pages, zero publication callbacks, exact submitted/
@@ -705,9 +706,14 @@ must reserve fresh blocks, publish each new representation exactly once, and
 allow one final DISCARD without u32 generation wrap; subsequent WRITE/DISCARD
 must fail -EOVERFLOW with no authority mutation. The fixture is serialized,
 rootless production-C evidence, not a loaded-kernel fault-injection claim.
-On a failing assertion, name the operation, logical generation, reservation/
-publication phase, original errno, actual errno and retained authority; print
-no successful per-operation logs or private page bytes.
+On a failing assertion, name the phase-correct operation and logical generation,
+the reservation/publication phase, the original injected errno, expected errno,
+captured actual errno and retained authority. Never report an expected or stale
+errno as the actual result of a survivor read, DISCARD or rollover refusal.
+Counter diagnostics must show exact expected/actual committed-page, lower-run,
+sealing, publication, reservation-cursor, authority-reservation and engine
+completion/success values; print no successful per-operation logs or private
+page bytes.
 
 Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants. The Device Mapper source-contract regression for corrupted DISCARD mappings must compile the actual `swapz_discard` body together with its actual mapper-local extent-bounds helper, so physical-end and segment-crossing failures are executable production-body evidence rather than string-only checks. The preparation codec-result regression executes the production `preparation-slots.h` classifier/publication helper and distinguishes negative errno to ERROR, zero to READY_RAW, and positive length to READY_COMPRESSED; zero/positive outcomes must also be exercised through actual state publication. It must exercise both deterministic publication interleavings, including ERROR winning before RAW selection and RAW_SELECTED winning before a late negative result; the latter proves the target caller still owns fail-closed handling rather than mutating the selected state. It must additionally race one producer and one RAW selector for thousands of iterations and require any observed READY/ERROR state to expose the producer's payload/error side data through the acquire publication edge. The exact engine tests must inject both a successful short lower WRITE and a lower WRITE that physically completes a nonzero prefix before returning `-EIO`; neither may publish a new mapping, trigger verify-after-write readback, or discard a previous authoritative generation. The native fault fixture must verify the acknowledged lower-media prefix against the encoded bytes and the unwritten suffix against zero-filled media; a fabricated partial completion without actual bytes is insufficient. The experimental exact-production-C GitHub workflow must execute the complete native suite with AddressSanitizer plus UndefinedBehaviorSanitizer on both x86_64 and arm64; do not duplicate that expensive pass in the project-goal workflow. On x86_64 it must then clean the native build and rerun the pthread preparation publication/slot-reuse probes with ThreadSanitizer, halting on the first race report. Native ASan/UBSan/TSan coverage is supporting evidence only and must not be reported as KASAN, KCSAN, lockdep or loaded-kernel race qualification. GC engine coverage must also force a fully completed batched lower write whose authority replay fails after at least one earlier extent has published; the wrapper must return the exact committed prefix while leaving the unpublished tail unreachable, so callers never retry already-authoritative pages as though the prefix were zero. A delayed GC lower completion must keep both overwrite staging and DISCARD fenced until replay, and failed GC lower I/O must leave the uncertain physical reservation unavailable for immediate reuse. A combined lower WRITE that reports a short physical prefix and -EIO must publish none of its staged extents, leave previous mappings byte-exact, quarantine all reserved blocks (including unwritten tail blocks), and retry from a fresh range.
 

@@ -454,6 +454,24 @@ struct publication_fault_control {
 	int original_errno;
 };
 
+struct publication_expectation {
+	unsigned int lower_runs;
+	unsigned int sealed_calls;
+	unsigned int sealed_pages;
+	unsigned int published_calls;
+	unsigned int published_pages;
+	swapz_u8 committed_pages;
+	swapz_u32 next_block;
+	swapz_u32 committed_blocks;
+	swapz_u32 abandoned_blocks;
+	swapz_u32 submitted_blocks;
+	swapz_u32 completed_blocks;
+	swapz_u32 bulk_writes;
+	swapz_u32 bulk_extents;
+	swapz_u32 bulk_mixed_runs;
+	swapz_u32 bulk_raw_entries;
+};
+
 static int publication_lower_read(void *opaque, swapz_u32 start_block,
 				  swapz_u8 blocks, swapz_u8 *destination)
 {
@@ -526,38 +544,68 @@ static int publication_lower_write(void *opaque, swapz_u32 start_block,
 	return 0;
 }
 
-static int publication_failure(const char *phase, int actual_errno,
-			       const struct publication_fault_control *control,
-			       const struct swapz_map *retained_raw,
-			       const struct swapz_map *retained_compressed)
+static int publication_failure(
+	const char *operation, swapz_u32 logical_generation, const char *phase,
+	int expected_errno, int actual_errno, swapz_u8 actual_committed_pages,
+	const struct publication_fault_control *control,
+	const struct publication_expectation *expected,
+	const struct swapz_map *initial_raw,
+	const struct swapz_map *initial_compressed)
 {
 	fprintf(stderr,
-		"FAIL operation=mixed_batch_replace logical_generation=%u "
-		"phase=%s original_errno=%d actual_errno=%d "
-		"retained_authority=raw(gen:%u,start:%u,valid:%u)"
-		",compressed(gen:%u,start:%u,valid:%u) "
-		"current=raw(gen:%u,start:%u),compressed(gen:%u,start:%u) "
-		"reservation=(start:%u,blocks:%u) lower_runs=%u "
-		"sealed_pages=%u published_pages=%u committed_blocks=%u "
-		"abandoned_blocks=%u\n",
-		UINT32_MAX - 1U, phase, control->original_errno, actual_errno,
-		retained_raw->generation, retained_raw->start_block,
-		(unsigned int)retained_raw->valid,
-		retained_compressed->generation,
-		retained_compressed->start_block,
-		(unsigned int)retained_compressed->valid,
+		"FAIL operation=%s logical_generation=%u phase=%s "
+		"original_errno=%d expected_errno=%d actual_errno=%d "
+		"initial_authority=raw(gen:%u,start:%u),compressed(gen:%u,start:%u) "
+		"retained_authority=p0(gen:%u,start:%u,raw:%u,valid:%u),"
+		"p1(gen:%u,start:%u,raw:%u,valid:%u),"
+		"p2(gen:%u,start:%u,raw:%u,valid:%u) "
+		"reservation=(start:%u,blocks:%u) "
+		"counters_expected_actual="
+		"lower_runs:%u/%u,sealed_calls:%u/%u,sealed_pages:%u/%u,"
+		"published_calls:%u/%u,published_pages:%u/%u,"
+		"committed_pages:%u/%u,next_block:%u/%u,"
+		"committed_blocks:%u/%u,abandoned_blocks:%u/%u,"
+		"submitted_blocks:%u/%u,completed_blocks:%u/%u,"
+		"bulk_writes:%u/%u,bulk_extents:%u/%u,"
+		"bulk_mixed_runs:%u/%u,bulk_raw_entries:%u/%u\n",
+		operation, logical_generation, phase, control->original_errno,
+		expected_errno, actual_errno,
+		initial_raw->generation, initial_raw->start_block,
+		initial_compressed->generation, initial_compressed->start_block,
 		maps[0].generation, maps[0].start_block,
+		(unsigned int)maps[0].raw, (unsigned int)maps[0].valid,
 		maps[1].generation, maps[1].start_block,
-		control->failed_start, control->failed_blocks,
-		control->lower_runs, control->sealed_pages,
-		control->published_pages, a.committed_blocks, a.abandoned_blocks);
+		(unsigned int)maps[1].raw, (unsigned int)maps[1].valid,
+		maps[2].generation, maps[2].start_block,
+		(unsigned int)maps[2].raw, (unsigned int)maps[2].valid,
+		control->failed_start, (unsigned int)control->failed_blocks,
+		expected->lower_runs, control->lower_runs,
+		expected->sealed_calls, control->sealed_calls,
+		expected->sealed_pages, control->sealed_pages,
+		expected->published_calls, control->published_calls,
+		expected->published_pages, control->published_pages,
+		(unsigned int)expected->committed_pages,
+		(unsigned int)actual_committed_pages,
+		expected->next_block, a.next_block,
+		expected->committed_blocks, a.committed_blocks,
+		expected->abandoned_blocks, a.abandoned_blocks,
+		expected->submitted_blocks, publication_engine.submitted_blocks,
+		expected->completed_blocks, publication_engine.completed_blocks,
+		expected->bulk_writes, publication_engine.bulk_writes,
+		expected->bulk_extents, publication_engine.bulk_extents,
+		expected->bulk_mixed_runs, publication_engine.bulk_mixed_runs,
+		expected->bulk_raw_entries, publication_engine.bulk_raw_entries);
 	return 1;
 }
 
-#define REQUIRE_PUBLICATION(condition, phase, actual_errno) do { \
+#define REQUIRE_PUBLICATION(condition, operation, generation, phase, \
+			    expected_errno, actual_errno) do { \
 	if (!(condition)) \
-		return publication_failure(phase, actual_errno, &control, \
-					   &retained_raw, &retained_compressed); \
+		return publication_failure(operation, generation, phase, \
+					   expected_errno, actual_errno, committed_pages, \
+					   &control, \
+					   &expectation, &retained_raw, \
+					   &retained_compressed); \
 } while (0)
 
 static int test_torn_mixed_replacement_discard_generation_rollover(void)
@@ -565,6 +613,7 @@ static int test_torn_mixed_replacement_discard_generation_rollover(void)
 	const swapz_u32 raw_logical = 0, compressed_logical = 1;
 	const size_t stride = SWAPZ_BLOCK_BYTES;
 	struct publication_fault_control control = { .original_errno = -EIO };
+	struct publication_expectation expectation = { 0 };
 	struct swapz_tx transaction;
 	struct swapz_map retained_raw, retained_compressed;
 	struct swapz_compressed_page replacement[3] = { 0 };
@@ -648,19 +697,52 @@ static int test_torn_mixed_replacement_discard_generation_rollover(void)
 	committed_pages = 99;
 	error = swapz_engine_write_window_batched(&publication_engine,
 						   replacement, 3, &committed_pages);
-	REQUIRE_PUBLICATION(error == -EIO && committed_pages == 0,
-			    "lower_prefix_eio", error);
-	REQUIRE_PUBLICATION(control.lower_runs == 1 &&
-			    control.sealed_calls == 1 && control.sealed_pages == 3 &&
-			    control.published_calls == 0 && control.published_pages == 0 &&
+	expectation = (struct publication_expectation){
+		.lower_runs = 1,
+		.sealed_calls = 1,
+		.sealed_pages = 3,
+		.published_calls = 0,
+		.published_pages = 0,
+		.committed_pages = 0,
+		.next_block = 4,
+		.committed_blocks = 2,
+		.abandoned_blocks = 2,
+		.submitted_blocks = 2,
+		.completed_blocks = 1,
+		.bulk_writes = 0,
+		.bulk_extents = 0,
+		.bulk_mixed_runs = 0,
+		.bulk_raw_entries = 0,
+	};
+	REQUIRE_PUBLICATION(error == -EIO &&
+			    committed_pages == expectation.committed_pages,
+			    "mixed_batch_replace", UINT32_MAX - 1U,
+			    "lower_prefix_eio", -EIO, error);
+	REQUIRE_PUBLICATION(control.lower_runs == expectation.lower_runs &&
+			    control.sealed_calls == expectation.sealed_calls &&
+			    control.sealed_pages == expectation.sealed_pages &&
+			    control.published_calls == expectation.published_calls &&
+			    control.published_pages == expectation.published_pages &&
 			    !control.ownership_violations &&
 			    control.failed_start == 2 && control.failed_blocks == 2,
-			    "staged_unpublished", error);
+			    "mixed_batch_replace", UINT32_MAX - 1U,
+			    "staged_unpublished", -EIO, error);
 	REQUIRE_PUBLICATION(!a.in_flight && !a.batch_pending &&
-			    a.committed_blocks == 2 && a.abandoned_blocks == 2 &&
-			    a.next_block == 4 &&
-			    publication_engine.submitted_blocks == 2 &&
-			    publication_engine.completed_blocks == 1 &&
+			    a.committed_blocks == expectation.committed_blocks &&
+			    a.abandoned_blocks == expectation.abandoned_blocks &&
+			    a.next_block == expectation.next_block &&
+			    publication_engine.submitted_blocks ==
+				    expectation.submitted_blocks &&
+			    publication_engine.completed_blocks ==
+				    expectation.completed_blocks &&
+			    publication_engine.bulk_writes ==
+				    expectation.bulk_writes &&
+			    publication_engine.bulk_extents ==
+				    expectation.bulk_extents &&
+			    publication_engine.bulk_mixed_runs ==
+				    expectation.bulk_mixed_runs &&
+			    publication_engine.bulk_raw_entries ==
+				    expectation.bulk_raw_entries &&
 			    maps[0].generation == retained_raw.generation &&
 			    maps[1].generation == retained_compressed.generation &&
 			    !memcmp(&maps[0], &retained_raw, sizeof(retained_raw)) &&
@@ -670,52 +752,96 @@ static int test_torn_mixed_replacement_discard_generation_rollover(void)
 			    live[retained_raw.start_block] == 1 &&
 			    live[retained_compressed.start_block] == 1 &&
 			    !live[2] && !live[3] && !classes[2] && !classes[3],
-			    "reservation_quarantine", error);
+			    "mixed_batch_replace", UINT32_MAX - 1U,
+			    "reservation_quarantine", -EIO, error);
 	REQUIRE_PUBLICATION(!memcmp(publication_media + 2U * stride,
 				     publication_first_block, stride),
-			    "physical_prefix", error);
+			    "mixed_batch_replace", UINT32_MAX - 1U,
+			    "physical_prefix", -EIO, error);
 	{
 		static const swapz_u8 empty_block[SWAPZ_BLOCK_BYTES];
 
 		REQUIRE_PUBLICATION(!memcmp(publication_media + 3U * stride,
 					     empty_block, stride),
-				    "unwritten_suffix", error);
+				    "mixed_batch_replace", UINT32_MAX - 1U,
+				    "unwritten_suffix", -EIO, error);
 	}
+
+	error = swapz_verify_raw(
+		&a, raw_logical,
+		publication_media + (size_t)retained_raw.start_block * stride);
 	REQUIRE_PUBLICATION(
 		!memcmp(publication_media +
 			(size_t)retained_raw.start_block * stride,
-			publication_old_raw, stride) &&
-		swapz_verify_raw(&a, raw_logical,
-				 publication_media +
-				 (size_t)retained_raw.start_block * stride) == 0,
-		"raw_survivor", error);
-	REQUIRE_PUBLICATION(swapz_engine_read_page(
-			&publication_engine, compressed_logical, publication_readback,
-			sizeof(publication_readback), &payload_length) == 0 &&
-			payload_length == sizeof(compressed) &&
-			!memcmp(publication_readback, compressed, payload_length),
-			    "compressed_survivor", error);
+			publication_old_raw, stride) && !error,
+		"raw_survivor_read", retained_raw.generation,
+		"retained_authority", 0, error);
+
+	error = swapz_engine_read_page(
+		&publication_engine, compressed_logical, publication_readback,
+		sizeof(publication_readback), &payload_length);
+	REQUIRE_PUBLICATION(error == 0 && payload_length == sizeof(compressed) &&
+			    !memcmp(publication_readback, compressed, payload_length),
+			    "compressed_survivor_read",
+			    retained_compressed.generation,
+			    "retained_authority", 0, error);
+
 	read_calls_before = control.read_calls;
 	payload_length = 7;
-	REQUIRE_PUBLICATION(swapz_engine_read_page(
-			&publication_engine, 2, publication_readback,
-			sizeof(publication_readback), &payload_length) == -ESTALE &&
-			!payload_length && control.read_calls == read_calls_before,
-			    "unpublished_newcomer", error);
+	error = swapz_engine_read_page(
+		&publication_engine, 2, publication_readback,
+		sizeof(publication_readback), &payload_length);
+	REQUIRE_PUBLICATION(error == -ESTALE && !payload_length &&
+			    control.read_calls == read_calls_before,
+			    "unpublished_newcomer_read", maps[2].generation,
+			    "unpublished_bytes", -ESTALE, error);
 
 	/* A retry takes a fresh physical reservation, changes both storage
 	 * representations, and publishes exactly three logical generations. */
 	committed_pages = 99;
 	error = swapz_engine_write_window_batched(&publication_engine,
 						   replacement, 3, &committed_pages);
-	REQUIRE_PUBLICATION(!error && committed_pages == 3 &&
-			    control.lower_runs == 2 && control.sealed_calls == 2 &&
-			    control.sealed_pages == 6 && control.published_calls == 1 &&
-			    control.published_pages == 3 && !control.ownership_violations &&
+	expectation = (struct publication_expectation){
+		.lower_runs = 2,
+		.sealed_calls = 2,
+		.sealed_pages = 6,
+		.published_calls = 1,
+		.published_pages = 3,
+		.committed_pages = 3,
+		.next_block = 6,
+		.committed_blocks = 4,
+		.abandoned_blocks = 2,
+		.submitted_blocks = 4,
+		.completed_blocks = 3,
+		.bulk_writes = 1,
+		.bulk_extents = 2,
+		.bulk_mixed_runs = 1,
+		.bulk_raw_entries = 1,
+	};
+	REQUIRE_PUBLICATION(!error &&
+			    committed_pages == expectation.committed_pages &&
+			    control.lower_runs == expectation.lower_runs &&
+			    control.sealed_calls == expectation.sealed_calls &&
+			    control.sealed_pages == expectation.sealed_pages &&
+			    control.published_calls == expectation.published_calls &&
+			    control.published_pages == expectation.published_pages &&
+			    !control.ownership_violations &&
 			    !a.in_flight && !a.batch_pending &&
-			    a.committed_blocks == 4 && a.abandoned_blocks == 2 &&
-			    a.next_block == 6 && publication_engine.submitted_blocks == 4 &&
-			    publication_engine.completed_blocks == 3 &&
+			    a.committed_blocks == expectation.committed_blocks &&
+			    a.abandoned_blocks == expectation.abandoned_blocks &&
+			    a.next_block == expectation.next_block &&
+			    publication_engine.submitted_blocks ==
+				    expectation.submitted_blocks &&
+			    publication_engine.completed_blocks ==
+				    expectation.completed_blocks &&
+			    publication_engine.bulk_writes ==
+				    expectation.bulk_writes &&
+			    publication_engine.bulk_extents ==
+				    expectation.bulk_extents &&
+			    publication_engine.bulk_mixed_runs ==
+				    expectation.bulk_mixed_runs &&
+			    publication_engine.bulk_raw_entries ==
+				    expectation.bulk_raw_entries &&
 			    !live[retained_raw.start_block] &&
 			    !live[retained_compressed.start_block] &&
 			    maps[0].valid && !maps[0].raw &&
@@ -723,48 +849,67 @@ static int test_torn_mixed_replacement_discard_generation_rollover(void)
 			    maps[1].valid && maps[1].raw &&
 			    maps[1].generation == UINT32_MAX - 1U &&
 			    maps[2].valid && !maps[2].raw && maps[2].generation == 1,
-			    "retry_publication", error);
+			    "mixed_batch_retry", UINT32_MAX - 1U,
+			    "retry_publication", 0, error);
 	first_retry_block = maps[0].start_block;
 	REQUIRE_PUBLICATION(first_retry_block == 4 && maps[1].start_block == 5 &&
 			    live[first_retry_block] == 2 && live[5] == 1,
-			    "retry_reservation", error);
-	REQUIRE_PUBLICATION(swapz_engine_read_page(
-			&publication_engine, 0, publication_readback,
-			sizeof(publication_readback), &payload_length) == 0 &&
-			payload_length == sizeof(publication_new_compressed[0]) &&
-			!memcmp(publication_readback, publication_new_compressed[0],
-				payload_length),
-			    "compressed_replacement_read", error);
-	REQUIRE_PUBLICATION(swapz_engine_read_page(
-			&publication_engine, 2, publication_readback,
-			sizeof(publication_readback), &payload_length) == 0 &&
-			payload_length == sizeof(publication_new_compressed[1]) &&
-			!memcmp(publication_readback, publication_new_compressed[1],
-				payload_length),
-			    "newcomer_read", error);
+			    "mixed_batch_retry", UINT32_MAX - 1U,
+			    "retry_reservation", 0, error);
+
+	error = swapz_engine_read_page(
+		&publication_engine, 0, publication_readback,
+		sizeof(publication_readback), &payload_length);
+	REQUIRE_PUBLICATION(
+		error == 0 &&
+		payload_length == sizeof(publication_new_compressed[0]) &&
+		!memcmp(publication_readback, publication_new_compressed[0],
+			payload_length),
+		"compressed_replacement_read", maps[0].generation,
+		"published_authority", 0, error);
+
+	error = swapz_engine_read_page(
+		&publication_engine, 2, publication_readback,
+		sizeof(publication_readback), &payload_length);
+	REQUIRE_PUBLICATION(
+		error == 0 &&
+		payload_length == sizeof(publication_new_compressed[1]) &&
+		!memcmp(publication_readback, publication_new_compressed[1],
+			payload_length),
+		"newcomer_read", maps[2].generation,
+		"published_authority", 0, error);
+
+	error = swapz_verify_raw(
+		&a, compressed_logical,
+		publication_media + (size_t)maps[1].start_block * stride);
 	REQUIRE_PUBLICATION(
 		!memcmp(publication_media + (size_t)maps[1].start_block * stride,
-			publication_new_raw, stride) &&
-		swapz_verify_raw(&a, compressed_logical,
-				 publication_media +
-				 (size_t)maps[1].start_block * stride) == 0,
-		"raw_replacement_read", error);
+			publication_new_raw, stride) && !error,
+		"raw_replacement_read", maps[1].generation,
+		"published_authority", 0, error);
 
 	/* DISCARD takes the last available generation without reviving bytes.
 	 * Neither a second DISCARD nor WRITE may wrap that logical generation. */
-	REQUIRE_PUBLICATION(swapz_discard_page(&a, compressed_logical) == 0 &&
-			    !maps[1].valid && maps[1].generation == UINT32_MAX &&
-			    !live[5], "discard_commit", error);
-	REQUIRE_PUBLICATION(swapz_discard_page(&a, compressed_logical) ==
-			    -EOVERFLOW, "discard_overflow", -EOVERFLOW);
-	REQUIRE_PUBLICATION(swapz_stage(&a, &compressed_logical, 1, 1,
-					&transaction) == -EOVERFLOW &&
-			    !a.in_flight && a.next_block == 6 &&
+	error = swapz_discard_page(&a, compressed_logical);
+	REQUIRE_PUBLICATION(error == 0 && !maps[1].valid &&
+			    maps[1].generation == UINT32_MAX && !live[5],
+			    "discard", UINT32_MAX, "publish_invalidation", 0, error);
+
+	error = swapz_discard_page(&a, compressed_logical);
+	REQUIRE_PUBLICATION(error == -EOVERFLOW,
+			    "discard", maps[1].generation,
+			    "generation_rollover_refusal", -EOVERFLOW, error);
+
+	error = swapz_stage(&a, &compressed_logical, 1, 1, &transaction);
+	REQUIRE_PUBLICATION(error == -EOVERFLOW &&
+			    !a.in_flight && a.next_block == expectation.next_block &&
 			    maps[0].valid && maps[0].generation == UINT32_MAX - 1U &&
 			    maps[2].valid && maps[2].generation == 1 &&
 			    live[first_retry_block] == 2 &&
-			    a.committed_blocks == 4 && a.abandoned_blocks == 2,
-			    "generation_rollover_refusal", -EOVERFLOW);
+			    a.committed_blocks == expectation.committed_blocks &&
+			    a.abandoned_blocks == expectation.abandoned_blocks,
+			    "write_stage", maps[1].generation,
+			    "generation_rollover_refusal", -EOVERFLOW, error);
 	return 0;
 }
 #undef REQUIRE_PUBLICATION
