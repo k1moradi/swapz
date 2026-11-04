@@ -33,6 +33,9 @@ struct forced_terminal_publication {
  */
 static _Thread_local struct forced_terminal_publication *forced_publication;
 
+/* Defined after the included production header; keep the CAS shim neutral. */
+static int publish_interposed_terminal(atomic_t *state, int terminal_state);
+
 /* A deterministic producer publication between the first read and raw CAS.
  * Counts API-level acquire observations; it is not a hardware reordering or
  * LKMM proof. The contract allows an unordered failed conditional RMW. */
@@ -43,6 +46,8 @@ static struct {
 	unsigned int acquire_reads;
 	unsigned int ready_acquires;
 	unsigned int failed_cas;
+	unsigned int helper_publications;
+	unsigned int failed_helper_publications;
 } publication;
 
 static int atomic_read(atomic_t *value)
@@ -67,9 +72,14 @@ static int atomic_cmpxchg(atomic_t *value, int old, int replacement)
 	int expected = old;
 
 	if (value == publication.state && publication.publish_before_cas) {
-		atomic_store_explicit(&value->value, publication.ready_state,
-				      memory_order_release);
+		int terminal_state = publication.ready_state;
+
+		/* Clear the hook before calling the real helper's nested CAS. */
 		publication.publish_before_cas = 0;
+		publication.helper_publications++;
+		if (publish_interposed_terminal(value, terminal_state) !=
+		    SWAPZ_PREPARATION_PREPARING)
+			publication.failed_helper_publications++;
 	}
 	if (value == publication.state && forced_publication) {
 		atomic_store_explicit(&forced_publication->publisher_requested, 1,
@@ -121,6 +131,21 @@ static void atomic64_or(s64 bits, atomic64_t *mask)
 
 #define __ffs64(word) ((unsigned int)__builtin_ctzll(word))
 #include "preparation-slots.h"
+
+/* Forced CAS interposition publishes via the real production codec helper. */
+static int publish_interposed_terminal(atomic_t *state, int terminal_state)
+{
+	switch (terminal_state) {
+	case SWAPZ_PREPARATION_READY_COMPRESSED:
+		return swapz_preparation_publish_codec_result(state, 2048);
+	case SWAPZ_PREPARATION_READY_RAW:
+		return swapz_preparation_publish_codec_result(state, 0);
+	case SWAPZ_PREPARATION_ERROR:
+		return swapz_preparation_publish_codec_result(state, -EIO);
+	default:
+		return SWAPZ_PREPARATION_ERROR;
+	}
+}
 
 #define CHECK(x) do { if (!(x)) { \
 	fprintf(stderr, "%s:%d failed %s\n", __FILE__, __LINE__, #x); \
@@ -220,8 +245,12 @@ static int test_ready_publication_wins_raw_cas(void)
 		publication.acquire_reads = 0;
 		publication.ready_acquires = 0;
 		publication.failed_cas = 0;
+		publication.helper_publications = 0;
+		publication.failed_helper_publications = 0;
 		CHECK(swapz_preparation_select_raw(&state) == states[i]);
 		CHECK(publication.failed_cas == 1);
+		CHECK(publication.helper_publications == 1);
+		CHECK(publication.failed_helper_publications == 0);
 		CHECK(publication.ready_acquires == 1);
 		CHECK(publication.acquire_reads == 2);
 		CHECK(atomic_read(&state) == states[i]);
@@ -235,9 +264,13 @@ static int test_ready_publication_wins_raw_cas(void)
 		publication.acquire_reads = 0;
 		publication.ready_acquires = 0;
 		publication.failed_cas = 0;
+		publication.helper_publications = 0;
+		publication.failed_helper_publications = 0;
 		CHECK(swapz_preparation_select_raw_relaxed_reread_mutant(&state) ==
 		      states[i]);
 		CHECK(publication.failed_cas == 1);
+		CHECK(publication.helper_publications == 1);
+		CHECK(publication.failed_helper_publications == 0);
 		CHECK(publication.ready_acquires == 0);
 		CHECK(publication.acquire_reads == 1);
 		CHECK(atomic_read(&state) == states[i]);
@@ -246,6 +279,8 @@ static int test_ready_publication_wins_raw_cas(void)
 		publication.acquire_reads = 0;
 		publication.ready_acquires = 0;
 		publication.failed_cas = 0;
+		publication.helper_publications = 0;
+		publication.failed_helper_publications = 0;
 		CHECK(swapz_preparation_select_raw(&state) == states[i]);
 		CHECK(publication.acquire_reads == 1);
 		CHECK(publication.ready_acquires == 1);
@@ -256,10 +291,14 @@ static int test_ready_publication_wins_raw_cas(void)
 	publication.acquire_reads = 0;
 	publication.ready_acquires = 0;
 	publication.failed_cas = 0;
+	publication.helper_publications = 0;
+	publication.failed_helper_publications = 0;
 	CHECK(swapz_preparation_select_raw(&state) == SWAPZ_PREPARATION_RAW_SELECTED);
 	CHECK(publication.acquire_reads == 1);
 	CHECK(publication.ready_acquires == 0);
 	CHECK(publication.failed_cas == 0);
+	CHECK(publication.helper_publications == 0);
+	CHECK(publication.failed_helper_publications == 0);
 	publication.state = NULL;
 	return 0;
 }
