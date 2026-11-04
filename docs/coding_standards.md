@@ -329,7 +329,10 @@ by their `st_rdev`, and regular swapfiles conflict by their filesystem
 and unreadable entries refuse formatting. The readable `/proc/swaps` inventory
 must contain the kernel's five-column header; empty, headerless, malformed or
 type-inconsistent rows refuse formatting rather than being interpreted as no
-active swap. This catches directly backed swapfiles visible through
+active swap. Every record must terminate in a newline; embedded NULs and
+control bytes, records of 8192 bytes or longer, inventories over 16 MiB or
+65536 rows, and duplicate swap backing identities (block `st_rdev`, regular
+`st_dev` and `st_ino`) are not clearance. This catches directly backed swapfiles visible through
 `/proc/swaps` even if their mount is outside the formatter's mount namespace;
 it does not prove ancestry through arbitrary stacked filesystems.
 Mount inventory must inspect the formatter's own mount table and each
@@ -344,15 +347,19 @@ Mount inventory parsing
 must accept Linux pseudo-filesystem major-zero device identifiers (for example
 `0:20`) without mistaking them for the selected nonzero-major block device.
 Every opened mount table must contain at least one complete row, including
-both numeric mount IDs, the mount root/path/options and the three required
-post-separator fields. An empty table or a structurally incomplete unrelated
+both numeric mount IDs, absolute mount root/path with valid octal escaping,
+valid optional propagation tags, and the three required post-separator fields.
+Duplicate mount IDs within one table are malformed. An empty table or a structurally incomplete unrelated
 sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
 unverified target identities still fail closed.
 Missing evidence for an existing mount namespace, malformed, unreadable,
 permission-denied, changing or ambiguous evidence fails closed.
 
 After that read-only preflight, open the requested path exactly once with
-`O_RDWR | O_EXCL | O_CLOEXEC`. The opened descriptor is the I/O authority.
+`O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW`. The requested final path component
+must be a root-owned, non-world-writable block node, never a symlink. The opened
+descriptor is the I/O authority; path and descriptor must also identify the
+same inode (`st_dev`, `st_ino`) and not merely the same block `st_rdev`.
 Before reading block zero, require `fstat()` on that same descriptor plus a
 fresh path/PARTUUID-alias/sysfs/topology/mount/swap snapshot to match the
 expected device, parent and exact `BLKGETSIZE64` byte count. The same opened
