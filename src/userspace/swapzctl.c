@@ -1304,6 +1304,55 @@ static int format_sysfs_partuuid_matches(dev_t device,
 	return 0;
 }
 
+/* Mountinfo encodes whitespace and backslashes in path fields as octal. */
+static int format_mountinfo_path_valid(const char *begin, const char *end)
+{
+	const char *cursor = begin;
+
+	if (cursor == end || *cursor != '/')
+		return 0;
+	while (cursor < end) {
+		if (*cursor != '\\') {
+			++cursor;
+			continue;
+		}
+		if (end - cursor < 4 || cursor[1] < '0' || cursor[1] > '7' ||
+		    cursor[2] < '0' || cursor[2] > '7' ||
+		    cursor[3] < '0' || cursor[3] > '7')
+			return 0;
+		cursor += 4;
+	}
+	return 1;
+}
+
+/* Reject ambiguous optional propagation metadata, not legitimate mounts. */
+static int format_mountinfo_optional_valid(const char *begin, const char *end)
+{
+	static const char *const prefixes[] = {
+		"shared:", "master:", "propagate_from:",
+	};
+	size_t index;
+
+	if ((size_t)(end - begin) == sizeof("unbindable") - 1U &&
+	    !memcmp(begin, "unbindable", sizeof("unbindable") - 1U))
+		return 1;
+	for (index = 0; index < sizeof(prefixes) / sizeof(prefixes[0]);
+	     ++index) {
+		const size_t prefix_length = strlen(prefixes[index]);
+		const char *number_end;
+		unsigned long long mount_identifier;
+
+		if ((size_t)(end - begin) <= prefix_length ||
+		    memcmp(begin, prefixes[index], prefix_length))
+			continue;
+		return parse_unsigned_decimal(begin + prefix_length,
+					      ULLONG_MAX, &number_end,
+					      &mount_identifier) == 0 &&
+		       number_end == end && mount_identifier != 0;
+	}
+	return 0;
+}
+
 static int format_mountinfo_line_device(const char *line, dev_t *device)
 {
 	const char *cursor;
@@ -1348,8 +1397,11 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 			if (parse_device_identity_fields(token, &mounted_major,
 							 &mounted_minor, 0) < 0)
 				return -1;
-		} else if ((field == 3U || field == 4U) && *cursor != '/') {
-			/* Kernel mount roots and mountpoints are absolute. */
+		} else if ((field == 3U || field == 4U) &&
+			   !format_mountinfo_path_valid(cursor, token_end)) {
+			return -1;
+		} else if (field >= 6U &&
+			   !format_mountinfo_optional_valid(cursor, token_end)) {
 			return -1;
 		}
 		++field;
