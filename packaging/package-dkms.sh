@@ -369,15 +369,15 @@ for destination in "$srcbase" "$modules_root" "$modules_root/$kernel_release" "$
     "$unit_dir" "$generator_dir" "$installed_module_dir"; do
   if [[ -e "$destination" || -L "$destination" ]]; then
     reject_symlinked_destination "$destination"
-    [[ -d "$destination" ]] || blocked "non-directory package destination: $destination"
+    [[ -d "$destination" ]] || blocked "non-directory package destination"
     IFS=: read -r destination_uid destination_gid destination_mode < <(
-      stat -c '%u:%g:%a' -- "$destination"
-    ) || blocked "cannot inspect package destination: $destination"
+      stat -c '%u:%g:%a' -- "$destination" 2>/dev/null
+    ) || blocked "cannot inspect package destination"
     [[ "$destination_uid" == "$expected_installed_owner" &&
        "$destination_gid" == "$expected_installed_group" ]] ||
-      blocked "unexpected package destination ownership: $destination"
+      blocked "unexpected package destination ownership"
     (( (8#$destination_mode & 8#022) == 0 )) ||
-      blocked "writable package destination directory: $destination"
+      blocked "writable package destination directory"
   fi
 done
 
@@ -448,7 +448,9 @@ verify_source_manifest() {
 
 verify_binary_manifest() {
   [[ -f "$src/$binary_manifest" && ! -L "$src/$binary_manifest" ]] || return 1
-  sha256sum --quiet -c "$src/$binary_manifest"
+  # Binary-manifest destinations are absolute. Propagate only verification
+  # status so a refusal never exposes a private sandbox or install path.
+  sha256sum --quiet -c "$src/$binary_manifest" >/dev/null 2>&1
 }
 
 verify_owned_legacy() {
@@ -1389,6 +1391,33 @@ restore_uninstall_cli_backup() {
   mv -f -- "$temporary_cli" "$cli" || return 1
 }
 
+committed_transaction_final_state_is_exact() {
+  local committed_status=""
+  # A rollback trap may observe the durable terminal journal before the caller
+  # has cleared its trap. Trust it only with the complete snapshot and live
+  # terminal state independently verified.
+  verify_transaction_snapshot >/dev/null 2>&1 || return 1
+  python3 - "$transaction_dir/state.json" <<'PY' >/dev/null 2>&1 || return 1
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    state = json.load(stream)
+raise SystemExit(0 if state.get("phase") == "committed" else 1)
+PY
+  query_dkms_status committed_status -m swapz -v "$version" || return 1
+  if [[ "$action" == install ]]; then
+    verify_owned || return 1
+    dkms_status_exact_installed "$committed_status" || return 1
+  elif [[ "$action" == uninstall ]]; then
+    [[ -z "$committed_status" ]] && ! package_paths_present &&
+      module_candidates_absent || return 1
+  else
+    return 1
+  fi
+  other_kernel_module_candidates_absent
+}
+
 restore_uninstall_backup() {
   local expected_package_kind="${1:-current}"
   local current_status="" restored_status=""
@@ -1475,6 +1504,11 @@ uninstall_rollback() {
   local rc="${1:-1}" reason="${2:-failure}"
   trap - ERR HUP INT TERM
   transaction_active=0
+  if [[ "$transaction_phase" == committed ]] &&
+     committed_transaction_final_state_is_exact; then
+    echo "BLOCKED: package uninstall $reason after durable committed phase; committed uninstall verified; rollback not attempted; recovery-required journal retained" >&2
+    exit "$rc"
+  fi
   echo "BLOCKED: package uninstall $reason; attempting transaction rollback" >&2
   if ! verify_transaction_snapshot; then
     quarantine_activation || true
@@ -2171,6 +2205,12 @@ rollback() {
   (( rollback_in_progress == 0 )) || exit "$rc"
   rollback_in_progress=1
   trap - ERR HUP INT TERM
+  if [[ "$transaction_phase" == committed ]] &&
+     committed_transaction_final_state_is_exact; then
+    transaction_active=0
+    echo "BLOCKED: package $reason after durable committed phase; committed install verified; rollback not attempted; recovery-required journal retained" >&2
+    exit "$rc"
+  fi
   echo "BLOCKED: package $reason; attempting transaction rollback" >&2
   if [[ -n "${temporary_cli:-}" ]]; then
     local temporary_cleanup_status=0

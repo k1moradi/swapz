@@ -835,6 +835,7 @@ exec "{flock_binary}" "$@"
         result = self.invoke("install")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("writable package destination directory", result.stderr)
+        self.assertNotIn(str(self.home), result.stderr)
         self.prefix.chmod(0o755)
 
         dkms = self.bin / "dkms"
@@ -1845,6 +1846,7 @@ exec "{flock_binary}" "$@"
         result = self.invoke("install")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertNotIn(str(self.home), result.stderr)
         self.assertEqual(binary.read_bytes(), b"tampered-userspace\n")
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
 
@@ -1987,6 +1989,62 @@ exec "{flock_binary}" "$@"
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate(timeout=8)
+
+    def terminate_at_durable_phase(self, action, phase):
+        """SIGTERM after durable commit must preserve the terminal package state."""
+        ready = self.home / "package-checkpoint.ready"
+        ready.unlink(missing_ok=True)
+        environment = dict(self.env, SWAPZ_TEST_PAUSE_AFTER=phase)
+        process = subprocess.Popen(
+            ["bash", str(self.script), action, str(self.prefix)],
+            cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline and not ready.exists():
+                if process.poll() is not None:
+                    stdout, stderr = process.communicate(timeout=8)
+                    self.fail(f"checkpoint {phase} not reached: {stdout}\n{stderr}")
+                time.sleep(0.025)
+            self.assertTrue(ready.exists(), f"missing durable checkpoint {phase}")
+            transactions = list(
+                (self.home / "transactions").glob("swapz-*.*"))
+            self.assertEqual(len(transactions), 1)
+            state = json.loads((transactions[0] / "state.json").read_text())
+            self.assertEqual(state["phase"], phase)
+            os.killpg(process.pid, signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
+            return transactions[0], stderr
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=8)
+
+    def test_sigterm_after_committed_phase_preserves_terminal_state(self):
+        install_transaction, install_stderr = self.terminate_at_durable_phase(
+            "install", "committed")
+        self.assertIn("committed install verified", install_stderr)
+        self.assertIn("rollback not attempted", install_stderr)
+        self.assertNotIn("attempting transaction rollback", install_stderr)
+        self.assert_installed_exact()
+        self.assertTrue(install_transaction.exists())
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertFalse(install_transaction.exists())
+        self.assert_installed_exact()
+
+        uninstall_transaction, uninstall_stderr = self.terminate_at_durable_phase(
+            "uninstall", "committed")
+        self.assertIn("committed uninstall verified", uninstall_stderr)
+        self.assertIn("rollback not attempted", uninstall_stderr)
+        self.assertNotIn("attempting transaction rollback", uninstall_stderr)
+        self.assert_absent()
+        self.assertTrue(uninstall_transaction.exists())
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertFalse(uninstall_transaction.exists())
+        self.assert_absent()
 
     def test_sigkill_after_install_module_publication_retains_recovery_gate(self):
         transaction = self.kill_at_durable_phase("install", "module-promoted")
