@@ -1352,11 +1352,12 @@ static int format_mountinfo_optional_valid(const char *begin, const char *end,
 		{ "master", 1U << 1 },
 		{ "propagate_from", 1U << 2 },
 	};
-	const size_t length = (size_t)(end - begin);
+	size_t length;
 	size_t index;
 
 	if (!begin || !end || !seen_fields || begin >= end)
 		return 0;
+	length = (size_t)(end - begin);
 	if (length == sizeof("unbindable") - 1U &&
 	    !memcmp(begin, "unbindable", sizeof("unbindable") - 1U)) {
 		const unsigned int bit = 1U << 3;
@@ -1405,9 +1406,12 @@ static int format_mountinfo_optional_valid(const char *begin, const char *end,
 static int format_mountinfo_rw_options_valid(const char *begin,
 					     const char *end)
 {
-	const size_t length = (size_t)(end - begin);
+	size_t length;
 
-	if (!begin || !end || length < 2U)
+	if (!begin || !end || begin >= end)
+		return 0;
+	length = (size_t)(end - begin);
+	if (length < 2U)
 		return 0;
 	if ((memcmp(begin, "ro", 2U) && memcmp(begin, "rw", 2U)) ||
 	    (length > 2U && begin[2] != ','))
