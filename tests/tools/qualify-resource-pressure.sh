@@ -123,7 +123,7 @@ sample_host_memory_admission() {
     local maximum_observed_kib="" consecutive_sufficient=0
 
     for admission_sample in 1 2 3 4 5; do
-        if ! memory_inventory="$(read_host_memory_inventory "$inventory_source")"; then
+        if ! memory_inventory="$(read_host_memory_inventory "$inventory_source" 2>/dev/null)"; then
             printf 'BLOCKED: ID36 MemAvailable unavailable or malformed (required:%s kB; /proc/meminfo must be readable with one canonical kB value for each inventory field)\n' \
                 "$MIN_AVAILABLE_KIB" >&2
             return 2
