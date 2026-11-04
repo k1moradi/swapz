@@ -34,7 +34,7 @@ struct forced_terminal_publication {
 static _Thread_local struct forced_terminal_publication *forced_publication;
 
 /* Defined after the included production header; keep the CAS shim neutral. */
-static int publish_interposed_terminal(atomic_t *state, int terminal_state);
+static void publish_interposed_terminal(atomic_t *state, int terminal_state);
 
 /* A deterministic producer publication between the first read and raw CAS.
  * Counts API-level acquire observations; it is not a hardware reordering or
@@ -77,9 +77,7 @@ static int atomic_cmpxchg(atomic_t *value, int old, int replacement)
 		/* Clear the hook before calling the real helper's nested CAS. */
 		publication.publish_before_cas = 0;
 		publication.helper_publications++;
-		if (publish_interposed_terminal(value, terminal_state) !=
-		    SWAPZ_PREPARATION_PREPARING)
-			publication.failed_helper_publications++;
+		publish_interposed_terminal(value, terminal_state);
 	}
 	if (value == publication.state && forced_publication) {
 		atomic_store_explicit(&forced_publication->publisher_requested, 1,
@@ -133,18 +131,27 @@ static void atomic64_or(s64 bits, atomic64_t *mask)
 #include "preparation-slots.h"
 
 /* Forced CAS interposition publishes via the real production codec helper. */
-static int publish_interposed_terminal(atomic_t *state, int terminal_state)
+static void publish_interposed_terminal(atomic_t *state, int terminal_state)
 {
+	int codec_result;
+
 	switch (terminal_state) {
 	case SWAPZ_PREPARATION_READY_COMPRESSED:
-		return swapz_preparation_publish_codec_result(state, 2048);
+		codec_result = 2048;
+		break;
 	case SWAPZ_PREPARATION_READY_RAW:
-		return swapz_preparation_publish_codec_result(state, 0);
+		codec_result = 0;
+		break;
 	case SWAPZ_PREPARATION_ERROR:
-		return swapz_preparation_publish_codec_result(state, -EIO);
+		codec_result = -EIO;
+		break;
 	default:
-		return SWAPZ_PREPARATION_ERROR;
+		publication.failed_helper_publications++;
+		return;
 	}
+	if (swapz_preparation_publish_codec_result(state, codec_result) !=
+	    SWAPZ_PREPARATION_PREPARING)
+		publication.failed_helper_publications++;
 }
 
 #define CHECK(x) do { if (!(x)) { \
