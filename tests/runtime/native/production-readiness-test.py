@@ -247,19 +247,21 @@ def campaign_artifact(name, byte):
 
 def sampled_metadata_ram_trace(peak_ram_bytes=900 * 1024 * 1024):
     # Rootless fixture only. Real RAM must come from the serialized loaded host.
-    baseline_available = 8 * 1024 * 1024 * 1024
-    baseline_s_unreclaim = 100 * 1024 * 1024
-    baseline_vmalloc = 200 * 1024 * 1024
+    if peak_ram_bytes % 1024:
+        raise ValueError("synthetic RAM peak must be KiB-aligned")
+    baseline_available_kib = 8 * 1024 * 1024
+    baseline_s_unreclaim_kib = 100 * 1024
+    baseline_vmalloc_kib = 200 * 1024
     phase_values = (
         ("baseline", [0] * 10, False),
-        ("initialization", [200 * 1024 * 1024, 400 * 1024 * 1024], True),
-        ("steady", [600 * 1024 * 1024, 800 * 1024 * 1024], True),
-        ("gc", [peak_ram_bytes, 850 * 1024 * 1024], True),
-        ("teardown", [850 * 1024 * 1024] + [0] * 21, None),
+        ("initialization", [200 * 1024, 400 * 1024], True),
+        ("steady", [600 * 1024, 800 * 1024], True),
+        ("gc", [peak_ram_bytes // 1024, 850 * 1024], True),
+        ("teardown", [850 * 1024] + [0] * 21, None),
     )
     samples = []
-    for phase, deltas, mapper_present in phase_values:
-        for phase_index, delta in enumerate(deltas):
+    for phase, deltas_kib, mapper_present in phase_values:
+        for phase_index, delta_kib in enumerate(deltas_kib):
             index = len(samples) + 1
             seconds, tenths = divmod(index, 10)
             present = (
@@ -269,11 +271,13 @@ def sampled_metadata_ram_trace(peak_ram_bytes=900 * 1024 * 1024):
                 "monotonic_ns": index * 100_000_000,
                 "timestamp_utc":
                     f"2026-11-03T00:00:{seconds:02d}.{tenths}Z",
-                "mem_available_bytes": baseline_available - delta,
-                "s_unreclaim_bytes": (
-                    baseline_s_unreclaim + (delta // 8 if present else 0)),
-                "vmalloc_used_bytes": (
-                    baseline_vmalloc + (delta // 16 if present else 0)),
+                "mem_available_kib": baseline_available_kib - delta_kib,
+                "s_unreclaim_kib": (
+                    baseline_s_unreclaim_kib +
+                    (delta_kib // 8 if present else 0)),
+                "vmalloc_used_kib": (
+                    baseline_vmalloc_kib +
+                    (delta_kib // 16 if present else 0)),
                 "mapper_present": present,
             })
     return {
@@ -284,6 +288,7 @@ def sampled_metadata_ram_trace(peak_ram_bytes=900 * 1024 * 1024):
         "mapper_uuid": "SWAPZ-PRIMARY-" + "f" * 32,
         "host_boot_id": "11111111-1111-4111-8111-111111111111",
         "sampling_interval_ns": 100_000_000,
+        "meminfo_unit": "kB",
         "samples": samples,
     }
 
