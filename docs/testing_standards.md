@@ -738,9 +738,9 @@ exactly 17 capacity-scaled `kvcalloc` sites (three logical-page indexes, three
 physical-block indexes and eleven per-segment indexes), every matching
 `kvfree`, exact element types and lengths, and preflight-before-allocation
 constructor order. It mutates a copy of the constructor to demonstrate that
-an early or resized index is rejected. This is a reproducible production
-source-size audit, NOT an allocator success, page-table estimate or host RAM
-PASS. Constructor failure injection on owned RAM-backed `null_blk` and
+an early, differently spelled or resized allocation is rejected. This is a
+reproducible production source-size and conservative leaf-PTE scale audit, NOT
+an allocator-success or host-RAM PASS. Constructor failure injection on owned RAM-backed `null_blk` and
 repeated create/destroy require serialized loaded-host verification; the
 native authority suite also performs 17 deterministic small-index failure
 injections and a successful attach, repeated eight times with reverse-order
@@ -1236,7 +1236,9 @@ observed absent. Each sample records \`MemAvailable\`, \`SUnreclaim\`,
 \`VmallocUsed\`, UTC time, a monotonic timestamp and mapper-presence state.
 The trace preserves the three \`/proc/meminfo\` integers in their
 kernel-reported \`kB\` units and declares \`meminfo_unit: "kB"\`; the
-validator alone converts them to bytes before applying the ceiling. A trace
+shared validator's strict parser rejects missing, duplicate or wrong-unit
+fields, and the validator alone converts them to bytes before applying the
+ceiling. A trace
 that relabels byte values or silently treats KiB integers as bytes is invalid.
 Mapper-present means the exact source-bound mapper UUID named by the trace, not
 merely some Device Mapper node. The qualifying
@@ -5328,8 +5330,9 @@ evaluation must also ingest the sealed
 bytes from the release record, require exact source and pair-source consistency,
 v2 PASS qualification, the same authorized target, an exact MATCH between
 the accepted qualification-pair lower identity and the campaign host snapshot,
-STABLE host identity with quiescent admitted-device boundaries, and the exact current policy,
-prospective-amendment, campaign-evaluator and evidence-sealer digests. Its
+STABLE host identity with quiescent admitted-device boundaries, and the exact
+current policy, prospective-amendment, campaign-evaluator, evidence-sealer and
+metadata-RAM-validator digests. Its
 host/summary/pair artifact manifest must be structurally complete and internally
 count-consistent. Missing or stale sealed campaign evidence is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
