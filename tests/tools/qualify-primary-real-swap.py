@@ -91,6 +91,7 @@ REUSE_ROUNDS = 2
 RESULT_PREFIX = "PRIMARY_REAL_SWAP_RESULT="
 SOURCE_ADMISSION_SCHEMA = "swapz-primary-real-swap-admission-v1"
 SOURCE_ADMISSION_MAX_LINE_BYTES = 4096
+MAX_PHYSICAL_SOURCE_BYTES = 16 * 1024 * 1024
 SOURCE_ADMISSION_TIMEOUT_SECONDS = 45
 MAX_ORACLE_RECORD_BYTES = 4096
 # A sustained memory stall is a safety stop, not an integrity oracle.
@@ -291,7 +292,7 @@ class SourceAdmissionClient:
         raise Blocked("source admission response is oversized")
 
     def require(self, phase: str) -> str:
-        if not re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase):
+        if not re.fullmatch(r"(?:initial|final|published|cycle-[1-4])", phase):
             raise Blocked("source admission phase is invalid")
         if self._physical_control_inputs_sha256 is None:
             raise Blocked("physical control source inputs are not pinned")
@@ -327,19 +328,30 @@ class SourceAdmissionClient:
             "schema", "status", "phase", "source_sha", "nonce",
             "oracle_sha256",
         }
+        status = response.get("status") if isinstance(response, dict) else None
+        if status == "BLOCKED":
+            required.add("reason")
         oracle_sha256 = (
             str(response.get("oracle_sha256", ""))
             if isinstance(response, dict) else "")
         if (not isinstance(response, dict) or set(response) != required or
+                (not isinstance(status, str) or
+                 status not in {"PASS", "BLOCKED"}) or
+                (status == "BLOCKED" and (
+                    not isinstance(response.get("reason"), str) or
+                    not response["reason"].isascii() or
+                    not 1 <= len(response["reason"]) <= 256 or
+                    any(ord(character) < 0x20 for character in response["reason"]))) or
                 response.get("schema") != SOURCE_ADMISSION_SCHEMA or
                 response.get("phase") != phase or
                 response.get("source_sha") != self._validated_source or
                 response.get("nonce") != nonce or
                 not re.fullmatch(r"[0-9a-f]{64}", oracle_sha256)):
             raise Blocked("source admission response identity mismatch")
-        if response.get("status") != "PASS":
+        if status != "PASS":
             raise Blocked(
-                f"unprivileged source admission refused at {phase}")
+                f"unprivileged source admission refused at {phase}: "
+                f"{response['reason']}")
         if self._oracle_sha256 is None:
             self._oracle_sha256 = oracle_sha256
         elif self._oracle_sha256 != oracle_sha256:
@@ -498,6 +510,9 @@ class PersistentEvidence:
         if status_value not in {"PASS", "FAIL", "BLOCKED"}:
             raise ValueError("terminal evidence status must be PASS, FAIL, or BLOCKED")
         self.record.update(fields)
+        if status_value != "PASS":
+            # A failed post-publication check must not retain a nested PASS result.
+            self.record.pop("result", None)
         self.record["status"] = status_value
         self.record["reason"] = reason
         self.record["phase"] = "COMPLETE"
@@ -539,7 +554,8 @@ def _safe_child_environment(
 
 def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
          input_text: str | None = None,
-         extra_environment: dict[str, str] | None = None
+         extra_environment: dict[str, str] | None = None,
+         cwd: Path | None = None
          ) -> subprocess.CompletedProcess[str]:
     if not argv:
         raise Blocked("required command invocation is empty")
@@ -556,6 +572,7 @@ def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
             timeout=timeout,
             check=False,
             env=environment,
+            cwd=cwd,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Blocked(
@@ -597,6 +614,8 @@ def _read_stable_file_bytes(
             if not chunk:
                 break
             payload.extend(chunk)
+            if len(payload) > MAX_PHYSICAL_SOURCE_BYTES:
+                raise error_type(f"{label} exceeds the bounded source input size")
         opened_after = os.fstat(file_descriptor)
         named_after = path.lstat()
         if _stable_file_identity(opened_after) != _stable_file_identity(opened_before) or \
@@ -850,14 +869,116 @@ def pin_physical_control_inputs(
     return source_root, hashes
 
 
+def require_pinned_physical_control_inputs(
+        source_root: Path, private_directory: Path,
+        expected_hashes: dict[str, str] | None, phase: str) -> None:
+    """Prove the private compiler's complete repository input closure.
+
+    The snapshot is owned by this root-only workspace until final cleanup.
+    Rechecking on both sides of compilation detects unauthorized edits; the
+    unprivileged worktree cannot supply an include inside this tree.
+    """
+    if source_root.name != "source" or source_root.parent != private_directory.parent \
+            or source_root == ROOT:
+        raise Blocked(f"physical control source root is not private at {phase}")
+    try:
+        workspace_identity = source_root.parent.lstat()
+    except OSError as exc:
+        raise Blocked(
+            f"private physical control workspace unavailable at {phase}") from exc
+    if not stat.S_ISDIR(workspace_identity.st_mode) or \
+            workspace_identity.st_uid != os.geteuid() or \
+            stat.S_IMODE(workspace_identity.st_mode) != 0o700:
+        raise Blocked(f"private physical control workspace unsafe at {phase}")
+    if not isinstance(expected_hashes, dict) or \
+            set(expected_hashes) != set(PHYSICAL_CONTROL_INPUT_PATHS):
+        raise Blocked("physical control validated-commit input inventory is incomplete")
+
+    expected_files = set(PHYSICAL_CONTROL_INPUT_PATHS)
+    for relative in PHYSICAL_CONTROL_INPUT_PATHS:
+        expected = expected_hashes[relative]
+        if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+            raise Blocked("physical control validated-commit digest is malformed")
+        path = source_root / relative
+        # O_NOFOLLOW on a file alone does not reject symlink parent directories.
+        directory = source_root
+        for part in (".", *Path(relative).parent.parts):
+            if part != ".":
+                directory = directory / part
+            try:
+                identity = directory.lstat()
+            except OSError as exc:
+                raise Blocked(
+                    f"physical control source directory missing at {phase}: {relative}"
+                ) from exc
+            if not stat.S_ISDIR(identity.st_mode) or \
+                    identity.st_uid != os.geteuid() or \
+                    stat.S_IMODE(identity.st_mode) != 0o700:
+                raise Blocked(
+                    f"physical control source directory unsafe at {phase}: {relative}")
+        try:
+            identity = path.lstat()
+        except OSError as exc:
+            raise Blocked(
+                f"physical control source missing at {phase}: {relative}") from exc
+        if not stat.S_ISREG(identity.st_mode) or \
+                identity.st_uid != os.geteuid() or \
+                stat.S_IMODE(identity.st_mode) != 0o400 or identity.st_nlink != 1:
+            raise Blocked(
+                f"physical control source identity unsafe at {phase}: {relative}")
+        if _sha256_file(path) != expected:
+            raise Blocked(
+                f"physical control source differs from validated commit at "
+                f"{phase}: {relative}")
+
+    # Enumerate transitive quoted includes. Angle includes are toolchain/system
+    # headers, not worktree inputs: no -I, -include or inherited CPATH is used.
+    for relative in PHYSICAL_CONTROL_INPUT_PATHS:
+        if not relative.endswith((".c", ".h")):
+            continue
+        payload = _read_stable_file_bytes(
+            source_root / relative, f"private source include graph {relative}")
+        if hashlib.sha256(payload).hexdigest() != expected_hashes[relative]:
+            raise Blocked(
+                f"physical control source differs from validated commit at "
+                f"{phase}: {relative}")
+        for line in payload.splitlines():
+            match = re.match(rb"^[ \t]*#[ \t]*(include|include_next)\b[ \t]*(.*)$", line)
+            if match is None:
+                continue
+            directive, operand = match.groups()
+            if directive != b"include" or not (
+                    operand.startswith(b"<") and b">" in operand or
+                    operand.startswith(b'"') and b'"' in operand[1:]):
+                raise Blocked(
+                    f"physical control has an unpinned include at {phase}: {relative}")
+            if operand.startswith(b"<"):
+                continue
+            try:
+                header = operand[1:operand.index(b'"', 1)].decode("ascii")
+            except (UnicodeError, ValueError) as exc:
+                raise Blocked(
+                    f"physical control has an invalid include at {phase}: {relative}"
+                ) from exc
+            normalized = os.path.normpath(
+                os.path.join(os.path.dirname(relative), header)).replace(os.sep, "/")
+            if normalized not in expected_files or not normalized.endswith(".h"):
+                raise Blocked(
+                    f"physical control has an unpinned transitive header at "
+                    f"{phase}: {relative} -> {header}")
+
+
 def build_physical_execution_control(validated_source: str,
                                      qualified_swapzctl: Path,
                                      private_directory: Path,
-                                     source_root: Path = ROOT
+                                     source_root: Path = ROOT,
+                                     expected_input_hashes: dict[str, str] | None = None
                                      ) -> tuple[Path, str]:
     """Build a noninstalled exact-source coordinator bound to qualified bytes."""
     if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
         raise Blocked("validated source SHA is malformed")
+    require_pinned_physical_control_inputs(
+        source_root, private_directory, expected_input_hashes, "before_compile")
     try:
         qualified_control = qualified_swapzctl.resolve(strict=True)
     except OSError as exc:
@@ -891,7 +1012,11 @@ def build_physical_execution_control(validated_source: str,
         str(source_root / "src/userspace/swapz-primary.c"),
         "-o", str(output),
     ]
-    result = _run(command, check=False, timeout=120)
+    # The compiler must not resolve relative inputs against the mutable checkout.
+    # System headers and toolchain are root-owned host prerequisites.
+    result = _run(command, check=False, timeout=120, cwd=private_directory)
+    require_pinned_physical_control_inputs(
+        source_root, private_directory, expected_input_hashes, "after_compile")
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().replace("\n", "; ")
         raise Blocked(
@@ -905,6 +1030,20 @@ def build_physical_execution_control(validated_source: str,
             stat.S_IMODE(identity.st_mode) != 0o700:
         raise Blocked("private physical coordinator identity is unsafe")
     return output, _sha256_file(output)
+
+
+def require_private_execution_artifact_identity(
+        control_path: Path, oracle_path: Path,
+        expected_control_sha256: str, expected_oracle_sha256: str,
+        phase: str) -> None:
+    """Retain exact root-owned runtime bytes between build, use and publication."""
+    for label, path, expected in (
+            ("coordinator", control_path, expected_control_sha256),
+            ("oracle", oracle_path, expected_oracle_sha256)):
+        if not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+            raise Blocked(f"private {label} artifact digest invalid at {phase}")
+        if _sha256_file(path) != expected:
+            raise Blocked(f"private {label} artifact changed at {phase}")
 
 
 def qualification_artifact_hashes(
@@ -1554,7 +1693,8 @@ def require_sole_partition_topology(target_row: dict, parent_row: dict,
 
 
 def _read_readiness_snapshot(
-        path: Path = AUTHORIZATION_SNAPSHOT) -> tuple[dict, str]:
+        path: Path = AUTHORIZATION_SNAPSHOT,
+        expected_sha256: str | None = None) -> tuple[dict, str]:
     payload = _read_stable_file_bytes(
         path, "production readiness snapshot")
     try:
@@ -1562,9 +1702,13 @@ def _read_readiness_snapshot(
     except UnicodeError as exc:
         raise Blocked(
             "production readiness snapshot is not valid UTF-8") from exc
+    observed = hashlib.sha256(payload).hexdigest()
+    if expected_sha256 is not None and observed != expected_sha256:
+        raise Blocked(
+            "production readiness snapshot differs from validated commit at policy_use")
     snapshot = _load_unique_json(
         text_payload, "production readiness snapshot")
-    return snapshot, hashlib.sha256(payload).hexdigest()
+    return snapshot, observed
 
 
 def validate_acceptance_manifest(
@@ -1614,7 +1758,8 @@ def validate_acceptance_manifest(
 def _verify_acceptance_manifest_snapshot(
         *, cycles: int, workload_mib: int, resident_mib: int,
         swap_limit_mib: int, timeout_seconds: int,
-        path: Path = ACCEPTANCE_MANIFEST) -> tuple[dict, str]:
+        path: Path = ACCEPTANCE_MANIFEST,
+        expected_sha256: str | None = None) -> tuple[dict, str]:
     payload = _read_stable_file_bytes(
         path, "production acceptance manifest")
     try:
@@ -1622,12 +1767,16 @@ def _verify_acceptance_manifest_snapshot(
     except UnicodeError as exc:
         raise Blocked(
             "production acceptance manifest is not valid UTF-8") from exc
+    observed = hashlib.sha256(payload).hexdigest()
+    if expected_sha256 is not None and observed != expected_sha256:
+        raise Blocked(
+            "production acceptance manifest differs from validated commit at policy_use")
     manifest = _load_unique_json(text_payload, "production acceptance manifest")
     accepted = validate_acceptance_manifest(
         manifest, cycles=cycles, workload_mib=workload_mib,
         resident_mib=resident_mib, swap_limit_mib=swap_limit_mib,
         timeout_seconds=timeout_seconds)
-    return accepted, hashlib.sha256(payload).hexdigest()
+    return accepted, observed
 
 
 def verify_acceptance_manifest(
@@ -3487,7 +3636,8 @@ def _execute_admitted(
         private_directory = private_parent / "control"
         swapzctl, execution_control_sha256 = build_physical_execution_control(
             arguments.validated_source, qualified_swapzctl, private_directory,
-            source_root=pinned_source_root)
+            source_root=pinned_source_root,
+            expected_input_hashes=physical_control_inputs_sha256)
         oracle_path, oracle_sha256 = pin_real_swap_oracle(
             requested_oracle_path, private_parent, expected_oracle_sha256)
     except BaseException as original_error:
@@ -3509,10 +3659,18 @@ def _execute_admitted(
                 resident_mib=arguments.resident_mib,
                 swap_limit_mib=arguments.swap_limit_mib,
                 timeout_seconds=arguments.timeout_seconds,
-                path=pinned_acceptance_manifest)
+                path=pinned_acceptance_manifest,
+                expected_sha256=physical_control_inputs_sha256[
+                    "docs/production-acceptance.json"])
         authorization_snapshot, authorization_snapshot_sha256 = \
-            _read_readiness_snapshot(pinned_authorization_snapshot)
+            _read_readiness_snapshot(
+                pinned_authorization_snapshot,
+                expected_sha256=physical_control_inputs_sha256[
+                    "docs/handoff/production-readiness.json"])
         _kernel_log_snapshot()
+        require_private_execution_artifact_identity(
+            swapzctl, oracle_path, execution_control_sha256, oracle_sha256,
+            "before_qualification_import")
         _import_qualification(swapzctl, report_path)
         plan = _read_plan(swapzctl)
         artifact_hashes = verify_provenance(
@@ -3594,6 +3752,9 @@ def _execute_admitted(
                 cycles=cycles,
                 cycle=cycle_index,
             )
+            require_private_execution_artifact_identity(
+                swapzctl, oracle_path, execution_control_sha256, oracle_sha256,
+                f"before_cycle-{cycle_index}")
             result = run_cycle(
                 cycle_index,
                 swapzctl=swapzctl,
@@ -3620,6 +3781,9 @@ def _execute_admitted(
                 cycle=cycle_index,
                 run_id=result["run_id"],
             )
+        require_private_execution_artifact_identity(
+            swapzctl, oracle_path, execution_control_sha256, oracle_sha256,
+            "before_final_publication")
         kernel_after = _kernel_log_snapshot()
         _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
         # A terminal PASS must never coexist with a leaked privileged control
@@ -3668,14 +3832,18 @@ def _execute_admitted(
         }
         # A long physical run must not qualify a source superseded on main.
         # Perform the final Git/source proof after all result inputs and owned
-        # workspace cleanup have stabilized. Only channel close and the
-        # fail-closed evidence commit follow this approval.
+        # workspace cleanup have stabilized. Publish a non-PASS disposition,
+        # recheck main, then close the channel and commit PASS evidence.
         require_final_installed_artifact_identity(
             qualified_swapzctl, artifact_hashes)
         # Policy and target authorization were consumed from commit-bound
         # private snapshots. The final admission re-proves that exact source
         # commit is still canonical after the private workspace is removed.
         admission.require("final")
+        # Publish only a non-PASS pending disposition before the last parent
+        # source proof; a failed proof can never strand a durable false PASS.
+        evidence.update("FINAL_PUBLICATION_PENDING", cycles=cycles)
+        admission.require("published")
         if terminal_cleanup is not None:
             terminal_cleanup()
         evidence.finish("PASS", cycles=cycles, result=result)
