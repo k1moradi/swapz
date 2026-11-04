@@ -227,12 +227,6 @@ jobs:
           if [[ "$(git symbolic-ref --quiet --short HEAD)" != main ]]; then
             fail "commit=$head_sha checkout must be on main"
           fi
-          if ! commit_message="$(git log -1 --format=%B "$head_sha" 2>/dev/null)"; then
-            fail "commit=$head_sha unable to read commit message"
-          fi
-          if grep -Fqi '[skip ci]' <<<"$commit_message"; then
-            fail "commit=$head_sha reason=[skip ci] commits cannot receive fresh exact-SHA CI qualification; corrective_procedure=do not amend or force-push published history; use already-valid CI for the original code-bearing source if available, otherwise qualify a future code-bearing release-candidate commit through a normal non-force main push"
-          fi
           changeset_file="$(mktemp)"
           commit_list_file="$(mktemp)"
           trap 'rm -f "$changeset_file" "$commit_list_file"' EXIT
@@ -339,11 +333,40 @@ jobs:
       FOCUSED_RESULT: ${{ needs.focused-rootless.result }}
       POLICY_RESULT: ${{ needs.repository-policy.result }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Classify intentionally skipped exact-SHA commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! commit_message="$(git log -1 --format=%B "$GITHUB_SHA" 2>/dev/null)"; then
+            printf 'SOURCE_CONTRACT_MISMATCH: commit=%s path=<commit-message> reason=unable to read tested commit message; corrective_procedure=do not qualify this run; verify the exact published SHA and rerun only a code-bearing release candidate without rewriting history\n' "$GITHUB_SHA" >&2
+            exit 1
+          fi
+          if grep -Fqi '[skip ci]' <<<"$commit_message"; then
+            changeset_file="$(mktemp)"
+            trap 'rm -f "$changeset_file"' EXIT
+            if ! git diff --name-only --no-renames -z "$GITHUB_SHA^1" "$GITHUB_SHA" -- > "$changeset_file"; then
+              printf 'SOURCE_CONTRACT_MISMATCH: commit=%s path=<unavailable> reason=unable to inspect skipped commit changeset; corrective_procedure=do not qualify this run or rewrite published history; qualify a future code-bearing release-candidate commit normally\n' "$GITHUB_SHA" >&2
+              exit 1
+            fi
+            offending_path='<no-changed-path>'
+            if IFS= read -r -d '' changed_path < "$changeset_file"; then
+              offending_path="$changed_path"
+            fi
+            printf -v quoted_path '%q' "$offending_path"
+            printf 'SOURCE_CONTRACT_MISMATCH: commit=%s path=%s reason=[skip ci] commits cannot receive fresh exact-SHA CI qualification; corrective_procedure=do not amend or force-push published history; use already-valid CI for the original code-bearing source if available, otherwise qualify a future code-bearing release-candidate commit through a normal non-force main push\n' "$GITHUB_SHA" "$quoted_path" >&2
+            printf 'SWAPZ_SKIP_CI_HEAD=1\n' >> "$GITHUB_ENV"
+          fi
       - name: Reject failed, skipped, or cancelled prerequisite jobs
         shell: bash
         run: |
           set -euo pipefail
           failures=0
+          if [[ "${SWAPZ_SKIP_CI_HEAD:-0}" == 1 ]]; then
+            failures=1
+          fi
           for job in NATIVE MAKE FOCUSED POLICY; do
             result_variable="${job}_RESULT"
             result="${!result_variable}"

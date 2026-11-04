@@ -84,15 +84,16 @@ command, with `make fast_test` only the nonqualifying development loop.
 Documentation-only changes and generated `test_results.json`-only evidence
 commits require no extra standards edit. The test reporter labels its
 report-only evidence commits `[skip ci]`; that prevents the push-triggered
-Actions run. The repository-policy job also refuses any run whose tested HEAD
-commit message contains `[skip ci]`, including an explicit workflow dispatch,
-so a report-only or intentionally skipped commit cannot manufacture a fresh
-exact-SHA CI PASS. The marker is not a policy exemption for implementation
-work. An implementation commit labeled `[skip ci]` remains noncompliant
-without a same-commit standard update and must never be used to bypass the
-direct-main policy. Rootless CI is partial evidence: the exact-SHA conclusion
-rejects failed, skipped, and cancelled dependencies and never substitutes for
-owner-run `make test` qualification.
+Actions run. The repository-policy script still treats report-only evidence as
+non-implementation, while the exact-SHA conclusion independently inspects the
+tested HEAD commit and refuses `[skip ci]`, including an explicit workflow
+dispatch. Therefore a report-only or intentionally skipped commit cannot
+manufacture a fresh exact-SHA CI PASS. The marker is not a policy exemption for
+implementation work. An implementation commit labeled `[skip ci]` remains
+noncompliant without a same-commit standard update and must never be used to
+bypass the direct-main policy. Rootless CI is partial evidence: the exact-SHA
+conclusion rejects failed, skipped, and cancelled dependencies and never
+substitutes for owner-run `make test` qualification.
 
 A same-commit policy failure on published history cannot be repaired
 retroactively. Its diagnostic must name the offending SHA and path, explain the
