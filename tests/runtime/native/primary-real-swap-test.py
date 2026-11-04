@@ -45,6 +45,18 @@ class FakeStat:
 
 
 class PrimaryRealSwapContracts(unittest.TestCase):
+    @staticmethod
+    def physical_dependency_output(source_root: Path) -> str:
+        dependencies = sorted(
+            qualify._physical_control_expected_dependencies(source_root),
+            key=os.fspath)
+        joined = " ".join(os.fspath(path) for path in dependencies)
+        second_source = source_root / "src/userspace/swapz-primary.c"
+        return (
+            f"swapzctl.o: {joined}\n"
+            f"swapz-primary.o: {second_source}\n"
+        )
+
     def test_oracle_page_pattern_is_full_page_deterministic_and_page_specific(self):
         first = oracle.page_pattern("01" * 16, 7)
         again = oracle.page_pattern("01" * 16, 7)
@@ -389,14 +401,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 relative: hashlib.sha256(payload).hexdigest()
                 for relative, payload in originals.items()
             }
-            candidates = (
-                "src/userspace/swapzctl.c",
-                "src/userspace/swapz-primary.c",
-                "src/kernel/codec.h",
-                "src/kernel/authority.h",
-                "docs/production-acceptance.json",
-                "docs/handoff/production-readiness.json",
-            )
+            candidates = qualify.PHYSICAL_CONTROL_INPUT_PATHS
             with mock.patch.object(qualify, "ROOT", worktree):
                 for index, relative in enumerate(candidates):
                     with self.subTest(input=relative):
@@ -423,6 +428,83 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                         finally:
                             source_path.write_bytes(originals[relative])
 
+
+    def test_worktree_mutation_after_copy_cannot_enter_private_compile(self):
+        completed = __import__("subprocess").CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worktree = root / "worktree"
+            worktree.mkdir(mode=0o700)
+            for relative in qualify.PHYSICAL_CONTROL_INPUT_PATHS:
+                path = worktree / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                payload = (
+                    b"test-version\n"
+                    if relative == "src/kernel/VERSION"
+                    else b"/* trusted snapshot input */\n"
+                )
+                path.write_bytes(payload)
+
+            qualified = root / "prefix/sbin/swapzctl"
+            qualified.parent.mkdir(parents=True)
+            qualified.write_bytes(b"qualified installed control")
+            private_parent = root / "private-parent"
+            private_parent.mkdir(mode=0o700)
+
+            with mock.patch.object(qualify, "ROOT", worktree):
+                source_root, digests = qualify.pin_physical_control_inputs(
+                    private_parent)
+                for relative in qualify.PHYSICAL_CONTROL_INPUT_PATHS:
+                    (worktree / relative).write_bytes(
+                        b"unauthorized mutable worktree bytes\n")
+
+                observed_sources = []
+
+                def fake_compile(argv, **_kwargs):
+                    if "-MM" in argv:
+                        return completed(
+                            args=argv, returncode=0,
+                            stdout=self.physical_dependency_output(source_root),
+                            stderr="")
+                    observed_sources.extend(
+                        argument for argument in argv if argument.endswith(".c"))
+                    Path(argv[argv.index("-o") + 1]).write_bytes(
+                        b"private physical control")
+                    return completed(
+                        args=argv, returncode=0, stdout="", stderr="")
+
+                with mock.patch.object(
+                        qualify, "_run", side_effect=fake_compile):
+                    control, _digest = qualify.build_physical_execution_control(
+                        "a" * 40, qualified, private_parent / "control",
+                        source_root=source_root, expected_input_hashes=digests)
+
+            self.assertTrue(control.is_file())
+            self.assertEqual(len(observed_sources), 2)
+            self.assertTrue(all(
+                Path(source).is_relative_to(source_root)
+                for source in observed_sources))
+            self.assertTrue(all(
+                not Path(source).is_relative_to(worktree)
+                for source in observed_sources))
+
+    def test_physical_source_snapshot_rejects_symlink_parent_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worktree = root / "worktree"
+            alternate = root / "alternate-kernel"
+            (worktree / "src").mkdir(parents=True)
+            alternate.mkdir()
+            (alternate / "VERSION").write_text("test-version\n", encoding="ascii")
+            (worktree / "src/kernel").symlink_to(
+                alternate, target_is_directory=True)
+            private_parent = root / "private"
+            private_parent.mkdir(mode=0o700)
+            with mock.patch.object(qualify, "ROOT", worktree), \
+                    self.assertRaisesRegex(
+                        qualify.Blocked, "physical control source"):
+                qualify.pin_physical_control_inputs(private_parent)
+
     def test_private_source_hashes_reject_mutation_before_and_during_compile(self):
         completed = __import__("subprocess").CompletedProcess
         with tempfile.TemporaryDirectory() as directory:
@@ -430,14 +512,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             qualified = root / "prefix/sbin/swapzctl"
             qualified.parent.mkdir(parents=True)
             qualified.write_bytes(b"qualified installed control")
-            candidates = (
-                "src/userspace/swapzctl.c",
-                "src/userspace/swapz-primary.c",
-                "src/kernel/codec.h",
-                "src/kernel/authority.h",
-                "docs/production-acceptance.json",
-                "docs/handoff/production-readiness.json",
-            )
+            candidates = qualify.PHYSICAL_CONTROL_INPUT_PATHS
             for index, relative in enumerate(candidates):
                 with self.subTest(input=relative, phase="before_compile"):
                     attempt = root / f"before-{index}"
@@ -457,7 +532,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                                 "a" * 40, qualified, attempt / "control",
                                 source_root=source_root, expected_input_hashes=digests)
 
-            for index, relative in enumerate(candidates[:4]):
+            for index, relative in enumerate(candidates):
                 with self.subTest(input=relative, phase="during_compile"):
                     attempt = root / f"during-{index}"
                     attempt.mkdir(mode=0o700)
@@ -465,6 +540,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
                     def modified_compile(argv, **kwargs):
                         self.assertEqual(kwargs["cwd"], attempt / "control")
+                        if "-MM" in argv:
+                            return completed(
+                                args=argv, returncode=0,
+                                stdout=self.physical_dependency_output(source_root),
+                                stderr="")
                         changed = source_root / relative
                         changed.chmod(0o600)
                         changed.write_bytes(b"mutated while compiler is running\n")
@@ -480,6 +560,35 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify.build_physical_execution_control(
                                 "a" * 40, qualified, attempt / "control",
                                 source_root=source_root, expected_input_hashes=digests)
+
+
+    def test_private_compile_dependency_scan_rejects_unpinned_path(self):
+        completed = __import__("subprocess").CompletedProcess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            qualified = root / "prefix/sbin/swapzctl"
+            qualified.parent.mkdir(parents=True)
+            qualified.write_bytes(b"qualified installed control")
+            source_root, digests = qualify.pin_physical_control_inputs(root)
+            unexpected = root / "mutable-worktree/header.h"
+
+            def fake_dependency_scan(argv, **_kwargs):
+                if "-MM" not in argv:
+                    raise AssertionError("compile must not run after bad dependencies")
+                output = (
+                    self.physical_dependency_output(source_root) +
+                    f"unexpected.o: {unexpected}\n"
+                )
+                return completed(
+                    args=argv, returncode=0, stdout=output, stderr="")
+
+            with mock.patch.object(
+                    qualify, "_run", side_effect=fake_dependency_scan), \
+                    self.assertRaisesRegex(
+                        qualify.Blocked, "dependency closure differs"):
+                qualify.build_physical_execution_control(
+                    "a" * 40, qualified, root / "control",
+                    source_root=source_root, expected_input_hashes=digests)
 
     def test_private_compile_rejects_worktree_root_and_unpinned_transitive_header(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -540,6 +649,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             source_root, source_hashes = qualify.pin_physical_control_inputs(root)
 
             def fake_compile(argv, **_kwargs):
+                if "-MM" in argv:
+                    return completed(
+                        args=argv, returncode=0,
+                        stdout=self.physical_dependency_output(source_root),
+                        stderr="")
                 output = Path(argv[argv.index("-o") + 1])
                 output.write_bytes(b"private-physical-control")
                 return completed(args=argv, returncode=0, stdout="", stderr="")
@@ -549,8 +663,15 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     source_sha, qualified, private_directory,
                     source_root=source_root, expected_input_hashes=source_hashes)
 
+            dependency_argv = run.call_args_list[0].args[0]
             argv = run.call_args.args[0]
             self.assertEqual(run.call_args.kwargs["cwd"], private_directory)
+            self.assertIn("-MM", dependency_argv)
+            source_index = argv.index(
+                str(source_root / "src/userspace/swapzctl.c"))
+            self.assertEqual(
+                dependency_argv[1:dependency_argv.index("-MM")],
+                argv[1:source_index])
             self.assertNotIn("-I", argv)
             self.assertNotIn("-include", argv)
             self.assertIn("-DSWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST=1", argv)
@@ -840,7 +961,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
     def test_terminal_pass_waits_for_owned_cleanup(self):
         for failure_point in ("private workspace", "source admission channel",
-                              "published source change"):
+                              "final source change"):
             with self.subTest(failure_point=failure_point), \
                     tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -906,12 +1027,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 ])
                 admission = mock.Mock()
                 admission.require.side_effect = (
-                    ["0" * 64, "0" * 64,
+                    ["0" * 64,
                      qualify.Blocked(
-                         "unprivileged source admission refused at published: "
+                         "unprivileged source admission refused at final: "
                          "production source tree is not clean")]
-                    if failure_point == "published source change"
-                    else ["0" * 64] * 3)
+                    if failure_point == "final source change"
+                    else ["0" * 64] * 2)
                 cycle_results = iter([
                     {"run_id": "1" * 32, "linux_swap_uuid": "1" * 32},
                     {"run_id": "2" * 32, "linux_swap_uuid": "2" * 32},
@@ -1026,7 +1147,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             side_effect=fake_cycle))
                     stack.enter_context(
                         self.assertRaises(
-                            qualify.Blocked if failure_point == "published source change"
+                            qualify.Blocked if failure_point == "final source change"
                             else qualify.QualificationFailure))
                     qualify._execute_admitted(
                         args, admission, terminal_cleanup=terminal_cleanup)
@@ -1036,11 +1157,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     status for status, _reason
                     in evidence_instances[0].finish_calls]
                 self.assertEqual(
-                    statuses, ["BLOCKED"] if failure_point == "published source change"
+                    statuses, ["BLOCKED"] if failure_point == "final source change"
                     else ["FAIL"])
                 failure_reason = evidence_instances[0].finish_calls[-1][1]
                 self.assertEqual(statuses[-1],
-                                 "BLOCKED" if failure_point == "published source change"
+                                 "BLOCKED" if failure_point == "final source change"
                                  else "FAIL")
                 if failure_point == "private workspace":
                     self.assertEqual(workspace_cleanup_calls, [True, True])
@@ -1055,7 +1176,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 else:
                     self.assertEqual(workspace_cleanup_calls, [True])
                     self.assertEqual(terminal_cleanup_calls, [])
-                    self.assertIn("at published", failure_reason)
+                    self.assertIn("at final", failure_reason)
 
     def test_terminal_pass_orders_cleanup_and_pins_verified_report_digest(self):
         source = HELPER.read_text(encoding="utf-8")
@@ -1071,22 +1192,19 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         result_index = execute_source.index('result = {', cleanup_complete_index)
         final_artifact_index = execute_source.index(
             "require_final_installed_artifact_identity(", result_index)
-        final_admission_index = execute_source.index(
-            'admission.require("final")', final_artifact_index)
         pending_index = execute_source.index(
-            'evidence.update("FINAL_PUBLICATION_PENDING"', final_admission_index)
-        published_admission_index = execute_source.index(
-            'admission.require("published")', pending_index)
+            'evidence.update("FINAL_PUBLICATION_PENDING"', final_artifact_index)
+        final_admission_index = execute_source.index(
+            'admission.require("final")', pending_index)
         close_index = execute_source.index(
-            "terminal_cleanup()", published_admission_index)
+            "terminal_cleanup()", final_admission_index)
         pass_index = execute_source.index(
-            'evidence.finish("PASS"', published_admission_index)
+            'evidence.finish("PASS"', final_admission_index)
         self.assertLess(cleanup_index, result_index)
         self.assertLess(result_index, final_artifact_index)
-        self.assertLess(final_artifact_index, final_admission_index)
-        self.assertLess(final_admission_index, pending_index)
-        self.assertLess(pending_index, published_admission_index)
-        self.assertLess(published_admission_index, close_index)
+        self.assertLess(final_artifact_index, pending_index)
+        self.assertLess(pending_index, final_admission_index)
+        self.assertLess(final_admission_index, close_index)
         self.assertLess(close_index, pass_index)
 
         self.assertIn(
@@ -1132,6 +1250,19 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     fake, destination,
                     hashlib.sha256(ORACLE.read_bytes()).hexdigest())
 
+
+    def test_real_swap_oracle_rejects_symlink_alias_without_following_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            alias = Path(directory) / "oracle.py"
+            alias.symlink_to(ORACLE)
+            destination = Path(directory) / "pinned"
+            destination.mkdir()
+            with self.assertRaisesRegex(
+                    qualify.Blocked, "exact source-controlled oracle"):
+                qualify.pin_real_swap_oracle(
+                    alias, destination,
+                    hashlib.sha256(ORACLE.read_bytes()).hexdigest())
+
     def test_oracle_pin_preserves_read_failure_when_descriptor_close_also_fails(self):
         real_close = os.close
 
@@ -1147,7 +1278,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify.os, "close", side_effect=close_then_fail), \
                 self.assertRaisesRegex(
                     qualify.Blocked,
-                    "cannot pin real-swap oracle: synthetic read failure; "
+                    "cannot read real-swap oracle: synthetic read failure; "
                     "cleanup also failed: .*synthetic close failure"):
             qualify.pin_real_swap_oracle(
                 ORACLE, Path(directory),
@@ -1203,13 +1334,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             client.require("cycle-1")
 
 
-    def test_parent_revalidates_changed_main_after_evidence_publication(self):
-        # All five admission phases are synthetic; no privileged child is launched.
+    def test_parent_revalidates_changed_main_at_final_publication_boundary(self):
+        # All four admission phases are synthetic; no privileged child is launched.
         source_sha = "a" * 40
         hashes = {relative: "c" * 64
                   for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
         records = []
-        for phase in ("initial", "cycle-1", "cycle-2", "final", "published"):
+        for phase in ("initial", "cycle-1", "cycle-2", "final"):
             records.append(
                 (json.dumps({
                     "schema": parent.SOURCE_ADMISSION_SCHEMA,
@@ -1250,18 +1381,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         child.wait.return_value = 2
         with mock.patch.object(
                 parent, "_check_git_source",
-                side_effect=[None, None, None, None,
+                side_effect=[None, None, None,
                              parent.Blocked("production source tree is not clean")]
                 ) as check:
             result = parent._serve_admission(
                 server, child, source_sha, "/usr/bin/git",
                 "d" * 64, hashes, "8" * 64, 2)
         self.assertEqual(result, 2)
-        self.assertEqual(check.call_count, 5)
+        self.assertEqual(check.call_count, 4)
         responses = [json.loads(line) for line in stream.output.getvalue().splitlines()]
         self.assertEqual([reply["status"] for reply in responses],
-                         ["PASS", "PASS", "PASS", "PASS", "BLOCKED"])
-        self.assertEqual(responses[-1]["phase"], "published")
+                         ["PASS", "PASS", "PASS", "BLOCKED"])
+        self.assertEqual(responses[-1]["phase"], "final")
         self.assertEqual(
             responses[-1]["reason"], "production source tree is not clean")
 
@@ -1277,7 +1408,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         response = {
             "schema": qualify.SOURCE_ADMISSION_SCHEMA,
             "source_sha": source_sha,
-            "phase": "published",
+            "phase": "final",
             "status": "BLOCKED",
             "nonce": "b" * 32,
             "oracle_sha256": "d" * 64,
@@ -1290,23 +1421,49 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with mock.patch.object(qualify.os, "urandom", return_value=b"\xbb" * 16):
             with self.assertRaisesRegex(
                     qualify.Blocked,
-                    "at published: current remote main differs"):
-                client.require("published")
+                    "at final: current remote main differs"):
+                client.require("final")
 
     def test_parent_hashes_oracle_from_validated_commit_object(self):
         source_sha = "a" * 40
         payload = b"exact committed oracle bytes\n"
-        completed = __import__("subprocess").CompletedProcess(
+        completed = __import__("subprocess").CompletedProcess
+        size = completed(
+            args=[], returncode=0,
+            stdout=f"{len(payload)}\n".encode("ascii"), stderr=b"")
+        contents = completed(
             args=[], returncode=0, stdout=payload, stderr=b"")
         with mock.patch.object(
-                    parent.subprocess, "run", return_value=completed) as run:
+                    parent.subprocess, "run",
+                    side_effect=[size, contents]) as run:
             observed = parent._git_file_sha256(
                 source_sha, ORACLE, "/usr/bin/git")
         self.assertEqual(observed, hashlib.sha256(payload).hexdigest())
+        object_spec = (
+            f"{source_sha}:tests/tools/primary-real-swap-oracle.py")
         self.assertEqual(
-            run.call_args.args[0],
-            ["/usr/bin/git", "show",
-             f"{source_sha}:tests/tools/primary-real-swap-oracle.py"])
+            run.call_args_list[0].args[0],
+            ["/usr/bin/git", "cat-file", "-s", object_spec])
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["/usr/bin/git", "show", object_spec])
+
+
+    def test_parent_rejects_oversized_commit_input_before_buffering_blob(self):
+        source_sha = "a" * 40
+        completed = __import__("subprocess").CompletedProcess
+        oversized = completed(
+            args=[], returncode=0,
+            stdout=f"{parent.MAX_COMMIT_SOURCE_INPUT_BYTES + 1}\n".encode("ascii"),
+            stderr=b"")
+        with mock.patch.object(
+                parent.subprocess, "run", return_value=oversized) as run, \
+                self.assertRaisesRegex(
+                    parent.Blocked, "exceeds size boundary"):
+            parent._git_file_bytes(source_sha, ORACLE, "/usr/bin/git")
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(
+            run.call_args.args[0][1:3], ["cat-file", "-s"])
 
     def test_unadmitted_privileged_child_cleanup_is_bounded(self):
         child = mock.Mock()
@@ -2636,10 +2793,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             final = json.loads(evidence.path.read_text(encoding="utf-8"))
             self.assertEqual(final["status"], "BLOCKED")
             self.assertEqual(final["reason"], "synthetic evidence gap")
-            # Publication can be revoked if the parent refuses the post-PASS
-            # source proof; nested result must not advertise a stale PASS.
+            # Any later non-PASS correction must not retain a nested PASS
+            # result from a prior terminal record.
             evidence.finish("PASS", result={"status": "PASS"})
-            evidence.finish("BLOCKED", "source changed at published")
+            evidence.finish("BLOCKED", "source changed at final")
             revoked = json.loads(evidence.path.read_text(encoding="utf-8"))
             self.assertEqual(revoked["status"], "BLOCKED")
             self.assertNotIn("result", revoked)
@@ -2913,12 +3070,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             qualified = root / "prefix/sbin/swapzctl"
             qualified.parent.mkdir(parents=True)
             qualified.write_bytes(b"qualified")
-            source_root = root / "pinned"
-            (source_root / "src/kernel").mkdir(parents=True)
-            (source_root / "src/kernel/VERSION").write_text("1.2.3\n")
-            (source_root / "src/userspace").mkdir(parents=True)
+            source_root, source_hashes = qualify.pin_physical_control_inputs(root)
 
             def fake_compile(argv, **_kwargs):
+                if "-MM" in argv:
+                    return completed(
+                        args=argv, returncode=0,
+                        stdout=self.physical_dependency_output(source_root),
+                        stderr="")
                 output = Path(argv[argv.index("-o") + 1])
                 output.write_bytes(b"private")
                 return completed(args=argv, returncode=0, stdout="", stderr="")
@@ -2927,7 +3086,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify, "_run", side_effect=fake_compile) as run:
                 qualify.build_physical_execution_control(
                     source_sha, qualified, root / "control",
-                    source_root=source_root)
+                    source_root=source_root,
+                    expected_input_hashes=source_hashes)
             argv = run.call_args.args[0]
             self.assertIn(
                 str(source_root / "src/userspace/swapzctl.c"), argv)
@@ -3159,17 +3319,26 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_parent_reads_privileged_helper_from_validated_commit_object(self):
         source_sha = "a" * 40
         payload = b"exact committed privileged helper bytes\n"
-        completed = __import__("subprocess").CompletedProcess(
+        completed = __import__("subprocess").CompletedProcess
+        size = completed(
+            args=[], returncode=0,
+            stdout=f"{len(payload)}\n".encode("ascii"), stderr=b"")
+        contents = completed(
             args=[], returncode=0, stdout=payload, stderr=b"")
         with mock.patch.object(
-                parent.subprocess, "run", return_value=completed) as run:
+                parent.subprocess, "run",
+                side_effect=[size, contents]) as run:
             observed = parent._git_file_bytes(
                 source_sha, parent.PRIVILEGED_HELPER, "/usr/bin/git")
         self.assertEqual(observed, payload)
+        object_spec = (
+            f"{source_sha}:tests/tools/qualify-primary-real-swap.py")
         self.assertEqual(
-            run.call_args.args[0],
-            ["/usr/bin/git", "show",
-             f"{source_sha}:tests/tools/qualify-primary-real-swap.py"])
+            run.call_args_list[0].args[0],
+            ["/usr/bin/git", "cat-file", "-s", object_spec])
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["/usr/bin/git", "show", object_spec])
 
     def test_terminal_helper_identity_is_commit_bound_not_mutable_path_hash(self):
         source = HELPER.read_text(encoding="utf-8")
