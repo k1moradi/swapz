@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -2651,6 +2652,157 @@ static void test_orphan_ready_claim_reconciliation(void)
 	assert(rmdir(base_template) == 0);
 }
 
+static void write_package_test_artifact(const char *path, const char *bytes)
+{
+	size_t length = strlen(bytes);
+	int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW |
+			   O_CLOEXEC, 0600);
+
+	assert(fd >= 0);
+	assert(write(fd, bytes, length) == (ssize_t)length);
+	assert(fsync(fd) == 0);
+	assert(close(fd) == 0);
+}
+
+static void test_package_transaction_process_death_guard(void)
+{
+	static const char journal_record[] =
+		"{\"schema\":\"swapz-package-install-v1\",\"phase\":\"cli-published\","
+		"\"version\":\"test\",\"kernel_release\":\"test\",\"backup_files\":[]}\n";
+	const char *home = getenv("HOME");
+	char fixture[PATH_MAX];
+	char transactions[PATH_MAX];
+	char transaction[PATH_MAX];
+	char uninstall_transaction[PATH_MAX];
+	char journal[PATH_MAX];
+	char cli_artifact[PATH_MAX];
+	char module_artifact[PATH_MAX];
+	char lock_path[PATH_MAX];
+	char unknown_entry[PATH_MAX];
+	int directory_fd;
+	int lock_fd;
+	int status;
+	pid_t packaging_pid;
+
+	assert(home && home[0] == '/');
+	assert(snprintf(fixture, sizeof(fixture),
+			"%s/.swapz-package-crash-XXXXXX", home) > 0);
+	assert(mkdtemp(fixture));
+	assert(snprintf(transactions, sizeof(transactions),
+			"%s/transactions", fixture) > 0);
+	assert(snprintf(transaction, sizeof(transaction),
+			"%s/swapz-package.12345678", transactions) > 0);
+	assert(snprintf(uninstall_transaction, sizeof(uninstall_transaction),
+			"%s/swapz-uninstall.87654321", transactions) > 0);
+	assert(snprintf(journal, sizeof(journal),
+			"%s/state.json", transaction) > 0);
+	assert(snprintf(cli_artifact, sizeof(cli_artifact),
+			"%s/published-swapzctl", fixture) > 0);
+	assert(snprintf(module_artifact, sizeof(module_artifact),
+			"%s/published-dm-swapz.ko", fixture) > 0);
+	assert(snprintf(lock_path, sizeof(lock_path),
+			"%s/%s", fixture, SWAPZ_PRIMARY_MUTATION_LOCK_NAME) > 0);
+	assert(snprintf(unknown_entry, sizeof(unknown_entry),
+			"%s/unknown-state", transactions) > 0);
+	/* A genuinely untouched installation needs no transaction directory. */
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) == 0);
+	assert(mkdir(transactions, 0700) == 0);
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) == 0);
+
+	packaging_pid = fork();
+	assert(packaging_pid >= 0);
+	if (packaging_pid == 0) {
+		/* Private stand-ins for module and CLI publication: no real swap. */
+		lock_fd = swapz_primary_mutation_lock_at(fixture, geteuid());
+		assert(lock_fd >= 0);
+		write_package_test_artifact(module_artifact, "module-published\n");
+		write_package_test_artifact(cli_artifact, "cli-published\n");
+		assert(mkdir(transaction, 0700) == 0);
+		write_package_test_artifact(journal, journal_record);
+		directory_fd = open(transaction, O_RDONLY | O_DIRECTORY |
+				    O_NOFOLLOW | O_CLOEXEC);
+		assert(directory_fd >= 0 && fsync(directory_fd) == 0);
+		assert(close(directory_fd) == 0);
+		directory_fd = open(transactions, O_RDONLY | O_DIRECTORY |
+				    O_NOFOLLOW | O_CLOEXEC);
+		assert(directory_fd >= 0 && fsync(directory_fd) == 0);
+		assert(close(directory_fd) == 0);
+		/* Simulate SIGKILL semantics: no trap, unlock or journal cleanup. */
+		_exit(86);
+	}
+	assert(waitpid(packaging_pid, &status, 0) == packaging_pid);
+	assert(WIFEXITED(status) && WEXITSTATUS(status) == 86);
+
+	/* The package flock is free again, but durable rollback remains. */
+	lock_fd = swapz_primary_mutation_lock_at(fixture, geteuid());
+	assert(lock_fd >= 0);
+	errno = 0;
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0 && errno == EBUSY);
+	assert(close(lock_fd) == 0);
+
+	/* Journal validity is not permission to activate before completion. */
+	assert(truncate(journal, 0) == 0);
+	errno = 0;
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0 && errno == EBUSY);
+	assert(unlink(journal) == 0);
+	assert(symlink("../../published-swapzctl", journal) == 0);
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0);
+	assert(unlink(journal) == 0);
+	assert(mkfifo(journal, 0600) == 0);
+	/* No journal opens: a FIFO must not cause activation to hang. */
+	errno = 0;
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0 && errno == EBUSY);
+	assert(unlink(journal) == 0);
+	/* Even a directory left before the prepared journal is unsafe. */
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0);
+	assert(rmdir(transaction) == 0);
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) == 0);
+
+	assert(mkdir(uninstall_transaction, 0700) == 0);
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0);
+	assert(rmdir(uninstall_transaction) == 0);
+	write_package_test_artifact(unknown_entry, "ambiguous\n");
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0);
+	assert(unlink(unknown_entry) == 0);
+	assert(chmod(transactions, 0755) == 0);
+	errno = 0;
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0 && errno == EPERM);
+	assert(chmod(transactions, 0700) == 0);
+	errno = 0;
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, (uid_t)-1) < 0 && errno == EPERM);
+
+	assert(rmdir(transactions) == 0);
+	assert(symlink(fixture, transactions) == 0);
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0);
+	assert(unlink(transactions) == 0);
+	assert(mkfifo(transactions, 0600) == 0);
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0);
+	assert(unlink(transactions) == 0);
+	/* Successful package recovery removes the durable directory. */
+	assert(mkdir(transactions, 0700) == 0);
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) == 0);
+	assert(unlink(cli_artifact) == 0);
+	assert(unlink(module_artifact) == 0);
+	assert(unlink(lock_path) == 0);
+	assert(rmdir(transactions) == 0);
+	assert(rmdir(fixture) == 0);
+}
+
 int main(void)
 {
 	swapz_u32 reserve_blocks = 0;
@@ -2766,6 +2918,7 @@ int main(void)
 	test_primary_qualification_report_store();
 	test_primary_qualification_live_reader_disabled_in_rootless();
 	test_orphan_ready_claim_reconciliation();
+	test_package_transaction_process_death_guard();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
 			 "%s/.swapz-primary-lock-XXXXXX", home) > 0);
