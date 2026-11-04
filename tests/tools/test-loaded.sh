@@ -192,12 +192,13 @@ printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
 run_privileged_bounded 600 tests/tools/deploy-nullblk.sh --validated-source "$tested_source"
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 printf '%s\n' 'START_LOADED_PRIMARY_NULLBLK_LIFECYCLE'
-# The qualifier currently exercises up to 88 independently bounded 90-second
-# lifecycle operations across normal start/stop, eleven process-death phases,
-# repeat-recovery checks and thirteen negative cases. Keep the aggregate guard
-# above that 7,920-second inner ceiling plus setup/cleanup headroom; never
-# weaken the per-operation timeouts to make the outer wrapper pass.
-run_privileged_bounded 9000 tests/tools/qualify-primary-lifecycle-nullblk.sh \
+# The qualifier can issue up to 144 independently bounded 90-second primary
+# lifecycle commands across normal start/stop, eighteen process-death phases,
+# repeat-recovery checks and thirteen negative cases. Cleanup has one separate
+# 60-second recovery ceiling. Keep the aggregate guard above the 12,960-second
+# lifecycle-command ceiling plus setup/cleanup headroom; never weaken an inner
+# timeout to make the outer wrapper pass.
+run_privileged_bounded 14400 tests/tools/qualify-primary-lifecycle-nullblk.sh \
 	--validated-source "$tested_source"
 
 # One deterministic, measured-LZ4 immutable fixture/trace for the paired

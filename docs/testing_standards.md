@@ -968,7 +968,16 @@ incomplete; the parser must not silently overwrite an earlier PASS match.
 Merely executing the helper or recognizing its failure markers is not sufficient
 for a qualification PASS. The loaded report parser must require those same
 eighteen phases in canonical order and the `cases:18` interruption-recovery
-aggregate; any smaller aggregate is incomplete evidence. The normal-stop matrix
+aggregate; any smaller aggregate is incomplete evidence. Every direct primary
+lifecycle command in the owned-null_blk rehearsal, including metadata-only
+`prepare` and diagnostic `plan`, must have a finite process watchdog; ordinary
+test operations use the same 90-second TERM-then-KILL ceiling, while final
+cleanup recovery retains its separate 60-second ceiling. With the eighteen-case
+matrix the complete success path can issue at most 144 such 90-second commands,
+so the loaded-stage aggregate watchdog must remain at least 14,400 seconds,
+above the 12,960-second command ceiling with bounded setup/cleanup headroom.
+Increasing coverage may raise the aggregate watchdog but must never lengthen or
+remove an individual lifecycle timeout. The normal-stop matrix
 must include fresh-process death after durable STOPPING, after native swapoff,
 after exact mapper removal, after owned-module unload, and after durable
 RESTORED before terminal COMPLETE/owner release. Recovery from those later

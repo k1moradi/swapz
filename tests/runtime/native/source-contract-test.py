@@ -290,8 +290,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "start-module-inserted", "start-module-loaded",
                 "start-mapper-inactive", "start-mapper-resumed",
                 "start-mkswap", "start-swapon",
-                "stop-stopping", "stop-swapoff", "recover-recovering",
-                "recover-swapoff",
+                "stop-stopping", "stop-swapoff",
+                "stop-mapper-removed", "stop-module-unloaded",
+                "stop-restored", "recover-recovering", "recover-swapoff",
                 "recover-mapper-removed", "recover-module-unloaded",
                 "recover-restored"):
             self.assertIn(phase, rehearsal)
@@ -299,8 +300,23 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER="$phase"', rehearsal)
         self.assertIn('"$CONTROL" primary recover', rehearsal)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:18",
             rehearsal)
+        self.assertEqual(
+            rehearsal.count('"$CONTROL" primary prepare 2>&1'), 2)
+        self.assertNotIn(
+            'output="$("$CONTROL" primary prepare 2>&1)', rehearsal)
+        self.assertNotIn(
+            'prepare_output="$("$CONTROL" primary prepare 2>&1)', rehearsal)
+        self.assertIn(
+            'timeout --signal=TERM --kill-after=10s 90s \\\n'
+            '\t\t"$CONTROL" primary prepare 2>&1', rehearsal)
+        self.assertIn(
+            'timeout --signal=TERM --kill-after=10s 90s \\\n'
+            '\t"$CONTROL" primary prepare 2>&1', rehearsal)
+        self.assertIn(
+            'timeout --signal=TERM --kill-after=10s 90s \\\n'
+            '\t\t"$CONTROL" primary plan 2>&1', rehearsal)
         self.assertIn(
             'TEST_BASE="/var/lib/swapz-primary-owned-nullblk-test-$TOKEN"',
             rehearsal)
@@ -5619,6 +5635,9 @@ int main(void)
                       loaded)
         self.assertIn("run_privileged_bounded 600 tests/tools/deploy-nullblk.sh",
                       loaded)
+        self.assertIn(
+            "run_privileged_bounded 14400 "
+            "tests/tools/qualify-primary-lifecycle-nullblk.sh", loaded)
         self.assertIn("run_privileged_bounded 720 tests/tools/benchmark-owned-pair.sh",
                       loaded)
         self.assertIn("run_privileged_bounded 960 tests/tools/qualify-resource-pressure.sh",

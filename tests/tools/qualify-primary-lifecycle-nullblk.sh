@@ -299,7 +299,8 @@ PY
 prepare_interruption_run() {
 	local output
 
-	if ! output="$("$CONTROL" primary prepare 2>&1)"; then
+	if ! output="$(timeout --signal=TERM --kill-after=10s 90s \
+		"$CONTROL" primary prepare 2>&1)"; then
 		printf '%s\n' "$output" >&2
 		fail "interruption prepare failed"
 	fi
@@ -1392,9 +1393,11 @@ printf 'PARTUUID=%s\n' "$PARTUUID" > "$CONFIG_BASE/primary-target"
 chmod 0600 "$CONFIG_BASE/primary-target"
 
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"
-if ! prepare_output="$("$CONTROL" primary prepare 2>&1)"; then
+if ! prepare_output="$(timeout --signal=TERM --kill-after=10s 90s \
+	"$CONTROL" primary prepare 2>&1)"; then
 	printf '%s\n' "$prepare_output" >&2
-	prepare_plan="$("$CONTROL" primary plan 2>&1)" || true
+	prepare_plan="$(timeout --signal=TERM --kill-after=10s 90s \
+		"$CONTROL" primary plan 2>&1)" || true
 	if [[ -n "$prepare_plan" ]]; then
 		note "PRIMARY_PREPARE_DIAGNOSTIC_PLAN=$prepare_plan"
 	else
