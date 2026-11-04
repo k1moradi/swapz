@@ -1832,6 +1832,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                           return_value={
                                               "other_mapper_count": 0,
                                               "other_mapper_sha256": "a" * 64}),
+                        mock.patch.object(
+                            probe, "_block_stat_snapshot",
+                            return_value={
+                                "available": True,
+                                "values": [0] * probe.MIN_BLOCK_STAT_FIELDS,
+                                "device_major_minor":
+                                    target["parent_major_minor"],
+                                "sector_bytes": 512,
+                            }),
                         mock.patch.object(probe, "_read_block0",
                                           return_value=target["header"]),
                         mock.patch.object(probe, "_active_swap_for",
