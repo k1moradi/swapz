@@ -668,7 +668,7 @@ def artifact(path: Path, data: bytes) -> dict:
 
 def campaign_capacity_and_ram(
         pair_records: list[dict], target_device_bytes: int,
-        source_sha: str) -> dict | None:
+        source_sha: str, metadata_ram_trace: dict | None = None) -> dict | None:
     """Seal maximum logical capacity and measured target RAM from sustained I/O."""
     accepted = [
         pair for pair in pair_records
@@ -700,7 +700,9 @@ def campaign_capacity_and_ram(
         return None
     identity = swapz.get("device_identity")
     mapper_uuid = identity.get("dm_uuid") if isinstance(identity, dict) else None
-    trace = resources.get("metadata_ram_trace")
+    # Post-teardown RAM observations are sealed separately from the replay
+    # pair, which completes before the mapper can be safely destroyed.
+    trace = metadata_ram_trace
     try:
         RAM_VALIDATOR["validate_metadata_ram_trace"](
             trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
@@ -757,9 +759,12 @@ def campaign_status(summary_status: str, source_consistent: bool,
 
 
 def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
-                  summary_path: Path, pair_paths: list[Path]) -> dict:
+                  summary_path: Path, pair_paths: list[Path],
+                  metadata_ram_trace_path: Path | None = None) -> dict:
     require_clean_source(source_sha)
     evidence_paths = [before_path, after_path, summary_path, *pair_paths]
+    if metadata_ram_trace_path is not None:
+        evidence_paths.append(metadata_ram_trace_path)
     identities = []
     for path in evidence_paths:
         info = os.stat(path, follow_symlinks=False)
@@ -770,6 +775,15 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
     before, before_data = read_json(before_path)
     after, after_data = read_json(after_path)
     summary, summary_data = read_json(summary_path)
+    metadata_ram_trace = None
+    metadata_ram_trace_data = None
+    if metadata_ram_trace_path is not None:
+        metadata_ram_trace, metadata_ram_trace_data = read_json(
+            metadata_ram_trace_path)
+        if metadata_ram_trace_data != (
+                json.dumps(metadata_ram_trace, indent=2,
+                           sort_keys=True) + "\n").encode():
+            raise ValueError("serialized RAM trace JSON is not canonical")
     validate_host_snapshot(before, source_sha)
     validate_host_snapshot(after, source_sha)
     if snapshot_time(after) < snapshot_time(before):
@@ -880,7 +894,8 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
     target_identity = physical_target_identity(before)
     target_binding = qualification_target_binding(summary, before)
     capacity_and_ram = campaign_capacity_and_ram(
-        pair_records, target_identity["device_bytes"], source_sha)
+        pair_records, target_identity["device_bytes"], source_sha,
+        metadata_ram_trace)
     if capacity_and_ram is not None and not metadata_ram_trace_within_host_window(
             capacity_and_ram, before, after):
         capacity_and_ram = None
@@ -943,6 +958,9 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
             "host_before": artifact(before_path, before_data),
             "host_after": artifact(after_path, after_data),
             "qualification_summary": artifact(summary_path, summary_data),
+            "metadata_ram_trace": (
+                artifact(metadata_ram_trace_path, metadata_ram_trace_data)
+                if metadata_ram_trace_path is not None else None),
             "pairs": pair_artifacts,
         },
         "record_count": len(pair_artifacts),
@@ -964,6 +982,7 @@ def main() -> None:
     seal.add_argument("--host-after", type=Path, required=True)
     seal.add_argument("--summary", type=Path, required=True)
     seal.add_argument("--pair", type=Path, action="append", default=[])
+    seal.add_argument("--metadata-ram-trace", type=Path)
     seal.add_argument("--result", type=Path, required=True)
 
     args = parser.parse_args()
@@ -973,7 +992,7 @@ def main() -> None:
         else:
             value = seal_campaign(
                 args.source_sha, args.host_before, args.host_after,
-                args.summary, args.pair)
+                args.summary, args.pair, args.metadata_ram_trace)
         write_new_json(args.result, value)
         print(json.dumps(value, sort_keys=True))
     except (OSError, ValueError, TypeError, KeyError,
