@@ -649,6 +649,7 @@ observe_runtime()
 	dm_table=unavailable
 	dm_status=unavailable
 	mapper_major_minor=unavailable
+	mapper_table_sectors=unavailable
 	swap_size_kib=0
 	swap_used_kib=0
 	swap_remaining_kib=0
@@ -713,6 +714,11 @@ observe_runtime()
 		[ -n "$dm_uuid" ] || dm_uuid=unavailable
 		[ -n "$dm_table" ] || dm_table=unavailable
 		[ -n "$dm_status" ] || dm_status=unavailable
+		# A returned name alone is not proof of the kernel DM UUID grammar.
+		if [ "$dm_uuid" != unavailable ] &&
+		   ! printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$'; then
+			append_reason failure_reasons mapper_uuid_invalid
+		fi
 		if [ "$active_run" != unavailable ] && [ "$dm_uuid" != "SWAPZ-PRIMARY-$active_run" ]; then
 			append_reason failure_reasons mapper_uuid_not_bound_to_active_run
 		fi
@@ -727,11 +733,19 @@ observe_runtime()
 			set -- $dm_table
 			IFS=$old_ifs
 			set +f
-			if [ "$#" -lt 5 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
-			   ! canonical_unsigned "$2" || [ "$2" = 0 ]; then
+			# Only the complete production table grammar proves a bound mapper.
+			if [ "$#" -ne 12 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
+			   ! canonical_unsigned "$2" || [ "$2" = 0 ] ||
+			   [ "$5" != 0 ] || [ "$6" != 64 ] || [ "$7" != 0 ] ||
+			   [ "$8" != 2 ] || [ "$9" != 0 ] || [ "${10}" != 1 ] ||
+			   [ "${11}" != 0 ] || [ "${12}" != 0 ]; then
 				append_reason failure_reasons mapper_table_invalid
-			elif [ "$selected_major_minor" != unavailable ] && [ "$4" != "$selected_major_minor" ]; then
-				append_reason failure_reasons mapper_backing_identity_mismatch
+			else
+				mapper_table_sectors=$2
+				if [ "$selected_major_minor" != unavailable ] &&
+				   [ "$4" != "$selected_major_minor" ]; then
+					append_reason failure_reasons mapper_backing_identity_mismatch
+				fi
 			fi
 		else
 			append_reason observation_reasons mapper_table_unavailable
@@ -751,9 +765,13 @@ observe_runtime()
 				set -- $dm_status
 				IFS=$old_ifs
 				set +f
-				if [ "$#" -lt 5 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
+				if [ "$#" -lt 4 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
 				   ! canonical_unsigned "$2" || [ "$2" = 0 ]; then
 					append_reason observation_reasons mapper_status_invalid
+					dm_status=unavailable
+				elif [ "$mapper_table_sectors" != unavailable ] &&
+				     [ "$2" != "$mapper_table_sectors" ]; then
+					append_reason observation_reasons mapper_status_geometry_invalid
 					dm_status=unavailable
 				fi
 			fi
