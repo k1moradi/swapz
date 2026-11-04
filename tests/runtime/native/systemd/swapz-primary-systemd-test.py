@@ -1453,6 +1453,92 @@ class RuntimeHealthTests(unittest.TestCase):
                 self.assertIn("failures=first_terminal_error", terminal_error.stderr)
                 self.assertIn(f"first_error={valid_error}", terminal_error.stderr)
 
+    def test_mapper_device_alias_requires_the_expected_sysfs_dm_name(self) -> None:
+        # A substituted mapper alias can match raw backing swap accounting,
+        # while dmsetup still finds a different object by its mapper name.
+        write_executable(
+            self.bin / "lsblk",
+            "#!/bin/sh\n"
+            '[ "$2" = MAJ:MIN ] || exit 1\n'
+            'case "$4" in\n'
+            '  */disk/by-partuuid/*|*/mapper/swapz-primary) echo 8:1 ;;\n'
+            '  *) exit 1 ;;\n'
+            'esac\n',
+        )
+        substituted = self.run_helper("once")
+        self.assertEqual(substituted.returncode, 1, substituted.stderr)
+        self.assertIn("mapper_device_identity_invalid", substituted.stderr)
+        self.assertNotIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", substituted.stderr)
+
+    def test_foreign_sysfs_dm_name_is_not_accepted(self) -> None:
+        (self.sys / "dev" / "block" / "253:0" / "dm" / "name").write_text(
+            "foreign-mapper\n", encoding="ascii"
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("mapper_device_identity_invalid", observed.stderr)
+
+    def test_ambiguous_dm_status_is_incomplete_not_terminal(self) -> None:
+        valid_status = (
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0 window_gc_pressure=0"
+        )
+        for malformed in (
+            valid_status + "\n" + valid_status.replace("failed=0", "failed=1"),
+            valid_status.replace("swapz", "linear", 1),
+            valid_status.replace("failed=0", "failed=0 failed=1"),
+            valid_status.replace("error=0", "error=0 error=-5"),
+            valid_status.replace("error=0", "error=0=corrupt"),
+        ):
+            with self.subTest(malformed=malformed):
+                env = self.env.copy()
+                env["MOCK_DM_STATUS"] = malformed
+                observed = self.run_helper("once", env)
+                self.assertEqual(observed.returncode, 2, observed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+                self.assertIn("observation_errors=", observed.stderr)
+                self.assertNotIn("failures=target_failed", observed.stderr)
+                self.assertNotIn("failures=first_terminal_error", observed.stderr)
+
+    def test_missing_gc_progress_is_incomplete(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_STATUS"] = (
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0"
+        )
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("gc_progress_telemetry_unavailable", observed.stderr)
+
+    def test_unavailable_systemd_state_is_incomplete_but_inactive_is_failure(self) -> None:
+        write_executable(self.bin / "systemctl", "#!/bin/sh\nexit 1\n")
+        incomplete = self.run_helper("once")
+        self.assertEqual(incomplete.returncode, 2, incomplete.stderr)
+        self.assertIn("mapper_service_state_unavailable", incomplete.stderr)
+        self.assertNotIn("mapper_service_not_active", incomplete.stderr)
+
+        write_executable(
+            self.bin / "systemctl",
+            '#!/bin/sh\n'
+            'case "$*" in\n'
+            '  *--property=ActiveState*) echo inactive ;;\n'
+            '  *--property=SubState*) echo dead ;;\n'
+            '  *--property=Result*) echo success ;;\n'
+            '  *) exit 1 ;;\n'
+            'esac\n',
+        )
+        inactive = self.run_helper("once")
+        self.assertEqual(inactive.returncode, 1, inactive.stderr)
+        self.assertIn("mapper_service_not_active", inactive.stderr)
+
     def test_malformed_unsigned_status_counter_is_degraded(self) -> None:
         base_status = (
             "0 216641536 swapz failed=0 error=0 flush_err=0 "

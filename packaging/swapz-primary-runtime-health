@@ -278,11 +278,20 @@ status_token()
 		{
 			for (position = 1; position <= NF; ++position) {
 				split($position, pair, "=")
-				if (pair[1] == wanted && length(pair[2])) {
-					print pair[2]
-					exit
+				if (pair[1] != wanted)
+					continue
+				value = substr($position, length(wanted) + 2)
+				if (seen || value == "" || index(value, "=") != 0)
+					invalid = 1
+				else {
+					result = value
+					seen = 1
 				}
 			}
+		}
+		END {
+			if (invalid) print "invalid"
+			else if (seen) print result
 		}
 	'
 }
@@ -565,7 +574,11 @@ unit_property()
 {
 	unit=$1
 	property=$2
-	run_bounded systemctl show --property="$property" --value "$unit" 2>/dev/null || return 1
+	value=$(run_bounded systemctl show --property="$property" --value "$unit" 2>/dev/null) || return 1
+	# Blank or multiline output is untrusted observation, not an inactive unit.
+	case "$value" in ''|*'
+'*) return 1 ;; esac
+	printf '%s\n' "$value"
 }
 
 activation_guard()
@@ -686,6 +699,14 @@ observe_runtime()
 
 	if [ -e "$mapper_path" ]; then
 		mapper_major_minor=$(path_major_minor "$mapper_path" 2>/dev/null || printf 'unavailable')
+		# An alias substituted for /dev/mapper/swapz-primary must never be
+		# mistaken for the mapper merely because its swap inventory matches.
+		mapper_dm_name=unavailable
+		if [ "$mapper_major_minor" != unavailable ] &&
+		   [ -r "$sys_root/dev/block/$mapper_major_minor/dm/name" ]; then
+			mapper_dm_name=$(cat -- "$sys_root/dev/block/$mapper_major_minor/dm/name" 2>/dev/null || printf 'unavailable')
+		fi
+		[ "$mapper_dm_name" = "$mapper_name" ] || append_reason failure_reasons mapper_device_identity_invalid
 		dm_uuid=$(run_bounded dmsetup info --columns --noheadings --separator '|' -o uuid "$mapper_name" 2>/dev/null | awk 'NR == 1 { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }' || true)
 		dm_table=$(run_bounded dmsetup table "$mapper_name" 2>/dev/null || true)
 		dm_status=$(run_bounded dmsetup status "$mapper_name" 2>/dev/null || true)
@@ -706,13 +727,36 @@ observe_runtime()
 			set -- $dm_table
 			IFS=$old_ifs
 			set +f
-			if [ "$#" -lt 4 ] || [ "$1" != 0 ] || [ "$3" != swapz ]; then
+			if [ "$#" -lt 5 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
+			   ! canonical_unsigned "$2" || [ "$2" = 0 ]; then
 				append_reason failure_reasons mapper_table_invalid
 			elif [ "$selected_major_minor" != unavailable ] && [ "$4" != "$selected_major_minor" ]; then
 				append_reason failure_reasons mapper_backing_identity_mismatch
 			fi
 		else
 			append_reason observation_reasons mapper_table_unavailable
+		fi
+		if [ "$dm_status" != unavailable ]; then
+			# DM status must describe one complete swapz target. Do not read
+			# terminal bits from a torn, multiline, or foreign-target record.
+			case "$dm_status" in
+			*'
+'*) append_reason observation_reasons mapper_status_not_single_target; dm_status=unavailable ;;
+			esac
+			if [ "$dm_status" != unavailable ]; then
+				set -f
+				old_ifs=$IFS
+				IFS=' '
+				# shellcheck disable=SC2086 # Validate the DM status token framing.
+				set -- $dm_status
+				IFS=$old_ifs
+				set +f
+				if [ "$#" -lt 5 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
+				   ! canonical_unsigned "$2" || [ "$2" = 0 ]; then
+					append_reason observation_reasons mapper_status_invalid
+					dm_status=unavailable
+				fi
+			fi
 		fi
 		if [ "$dm_status" != unavailable ]; then
 			for token in failed error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err gc_victims gc_pages gc_no_headroom_skips gc_reserve_segments_initial gc_reserve_segments_current gc_destination_advances window_gc_pressure; do
@@ -736,8 +780,18 @@ observe_runtime()
 				esac
 			done
 			for token_name in flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
-				eval "value=\$$token_name"
-				[ "$value" = unavailable ] || canonical_unsigned "$value" || append_reason observation_reasons dm_status_counter_invalid
+				eval "value=\$token_name"
+				if [ "$value" = unavailable ]; then
+					append_reason observation_reasons dm_status_counter_unavailable
+				elif ! canonical_unsigned "$value"; then
+					append_reason observation_reasons dm_status_counter_invalid
+				fi
+			done
+			# Monitoring cannot exclude a sustained GC stall when any of its
+			# pressure/progress counters are absent or unparseable.
+			for token_name in gc_victims gc_pages gc_no_headroom_skips window_gc_pressure; do
+				eval "value=\$token_name"
+				canonical_unsigned "$value" || append_reason observation_reasons gc_progress_telemetry_unavailable
 			done
 			# Missing or malformed terminal-state telemetry is incomplete
 			# evidence, not proof that the target entered a failure state.
@@ -822,10 +876,26 @@ EOF
 	swap_unit_active=$(unit_property "$mapper_swap_unit" ActiveState 2>/dev/null || printf 'unavailable')
 	swap_unit_sub=$(unit_property "$mapper_swap_unit" SubState 2>/dev/null || printf 'unavailable')
 	swap_unit_result=$(unit_property "$mapper_swap_unit" Result 2>/dev/null || printf 'unavailable')
-	[ "$mapper_active" = active ] || append_reason failure_reasons mapper_service_not_active
-	[ "$swap_unit_active" = active ] || append_reason failure_reasons passive_swap_unit_not_active
-	[ "$mapper_result" = success ] || [ "$mapper_result" = unavailable ] || append_reason failure_reasons mapper_service_failed
-	[ "$swap_unit_result" = success ] || [ "$swap_unit_result" = unavailable ] || append_reason failure_reasons passive_swap_unit_failed
+	case "$mapper_active" in
+	active) ;;
+	unavailable) append_reason observation_reasons mapper_service_state_unavailable ;;
+	*) append_reason failure_reasons mapper_service_not_active ;;
+	esac
+	case "$swap_unit_active" in
+	active) ;;
+	unavailable) append_reason observation_reasons passive_swap_unit_state_unavailable ;;
+	*) append_reason failure_reasons passive_swap_unit_not_active ;;
+	esac
+	case "$mapper_result" in
+	success) ;;
+	unavailable) append_reason observation_reasons mapper_service_result_unavailable ;;
+	*) append_reason failure_reasons mapper_service_failed ;;
+	esac
+	case "$swap_unit_result" in
+	success) ;;
+	unavailable) append_reason observation_reasons passive_swap_unit_result_unavailable ;;
+	*) append_reason failure_reasons passive_swap_unit_failed ;;
+	esac
 
 	if ! hibernation_config_check; then
 		append_reason failure_reasons hibernation_resume_configuration_conflict

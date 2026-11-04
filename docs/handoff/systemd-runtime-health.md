@@ -43,6 +43,15 @@ fixed system executable path and locale. Missing or malformed `failed` /
 `DEGRADED`, not a fabricated terminal failure; only a valid confirmed
 nonzero terminal state yields `FAIL`.
 
+Runtime identity validation also binds the observed mapper path to its captured
+sysfs Device Mapper name; a substituted path cannot pass merely by matching
+the selected raw partition's major:minor. The observer requires a single
+well-framed DM status record and rejects duplicated or malformed status tokens.
+Missing GC-progress and error counters and unavailable systemd properties yield
+`DEGRADED` rather than an invented `FAIL`; a known inactive service, foreign
+mapper identity, or confirmed terminal DM failure still yields `FAIL`. These
+distinctions do not relax the hibernation guards or authorize swap mutation.
+
 Package installation keeps all primary units disabled and does not start the
 mapper, monitor, passive swap, hibernation action, or any swap mutation. The
 production userspace lifecycle compile gate remains disabled until a frozen
