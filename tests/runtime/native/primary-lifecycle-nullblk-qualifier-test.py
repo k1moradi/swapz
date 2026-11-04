@@ -180,8 +180,10 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             'assert_unrelated_host_swap_identity "normal start"',
             'active_backing_header_sha256=',
         )
+        # Exact-once matching prevents a stale correct guard elsewhere in the
+        # section from masking a broken or misbound fail-closed operator.
         for proof_step in proof_steps:
-            self.assertIn(proof_step, positive_path)
+            self.assertEqual(positive_path.count(proof_step), 1)
         for earlier, later in zip(proof_steps, proof_steps[1:]):
             self.assertLess(positive_path.index(earlier),
                             positive_path.index(later))

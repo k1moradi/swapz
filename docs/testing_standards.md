@@ -4624,8 +4624,13 @@ fresh-process recovery. Evidence reads must validate regular-file ownership,
 mode and link identity, and copied bytes and the evidence directory must be
 fsynced. Evidence preservation failures quarantine the owned resources. Swap
 inventory oracles must fail closed on a present but unstatable swap-device path,
-never infer swap inactivity from a skipped entry. The unprivileged loaded-test
-parent must establish the clean checkout at the exact validated HEAD before
+never infer swap inactivity from a skipped entry. The rootless qualifier contract
+must run `bash -n` and pin each normal-start ACTIVE proof step exactly once and
+in execution order, including adjacency between the unique active-swap count
+predicate and its fail handler. Mere substring presence is insufficient because
+a syntactically valid misbound `||` can otherwise make a later assertion its
+failure branch. The unprivileged loaded-test parent must establish the clean
+checkout at the exact validated HEAD before
 sudo, pass that SHA explicitly to the lifecycle helper, and recheck Git metadata
 after the child returns. The privileged lifecycle helper must not invoke Git; it
 must instead bind the passed SHA to the generated clean build-info provenance
