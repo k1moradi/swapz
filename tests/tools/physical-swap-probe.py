@@ -1108,8 +1108,8 @@ def _block_stat_snapshot(target):
     if not isinstance(parent, str) or not re.fullmatch(
             r"[0-9]+:[0-9]+", parent):
         return {"available": False,
-                "error": f"lower_parent_major_minor expected=number:number "
-                         f"observed={parent!r}"}
+                "error": "lower_parent_major_minor expected=number:number "
+                         "observed=invalid_format"}
     path = Path(f"/sys/dev/block/{parent}/stat")
     try:
         tokens = path.read_text().split()
@@ -1251,13 +1251,9 @@ def _kernel_diagnostics_error(record):
     if not isinstance(record, dict):
         return f"kernel_trace expected=object observed={record!r}"
     if record.get("available") is not True:
-        return (
-            "kernel_trace expected=available "
-            f"observed={_bounded_text(record.get('error', record))}")
+        return "kernel_trace expected=available observed=unavailable"
     if record.get("time_filter_applied") is not True:
-        return (
-            "kernel_trace expected=time_filtered "
-            f"observed_source={record.get('source')!r}")
+        return "kernel_trace expected=time_filtered observed=unfiltered"
     if record.get("truncated") is not False:
         return (
             "kernel_trace expected=complete "
@@ -1336,9 +1332,11 @@ def _dm_inventory_snapshot(
     for name, uuid in _dm_info_rows(result.stdout, 2):
         if reject_swapz_namespace and (
                 name.startswith("swapz") or uuid.startswith("SWAPZ")):
+            conflict = ("name_namespace_collision" if name.startswith("swapz")
+                        else "uuid_namespace_collision")
             raise ProbeError(
                 "mapper_provenance expected=no_swapz_namespace "
-                f"observed=name={name!r},uuid={uuid!r}")
+                f"observed={conflict}")
         if name == owned_name or uuid == owned_uuid:
             if (name, uuid) != (owned_name, owned_uuid):
                 raise ProbeError("owned mapper name or UUID changed in inventory")
@@ -2389,7 +2387,7 @@ def _campaign_card_identity(device, parent_major_minor):
         parent_sectors = int(sectors_text)
     except ValueError as exc:
         raise ProbeError(
-            f"card_parent_sectors expected=integer observed={sectors_text!r}"
+            "card_parent_sectors expected=integer observed=noninteger"
         ) from exc
     if parent_sectors <= 0 or parent_sectors > MAX_BLOCK_COUNTER // 512:
         raise ProbeError(
@@ -2403,7 +2401,7 @@ def _campaign_card_identity(device, parent_major_minor):
     if not model or not transport:
         raise ProbeError(
             "card_identity expected=nonempty_model_and_transport "
-            f"observed=model={model!r},transport={transport!r}")
+            f"observed=model_present={bool(model)},transport_present={bool(transport)}")
     canonical = {
         "parent_major_minor": parent_major_minor,
         "physical_disk": parent.name,
@@ -2435,7 +2433,7 @@ def _normalize_expected_partuuid(value):
             not re.fullmatch(r"[0-9a-f]+(?:-[0-9a-f]+)*", normalized) or
             sum(ch != "-" for ch in normalized) < 8):
         raise ProbeError(
-            f"expected_partuuid expected=stable_hex observed={value!r}")
+            "expected_partuuid expected=stable_hex observed=invalid_format")
     return normalized
 
 
@@ -2450,9 +2448,7 @@ def _require_campaign_target_quiescent(target):
             observed_card["sha256"] != expected_card_sha):
         raise ProbeError(
             f"campaign_card_identity expected={expected_card_sha!r} "
-            f"observed={observed_card['sha256']!r} "
-            f"model={observed_card['model']!r} "
-            f"transport={observed_card['transport']!r}")
+            f"observed={observed_card['sha256']!r}")
     try:
         holders = _holder_names(target["major"], target["minor"])
     except OSError as exc:
@@ -2461,7 +2457,7 @@ def _require_campaign_target_quiescent(target):
         ) from exc
     if holders:
         raise ProbeError(
-            f"campaign_holders expected=[] observed={holders!r}")
+            f"campaign_holders expected=[] observed=holder_count_{len(holders)}")
     if _mountinfo_has_device(target["major"], target["minor"]):
         raise ProbeError(
             f"campaign_mount expected=absent observed="
@@ -2511,12 +2507,13 @@ def inspect_campaign_target(device_arg, confirm_arg, expected_partuuid):
         holders = sorted(path.name for path in (sys_entry / "holders").iterdir())
     except (OSError, RuntimeError) as exc:
         raise ProbeError(
-            f"campaign_topology expected=readable_partition observed="
-            f"{_bounded_text(exc)}") from exc
+            "campaign_topology expected=readable_partition "
+            f"observed=unreadable_errno_{getattr(exc, 'errno', None)!r}"
+        ) from exc
     parent_major_minor = _physical_parent_identity(major, minor)
     if holders:
         raise ProbeError(
-            f"campaign_holders expected=[] observed={holders!r}")
+            f"campaign_holders expected=[] observed=holder_count_{len(holders)}")
     if _mountinfo_has_device(major, minor):
         raise ProbeError(
             f"campaign_mount expected=absent observed={major}:{minor}")
@@ -2558,7 +2555,7 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
     if not isinstance(source_sha, str) or not re.fullmatch(
             r"[0-9a-f]{40}", source_sha):
         raise ProbeError(
-            f"campaign_source_sha expected=40_lower_hex observed={source_sha!r}")
+            "campaign_source_sha expected=40_lower_hex observed=invalid_format")
     target = inspect_campaign_target(
         device_arg, confirm_arg, expected_partuuid)
     lower_before = _block_stat_snapshot(target)
