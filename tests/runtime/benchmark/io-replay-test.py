@@ -4,8 +4,10 @@
 This does NOT load the swapz module: same regular-file replay code tests only
 the trace contract, oracle, safety guard and fail-closed pair comparator.
 """
+import contextlib
 import copy
 import hashlib
+import io
 import json
 import os
 import random
@@ -391,8 +393,7 @@ class PairReplayContract(unittest.TestCase):
             "swapz_fast_representative", SCRIPT.parents[2] / "tools/fast-test.py")
         fast = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fast)
-        analyzer = fast.ANON_PAGE_ANALYZER
-        self.assertTrue(analyzer.is_file(), "native analyzer must be built first")
+        self.require_native_tool("anon-page-analyzer", "representative")
 
         marker = b"PRIVATE_REPRESENTATIVE_PAGE_5d741fc2"
         zero = bytes(PAGE)
@@ -498,7 +499,9 @@ class PairReplayContract(unittest.TestCase):
         spec.loader.exec_module(fast)
         for scenario, extra in (("fast-w8", []), ("fast-stripes-w4", []),
                                 ("fast-mixed", ["--calibration", "linear"])):
-            with patch.object(sys, "argv", ["fast-test", "--mixed-ops",
+            parser_stderr = io.StringIO()
+            with contextlib.redirect_stderr(parser_stderr), \
+                    patch.object(sys, "argv", ["fast-test", "--mixed-ops",
                     "65536", "--scenarios", scenario, *extra]), \
                     patch.object(fast, "privileged") as privileged, \
                     patch.object(fast, "build") as build:
@@ -507,6 +510,8 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
                 privileged.assert_not_called()
                 build.assert_not_called()
+            self.assertIn("MIXED_OPS=65536 requires ordinary mixed-only scenarios",
+                          parser_stderr.getvalue())
 
     def test_host_cpu_boundaries_expose_contention_without_idle_inference(self):
         import importlib.util
@@ -544,13 +549,53 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(module.host_cpu_delta(before, invalid)["status"],
                              "UNAVAILABLE")
 
-    def run_cmd(self, *args, success=True):
-        run = subprocess.run([sys.executable, str(SCRIPT), *map(str, args)],
-                             capture_output=True, text=True, timeout=30)
+    def require_native_tool(self, target, scenario):
+        # The source-contract job invokes this suite on an unbuilt checkout.
+        # Only the required native leaf target is compiled; no sudo or root make.
+        executable = ROOT / "build/tests/native" / target
+        context = (f"phase=native-build scenario={scenario} "
+                   f"candidate=off/swapz target={target}")
+        try:
+            build = subprocess.run(
+                ["make", "-s", "--no-print-directory", "-C",
+                 str(ROOT / "tests/suites"), str(executable)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            self.fail(f"{context} invariant=build-launch "
+                      f"reason={type(error).__name__}")
+        self.assertEqual(
+            build.returncode, 0,
+            f"{context} invariant=build-exit-status exit_status={build.returncode} "
+            "reason=unprivileged native build failed")
+        self.assertTrue(
+            executable.is_file() and os.access(executable, os.X_OK),
+            f"{context} invariant=executable-native-tool "
+            "reason=make returned success without an executable")
+        return executable
+
+    def run_cmd(self, *args, success=True, scenario=None):
+        phase = str(args[0])
+        candidate = (str(args[args.index("--candidate") + 1])
+                     if "--candidate" in args else
+                     "off/swapz" if phase == "compare" else "none")
+        context = (f"phase={phase} scenario={scenario or self._testMethodName} "
+                   f"candidate={candidate}")
+        try:
+            run = subprocess.run(
+                [sys.executable, str(SCRIPT), *map(str, args)],
+                capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            self.fail(f"{context} invariant=command-timeout seconds=30 "
+                      "reason=replay subprocess did not finish")
         if success and run.returncode:
-            self.fail(f"command {args}: rc={run.returncode}\n{run.stdout}\n{run.stderr}")
+            self.fail(f"{context} invariant=command-exit-status "
+                      f"exit_status={run.returncode} "
+                      "reason=replay subprocess failed (private child output withheld)")
         if not success:
-            self.assertNotEqual(run.returncode, 0, repr(args))
+            self.assertNotEqual(
+                run.returncode, 0,
+                f"{context} invariant=expected-rejection exit_status=0 "
+                "reason=invalid replay input accepted")
         return run
 
     def test_four_mib_verified_fixed_volume_read_rootless(self):
@@ -1673,9 +1718,7 @@ class PairReplayContract(unittest.TestCase):
                 mod.check_device(a, 8)
 
     def test_native_replay_preserves_rootless_oracle(self):
-        helper = SCRIPT.parents[3] / "build/tests/native/io-replay-native"
-        self.assertTrue(helper.is_file())
-        self.assertTrue(os.access(helper, os.X_OK))
+        self.require_native_tool("io-replay-native", "qd-waves")
         for mode in ("qd-waves", "persistent-write", "persistent-mixed", "lane-mixed-waves"):
             with self.subTest(mode=mode), \
                     tempfile.TemporaryDirectory() as temp:
@@ -1695,7 +1738,7 @@ class PairReplayContract(unittest.TestCase):
                     prepare.append("--sustained-write")
                 elif mode in ("persistent-mixed", "lane-mixed-waves"):
                     prepare += ["--mixed-lanes", "persistent" if mode == "persistent-mixed" else "waves"]
-                self.run_cmd(*prepare)
+                self.run_cmd(*prepare, scenario=mode)
                 reports = []
                 for candidate in ("off", "swapz"):
                     device = root / f"swapz-replay-native-{candidate}.bin"
@@ -1709,22 +1752,27 @@ class PairReplayContract(unittest.TestCase):
                         "--device", device, "--candidate", candidate,
                         "--source-sha", "rootless-no-module",
                         "--regular-file-test", "--native-replay",
-                        "--result", result)
+                        "--result", result, scenario=mode)
                     record = json.loads(result.read_text())
                     self.assertEqual(record["replay_engine"], "native-c")
                     self.assertEqual(record["replay_mode"], mode)
                     self.assertEqual(
                         record["verified_post_sha256"],
-                        record["expected_post_sha256"])
+                        record["expected_post_sha256"],
+                        f"phase=native-replay scenario={mode} candidate={candidate} "
+                        "invariant=post-image-sha256")
                     self.assertEqual(record["write_ops"] + record["read_ops"], 32)
                     self.assertGreater(record["seconds"], 0)
                     self.assertIn("native", record["mixed_timed_scope"])
                     reports.append(result)
                 compared = json.loads(
-                    self.run_cmd("compare", "--reports", *reports).stdout)
+                    self.run_cmd("compare", "--reports", *reports,
+                                 scenario=mode).stdout)
                 self.assertEqual(compared["replay_engine"], "native-c")
                 self.assertEqual(
-                    compared["verdict"], "PASS_IDENTICAL_LOGICAL_INPUT")
+                    compared["verdict"], "PASS_IDENTICAL_LOGICAL_INPUT",
+                    f"phase=pair-compare scenario={mode} candidate=off/swapz "
+                    "invariant=identical-logical-input")
 
     def test_mixed_lanes_isolate_barrier_and_reject_cross_lane_mutations(self):
         import runpy

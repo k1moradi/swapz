@@ -4302,6 +4302,21 @@ the measured ~44-second suite including the longer deterministic-plan oracle
 checks on the two-core host. This changes no loaded replay, privileged helper,
 kernel-progress or teardown deadline.
 
+The independent source-contract job runs `io-replay-test.py` on a clean
+checkout before any native suite has built its binaries. The rootless replay
+suite must compile its exact `tests/suites/Makefile` leaf targets for
+`io-replay-native` and `anon-page-analyzer` before executing their assertions;
+a missing compiler, failed build or nonexecutable output is a failure, never
+an oracle skip. Keep compilation unprivileged and separate from the release
+qualification interface: `make fast_test` is still development-only, and
+`make test` remains the sole qualification command. Rootless failures
+must name the phase, scenario, candidate, mismatched invariant or child exit
+status, and a bounded reason without publishing representative samples or
+private paths. Negative `MIXED_OPS=65536` CLI probes must still assert
+`SystemExit(2)` and the exact ordinary-mixed-only restriction, while capturing
+their expected usage stderr locally so the retained source-contract summary
+points to the real failed replay invariant instead.
+
 Prepared compression-cost coverage must execute the actual production wrapper
 and ordered observer against the existing EWMA helper. Check a nonzero lane
 baseline, consecutive compressed/RAW samples, a zero/unknown sample, preserved
