@@ -1487,6 +1487,25 @@ static swapz_u16 swapz_probe_set(
         self.assertLess(accept.index("swapz_discard_page(&ctx->authority, logical)"),
                         accept.index("swapz_discard_dead_segment(ctx, old_segment)"))
 
+    def test_zero_elision_bounds_checks_old_map_before_segment_probe(self):
+        accept = body("swapz_accept_write")
+        start = accept.index("if (length > 0 && length <= 64 &&")
+        end = accept.index("if (length <= 0 && bulk_raw_eligible)", start)
+        zero = accept[start:end]
+        self.assertRegex(
+            zero,
+            r"if \(old->start_block >= ctx->physical_blocks\) \{"
+            r"\s+error = -EUCLEAN;\s+\} else \{")
+        self.assertLess(
+            zero.index("old->start_block >= ctx->physical_blocks"),
+            zero.index("ctx->segment_mapped_pages[old_segment]"))
+        self.assertRegex(
+            zero,
+            r"if \(!error\)\s+error = swapz_discard_page\(")
+        self.assertLess(
+            zero.index("ctx->segment_mapped_pages[old_segment]"),
+            zero.index("swapz_discard_page(&ctx->authority, logical)"))
+
     def test_targeted_read_metadata_and_payload_diagnostics_are_success_only(self):
         engine = (ROOT / "src/kernel/engine.c").read_text()
         header = (ROOT / "src/kernel/engine.h").read_text()

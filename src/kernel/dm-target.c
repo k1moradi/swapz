@@ -5846,12 +5846,20 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			 * has removed the final live mapping.
 			 */
 			if (old->valid && ctx->segment_mapped_pages) {
-				old_segment =
-					old->start_block / SWAPZ_SEGMENT_BLOCKS;
-				became_dead =
-					ctx->segment_mapped_pages[old_segment] == 1U;
+				/* Validate the physical index before probing segment liveness.
+				 * The authority's later discard validation cannot protect
+				 * this earlier array access from a corrupt map. */
+				if (old->start_block >= ctx->physical_blocks) {
+					error = -EUCLEAN;
+				} else {
+					old_segment =
+						old->start_block / SWAPZ_SEGMENT_BLOCKS;
+					became_dead =
+						ctx->segment_mapped_pages[old_segment] == 1U;
+				}
 			}
-			error = swapz_discard_page(&ctx->authority, logical);
+			if (!error)
+				error = swapz_discard_page(&ctx->authority, logical);
 		}
 		if (!error && became_dead &&
 		    old_segment != ctx->authority.open_segment)
