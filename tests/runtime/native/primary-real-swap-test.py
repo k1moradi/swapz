@@ -405,6 +405,28 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(
             child_environment["SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION"], "1")
 
+    def test_owned_source_admission_close_preserves_original_failure(self):
+        arguments = qualify.build_parser().parse_args([
+            "--validated-source", "a" * 40,
+            "--qualification-report", "/synthetic/report.json",
+            "--source-admission-socket", "/synthetic/socket",
+            "--source-admission-parent-uid", "1000",
+        ])
+        channel = mock.Mock()
+        channel.close.side_effect = OSError("synthetic close failure")
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(os, "geteuid", return_value=0), \
+                mock.patch.object(qualify, "SourceAdmissionClient",
+                                  return_value=channel), \
+                mock.patch.object(qualify, "_execute_admitted",
+                                  side_effect=qualify.Blocked("source proof failed")):
+            with self.assertRaisesRegex(
+                    qualify.Blocked,
+                    "source proof failed; cleanup also failed: "
+                    "source admission channel: synthetic close failure"):
+                qualify.execute(arguments)
+        channel.close.assert_called_once_with()
+
     def test_private_workspace_is_cleaned_when_admission_fails_before_evidence(self):
         completed = __import__("subprocess").CompletedProcess
         with tempfile.TemporaryDirectory() as directory:

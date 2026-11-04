@@ -2789,7 +2789,12 @@ def execute(arguments: argparse.Namespace,
         return _execute_admitted(arguments, admission)
     finally:
         if owns_admission:
-            admission.close()
+            original_error = sys.exc_info()[1]
+            try:
+                admission.close()
+            except Exception as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error, [f"source admission channel: {cleanup_error}"])
 
 
 def build_parser() -> argparse.ArgumentParser:
