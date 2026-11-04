@@ -8,7 +8,8 @@ swapz_clear_tmp_before_memory_check() {
     }
     local helper_directory
     helper_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
-    python3 -B "$helper_directory/cleanup-owned-tmp.py" /tmp 0 1777 || {
+    timeout --signal=TERM --kill-after=2s 30s \
+        python3 -I -B "$helper_directory/cleanup-owned-tmp.py" /tmp 0 1777 || {
         printf '%s\n' 'BLOCKED: cannot safely remove verified completed swapz /tmp sessions' >&2
         return 1
     }
