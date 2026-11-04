@@ -3612,9 +3612,11 @@ cover the literal kernel header, canonical numeric fields, embedded NULs,
 missing final newlines, overlong rows, bounded table/row budgets, duplicate
 mount IDs and duplicate swap backing identities, malformed known mount
 optional fields and octal escapes, forward-compatible unknown mount optional
-fields, filesystem-specific non-path mount roots, raw legal filename bytes,
+fields, duplicate known propagation tags, ro/rw mount and superblock option
+grammar, filesystem-specific non-path mount roots, raw legal filename bytes,
 kernel-escaped swapfile paths and deterministic byte mutations under the
-ASan/UBSan rootless test build. A rootless proc-directory fixture must prove that a selected partition or
+ASan/UBSan rootless test build. The visible-PID traversal bound must not be
+lower than Linux's maximum possible PID space. A rootless proc-directory fixture must prove that a selected partition or
 parent mounted only in another visible PID's namespace blocks formatting,
 while unrelated sibling mounts remain nonconflicting. Missing or malformed
 mountinfo for a PID whose ns/mnt marker is still present must fail closed;
