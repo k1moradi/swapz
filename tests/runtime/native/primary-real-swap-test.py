@@ -712,10 +712,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 ])
                 admission = mock.Mock()
                 admission.require.side_effect = ["0" * 64, "0" * 64]
-                cycle_results = [
+                cycle_results = iter([
                     {"run_id": "1" * 32, "linux_swap_uuid": "1" * 32},
                     {"run_id": "2" * 32, "linux_swap_uuid": "2" * 32},
-                ]
+                ])
+
+                def fake_cycle(index, **kwargs):
+                    self.assertIn("0" * 32, kwargs["prior_run_ids"])
+                    if index == 2:
+                        self.assertIn("1" * 32, kwargs["prior_run_ids"])
+                    return next(cycle_results)
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(
                         mock.patch.object(
@@ -789,7 +795,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify, "read_swap_rows", return_value=[]))
                     stack.enter_context(
                         mock.patch.object(
-                            qualify, "_validate_precycle_state"))
+                            qualify, "_validate_precycle_state",
+                            return_value={
+                                "stage": "COMPLETE",
+                                "run_id": "0" * 32,
+                            }))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "_reject_relevant_kernel_errors"))
@@ -806,7 +816,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "run_cycle",
-                            side_effect=cycle_results))
+                            side_effect=fake_cycle))
                     stack.enter_context(
                         self.assertRaises(qualify.QualificationFailure))
                     qualify._execute_admitted(
@@ -2887,6 +2897,22 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertIn(
             "'__swapz_source_root__': source_root",
             parent.PRIVILEGED_HELPER_BOOTSTRAP)
+
+
+    def test_precycle_state_returns_prior_complete_run_for_freshness_seed(self):
+        prior = {
+            "schema": "swapz-primary-state-v1",
+            "run_id": "a" * 32,
+            "stage": "COMPLETE",
+            "recovery_previous_stage": "NONE",
+        }
+        with mock.patch.object(qualify, "read_state", return_value=prior), \
+                mock.patch.object(
+                    qualify, "_path_present", return_value=False), \
+                mock.patch.object(qualify, "_dm_identity", return_value=None):
+            observed = qualify._validate_precycle_state(
+                "f13428f6-01", (8, 1), (8, 0), [])
+        self.assertIs(observed, prior)
 
 
 if __name__ == "__main__":

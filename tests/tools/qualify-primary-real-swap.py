@@ -1847,7 +1847,8 @@ def _ensure_commands(names: tuple[str, ...]) -> None:
 
 def _validate_precycle_state(
         partuuid: str, target_device: tuple[int, int],
-        parent_device: tuple[int, int], baseline: list[SwapRow]) -> None:
+        parent_device: tuple[int, int],
+        baseline: list[SwapRow]) -> dict | None:
     state = read_state()
     if state is not None and state.get("stage") != "COMPLETE":
         raise Blocked(f"unresolved primary state {state.get('stage')}")
@@ -1860,6 +1861,7 @@ def _validate_precycle_state(
         baseline, target_device, parent_device)
     if _path_present(Path("/sys/module/dm_swapz"), "dm_swapz module sysfs state"):
         raise Blocked("dm_swapz is already loaded before primary cycle")
+    return state
 
 
 def _read_primary_output(result: subprocess.CompletedProcess[str], prefix: str) -> str:
@@ -3516,7 +3518,7 @@ def _execute_admitted(
         # geometry, lsblk and the authorized target snapshot.
         target_size_bytes = int(plan["target_device_bytes"])
         baseline = read_swap_rows()
-        _validate_precycle_state(
+        baseline_state = _validate_precycle_state(
             selector_partuuid, target_device, target_parent_device, baseline)
         kernel_before = _kernel_log_snapshot()
         _reject_relevant_kernel_errors([])
@@ -3558,7 +3560,10 @@ def _execute_admitted(
                 error_type=Blocked)
         raise
 
-    run_ids: set[str] = set()
+    # First-cycle freshness also excludes the immediately preceding durable
+    # COMPLETE transaction, not only IDs observed later in this campaign.
+    run_ids: set[str] = (
+        {baseline_state["run_id"]} if baseline_state is not None else set())
     swap_uuids: set[str] = set()
     cycles: list[dict] = []
     workspace_cleanup_complete = False
