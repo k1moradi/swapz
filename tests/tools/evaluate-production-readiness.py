@@ -31,6 +31,7 @@ METADATA_RAM_VALIDATOR = (
 RAM_TRACE_VALIDATOR = runpy.run_path(str(METADATA_RAM_VALIDATOR))
 MAX_EVIDENCE_INPUT_BYTES = 256 * 1024 * 1024
 MAX_ENV_EVIDENCE_INPUT_BYTES = 1024 * 1024
+UNIX_EPOCH_ORDINAL = datetime.date(1970, 1, 1).toordinal()
 PHYSICAL_CAMPAIGN_AMENDMENT = (
     ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json")
 
@@ -322,9 +323,8 @@ def _parse_utc_evidence_time(value: Any) -> int | None:
             int(core[11:13]), int(core[14:16]), int(core[17:19]))
     except ValueError:
         return None
-    epoch_ordinal = datetime.date(1970, 1, 1).toordinal()
     whole_seconds = (
-        (observed.toordinal() - epoch_ordinal) * 86400 +
+        (observed.toordinal() - UNIX_EPOCH_ORDINAL) * 86400 +
         observed.hour * 3600 + observed.minute * 60 + observed.second)
     return whole_seconds * 1_000_000_000 + fraction_ns
 
