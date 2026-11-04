@@ -257,43 +257,73 @@ static void test_checked_counter_arithmetic(void)
 
 static size_t fixture_align_target_offset(size_t value)
 {
-	const size_t alignment = _Alignof(struct dm_target_spec);
-	const size_t remainder = value % alignment;
+	size_t aligned = 0;
 
-	assert(value <= SIZE_MAX - (remainder ? alignment - remainder : 0U));
-	return remainder ? value + alignment - remainder : value;
+	assert(status_align_target_offset(value, &aligned) == 0);
+	return aligned;
+}
+
+/* Construct real absolute DM_TABLE_STATUS offsets without touching a mapper. */
+static size_t make_dm_multi_fixture(
+	unsigned char *buffer, size_t capacity, const char *const *types,
+	const char *const *parameters, const int *target_status,
+	size_t count, uint64_t device_id)
+{
+	struct dm_ioctl header = { 0 };
+	size_t next_offset = 0;
+	size_t used_end = 0;
+	size_t target;
+
+	assert(count <= SWAPZ_STATUS_MAX_TARGETS);
+	assert(capacity >= sizeof(header));
+	memset(buffer, 0, capacity);
+	for (target = 0; target < count; ++target) {
+		struct dm_target_spec specification = { 0 };
+		size_t status_bytes = strlen(parameters[target]) + 1U;
+
+		used_end = next_offset + sizeof(specification) + status_bytes;
+		assert(used_end <= capacity - sizeof(header));
+		assert(strlen(types[target]) < sizeof(specification.target_type));
+		specification.sector_start = (uint64_t)target * 1024U;
+		specification.length = 1024U;
+		specification.status = target_status ? target_status[target] : 0;
+		specification.next = (uint32_t)fixture_align_target_offset(used_end);
+		memcpy(specification.target_type, types[target], strlen(types[target]) + 1U);
+		memcpy(buffer + sizeof(header) + next_offset,
+		       &specification, sizeof(specification));
+		memcpy(buffer + sizeof(header) + next_offset + sizeof(specification),
+		       parameters[target], status_bytes);
+		next_offset = specification.next;
+		assert(next_offset <= capacity - sizeof(header));
+	}
+	header.data_start = sizeof(header);
+	header.data_size = (uint32_t)(sizeof(header) + used_end);
+	header.target_count = (uint32_t)count;
+	header.dev = device_id;
+	memcpy(header.name, "fixture", sizeof("fixture"));
+	memcpy(buffer, &header, sizeof(header));
+	return sizeof(header) + next_offset;
 }
 
 static size_t make_dm_status_fixture(unsigned char *buffer, size_t capacity,
 				     const char *target_type, const char *parameters,
 				     int target_status)
 {
-	struct dm_ioctl header = { 0 };
-	struct dm_target_spec specification = { 0 };
-	const size_t parameter_bytes = strlen(parameters) + 1U;
-	const size_t payload_used = sizeof(specification) + parameter_bytes;
-	const size_t terminal_next = fixture_align_target_offset(payload_used);
-	const size_t data_size = sizeof(header) + payload_used;
-	const size_t reply_capacity = sizeof(header) + terminal_next;
+	const char *const types[] = { target_type };
+	const char *const texts[] = { parameters };
+	const int codes[] = { target_status };
 
-	assert(reply_capacity <= capacity);
-	assert(terminal_next <= UINT32_MAX);
-	memset(buffer, 0, capacity);
-	header.data_start = sizeof(header);
-	header.data_size = (uint32_t)data_size;
-	header.target_count = 1;
-	header.dev = 1;
-	memcpy(header.name, "fixture", sizeof("fixture"));
-	specification.length = 1024;
-	specification.status = target_status;
-	specification.next = (uint32_t)terminal_next;
-	assert(strlen(target_type) < sizeof(specification.target_type));
-	memcpy(specification.target_type, target_type, strlen(target_type) + 1U);
-	memcpy(buffer, &header, sizeof(header));
-	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
-	memcpy(buffer + sizeof(header) + sizeof(specification),
-	       parameters, parameter_bytes);
-	return reply_capacity;
+	return make_dm_multi_fixture(buffer, capacity, types, texts, codes, 1, 1);
+}
+
+static int parse_fixture(const unsigned char *buffer, size_t size,
+			 uint64_t expected_device,
+			 struct dm_status_observation *observation,
+			 struct status_problem *problem, unsigned int *problem_target)
+{
+	memset(observation, 0, sizeof(*observation));
+	return parse_dm_status_observation(buffer, size, "fixture", expected_device,
+					   observation, problem, problem_target);
 }
 
 static void test_dm_reply_boundaries_and_identity(void)
@@ -301,144 +331,231 @@ static void test_dm_reply_boundaries_and_identity(void)
 	unsigned char buffer[2048];
 	struct dm_ioctl header;
 	struct dm_target_spec specification;
-	struct swapz_target_snapshot snapshot;
+	struct dm_status_observation observation;
+	struct status_problem problem;
+	unsigned int failed_target;
 	size_t size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
-					     fixture_valid_status, 0);
+					      fixture_valid_status, 0);
 
+	/* These are wire records, not _Alignof(struct dm_target_spec). */
+	assert(SWAPZ_DM_WIRE_ALIGNMENT == 8U);
+	assert(fixture_align_target_offset(8) == 8U);
+	assert(fixture_align_target_offset(9) == 16U);
+	assert(fixture_align_target_offset(16) == 16U);
+	assert(fixture_align_target_offset(17) == 24U);
+	assert(fixture_align_target_offset(24) == 24U);
+	assert(fixture_align_target_offset(25) == 32U);
 	memcpy(&header, buffer, sizeof(header));
 	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
-	assert(specification.next != 0U);
-	assert((size_t)specification.next ==
-	       fixture_align_target_offset(
-		       (size_t)header.data_size - header.data_start));
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0, &snapshot) == 1);
-	assert(snapshot.ratio_state == STATUS_READY);
-	assert(snapshot.device_id == 1);
-	/*
-	 * The terminal next offset is only metadata: Linux may align it beyond
-	 * the final used byte. Parsing must not require those padding bytes.
-	 */
-	assert(parse_dm_target_snapshot(buffer, (size_t)header.data_size,
-					"fixture", 0, &snapshot) == 1);
-	assert(snapshot.ratio_state == STATUS_READY);
-	assert(parse_dm_target_snapshot(buffer, (size_t)header.data_size - 1U,
-					"fixture", 0, &snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_ioctl.data_start/data_size"));
-	assert(parse_dm_target_snapshot(buffer, size, "different", 0,
-					&snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_ioctl.name"));
-
-	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	assert((size_t)specification.next == fixture_align_target_offset(
+		(size_t)header.data_size - header.data_start));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) == 0);
+	assert(observation.target_count == 1 && observation.targets[0].is_swapz);
+	assert(observation.targets[0].ratio_state == STATUS_READY);
+	status_free_observation(&observation);
+	/* Final padding is metadata; data_size ends at the last status NUL. */
+	assert(parse_fixture(buffer, header.data_size, 1, &observation,
+			     &problem, &failed_target) == 0);
+	status_free_observation(&observation);
+	assert(parse_fixture(buffer, header.data_size - 1U, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_ioctl.data_start/data_size"));
+	status_free_observation(&observation);
+	assert(parse_fixture(buffer, size, 2, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_ioctl.dev"));
+	status_free_observation(&observation);
 	specification.next = 0;
 	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0,
-					&snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_target_spec.next"));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_target_spec.next"));
+	status_free_observation(&observation);
 
 	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
 				      fixture_valid_status, 0);
 	memcpy(&header, buffer, sizeof(header));
 	header.target_count = 2;
 	memcpy(buffer, &header, sizeof(header));
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0,
-					&snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_target_spec.next"));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_target_spec.next"));
+	status_free_observation(&observation);
 
 	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
 				      fixture_valid_status, 0);
 	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
-	specification.next = UINT_MAX;
+	specification.next = UINT32_MAX;
 	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0,
-					&snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_target_spec.next"));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_target_spec.next"));
+	status_free_observation(&observation);
 
 	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
 				      fixture_valid_status, -5);
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0, &snapshot) == 1);
-	assert(snapshot.ratio_state == STATUS_FAILED);
-	assert(!strcmp(snapshot.problem.field, "dm_target_spec.status"));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) == -2);
+	assert(!strcmp(problem.field, "dm_target_spec.status"));
+	status_free_observation(&observation);
 	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
 				      fixture_valid_status, 5);
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0, &snapshot) == 1);
-	assert(snapshot.ratio_state == STATUS_BLOCKED);
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) == -2);
+	assert(!strcmp(problem.field, "dm_target_spec.status"));
+	status_free_observation(&observation);
 
 	size = make_dm_status_fixture(buffer, sizeof(buffer), "linear",
-				      fixture_valid_status, 0);
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0, &snapshot) == 0);
-	assert(!snapshot.problem.field);
+				      "private-target-data", 0);
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) == 0);
+	assert(!observation.targets[0].is_swapz);
+	status_free_observation(&observation);
 	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
 				      fixture_valid_status, 0);
 	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
 	memset(specification.target_type, 'x', sizeof(specification.target_type));
 	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0,
-					&snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_target_spec.target_type"));
-
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_target_spec.target_type"));
+	status_free_observation(&observation);
 	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
 				      fixture_valid_status, 0);
 	memcpy(&header, buffer, sizeof(header));
 	header.dev = 0;
 	memcpy(buffer, &header, sizeof(header));
-	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0, &snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_ioctl.dev"));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_ioctl.dev"));
+	status_free_observation(&observation);
 }
 
 static void test_absolute_offsets_for_multiple_dm_targets(void)
 {
-	unsigned char buffer[2048] = { 0 };
-	struct dm_ioctl header = { 0 };
-	struct dm_target_spec specification = { 0 };
-	struct swapz_target_snapshot snapshot;
-	const char *const first_params = "not-a-swapz-status";
-	const char *const second_params = "another-linear-status";
-	const size_t first_used = sizeof(specification) + strlen(first_params) + 1U;
-	const size_t first_next = fixture_align_target_offset(first_used);
-	const size_t second_used = first_next + sizeof(specification) +
-				   strlen(second_params) + 1U;
-	const size_t second_next = fixture_align_target_offset(second_used);
-	const size_t final_used = second_next + sizeof(specification) +
-				  strlen(fixture_valid_status) + 1U;
-	const size_t final_next = fixture_align_target_offset(final_used);
-	const size_t data_size = sizeof(header) + final_used;
-	const size_t capacity = sizeof(header) + final_next;
-	unsigned char *first = buffer + sizeof(header);
-	unsigned char *second = first + first_next;
-	unsigned char *third = first + second_next;
+	unsigned char buffer[2048];
+	const char *const types[] = { "linear", "linear", "swapz" };
+	const char *const texts[] = {
+		"private-status", "another-private-status", fixture_valid_status
+	};
+	struct dm_status_observation observation;
+	struct status_problem problem;
+	struct dm_ioctl header;
+	struct dm_target_spec specification;
+	unsigned int failed_target = 0;
+	size_t size = make_dm_multi_fixture(buffer, sizeof(buffer), types,
+					    texts, NULL, 3, 1);
+	size_t second_offset;
 
-	assert(capacity <= sizeof(buffer));
-	assert(final_next <= UINT32_MAX);
-	header.data_size = (uint32_t)data_size;
-	header.data_start = sizeof(header);
-	header.target_count = 3;
-	header.dev = 1;
-	memcpy(header.name, "fixture", sizeof("fixture"));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) == 0);
+	assert(observation.target_count == 3);
+	assert(observation.targets[2].is_swapz);
+	status_free_observation(&observation);
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	second_offset = specification.next;
+	/* Overlap the next record even though the next offset is aligned. */
+	memcpy(&specification, buffer + sizeof(header) + second_offset,
+	       sizeof(specification));
+	specification.next = (uint32_t)(second_offset + 8U);
+	memcpy(buffer + sizeof(header) + second_offset, &specification,
+	       sizeof(specification));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(failed_target == 1);
+	assert(!strcmp(problem.field, "dm_target_spec.next"));
+	status_free_observation(&observation);
+
+	size = make_dm_multi_fixture(buffer, sizeof(buffer), types,
+				     texts, NULL, 3, 1);
+	memcpy(&header, buffer, sizeof(header));
+	header.data_size -= 1U; /* Truncate the final NUL. */
 	memcpy(buffer, &header, sizeof(header));
-	memcpy(specification.target_type, "linear", sizeof("linear"));
-	specification.length = 1024;
-	specification.next = (uint32_t)first_next;
-	memcpy(first, &specification, sizeof(specification));
-	memcpy(first + sizeof(specification), first_params, strlen(first_params) + 1U);
-	specification.next = (uint32_t)second_next;
-	memcpy(second, &specification, sizeof(specification));
-	memcpy(second + sizeof(specification), second_params, strlen(second_params) + 1U);
-	memcpy(specification.target_type, "swapz", sizeof("swapz"));
-	specification.next = (uint32_t)final_next;
-	memcpy(third, &specification, sizeof(specification));
-	memcpy(third + sizeof(specification), fixture_valid_status,
-	       strlen(fixture_valid_status) + 1U);
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_target_spec.params") ||
+	       !strcmp(problem.field, "dm_target_spec.next"));
+	status_free_observation(&observation);
+}
 
-	assert(parse_dm_target_snapshot(buffer, capacity, "fixture", 0,
-					&snapshot) == 1);
-	assert(snapshot.ratio_state == STATUS_READY);
-	memcpy(&specification, second, sizeof(specification));
-	specification.next =
-		(uint32_t)(first_next + sizeof(specification) + 1U);
-	memcpy(second, &specification, sizeof(specification));
-	assert(parse_dm_target_snapshot(buffer, capacity, "fixture", 0,
-					&snapshot) < 0);
-	assert(!strcmp(snapshot.problem.field, "dm_target_spec.next"));
+static void test_full_target_inventory_comparison(void)
+{
+	unsigned char first_buffer[2048];
+	unsigned char second_buffer[2048];
+	const char *const types[] = { "linear", "swapz" };
+	const char *const statuses[] = { "private-target-data", fixture_valid_status };
+	struct dm_status_observation first = { 0 };
+	struct dm_status_observation second = { 0 };
+	struct status_problem problem;
+	struct dm_ioctl header;
+	struct dm_target_spec specification;
+	unsigned int failed_target = 0;
+	size_t first_size = make_dm_multi_fixture(first_buffer, sizeof(first_buffer),
+						   types, statuses, NULL, 2, 1);
+	size_t second_size = make_dm_multi_fixture(second_buffer, sizeof(second_buffer),
+						    types, statuses, NULL, 2, 1);
+	size_t second_record_offset;
+
+	assert(parse_fixture(first_buffer, first_size, 1, &first,
+			     &problem, &failed_target) == 0);
+	assert(parse_fixture(second_buffer, second_size, 1, &second,
+			     &problem, &failed_target) == 0);
+	assert(status_observations_equal(&first, &second, &problem, &failed_target));
+	status_free_observation(&second);
+
+	memcpy(&header, second_buffer, sizeof(header));
+	header.event_nr = 17;
+	memcpy(second_buffer, &header, sizeof(header));
+	assert(parse_fixture(second_buffer, second_size, 1, &second,
+			     &problem, &failed_target) == 0);
+	assert(!status_observations_equal(&first, &second, &problem, &failed_target));
+	assert(!strcmp(problem.field, "dm_ioctl.event_nr"));
+	status_free_observation(&second);
+	header.event_nr = 0;
+	memcpy(second_buffer, &header, sizeof(header));
+
+	memcpy(&specification, second_buffer + sizeof(header), sizeof(specification));
+	second_record_offset = specification.next;
+	specification.length += 1U;
+	memcpy(second_buffer + sizeof(header), &specification, sizeof(specification));
+	assert(parse_fixture(second_buffer, second_size, 1, &second,
+			     &problem, &failed_target) == 0);
+	assert(!status_observations_equal(&first, &second, &problem, &failed_target));
+	assert(failed_target == 0 && !strcmp(problem.field,
+					     "dm_target_spec.sector_start/length"));
+	status_free_observation(&second);
+	specification.length -= 1U;
+	memcpy(second_buffer + sizeof(header), &specification, sizeof(specification));
+
+	memcpy(specification.target_type, "crypt", sizeof("crypt"));
+	memcpy(second_buffer + sizeof(header), &specification, sizeof(specification));
+	assert(parse_fixture(second_buffer, second_size, 1, &second,
+			     &problem, &failed_target) == 0);
+	assert(!status_observations_equal(&first, &second, &problem, &failed_target));
+	assert(!strcmp(problem.field, "dm_target_spec.target_type"));
+	status_free_observation(&second);
+	memcpy(specification.target_type, "linear", sizeof("linear"));
+	memcpy(second_buffer + sizeof(header), &specification, sizeof(specification));
+
+	/* A changed non-swapz INFO string must not be ignored. */
+	second_buffer[sizeof(header) + sizeof(specification)] = 'X';
+	assert(parse_fixture(second_buffer, second_size, 1, &second,
+			     &problem, &failed_target) == 0);
+	assert(!status_observations_equal(&first, &second, &problem, &failed_target));
+	assert(!strcmp(problem.field, "dm_target_spec.params"));
+	status_free_observation(&second);
+
+	/* No parser can infer a new target from the same truncated payload. */
+	header.target_count = SWAPZ_STATUS_MAX_TARGETS + 1U;
+	memcpy(second_buffer, &header, sizeof(header));
+	assert(parse_fixture(second_buffer, second_size, 1, &second,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_target_spec.next"));
+	status_free_observation(&second);
+	assert(second_record_offset > sizeof(specification));
+	status_free_observation(&first);
 }
 
 static void test_padding_output_has_no_fabricated_compressed_ratio(void)
@@ -476,33 +593,46 @@ struct status_reader_fixture {
 	size_t count;
 	size_t calls;
 	size_t present_reads; /* Zero means present on every read. */
+	uint64_t second_device; /* Nonzero changes the identity on the second read. */
+	int second_target_status; /* Negative means a failed later target. */
+	int fail_errno;
 };
 
-static int read_fixture_snapshot(void *context, const char *name,
-				 unsigned int target_index,
-				 struct swapz_target_snapshot *snapshot)
+static int read_fixture_observation(
+	void *context, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
 {
 	struct status_reader_fixture *fixture = context;
-	const char *status;
+	const char *const types[] = { "swapz", "swapz" };
+	const char *texts[2];
+	const int codes[] = { 0, fixture->second_target_status };
+	unsigned char *buffer;
+	size_t size;
+	int result;
 
 	(void)name;
-	if (target_index)
-		return 0;
-	if (fixture->present_reads && fixture->calls >= fixture->present_reads) {
+	if ((fixture->present_reads && fixture->calls >= fixture->present_reads) ||
+	    fixture->fail_errno) {
 		++fixture->calls;
-		return 0;
+		errno = fixture->fail_errno ? fixture->fail_errno : ENXIO;
+		return -1;
 	}
 	assert(fixture->count);
-	status = fixture->statuses[fixture->calls % fixture->count];
+	texts[0] = fixture_valid_status;
+	texts[1] = fixture->statuses[fixture->calls % fixture->count];
+	buffer = malloc(2048);
+	assert(buffer);
+	size = make_dm_multi_fixture(buffer, 2048, types, texts, codes, 2,
+				     fixture->second_device && (fixture->calls % 2U) ?
+				     fixture->second_device : expected_device);
 	++fixture->calls;
-	memset(snapshot, 0, sizeof(*snapshot));
-	snapshot->sector_start = 1;
-	snapshot->length = 1024;
-	snapshot->device_id = 1;
-	snapshot->event_number = 2;
-	snapshot->ratio_state = parse_swapz_ratio_status_diagnostic(
-		status, &snapshot->ratio, &snapshot->problem);
-	return 1;
+	memset(observation, 0, sizeof(*observation));
+	observation->reply = buffer;
+	result = parse_fixture(buffer, size, expected_device, observation,
+			       problem, problem_target);
+	observation->reply = buffer;
+	return result;
 }
 
 static void test_snapshot_retry_exhaustion_and_failures(void)
@@ -521,58 +651,96 @@ static void test_snapshot_retry_exhaustion_and_failures(void)
 		"compressed=2 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=0 "
 		"failed=0 error=0"
 	};
-	struct status_reader_fixture fixture = { changing, 2, 0, 0 };
-	char diagnostic[1024] = { 0 };
+	struct status_reader_fixture fixture = {
+		.statuses = changing, .count = 2
+	};
+	struct status_ready_report report = { 0 };
+	char diagnostic[2048] = { 0 };
 	FILE *capture = tmpfile();
+	FILE *stdout_capture = tmpfile();
+	int saved_stdout = dup(STDOUT_FILENO);
 	int saved_stderr = dup(STDERR_FILENO);
-	int targets = 0;
 	size_t bytes;
 	int result;
 
-	assert(capture && saved_stderr >= 0);
+	assert(capture && stdout_capture && saved_stderr >= 0 && saved_stdout >= 0);
 	assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
-	result = report_device_status_with_reader(&fixture, read_fixture_snapshot,
-						   "fixture", &targets);
+	result = report_device_status_with_reader(&fixture, read_fixture_observation,
+						   "fixture", 1, &report);
 	fflush(stderr);
 	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
-	assert(result == -2 && targets == 0);
+	assert(result == -2 && report.count == 0);
 	assert(fixture.calls == 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES);
 	rewind(capture);
 	bytes = fread(diagnostic, 1, sizeof(diagnostic) - 1U, capture);
 	diagnostic[bytes] = '\0';
 	assert(strstr(diagnostic, "UNAVAILABLE"));
-	assert(strstr(diagnostic, "consecutive DM INFO snapshots"));
+	assert(strstr(diagnostic, "snapshot 2"));
+	assert(strstr(diagnostic, "dm_target_spec.params"));
+	assert(!strstr(diagnostic, fixture_valid_status));
 
-	fixture = (struct status_reader_fixture){ failed, 2, 0, 0 };
-	targets = 0;
-	assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
-	result = report_device_status_with_reader(&fixture, read_fixture_snapshot,
-						   "fixture", &targets);
-	fflush(stderr);
-	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
-	assert(result == -2 && targets == 0 && fixture.calls == 2);
-	fixture = (struct status_reader_fixture){ torn, 1, 0, 0 };
-	targets = 0;
-	assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
-	result = report_device_status_with_reader(&fixture, read_fixture_snapshot,
-						   "fixture", &targets);
-	fflush(stderr);
-	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
-	assert(result == -2 && targets == 0);
-	assert(fixture.calls == 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES);
+	fixture = (struct status_reader_fixture){ .statuses = failed, .count = 2 };
+	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
+						"fixture", 1, &report) == -2);
+	assert(!report.count && fixture.calls == 2);
+	fixture = (struct status_reader_fixture){ .statuses = torn, .count = 1 };
+	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
+						"fixture", 1, &report) == -2);
+	assert(!report.count && fixture.calls == 2U * SWAPZ_STATUS_SNAPSHOT_RETRIES);
 
-	fixture = (struct status_reader_fixture){ torn, 1, 0, 1 };
-	targets = 0;
-	assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
-	result = report_device_status_with_reader(&fixture, read_fixture_snapshot,
-						   "fixture", &targets);
-	fflush(stderr);
-	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
-	assert(result == -2 && targets == 0);
-	assert(fixture.calls == SWAPZ_STATUS_SNAPSHOT_RETRIES + 1U);
+	fixture = (struct status_reader_fixture){
+		.statuses = changing, .count = 2, .second_device = 2
+	};
+	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
+						"fixture", 1, &report) == -2);
+	assert(!report.count && fixture.calls == 2);
 
+	fixture = (struct status_reader_fixture){
+		.statuses = changing, .count = 2, .second_target_status = -5
+	};
+	assert(dup2(fileno(stdout_capture), STDOUT_FILENO) >= 0);
+	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
+						"fixture", 1, &report) == -2);
+	fflush(stdout);
+	assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+	assert(!report.count && fixture.calls == 1);
+	/* Even if the first target is healthy, the later failure emits no metrics. */
+	rewind(stdout_capture);
+	assert(fread(diagnostic, 1, sizeof(diagnostic) - 1U, stdout_capture) == 0);
+	fixture = (struct status_reader_fixture){
+		.statuses = changing, .count = 2, .fail_errno = EACCES
+	};
+	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
+						"fixture", 1, &report) == -2);
+	assert(!report.count && fixture.calls == 1);
+	fixture = (struct status_reader_fixture){
+		.statuses = torn, .count = 1, .present_reads = 1
+	};
+	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
+						"fixture", 1, &report) == -2);
+	assert(!report.count && fixture.calls == 2);
+
+	free(report.targets);
+	close(saved_stdout);
 	close(saved_stderr);
 	fclose(capture);
+	fclose(stdout_capture);
+}
+
+static void test_complete_snapshot_before_output(void)
+{
+	const char *const stable[] = { fixture_valid_status };
+	struct status_reader_fixture fixture = {
+		.statuses = stable, .count = 1
+	};
+	struct status_ready_report report = { 0 };
+
+	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
+						"fixture", 1, &report) == 0);
+	assert(fixture.calls == 2 && report.count == 2);
+	assert(report.targets[0].target_index == 0);
+	assert(report.targets[1].target_index == 1);
+	free(report.targets);
 }
 
 static void test_status_is_read_only(void)
@@ -583,6 +751,12 @@ static void test_status_is_read_only(void)
 	assert((status_control_open_flags() & O_ACCMODE) == O_RDONLY);
 	assert(!(status_control_open_flags() & (O_CREAT | O_TRUNC)));
 	assert(dm_query(-1, DM_DEV_REMOVE, "fixture",
+			&reply, &reply_size) == -1);
+	assert(errno == EPERM);
+	assert(dm_query(-1, DM_TABLE_LOAD, "fixture",
+			&reply, &reply_size) == -1);
+	assert(errno == EPERM);
+	assert(dm_query(-1, DM_DEV_SUSPEND, "fixture",
 			&reply, &reply_size) == -1);
 	assert(errno == EPERM);
 	assert(!reply && reply_size == 0);
@@ -603,8 +777,10 @@ int main(void)
 	test_checked_counter_arithmetic();
 	test_dm_reply_boundaries_and_identity();
 	test_absolute_offsets_for_multiple_dm_targets();
+	test_full_target_inventory_comparison();
 	test_padding_output_has_no_fabricated_compressed_ratio();
 	test_snapshot_retry_exhaustion_and_failures();
+	test_complete_snapshot_before_output();
 	test_status_is_read_only();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;

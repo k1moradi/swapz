@@ -58,6 +58,19 @@ snapshots with identical relevant monotonic counters and validate
 `logical_write == (compressed + raw + zero_elided) * 4096`. A malformed,
 overflowing, unstable or failed target must not produce a numeric ratio.
 
+Device Mapper `DM_TABLE_STATUS` and `DM_LIST_DEVICES` wire records use an
+explicit eight-byte alignment independent of C struct `_Alignof` (including
+32-bit hosts). Validate absolute target offsets, aligned terminal offset,
+bounded counts, NUL containment and all target records with checked byte
+offsets and copied headers; do not dereference unaligned wire structures.
+Bind each LIST_DEVICES name to its device number on both INFO observations,
+compare the complete ordered target inventory, event generation, geometry,
+status and all committed ratio counters across two full reads, and withhold
+all numeric status output until every enumerated device validates. Distinguish
+BLOCKED, FAILED and UNAVAILABLE with device/index/generation/field or errno
+without echoing untrusted INFO text. Observational ioctl permission denial
+may require CAP_SYS_ADMIN and must never trigger privileged escalation.
+
 Kernel information-status emission may use multiple bounded `DMEMIT` calls to
 keep callback stack use bounded. The externally concatenated INFO stream is the
 contract: preserve token order, names and values across emission chunks.

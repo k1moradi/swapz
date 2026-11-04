@@ -34,6 +34,10 @@
 #define SWAPZ_DM_CONTROL_PATH "/dev/mapper/control"
 #define SWAPZ_DM_BUFFER_INITIAL (64U * 1024U)
 #define SWAPZ_DM_BUFFER_MAX (1024U * 1024U)
+/* Device Mapper records are eight-byte aligned on the wire, even on 32-bit C ABIs. */
+#define SWAPZ_DM_WIRE_ALIGNMENT 8U
+#define SWAPZ_STATUS_MAX_TARGETS 4096U
+#define SWAPZ_STATUS_MAX_RESULTS 65536U
 #define SWAPZ_STATUS_SNAPSHOT_RETRIES 8U
 #define SWAPZ_FORMAT_PROC_LINE_BYTES 8192U
 #define SWAPZ_FORMAT_PROC_MAX_BYTES (16U * 1024U * 1024U)
@@ -342,6 +346,7 @@ struct status_problem {
 	const char *field;
 	const char *expected;
 	const char *observed;
+	int kernel_errno;
 };
 
 struct swapz_target_snapshot {
@@ -352,6 +357,33 @@ struct swapz_target_snapshot {
 	struct swapz_ratio_status ratio;
 	struct status_problem problem;
 	int ratio_state;
+	int target_status;
+	int is_swapz;
+	char target_type[DM_MAX_TYPE_NAME];
+	/* Both pointers refer to the owning observation's immutable reply. */
+	const char *status_text;
+	size_t status_length;
+};
+
+struct dm_status_observation {
+	unsigned char *reply;
+	struct swapz_target_snapshot *targets;
+	uint64_t device_id;
+	uint32_t event_number;
+	uint32_t target_count;
+	uint32_t flags;
+};
+
+struct status_ready_target {
+	char name[DM_NAME_LEN];
+	unsigned int target_index;
+	struct swapz_ratio_status ratio;
+};
+
+struct status_ready_report {
+	struct status_ready_target *targets;
+	size_t count;
+	size_t capacity;
 };
 
 static void status_set_problem(struct status_problem *problem,
@@ -361,6 +393,7 @@ static void status_set_problem(struct status_problem *problem,
 	problem->field = field;
 	problem->expected = expected;
 	problem->observed = observed;
+	problem->kernel_errno = 0;
 }
 
 static int status_separator(char character)
@@ -527,6 +560,7 @@ static int parse_swapz_ratio_status_diagnostic(
 		status_set_problem(problem, "status_snapshot_error",
 				   "absent when kernel INFO counters are available",
 				   "kernel could not produce a status snapshot (negative errno)");
+		problem->kernel_errno = snapshot_error;
 		return STATUS_UNAVAILABLE;
 	}
 	if (parse_status_unsigned(status, "failed", 1ULL,
@@ -543,6 +577,7 @@ static int parse_swapz_ratio_status_diagnostic(
 		status_set_problem(problem, "error",
 				   "0 for a healthy target (-1..-4095 indicates errno)",
 				   "negative kernel error");
+		problem->kernel_errno = ratio->error;
 		return STATUS_FAILED;
 	}
 	if (parse_status_unsigned(status, "logical_write", ULLONG_MAX,
@@ -773,7 +808,7 @@ static int dm_query(int fd, unsigned long request, const char *name,
  */
 static int status_align_target_offset(size_t value, size_t *aligned)
 {
-	const size_t alignment = _Alignof(struct dm_target_spec);
+	const size_t alignment = SWAPZ_DM_WIRE_ALIGNMENT;
 	const size_t remainder = value % alignment;
 	const size_t padding = remainder ? alignment - remainder : 0U;
 
@@ -783,27 +818,36 @@ static int status_align_target_offset(size_t value, size_t *aligned)
 	return 0;
 }
 
-static int parse_dm_target_snapshot(const unsigned char *buffer,
-				    size_t buffer_size, const char *expected_name,
-				    unsigned int wanted_target,
-				    struct swapz_target_snapshot *snapshot)
+static void status_free_observation(struct dm_status_observation *observation)
+{
+	free(observation->reply);
+	free(observation->targets);
+	memset(observation, 0, sizeof(*observation));
+}
+
+/*
+ * Parse the entire DM_TABLE_STATUS reply once. INFO strings remain owned by
+ * the reply buffer until the complete pair of observations is compared.
+ * Every spec is copied before access: neither kernel offsets nor host ABI
+ * alignment can turn a wire record into a dereferenced C structure.
+ */
+static int parse_dm_status_observation(
+	const unsigned char *buffer, size_t buffer_size, const char *expected_name,
+	uint64_t expected_device, struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
 {
 	struct dm_ioctl header;
-	struct dm_target_spec selected_spec = { 0 };
-	const size_t target_alignment = _Alignof(struct dm_target_spec);
-	const char *record_base;
-	const char *cursor;
-	const char *data_end;
-	const char *selected_params = NULL;
+	const unsigned char *record_base;
 	size_t payload_size;
 	size_t terminal_next;
+	size_t current_offset = 0;
 	uint32_t target;
-	unsigned int swapz_index = 0;
 
-	memset(snapshot, 0, sizeof(*snapshot));
+	*problem_target = 0;
+	memset(problem, 0, sizeof(*problem));
 	if (buffer_size < sizeof(header)) {
-		status_set_problem(&snapshot->problem, "dm_ioctl.data_size",
-				   ">= sizeof(dm_ioctl)", "truncated DM ioctl header");
+		status_set_problem(problem, "dm_ioctl.data_size",
+				   "complete DM ioctl header", "truncated DM ioctl header");
 		return -1;
 	}
 	memcpy(&header, buffer, sizeof(header));
@@ -811,177 +855,199 @@ static int parse_dm_target_snapshot(const unsigned char *buffer,
 	    header.data_size < sizeof(header) ||
 	    header.data_start < sizeof(header) ||
 	    header.data_start > header.data_size ||
-	    header.data_start % target_alignment) {
-		status_set_problem(&snapshot->problem, "dm_ioctl.data_start/data_size",
-				   "aligned sizeof(dm_ioctl) <= start <= size <= reply capacity",
+	    header.data_start % SWAPZ_DM_WIRE_ALIGNMENT) {
+		status_set_problem(problem, "dm_ioctl.data_start/data_size",
+				   "8-byte-aligned start and bounded INFO payload",
 				   "out-of-bounds or misaligned DM INFO payload");
 		return -1;
 	}
 	payload_size = (size_t)header.data_size - header.data_start;
-		if ((header.target_count &&
+	if (header.target_count > SWAPZ_STATUS_MAX_TARGETS ||
+	    (header.target_count &&
 	     (payload_size < sizeof(struct dm_target_spec) + 1U ||
-	      header.target_count >
-		      payload_size / (sizeof(struct dm_target_spec) + 1U))) ||
+	      header.target_count > payload_size /
+		      (sizeof(struct dm_target_spec) + 1U))) ||
+	    (!header.target_count && payload_size) ||
 	    status_align_target_offset(payload_size, &terminal_next) < 0 ||
 	    terminal_next > UINT32_MAX) {
-		status_set_problem(&snapshot->problem, "dm_target_spec.next",
-				   "bounded target count and a representable aligned terminal offset",
-				   "target count is impossible or terminal offset exceeds uint32");
+		status_set_problem(problem, "dm_target_spec.next",
+				   "bounded target count and representable 8-byte terminal offset",
+				   "impossible count, nonempty zero-target payload or terminal overflow");
 		return -1;
 	}
 	if (!memchr(header.name, '\0', sizeof(header.name)) ||
 	    strcmp(header.name, expected_name)) {
-		status_set_problem(&snapshot->problem, "dm_ioctl.name",
-				   "NUL-terminated name matching the queried target",
-				   "missing terminator or changed target identity");
+		status_set_problem(problem, "dm_ioctl.name",
+				   "NUL-terminated queried mapping name",
+				   "missing terminator or changed mapping identity");
 		return -1;
 	}
-	if (!header.dev) {
-		status_set_problem(&snapshot->problem, "dm_ioctl.dev",
-				   "nonzero device identity", "zero device identity");
+	if (!header.dev || header.dev != expected_device) {
+		status_set_problem(problem, "dm_ioctl.dev",
+				   "same nonzero device number as LIST_DEVICES",
+				   "device number changed or is zero (mapping name reused)");
 		return -1;
 	}
 	if (header.flags & DM_STATUS_TABLE_FLAG) {
-		status_set_problem(&snapshot->problem, "dm_ioctl.flags",
-				   "INFO status, not table parameters",
+		status_set_problem(problem, "dm_ioctl.flags",
+				   "INFO status rather than table parameters",
 				   "DM_STATUS_TABLE_FLAG set");
 		return -1;
 	}
-	record_base = (const char *)buffer + header.data_start;
-	cursor = record_base;
-	data_end = (const char *)buffer + header.data_size;
-	for (target = 0; target < header.target_count; ++target) {
-		struct dm_target_spec specification;
-		const char *record_end;
-		const char *parameters;
-		const char *parameters_end;
-		size_t type_length;
-		size_t current_offset = (size_t)(cursor - record_base);
-		int final_target = target + 1U == header.target_count;
-
-		if ((size_t)(data_end - cursor) < sizeof(specification)) {
-			status_set_problem(&snapshot->problem, "dm_target_spec",
-					   "complete target header within DM reply",
-					   "truncated target record");
+	if (header.target_count) {
+		observation->targets = calloc(header.target_count,
+					      sizeof(*observation->targets));
+		if (!observation->targets) {
+			status_set_problem(problem, "DM target inventory",
+					   "bounded snapshot allocation",
+					   "allocation failed");
+			errno = ENOMEM;
 			return -1;
 		}
-		memcpy(&specification, cursor, sizeof(specification));
+	}
+	observation->device_id = header.dev;
+	observation->event_number = header.event_nr;
+	observation->target_count = header.target_count;
+	observation->flags = header.flags;
+	record_base = buffer + header.data_start;
+	for (target = 0; target < header.target_count; ++target) {
+		struct dm_target_spec specification;
+		struct swapz_target_snapshot *entry = &observation->targets[target];
+		const unsigned char *parameters;
+		const unsigned char *record_end;
+		const unsigned char *terminator;
+		size_t record_end_offset;
+		size_t type_length;
+		const int final_target = target + 1U == header.target_count;
+
+		*problem_target = target;
+		if (current_offset > payload_size ||
+		    payload_size - current_offset < sizeof(specification) + 1U) {
+			status_set_problem(problem, "dm_target_spec",
+					   "complete target header and status terminator",
+					   "truncated or overlapping target record");
+			return -1;
+		}
+		memcpy(&specification, record_base + current_offset,
+		       sizeof(specification));
 		if (final_target) {
 			/*
-			 * DM_TABLE_STATUS uses an absolute offset from the first
-			 * target spec. Linux also fills the final next field with
-			 * the aligned end offset, while data_size stops at the
-			 * final status-string NUL before alignment padding.
+			 * The final next offset is aligned beyond the last
+			 * status NUL; data_size need not include that padding.
 			 */
 			if ((size_t)specification.next != terminal_next) {
-				status_set_problem(&snapshot->problem, "dm_target_spec.next",
-						   "aligned terminal offset from the first target spec",
-						   "final offset does not match the aligned INFO payload end");
+				status_set_problem(problem, "dm_target_spec.next",
+						   "8-byte-aligned terminal INFO payload offset",
+						   "incorrect final target offset");
 				return -1;
 			}
-			record_end = data_end;
+			record_end_offset = payload_size;
 		} else {
 			if (!specification.next ||
-			    specification.next % target_alignment ||
-			    specification.next <= current_offset ||
-			    specification.next - current_offset <= sizeof(specification) ||
+			    specification.next % SWAPZ_DM_WIRE_ALIGNMENT ||
+			    (size_t)specification.next <= current_offset ||
+			    (size_t)specification.next - current_offset <
+				    sizeof(specification) + 1U ||
 			    (size_t)specification.next > payload_size ||
 			    payload_size - (size_t)specification.next <
 				    sizeof(specification) + 1U) {
-				status_set_problem(&snapshot->problem, "dm_target_spec.next",
-						   "aligned forward absolute offset to a complete next target",
-						   "zero, unaligned, overlapping or truncated nonfinal offset");
+				status_set_problem(problem, "dm_target_spec.next",
+						   "8-byte-aligned forward absolute offset with next record",
+						   "zero, misaligned, overlapping or truncated offset");
 				return -1;
 			}
-			record_end = record_base + specification.next;
+			record_end_offset = specification.next;
 		}
 		type_length = strnlen(specification.target_type,
 				      sizeof(specification.target_type));
 		if (type_length == sizeof(specification.target_type)) {
-			status_set_problem(&snapshot->problem, "dm_target_spec.target_type",
-					   "NUL-terminated target type, exactly 'swapz' for swapz",
+			status_set_problem(problem, "dm_target_spec.target_type",
+					   "NUL-terminated target type",
 					   "unterminated target identity");
 			return -1;
 		}
-		parameters = cursor + sizeof(specification);
-		parameters_end = memchr(parameters, '\0',
-				       (size_t)(record_end - parameters));
-		if (!parameters_end) {
-			status_set_problem(&snapshot->problem, "dm_target_spec.params",
-					   "NUL-terminated INFO token string inside record",
-					   "missing status terminator or truncated DM reply");
+		if (!specification.length ||
+		    specification.sector_start > UINT64_MAX - specification.length) {
+			status_set_problem(problem, "dm_target_spec.sector_start/length",
+					   "nonzero length and nonoverflowing sector end",
+					   "invalid target geometry");
 			return -1;
 		}
-		if (!strcmp(specification.target_type, "swapz")) {
-			if (!specification.length ||
-			    specification.sector_start > UINT64_MAX - specification.length) {
-				status_set_problem(&snapshot->problem, "dm_target_spec.sector_start/length",
-						   "nonzero length and uint64 sector end without overflow",
-						   "invalid target geometry");
-				return -1;
-			}
-			if (swapz_index == wanted_target) {
-				selected_spec = specification;
-				selected_params = parameters;
-			}
-			++swapz_index;
+		parameters = record_base + current_offset + sizeof(specification);
+		record_end = record_base + record_end_offset;
+		terminator = memchr(parameters, '\0',
+				   (size_t)(record_end - parameters));
+		if (!terminator) {
+			status_set_problem(problem, "dm_target_spec.params",
+					   "status NUL contained within target record",
+					   "missing terminator or truncated INFO reply");
+			return -1;
 		}
-		cursor = record_end;
+		entry->sector_start = specification.sector_start;
+		entry->length = specification.length;
+		entry->device_id = header.dev;
+		entry->event_number = header.event_nr;
+		entry->target_status = specification.status;
+		memcpy(entry->target_type, specification.target_type,
+		       sizeof(entry->target_type));
+		entry->status_text = (const char *)parameters;
+		entry->status_length = (size_t)(terminator - parameters);
+		entry->is_swapz = !strcmp(entry->target_type, "swapz");
+		if (specification.status > 0 || specification.status < -4095) {
+			status_set_problem(problem, "dm_target_spec.status",
+					   "0 or kernel errno -1..-4095",
+					   "invalid DM target status");
+			entry->ratio_state = STATUS_BLOCKED;
+		} else if (specification.status < 0) {
+			status_set_problem(problem, "dm_target_spec.status",
+					   "0 for healthy target",
+					   "negative errno: Device Mapper reports target failure");
+			problem->kernel_errno = specification.status;
+			entry->ratio_state = STATUS_FAILED;
+		} else if (entry->is_swapz) {
+			entry->ratio_state = parse_swapz_ratio_status_diagnostic(
+				entry->status_text, &entry->ratio, problem);
+		} else {
+			entry->ratio_state = STATUS_READY;
+		}
+		if (entry->ratio_state == STATUS_BLOCKED ||
+		    entry->ratio_state == STATUS_FAILED ||
+		    entry->ratio_state == STATUS_UNAVAILABLE)
+			return -2;
+		if (entry->ratio_state == STATUS_RETRY)
+			entry->problem = *problem;
+		current_offset = record_end_offset;
 	}
-	if (!selected_params)
-		return 0;
-	snapshot->sector_start = selected_spec.sector_start;
-	snapshot->length = selected_spec.length;
-	snapshot->device_id = header.dev;
-	snapshot->event_number = header.event_nr;
-	if (selected_spec.status > 0 || selected_spec.status < -4095) {
-		status_set_problem(&snapshot->problem, "dm_target_spec.status",
-				   "0 (healthy) or negative errno -1..-4095",
-				   "positive or out-of-range DM status");
-		snapshot->ratio_state = STATUS_BLOCKED;
-	} else if (selected_spec.status) {
-		status_set_problem(&snapshot->problem, "dm_target_spec.status",
-				   "0 for healthy target",
-				   "negative errno: Device Mapper reports target failure");
-		snapshot->ratio_state = STATUS_FAILED;
-	} else {
-		snapshot->ratio_state = parse_swapz_ratio_status_diagnostic(
-			selected_params, &snapshot->ratio, &snapshot->problem);
-	}
-	return 1;
+	return 0;
 }
 
-static int read_swapz_target_snapshot(int fd, const char *name,
-				      unsigned int wanted_target,
-				      struct swapz_target_snapshot *snapshot)
+static int read_dm_status_observation(
+	int fd, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
 {
 	unsigned char *buffer = NULL;
 	size_t buffer_size = 0;
-	int result;
+	int parse_result;
 
-	memset(snapshot, 0, sizeof(*snapshot));
+	memset(observation, 0, sizeof(*observation));
+	memset(problem, 0, sizeof(*problem));
+	*problem_target = 0;
 	if (dm_query(fd, DM_TABLE_STATUS, name, &buffer, &buffer_size) < 0) {
-		if (errno == EPROTO) {
-			status_set_problem(
-				&snapshot->problem, "dm_ioctl.data_start/data_size",
-				"sizeof(dm_ioctl) <= data_start <= data_size <= reply capacity",
-				"kernel returned an out-of-bounds DM INFO header");
-			snapshot->ratio_state = STATUS_BLOCKED;
-		} else if (errno == EOVERFLOW) {
-			status_set_problem(
-				&snapshot->problem, "DM_BUFFER_FULL_FLAG",
-				"clear after a complete INFO reply <= 1048576 bytes",
-				"reply remained buffer-full at the bounded maximum");
-			snapshot->ratio_state = STATUS_UNAVAILABLE;
-		}
+		if (errno == EPROTO)
+			status_set_problem(problem, "dm_ioctl.data_start/data_size",
+					   "bounded DM INFO header", "invalid reply header");
+		else if (errno == EOVERFLOW)
+			status_set_problem(problem, "DM_BUFFER_FULL_FLAG",
+					   "complete INFO reply within 1048576 bytes",
+					   "reply remained buffer-full");
 		return -1;
 	}
-	result = parse_dm_target_snapshot(buffer, buffer_size, name,
-					  wanted_target, snapshot);
-	free(buffer);
-	if (result < 0)
-		errno = EPROTO;
-	return result;
+	observation->reply = buffer;
+	parse_result = parse_dm_status_observation(buffer, buffer_size, name,
+						 expected_device, observation,
+						 problem, problem_target);
+	return parse_result;
 }
 
 static void status_safe_mapping_name(const char *name,
@@ -1056,123 +1122,263 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 
 /* Do not include untrusted INFO text, device paths or unverified counters. */
 static int status_report_problem(const char *state, const char *name,
-				 unsigned int target_index,
+				 uint64_t device_id, unsigned int target_index,
+				 unsigned int generation,
 				 const struct status_problem *problem)
 {
 	char safe_name[DM_NAME_LEN + 1U];
 
 	status_safe_mapping_name(name, safe_name);
 	fprintf(stderr,
-		"swapzctl status: %s: mapping '%s' target %u: field '%s'; expected %s; observed %s\n",
-		state, safe_name, target_index + 1U, problem->field,
-		problem->expected, problem->observed);
+		"swapzctl status: %s: mapping '%s' device %u:%u target %u snapshot %u: field '%s'; expected %s; observed %s",
+		state, safe_name, major((dev_t)device_id),
+		minor((dev_t)device_id), target_index + 1U, generation,
+		problem->field, problem->expected, problem->observed);
+	if (problem->kernel_errno)
+		fprintf(stderr, "; kernel errno=%d", problem->kernel_errno);
+	fputc('\n', stderr);
 	errno = EPROTO;
-	return -2; /* A precise diagnostic has already been emitted. */
+	return -2;
 }
 
-typedef int (*status_snapshot_reader)(void *context, const char *name,
-				      unsigned int target_index,
-				      struct swapz_target_snapshot *snapshot);
-
-static int status_read_snapshot_with_fd(void *context, const char *name,
-					unsigned int target_index,
-					struct swapz_target_snapshot *snapshot)
+static int status_report_ioctl_failure(const char *name, uint64_t device_id,
+				       unsigned int generation, int error_number)
 {
-	const int fd = *(const int *)context;
+	char safe_name[DM_NAME_LEN + 1U];
 
-	return read_swapz_target_snapshot(fd, name, target_index, snapshot);
+	status_safe_mapping_name(name, safe_name);
+	fprintf(stderr,
+		"swapzctl status: UNAVAILABLE: mapping '%s' device %u:%u snapshot %u: DM_TABLE_STATUS errno=%d (%s)%s\n",
+		safe_name, major((dev_t)device_id), minor((dev_t)device_id),
+		generation, error_number, strerror(error_number),
+		(error_number == EACCES || error_number == EPERM) ?
+			"; observational DM ioctl needs CAP_SYS_ADMIN; no escalation attempted" : "");
+	errno = error_number;
+	return -2;
+}
+
+static int status_observations_equal(
+	const struct dm_status_observation *first,
+	const struct dm_status_observation *second,
+	struct status_problem *problem, unsigned int *problem_target)
+{
+	uint32_t target;
+
+	if (first->device_id != second->device_id) {
+		status_set_problem(problem, "dm_ioctl.dev",
+				   "identical device numbers in snapshots 1 and 2",
+				   "device identity changed");
+		return 0;
+	}
+	if (first->flags != second->flags) {
+		status_set_problem(problem, "dm_ioctl.flags",
+				   "identical DM flags in snapshots 1 and 2",
+				   "DM flags changed");
+		return 0;
+	}
+	if (first->event_number != second->event_number) {
+		status_set_problem(problem, "dm_ioctl.event_nr",
+				   "identical event generations in snapshots 1 and 2",
+				   "event generation changed");
+		return 0;
+	}
+	if (first->target_count != second->target_count) {
+		status_set_problem(problem, "dm_ioctl.target_count",
+				   "identical target count and order in snapshots 1 and 2",
+				   "target count changed");
+		return 0;
+	}
+	for (target = 0; target < first->target_count; ++target) {
+		const struct swapz_target_snapshot *left = &first->targets[target];
+		const struct swapz_target_snapshot *right = &second->targets[target];
+
+		*problem_target = target;
+		if (strcmp(left->target_type, right->target_type)) {
+			status_set_problem(problem, "dm_target_spec.target_type",
+					   "identical ordered target types",
+					   "target inventory changed");
+			return 0;
+		}
+		if (left->sector_start != right->sector_start ||
+		    left->length != right->length) {
+			status_set_problem(problem, "dm_target_spec.sector_start/length",
+					   "identical target geometry across snapshots",
+					   "target geometry changed");
+			return 0;
+		}
+		if (left->target_status != right->target_status) {
+			status_set_problem(problem, "dm_target_spec.status",
+					   "identical target status across snapshots",
+					   "target status changed");
+			return 0;
+		}
+		if (left->status_length != right->status_length ||
+		    memcmp(left->status_text, right->status_text,
+			   left->status_length)) {
+			status_set_problem(problem, "dm_target_spec.params",
+					   "identical complete INFO status across snapshots",
+					   "target status text or counters changed");
+			return 0;
+		}
+		if (left->is_swapz && !ratio_status_equal(&left->ratio, &right->ratio)) {
+			status_set_problem(problem, "swapz counters",
+					   "identical committed counters across snapshots",
+					   "relevant counter changed");
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int status_append_ready_target(
+	struct status_ready_report *report, const char *name,
+	unsigned int target_index, const struct swapz_ratio_status *ratio)
+{
+	struct status_ready_target *grown;
+	size_t capacity;
+
+	if (report->count == SWAPZ_STATUS_MAX_RESULTS) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	if (report->count == report->capacity) {
+		capacity = report->capacity ? report->capacity * 2U : 8U;
+		if (capacity > SWAPZ_STATUS_MAX_RESULTS)
+			capacity = SWAPZ_STATUS_MAX_RESULTS;
+		grown = realloc(report->targets, capacity * sizeof(*grown));
+		if (!grown)
+			return -1;
+		report->targets = grown;
+		report->capacity = capacity;
+	}
+	memcpy(report->targets[report->count].name, name, strlen(name) + 1U);
+	report->targets[report->count].target_index = target_index;
+	report->targets[report->count].ratio = *ratio;
+	++report->count;
+	return 0;
+}
+
+typedef int (*status_observation_reader)(
+	void *context, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target);
+
+static int status_read_observation_with_fd(
+	void *context, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
+{
+	return read_dm_status_observation(*(const int *)context, name,
+					  expected_device, observation,
+					  problem, problem_target);
 }
 
 static int report_device_status_with_reader(
-	void *context, status_snapshot_reader read_snapshot,
-	const char *name, int *swapz_targets)
+	void *context, status_observation_reader read_observation,
+	const char *name, uint64_t expected_device,
+	struct status_ready_report *report)
 {
-	unsigned int target_index;
+	struct status_problem last_problem = {
+		.field = "complete consecutive DM INFO snapshots",
+		.expected = "two identical full target inventories within 8 retries",
+		.observed = "inventory, identity or counters changed between generations 1 and 2"
+	};
+	unsigned int last_target = 0;
+	unsigned int attempt;
 
-	for (target_index = 0;; ++target_index) {
-		unsigned int attempt;
-		int found_target = 0;
-		struct status_problem last_problem = {
-			.field = "consecutive DM INFO snapshots",
-			.expected = "two identical target identities and committed counters within 8 retries",
-			.observed = "target identity or counters changed between reads"
-		};
+	for (attempt = 0; attempt < SWAPZ_STATUS_SNAPSHOT_RETRIES; ++attempt) {
+		struct dm_status_observation first = { 0 };
+		struct dm_status_observation second = { 0 };
+		struct status_problem problem = { 0 };
+		unsigned int problem_target = 0;
+		unsigned int target;
+		int result;
 
-		for (attempt = 0; attempt < SWAPZ_STATUS_SNAPSHOT_RETRIES; ++attempt) {
-			struct swapz_target_snapshot first = { 0 };
-			struct swapz_target_snapshot second = { 0 };
-			int first_result;
-			int second_result;
+		result = read_observation(context, name, expected_device, &first,
+					  &problem, &problem_target);
+		if (result < 0) {
+			int saved_errno = errno;
+			int target_state = result == -2 ?
+				first.targets[problem_target].ratio_state : STATUS_BLOCKED;
 
-			first_result = read_snapshot(
-				context, name, target_index, &first);
-			if (first_result < 0) {
-				if (first.problem.field)
-					return status_report_problem(
-						first.ratio_state == STATUS_UNAVAILABLE ?
-							"UNAVAILABLE" : "BLOCKED",
-						name, target_index, &first.problem);
-				return -1;
-			}
-			if (!first_result) {
-				if (found_target)
-					continue; /* A previously seen target disappeared. */
-				break;
-			}
-			found_target = 1;
-			if (first.ratio_state == STATUS_BLOCKED ||
-			    first.ratio_state == STATUS_FAILED ||
-			    first.ratio_state == STATUS_UNAVAILABLE)
+			status_free_observation(&first);
+			if (problem.field)
 				return status_report_problem(
-					first.ratio_state == STATUS_BLOCKED ? "BLOCKED" :
-					first.ratio_state == STATUS_FAILED ? "FAILED" : "UNAVAILABLE",
-					name, target_index, &first.problem);
-			second_result = read_snapshot(
-				context, name, target_index, &second);
-			if (second_result < 0) {
-				if (second.problem.field)
-					return status_report_problem(
-						second.ratio_state == STATUS_UNAVAILABLE ?
-							"UNAVAILABLE" : "BLOCKED",
-						name, target_index, &second.problem);
-				return -1;
-			}
-			if (second_result &&
-			    (second.ratio_state == STATUS_BLOCKED ||
-			     second.ratio_state == STATUS_FAILED ||
-			     second.ratio_state == STATUS_UNAVAILABLE))
-				return status_report_problem(
-					second.ratio_state == STATUS_BLOCKED ? "BLOCKED" :
-					second.ratio_state == STATUS_FAILED ? "FAILED" : "UNAVAILABLE",
-					name, target_index, &second.problem);
-			if (!second_result ||
-			    first.sector_start != second.sector_start ||
-			    first.length != second.length ||
-			    first.device_id != second.device_id ||
-			    first.event_number != second.event_number ||
-			    first.ratio_state != second.ratio_state ||
-			    !ratio_status_equal(&first.ratio, &second.ratio))
-				continue;
-			if (first.ratio_state == STATUS_RETRY) {
-				last_problem = first.problem;
-				continue;
-			}
-			report_swapz_target(name, target_index, &first.ratio);
-			(*swapz_targets)++;
-			break;
+					target_state == STATUS_FAILED ? "FAILED" :
+					target_state == STATUS_UNAVAILABLE ||
+					saved_errno == EOVERFLOW || saved_errno == ENOMEM ?
+					"UNAVAILABLE" : "BLOCKED",
+					name, expected_device, problem_target, 1, &problem);
+			return status_report_ioctl_failure(name, expected_device,
+							   1, saved_errno);
 		}
-		if (!found_target)
-			return 0;
-		if (attempt == SWAPZ_STATUS_SNAPSHOT_RETRIES)
-			return status_report_problem("UNAVAILABLE", name, target_index,
-						     &last_problem);
+		result = read_observation(context, name, expected_device, &second,
+					  &problem, &problem_target);
+		if (result < 0) {
+			int saved_errno = errno;
+			int target_state = result == -2 ?
+				second.targets[problem_target].ratio_state : STATUS_BLOCKED;
+
+			status_free_observation(&first);
+			status_free_observation(&second);
+			if (problem.field)
+				return status_report_problem(
+					target_state == STATUS_FAILED ? "FAILED" :
+					target_state == STATUS_UNAVAILABLE ||
+					saved_errno == EOVERFLOW || saved_errno == ENOMEM ?
+					"UNAVAILABLE" : "BLOCKED",
+					name, expected_device, problem_target, 2, &problem);
+			return status_report_ioctl_failure(name, expected_device,
+							   2, saved_errno);
+		}
+		if (!status_observations_equal(&first, &second,
+					       &problem, &problem_target)) {
+			last_problem = problem;
+			last_target = problem_target;
+			goto retry;
+		}
+		for (target = 0; target < first.target_count; ++target) {
+			const struct swapz_target_snapshot *entry = &first.targets[target];
+
+			if (entry->ratio_state == STATUS_RETRY) {
+				last_problem = entry->problem;
+				last_target = target;
+				goto retry;
+			}
+		}
+		for (target = 0; target < first.target_count; ++target) {
+			const struct swapz_target_snapshot *entry = &first.targets[target];
+
+			if (entry->is_swapz &&
+			    status_append_ready_target(report, name, target, &entry->ratio) < 0) {
+				struct status_problem allocation_problem = {
+					.field = "validated status results",
+					.expected = "bounded output inventory allocation",
+					.observed = "allocation failed or result limit exceeded"
+				};
+
+				status_free_observation(&first);
+				status_free_observation(&second);
+				return status_report_problem("UNAVAILABLE", name, expected_device,
+							     target, 2, &allocation_problem);
+			}
+		}
+		status_free_observation(&first);
+		status_free_observation(&second);
+		return 0;
+retry:
+		status_free_observation(&first);
+		status_free_observation(&second);
 	}
+	return status_report_problem("UNAVAILABLE", name, expected_device,
+				     last_target, 2, &last_problem);
 }
 
-static int report_device_status(int fd, const char *name, int *swapz_targets)
+static int report_device_status(int fd, const char *name, uint64_t expected_device,
+				struct status_ready_report *report)
 {
-	return report_device_status_with_reader(&fd, status_read_snapshot_with_fd,
-						name, swapz_targets);
+	return report_device_status_with_reader(&fd, status_read_observation_with_fd,
+						name, expected_device, report);
 }
 
 static int status_control_open_flags(void)
@@ -1185,99 +1391,103 @@ static int status_targets(void)
 {
 	unsigned char *buffer = NULL;
 	size_t buffer_size = 0;
-	struct dm_ioctl *io;
-	char *cursor;
-	char *data_end;
+	struct dm_ioctl header;
+	struct status_ready_report report = { 0 };
+	size_t current_offset;
+	size_t payload_size;
 	int fd;
-	int swapz_targets = 0;
 	int result = 1;
 
 	fd = open(SWAPZ_DM_CONTROL_PATH, status_control_open_flags());
 	if (fd < 0) {
-		perror("swapzctl status: open /dev/mapper/control");
+		if (errno == EPERM || errno == EACCES)
+			fprintf(stderr, "swapzctl status: UNAVAILABLE: opening DM control for observation needs permission (CAP_SYS_ADMIN may be required); errno=%d (%s); no escalation attempted\n",
+				errno, strerror(errno));
+		else
+			perror("swapzctl status: open /dev/mapper/control");
 		return 1;
 	}
 	if (dm_query(fd, DM_LIST_DEVICES, NULL, &buffer, &buffer_size) < 0) {
 		if (errno == EPROTO)
-			fputs("swapzctl status: BLOCKED: field 'dm_ioctl.data_start/data_size'; "
-			      "expected sizeof(dm_ioctl) <= data_start <= data_size <= reply "
-			      "capacity; observed out-of-bounds Device Mapper device-list header\n",
+			fputs("swapzctl status: BLOCKED: field 'dm_ioctl.data_start/data_size'; expected bounded device-list header; observed invalid DM reply\n",
 			      stderr);
 		else if (errno == EOVERFLOW)
-			fputs("swapzctl status: UNAVAILABLE: field 'DM_BUFFER_FULL_FLAG'; "
-			      "expected clear after a complete device list <= 1048576 bytes; "
-			      "observed list remained buffer-full at the bounded maximum\n",
+			fputs("swapzctl status: UNAVAILABLE: field 'DM_BUFFER_FULL_FLAG'; expected complete device list <= 1048576 bytes; observed buffer-full reply\n",
 			      stderr);
+		else if (errno == EPERM || errno == EACCES)
+			fprintf(stderr, "swapzctl status: UNAVAILABLE: DM_LIST_DEVICES errno=%d (%s); observational ioctl requires CAP_SYS_ADMIN; no escalation attempted\n",
+				errno, strerror(errno));
 		else
 			perror("swapzctl status: list Device Mapper devices");
 		goto out;
 	}
-	(void)buffer_size;
-	io = (struct dm_ioctl *)buffer;
-	cursor = (char *)buffer + io->data_start;
-	data_end = (char *)buffer + io->data_size;
-	while (cursor < data_end) {
-		char *record_end;
-		char *name;
+	memcpy(&header, buffer, sizeof(header));
+	if (header.data_start % SWAPZ_DM_WIRE_ALIGNMENT) {
+		fputs("swapzctl status: BLOCKED: field 'dm_ioctl.data_start'; expected 8-byte wire alignment; observed unaligned device-list offset\n", stderr);
+		goto out;
+	}
+	current_offset = header.data_start;
+	payload_size = header.data_size;
+	while (current_offset < payload_size) {
+		const unsigned char *record = buffer + current_offset;
+		const size_t remaining = payload_size - current_offset;
+		const size_t name_offset = offsetof(struct dm_name_list, name);
+		const char *name;
 		const char *name_end;
+		size_t record_size;
+		uint64_t device_id;
 		uint32_t next;
 
-		if ((size_t)(data_end - cursor) <
-		    offsetof(struct dm_name_list, name) + 1U) {
-			fputs("swapzctl status: BLOCKED: field 'dm_name_list'; "
-			      "expected complete record header plus NUL-terminated name; "
-			      "observed truncated Device Mapper device-list record\n",
-			      stderr);
+		if (remaining < name_offset + 1U) {
+			fputs("swapzctl status: BLOCKED: field 'dm_name_list'; expected complete name header and terminator; observed truncated record\n", stderr);
 			goto out;
 		}
-		memcpy(&next, cursor + offsetof(struct dm_name_list, next), sizeof(next));
-		if (next) {
-			if (next % _Alignof(struct dm_name_list) ||
-			    next < offsetof(struct dm_name_list, name) + 1U ||
-			    (size_t)(data_end - cursor) < next) {
-				fputs("swapzctl status: BLOCKED: field 'dm_name_list.next'; "
-				      "expected aligned forward offset within data_size; "
-				      "observed zero-width, unaligned or truncated next record\n",
-				      stderr);
-				goto out;
-			}
-			record_end = cursor + next;
-		} else {
-			record_end = data_end;
-		}
-		name = cursor + offsetof(struct dm_name_list, name);
-		name_end = memchr(name, '\0', (size_t)(record_end - name));
-		if (!name_end) {
-			fputs("swapzctl status: BLOCKED: field 'dm_name_list.name'; "
-			      "expected NUL-terminated mapping name within its record; "
-			      "observed missing terminator or truncated reply\n",
-			      stderr);
+		memcpy(&device_id, record + offsetof(struct dm_name_list, dev),
+		       sizeof(device_id));
+		memcpy(&next, record + offsetof(struct dm_name_list, next),
+		       sizeof(next));
+		if (next && (next % SWAPZ_DM_WIRE_ALIGNMENT ||
+			     next < name_offset + 1U || (size_t)next > remaining)) {
+			fputs("swapzctl status: BLOCKED: field 'dm_name_list.next'; expected 8-byte-aligned forward offset within reply; observed overlapping, unaligned or truncated record\n", stderr);
 			goto out;
 		}
-		if (*name) {
-			int device_result = report_device_status(fd, name, &swapz_targets);
-
-			if (device_result < 0 &&
-			    (device_result == -2 ||
-			     (errno != ENXIO && errno != ENODEV))) {
-				if (device_result != -2)
-					perror("swapzctl status: read Device Mapper target status");
-				goto out;
-			}
+		record_size = next ? (size_t)next : remaining;
+		name = (const char *)record + name_offset;
+		name_end = memchr(name, '\0', record_size - name_offset);
+		if (!name_end || name == name_end ||
+		    (size_t)(name_end - name) >= DM_NAME_LEN) {
+			fputs("swapzctl status: BLOCKED: field 'dm_name_list.name'; expected bounded NUL-terminated mapping name; observed empty, unterminated or too-long name\n", stderr);
+			goto out;
 		}
+		if (!device_id) {
+			fputs("swapzctl status: BLOCKED: field 'dm_name_list.dev'; expected nonzero LIST_DEVICES identity; observed zero device number\n", stderr);
+			goto out;
+		}
+		if (report_device_status(fd, name, device_id, &report) < 0)
+			goto out;
 		if (!next)
 			break;
-		cursor = record_end;
+		current_offset += next;
 	}
-	if (!swapz_targets)
-		puts("swapz targets: none");
 	result = 0;
 out:
 	free(buffer);
 	if (close(fd) < 0) {
 		perror("swapzctl status: close /dev/mapper/control");
-		return 1;
+		result = 1;
 	}
+	/* Nothing numeric is printed until every device and both generations pass. */
+	if (!result) {
+		size_t index;
+
+		if (!report.count)
+			puts("swapz targets: none");
+		for (index = 0; index < report.count; ++index)
+			report_swapz_target(report.targets[index].name,
+					    report.targets[index].target_index,
+					    &report.targets[index].ratio);
+	}
+	free(report.targets);
 	return result;
 }
 
