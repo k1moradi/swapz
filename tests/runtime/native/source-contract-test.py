@@ -1873,6 +1873,7 @@ static swapz_u16 swapz_probe_set(
 #include <errno.h>
 typedef uint64_t sector_t;
 typedef uint32_t swapz_u32;
+typedef uint8_t swapz_u8;
 #define SWAPZ_SECTORS 8U
 #define SWAPZ_SEGMENT_BLOCKS 256U
 #define PHYSICAL_BLOCKS 512U
