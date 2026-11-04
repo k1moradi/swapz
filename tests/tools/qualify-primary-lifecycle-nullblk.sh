@@ -1391,6 +1391,11 @@ chmod 0600 "$CONFIG_BASE/primary-target"
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"
 if ! prepare_output="$("$CONTROL" primary prepare 2>&1)"; then
 	printf '%s\n' "$prepare_output" >&2
+	if prepare_plan="$("$CONTROL" primary plan 2>&1)"; then
+		note "PRIMARY_PREPARE_DIAGNOSTIC_PLAN=$prepare_plan"
+	else
+		note "PRIMARY_PREPARE_DIAGNOSTIC_PLAN=unavailable"
+	fi
 	fail "production coordinator prepare failed on owned null_blk"
 fi
 printf '%s\n' "$prepare_output"

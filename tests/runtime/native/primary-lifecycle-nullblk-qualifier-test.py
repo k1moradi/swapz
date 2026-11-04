@@ -146,6 +146,10 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn('mkswap "$PARTITION" >/dev/null', self.script)
         self.assertNotIn('mkswap --no-discard', self.script)
 
+    def test_prepare_failure_emits_read_only_gate_plan(self):
+        self.assertIn('"$CONTROL" primary plan', self.script)
+        self.assertIn('PRIMARY_PREPARE_DIAGNOSTIC_PLAN=', self.script)
+
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
