@@ -376,6 +376,10 @@ swapz_clear_tmp_before_memory_check
             'write_cgroup_control memory.high "$MEMORY_HIGH_BYTES" || exit 2',
             source)
         self.assertIn('rm -rf -- "$SESSION" 2>/dev/null', source)
+        self.assertNotIn('rmdir "$CGROUP" 2>/dev/null || result=1', source)
+        self.assertIn(
+            "BLOCKED: ID36 isolated cgroup cleanup did not complete;",
+            source)
         self.assertNotIn("rm -rf /tmp", source)
         self.assertNotIn("drop_caches", source)
 
