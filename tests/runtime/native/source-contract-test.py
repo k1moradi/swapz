@@ -7404,7 +7404,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 "BACKING", "IO_CLIENT", "AUTHORITY", "CORE_SCRATCH",
                 "READ_SLOTS", "WORKQUEUE", "PREPARATION_SCRATCH",
                 "PREPARATION_WORKQUEUE"):
-            marker = constructor.index("SWAPZ_CONSTRUCTOR_FAIL_AFTER_" + stage)
+            marker = constructor.rindex("SWAPZ_CONSTRUCTOR_FAIL_AFTER_" + stage)
             self.assertRegex(
                 constructor[marker:marker + 180],
                 r"\)\)\s*\{\s*error = -ENOMEM;\s*goto fail;\s*\}")
