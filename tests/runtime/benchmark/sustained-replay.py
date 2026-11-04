@@ -1023,20 +1023,25 @@ def run(args):
                     fd, data_offset, occupied, args.qd, fill_chunks, args.seed,
                     pool)
                 partial["fill"] = fill
-                warm_results, _, _, _ = phase_workers(
+                warm_results, _, warmup_wall_ns, warmup_phase_start_ns = phase_workers(
                     fd, data_offset, args, hot, fill_chunks, churn_chunks, True,
                     pool)
                 initial_writes = [row["writes"] for row in warm_results]
+                warmup_operations_completed = sum(
+                    row["ops"] for row in warm_results)
+                warmup_end_monotonic_ns = (
+                    warmup_phase_start_ns + warmup_wall_ns)
 
                 pre_quiet = quiet_window()
                 if identity.get("dm_uuid"):
                     REPLAY["kernel_write_profile_epoch"](target, identity)
-                lower_before = REPLAY["lower_stat"](identity.get("owned_disk"))
-                write_before = REPLAY["kernel_write_snapshot"](target, identity)
-                read_before = REPLAY["kernel_read_snapshot"](target, identity)
+
+                # Warmup is complete before any qualification boundary.
+                # Start the observer first, then take target/worker/process
+                # baselines. The independent lower-device stat is deliberately
+                # last so it is the tightest pre-measurement I/O bracket.
                 status_before = status_snapshot(target, identity)
-                host_before = REPLAY["host_cpu_snapshot"]()
-                cpu_before = process_cpu()
+                target_before_monotonic_ns = time.monotonic_ns()
                 measured_progress = ProgressTracker()
                 interval_sampler = (
                     SustainedIntervalSampler(
@@ -1045,16 +1050,31 @@ def run(args):
                     if args.measure_seconds is not None else None)
                 if interval_sampler is not None:
                     interval_sampler.start()
+                write_before = REPLAY["kernel_write_snapshot"](target, identity)
+                read_before = REPLAY["kernel_read_snapshot"](target, identity)
+                worker_before_monotonic_ns = time.monotonic_ns()
+                host_before = REPLAY["host_cpu_snapshot"]()
+                lower_before = REPLAY["lower_stat"](identity.get("owned_disk"))
+                lower_before_monotonic_ns = time.monotonic_ns()
+                cpu_before = process_cpu()
+                process_before_monotonic_ns = time.monotonic_ns()
+
                 start = time.monotonic_ns()
                 try:
                     measured, measured_progress, wall_ns, measured_phase_start_ns = phase_workers(
                         fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
                         pool, initial_writes, measured_progress)
                     end = time.monotonic_ns()
+                    cpu_after = process_cpu()
+                    process_after_monotonic_ns = time.monotonic_ns()
+                    lower_after = REPLAY["lower_stat"](identity.get("owned_disk"))
+                    lower_after_monotonic_ns = time.monotonic_ns()
                     measured_max_no_progress_seconds = (
                         measured_progress.snapshot_max_gap_ns() / 1e9)
-                    cpu_after = process_cpu()
                     host_after = REPLAY["host_cpu_snapshot"]()
+                    read_after = REPLAY["kernel_read_snapshot"](target, identity)
+                    write_after = REPLAY["kernel_write_snapshot"](target, identity)
+                    worker_after_monotonic_ns = time.monotonic_ns()
                 finally:
                     # Capture the replay exception state before stop() can
                     # replace sys.exc_info() with its own telemetry exception.
@@ -1062,9 +1082,7 @@ def run(args):
                     interval_rows = stop_interval_sampler(
                         interval_sampler, partial, primary_failure_active)
             status_after = status_snapshot(target, identity)
-            read_after = REPLAY["kernel_read_snapshot"](target, identity)
-            write_after = REPLAY["kernel_write_snapshot"](target, identity)
-            lower_after = REPLAY["lower_stat"](identity.get("owned_disk"))
+            target_after_monotonic_ns = time.monotonic_ns()
             post_quiet = quiet_window()
 
             seconds = (end - start) / 1e9
@@ -1129,7 +1147,8 @@ def run(args):
                 fill_chunks, churn_chunks, writes_per_lane)
             if oracle["mismatches"]:
                 raise ValueError("final byte oracle failed")
-            gc = status_delta(status_before, status_after, wall_ns)
+            gc = status_delta(
+                status_before, status_after, end - start)
             if identity.get("dm_uuid") and not \
                     QUALIFICATION["target_health_ok"](gc):
                 raise ValueError("swapz target reported failed/error status")
@@ -1160,6 +1179,11 @@ def run(args):
                     "churn": churn_sha}, sort_keys=True).encode()).hexdigest(),
                 "warmup_operations": args.warmup_operations,
                 "warmup_seconds": args.warmup_seconds,
+                "warmup_evidence": {
+                    "start_monotonic_ns": warmup_phase_start_ns,
+                    "end_monotonic_ns": warmup_end_monotonic_ns,
+                    "duration_seconds": warmup_wall_ns / 1e9,
+                    "operations": warmup_operations_completed},
                 "measure_operations": args.measure_operations,
                 "measure_seconds_requested": args.measure_seconds,
                 "fill": fill, "seconds": seconds,
@@ -1211,6 +1235,22 @@ def run(args):
                 "measurement_snapshots": {
                     "lower_before": lower_before,
                     "lower_after": lower_after,
+                    "lower_before_monotonic_ns":
+                        lower_before_monotonic_ns,
+                    "target_before_monotonic_ns":
+                        target_before_monotonic_ns,
+                    "worker_before_monotonic_ns":
+                        worker_before_monotonic_ns,
+                    "process_before_monotonic_ns":
+                        process_before_monotonic_ns,
+                    "process_after_monotonic_ns":
+                        process_after_monotonic_ns,
+                    "worker_after_monotonic_ns":
+                        worker_after_monotonic_ns,
+                    "target_after_monotonic_ns":
+                        target_after_monotonic_ns,
+                    "lower_after_monotonic_ns":
+                        lower_after_monotonic_ns,
                     "process_before": {
                         "user_seconds": cpu_before[0],
                         "system_seconds": cpu_before[1],

@@ -80,7 +80,7 @@ def _load_frozen_physical_contract() -> dict:
             ACCEPTANCE_MANIFEST.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_object,
             parse_constant=_reject_json_constant,
-        parse_float=_finite_json_float)
+            parse_float=_finite_json_float)
     except (OSError, ValueError) as exc:
         raise ValueError(
             f"cannot load frozen production acceptance manifest: {exc}") from exc
@@ -116,7 +116,7 @@ def _load_frozen_amendment() -> dict:
             AMENDMENT_MANIFEST.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_object,
             parse_constant=_reject_json_constant,
-        parse_float=_finite_json_float)
+            parse_float=_finite_json_float)
     except (OSError, ValueError) as exc:
         raise ValueError(
             f"cannot load prospective physical amendment: {exc}") from exc
@@ -177,7 +177,10 @@ def service_limits(workload: str) -> dict:
 def number(value, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be finite") from exc
     if not math.isfinite(result):
         raise ValueError(f"{name} must be finite")
     return result
@@ -191,6 +194,18 @@ def exact_json_value(value, expected) -> bool:
 LATENCY_SUB_BUCKETS = 16
 LATENCY_EXPONENTS = 65
 LATENCY_BIN_COUNT = LATENCY_SUB_BUCKETS * LATENCY_EXPONENTS
+
+TARGET_STATUS_COUNTER_FIELDS = (
+    "gc_wall_ns", "gc_no_headroom_skips", "gc_victims",
+    "gc_role_rotations", "gc_pages", "gc_read", "gc_write",
+    "gc_read_reqs", "gc_write_reqs", "alloc_probe_segments",
+    "alloc_probe_full_scans", "alloc_probe_wall_ns", "segment_program_sum",
+)
+TARGET_STATUS_GAUGE_FIELDS = (
+    "cursor", "reserve", "last_gc_victim", "last_gc_destination",
+    "failed", "error",
+)
+TARGET_STATUS_FIELDS = TARGET_STATUS_COUNTER_FIELDS + TARGET_STATUS_GAUGE_FIELDS
 
 
 def latency_bin_index(value: int) -> int:
@@ -507,12 +522,9 @@ def validate_module_provenance(arm: dict, label: str) -> list[str]:
     return []
 
 
-def measurement_snapshot_reasons(arm: dict, label: str) -> list[str]:
-    """Verify independent sector, process, VmHWM and worker CPU boundaries.
-
-    The parent's /sys/block/<disk>/stat sectors are 512-byte units regardless
-    of the card's advertised physical sector and our logical 4096-byte pages.
-    """
+def measurement_snapshot_reasons(
+        arm: dict, workload_name: str, label: str) -> list[str]:
+    """Verify raw lower-device, process/RSS and worker boundary evidence."""
     try:
         snapshots = metric(arm, "measurement_snapshots")
         if not isinstance(snapshots, dict):
@@ -524,7 +536,8 @@ def measurement_snapshot_reasons(arm: dict, label: str) -> list[str]:
                 any(type(value) is not int or value < 0
                     for value in before + after)):
             raise ValueError("lower-device counter snapshots are malformed")
-        deltas = [end - start for start, end in zip(before, after)]
+        deltas = [end_value - start_value
+                  for start_value, end_value in zip(before, after)]
         if any(deltas[index] < 0 for index in (0, 2, 4, 6, 15)):
             raise ValueError("lower-device counters reset during measurement")
         lower = metric(arm, "lower_io")
@@ -537,7 +550,69 @@ def measurement_snapshot_reasons(arm: dict, label: str) -> list[str]:
                 ("lower_write_bytes", deltas[6] * 512),
                 ("lower_flush_requests", deltas[15])):
             if type(lower.get(field)) is not int or lower[field] != calculated:
-                raise ValueError(f"{field} differs from raw lower-device counters")
+                raise ValueError(
+                    f"{field} differs from raw lower-device counters")
+
+        warmup = metric(arm, "warmup_evidence")
+        if not isinstance(warmup, dict):
+            raise ValueError("warmup completion evidence is missing")
+        warmup_start = metric(warmup, "start_monotonic_ns")
+        warmup_end = metric(warmup, "end_monotonic_ns")
+        warmup_operations = metric(warmup, "operations")
+        warmup_duration = number(
+            metric(warmup, "duration_seconds"), "warmup.duration_seconds")
+        arm_start = metric(arm, "arm_started_monotonic_ns")
+        measured_start = metric(arm, "measured_start_monotonic_ns")
+        measured_end = metric(arm, "measured_end_monotonic_ns")
+        arm_end = metric(arm, "arm_finished_monotonic_ns")
+        lower_before_time = metric(
+            snapshots, "lower_before_monotonic_ns")
+        target_before_time = metric(
+            snapshots, "target_before_monotonic_ns")
+        worker_before_time = metric(
+            snapshots, "worker_before_monotonic_ns")
+        process_before_time = metric(
+            snapshots, "process_before_monotonic_ns")
+        process_after_time = metric(
+            snapshots, "process_after_monotonic_ns")
+        worker_after_time = metric(
+            snapshots, "worker_after_monotonic_ns")
+        target_after_time = metric(
+            snapshots, "target_after_monotonic_ns")
+        lower_after_time = metric(
+            snapshots, "lower_after_monotonic_ns")
+        chronology = (
+            arm_start, warmup_start, warmup_end, target_before_time,
+            worker_before_time, lower_before_time, process_before_time,
+            measured_start, measured_end, process_after_time,
+            lower_after_time, worker_after_time, target_after_time, arm_end)
+        if any(type(value) is not int or value <= 0 for value in chronology):
+            raise ValueError("measurement boundary timestamps are malformed")
+        if not (
+                arm_start <= warmup_start < warmup_end <= target_before_time <=
+                worker_before_time <= lower_before_time <= process_before_time <=
+                measured_start < measured_end <= process_after_time <=
+                lower_after_time <= worker_after_time <= target_after_time <=
+                arm_end):
+            raise ValueError(
+                "warmup/target/worker/process/lower boundaries do not bracket measurement")
+        if not math.isclose(
+                (warmup_end - warmup_start) / 1e9, warmup_duration,
+                rel_tol=1e-9, abs_tol=1e-6):
+            raise ValueError("warmup duration differs from monotonic boundaries")
+        if type(warmup_operations) is not int or warmup_operations <= 0:
+            raise ValueError("warmup completed-operation count is invalid")
+        workload = workload_spec(workload_name)
+        required_warmup_operations = workload.get("warmup_operations")
+        required_warmup_seconds = workload.get("warmup_seconds")
+        if (required_warmup_operations is not None and
+                warmup_operations != required_warmup_operations):
+            raise ValueError(
+                "completed warmup operation count differs from prospective workload")
+        if (required_warmup_seconds is not None and
+                warmup_duration < float(required_warmup_seconds)):
+            raise ValueError(
+                "completed warmup duration is shorter than prospective workload")
 
         process_before = metric(snapshots, "process_before")
         process_after = metric(snapshots, "process_after")
@@ -546,14 +621,18 @@ def measurement_snapshot_reasons(arm: dict, label: str) -> list[str]:
         for field, output in (
                 ("user_seconds", "replay_user_seconds"),
                 ("system_seconds", "replay_system_seconds")):
-            start = number(metric(process_before, field), f"process_before.{field}")
-            end = number(metric(process_after, field), f"process_after.{field}")
-            if start < 0 or end < start:
+            start_value = number(
+                metric(process_before, field), f"process_before.{field}")
+            end_value = number(
+                metric(process_after, field), f"process_after.{field}")
+            if start_value < 0 or end_value < start_value:
                 raise ValueError("process CPU counters reset")
             if not math.isclose(
-                    number(metric(arm, "cpu." + output), output), end - start,
+                    number(metric(arm, "cpu." + output), output),
+                    end_value - start_value,
                     rel_tol=1e-9, abs_tol=1e-12):
-                raise ValueError(f"cpu.{output} differs from process snapshots")
+                raise ValueError(
+                    f"cpu.{output} differs from process snapshots")
         before_rss = metric(process_before, "peak_rss_bytes")
         after_rss = metric(process_after, "peak_rss_bytes")
         if (type(before_rss) is not int or type(after_rss) is not int or
@@ -567,7 +646,8 @@ def measurement_snapshot_reasons(arm: dict, label: str) -> list[str]:
                  after_rss - before_rss)):
             observed = metric(arm, "resources." + field)
             if type(observed) is not int or observed != calculated:
-                raise ValueError(f"resources.{field} differs from VmHWM snapshots")
+                raise ValueError(
+                    f"resources.{field} differs from VmHWM snapshots")
 
         worker_before = metric(snapshots, "worker_cpu_ns_before")
         worker_after = metric(snapshots, "worker_cpu_ns_after")
@@ -580,9 +660,60 @@ def measurement_snapshot_reasons(arm: dict, label: str) -> list[str]:
                        "exported worker CPU"),
                 (worker_after - worker_before) / 1e9,
                 rel_tol=1e-9, abs_tol=1e-12):
-            raise ValueError("kernel worker CPU differs from boundary snapshots")
+            raise ValueError(
+                "kernel worker CPU differs from boundary snapshots")
     except (ValueError, TypeError) as exc:
         return [f"{label} measured snapshots: {exc}"]
+    return []
+
+
+def target_status_snapshot_reasons(arm: dict, label: str) -> list[str]:
+    """Recompute whole-arm target deltas from the raw DM status boundaries."""
+    before = arm.get("target_status_before")
+    after = arm.get("target_status_after")
+    observed = arm.get("gc")
+    if label == "raw":
+        return ([] if before is None and after is None and observed is None else
+                ["raw target-status evidence must be absent"])
+    try:
+        if (not isinstance(before, dict) or not isinstance(after, dict) or
+                set(before) != set(TARGET_STATUS_FIELDS) or
+                set(after) != set(TARGET_STATUS_FIELDS)):
+            raise ValueError("target status boundary fields are incomplete")
+        if any(type(row[field]) is not int or row[field] < 0
+               for row in (before, after) for field in TARGET_STATUS_FIELDS):
+            raise ValueError("target status boundary counters are malformed")
+        derived = {}
+        for field in TARGET_STATUS_COUNTER_FIELDS:
+            value = after[field] - before[field]
+            if value < 0:
+                raise ValueError("target status counter reset: " + field)
+            derived[field] = value
+        for field in TARGET_STATUS_GAUGE_FIELDS:
+            derived[field] = after[field]
+        measured_start = metric(arm, "measured_start_monotonic_ns")
+        measured_end = metric(arm, "measured_end_monotonic_ns")
+        if (type(measured_start) is not int or type(measured_end) is not int or
+                measured_end <= measured_start):
+            raise ValueError("measured target-status window is malformed")
+        derived["wall_fraction"] = (
+            derived["gc_wall_ns"] / (measured_end - measured_start))
+        if not isinstance(observed, dict) or set(observed) != set(derived):
+            raise ValueError("serialized target delta fields are incomplete")
+        for field in TARGET_STATUS_FIELDS:
+            if type(observed.get(field)) is not int or \
+                    observed[field] != derived[field]:
+                raise ValueError(
+                    f"gc.{field} differs from target status snapshots")
+        wall_fraction = number(
+            observed.get("wall_fraction"), "gc.wall_fraction")
+        if not math.isclose(
+                wall_fraction, derived["wall_fraction"],
+                rel_tol=1e-12, abs_tol=1e-15):
+            raise ValueError(
+                "gc.wall_fraction differs from target status snapshots")
+    except (ValueError, TypeError) as exc:
+        return [f"{label} target status snapshots: {exc}"]
     return []
 
 
@@ -620,7 +751,8 @@ def measured_block_accounting_reasons(arm: dict, workload: str,
         if (type(lower_bytes) is not int or type(lower_requests) is not int or
                 lower_bytes <= 0 or lower_requests <= 0):
             raise ValueError("independent lower WRITE counters are missing or nonpositive")
-        reasons += measurement_snapshot_reasons(arm, label)
+        reasons += measurement_snapshot_reasons(arm, workload, label)
+        reasons += target_status_snapshot_reasons(arm, label)
         lower_read_bytes = metric(arm, "lower_io.lower_read_bytes")
         if type(lower_read_bytes) is not int or lower_read_bytes < 0:
             raise ValueError("independent lower READ counters are malformed")
@@ -805,6 +937,10 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
         previous_end = 0.0
         previous_monotonic_end = None
         positive_gc_interval = False
+        interval_gc_totals = {
+            field: 0 for field in (
+                "gc_wall_ns", "gc_no_headroom_skips",
+                "gc_victims", "gc_pages", "segment_program_sum")}
         for index, row in enumerate(intervals):
             if not isinstance(row, dict) or type(row.get("interval")) is not int or row["interval"] != index:
                 raise ValueError("telemetry interval indexing is invalid")
@@ -839,10 +975,11 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                         type(gc.get("gc_no_headroom_skips")) is not int or
                         gc["gc_no_headroom_skips"] != 0):
                     raise ValueError("interval target failure or GC no-headroom skip")
-                for field in ("gc_wall_ns", "gc_victims", "gc_pages"):
+                for field in interval_gc_totals:
                     if type(gc.get(field)) is not int or gc[field] < 0:
                         raise ValueError(
                             "interval GC activity counters are missing or malformed")
+                    interval_gc_totals[field] += gc[field]
                 positive_gc_interval = positive_gc_interval or (
                     monotonic_start >= measured_started and
                     monotonic_end <= measured_finished and
@@ -855,9 +992,17 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                 "telemetry intervals do not cover the measured monotonic window")
         if previous_end < spec["measure_seconds"]:
             raise ValueError("telemetry does not cover the full measured hour")
-        if label == "swapz" and not positive_gc_interval:
-            raise ValueError(
-                "telemetry contains no fully measured interval with GC relocation")
+        if label == "swapz":
+            whole_gc = metric(arm, "gc")
+            if not isinstance(whole_gc, dict):
+                raise ValueError("whole-arm GC evidence is missing")
+            for field, total in interval_gc_totals.items():
+                if type(whole_gc.get(field)) is not int or                         whole_gc[field] < total:
+                    raise ValueError(
+                        f"interval {field} exceeds whole-arm target delta")
+            if not positive_gc_interval:
+                raise ValueError(
+                    "telemetry contains no fully measured interval with GC relocation")
         occupancy = metric(arm, "occupancy_transitions")
         required_phases = ("initial", "post-fill", "post-warmup", "measured-end")
         occupied = metric(arm, "occupied_pages")
@@ -882,8 +1027,9 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     reasons = validate_module_provenance(arm, label)
     # Independent block counters establish lower-device traffic, not NAND wear
     # or endurance. Reject a stronger claim attached to otherwise valid data.
-    if (workload != "anonymous-swap" and
-            arm.get("claim_boundary") != CONTRACT["claim_boundary"]):
+    claim_boundary = arm.get("claim_boundary")
+    if (claim_boundary is not None and
+            claim_boundary != CONTRACT["claim_boundary"]):
         reasons.append(
             f"{label} lower-device claim boundary differs from frozen protocol")
     # Monotonic timestamps bind physical arm order; the campaign sealer pins boot ID.

@@ -369,17 +369,26 @@ hour-long throughput comparison.
 
 Every physical block replay retains the measured-boundary raw lower
 `/sys/block/<disk>/stat` counters, process user/system CPU and post-exec
-VmHWM, and exported worker-CPU boundaries. The evaluator independently
+VmHWM, exported worker-CPU boundaries, and before/after target-status counters.
+Warmup completion and each lower/target/worker/process boundary carry monotonic
+timestamps: warmup must finish before every measured boundary, observer setup
+must finish before the worker/process baselines, the process snapshot is the
+closest CPU/RSS bracket around measured start/end, and lower-device statistics
+are taken immediately outside that process boundary so setup/warmup I/O cannot
+enter the physical-I/O delta. The corresponding after-snapshots must follow
+measured completion. The evaluator independently
 recomputes lower READ/WRITE bytes and request deltas from 512-byte sectors,
-logical READ/WRITE/total MB/s, process CPU and absolute peak RSS, and rejects
-counter resets, missing snapshots, or inconsistent derived fields. Sustained
-minute histograms separately persist READ and WRITE bins and their combined
-projection, so an altered combined tail that does not conserve the original
-per-operation minute evidence is rejected. Chronology and 60 consecutive
-measured-minute windows are also validated. These checks do not cryptographically
-authenticate a wholly rewritten report; the campaign sealer's external artifact
-hashes and source/mapper identity evidence remain necessary. Host-visible
-lower-device bytes and requests are not direct physical NAND wear measurements.
+logical READ/WRITE/total MB/s, process CPU and absolute peak RSS. It also
+re-derives whole-arm GC counters and GC wall fraction from the target-status
+snapshots rather than trusting the serialized aggregate, and rejects interval
+GC totals that exceed that enclosing target delta. Sustained minute histograms
+separately persist READ and WRITE bins and their combined projection, so an
+altered combined tail that does not conserve the original per-operation minute
+evidence is rejected. Chronology and 60 consecutive measured-minute windows
+are also validated. These checks do not cryptographically authenticate a
+wholly rewritten report; the campaign sealer's external artifact hashes and
+source/mapper identity evidence remain necessary. Host-visible lower-device
+bytes and requests are not direct physical NAND wear measurements.
 The block arm records the exact frozen claim boundary, and the evaluator
 rejects a strengthened NAND-wear claim. JSON numeric parsing also rejects
 NaN, Infinity and overflow exponents (for example, `1e999`) before the

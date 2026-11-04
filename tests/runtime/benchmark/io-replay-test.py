@@ -2354,6 +2354,33 @@ class PairReplayContract(unittest.TestCase):
                 (report["measured_end_monotonic_ns"] -
                  report["measured_start_monotonic_ns"]) / 1e9,
                 report["seconds"], places=6)
+            warmup = report["warmup_evidence"]
+            self.assertEqual(warmup["operations"], 32)
+            self.assertLessEqual(
+                warmup["end_monotonic_ns"],
+                report["measurement_snapshots"][
+                    "lower_before_monotonic_ns"])
+            boundary_times = [
+                report["measurement_snapshots"][field]
+                for field in (
+                    "target_before_monotonic_ns",
+                    "worker_before_monotonic_ns",
+                    "lower_before_monotonic_ns",
+                    "process_before_monotonic_ns")]
+            self.assertEqual(boundary_times, sorted(boundary_times))
+            self.assertLessEqual(
+                boundary_times[-1], report["measured_start_monotonic_ns"])
+            after_boundary_times = [
+                report["measurement_snapshots"][field]
+                for field in (
+                    "process_after_monotonic_ns",
+                    "lower_after_monotonic_ns",
+                    "worker_after_monotonic_ns",
+                    "target_after_monotonic_ns")]
+            self.assertEqual(
+                after_boundary_times, sorted(after_boundary_times))
+            self.assertGreaterEqual(
+                after_boundary_times[0], report["measured_end_monotonic_ns"])
             self.assertEqual(report["read_ops"] + report["write_ops"], 256)
             self.assertEqual(report["oracle"]["mismatches"], 0)
             self.assertEqual(report["oracle"]["verified_pages"], 96)
@@ -2473,19 +2500,27 @@ class PairReplayContract(unittest.TestCase):
             cpu_per_byte = 1.1e-9 if swapz else 1.0e-9
             elapsed_seconds = writes * PAGE / write_mbps / 1_000_000
             first = (candidate == "raw") == (order == "raw-first")
+            arm_start_ns = (
+                1_000_000_000_000 if first else 2_000_000_000_000)
+            measured_start_ns = arm_start_ns + 1_000_000_000
+            measured_end_ns = (
+                measured_start_ns + round(elapsed_seconds * 1e9))
+            target_before = (
+                {field: 0 for field in qualification.TARGET_STATUS_FIELDS}
+                if swapz else None)
+            target_after = copy.deepcopy(target_before)
+            target_delta = ({
+                **{field: 0 for field in qualification.TARGET_STATUS_FIELDS},
+                "wall_fraction": 0.0,
+            } if swapz else None)
             return {
                 "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
                 "claim_boundary": qualification.CONTRACT["claim_boundary"],
-                "arm_started_monotonic_ns": (
-                    1_000_000_000_000 if first else 2_000_000_000_000),
-                "measured_start_monotonic_ns": (
-                    1_001_000_000_000 if first else 2_001_000_000_000),
-                "measured_end_monotonic_ns": (
-                    (1_001_000_000_000 if first else 2_001_000_000_000) +
-                    round(elapsed_seconds * 1e9)),
-                "arm_finished_monotonic_ns": (
-                    (1_002_000_000_000 if first else 2_002_000_000_000) +
-                    round(elapsed_seconds * 1e9)),
+                "arm_started_monotonic_ns": arm_start_ns,
+                "measured_start_monotonic_ns": measured_start_ns,
+                "measured_end_monotonic_ns": measured_end_ns,
+                "arm_finished_monotonic_ns":
+                    measured_end_ns + 1_000_000_000,
                 "arm_boot_id": "11111111-2222-3333-4444-555555555555",
                 "loaded_module_provenance": ({
                     "status": "LOADED",
@@ -2505,6 +2540,11 @@ class PairReplayContract(unittest.TestCase):
                     "fill": "f" * 64, "churn": "c" * 64,
                 }, sort_keys=True).encode()).hexdigest(),
                 "warmup_operations": 65536, "warmup_seconds": None,
+                "warmup_evidence": {
+                    "start_monotonic_ns": arm_start_ns + 100_000_000,
+                    "end_monotonic_ns": arm_start_ns + 200_000_000,
+                    "duration_seconds": .1,
+                    "operations": 65536},
                 "measure_operations": 1048576, "measure_seconds_requested": None,
                 "read_ops": reads,
                 "write_ops": writes, "oracle": {"mismatches": 0},
@@ -2522,6 +2562,22 @@ class PairReplayContract(unittest.TestCase):
                     "lower_after": [
                         10, 0, 80, 0, lower_write_requests, 0,
                         lower_write_bytes // 512, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    "target_before_monotonic_ns":
+                        arm_start_ns + 300_000_000,
+                    "worker_before_monotonic_ns":
+                        arm_start_ns + 400_000_000,
+                    "lower_before_monotonic_ns":
+                        arm_start_ns + 500_000_000,
+                    "process_before_monotonic_ns":
+                        arm_start_ns + 600_000_000,
+                    "process_after_monotonic_ns":
+                        measured_end_ns + 100_000_000,
+                    "lower_after_monotonic_ns":
+                        measured_end_ns + 200_000_000,
+                    "worker_after_monotonic_ns":
+                        measured_end_ns + 300_000_000,
+                    "target_after_monotonic_ns":
+                        measured_end_ns + 400_000_000,
                     "process_before": {
                         "user_seconds": 0.0, "system_seconds": 0.0,
                         "peak_rss_bytes": 31 * 1024 * 1024},
@@ -2583,7 +2639,9 @@ class PairReplayContract(unittest.TestCase):
                     "metadata_and_target_peak_ram_bytes":
                         512 * 1024 * 1024 if swapz else 0,
                 },
-                "gc": {"failed": 0, "error": 0} if swapz else None,
+                "target_status_before": target_before,
+                "target_status_after": target_after,
+                "gc": target_delta,
                 "device_identity": {
                     "physical_partuuid": "f13428f6-01",
                     "physical_device_bytes": 124787884032,
@@ -2669,6 +2727,15 @@ class PairReplayContract(unittest.TestCase):
                 lambda row: row["raw"]["measurement_snapshots"].pop(
                     "lower_before"),
                 lambda row: row["swapz"].pop("measured_end_monotonic_ns"),
+                lambda row: row["raw"]["warmup_evidence"].update(
+                    operations=65535),
+                lambda row: row["swapz"]["measurement_snapshots"].update(
+                    process_before_monotonic_ns=
+                        row["swapz"]["measured_start_monotonic_ns"] + 1),
+                lambda row: row["swapz"]["target_status_after"].update(
+                    gc_wall_ns=1),
+                lambda row: row["swapz"]["gc"].update(
+                    wall_fraction=.25),
                 lambda row: row["swapz"].update(resources=["malformed"]),
                 lambda row: row["swapz"].update(
                     device_identity=["malformed"]),
@@ -2696,6 +2763,12 @@ class PairReplayContract(unittest.TestCase):
                     with self.assertRaisesRegex(
                             ValueError, "non-finite JSON number"):
                         qualification._load_json_path(nonfinite)
+            truncated = Path(directory) / "truncated.json"
+            truncated.write_text('{"value":')
+            with self.assertRaises(ValueError):
+                qualification._load_json_path(truncated)
+        with self.assertRaisesRegex(ValueError, "must be finite"):
+            qualification.number(10 ** 10000, "oversized integer")
 
         # Python bool is an int subclass; QD1 must still require a JSON integer.
         qd1 = arm("raw")
@@ -2992,6 +3065,7 @@ class PairReplayContract(unittest.TestCase):
                     "gc_wall_ns": 1 if index == 20 else 0,
                     "gc_victims": 1 if index == 20 else 0,
                     "gc_pages": 1 if index == 20 else 0,
+                    "segment_program_sum": 1 if index == 20 else 0,
                 },
             }
             for index in range(60)]
@@ -3024,6 +3098,11 @@ class PairReplayContract(unittest.TestCase):
                 for index, phase in enumerate((
                     "initial", "post-fill", "post-warmup", "measured-end"))],
             "oracle": {"verified_pages": 90},
+            "gc": {
+                "gc_wall_ns": 1, "gc_no_headroom_skips": 0,
+                "gc_victims": 1, "gc_pages": 1,
+                "segment_program_sum": 1,
+            },
         }
         self.assertEqual(
             qualification.sustained_coverage_reasons(raw, "raw"), [])
@@ -3064,6 +3143,7 @@ class PairReplayContract(unittest.TestCase):
                 gc_no_headroom_skips=1),
             lambda arm: arm["sustained_intervals"][20]["gc"].pop(
                 "gc_no_headroom_skips"),
+            lambda arm: arm["gc"].update(segment_program_sum=0),
             lambda arm: arm["occupancy_transitions"][3].update(
                 occupied_pages=0),
             lambda arm: arm["oracle"].update(verified_pages=89),
@@ -3387,6 +3467,14 @@ class PairReplayContract(unittest.TestCase):
             nonfinite.write_text('{"value":Infinity}')
             with self.assertRaisesRegex(ValueError, "invalid JSON evidence"):
                 evidence.read_json(nonfinite)
+            duplicate = Path(directory) / "duplicate.json"
+            duplicate.write_text('{"value":1,"value":2}')
+            with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+                evidence.read_json(duplicate)
+            truncated = Path(directory) / "truncated.json"
+            truncated.write_text('{"value":')
+            with self.assertRaisesRegex(ValueError, "invalid JSON evidence"):
+                evidence.read_json(truncated)
 
         self.assertEqual(
             evidence.campaign_status(
@@ -3414,6 +3502,12 @@ class PairReplayContract(unittest.TestCase):
             "BLOCKED_ARM_BOOT_IDENTITY_CHANGED")
         source_sha = "a" * 40
         mapper_uuid = "SWAPZ-PRIMARY-" + "f" * 32
+        with mock.patch.object(
+                evidence, "run_text",
+                side_effect=[source_sha, "b" * 40]):
+            with self.assertRaisesRegex(
+                    ValueError, "HEAD == origin/main == source SHA"):
+                evidence.require_clean_source(source_sha)
 
         def ram_trace(peak=8192):
             self.assertEqual(peak % 1024, 0)
@@ -3682,6 +3776,8 @@ class PairReplayContract(unittest.TestCase):
             lambda item: item["samples"][13].update(
                 timestamp_utc="2026-11-03T00:00:00Z"),
             lambda item: item.update(source_sha="b" * 40),
+            lambda item: item.update(
+                mapper_uuid="SWAPZ-PRIMARY-" + "e" * 32),
             lambda item: item["samples"][13].update(mapper_present=False),
             lambda item: item.update(scope="target-owned-estimate"),
             lambda item: item.update(meminfo_unit="bytes"),
@@ -3859,6 +3955,19 @@ class PairReplayContract(unittest.TestCase):
                         source_sha, before_path, after_path,
                         summary_path, [pair_path], ram_trace_path)
             self.assertEqual(sealed["record_count"], 1)
+            pair_bytes = pair_path.read_bytes()
+            summary_bytes = summary_path.read_bytes()
+            self.assertEqual(
+                sealed["artifacts"]["pairs"][0]["sha256"],
+                hashlib.sha256(pair_bytes).hexdigest())
+            self.assertEqual(
+                sealed["artifacts"]["qualification_summary"]["sha256"],
+                hashlib.sha256(summary_bytes).hexdigest())
+            pair_path.write_bytes(pair_bytes + b"\n")
+            self.assertNotEqual(
+                sealed["artifacts"]["pairs"][0]["sha256"],
+                hashlib.sha256(pair_path.read_bytes()).hexdigest())
+            pair_path.write_bytes(pair_bytes)
             self.assertEqual(sealed["campaign_status"], "FAIL_OR_INCOMPLETE")
             self.assertIsNone(sealed["capacity_and_ram"])
             self.assertTrue(sealed["source_consistent"])
