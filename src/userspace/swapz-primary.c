@@ -9264,6 +9264,7 @@ static int swapz_primary_stop_active(void)
 	int complete_persisted = 0;
 	int result = -1;
 	int saved_errno = EIO;
+	const char *failure_phase = "admission";
 
 	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
 		errno = ENOTSUP;
@@ -9310,20 +9311,24 @@ static int swapz_primary_stop_active(void)
 		goto out;
 	stopping_persisted = 1;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-stopping");
+	failure_phase = "swapoff";
 	if (swapz_primary_deactivate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest,
 		    &swap_deactivated_by_call) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-swapoff");
+	failure_phase = "mapper-remove";
 	if (swapz_primary_dm_remove_mapper(
 		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-mapper-removed");
+	failure_phase = "module-unload";
 	if (swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, &manifest, 0,
 		    &module_unloaded_by_call) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-module-unloaded");
+	failure_phase = "header-verify";
 	if (swapz_primary_header_build(
 		    manifest.run_id, manifest.target.device_bytes,
 		    expected_header) < 0)
@@ -9342,24 +9347,31 @@ static int swapz_primary_stop_active(void)
 		goto out;
 	}
 	target_fd = -1;
+	failure_phase = "state-restored";
 	restored_state = stopping_state;
 	restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-restored");
+	failure_phase = "state-complete";
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &complete_state, 0) < 0)
 		goto out;
 	complete_persisted = 1;
+	failure_phase = "owner-release";
 	if (swapz_primary_release_partition_owner_at(
 		    recovery_fd, lock_fd, manifest.run_id, 0) < 0)
 		goto out;
 	result = 0;
 out:
 	saved_errno = errno ? errno : EIO;
+	if (result < 0)
+		fprintf(stderr,
+			"PRIMARY_STOP=FAILED phase=%s errno=%d error=%s\n",
+			failure_phase, saved_errno, strerror(saved_errno));
 	if (result < 0 && stopping_persisted && !complete_persisted &&
 	    recovery_fd >= 0 && lock_fd >= 0) {
 		int failure_errno = saved_errno;
@@ -9428,6 +9440,7 @@ static int swapz_primary_recover(void)
 	int complete_persisted = 0;
 	int result = -1;
 	int saved_errno = EIO;
+	const char *failure_phase = "admission";
 
 	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
 		errno = ENOTSUP;
@@ -9489,6 +9502,7 @@ static int swapz_primary_recover(void)
 		goto out;
 	}
 	target_fd = -1;
+	failure_phase = "state-normalize";
 
 	/*
 	 * An abrupt process exit cannot write RECOVERY_REQUIRED for itself.
@@ -9505,6 +9519,7 @@ static int swapz_primary_recover(void)
 			goto out;
 		state = recovery_required_state;
 	}
+	failure_phase = "state-recovering";
 	if (swapz_primary_transaction_manifest_matches_at(
 		    recovery_fd, lock_fd, &manifest, recovery_required_stage,
 		    sizeof(recovery_required_stage) /
@@ -9519,20 +9534,24 @@ static int swapz_primary_recover(void)
 	recovering_persisted = 1;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-recovering");
 
+	failure_phase = "swapoff";
 	if (swapz_primary_deactivate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest,
 		    &swap_deactivated_by_call) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-swapoff");
+	failure_phase = "mapper-remove";
 	if (swapz_primary_dm_remove_mapper(
 		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-mapper-removed");
+	failure_phase = "module-unload";
 	if (swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, &manifest, 1,
 		    &module_unloaded_by_call) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-module-unloaded");
+	failure_phase = "header-verify";
 
 	/* After all holders are gone, prove the same known header through an
 	 * exclusive manifest-bound descriptor before closing the transaction. */
@@ -9551,6 +9570,7 @@ static int swapz_primary_recover(void)
 		goto out;
 	}
 	target_fd = -1;
+	failure_phase = "state-restored";
 
 	restored_state = recovering_state;
 	restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
@@ -9558,18 +9578,24 @@ static int swapz_primary_recover(void)
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-restored");
+	failure_phase = "state-complete";
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &complete_state, 0) < 0)
 		goto out;
 	complete_persisted = 1;
+	failure_phase = "owner-release";
 	if (swapz_primary_release_partition_owner_at(
 		    recovery_fd, lock_fd, manifest.run_id, 0) < 0)
 		goto out;
 	result = 0;
 out:
 	saved_errno = errno ? errno : EIO;
+	if (result < 0)
+		fprintf(stderr,
+			"PRIMARY_RECOVER=FAILED phase=%s errno=%d error=%s\n",
+			failure_phase, saved_errno, strerror(saved_errno));
 	if (result < 0 && recovering_persisted && !complete_persisted &&
 	    recovery_fd >= 0 && lock_fd >= 0) {
 		int failure_errno = saved_errno;
