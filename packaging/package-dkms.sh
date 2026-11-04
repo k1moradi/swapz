@@ -451,6 +451,21 @@ verify_installed_module_set() {
   [[ "$count" == 1 && "$matched" == "$installed_module" ]]
 }
 
+prepare_exact_module_restore() {
+  local candidate count=0 rebuilt_module=""
+  for candidate in "${module_candidate_paths[@]}"; do
+    if [[ -e "$candidate" || -L "$candidate" ]]; then
+      count=$((count + 1))
+      rebuilt_module="$candidate"
+    fi
+  done
+  [[ "$count" == 1 && -f "$rebuilt_module" && ! -L "$rebuilt_module" ]] ||
+    return 1
+  if [[ "$rebuilt_module" != "$installed_module" ]]; then
+    rm -f -- "$rebuilt_module" || return 1
+  fi
+}
+
 verify_module_resolution() {
   local resolved_module
   resolved_module="$(modinfo -n dm_swapz 2>/dev/null || true)"
@@ -797,6 +812,7 @@ restore_uninstall_backup() {
   "$dkms_bin" add -m swapz -v "$version" || return 1
   "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
+  prepare_exact_module_restore || return 1
   install -d -m0755 "$installed_module_dir"
   install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
@@ -1248,6 +1264,7 @@ restore_previous_package() {
   "$dkms_bin" add -m swapz -v "$version" || return 1
   "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
+  prepare_exact_module_restore || return 1
   [[ -f "$backup_dir/installed-module" && ! -L "$backup_dir/installed-module" ]] ||
     return 1
   install -d -m0755 "$installed_module_dir"

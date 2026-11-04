@@ -151,6 +151,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_MODULE_LOOKUP_SAW_CLI_MARKER=str(
                 self.module_lookup_saw_cli_marker),
             SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS="0",
+            SWAPZ_FAKE_DKMS_MODULE_SUFFIX="",
             SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
             SWAPZ_FAKE_FAIL_AT="never",
             SWAPZ_FAKE_BUILD_SLEEP="0",
@@ -230,8 +231,9 @@ case "$cmd" in
     ;;
   install)
     [[ -f "$SWAPZ_DKMS_STATE" ]]
-    mkdir -p "$(dirname "$SWAPZ_TEST_INSTALLED_MODULE")"
-    printf 'dkms-rebuilt-not-qualified\n' > "$SWAPZ_TEST_INSTALLED_MODULE"
+    module_path="$SWAPZ_TEST_INSTALLED_MODULE${SWAPZ_FAKE_DKMS_MODULE_SUFFIX:-}"
+    mkdir -p "$(dirname "$module_path")"
+    printf 'dkms-rebuilt-not-qualified\n' > "$module_path"
     ;;
   remove)
     rm -f "$SWAPZ_DKMS_STATE" "$SWAPZ_TEST_INSTALLED_MODULE"*
@@ -902,6 +904,43 @@ exec "{flock_binary}" "$@"
                 self.assertEqual(self.installed_module.read_bytes(), old_module)
                 self.assertFalse(
                     list((self.home / "transactions").glob("swapz-package.*")))
+
+    def test_compressed_dkms_image_is_normalized_during_rollbacks(self):
+        compressed_module = Path(str(self.installed_module) + ".zst")
+        compressed_env = {"SWAPZ_FAKE_DKMS_MODULE_SUFFIX": ".zst"}
+
+        first = self.invoke("install", compressed_env)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        old_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        old_module = self.installed_module.read_bytes()
+        self.assertFalse(compressed_module.exists())
+
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        failed_upgrade = self.invoke("install", {
+            **compressed_env,
+            "SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1",
+        })
+        self.assertNotEqual(failed_upgrade.returncode, 0)
+        self.assertIn("attempting transaction rollback", failed_upgrade.stderr)
+        self.assertEqual(
+            (self.prefix / "sbin/swapzctl").read_bytes(), old_cli)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        self.assertFalse(compressed_module.exists())
+        self.assertFalse(
+            list((self.home / "transactions").glob("swapz-package.*")))
+
+        failed_uninstall = self.invoke("uninstall", {
+            **compressed_env,
+            "SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed",
+        })
+        self.assertNotEqual(failed_uninstall.returncode, 0)
+        self.assertIn("attempting transaction rollback", failed_uninstall.stderr)
+        self.assertEqual(
+            (self.prefix / "sbin/swapzctl").read_bytes(), old_cli)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        self.assertFalse(compressed_module.exists())
+        self.assertEqual(self.uninstall_transactions(), [])
 
     def test_install_cli_only_published_after_systemd_reload(self):
         gated = {"SWAPZ_TEST_ASSERT_CLI_ABSENT_AT_RELOAD": "1"}

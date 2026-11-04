@@ -128,8 +128,11 @@ DKMS still performs a current-kernel compatibility build, but that rebuild is
 not promoted as the qualified image. After DKMS succeeds, packaging replaces
 the DKMS-installed image with the byte-exact qualified `dm-swapz.ko`, hashes it
 before and after `depmod`, and requires `modinfo -n dm_swapz` to resolve to
-that owned path. The qualified module digest, the retained package copy, and
-the module selected for a later checked load therefore identify the same bytes.
+that owned path. Install and both rollback paths normalize a single DKMS-built
+compressed or uncompressed candidate before restoring the exact uncompressed
+qualified image, so rollback cannot leave a second module candidate behind.
+The qualified module digest, the retained package copy, and the module selected
+for a later checked load therefore identify the same bytes.
 
 Install/upgrade is serialized and transactional. An identical verified install
 is a no-op. A non-identical upgrade refuses a loaded swapz module or existing
