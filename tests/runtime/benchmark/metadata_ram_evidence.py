@@ -79,18 +79,33 @@ def parse_meminfo_counters(text: Any) -> dict[str, int]:
     return values
 
 
+MAX_UINT32 = (1 << 32) - 1
+MAX_UINT64 = (1 << 64) - 1
+
+
+def _checked_product(first: int, second: int, limit: int) -> int | None:
+    """Model an unsigned allocation-length multiplication without wrapping."""
+    if (any(type(value) is not int or value < 0
+            for value in (first, second, limit)) or
+            (first and second > limit // first)):
+        return None
+    return first * second
+
+
 def maximum_logical_pages_for_partition(
         partition_bytes: Any, *, size_t_max: int = SIZE_T_MAX) -> int | None:
     """Mirror production header/segment/reserve/addressability admission.
 
-    This is allocation-free sizing only. Loaded allocation success and actual
-    page-table/allocator overhead still require host measurement.
+    Arithmetic is bounded explicitly, even though Python integers cannot
+    overflow. This predicts index lengths, never successful kernel allocation
+    or measured host peak RAM.
     """
     if (
             type(partition_bytes) is not int or partition_bytes <= 0 or
-            partition_bytes > (1 << 64) - 1 or
+            partition_bytes > MAX_UINT64 or
             partition_bytes % BLOCK_BYTES or
-            type(size_t_max) is not int or size_t_max <= 0):
+            type(size_t_max) is not int or
+            size_t_max <= 0 or size_t_max > MAX_UINT64):
         return None
     total_blocks = partition_bytes // BLOCK_BYTES
     if total_blocks <= 1:
@@ -99,24 +114,26 @@ def maximum_logical_pages_for_partition(
         (total_blocks - 1) // SEGMENT_BLOCKS) * SEGMENT_BLOCKS
     if (
             physical_blocks < 3 * SEGMENT_BLOCKS or
-            physical_blocks > (1 << 32) - 1 or
-            physical_blocks * 2 > size_t_max):
+            physical_blocks > MAX_UINT32 or
+            _checked_product(physical_blocks, 2, size_t_max) is None):
         return None
 
     def admitted(logical_pages: int) -> bool:
         if (
-                logical_pages <= 0 or logical_pages > (1 << 32) - 1 or
-                logical_pages * 16 > size_t_max):
+                not 0 < logical_pages <= MAX_UINT32 or
+                _checked_product(logical_pages, 16, size_t_max) is None):
             return False
+        # The production header divides before addition to avoid u32 wrap.
         reserve_blocks = max(
-            (logical_pages + 7) // 8, MINIMUM_GC_RESERVE_BLOCKS)
+            logical_pages // 8 + (logical_pages % 8 != 0),
+            MINIMUM_GC_RESERVE_BLOCKS)
         if reserve_blocks >= physical_blocks:
             return False
         foreground_blocks = (
             (physical_blocks - reserve_blocks) // SEGMENT_BLOCKS
         ) * SEGMENT_BLOCKS
-        return (
-            logical_pages + FOREGROUND_HEADROOM_BLOCKS <= foreground_blocks)
+        required_blocks = logical_pages + FOREGROUND_HEADROOM_BLOCKS
+        return required_blocks <= MAX_UINT64 and required_blocks <= foreground_blocks
 
     low, high, maximum = 1, physical_blocks, 0
     while low <= high:
@@ -127,7 +144,6 @@ def maximum_logical_pages_for_partition(
         else:
             high = middle - 1
     return maximum or None
-
 
 def _median_twice(values: list[int]) -> int:
     """Return exactly twice the integer-sample median without float rounding."""
@@ -397,7 +413,7 @@ def validate_metadata_ram_trace(
             if (
                     wall_elapsed_ns < 0 or
                     abs(wall_elapsed_ns - elapsed_ns) >
-                    CLOCK_AGREEMENT_TOLERANCE_NS):
+                    SAMPLING_INTERVAL_NS // 2):
                 raise ValueError(
                     "metadata RAM sample UTC/monotonic clocks disagree")
         previous_monotonic = monotonic_ns
@@ -472,6 +488,18 @@ def validate_metadata_ram_trace(
         sample["mem_available_kib"] for sample in baseline]
     baseline_median_available_twice_kib = _median_twice(
         baseline_available_kib)
+    # A median defeats one outlier in the peak calculation, but non-quiescent
+    # baseline observations are themselves inadequate qualification evidence.
+    # Reject excursions beyond one percent (at least 64 KiB), for all three
+    # raw host-memory counters, rather than cherry-picking a favorable median.
+    for field in ("mem_available_kib", "s_unreclaim_kib",
+                  "vmalloc_used_kib"):
+        observed = [sample[field] for sample in baseline]
+        median_twice = _median_twice(observed)
+        allowed_twice_kib = max(128, median_twice // 100)
+        if any(abs(2 * value - median_twice) > allowed_twice_kib
+               for value in observed):
+            raise ValueError("metadata RAM pre-create baseline is unstable")
     # Constructor allocations occur before Device Mapper publishes the exact
     # UUID, so the qualifying target-lifecycle window starts with the first
     # initialization sample and ends with the last target-present teardown
@@ -512,6 +540,16 @@ def validate_metadata_ram_trace(
         sample["s_unreclaim_kib"] for sample in baseline])
     baseline_vmalloc_used_twice_kib = _median_twice([
         sample["vmalloc_used_kib"] for sample in baseline])
+    # A passing recovery median cannot conceal renewed leakage in the final
+    # observation. Require the final target-absent reading to recover too.
+    final_recovery = recovery[-1]
+    if (2 * final_recovery["mem_available_kib"] <
+            baseline_median_available_twice_kib or
+            2 * final_recovery["s_unreclaim_kib"] >
+            baseline_s_unreclaim_twice_kib or
+            2 * final_recovery["vmalloc_used_kib"] >
+            baseline_vmalloc_used_twice_kib):
+        raise ValueError("metadata RAM final teardown sample did not recover")
     if (
             recovery[-1]["monotonic_ns"] -
             recovery[0]["monotonic_ns"] < 1_000_000_000 or
