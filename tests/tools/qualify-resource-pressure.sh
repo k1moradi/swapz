@@ -39,6 +39,7 @@ PAIR_REPLAY_TIMEOUT_SECONDS=280
 PAIR_OUTER_SLACK_SECONDS=$PAIR_REPLAY_TIMEOUT_SECONDS
 PAIR_OUTER_SECONDS=$((PAIR_REPLAY_TIMEOUT_SECONDS * 2 + PAIR_OUTER_SLACK_SECONDS))
 MIN_AVAILABLE_KIB=$((1024 * 1024))
+MIN_AVAILABLE_BYTES=$((MIN_AVAILABLE_KIB * 1024))
 PRESSURE_SCRIPT="$ROOT/tests/runtime/benchmark/resource-pressure.py"
 PAIR="$ROOT/tests/tools/benchmark-owned-pair.sh"
 
@@ -252,10 +253,10 @@ printf 'ID36_HOST_MEMORY=source:/proc/meminfo unit:kB total:%s initial_available
 read_cgroup_root_memory_inventory() {
     local memory_max_path="$CGROUP_ROOT/memory.max"
     local memory_current_path="$CGROUP_ROOT/memory.current"
-    local memory_max memory_current
+    local memory_max memory_current headroom_status
 
     if [[ ! -e $memory_max_path && ! -e $memory_current_path ]]; then
-        printf '%s\n' 'root-exempt root-exempt'
+        printf '%s\n' 'root-exempt root-exempt unbounded'
         return 0
     fi
     [[ -e $memory_max_path && -e $memory_current_path ]] || return 1
@@ -266,16 +267,37 @@ read_cgroup_root_memory_inventory() {
         return 1
     fi
     [[ $memory_current =~ ^(0|[1-9][0-9]*)$ ]] || return 1
-    printf '%s %s\n' "$memory_max" "$memory_current"
+    if [[ $memory_max == max ]]; then
+        headroom_status=unbounded
+    else
+        headroom_status="$(awk -v limit="$memory_max" \
+            -v current="$memory_current" -v required="$MIN_AVAILABLE_BYTES" '
+            BEGIN {
+                if (current > limit)
+                    exit 1
+                if ((limit - current) >= required)
+                    print "sufficient"
+                else
+                    print "insufficient"
+            }
+        ')" || return 1
+    fi
+    printf '%s %s %s\n' "$memory_max" "$memory_current" "$headroom_status"
 }
 
 if ! parent_memory_inventory="$(read_cgroup_root_memory_inventory)"; then
     printf '%s\n' 'BLOCKED: ID36 cgroup-root memory inventory is inconsistent or malformed' >&2
     exit 2
 fi
-read -r parent_memory_max parent_memory_current <<< "$parent_memory_inventory"
-printf 'ID36_PARENT_CGROUP_MEMORY=source:%s memory_max:%s memory_current:%s\n' \
-    "$CGROUP_ROOT" "$parent_memory_max" "$parent_memory_current"
+read -r parent_memory_max parent_memory_current parent_headroom_status \
+    <<< "$parent_memory_inventory"
+printf 'ID36_PARENT_CGROUP_MEMORY=source:%s memory_max:%s memory_current:%s headroom:%s required_headroom_bytes:%s\n' \
+    "$CGROUP_ROOT" "$parent_memory_max" "$parent_memory_current" \
+    "$parent_headroom_status" "$MIN_AVAILABLE_BYTES"
+if [[ $parent_headroom_status == insufficient ]]; then
+    printf '%s\n' 'BLOCKED: ID36 cgroup root lacks 1 GiB effective memory headroom' >&2
+    exit 2
+fi
 if (( available_kib < MIN_AVAILABLE_KIB )); then
     printf '%s\n' 'BLOCKED: ID36 host lacks 1 GiB MemAvailable safety headroom' >&2
     exit 2

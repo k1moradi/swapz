@@ -5560,12 +5560,17 @@ int main(void)
             "OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo", preflight)
         self.assertIn("admission:no", preflight)
         self.assertIn("MIN_AVAILABLE_KIB=$((1024 * 1024))", pressure)
+        self.assertIn(
+            "MIN_AVAILABLE_BYTES=$((MIN_AVAILABLE_KIB * 1024))", pressure)
         self.assertIn("for admission_sample in 1 2 3 4 5; do", pressure)
         self.assertIn("if (( available_kib >= MIN_AVAILABLE_KIB )); then", pressure)
         self.assertIn("sleep 1", pressure)
         self.assertIn("ID36_PARENT_CGROUP_MEMORY=source:", pressure)
-        self.assertIn("root-exempt root-exempt", pressure)
+        self.assertIn("root-exempt root-exempt unbounded", pressure)
         self.assertNotIn("BLOCKED: ID36 parent cgroup budget below 896 MiB", pressure)
+        self.assertIn(
+            "BLOCKED: ID36 cgroup root lacks 1 GiB effective memory headroom",
+            pressure)
         self.assertIn("BLOCKED: ID36 host lacks 1 GiB MemAvailable", pressure)
         self.assertLess(
             pressure.index("START_ID36_RESOURCE_PRESSURE=admission"),
@@ -5610,8 +5615,9 @@ int main(void)
         cgroup_end = pressure.index("\n}\n", cgroup_start) + 2
         cgroup_helper = pressure[cgroup_start:cgroup_end]
         cgroup_command = (
-            "set -euo pipefail\nCGROUP_ROOT=$1\n" + cgroup_helper +
-            "\nread_cgroup_root_memory_inventory\n")
+            "set -euo pipefail\nCGROUP_ROOT=$1\n"
+            "MIN_AVAILABLE_BYTES=$((1024 * 1024 * 1024))\n" +
+            cgroup_helper + "\nread_cgroup_root_memory_inventory\n")
         with tempfile.TemporaryDirectory(
                 prefix="swapz-id36-cgroup-root-") as folder:
             root = Path(folder)
@@ -5624,25 +5630,37 @@ int main(void)
             result = cgroup_inventory()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
-                result.stdout.strip(), "root-exempt root-exempt")
+                result.stdout.strip(), "root-exempt root-exempt unbounded")
 
             (root / "memory.max").write_text("max\n")
             (root / "memory.current").write_text("123\n")
             result = cgroup_inventory()
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), "max 123")
+            self.assertEqual(result.stdout.strip(), "max 123 unbounded")
 
-            # memory.max is containment, not a second ID36 admission floor.
-            (root / "memory.max").write_text(str(512 * 1024 * 1024) + "\n")
+            (root / "memory.max").write_text(str(2 * 1024 * 1024 * 1024) + "\n")
+            (root / "memory.current").write_text(str(512 * 1024 * 1024) + "\n")
             result = cgroup_inventory()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
-                result.stdout.strip(), f"{512 * 1024 * 1024} 123")
+                result.stdout.strip(),
+                f"{2 * 1024 * 1024 * 1024} {512 * 1024 * 1024} sufficient")
+
+            # The same frozen 1 GiB floor also applies to a finite ancestor
+            # budget so an environmental cgroup cap cannot become a later OOM.
+            (root / "memory.max").write_text(str(512 * 1024 * 1024) + "\n")
+            (root / "memory.current").write_text("123\n")
+            result = cgroup_inventory()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                f"{512 * 1024 * 1024} 123 insufficient")
 
             for maximum, current in (
                     ("01\n", "123\n"),
                     ("max\n", "0123\n"),
-                    ("garbage\n", "123\n")):
+                    ("garbage\n", "123\n"),
+                    ("123\n", "124\n")):
                 with self.subTest(maximum=maximum, current=current):
                     (root / "memory.max").write_text(maximum)
                     (root / "memory.current").write_text(current)
