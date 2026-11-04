@@ -96,8 +96,18 @@ static struct {
 	ino_t path_inode;
 	enum admission_change change;
 	unsigned int opens, reads, writes, syncs, closes;
+	const char *observed_identity;
+	unsigned int observed_identity_calls;
 	int enabled, path_is_symlink;
 } admission_fixture;
+
+static void admission_observe_identity(const char *identity)
+{
+	if (!identity || !admission_fixture.reads)
+		return;
+	admission_fixture.observed_identity = identity;
+	++admission_fixture.observed_identity_calls;
+}
 
 static const char *admission_route(const char *path, char mapped[PATH_MAX])
 {
@@ -194,6 +204,8 @@ static int admission_stat(const char *path, struct stat *info)
 	const char *actual;
 
 	if (admission_fixture.enabled && !strcmp(path, ADMISSION_ALIAS)) {
+		if (admission_fixture.change == ADMISSION_ALIAS_CHANGED)
+			admission_observe_identity("by-partuuid-alias");
 		*info = admission_block_stat(admission_fixture.alias_device, 17U);
 		return 0;
 	}
@@ -211,6 +223,10 @@ static int admission_lstat(const char *path, struct stat *info)
 	const char *actual;
 
 	if (admission_fixture.enabled && !strcmp(path, ADMISSION_DEVICE)) {
+		if (admission_fixture.change == ADMISSION_PATH_SYMLINK)
+			admission_observe_identity("path-symlink-substitution");
+		else if (admission_fixture.change == ADMISSION_PATH_INODE_CHANGED)
+			admission_observe_identity("same-dev_t-new-inode");
 		*info = admission_block_stat(makedev(8U, 1U),
 					    admission_fixture.path_inode);
 		if (admission_fixture.path_is_symlink)
@@ -239,6 +255,15 @@ static int admission_open(const char *path, int flags, ...)
 	char mapped[PATH_MAX];
 	const char *actual;
 	mode_t mode = 0;
+
+	if (admission_fixture.enabled && admission_fixture.reads) {
+		if (admission_fixture.change == ADMISSION_BAD_PARTUUID &&
+		    !strcmp(path, "/sys/dev/block/8:1/uevent"))
+			admission_observe_identity("sysfs-PARTUUID");
+		else if (admission_fixture.change == ADMISSION_PARENT_CHANGED &&
+			 !strcmp(path, ADMISSION_PARENT "/dev"))
+			admission_observe_identity("parent-dev_t");
+	}
 
 	if (flags & O_CREAT) {
 		va_list arguments;
@@ -284,6 +309,8 @@ static int admission_ioctl(int fd, unsigned long request, ...)
 	va_end(arguments);
 	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
 		if (request == BLKGETSIZE64) {
+			if (admission_fixture.change == ADMISSION_GEOMETRY_CHANGED)
+				admission_observe_identity("BLKGETSIZE64");
 			*(unsigned long long *)argument =
 				admission_fixture.geometry_bytes;
 			return 0;
@@ -479,6 +506,11 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		if (status != 2 || observed_errno != cases[index].expected_errno ||
 		    !strstr(report, "REFUSED: target identity changed before "
 			    "header write") ||
+		    !strstr(report, strerror(cases[index].expected_errno)) ||
+		    !admission_fixture.observed_identity ||
+		    strcmp(admission_fixture.observed_identity,
+			   cases[index].observed_identity) ||
+		    admission_fixture.observed_identity_calls != 1U ||
 		    strstr(report, ADMISSION_DEVICE) ||
 		    admission_fixture.opens != 1U ||
 		    admission_fixture.reads != 1U ||
@@ -488,9 +520,14 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		    memcmp(admission_fixture.block_zero, unchanged,
 			   sizeof(unchanged))) {
 			fprintf(stderr, "FAIL: phase=final-prewrite "
-				"reason=snapshot-refusal observed=%s errno=%d "
-				"expected=%d status=%d opens=%u reads=%u writes=%u\n",
+				"reason=snapshot-refusal expected_identity=%s "
+				"observed_identity=%s identity_reads=%u errno=%d "
+				"expected_errno=%d status=%d opens=%u reads=%u "
+				"writes=%u\n",
 				cases[index].observed_identity,
+				admission_fixture.observed_identity ?
+					admission_fixture.observed_identity : "none",
+				admission_fixture.observed_identity_calls,
 				observed_errno, cases[index].expected_errno,
 				status, admission_fixture.opens,
 				admission_fixture.reads, admission_fixture.writes);
@@ -556,6 +593,21 @@ static FILE *test_format_fopen(const char *path, const char *mode)
 {
 	char mapped[PATH_MAX];
 	const char *actual;
+
+	if (admission_fixture.enabled && admission_fixture.reads) {
+		if (admission_fixture.change == ADMISSION_SWAPFILE_ACTIVE &&
+		    !strcmp(path, "/proc/swaps"))
+			admission_observe_identity("active-swapfile-unauthenticated");
+		else if (admission_fixture.change == ADMISSION_PARENT_MOUNTED &&
+			 !strcmp(path, "/proc/3031/mountinfo"))
+			admission_observe_identity("foreign-parent-mount");
+		else if (admission_fixture.change == ADMISSION_FOREIGN_DENIED &&
+			 !strcmp(path, "/proc/3031/mountinfo"))
+			admission_observe_identity("foreign-mount-namespace-EACCES");
+		else if (admission_fixture.change == ADMISSION_LIVE_PID_TABLE_MISSING &&
+			 !strcmp(path, "/proc/3031/mountinfo"))
+			admission_observe_identity("live-pid-mountinfo-missing");
+	}
 
 	if (test_fopen_denied_path && !strcmp(path, test_fopen_denied_path)) {
 		errno = EACCES;

@@ -3753,8 +3753,11 @@ zero for PARTUUID drift, changed parent, foreign-mounted parent, active
 swapfile, unreadable foreign mount namespace, vanished PID mount table with
 a still-live namespace, stale size, substituted alias, symlink, and same-dev_t
 inode replacement. Diagnostics must not expose private device paths or
-serials. A disappeared PID whose mount namespace is also absent is a separate
-permitted-exit negative control, not an unsafe PASS. Retain intentionally
+serials. Each case must prove the mutated identity surface was actually
+re-read after the accepted block-zero snapshot rather than deriving the
+observed category only from the fixture selector, and the captured refusal
+diagnostic must carry the expected errno text. A disappeared PID whose mount
+namespace is also absent is a separate permitted-exit negative control, not an unsafe PASS. Retain intentionally
 unsafe cloned-identity negative controls, and never equate successful
 rootless snapshots with a loaded kernel's post-snapshot exclusive-descriptor
 behavior: that remains **NOT PROVEN** until separate safe privileged testing.
