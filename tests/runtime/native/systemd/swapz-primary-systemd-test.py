@@ -367,6 +367,170 @@ class UnitContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
 
+class UnitSandboxContractTests(unittest.TestCase):
+    """Static parser regression for sandbox and ownership-sensitive unit drift."""
+
+    @staticmethod
+    def directives(contents: str) -> dict[tuple[str, str], tuple[str, ...]]:
+        parsed: dict[tuple[str, str], list[str]] = {}
+        section = ""
+        for original_line in contents.splitlines():
+            line = original_line.strip()
+            if not line or line.startswith(("#", ";")):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+                continue
+            if not section or "=" not in line:
+                raise ValueError(f"invalid unit directive: {line}")
+            key, value = line.split("=", 1)
+            parsed.setdefault((section, key), []).append(value)
+        return {key: tuple(values) for key, values in parsed.items()}
+
+    def assert_secure_units(
+        self, *, mapper: str, verifier: str, health: str, passive_swap: str
+    ) -> None:
+        files = {
+            "mapper": self.directives(mapper),
+            "verifier": self.directives(verifier),
+            "health": self.directives(health),
+            "passive_swap": self.directives(passive_swap),
+        }
+
+        def require(unit: str, section: str, directive: str, value: str) -> None:
+            self.assertEqual(
+                files[unit].get((section, directive)),
+                (value,),
+                f"{unit}: {section}.{directive}",
+            )
+
+        require("mapper", "Unit", "DefaultDependencies", "no")
+        require("mapper", "Unit", "Requires", "-.mount")
+        require("mapper", "Unit", "RequiresMountsFor", "/var/lib/swapz/physical-recovery")
+        require(
+            "mapper", "Unit", "After",
+            r"-.mount systemd-modules-load.service dev-mapper-swapz\x2dprimary.swap",
+        )
+        require("mapper", "Unit", "Before", "swap.target shutdown.target")
+        require("mapper", "Unit", "Conflicts", "shutdown.target")
+        require("mapper", "Unit", "RefuseManualStart", "yes")
+        require("mapper", "Unit", "RefuseManualStop", "yes")
+        require("mapper", "Service", "Type", "oneshot")
+        require("mapper", "Service", "RemainAfterExit", "yes")
+        require("mapper", "Service", "TimeoutStartSec", "120s")
+        require("mapper", "Service", "TimeoutStopSec", "120s")
+        require("mapper", "Service", "RuntimeDirectory", "swapz")
+        require("mapper", "Service", "RuntimeDirectoryMode", "0700")
+        require("mapper", "Install", "WantedBy", "swap.target")
+        # This exclusion mask keeps CAP_SYS_ADMIN (DM/swapon/swapoff),
+        # CAP_SYS_MODULE (finit_module), and native device-node access.
+        require(
+            "mapper", "Service", "CapabilityBoundingSet",
+            "~CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE "
+            "CAP_SYS_PTRACE CAP_SYS_BOOT CAP_SYS_TIME CAP_SYSLOG "
+            "CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_BPF CAP_PERFMON "
+            "CAP_CHECKPOINT_RESTORE",
+        )
+        require(
+            "mapper", "Service", "ReadOnlyPaths",
+            "-/var/lib/swapz-package-transactions",
+        )
+        for directive, value in (
+            ("NoNewPrivileges", "yes"),
+            ("ProtectSystem", "full"),
+            ("ProtectHome", "yes"),
+            ("PrivateTmp", "yes"),
+            ("LockPersonality", "yes"),
+            ("RestrictRealtime", "yes"),
+            ("RestrictSUIDSGID", "yes"),
+            ("SystemCallArchitectures", "native"),
+        ):
+            require("mapper", "Service", directive, value)
+        self.assertNotIn(("Service", "ProtectKernelModules"), files["mapper"])
+        self.assertNotIn(("Service", "PrivateDevices"), files["mapper"])
+
+        for unit in ("verifier", "health"):
+            require(unit, "Service", "NoNewPrivileges", "yes")
+            # DM status ioctls can require CAP_SYS_ADMIN; neither observer
+            # receives the mapper's CAP_SYS_MODULE.
+            require(unit, "Service", "CapabilityBoundingSet", "CAP_SYS_ADMIN")
+            require(unit, "Service", "ProtectHome", "yes")
+            require(unit, "Service", "PrivateTmp", "yes")
+            require(unit, "Service", "ProtectKernelModules", "yes")
+            require(unit, "Service", "RestrictRealtime", "yes")
+            require(unit, "Service", "LockPersonality", "yes")
+            require(unit, "Service", "SystemCallArchitectures", "native")
+            self.assertNotIn(("Unit", "Wants"), files[unit])
+            self.assertNotIn(("Unit", "Requires"), files[unit])
+        require(
+            "verifier", "Unit", "After",
+            r"swapz-primary-mapper.service dev-mapper-swapz\x2dprimary.swap",
+        )
+        require("verifier", "Service", "ProtectSystem", "full")
+        require(
+            "verifier", "Service", "ReadOnlyPaths",
+            "-/var/lib/swapz/physical-recovery "
+            "-/var/lib/swapz-package-transactions",
+        )
+        require("verifier", "Service", "TimeoutStartSec", "30s")
+        require("verifier", "Install", "WantedBy", "multi-user.target")
+        require("health", "Service", "ProtectSystem", "strict")
+        require("health", "Service", "Restart", "on-failure")
+        require("health", "Service", "TimeoutStopSec", "10s")
+        require("health", "Unit", "ConditionPathExists", "/dev/mapper/swapz-primary")
+        require("health", "Install", "WantedBy", "swap.target")
+
+        require("passive_swap", "Unit", "RefuseManualStart", "yes")
+        require("passive_swap", "Unit", "RefuseManualStop", "yes")
+        require("passive_swap", "Swap", "What", "/dev/mapper/swapz-primary")
+        for section in ("Unit", "Install"):
+            for directive in ("Alias", "WantedBy", "RequiredBy", "Also"):
+                self.assertNotIn((section, directive), files["passive_swap"])
+
+    def test_units_enforce_sandbox_and_passive_ordering(self) -> None:
+        self.assert_secure_units(
+            mapper=read_text(MAPPER_SERVICE),
+            verifier=read_text(BOOT_VERIFY_SERVICE),
+            health=read_text(RUNTIME_HEALTH_SERVICE),
+            passive_swap=read_text(PRIMARY_SWAP),
+        )
+
+    def test_unit_drift_is_rejected_without_systemd_or_root(self) -> None:
+        original = {
+            "mapper": read_text(MAPPER_SERVICE),
+            "verifier": read_text(BOOT_VERIFY_SERVICE),
+            "health": read_text(RUNTIME_HEALTH_SERVICE),
+            "passive_swap": read_text(PRIMARY_SWAP),
+        }
+        mutations = (
+            ("missing recovery mount", "mapper", "RequiresMountsFor=/var/lib/swapz/physical-recovery", "RequiresMountsFor="),
+            ("lost root ordering", "mapper", "After=-.mount", "After=systemd-modules-load.service"),
+            ("lost stop ordering", "mapper", "Before=swap.target shutdown.target", "Before=shutdown.target"),
+            ("unbounded startup", "mapper", "TimeoutStartSec=120s", "TimeoutStartSec=infinity"),
+            ("unbounded stop", "mapper", "TimeoutStopSec=120s", "TimeoutStopSec=infinity"),
+            ("privilege escalation", "mapper", "NoNewPrivileges=yes", "NoNewPrivileges=no"),
+            ("module capability excluded", "mapper", "CAP_NET_RAW", "CAP_SYS_MODULE"),
+            ("module loading disabled", "mapper", "ProtectSystem=full", "ProtectKernelModules=yes"),
+            ("unprotected filesystem", "mapper", "ProtectSystem=full", "ProtectSystem=no"),
+            ("journal writable", "mapper", "ReadOnlyPaths=-/var/lib/swapz-package-transactions", "ReadOnlyPaths="),
+            ("verifier starts mapper", "verifier", "After=swapz-primary-mapper.service", "Wants=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
+            ("verifier may alter recovery", "verifier", "ReadOnlyPaths=-/var/lib/swapz/physical-recovery", "ReadOnlyPaths="),
+            ("verifier can load modules", "verifier", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
+            ("health can load modules", "health", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
+            ("health can edit filesystem", "health", "ProtectSystem=strict", "ProtectSystem=full"),
+            ("health starts mapper", "health", "After=swapz-primary-mapper.service", "Requires=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
+            ("passive swap enabled", "passive_swap", "TimeoutSec=120s", "TimeoutSec=120s\n\n[Install]\nWantedBy=swap.target"),
+            ("raw swap alias", "passive_swap", "TimeoutSec=120s", "TimeoutSec=120s\n\n[Install]\nAlias=dev-disk-by-partuuid-unsafe.swap"),
+        )
+        for name, file_key, old, new in mutations:
+            with self.subTest(name=name):
+                self.assertIn(old, original[file_key])
+                changed = original.copy()
+                changed[file_key] = original[file_key].replace(old, new, 1)
+                with self.assertRaises(AssertionError, msg=name):
+                    self.assert_secure_units(**changed)
+
+
 class ControlledLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="swapz-lifecycle-")
@@ -473,6 +637,25 @@ class ControlledLifecycleTests(unittest.TestCase):
             ["swapzctl:stop", "runtime:stop-observe"],
         )
 
+
+
+    def test_activation_guard_refusal_blocks_all_mapper_operations(self) -> None:
+        env = self.env.copy()
+        env["MOCK_RUNTIME_STATUS"] = "1"
+        self.assertNotEqual(self.execute_start_contract(env), 0)
+        self.assertEqual(
+            self.log.read_text(encoding="ascii").splitlines(),
+            ["runtime:activation-guard"],
+        )
+
+    def test_cold_boot_preflight_refusal_blocks_recovery_prepare_and_start(self) -> None:
+        env = self.env.copy()
+        env["MOCK_PREFLIGHT_STATUS"] = "1"
+        self.assertNotEqual(self.execute_start_contract(env), 0)
+        self.assertEqual(
+            self.log.read_text(encoding="ascii").splitlines(),
+            ["runtime:activation-guard", "verify:preflight"],
+        )
 
 
 class BootVerifierTests(unittest.TestCase):
@@ -1601,6 +1784,33 @@ class BootVerifierTests(unittest.TestCase):
                 self.assert_activation_revoked()
 
 
+    def test_preflight_refusal_revokes_activation_but_preserves_durable_evidence(self) -> None:
+        self.arm_then_reboot()
+        arm_file = self.report / "armed.env"
+        saved_arm = arm_file.read_bytes()
+        saved_records = {
+            path.name: path.read_bytes()
+            for path in self.recovery.iterdir()
+            if path.is_file()
+        }
+        env = self.env.copy()
+        env["MOCK_PARTUUID"] = OTHER_PARTUUID
+        blocked = self.run_verifier("preflight", env=env)
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
+        self.assertIn("selected PARTUUID changed after arming", blocked.stderr)
+        self.assert_activation_revoked()
+        self.assertEqual(arm_file.read_bytes(), saved_arm)
+        self.assertEqual(
+            {
+                path.name: path.read_bytes()
+                for path in self.recovery.iterdir()
+                if path.is_file()
+            },
+            saved_records,
+        )
+
+
 class RuntimeHealthTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="swapz-runtime-health-")
@@ -2391,6 +2601,28 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(observed.returncode, 2, observed.stderr)
         self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
         self.assertNotIn("failures=target_failed", observed.stderr)
+
+
+    def test_monitor_process_success_does_not_turn_missing_kernel_status_healthy(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_STATUS_UNAVAILABLE"] = "1"
+        # The monitor keeps reporting; its zero exit code only means the
+        # bounded test loop completed, not that mapper telemetry is healthy.
+        monitor = self.run_helper("monitor", env)
+        self.assertEqual(monitor.returncode, 0, monitor.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", monitor.stderr)
+        self.assertIn("mapper_status_unavailable", monitor.stderr)
+        once = self.run_helper("once", env)
+        self.assertEqual(once.returncode, 2, once.stderr)
+
+    def test_failed_shutdown_with_unreadable_swap_inventory_never_claims_safe(self) -> None:
+        (self.proc / "swaps").unlink()
+        observed = self.run_helper("stop-observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_STOP=FAIL", observed.stderr)
+        self.assertIn("reason=swap_or_mapper_still_present", observed.stderr)
+        self.assertIn("action=none operator_next=inspect_failed_primary_stop_no_retry", observed.stderr)
+        self.assertIn("mapper_present=1 active_swap=1", observed.stderr)
 
 
 if __name__ == "__main__":
