@@ -379,6 +379,8 @@ done
 [[ ! -d /sys/module/dm_swapz && -r /proc/swaps ]] ||
     fail "another dm_swapz loaded or swap inventory unavailable"
 SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-benchmark.XXXXXXXX")"
+printf 'pid=%s\nsource_sha=%s\n' "$$" "$VALIDATED_SOURCE" \
+    > "$SESSION/.swapz-benchmark-owner"
 exec > >(tee -a "$SESSION/session.log") 2>&1
 SWAPS="$(cat /proc/swaps)"
 SWAPS_ID="$(printf '%s
@@ -523,6 +525,11 @@ cleanup() {
         note 'BLOCKED: retain all remaining resources for read-only investigation'
     elif (( result == 0 )); then
         note 'PASS: isolated pair and ordinary teardown'
+        # The resource-pressure gate may later discard large replay inputs
+        # from this exact successful, fully torn-down session. Failed or
+        # quarantined sessions never receive this marker and remain intact.
+        printf 'pid=%s\nsource_sha=%s\n' "$$" "$SOURCE" \
+            > "$SESSION/.swapz-benchmark-complete"
     fi
     note "EVIDENCE=$SESSION/session.log"
     exit "$result"

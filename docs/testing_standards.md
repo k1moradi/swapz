@@ -2956,6 +2956,16 @@ have at least 1 GiB MemAvailable before this destructive-to-performance but
 RAM-only stress begins; otherwise qualification is BLOCKED rather than silently
 weakened.
 
+Immediately before reading the ID36 host-memory inventory, the helper removes
+only `fixture.bin`, `plan/trace.jsonl`, and `plan/manifest.json` from benchmark
+session directories carrying matching root-owned owner/completion markers.
+The completion marker is emitted only after a successful pair and ordinary
+teardown. A live, malformed, incomplete, failed, or quarantined owned session
+blocks admission and remains intact. Session logs and result JSON remain
+available. Other `/tmp` entries, including desktop sockets and files owned by
+unrelated applications, are never removed. This releases duplicated tmpfs
+inputs without weakening the 1 GiB admission threshold.
+
 The owned pair first creates and fully faults both 64MiB memory-backed
 `null_blk` devices outside the ID36 cgroup. It then migrates its benchmark
 process into the cgroup, proves that membership, and stops at a private barrier.

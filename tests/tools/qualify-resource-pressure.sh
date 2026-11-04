@@ -72,6 +72,123 @@ grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
 # preceding synthetic storage envelope's last benchmark phase.
 printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
 
+# Completed OFF/swapz pairs retain a private fixture snapshot and copied
+# immutable replay inputs under /tmp for investigation. Before the 1 GiB
+# headroom gate, remove only those large inputs from positively identified,
+# successful sessions whose owning benchmark process has exited. Keep session
+# logs, reports, markers, failures, quarantines, and all non-Swapz /tmp data.
+cleanup_completed_benchmark_scratch() {
+    local tmp_root candidate_tmp session owner_marker complete_marker session_log
+    local pid source_sha command_line scratch bytes local_path
+    local -a owner_fields complete_fields
+    local reclaimed=0 sessions=0
+    local roots=(/tmp)
+    if [[ ${TMPDIR:-} == /* ]]; then
+        candidate_tmp="$TMPDIR"
+        while [[ $candidate_tmp != / && $candidate_tmp == */ ]]; do
+            candidate_tmp="${candidate_tmp%/}"
+        done
+        if [[ $candidate_tmp != / && $candidate_tmp != /tmp ]]; then
+            roots+=("$candidate_tmp")
+        fi
+    fi
+
+    for tmp_root in "${roots[@]}"; do
+        [[ -d $tmp_root && ! -L $tmp_root ]] || continue
+        [[ $(stat -c '%u' -- "$tmp_root" 2>/dev/null) == 0 ]] || continue
+        for session in "$tmp_root"/swapz-benchmark.*; do
+            [[ -e $session || -L $session ]] || continue
+            [[ -d $session && ! -L $session ]] || continue
+            [[ $(stat -c '%u:%a' -- "$session" 2>/dev/null) == 0:700 ]] || continue
+
+            owner_marker="$session/.swapz-benchmark-owner"
+            complete_marker="$session/.swapz-benchmark-complete"
+            session_log="$session/session.log"
+            [[ -f $owner_marker && ! -L $owner_marker &&
+               $(stat -c '%u:%a' -- "$owner_marker" 2>/dev/null) == 0:600 ]] || {
+                printf '%s\n' \
+                    'BLOCKED: unmarked Swapz benchmark session prevents ID36 memory admission' >&2
+                return 1
+            }
+            mapfile -t owner_fields < "$owner_marker"
+            (( ${#owner_fields[@]} == 2 )) || {
+                printf '%s\n' 'BLOCKED: malformed Swapz benchmark owner marker' >&2
+                return 1
+            }
+            [[ ${owner_fields[0]} =~ ^pid=([1-9][0-9]*)$ ]] || {
+                printf '%s\n' 'BLOCKED: malformed Swapz benchmark owner PID' >&2
+                return 1
+            }
+            pid="${BASH_REMATCH[1]}"
+            [[ ${owner_fields[1]} =~ ^source_sha=([a-f0-9]{40})$ ]] || {
+                printf '%s\n' 'BLOCKED: malformed Swapz benchmark source identity' >&2
+                return 1
+            }
+            source_sha="${BASH_REMATCH[1]}"
+
+            # Any live session blocks the memory-pressure phase, even if it
+            # has not reached the successful-completion marker.
+            if [[ -r /proc/$pid/cmdline ]]; then
+                command_line="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+                if [[ $command_line == *benchmark-owned-pair.sh* ]]; then
+                    printf '%s\n' \
+                        'BLOCKED: a swapz benchmark pair is still active during ID36 cleanup' >&2
+                    return 1
+                fi
+            fi
+
+            [[ -f $complete_marker && ! -L $complete_marker &&
+               -f $session_log && ! -L $session_log &&
+               $(stat -c '%u:%a' -- "$complete_marker" 2>/dev/null) == 0:600 ]] || {
+                printf '%s\n' \
+                    'BLOCKED: incomplete Swapz benchmark session prevents ID36 memory admission' >&2
+                return 1
+            }
+            mapfile -t complete_fields < "$complete_marker"
+            (( ${#complete_fields[@]} == 2 )) || {
+                printf '%s\n' 'BLOCKED: malformed Swapz benchmark completion marker' >&2
+                return 1
+            }
+            [[ ${complete_fields[0]} == "pid=$pid" &&
+               ${complete_fields[1]} == "source_sha=$source_sha" ]] || {
+                printf '%s\n' \
+                    'BLOCKED: inconsistent Swapz benchmark completion identity' >&2
+                return 1
+            }
+
+            if [[ -e $session/plan || -L $session/plan ]]; then
+                [[ -d $session/plan && ! -L $session/plan &&
+                   $(stat -c '%u:%a' -- "$session/plan" 2>/dev/null) == 0:700 ]] || {
+                    printf '%s\n' \
+                        'BLOCKED: unexpected object in owned benchmark plan path' >&2
+                    return 1
+                }
+            fi
+            for scratch in fixture.bin plan/trace.jsonl plan/manifest.json; do
+                local_path="$session/$scratch"
+                [[ -e $local_path || -L $local_path ]] || continue
+                [[ -f $local_path && ! -L $local_path ]] || {
+                    printf '%s\n' 'BLOCKED: unexpected object in owned benchmark scratch path' >&2
+                    return 1
+                }
+                bytes="$(stat -c '%s' -- "$local_path")" || return 1
+                rm -- "$local_path" || return 1
+                reclaimed=$((reclaimed + bytes))
+            done
+            rmdir -- "$session/plan" 2>/dev/null || true
+            (( sessions += 1 ))
+        done
+    done
+    printf 'ID36_BENCHMARK_TMP_CLEANUP=sessions:%s bytes:%s\n' \
+        "$sessions" "$reclaimed"
+}
+
+cleanup_completed_benchmark_scratch || {
+    printf '%s\n' \
+        'BLOCKED: cannot safely clear completed Swapz benchmark scratch before memory admission' >&2
+    exit 2
+}
+
 # Read one coherent host snapshot with canonical kernel kB units. Reject
 # missing, duplicated, nondecimal or unitless fields instead of treating
 # malformed observations as enough free RAM.
