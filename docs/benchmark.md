@@ -620,8 +620,10 @@ teardown and at least two seconds with the exact mapper UUID observed absent.
 The trace keeps the kernel-reported \`MemAvailable\`, \`SUnreclaim\` and
 \`VmallocUsed\` KiB integers plus UTC/monotonic timestamps and
 mapper-presence state. The qualifying peak is derived as median(pre-create
-\`MemAvailable\`) minus the minimum \`MemAvailable\` while the mapper is
-present; the final target-absent second must recover to the baseline envelope.
+\`MemAvailable\`) minus the minimum \`MemAvailable\` from initialization start
+through the last mapper-present teardown sample, so pre-publication constructor
+allocations remain charged; the final target-absent second must recover to the
+baseline envelope.
 RAM samples labeled GC must overlap sustained telemetry intervals whose
 exported \`gc_wall_ns\`, \`gc_victims\` or \`gc_pages\` counter advanced.
 The same host sampler surrounds the raw control so unrelated host drift is
