@@ -48,6 +48,9 @@ OWN_DM=0
 OWN_MODULE=0
 QUARANTINE=0
 SUSPENDED=0
+SESSION_BOOT_ID=""
+BOOT_ID_PRODUCER_PHASE="owned_execution"
+BOOT_ID_PRODUCER_OBSERVED="withheld"
 fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 status_u64() {
@@ -55,6 +58,35 @@ status_u64() {
     [[ $line =~ (^|[[:space:]])${key}=([0-9]+)($|[[:space:]]) ]] ||
         return 1
     printf '%s\n' "${BASH_REMATCH[2]}"
+}
+
+# The kernel boot identity is the only authority for this execution marker.
+# Read exactly one 36-byte lowercase UUID plus newline, with at most one
+# extra byte to reject duplicate/extended records without unbounded input.
+swapz_read_session_boot_id() {
+    local boot_identity_path="$1" boot_identity_fd boot_record="" extra_byte=""
+    local boot_identity=""
+    BOOT_ID_READ=""
+    BOOT_ID_OBSERVED_CATEGORY="missing"
+    if ! { exec {boot_identity_fd}< "$boot_identity_path"; } 2>/dev/null; then
+        return 1
+    fi
+    if ! IFS= read -r -N 37 boot_record <&"$boot_identity_fd"; then
+        [[ -n "$boot_record" ]] && BOOT_ID_OBSERVED_CATEGORY="malformed"
+    elif IFS= read -r -N 1 extra_byte <&"$boot_identity_fd"; then
+        BOOT_ID_OBSERVED_CATEGORY="duplicate_or_extra"
+    else
+        boot_identity="${boot_record%$'\n'}"
+        if [[ "$boot_record" == "$boot_identity"$'\n' &&
+              "$boot_identity" =~ ^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$ ]]; then
+            BOOT_ID_READ="$boot_identity"
+            BOOT_ID_OBSERVED_CATEGORY="valid"
+        else
+            BOOT_ID_OBSERVED_CATEGORY="malformed"
+        fi
+    fi
+    exec {boot_identity_fd}<&-
+    [[ "$BOOT_ID_OBSERVED_CATEGORY" == valid ]]
 }
 
 # A repeated dmsetup remove/create can reassign the DM minor while udev is
@@ -198,9 +230,29 @@ cleanup() {
 		rc=1
 		QUARANTINE=1
 	fi
+	local expected_boot_marker="BOOT_ID=<uuid>"
+	[[ -n "$SESSION_BOOT_ID" ]] && expected_boot_marker="BOOT_ID=$SESSION_BOOT_ID"
 	if (( QUARANTINE )); then
-		note "BLOCKED: resource retained, never forced; log $SESSION/session.log"
+		note "BLOCKED_KERNEL_DEBUG_PRODUCER phase=teardown expected=$expected_boot_marker observed=quarantined evidence_retained=yes"
+		note "BLOCKED: resource retained, never forced; session log retained"
 		exit 1
+	fi
+	# Only after safe teardown can the producer attest the execution boot.
+	if (( rc == 0 )); then
+		if ! swapz_read_session_boot_id /proc/sys/kernel/random/boot_id; then
+			BOOT_ID_PRODUCER_PHASE="publication_capture"
+			BOOT_ID_PRODUCER_OBSERVED="$BOOT_ID_OBSERVED_CATEGORY"
+			rc=1
+		elif [[ "$BOOT_ID_READ" != "$SESSION_BOOT_ID" ]]; then
+			BOOT_ID_PRODUCER_PHASE="publication_match"
+			BOOT_ID_PRODUCER_OBSERVED="different_valid_boot"
+			rc=1
+		else
+			note "BOOT_ID=$SESSION_BOOT_ID"
+		fi
+	fi
+	if (( rc != 0 )); then
+		note "BLOCKED_KERNEL_DEBUG_PRODUCER phase=$BOOT_ID_PRODUCER_PHASE expected=$expected_boot_marker observed=$BOOT_ID_PRODUCER_OBSERVED evidence_retained=yes"
 	fi
 	if (( rc == 0 )); then
 		if (( MAX_BOUNDARY_PROBE )); then
@@ -219,6 +271,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Capture before provisioning, but do not publish until a clean owned teardown.
+if ! swapz_read_session_boot_id /proc/sys/kernel/random/boot_id; then
+    BOOT_ID_PRODUCER_PHASE="session_capture"
+    BOOT_ID_PRODUCER_OBSERVED="$BOOT_ID_OBSERVED_CATEGORY"
+    fail "kernel boot identity unavailable for owned session"
+fi
+SESSION_BOOT_ID="$BOOT_ID_READ"
 if ! mountpoint -q /sys/kernel/config; then
 	modprobe configfs
 	mount -t configfs configfs /sys/kernel/config ||

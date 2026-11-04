@@ -6337,12 +6337,19 @@ even when all synthetic loaded markers and module hashes otherwise match.
 It also requires exactly one execution `BOOT_ID=<uuid>` marker matching the
 same current boot as both runtime snapshots; missing, duplicated, malformed or
 different-boot execution identity blocks qualification with the expected boot
-identity and a safe observed category. The current read-only
-`deploy-nullblk.sh` producer does not emit that marker, so an actual loaded
-debug qualification remains intentionally BLOCKED until that producer's owner
-adds the marker. Rootless fixtures may inject it only into synthetic replay
-evidence and must still report `ROOTLESS_VALIDATOR_ONLY=PASS`, never a loaded
-PASS.
+identity and a safe observed category. The production `deploy-nullblk.sh`
+producer reads the kernel's real `/proc/sys/kernel/random/boot_id` as one
+bounded, newline-terminated lowercase UUID before device provisioning, but
+publishes the marker only in its successful, non-quarantined EXIT cleanup,
+after re-reading and matching the same boot identity. A short, missing,
+malformed, duplicated/extended or changed identity never publishes the marker;
+interruption, failed loaded work or uncertain teardown withholds it as well.
+Every withheld publication reports a fixed producer phase, expected marker,
+safe observed category and retained-evidence status without echoing private
+paths or arbitrary input. Rootless fixtures execute the real producer reader
+and cleanup with synthetic boot files and inert host commands, and may inject
+this marker only into synthetic replay evidence; they must still report
+`ROOTLESS_VALIDATOR_ONLY=PASS`, never a loaded PASS.
 The read-only feature probe can still report individual capabilities.
 Kernel diagnostics, helper failure reasons and contradictory source/module/
 kernel markers use fixed safe categories rather than echoing private dmesg

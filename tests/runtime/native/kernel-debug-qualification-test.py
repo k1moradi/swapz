@@ -222,6 +222,133 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertEqual(status, "BLOCKED")
         self.assertIn("observed duplicate markers", reason)
 
+
+    def test_execution_boot_marker_producer_rootless(self) -> None:
+        """Execute the real boot reader and EXIT cleanup without host devices."""
+        import os
+
+        source = DEPLOY_HELPER.read_text(encoding="utf-8")
+
+        def shell_function(function_name: str) -> str:
+            start = source.index(f"{function_name}() {{\n")
+            return source[start:source.index("\n}\n", start) + 2]
+
+        reader = shell_function("swapz_read_session_boot_id")
+        cleanup = shell_function("cleanup")
+        marker = 'note "BOOT_ID=$SESSION_BOOT_ID"'
+        self.assertEqual(cleanup.count(marker), 1)
+        self.assertLess(cleanup.index('if (( QUARANTINE )); then'), cleanup.index(marker))
+        self.assertLess(cleanup.index(marker), cleanup.index(
+            'note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"'))
+        identity_path = "/proc/sys/kernel/random/boot_id"
+        self.assertEqual(cleanup.count(identity_path), 1)
+        self.assertEqual(source.count(
+            "swapz_read_session_boot_id " + identity_path), 2)
+        # Only this in-memory test copy redirects the immutable production
+        # procfs path. Ownership flags disable every real teardown operation.
+        cleanup = cleanup.replace(identity_path, '"$TEST_BOOT_ID_FILE"')
+        shell = "set -Eeuo pipefail\n" + reader + "\n" + cleanup + r"""
+note() { printf '%s\n' "$*"; }
+fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
+cat() {
+    [[ "$1" == /proc/swaps ]] || return 91
+    printf 'Filename\tType\tSize\tUsed\tPriority\n'
+}
+swapz_swap_inventory_identity() { printf 'stable\n'; }
+SESSION="/synthetic-private/session"
+SWAPS_ID_BEFORE="stable"
+OWN_DM=0
+OWN_NULL=0
+OWN_MODULE=0
+QUARANTINE=0
+SUSPENDED=0
+MAX_BOUNDARY_PROBE=0
+GC_RECOVERY_FAULT_PROBE=0
+SESSION_BOOT_ID=""
+BOOT_ID_PRODUCER_PHASE="owned_execution"
+BOOT_ID_PRODUCER_OBSERVED="withheld"
+trap cleanup EXIT
+trap 'exit 143' TERM
+if ! swapz_read_session_boot_id "$TEST_BOOT_ID_FILE"; then
+    BOOT_ID_PRODUCER_PHASE="session_capture"
+    BOOT_ID_PRODUCER_OBSERVED="$BOOT_ID_OBSERVED_CATEGORY"
+    fail "kernel boot identity unavailable for owned session"
+fi
+SESSION_BOOT_ID="$BOOT_ID_READ"
+case "$SCENARIO" in
+    publication_missing) : > "$TEST_BOOT_ID_FILE" ;;
+    publication_malformed) printf 'not-a-uuid\n' > "$TEST_BOOT_ID_FILE" ;;
+    publication_duplicate)
+        printf '%s\n%s\n' "$SESSION_BOOT_ID" "$SESSION_BOOT_ID" > "$TEST_BOOT_ID_FILE" ;;
+    stale_boot) printf '%s\n' "$STALE_BOOT_ID" > "$TEST_BOOT_ID_FILE" ;;
+    interrupted) kill -TERM "$$" ;;
+    unfinished) exit 19 ;;
+    quarantine) QUARANTINE=1 ;;
+esac
+exit 0
+"""
+        other_boot = "00000000-0000-0000-0000-000000000000"
+        scenarios = (
+            ("clean", BOOT_ID + "\n", 0, "", ""),
+            ("capture_missing", "", 1, "session_capture", "missing"),
+            ("capture_malformed", "not-a-uuid\n", 1, "session_capture", "malformed"),
+            ("capture_duplicate", BOOT_ID + "\n" + BOOT_ID + "\n",
+             1, "session_capture", "duplicate_or_extra"),
+            ("publication_missing", BOOT_ID + "\n", 1, "publication_capture", "missing"),
+            ("publication_malformed", BOOT_ID + "\n", 1, "publication_capture", "malformed"),
+            ("publication_duplicate", BOOT_ID + "\n", 1,
+             "publication_capture", "duplicate_or_extra"),
+            ("stale_boot", BOOT_ID + "\n", 1, "publication_match", "different_valid_boot"),
+            ("interrupted", BOOT_ID + "\n", 143, "owned_execution", "withheld"),
+            ("unfinished", BOOT_ID + "\n", 19, "owned_execution", "withheld"),
+            ("quarantine", BOOT_ID + "\n", 1, "teardown", "quarantined"),
+        )
+        synthetic_records = "\n".join(
+            line for line in GOOD_LOG.splitlines()
+            if not line.startswith("BOOT_ID=")
+            and not line.startswith("PASS: loaded isolated"))
+        for scenario, initial_identity, expected_exit, phase, category in scenarios:
+            with self.subTest(scenario=scenario):
+                directory = Path(self.temporary_directory.name) / scenario
+                directory.mkdir()
+                identity_file = directory / "boot-id"
+                identity_file.write_text(initial_identity, encoding="utf-8")
+                completed = subprocess.run(
+                    ["bash", "-c", shell],
+                    env={**os.environ, "SCENARIO": scenario,
+                         "TEST_BOOT_ID_FILE": str(identity_file),
+                         "STALE_BOOT_ID": other_boot},
+                    cwd=directory, capture_output=True, text=True,
+                    timeout=4, check=False)
+                output = completed.stdout + completed.stderr
+                self.assertEqual(completed.returncode, expected_exit, output)
+                published = [
+                    line for line in completed.stdout.splitlines()
+                    if line.startswith("BOOT_ID=")]
+                status, reason = self.verify(
+                    execution=synthetic_records + "\n" + completed.stdout)
+                if not phase:
+                    self.assertEqual(published, [f"BOOT_ID={BOOT_ID}"])
+                    self.assertEqual(status, "PASS", reason)
+                    self.assertIn("PASS: loaded isolated swapz byte-exact I/O", output)
+                    self.assertNotIn("BLOCKED_KERNEL_DEBUG_PRODUCER", output)
+                else:
+                    self.assertEqual(published, [])
+                    self.assertEqual(status, "BLOCKED", reason)
+                    diagnostics = [line for line in output.splitlines()
+                                   if line.startswith("BLOCKED_KERNEL_DEBUG_PRODUCER")]
+                    self.assertEqual(len(diagnostics), 1, output)
+                    expected_marker = (f"BOOT_ID={BOOT_ID}"
+                                       if phase != "session_capture"
+                                       else "BOOT_ID=<uuid>")
+                    self.assertIn(
+                        f"phase={phase} expected={expected_marker} "
+                        f"observed={category} evidence_retained=yes",
+                        diagnostics[0])
+                    self.assertNotIn(str(directory), diagnostics[0])
+                    self.assertNotIn(other_boot, diagnostics[0])
+                    self.assertNotIn("PASS: loaded isolated", output)
+
     def test_runtime_state_must_be_active_before_and_after(self) -> None:
         required = ("kcsan",)
         self.assertEqual(
