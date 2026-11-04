@@ -717,7 +717,8 @@ arm_harness()
 
 	temporary=$(mktemp "$report_base/.armed.env.XXXXXX") || fail "cannot create arm record"
 	# An interrupted write cannot retain the old arm or a stray temporary.
-	trap 'rm -f -- "$temporary"' EXIT HUP INT TERM
+	trap 'rm -f -- "$temporary" "$arm_file"' EXIT
+	trap 'exit 1' HUP INT TERM
 	cat > "$temporary" <<ARM
 schema=swapz-primary-boot-arm-v1
 arm_boot_id=$boot_id

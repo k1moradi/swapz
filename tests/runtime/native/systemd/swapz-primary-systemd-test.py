@@ -10,11 +10,13 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import signal
 import shutil
 import stat
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -1413,6 +1415,42 @@ class BootVerifierTests(unittest.TestCase):
     def assert_activation_revoked(self) -> None:
         """No failed admission or observation may retain execution authority."""
         self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
+
+
+    def test_interrupted_arming_cannot_leave_authority_or_arm_record(self) -> None:
+        # Delay only a fake date command during the here-document build.
+        # A private process group makes the injected signal strictly rootless.
+        self.write_proc_swaps(active=False)
+        date_started = self.root / "date-started"
+        write_executable(
+            self.bin / "date",
+            "#!/bin/sh\n"
+            'printf "started\\n" > "$MOCK_DATE_STARTED"\n'
+            "exec sleep 15\n",
+        )
+        env = self.env.copy()
+        env["MOCK_DATE_STARTED"] = str(date_started)
+        verifier = subprocess.Popen(
+            [str(self.sbin / "swapz-primary-boot-verify"), "arm"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 4
+            while (not date_started.exists() and verifier.poll() is None
+                   and time.monotonic() < deadline):
+                time.sleep(0.02)
+            self.assertTrue(date_started.exists(), "fixture did not enter arming")
+            os.killpg(verifier.pid, signal.SIGTERM)
+            stdout, stderr = verifier.communicate(timeout=5)
+            self.assertNotEqual(verifier.returncode, 0, stderr)
+            self.assertNotIn("COLD_BOOT_HARNESS=ARMED", stdout)
+            self.assertFalse((self.report / "armed.env").exists())
+            self.assert_activation_revoked()
+        finally:
+            if verifier.poll() is None:
+                os.killpg(verifier.pid, signal.SIGKILL)
+                verifier.communicate(timeout=5)
 
     def test_rearming_failure_revokes_previous_arm_and_runtime_token(self) -> None:
         self.arm_then_reboot()
