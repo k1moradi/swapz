@@ -47,7 +47,9 @@ NoNewPrivileges=yes
 # udev coordination and durable /var/lib/swapz recovery writable for the owner.
 ProtectSystem=full
 ProtectHome=yes
-PrivateTmp=yes
+# PrivateTmp=yes implicitly orders tmp.mount ahead of this early swap owner;
+# tmp.mount can wait for swap.target, creating an unfixable boot ordering cycle.
+# This is intentionally not enabled on the mapper (unlike the later observers).
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
