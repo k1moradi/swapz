@@ -22,6 +22,16 @@ note() {
 	printf '%s\n' "$*"
 }
 
+block0_sha256() {
+	local device_path="$1"
+	local digest
+
+	digest="$(dd if="$device_path" bs=4096 count=1 status=none 2>/dev/null | \
+		sha256sum | awk '{print $1}')" || return 1
+	[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+	printf '%s\n' "$digest"
+}
+
 if [[ $# -ne 2 || $1 != --validated-source ]]; then
 	blocked "expected --validated-source <40-hex-sha>"
 fi
@@ -34,7 +44,7 @@ SOURCE_HEAD="$2"
 
 for command in cc dmsetup modprobe mountpoint mount blockdev sfdisk udevadm \
 	blkid mkswap sha256sum python3 timeout stat findmnt awk sed grep install od \
-	tr cut basename readlink rm rmdir ls sleep cat chmod; do
+	tr cut basename readlink rm rmdir ls sleep cat chmod dd; do
 	command -v "$command" >/dev/null 2>&1 ||
 		blocked "required command is unavailable: $command"
 done
@@ -1456,6 +1466,8 @@ while read -r swap_path swap_type swap_size swap_used swap_priority; do
 done < /proc/swaps
 [[ "$active_mapper_entries" == 1 ]] ||
 	fail "manager-created mapper is not the unique active swap identity"
+active_backing_header_sha256="$(block0_sha256 "$PARTITION")" ||
+	fail "cannot hash run-bound SWZ backing header before stop"
 
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=stop"
 if ! stop_output="$(timeout --signal=TERM --kill-after=10s 90s "$CONTROL" primary stop 2>&1)"; then
@@ -1491,6 +1503,10 @@ SWAPS_ID_AFTER="$(swapz_swap_inventory_identity /proc/swaps)" ||
 	fail "cannot resnapshot host swap identity"
 [[ "$SWAPS_ID_AFTER" == "$SWAPS_ID_BEFORE" ]] ||
 	fail "host swap identity differs after normal lifecycle teardown"
+stopped_backing_header_sha256="$(block0_sha256 "$PARTITION")" ||
+	fail "cannot hash run-bound SWZ backing header after stop"
+[[ "$stopped_backing_header_sha256" == "$active_backing_header_sha256" ]] ||
+	fail "normal stop changed the run-bound SWZ backing header"
 
 note "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:$RUN_ID partuuid:$PARTUUID device:$PART_DEVNO prepare:READY start:ACTIVE swapon:true stop:COMPLETE recovery_required:false"
 

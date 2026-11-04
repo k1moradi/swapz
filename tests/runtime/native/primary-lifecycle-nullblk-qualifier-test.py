@@ -149,6 +149,29 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn('mkswap "$PARTITION" >/dev/null', self.script)
         self.assertNotIn('mkswap --no-discard', self.script)
 
+
+    def test_normal_stop_proves_backing_header_preservation(self):
+        self.assertIn("block0_sha256() {", self.script)
+        before_stop = self.script.index(
+            'active_backing_header_sha256="$(block0_sha256 "$PARTITION")"')
+        stop = self.script.index(
+            'note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=stop"',
+            before_stop)
+        after_stop = self.script.index(
+            'stopped_backing_header_sha256="$(block0_sha256 "$PARTITION")"',
+            stop)
+        comparison = self.script.index(
+            '[[ "$stopped_backing_header_sha256" == '
+            '"$active_backing_header_sha256" ]]',
+            after_stop)
+        lifecycle_pass = self.script.index(
+            'note "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=',
+            comparison)
+        self.assertLess(before_stop, stop)
+        self.assertLess(stop, after_stop)
+        self.assertLess(after_stop, comparison)
+        self.assertLess(comparison, lifecycle_pass)
+
     def test_prepare_failure_emits_read_only_gate_plan(self):
         self.assertIn('"$CONTROL" primary plan', self.script)
         self.assertIn(')" || true', self.script)

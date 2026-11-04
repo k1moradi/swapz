@@ -4478,7 +4478,9 @@ closed, while an unformatted null_blk remains in the full-device test mode.
 With the opt-in disabled, the ordinary null_blk constructor must not probe
 block zero or change lower-device I/O counters.
 The start/stop rehearsal therefore verifies both exact Linux swap activation
-and preservation of the backing header.
+and preservation of the backing header. The owned-null_blk harness independently
+hashes the exact lower-device block zero after successful start and again after
+normal stop, and requires byte identity before publishing lifecycle PASS.
 
 Compile a noninstalled exact-source
 `swapzctl` under a root-owned private prefix, and generate a private
