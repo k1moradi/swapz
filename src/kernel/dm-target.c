@@ -6223,6 +6223,10 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 				    (m->extent_blocks != 1 &&
 				     m->extent_blocks != 2 &&
 				     m->extent_blocks != 4) ||
+				    /* An extent must fit both media and its segment. */
+				    m->extent_blocks > ctx->physical_blocks - start ||
+				    start % SWAPZ_SEGMENT_BLOCKS + m->extent_blocks >
+					SWAPZ_SEGMENT_BLOCKS ||
 				    ctx->extent_classes[start] != m->extent_blocks ||
 				    !ctx->live_records[start]) {
 					check_error = -EUCLEAN;

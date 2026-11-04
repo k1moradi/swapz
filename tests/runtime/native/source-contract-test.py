@@ -1853,6 +1853,112 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("discard_count", DM)
         self.assertNotIn("discard_serial", DM)
 
+    def test_discard_preflight_extent_bounds_exercises_production_c(self):
+        """A corrupt later extent cannot partially discard an earlier page."""
+        import subprocess
+        import tempfile
+
+        # Use the real Device Mapper function body, not a rewritten model.
+        # Both failures must occur before the first authority mutation.
+        self.assertIn("#define SWAPZ_SEGMENT_BLOCKS 256U",
+                      (ROOT / "src/kernel/authority.h").read_text())
+        source = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <errno.h>
+typedef uint64_t sector_t;
+typedef uint32_t swapz_u32;
+#define SWAPZ_SECTORS 8U
+#define SWAPZ_SEGMENT_BLOCKS 256U
+#define PHYSICAL_BLOCKS 512U
+struct swapz_map { swapz_u32 start_block, generation; unsigned extent_blocks, valid; };
+struct swapz_authority { swapz_u32 open_segment; };
+struct swapz_dm {
+    swapz_u32 logical_pages, physical_blocks;
+    struct swapz_map *maps;
+    uint8_t *extent_classes;
+    uint16_t *live_records;
+    swapz_u32 *segment_mapped_pages;
+    struct swapz_authority authority;
+    unsigned discard_pages;
+};
+struct bio { struct { sector_t bi_sector; } bi_iter; sector_t sectors; };
+static struct swapz_dm *current;
+static unsigned discarded;
+static sector_t bio_sectors(struct bio *bio) { return bio->sectors; }
+static int swapz_discard_page(struct swapz_authority *authority, swapz_u32 logical) {
+    struct swapz_map *map = &current->maps[logical];
+    assert(authority == &current->authority && map->valid);
+    assert(current->live_records[map->start_block]);
+    --current->live_records[map->start_block];
+    --current->segment_mapped_pages[map->start_block / SWAPZ_SEGMENT_BLOCKS];
+    map->valid = 0;
+    ++map->generation;
+    ++discarded;
+    return 0;
+}
+static int swapz_discard_dead_segment(struct swapz_dm *ctx, swapz_u32 segment) {
+    (void)ctx; (void)segment;
+    assert(!"unexpected dead-segment TRIM");
+    return 0;
+}
+static int swapz_discard(struct swapz_dm *ctx, struct bio *bio) {
+'''
+        source += body("swapz_discard")
+        source += r'''
+}
+static struct swapz_dm ctx;
+static struct swapz_map maps[2];
+static uint8_t classes[PHYSICAL_BLOCKS];
+static uint16_t live[PHYSICAL_BLOCKS];
+static swapz_u32 segments[PHYSICAL_BLOCKS / SWAPZ_SEGMENT_BLOCKS];
+static void initialize(unsigned second_start, unsigned second_blocks) {
+    memset(&ctx,0,sizeof(ctx)); memset(maps,0,sizeof(maps));
+    memset(classes,0,sizeof(classes)); memset(live,0,sizeof(live));
+    memset(segments,0,sizeof(segments));
+    ctx.logical_pages=2; ctx.physical_blocks=PHYSICAL_BLOCKS;
+    ctx.maps=maps; ctx.extent_classes=classes; ctx.live_records=live;
+    ctx.segment_mapped_pages=segments; ctx.authority.open_segment=0;
+    maps[0]=(struct swapz_map){ .start_block=0, .generation=1, .extent_blocks=1, .valid=1 };
+    maps[1]=(struct swapz_map){ .start_block=second_start, .generation=1,
+                               .extent_blocks=second_blocks, .valid=1 };
+    classes[0]=1; live[0]=1; segments[0]++;
+    classes[second_start]=second_blocks; live[second_start]=1;
+    segments[second_start / SWAPZ_SEGMENT_BLOCKS]++;
+    current=&ctx; discarded=0;
+}
+int main(void) {
+    struct bio whole={.bi_iter.bi_sector=0, .sectors=2*SWAPZ_SECTORS};
+    initialize(PHYSICAL_BLOCKS-1,4); /* Overruns physical capacity. */
+    assert(swapz_discard(&ctx,&whole)==-EUCLEAN);
+    assert(!discarded && !ctx.discard_pages && live[0]==1 &&
+           live[PHYSICAL_BLOCKS-1]==1 && maps[0].valid && maps[1].valid);
+    initialize(SWAPZ_SEGMENT_BLOCKS-1,2); /* Crosses segment boundary. */
+    assert(swapz_discard(&ctx,&whole)==-EUCLEAN);
+    assert(!discarded && !ctx.discard_pages && live[0]==1 &&
+           live[SWAPZ_SEGMENT_BLOCKS-1]==1 && maps[0].valid && maps[1].valid);
+    initialize(4,2); /* Valid two-page DISCARD still succeeds. */
+    assert(swapz_discard(&ctx,&whole)==0);
+    assert(discarded==2 && ctx.discard_pages==2 && !live[0] && !live[4]);
+    assert(!maps[0].valid && !maps[1].valid &&
+           maps[0].generation==2 && maps[1].generation==2);
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory(prefix="swapz-discard-bounds-") as temp:
+            path = Path(temp)
+            (path / "probe.c").write_text(source)
+            built = subprocess.run(
+                ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+                 str(path / "probe.c"), "-o", str(path / "probe")],
+                capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            ran = subprocess.run([str(path / "probe")],
+                                 capture_output=True, text=True)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+
     def test_fua_acknowledged_only_after_flush(self):
         flush = body("swapz_flush_window")
         self.assertLess(flush.index("swapz_issue_flush(ctx)"),
