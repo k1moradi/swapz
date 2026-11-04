@@ -700,6 +700,56 @@ static int test_partial_gc_failures_resume_same_reserve(void)
 }
 
 
+
+/*
+ * Serialized race-model interleaving, not a kernel race proof: a partial
+ * victim contains its LAST mapped compressed page at block 255. A failed
+ * lower completion after an earlier member relocated must not publish the
+ * last page, commit the victim, or reuse the uncertain reserve block.
+ */
+static int test_last_compressed_page_boundary_retry(void)
+{
+	struct swapz_map last_before;
+	swapz_u32 failed_block;
+	swapz_u32 original_generation;
+	unsigned int index;
+
+	CHECK(setup() == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 1U; ++index)
+		CHECK(write_one(0) == 0);
+	CHECK(write_one(7) == 0);
+	CHECK(maps[7].start_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+	last_before = maps[7];
+	original_generation = maps[0].generation;
+	CHECK(write_one(1) == 0);
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
+	CHECK(write_one(0) == 0);
+	CHECK(maps[0].generation == original_generation + 1U);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(a.gc_allocation && a.gc_destination == 2U);
+
+	fail_write = 1;
+	CHECK(write_one(7) == -EIO);
+	failed_block = a.next_block - 1U;
+	CHECK(maps[7].valid &&
+	      maps[7].start_block == last_before.start_block &&
+	      maps[7].generation == last_before.generation);
+	CHECK(!live[failed_block] && !classes[failed_block]);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(verify_page(0) == 0 && verify_page(7) == 0);
+	CHECK(a.gc_allocation && a.gc_destination == 2U);
+	CHECK(write_one(7) == 0);
+	CHECK(maps[7].start_block > failed_block &&
+	      maps[7].generation == last_before.generation + 1U);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+	CHECK(!a.gc_allocation && !roles[0] && roles[2]);
+	CHECK(verify_page(0) == 0 && verify_page(1) == 0 &&
+	      verify_page(7) == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(!live[index] && !classes[index]);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -713,6 +763,7 @@ int main(void)
 	CHECK(test_gc_torn_run_resumes_same_destination() == 0); passed++;
 	CHECK(test_gc_publication_prefix_is_not_republished() == 0); passed++;
 	CHECK(test_partial_gc_failures_resume_same_reserve() == 0); passed++;
+	CHECK(test_last_compressed_page_boundary_retry() == 0); passed++;
 	printf("SWAPZ_GC_ENGINE_ROTATION_TESTS_PASS=%d\n", passed);
 	return 0;
 }
