@@ -1366,14 +1366,15 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 		physical_blocks / SWAPZ_SEGMENT_BLOCKS;
 	struct swapz_authority_geometry geometry;
 	struct swapz_authority temporary_authority;
+	/* Keep this in the exact production constructor order. */
 	const size_t allocation_sizes[] = {
-		sizeof(struct swapz_map),
-		sizeof(swapz_u32), sizeof(swapz_u32),
-		sizeof(swapz_u16), sizeof(swapz_u8), sizeof(swapz_u8),
 		sizeof(swapz_u32), sizeof(swapz_u32), sizeof(swapz_u16),
 		sizeof(swapz_u32), sizeof(swapz_u32), sizeof(swapz_u32),
-		sizeof(swapz_u32), sizeof(swapz_u32), sizeof(swapz_u32),
+		sizeof(swapz_u32), sizeof(swapz_u32),
+		sizeof(swapz_u32), sizeof(swapz_u32),
 		sizeof(swapz_u8), sizeof(swapz_u8),
+		sizeof(struct swapz_map), sizeof(swapz_u16),
+		sizeof(swapz_u8), sizeof(swapz_u8), sizeof(swapz_u32),
 	};
 	const size_t allocation_count = sizeof(allocation_sizes) /
 					sizeof(allocation_sizes[0]);
@@ -1383,14 +1384,17 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 	CHECK(allocation_count == 17U);
 	CHECK(swapz_authority_capacity(physical_blocks, &geometry) == 0);
 	CHECK(geometry.maximum_logical_pages == SWAPZ_SEGMENT_BLOCKS);
-	allocation_lengths[0] = geometry.maximum_logical_pages;
-	allocation_lengths[1] = geometry.maximum_logical_pages;
-	allocation_lengths[2] = geometry.maximum_logical_pages;
-	allocation_lengths[3] = physical_blocks;
-	allocation_lengths[4] = physical_blocks;
-	allocation_lengths[5] = physical_blocks;
-	for (iteration = 6U; iteration < allocation_count; ++iteration)
+	for (iteration = 0U; iteration < 8U; ++iteration)
 		allocation_lengths[iteration] = segment_count;
+	allocation_lengths[8] = geometry.maximum_logical_pages;
+	allocation_lengths[9] = geometry.maximum_logical_pages;
+	allocation_lengths[10] = segment_count;
+	allocation_lengths[11] = segment_count;
+	allocation_lengths[12] = geometry.maximum_logical_pages;
+	allocation_lengths[13] = physical_blocks;
+	allocation_lengths[14] = physical_blocks;
+	allocation_lengths[15] = physical_blocks;
+	allocation_lengths[16] = segment_count;
 
 	/* 17 injected site failures plus success, repeated 8 times each. */
 	for (iteration = 0; iteration < 8U * (allocation_count + 1U);
@@ -1417,14 +1421,56 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 			allocated_all = true;
 			error = swapz_authority_init(
 				&temporary_authority,
-				(struct swapz_map *)allocated_indexes[0],
-				(swapz_u16 *)allocated_indexes[3],
-				(swapz_u8 *)allocated_indexes[4],
+				(struct swapz_map *)allocated_indexes[12],
+				(swapz_u16 *)allocated_indexes[13],
+				(swapz_u8 *)allocated_indexes[14],
 				geometry.maximum_logical_pages, physical_blocks);
-			if (!error &&
-			    temporary_authority.reserve_blocks !=
-					geometry.gc_reserve_blocks)
-				error = -EUCLEAN;
+			if (!error)
+				error = swapz_enable_extent_sequence_index(
+					&temporary_authority,
+					(swapz_u8 *)allocated_indexes[15],
+					(swapz_u32 *)allocated_indexes[16],
+					segment_count);
+			if (!error)
+				error = swapz_enable_segment_rotation(
+					&temporary_authority,
+					(swapz_u8 *)allocated_indexes[11],
+					segment_count);
+			if (!error)
+				error = swapz_enable_segment_mapping_counts(
+					&temporary_authority,
+					(swapz_u32 *)allocated_indexes[4],
+					segment_count);
+			if (!error)
+				error = swapz_enable_segment_program_counts(
+					&temporary_authority,
+					(swapz_u32 *)allocated_indexes[5],
+					segment_count);
+			if (!error)
+				error = swapz_enable_segment_page_lists(
+					&temporary_authority,
+					(swapz_u32 *)allocated_indexes[6],
+					(swapz_u32 *)allocated_indexes[7],
+					(swapz_u32 *)allocated_indexes[8],
+					(swapz_u32 *)allocated_indexes[9],
+					segment_count,
+					geometry.maximum_logical_pages);
+			if (!error)
+				error = swapz_enable_segment_gc_accounting(
+					&temporary_authority,
+					(swapz_u32 *)allocated_indexes[0],
+					(swapz_u32 *)allocated_indexes[1],
+					(swapz_u16 *)allocated_indexes[2],
+					segment_count);
+			if (!error) {
+				/* These two sidecars are target-owned rather than authority-
+				 * attached; touch their final elements before teardown. */
+				((swapz_u32 *)allocated_indexes[3])[segment_count - 1U] = 1U;
+				((swapz_u8 *)allocated_indexes[10])[segment_count - 1U] = 1U;
+				if (temporary_authority.reserve_blocks !=
+				    geometry.gc_reserve_blocks)
+					error = -EUCLEAN;
+			}
 		}
 		/* Model constructor unwind and normal teardown alike. */
 		for (site = allocation_count; site > 0U; --site)
