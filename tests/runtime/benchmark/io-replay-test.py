@@ -3191,6 +3191,7 @@ class PairReplayContract(unittest.TestCase):
                 "boot_id": trace["host_boot_id"],
                 "uptime_seconds": 0.0,
             },
+            "memory": {"total_bytes": 8 * 1024 * 1024 * 1024},
             "captured_at_utc": "2026-11-03T00:00:00Z",
         }
         after = {
@@ -3198,6 +3199,7 @@ class PairReplayContract(unittest.TestCase):
                 "boot_id": trace["host_boot_id"],
                 "uptime_seconds": 10.0,
             },
+            "memory": {"total_bytes": 8 * 1024 * 1024 * 1024},
             "captured_at_utc": "2026-11-03T00:00:10Z",
         }
         self.assertTrue(evidence.metadata_ram_trace_within_host_window(
