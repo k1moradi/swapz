@@ -1973,13 +1973,53 @@ int main(void) {
 
     def test_fua_acknowledged_only_after_flush(self):
         flush = body("swapz_flush_window")
-        self.assertLess(flush.index("swapz_issue_flush(ctx)"),
-                        flush.index("swapz_complete(bio, 0)"))
+        lower_extent = body("swapz_lower_write")
+        lower_run = body("swapz_lower_write_run")
+        raw = body("swapz_raw_write")
+        accept = body("swapz_accept_write")
+
+        # Packed FUA publication is gated inside the synchronous lower adapter,
+        # and the target-wide callback flag exists only across that engine call.
+        engine_call = flush.index(
+            "error = swapz_engine_write_window_batched_read_cap")
+        scope_set = flush.rfind(
+            "ctx->prepublication_fua = needs_fua;", 0, engine_call)
+        scope_clear = flush.index(
+            "ctx->prepublication_fua = false;", engine_call)
+        gc_after = flush.index(
+            "error = swapz_gc_compact_one(ctx);", scope_clear)
+        self.assertGreaterEqual(scope_set, 0)
+        self.assertLess(scope_set, engine_call)
+        self.assertLess(engine_call, scope_clear)
+        self.assertLess(scope_clear, gc_after)
+        self.assertIn("!needs_fua && ctx->engine.bulk_enabled", flush)
+
+        for lower in (lower_extent, lower_run):
+            gate = lower.index("swapz_write_flush_before_publish(")
+            self.assertLess(gate, lower.index("*completed = blocks;"))
+
+        # Standalone RAW applies FUA only after any ENOSPC/GC recovery and
+        # clears the gate before authority publication or another operation.
+        raw_set = raw.index(
+            "ctx->prepublication_fua = !!(bio->bi_opf & REQ_FUA);")
+        raw_write = raw.index("error = swapz_lower_write(", raw_set)
+        raw_clear = raw.index("ctx->prepublication_fua = false;", raw_write)
+        raw_publish = raw.index("error = swapz_finish_raw(", raw_clear)
+        self.assertLess(raw_set, raw_write)
+        self.assertLess(raw_write, raw_clear)
+        self.assertLess(raw_clear, raw_publish)
+
+        # Zero elision has no lower data write; its required FUA must still
+        # succeed before discard_page advances the logical generation.
+        zero_flush = accept.index("error = swapz_issue_flush(ctx);")
+        zero_publish = accept.index(
+            "error = swapz_discard_page(&ctx->authority, logical);")
+        self.assertLess(zero_flush, zero_publish)
+
+        # The former post-publication flush is intentionally gone.
+        self.assertNotIn("error = swapz_issue_flush(ctx);", flush)
         self.assertIn("if (error && needs_fua &&", flush)
         self.assertIn("(!recoverable_gc_error || committed)", flush)
-        self.assertLess(
-            flush.index("error = swapz_issue_flush(ctx)"),
-            flush.index("if (error && needs_fua &&"))
         self.assertIn("swapz_fail(ctx, error)", flush)
         self.assertNotIn("DM_MAPIO_KILL; /* Until FUA", body("swapz_map"))
 
@@ -2394,8 +2434,12 @@ int main(void) {
         self.assertIn("bulk_mixed_io=%u", body("swapz_status"))
         self.assertIn("bulk_raw_only_io=%u", body("swapz_status"))
         self.assertIn("bulk_raw_entries=%u", body("swapz_status"))
-        self.assertLess(dm_complete.index("swapz_issue_flush(ctx)"),
-                        dm_complete.index("swapz_complete(bio, 0)"))
+        lower_run = body("swapz_lower_write_run")
+        self.assertIn("swapz_write_flush_before_publish(", lower_run)
+        self.assertLess(
+            lower_run.index("swapz_write_flush_before_publish("),
+            lower_run.index("*completed = blocks;"))
+        self.assertIn("!needs_fua && ctx->engine.bulk_enabled", dm_complete)
         self.assertIn("swapz_flush_window(ctx)", process)
         self.assertIn("REQ_PREFLUSH", process)
         self.assertIn("swapz_raw_write(ctx, bio, logical)", accept)
@@ -3091,7 +3135,7 @@ int main(void) {
         start = DM.index("struct swapz_read_slot {")
         end = DM.index("\n};", start) + 3
         source = r'''
-/* Execute the real target selection, decode and completion bodies. */
+/* Execute the real target selection, extent validation, decode and completion bodies. */
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -3136,6 +3180,7 @@ static int LZ4_decompress_safe(const void *src, void *dst, int length, int capac
 { (void)src; (void)dst; (void)length; (void)capacity; assert(false); return -1; }
 /* Insert actual struct swapz_read_slot and target function definitions here. */
 ''' + DM[start:end] + "\n" + "\n".join(definition(name) for name in (
+            "swapz_map_extent_bounds_valid",
             "swapz_parallel_read_extent_mapped", "swapz_parallel_read_extent",
             "swapz_read_slot_prepare", "swapz_read_slot_run",
             "swapz_finish_read_slot_range")) + r'''
