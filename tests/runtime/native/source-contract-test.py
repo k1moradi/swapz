@@ -5,6 +5,7 @@ This is not a replacement for live kernel BIO/GC tests. It prevents CI and
 future privileged harnesses from accidentally selecting the old swapz module
 or the standalone memory-only research smoke instead of the real DM target.
 """
+from collections import Counter
 from pathlib import Path
 import re
 import unittest
@@ -6760,6 +6761,89 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         "extent_sequence_delta", "segment_sequence_base",
     )
 
+    FIXED_ALLOCATIONS = (
+        ("ctx", "kzalloc"),
+        ("ctx->batch_bytes", "vzalloc"),
+        ("ctx->gc_bytes_store", "vzalloc"),
+        ("ctx->input_page", "vzalloc"),
+        ("ctx->predictor_page", "kvmalloc"),
+        ("ctx->delta64_candidate_page", "kvmalloc"),
+        ("ctx->read_page", "vzalloc"),
+        ("ctx->read_compressed", "vzalloc"),
+        ("ctx->engine.write_scratch", "vzalloc"),
+        ("ctx->engine.read_scratch", "vzalloc"),
+        ("ctx->engine.read_metadata_cache", "vzalloc"),
+        ("ctx->engine.read_extent_cache", "vzalloc"),
+        ("ctx->read_slots", "kvcalloc"),
+        ("ctx->read_pages_store", "vzalloc"),
+        ("ctx->read_coalesce_scratch", "vzalloc"),
+        ("ctx->engine.bulk_scratch", "vzalloc"),
+        ("ctx->engine.bulk_txs", "kvcalloc"),
+        ("ctx->lz4_workmem", "kvmalloc"),
+        ("slot->engine.read_scratch", "vzalloc"),
+        ("slot->read_compressed", "vzalloc"),
+        ("slot->predictor_page", "kvmalloc"),
+        ("ctx->preparation_pages", "vzalloc"),
+        ("ctx->preparation_lanes", "kcalloc"),
+        ("ctx->submitter_lanes", "kvcalloc"),
+        ("lane->predictor_page", "kvmalloc"),
+        ("lane->predictor_page", "kvmalloc"),
+        ("lane->delta64_candidate_page", "kvmalloc"),
+        ("lane->delta64_candidate_page", "kvmalloc"),
+        ("lane->lz4_workmem", "kvmalloc"),
+        ("lane->lz4_workmem", "kvmalloc"),
+    )
+
+    DIRECT_FREES = (
+        ("ctx->preparation_lanes[prep_lane].predictor_page", "kvfree"),
+        ("ctx->preparation_lanes[prep_lane].delta64_candidate_page", "kvfree"),
+        ("ctx->preparation_lanes[prep_lane].lz4_workmem", "kvfree"),
+        ("ctx->preparation_lanes", "kfree"),
+        ("ctx->submitter_lanes[prep_lane].predictor_page", "kvfree"),
+        ("ctx->submitter_lanes[prep_lane].delta64_candidate_page", "kvfree"),
+        ("ctx->submitter_lanes[prep_lane].lz4_workmem", "kvfree"),
+        ("ctx->submitter_lanes", "kvfree"),
+        ("ctx->preparation_pages", "vfree"),
+        ("ctx->maps", "kvfree"),
+        ("ctx->live_records", "kvfree"),
+        ("ctx->extent_classes", "kvfree"),
+        ("ctx->extent_sequence_delta", "kvfree"),
+        ("ctx->segment_sequence_base", "kvfree"),
+        ("ctx->batch_bytes", "vfree"),
+        ("ctx->gc_bytes_store", "vfree"),
+        ("ctx->gc_scores", "kvfree"),
+        ("ctx->gc_io_scores", "kvfree"),
+        ("ctx->gc_min_live_blocks", "kvfree"),
+        ("ctx->gc_segment_evictions", "kvfree"),
+        ("ctx->segment_mapped_pages", "kvfree"),
+        ("ctx->segment_program_counts", "kvfree"),
+        ("ctx->segment_first_page", "kvfree"),
+        ("ctx->segment_last_page", "kvfree"),
+        ("ctx->page_prev_in_segment", "kvfree"),
+        ("ctx->page_next_in_segment", "kvfree"),
+        ("ctx->segment_trimmed", "kvfree"),
+        ("ctx->segment_roles", "kvfree"),
+        ("ctx->input_page", "vfree"),
+        ("ctx->predictor_page", "kvfree"),
+        ("ctx->delta64_candidate_page", "kvfree"),
+        ("ctx->read_page", "vfree"),
+        ("ctx->read_compressed", "vfree"),
+        ("ctx->engine.write_scratch", "vfree"),
+        ("ctx->engine.read_scratch", "vfree"),
+        ("ctx->engine.read_metadata_cache", "vfree"),
+        ("ctx->engine.read_extent_cache", "vfree"),
+        ("ctx->read_pages_store", "vfree"),
+        ("ctx->read_coalesce_scratch", "vfree"),
+        ("ctx->read_slots[slot].engine.read_scratch", "vfree"),
+        ("ctx->read_slots[slot].read_compressed", "vfree"),
+        ("ctx->read_slots[slot].predictor_page", "kvfree"),
+        ("ctx->read_slots", "kvfree"),
+        ("ctx->engine.bulk_scratch", "vfree"),
+        ("ctx->engine.bulk_txs", "kvfree"),
+        ("ctx->lz4_workmem", "kvfree"),
+        ("ctx", "kfree"),
+    )
+
     @staticmethod
     def allocation_inventory(constructor):
         # Require exactly the production kvcalloc count and sizeof expression.
@@ -6831,6 +6915,33 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertIn("sizeof(struct swapz_map)", authority)
         self.assertIn("sizeof(swapz_u16)", authority)
         self.assertIn("(size_t)-1", authority)
+
+    def test_all_constructor_allocations_and_frees_are_inventoried(self):
+        constructor = body("swapz_ctr")
+        destruction = body("swapz_free")
+        allocation_pattern = re.compile(
+            r"([A-Za-z0-9_>.\-\[\]]+)\s*=\s*"
+            r"(kzalloc|kcalloc|kmalloc|kmalloc_array|kvmalloc|"
+            r"kvmalloc_array|kvcalloc|kvzalloc|vmalloc|vzalloc)\s*\(")
+        observed_allocations = Counter(
+            allocation_pattern.findall(constructor))
+        expected_allocations = Counter(self.FIXED_ALLOCATIONS)
+        expected_allocations.update(
+            (f"ctx->{name}", "kvcalloc") for name in self.INDEX_ORDER)
+        self.assertEqual(
+            observed_allocations, expected_allocations,
+            "constructor direct allocation inventory changed; update the "
+            "capacity/RAM accounting before accepting the change")
+        self.assertEqual(sum(observed_allocations.values()), 47)
+
+        free_pattern = re.compile(
+            r"\b(kfree|kvfree|vfree)\s*\(\s*"
+            r"([A-Za-z0-9_>.\-\[\]]+)\s*\)")
+        observed_frees = Counter(
+            (expression, allocator)
+            for allocator, expression in free_pattern.findall(destruction))
+        self.assertEqual(observed_frees, Counter(self.DIRECT_FREES))
+        self.assertEqual(sum(observed_frees.values()), 47)
 
     def test_new_or_early_index_allocation_fails_source_audit(self):
         constructor = body("swapz_ctr")
