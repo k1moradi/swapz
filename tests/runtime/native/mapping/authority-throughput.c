@@ -91,9 +91,10 @@ static int test_legacy_reuse_rejects_cross_segment_map(void)
 	authority.reuse_dead_segments = 1;
 	test_maps[0] = (struct swapz_map) {
 		.start_block = corrupt_start,
-		.payload_length = SWAPZ_BLOCK_BYTES,
+		.payload_offset =
+			sizeof(struct swapz_header) + sizeof(struct swapz_record),
+		.payload_length = 128U,
 		.extent_blocks = 2U,
-		.raw = 1U,
 		.valid = 1U,
 	};
 	test_live[corrupt_start] = 1U;
