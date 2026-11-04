@@ -3122,16 +3122,25 @@ at least 1 GiB MemAvailable before this destructive-to-performance but RAM-only
 stress begins;
 otherwise qualification is BLOCKED rather than silently weakened.
 
-Immediately before the loaded-preflight diagnostic read and the ID36 admission
-sampling loop, the helpers verify that `/tmp` itself is a real, root-owned
-mode-1777 directory with no nested mountpoints, remove every direct child
-(including dotfiles) recursively, and verify the directory is empty. A
-nonstandard or uninspectable `/tmp`, a nested mountpoint, a removal error, or
-concurrent repopulation fails closed before the observation. ID36 repeats the
-cleanup because earlier loaded stages may have created temporary files after
-preflight. This may remove temporary data belonging to any process; run the
-privileged qualification only in the owner's serialized test window. Clearing
-`/tmp` does not weaken the 1 GiB `MemAvailable` threshold or drop kernel caches.
+Before the loaded-preflight diagnostic read and ID36 admission sampling,
+both scripts resolve the checkout-owned temporary-cleanup helper without an
+external `dirname` bootstrap dependency, require it to be readable, and refuse
+if sourcing fails. Missing or unloadable helpers block before cleanup or memory
+admission: ID36 reports the owned cleanup-helper prerequisite; loaded preflight
+uses the structured `LOADED_PREFLIGHT=BLOCKED`
+`check=completed_owned_tmp_cleanup_helper errno=unavailable` refusal with a
+bounded remedy. Rootless fixtures must prove both refusal paths using only the
+isolated bootstrap prefix, without executing privileged preflight or exposing
+private paths.
+
+The shared helper inspects the real root-owned mode-1777 `/tmp` and deletes
+only positively owned swapz benchmark sessions with matching completion proof
+and an exited owner process. Unrelated occupants, incomplete/quarantined
+sessions, and unproved ownership remain untouched. Unsafe mounts, unreadable
+proofs or failed owned cleanup block admission; neither helper broadly empties
+`/tmp` or drops kernel caches. ID36 repeats this bounded completed-owned
+cleanup after earlier loaded stages, without weakening the 1 GiB
+`MemAvailable` threshold.
 
 The owned pair first creates and fully faults both 64MiB memory-backed
 `null_blk` devices outside the ID36 cgroup. It then migrates its benchmark

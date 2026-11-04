@@ -714,15 +714,50 @@ sample_host_memory_admission
         self.assertIn(
             'source "$cleanup_helper" 2>/dev/null ||',
             preflight)
-        self.assertIn(
-            "owned temporary-cleanup helper unavailable",
-            preflight)
+        self.assertEqual(
+            preflight.count(
+                'refuse BLOCKED completed_owned_tmp_cleanup_helper unavailable'),
+            2)
+        self.assertLess(
+            preflight.index('cleanup_helper="$SCRIPT_DIR/clear-tmp-before-memory-check.sh"'),
+            preflight.index('[[ -r $cleanup_helper ]] ||'))
+        self.assertLess(
+            preflight.index('[[ -r $cleanup_helper ]] ||'),
+            preflight.index('source "$cleanup_helper" 2>/dev/null ||'))
         self.assertIn(
             'cd "$ROOT" 2>/dev/null || {',
             qualifier)
         self.assertIn(
             'SCRIPT_DIR="$(cd -- "$script_directory" 2>/dev/null && pwd -P)" ||',
             preflight)
+
+    def test_loaded_preflight_bootstrap_refuses_unavailable_cleanup(self):
+        preflight = PREFLIGHT.read_text(encoding="utf-8")
+        # Exercise only the bootstrap prefix, never the privileged preflight.
+        bootstrap = preflight[:preflight.index("note() {")]
+        bootstrap_path = self.root / "loaded-preflight.sh"
+        bootstrap_path.write_text(bootstrap, encoding="utf-8")
+        helper_path = self.root / "clear-tmp-before-memory-check.sh"
+        retained_path = self.root / "unowned-sentinel"
+        retained_path.write_text("keep", encoding="ascii")
+
+        for helper_source in (None, "return 7\n"):
+            with self.subTest(helper_source=helper_source):
+                if helper_source is None:
+                    helper_path.unlink(missing_ok=True)
+                else:
+                    helper_path.write_text(helper_source, encoding="ascii")
+                result = subprocess.run(
+                    ["bash", str(bootstrap_path)], capture_output=True,
+                    text=True, timeout=8, check=False)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(
+                    "BLOCKED: LOADED_PREFLIGHT=BLOCKED "
+                    "check=completed_owned_tmp_cleanup_helper "
+                    "errno=unavailable", result.stderr)
+                self.assertNotIn(str(self.root), result.stderr)
+                self.assertEqual(
+                    retained_path.read_text(encoding="ascii"), "keep")
 
     def test_cleanup_helper_error_is_propagated_without_touching_tmp(self):
         # Override timeout and id inside an isolated process. The original
