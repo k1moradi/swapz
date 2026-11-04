@@ -3402,6 +3402,9 @@ class PairReplayContract(unittest.TestCase):
             lambda item: item["samples"][11].update(phase="baseline"),
             lambda item: item["samples"][13].update(monotonic_ns=1),
             lambda item: item["samples"][13].update(
+                monotonic_ns=(
+                    item["samples"][12]["monotonic_ns"] + 151_000_000)),
+            lambda item: item["samples"][13].update(
                 timestamp_utc="2026-11-03T00:00:00Z"),
             lambda item: item.update(source_sha="b" * 40),
             lambda item: item["samples"][13].update(mapper_present=False),

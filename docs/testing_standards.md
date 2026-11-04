@@ -1249,10 +1249,12 @@ emulation must not be described as Linux swap behavior.
 
 Independent lower-device accounting uses the selected card's parent block
 statistics bracketed around each measured interval and separate cold-read
-brackets. Peak target RAM is sampled every 100 ms from a one-second pre-create
-baseline through mapper initialization, steady operation, measured GC and
+brackets. Peak target RAM is sampled on a 100 ms cadence from a one-second
+pre-create baseline through mapper initialization, steady operation, measured GC and
 ordinary mapper teardown, followed by at least two seconds with the mapper
-observed absent. Each sample records \`MemAvailable\`, \`SUnreclaim\`,
+observed absent. Consecutive monotonic samples must remain within 50–150 ms;
+larger scheduling gaps are incomplete evidence because they can hide the RAM
+peak. Each sample records \`MemAvailable\`, \`SUnreclaim\`,
 \`VmallocUsed\`, UTC time, a monotonic timestamp and mapper-presence state.
 The trace preserves the three \`/proc/meminfo\` integers in their
 kernel-reported \`kB\` units and declares \`meminfo_unit: "kB"\`; the
