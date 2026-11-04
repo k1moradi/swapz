@@ -4027,6 +4027,17 @@ The standalone recovery path must continue to refuse module unloading
 without same-process ownership; a recovered parser is not permission to
 bypass that limitation. An incomplete physical-probe restoration must refuse
 partition ownership release until the saved state reaches durable COMPLETE.
+
+Saved physical recovery evidence must require literal JSON
+`swap_was_active: true`, a positive integer `swap_size_kib`, and an integer
+`swap_priority` before inspecting/removing a mapper, writing the partition,
+or claiming that original swap restoration is complete. The original trial
+always starts from an active partition; a missing, false, truthy non-boolean,
+or malformed original-swap field is not permission to skip `swapon`.
+Reject it before device access with a bounded field-specific
+expected/observed diagnostic, leave the durable recovery stage and active
+ownership/one-use records untouched, and require manual recovery. Standalone
+`recover` must not return COMPLETE or release ownership on such evidence.
 The rootless teardown regression must prove that ORACLE_PASS instead preserves
 RECOVERY_REQUIRED evidence, leaves the partition ownership marker and one-use
 review intact, and cannot publish a smoke PASS. Failure diagnostics must state

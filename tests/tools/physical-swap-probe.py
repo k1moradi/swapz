@@ -1766,6 +1766,27 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
     if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != (
             state.get("header_sha256")):
         raise ProbeError("saved original header is missing or digest-mismatched")
+    # The original run admitted exactly one active swap partition. A damaged
+    # saved record must never turn restoration into an optional operation.
+    if state.get("swap_was_active") is not True:
+        observed = ("missing" if "swap_was_active" not in state else
+                    "false" if state["swap_was_active"] is False else "invalid")
+        raise ProbeError(
+            "recovery_original_swap_active expected=true "
+            f"observed={observed}; restoration_stage=not_attempted "
+            "ownership_marker_action=not_attempted; manual recovery required")
+    if type(state.get("swap_size_kib")) is not int or state["swap_size_kib"] <= 0:
+        observed = "missing" if "swap_size_kib" not in state else "invalid"
+        raise ProbeError(
+            "recovery_original_swap_size_kib expected=positive_integer "
+            f"observed={observed}; restoration_stage=not_attempted "
+            "ownership_marker_action=not_attempted; manual recovery required")
+    if type(state.get("swap_priority")) is not int:
+        observed = "missing" if "swap_priority" not in state else "invalid"
+        raise ProbeError(
+            "recovery_original_swap_priority expected=integer "
+            f"observed={observed}; restoration_stage=not_attempted "
+            "ownership_marker_action=not_attempted; manual recovery required")
     if state.get("module_ownership") not in {
             "NOT_STARTED", "MODULE_PENDING", "MODULE_OWNED"}:
         raise ProbeError("saved module ownership is unknown; manual review required")

@@ -507,6 +507,69 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         run.assert_not_called()
         write_header.assert_not_called()
 
+    def test_recovery_refuses_malformed_original_swap_evidence_before_device_access(self):
+        # A damaged saved active-swap flag previously skipped swapon, marked
+        # COMPLETE and released ownership even with the original swap absent.
+        cases = (
+            ("inactive", "swap_was_active", False,
+             "recovery_original_swap_active expected=true observed=false"),
+            ("missing_active", "swap_was_active", None,
+             "recovery_original_swap_active expected=true observed=missing"),
+            ("truthy_integer", "swap_was_active", 1,
+             "recovery_original_swap_active expected=true observed=invalid"),
+            ("zero_size", "swap_size_kib", 0,
+             "recovery_original_swap_size_kib expected=positive_integer observed=invalid"),
+            ("string_size", "swap_size_kib", "16777212",
+             "recovery_original_swap_size_kib expected=positive_integer observed=invalid"),
+            ("missing_priority", "swap_priority", None,
+             "recovery_original_swap_priority expected=integer observed=missing"),
+            ("boolean_priority", "swap_priority", True,
+             "recovery_original_swap_priority expected=integer observed=invalid"),
+        )
+        for case, field, value, diagnostic in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                state_dir = Path(temporary) / "state"
+                state, backup = self.make_recovery_state(state_dir)
+                if value is None:
+                    state.pop(field)
+                else:
+                    state[field] = value
+                state_path = state_dir / probe.STATE_NAME
+                state_path.write_text(json.dumps(state))
+                original_record = state_path.read_bytes()
+                marker_path = (
+                    self.recovery_base / f"partition-{state['partuuid']}.active")
+                consumed_path = (
+                    self.recovery_base / f"consumed-{state['run_id']}.json")
+                original_marker = marker_path.read_bytes()
+                original_consumption = consumed_path.read_bytes()
+                with mock.patch.object(probe, "_validate_state_dir"), \
+                        mock.patch.object(
+                            probe, "inspect_target_identity_for_recovery") as inspect, \
+                        mock.patch.object(probe, "_mapper_exists") as mapper, \
+                        mock.patch.object(probe, "_active_swap_for") as active, \
+                        mock.patch.object(probe, "_read_block0",
+                                          return_value=backup) as header_read, \
+                        mock.patch.object(probe, "_run") as command, \
+                        mock.patch.object(probe, "_write_block0") as header_write:
+                    with self.assertRaises(probe.ProbeError) as rejected:
+                        probe.recover(
+                            state_dir, state["device_arg"], state["device_arg"])
+                    self.assertIn(diagnostic, str(rejected.exception))
+                    self.assertIn(
+                        "restoration_stage=not_attempted "
+                        "ownership_marker_action=not_attempted; "
+                        "manual recovery required", str(rejected.exception))
+                    inspect.assert_not_called()
+                    mapper.assert_not_called()
+                    active.assert_not_called()
+                    header_read.assert_not_called()
+                    command.assert_not_called()
+                    header_write.assert_not_called()
+                self.assertEqual(state_path.read_bytes(), original_record)
+                self.assertEqual(marker_path.read_bytes(), original_marker)
+                self.assertEqual(consumed_path.read_bytes(), original_consumption)
+
     def test_recovery_refuses_to_remove_mapper_with_a_different_uuid(self):
         with tempfile.TemporaryDirectory() as temp:
             state_dir = Path(temp) / "state"
