@@ -394,7 +394,9 @@ wholly rewritten report; the campaign sealer's external artifact hashes and
 source/mapper identity evidence remain necessary. Adversarial regression
 fixtures mutate one evidence dimension at a time while retaining unrelated
 bound chronology and identity fields, so rejection demonstrates the intended
-invariant rather than an incidental malformed-arm failure. Host-visible
+invariant rather than an incidental malformed-arm failure. GC-window mutants
+also conserve their enclosing target-counter totals before testing whether
+relocation occurred inside the absolute measured window. Host-visible
 lower-device bytes and requests are not direct physical NAND wear measurements.
 The block arm records the exact frozen claim boundary, and the evaluator
 rejects a strengthened NAND-wear claim. JSON numeric parsing also rejects

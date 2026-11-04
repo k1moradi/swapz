@@ -3279,6 +3279,11 @@ class PairReplayContract(unittest.TestCase):
         after_measure["gc"].update(
             gc_wall_ns=1, gc_victims=1, gc_pages=1)
         outside_window_gc["sustained_intervals"].append(after_measure)
+        # Preserve the enclosing target-counter totals so this mutant reaches
+        # the absolute measured-window check rather than failing conservation.
+        outside_window_gc["gc"].update(
+            gc_wall_ns=2, gc_victims=1, gc_pages=1,
+            segment_program_sum=1)
         self.assertTrue(any(
             "fully measured interval with GC relocation" in reason
             for reason in qualification.sustained_coverage_reasons(
