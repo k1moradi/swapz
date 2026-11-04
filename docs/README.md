@@ -99,8 +99,9 @@ for the current dedicated SD card.
   technical context; implementation proposals and priorities stay in ROADMAP.
 - [handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md): historical `/dev/sda4` physical/capacity/live-swap evidence and transitional primary-manager implementation notes; not current policy.
 - [compile.md](compile.md): build/install/test interface and artifacts.
-- [benchmark.md](benchmark.md): current benchmark methodology, interpretation and
-  only the minimum settled evidence needed to avoid repeating a test.
+- [benchmark.md](benchmark.md): current benchmark methodology and qualification
+  interpretation; source-pinned experiment narratives are archived under
+  [historical benchmark experiments](handoff/historical-benchmark-experiment-memory.md).
 
 A settled idea should have one compact record in the ROADMAP evidence table:
 **decision, evidence anchor when useful, and the condition that would justify
