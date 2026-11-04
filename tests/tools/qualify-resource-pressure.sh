@@ -249,7 +249,7 @@ fi
 
 token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
 [[ $token =~ ^[a-f0-9]{16}$ ]] || {
-    printf '%s\n' 'BLOCKED: ID36 random identity unavailable' >&2
+    printf '%s\n' 'BLOCKED: ID36 random identity unavailable; require readable /dev/urandom for private cgroup identity' >&2
     exit 2
 }
 CGROUP="$CGROUP_ROOT/swapz-id36-$token"
@@ -303,7 +303,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 mkdir "$CGROUP" || {
-    printf '%s\n' 'BLOCKED: ID36 cannot create isolated cgroup' >&2
+    printf '%s\n' 'BLOCKED: ID36 cannot create isolated cgroup; require delegated writable cgroup v2 memory/CPU subtree without changing existing host groups' >&2
     exit 2
 }
 for control in memory.max memory.high memory.current memory.peak memory.events cpu.pressure cgroup.procs; do
@@ -322,13 +322,17 @@ if [[ -e $CGROUP/memory.swap.max ]]; then
 fi
 
 online_cpus="$(getconf _NPROCESSORS_ONLN)"
-[[ $online_cpus =~ ^[1-9][0-9]*$ ]] || {
-    printf '%s\n' 'BLOCKED: ID36 cannot determine online CPU count' >&2
+[[ $online_cpus =~ ^[1-9][0-9]*$ && ${#online_cpus} -le 18 ]] || {
+    printf '%s\n' 'BLOCKED: ID36 online CPU count unavailable or malformed; restore canonical getconf _NPROCESSORS_ONLN telemetry' >&2
     exit 2
 }
-cpu_workers=$((online_cpus * 2))
-(( cpu_workers > 32 )) && cpu_workers=32
-(( cpu_workers < 2 )) && cpu_workers=2
+# Clamp before multiplication so even unusual large CPU counts cannot wrap.
+if (( online_cpus >= 16 )); then
+    cpu_workers=32
+else
+    cpu_workers=$((online_cpus * 2))
+    (( cpu_workers < 2 )) && cpu_workers=2
+fi
 
 # Missing, duplicate, or malformed counters are not zero OOM/PSI evidence.
 # The caller inherits status 2 (BLOCKED) rather than silently passing.
@@ -349,7 +353,7 @@ event_value() {
             print counter
         }
     ' "$CGROUP/memory.events" 2>/dev/null)"; then
-        printf 'BLOCKED: ID36 memory.events counter %s missing or malformed\n' "$name" >&2
+        printf 'BLOCKED: ID36 memory.events counter %s missing or malformed; require one canonical nonnegative decimal counter before ID36\n' "$name" >&2
         return 2
     fi
     printf '%s\n' "$value"
@@ -379,7 +383,7 @@ cpu_some_total() {
             print total
         }
     ' "$CGROUP/cpu.pressure" 2>/dev/null)"; then
-        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some total missing or malformed' >&2
+        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some total missing or malformed; require one canonical nonnegative decimal some total counter before ID36' >&2
         return 2
     fi
     printf '%s\n' "$value"
@@ -418,12 +422,10 @@ done
 }
 pair_cgroup_pid="$(awk -F= '$1 == "pid" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PAIR_READY")"
 [[ $pair_cgroup_pid =~ ^[1-9][0-9]*$ ]] || {
-    cat "$PAIR_LOG" >&2
     printf '%s\n' 'FAIL: ID36 pair readiness did not report migrated PID' >&2
     exit 1
 }
 grep -Fxq "$pair_cgroup_pid" "$CGROUP/cgroup.procs" || {
-    cat "$PAIR_LOG" >&2
     printf '%s\n' 'FAIL: ID36 pair did not enter pressure cgroup after prewarm' >&2
     exit 1
 }
@@ -485,13 +487,13 @@ fi
 # and replay before reclaim/throttling begins.
 MEMORY_HIGH_BYTES=$((pressure_current + MEMORY_HEADROOM_BYTES))
 (( MEMORY_HIGH_BYTES < MEMORY_MAX_BYTES )) || {
-    printf 'FAIL: ID36 ready-state charge leaves no bounded memory.high headroom: %s bytes\n' \
-        "$pressure_current" >&2
-    exit 1
+    printf 'BLOCKED: ID36 ready-state charge cannot fit the memory.high boundary: observed:%s required_additional:%s memory.max:%s unit:bytes; reduce legitimate startup charge before retrying\n' \
+        "$pressure_current" "$MEMORY_HEADROOM_BYTES" "$MEMORY_MAX_BYTES" >&2
+    exit 2
 }
 (( pressure_current + PRESSURE_RAMP_BYTES < MEMORY_MAX_BYTES )) || {
-    printf 'BLOCKED: ID36 staged pressure would exceed memory.max safety bound: %s bytes\n' \
-        "$pressure_current" >&2
+    printf 'BLOCKED: ID36 staged pressure would exceed memory.max safety bound: observed:%s proposed_ramp:%s memory.max:%s unit:bytes; reduce legitimate startup charge before retrying\n' \
+        "$pressure_current" "$PRESSURE_RAMP_BYTES" "$MEMORY_MAX_BYTES" >&2
     exit 2
 }
 (( PRESSURE_RAMP_BYTES > MEMORY_HEADROOM_BYTES )) || {
@@ -620,7 +622,6 @@ fi
     exit 1
 }
 kill -0 "$PRESSURE_PID" 2>/dev/null || {
-    cat "$PRESSURE_LOG" >&2
     printf '%s\n' 'FAIL: ID36 pressure helper died during qualification' >&2
     exit 1
 }
