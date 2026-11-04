@@ -3036,6 +3036,34 @@ class PairReplayContract(unittest.TestCase):
         validator = evidence.RAM_VALIDATOR["validate_metadata_ram_trace"]
         validator(trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
                   expected_peak_ram_bytes=8192)
+        capacity = evidence.campaign_capacity_and_ram(
+            [capacity_pair], target_bytes, source_sha)
+        before = {
+            "kernel": {"boot_id": trace["host_boot_id"]},
+            "captured_at_utc": "2026-11-03T00:00:00Z",
+        }
+        after = {
+            "kernel": {"boot_id": trace["host_boot_id"]},
+            "captured_at_utc": "2026-11-03T00:01:00Z",
+        }
+        self.assertTrue(
+            evidence.metadata_ram_trace_within_host_window(
+                capacity, before, after))
+        invalid_before = copy.deepcopy(before)
+        invalid_before["kernel"]["boot_id"] = "22222222-2222-4222-8222-222222222222"
+        self.assertFalse(
+            evidence.metadata_ram_trace_within_host_window(
+                capacity, invalid_before, after))
+        invalid_before = copy.deepcopy(before)
+        invalid_before["captured_at_utc"] = "2026-11-03T00:00:02Z"
+        self.assertFalse(
+            evidence.metadata_ram_trace_within_host_window(
+                capacity, invalid_before, after))
+        invalid_after = copy.deepcopy(after)
+        invalid_after["captured_at_utc"] = "2026-11-03T00:00:09Z"
+        self.assertFalse(
+            evidence.metadata_ram_trace_within_host_window(
+                capacity, before, invalid_after))
         # A resource PASS must not survive a broken phase, cadence, provenance
         # or incomplete teardown-memory recovery.
         corruptions = (
