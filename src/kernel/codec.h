@@ -123,8 +123,9 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	       struct swapz_decoded *out, const swapz_u8 **payload);
 /* Caller must have authenticated immutable metadata with swapz_validate() or
  * swapz_validate_metadata_crc(). Descriptor lookup retains defensive bounds
- * checks but deliberately does not hash the payload. A metadata-CRC-only
- * caller must still enforce descriptor ordering/identity itself. */
+ * checks, including nonzero generation and payload/metadata separation, but
+ * deliberately does not hash the payload. A metadata-CRC-only caller must
+ * still enforce descriptor ordering/identity itself. */
 int swapz_lookup_validated_descriptor(const void *bytes, swapz_u32 bytes_total,
 				    swapz_u8 index, struct swapz_decoded *out,
 				    const swapz_u8 **payload);
