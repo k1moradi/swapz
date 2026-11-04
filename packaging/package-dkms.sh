@@ -712,7 +712,11 @@ snapshot_previously_journaled = final.exists() or final.is_symlink()
 entries = []
 # Fsync the transaction parent too: the rollback directory entry itself must
 # survive before any installed artifact is removed.
-directories = {backup, transaction, transaction.parent}
+# Include the parent of the transaction *root* too: creating
+# /var/lib/swapz-package-transactions is not durable merely by fsyncing
+# that newly created directory. Its entry lives in /var/lib.
+directories = {backup, transaction, transaction.parent,
+               transaction.parent.parent}
 for path in sorted(backup.rglob("*")):
     if path.is_symlink():
         raise SystemExit(f"unsafe backup symlink: {path}")
