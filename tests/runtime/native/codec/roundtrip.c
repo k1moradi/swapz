@@ -11,6 +11,9 @@
 #include "codec.h"
 #include "authority.h"
 #include <stddef.h>
+#if defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+#endif
 
 #define CHECK(expression) do { \
 	if (!(expression)) { \
@@ -854,6 +857,133 @@ static int test_overlapping_append_inputs(void)
 	return 0;
 }
 
+/* Check both address orderings and open/closed range boundaries through
+ * every production codec append entrypoint. No unrelated-pointer subtraction. */
+static int test_append_overlap_matrix(void)
+{
+	static swapz_u8 arena[2U * SWAPZ_MAX_COMPRESSED +
+			      SWAPZ_BLOCK_BYTES + 128U];
+	swapz_u8 *bytes = arena + SWAPZ_MAX_COMPRESSED + 64U;
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+	const swapz_u8 *stored;
+	unsigned int case_index, append_kind;
+	const struct {
+		const swapz_u8 *source;
+		swapz_u16 length;
+		int overlaps;
+	} cases[] = {
+		{ bytes + 128U, 16U, 1 }, /* Wholly inside. */
+		{ bytes + SWAPZ_BLOCK_BYTES - 7U, 7U, 1 },
+		{ bytes + SWAPZ_BLOCK_BYTES - 1U, 2U, 1 }, /* Cross right. */
+		{ bytes - 1U, 2U, 1 }, /* Cross left. */
+		{ bytes - 9U, 9U, 0 }, /* Exactly touch left. */
+		{ bytes + SWAPZ_BLOCK_BYTES, 9U, 0 }, /* Exactly touch right. */
+		{ bytes - 32U, 8U, 0 }, /* Disjoint, lower address. */
+		{ bytes + SWAPZ_BLOCK_BYTES + 16U, 8U, 0 },
+	};
+
+	memset(arena, 0xa5, sizeof(arena));
+	for (case_index = 0; case_index < sizeof(cases) / sizeof(cases[0]);
+	     ++case_index) {
+		const swapz_u8 *source = cases[case_index].source;
+		const swapz_u16 length = cases[case_index].length;
+		const swapz_u32 expected_crc = cases[case_index].overlaps ? 0U :
+			reference_crc32c(source, length);
+		for (append_kind = 0; append_kind < 5U; ++append_kind) {
+			swapz_u8 encoding = SWAPZ_ENCODING_LZ4;
+			int error;
+
+			CHECK(swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES,
+					  0x20400000U + 5U * case_index +
+					  append_kind) == 0);
+			CHECK(swapz_payload_overlaps_extent(&builder, source, length) ==
+			      cases[case_index].overlaps);
+			switch (append_kind) {
+			case 0:
+				error = swapz_append(&builder, 41U, 9U, source, length);
+				break;
+			case 1:
+				encoding = SWAPZ_ENCODING_DELTA64;
+				error = swapz_append_encoded(&builder, 41U, 9U,
+						     source, length, encoding);
+				break;
+			case 2:
+				error = swapz_append_prehashed(&builder, 41U, 9U,
+						       source, length, expected_crc);
+				break;
+			case 3:
+				encoding = SWAPZ_ENCODING_DELTA64_SHUF8;
+				error = swapz_append_prehashed_encoded(
+					&builder, 41U, 9U, source, length,
+					expected_crc, encoding);
+				break;
+			default:
+				error = swapz_append_prehashed_encoded_unique(
+					&builder, 41U, 9U, source, length,
+					expected_crc, encoding);
+				break;
+			}
+			if (cases[case_index].overlaps) {
+				CHECK(error == -EINVAL);
+				CHECK(builder.count == 0U &&
+				      builder.payload_start == SWAPZ_BLOCK_BYTES);
+				continue;
+			}
+			CHECK(error == 0);
+			CHECK(swapz_seal(&builder) == 0);
+			CHECK(swapz_validate(bytes, SWAPZ_BLOCK_BYTES) == 0);
+			memcpy(metadata_only, bytes, sizeof(metadata_only));
+			CHECK(swapz_peek(metadata_only, SWAPZ_BLOCK_BYTES,
+					 0U, &decoded) == 0);
+			CHECK(decoded.logical_page == 41U &&
+				      decoded.generation == 9U &&
+				      decoded.payload_length == length &&
+				      decoded.encoding == encoding &&
+				      decoded.payload_crc32c == expected_crc);
+			CHECK(swapz_lookup(bytes, SWAPZ_BLOCK_BYTES, 0U,
+					   &decoded, &stored) == 0);
+			CHECK(reference_crc32c(stored, length) == expected_crc);
+			CHECK(memcmp(stored, source, length) == 0);
+		}
+	}
+	/* Invalid length must be rejected before a tiny source is hashed. */
+	CHECK(swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES, 0x2040ffffU) == 0);
+	CHECK(swapz_append(&builder, 1U, 1U, payload,
+			   SWAPZ_MAX_COMPRESSED + 1U) == -EINVAL);
+	CHECK(swapz_append_encoded(&builder, 1U, 1U, payload,
+				   SWAPZ_MAX_COMPRESSED + 1U,
+				   SWAPZ_ENCODING_DELTA64) == -EINVAL);
+	CHECK(builder.count == 0U);
+	return 0;
+}
+
+/* With ASan, poison a valid address *inside* the builder after begin().
+ * A pre-rejection CRC read then fails deterministically. The opt-in
+ * SWAPZ_NEGATIVE_CONTROL_PREHASH reproduces that forbidden read. */
+static int test_no_overlapping_prehash(void)
+{
+#if defined(__SANITIZE_ADDRESS__)
+	struct swapz_builder builder;
+	const swapz_u8 *poisoned = extent + 512U;
+	int error, encoded_error;
+
+	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 0x20401111U) == 0);
+	__asan_poison_memory_region(poisoned, 32U);
+#if defined(SWAPZ_NEGATIVE_CONTROL_PREHASH)
+	(void)swapz_crc32c_bytes(poisoned, 32U);
+#endif
+	error = swapz_append(&builder, 1U, 1U, poisoned, 32U);
+	encoded_error = swapz_append_encoded(
+		&builder, 1U, 1U, poisoned, 32U, SWAPZ_ENCODING_DELTA64);
+	__asan_unpoison_memory_region(poisoned, 32U);
+	CHECK(error == -EINVAL && encoded_error == -EINVAL);
+	CHECK(builder.count == 0U &&
+	      builder.payload_start == SWAPZ_BLOCK_BYTES);
+#endif
+	return 0;
+}
+
 /* Rechecksum each forged descriptor using the independent bitwise oracle.
  * Full validation must reject CRC-valid illegal placements and descriptor
  * identities before lookup exposes payload bytes, for all extent classes. */
@@ -1038,6 +1168,8 @@ int main(void)
 	CHECK(test_partial_metadata_and_extent_bounds() == 0); tests++;
 	CHECK(test_maximum_record_count() == 0); tests++;
 	CHECK(test_overlapping_append_inputs() == 0); tests++;
+	CHECK(test_append_overlap_matrix() == 0); tests++;
+	CHECK(test_no_overlapping_prehash() == 0); tests++;
 	CHECK(test_authenticated_wire_mutations() == 0); tests++;
 	printf("SWAPZ_EXACT_PRODUCTION_C_TESTS_PASS=%d\n", tests);
 	return 0;

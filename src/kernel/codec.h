@@ -75,6 +75,21 @@ struct swapz_builder {
 	int sealed;
 };
 
+/* Reject an append source anywhere inside the builder-owned extent. Compare
+ * address differences instead of forming potentially wrapping end addresses;
+ * unrelated C object pointers must not be ordered or subtracted directly. */
+static inline int swapz_payload_overlaps_extent(const struct swapz_builder *builder,
+						const void *payload,
+						swapz_u16 length)
+{
+	unsigned long extent_address = (unsigned long)builder->bytes;
+	unsigned long payload_address = (unsigned long)payload;
+
+	if (payload_address >= extent_address)
+		return payload_address - extent_address < builder->bytes_total;
+	return extent_address - payload_address < length;
+}
+
 struct swapz_decoded {
 	swapz_u32 logical_page;
 	swapz_u32 generation;

@@ -43,7 +43,10 @@ static int swapz_append_page(struct swapz_engine *engine,
 		 * Hash only after the same cheap safety checks the generic
 		 * encoded append performs before touching caller payload.
 		 */
-		if (!swapz_page_valid(page) || !generation)
+		if (!swapz_page_valid(page) || !generation ||
+		    !builder || !builder->bytes || builder->sealed ||
+		    swapz_payload_overlaps_extent(builder, page->payload,
+						page->length))
 			return -EINVAL;
 		return swapz_append_prehashed_encoded_unique(
 			builder, page->logical_page, generation,

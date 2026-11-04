@@ -47,21 +47,6 @@ static inline int swapz_valid_extent_bytes(swapz_u32 bytes_total)
 	       bytes_total == 4U * SWAPZ_BLOCK_BYTES;
 }
 
-/* Reject an append source anywhere inside the builder-owned extent. Compare
- * address differences instead of forming potentially wrapping end addresses;
- * unrelated C object pointers must not be ordered or subtracted directly. */
-static inline int swapz_payload_overlaps_extent(const struct swapz_builder *builder,
-						const void *payload,
-						swapz_u16 length)
-{
-	unsigned long extent_address = (unsigned long)builder->bytes;
-	unsigned long payload_address = (unsigned long)payload;
-
-	if (payload_address >= extent_address)
-		return payload_address - extent_address < builder->bytes_total;
-	return extent_address - payload_address < length;
-}
-
 static swapz_u32 swapz_crc32c_state(swapz_u32 state, const void *data,
 				    swapz_u32 length)
 {
