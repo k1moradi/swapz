@@ -1092,9 +1092,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 "samples"].pop(),
             "sample_peak_disagrees": lambda capacity: capacity[
                 "metadata_ram_trace"]["samples"][14].update(
-                    mem_available_bytes=(
-                        8 * 1024 * 1024 * 1024 -
-                        900 * 1024 * 1024 - 1024)),
+                    mem_available_kib=(
+                        8 * 1024 * 1024 - 900 * 1024 - 1)),
             "source_mismatch": lambda capacity: capacity[
                 "metadata_ram_trace"].update(source_sha="b" * 40),
             "summary_tamper": lambda capacity: capacity[
