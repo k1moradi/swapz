@@ -1080,9 +1080,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "early_teardown": lambda capacity: capacity["metadata_ram_trace"][
                 "samples"].pop(),
             "sample_peak_disagrees": lambda capacity: capacity[
-                "metadata_ram_trace"]["samples"][6].update(ram_bytes=900000001),
+                "metadata_ram_trace"]["samples"][14].update(
+                    mem_available_bytes=7_099_999_999),
             "source_mismatch": lambda capacity: capacity[
                 "metadata_ram_trace"].update(source_sha="b" * 40),
+            "summary_tamper": lambda capacity: capacity[
+                "metadata_ram_summary"].update(sample_count=1),
             "short_capacity": lambda capacity: (
                 capacity.update(logical_pages=27080191,
                                 logical_capacity_bytes=27080191 * 4096)),
@@ -1098,9 +1101,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     SOURCE, report, report_raw, evidence, policy, policy_raw,
                     physical, physical_raw, campaign, campaign_raw)
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
-                expected = ("sealed campaign capacity/RAM evidence is invalid"
-                            if label == "short_capacity" else
-                            "sealed campaign RAM trace is invalid")
+                expected = (
+                    "sealed campaign capacity/RAM evidence is invalid"
+                    if label == "short_capacity" else
+                    "sealed campaign RAM trace summary does not match"
+                    if label == "summary_tamper" else
+                    "sealed campaign RAM trace is invalid")
                 self.assertTrue(
                     any(expected in blocker for blocker in result["code_blockers"]),
                     (label, result["code_blockers"]))
