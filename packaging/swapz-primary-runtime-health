@@ -889,7 +889,7 @@ EOF
 	fi
 
 	# The passive .swap may describe an already-active mapper, but must
-	# never be enabled as an independent swapon job.
+	# never be enabled as an independent activation job.
 	passive_enablement=$(run_bounded systemctl is-enabled "$mapper_swap_unit" 2>/dev/null) || :
 	case "$passive_enablement" in
 	static|disabled) ;;
@@ -984,7 +984,7 @@ stop_observe()
 	[ ! -e "$mapper_path" ] || mapper_present=1
 	if active_swapz_swap; then active_swap=1; else status=$?; [ "$status" -ne 2 ] || active_swap=1; fi
 	if [ "$mapper_present" -ne 0 ] || [ "$active_swap" -ne 0 ]; then
-		printf 'SWAPZ_RUNTIME_STOP=FAIL reason=swap_or_mapper_still_present mapper_present=%s active_swap=%s action=inspect_failed_primary_stop_no_retry\n' "$mapper_present" "$active_swap" >&2
+		printf 'SWAPZ_RUNTIME_STOP=FAIL reason=swap_or_mapper_still_present mapper_present=%s active_swap=%s action=none operator_next=inspect_failed_primary_stop_no_retry\n' "$mapper_present" "$active_swap" >&2
 		return 1
 	fi
 	return 0

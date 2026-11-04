@@ -1796,7 +1796,7 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(observed.returncode, 1, observed.stderr)
         self.assertIn("SWAPZ_RUNTIME_STOP=FAIL", observed.stderr)
         self.assertIn("reason=swap_or_mapper_still_present", observed.stderr)
-        self.assertIn("action=inspect_failed_primary_stop_no_retry", observed.stderr)
+        self.assertIn("action=none operator_next=inspect_failed_primary_stop_no_retry", observed.stderr)
         self.assertIn("mapper_present=1", observed.stderr)
         self.assertIn("active_swap=1", observed.stderr)
         helper = read_text(RUNTIME_HEALTH)
