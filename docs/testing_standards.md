@@ -2959,9 +2959,11 @@ diagnostic only. The final admission inventory records canonical kernel-kB
 host fields plus the mounted cgroup-root memory controls. A true cgroup-v2 root
 legitimately has no `memory.max` or `memory.current` and is recorded as
 `root-exempt`; when both files are exposed at a namespaced/non-root hierarchy
-root, their canonical values are reported but the child's 896 MiB containment
-ceiling is not a second admission floor. The host must have at least 1 GiB
-MemAvailable before this destructive-to-performance but RAM-only stress begins;
+root, their canonical values are reported and a finite root must retain the
+same 1 GiB effective headroom as the host admission floor. The child's 896 MiB
+containment ceiling is not a separate admission threshold. The host must have
+at least 1 GiB MemAvailable before this destructive-to-performance but RAM-only
+stress begins;
 otherwise qualification is BLOCKED rather than silently weakened.
 
 Immediately before reading the ID36 host-memory inventory, the helper removes
