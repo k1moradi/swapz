@@ -532,6 +532,7 @@ sample_host_memory_admission
         helper = shell_function(QUALIFIER, "cleanup")
         environment = ('SESSION=$1\nSTOP=$1/stop\nCGROUP=$1/absent\n'
                        'PAIR_PID=""\nPRESSURE_PID=""\n'
+                       'RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=0\n'
                        'PASS_EVIDENCE="PASS_ID36_RESOURCE_PRESSURE=synthetic"\n'
                        'rm() { return 1; }\n'
                        + helper)
