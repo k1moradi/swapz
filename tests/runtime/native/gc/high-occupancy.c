@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "authority.h"
 
 #define CHECK(x) do { if (!(x)) { \
@@ -348,9 +349,16 @@ static int test_sustained_all_raw_gc_rotations(void)
 {
 	const unsigned int rotations = 64U;
 	swapz_u32 next_logical = 0;
+	struct timespec wall_start, wall_end;
+	clock_t cpu_start, cpu_end;
 	unsigned int rotation;
 
 	CHECK(setup() == 0);
+	/* Native host CPU and wall observations are synthetic only: they are
+	 * NOT the physical ten-second stall or hour-long qualification gate. */
+	CHECK(timespec_get(&wall_start, TIME_UTC) == TIME_UTC);
+	cpu_start = clock();
+	CHECK(cpu_start != (clock_t)-1);
 	CHECK(fill_all_pages(1) == 0);
 	for (rotation = 0; rotation < rotations; ++rotation) {
 		swapz_u32 victim, block;
@@ -388,6 +396,16 @@ static int test_sustained_all_raw_gc_rotations(void)
 		      (SWAPZ_SEGMENT_BLOCKS / 2U));
 	CHECK(gc_reads == gc_writes);
 	CHECK(gc_bytes_relocated == gc_writes * (unsigned long long)SWAPZ_BLOCK_BYTES);
+	cpu_end = clock();
+	CHECK(timespec_get(&wall_end, TIME_UTC) == TIME_UTC);
+	CHECK(cpu_end != (clock_t)-1);
+	printf("SWAPZ_GC_SYNTHETIC_NATIVE_HOST_CPU_WALL=rotations:%u "
+	       "cpu_ms:%.3f wall_ms:%.3f map_scan_count:%llu "
+	       "physical_qualification:NOT_RUN\\n",
+	       rotations, 1000.0 * (double)(cpu_end - cpu_start) / CLOCKS_PER_SEC,
+	       1000.0 * ((double)(wall_end.tv_sec - wall_start.tv_sec) +
+			 (double)(wall_end.tv_nsec - wall_start.tv_nsec) / 1.0e9),
+	       a.alloc_probe_full_scans);
 	printf("SWAPZ_GC_SUSTAINED_EVIDENCE=rotations:%u "
 	       "foreground_writes:%llu gc_reads:%llu gc_writes:%llu "
 	       "gc_bytes_relocated:%llu\n",
@@ -450,6 +468,92 @@ static int test_false_zero_sidecar_blocks_commit_and_reuse(void)
 	return 0;
 }
 
+
+/*
+ * Force the last mapped logical RAW page to be the last source survivor.
+ * The lower layer writes all bytes but reports a failed completion at the
+ * publication boundary: this cannot acknowledge the new mapping. The same
+ * reserve must resume past the uncertain block, then reclaim the victim only
+ * after its very last authoritative reference moves.
+ */
+static int test_last_mapped_page_partial_victim_failed_publication(void)
+{
+	const swapz_u32 victim = LOGICAL_SEGMENTS - 1U;
+	const swapz_u32 last_logical = LOGICAL_PAGES - 1U;
+	struct swapz_map previous;
+	struct swapz_tx transaction;
+	swapz_u32 failed_block;
+	swapz_u32 logical;
+
+	CHECK(setup() == 0);
+	CHECK(fill_all_pages(1) == 0);
+	/* Eight COW overwrites create enough reserve headroom for one torn
+	 * destination block while leaving the last logical page untouched. */
+	for (logical = victim * SWAPZ_SEGMENT_BLOCKS;
+	     logical < victim * SWAPZ_SEGMENT_BLOCKS + 8U; ++logical)
+		CHECK(write_page(logical, 2) == 0);
+	CHECK(a.open_segment == FOREGROUND_SEGMENTS - 1U);
+	CHECK(segment_maps[victim] == SWAPZ_SEGMENT_BLOCKS - 8U);
+	previous = maps[last_logical];
+	CHECK(previous.valid && previous.raw &&
+	      previous.start_block == LOGICAL_PAGES - 1U);
+	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
+	CHECK(a.gc_destination == FOREGROUND_SEGMENTS);
+
+	for (logical = victim * SWAPZ_SEGMENT_BLOCKS + 8U;
+	     logical < last_logical; ++logical) {
+		const swapz_u32 source = maps[logical].start_block;
+
+		CHECK(source / SWAPZ_SEGMENT_BLOCKS == victim);
+		memcpy(page_bytes, media + (size_t)source * SWAPZ_BLOCK_BYTES,
+		       SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_verify_raw(&a, logical, page_bytes) == 0);
+		CHECK(swapz_stage(&a, &logical, 1, 1, &transaction) == 0);
+		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+		       page_bytes, SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1, 0) == 0);
+		gc_reads++;
+		gc_writes++;
+		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
+	}
+	CHECK(segment_maps[victim] == 1U);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
+	CHECK(a.gc_allocation && roles[victim] &&
+	      maps[last_logical].start_block == previous.start_block);
+	CHECK(verify_all_pages() == 0);
+
+	memcpy(page_bytes,
+	       media + (size_t)previous.start_block * SWAPZ_BLOCK_BYTES,
+	       SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_stage(&a, &last_logical, 1, 1, &transaction) == 0);
+	failed_block = transaction.start_block;
+	/* All bytes may reach media before the lower error; a success-looking
+	 * buffer never substitutes for an explicit completed-block ACK. */
+	memcpy(media + (size_t)failed_block * SWAPZ_BLOCK_BYTES,
+	       page_bytes, SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 0, -EIO) == -EIO);
+	CHECK(!a.in_flight && a.gc_allocation);
+	CHECK(maps[last_logical].start_block == previous.start_block &&
+	      maps[last_logical].generation == previous.generation);
+	CHECK(!live[failed_block] && !classes[failed_block]);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
+	CHECK(verify_all_pages() == 0);
+
+	CHECK(swapz_stage(&a, &last_logical, 1, 1, &transaction) == 0);
+	CHECK(transaction.start_block > failed_block);
+	memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+	       page_bytes, SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1, 0) == 0);
+	CHECK(maps[last_logical].generation == previous.generation + 1U);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == 0);
+	CHECK(!roles[victim] && roles[FOREGROUND_SEGMENTS]);
+	for (swapz_u32 block = victim * SWAPZ_SEGMENT_BLOCKS;
+	     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
+		CHECK(!live[block] && !classes[block]);
+	CHECK(verify_all_pages() == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -458,6 +562,8 @@ int main(void)
 	CHECK(test_sustained_all_raw_gc_rotations() == 0); passed++;
 	CHECK(test_fragmented_raw_gc_restores_progress() == 0); passed++;
 	CHECK(test_false_zero_sidecar_blocks_commit_and_reuse() == 0); passed++;
+	CHECK(test_last_mapped_page_partial_victim_failed_publication() == 0);
+	passed++;
 	printf("SWAPZ_GC_HIGH_OCCUPANCY_PASS=%d "
 	       "foreground_writes=%llu gc_reads=%llu gc_writes=%llu "
 	       "gc_bytes_relocated=%llu alloc_probe_256_block_scans=%llu\n",
