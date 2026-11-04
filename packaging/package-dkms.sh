@@ -1391,13 +1391,14 @@ restore_uninstall_cli_backup() {
   mv -f -- "$temporary_cli" "$cli" || return 1
 }
 
-committed_transaction_final_state_is_exact() {
-  local committed_status=""
-  # A rollback trap may observe the durable terminal journal before the caller
-  # has cleared its trap. Trust it only with the complete snapshot and live
-  # terminal state independently verified.
+durable_committed_transaction_record() {
+  # persist_transaction_state sets transaction_phase before writing, so the
+  # in-memory phase alone is not authority. The canonical journal must itself
+  # be durable and say committed. Final-state checks and durability precede
+  # that transition; a later signal must never reverse an accepted commit just
+  # because a read-only DKMS/status probe is temporarily unavailable.
   verify_transaction_snapshot >/dev/null 2>&1 || return 1
-  python3 - "$transaction_dir/state.json" <<'PY' >/dev/null 2>&1 || return 1
+  python3 - "$transaction_dir/state.json" <<'PY' >/dev/null 2>&1
 import json
 import sys
 
@@ -1405,17 +1406,6 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     state = json.load(stream)
 raise SystemExit(0 if state.get("phase") == "committed" else 1)
 PY
-  query_dkms_status committed_status -m swapz -v "$version" || return 1
-  if [[ "$action" == install ]]; then
-    verify_owned || return 1
-    dkms_status_exact_installed "$committed_status" || return 1
-  elif [[ "$action" == uninstall ]]; then
-    [[ -z "$committed_status" ]] && ! package_paths_present &&
-      module_candidates_absent || return 1
-  else
-    return 1
-  fi
-  other_kernel_module_candidates_absent
 }
 
 restore_uninstall_backup() {
@@ -1505,7 +1495,7 @@ uninstall_rollback() {
   trap - ERR HUP INT TERM
   transaction_active=0
   if [[ "$transaction_phase" == committed ]] &&
-     committed_transaction_final_state_is_exact; then
+     durable_committed_transaction_record; then
     echo "BLOCKED: package uninstall $reason after durable committed phase; committed uninstall verified; rollback not attempted; recovery-required journal retained" >&2
     exit "$rc"
   fi
@@ -2206,7 +2196,7 @@ rollback() {
   rollback_in_progress=1
   trap - ERR HUP INT TERM
   if [[ "$transaction_phase" == committed ]] &&
-     committed_transaction_final_state_is_exact; then
+     durable_committed_transaction_record; then
     transaction_active=0
     echo "BLOCKED: package $reason after durable committed phase; committed install verified; rollback not attempted; recovery-required journal retained" >&2
     exit "$rc"

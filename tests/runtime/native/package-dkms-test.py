@@ -1990,8 +1990,8 @@ exec "{flock_binary}" "$@"
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate(timeout=8)
 
-    def terminate_at_durable_phase(self, action, phase):
-        """SIGTERM after durable commit must preserve the terminal package state."""
+    def terminate_at_durable_phase(self, action, phase, before_signal=None):
+        """SIGTERM after a durable checkpoint must preserve terminal authority."""
         ready = self.home / "package-checkpoint.ready"
         ready.unlink(missing_ok=True)
         environment = dict(self.env, SWAPZ_TEST_PAUSE_AFTER=phase)
@@ -2012,6 +2012,8 @@ exec "{flock_binary}" "$@"
             self.assertEqual(len(transactions), 1)
             state = json.loads((transactions[0] / "state.json").read_text())
             self.assertEqual(state["phase"], phase)
+            if before_signal is not None:
+                before_signal()
             os.killpg(process.pid, signal.SIGTERM)
             stdout, stderr = process.communicate(timeout=8)
             self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
@@ -2045,6 +2047,29 @@ exec "{flock_binary}" "$@"
         self.assertEqual(recovered.returncode, 0, recovered.stderr)
         self.assertFalse(uninstall_transaction.exists())
         self.assert_absent()
+
+    def test_sigterm_after_committed_install_does_not_require_dkms_query(self):
+        dkms = self.bin / "dkms"
+
+        def make_dkms_temporarily_unavailable():
+            dkms.chmod(0o644)
+
+        try:
+            transaction, stderr = self.terminate_at_durable_phase(
+                "install", "committed", make_dkms_temporarily_unavailable)
+        finally:
+            dkms.chmod(0o755)
+
+        self.assertIn("committed install verified", stderr)
+        self.assertIn("rollback not attempted", stderr)
+        self.assertNotIn("attempting transaction rollback", stderr)
+        self.assert_installed_exact()
+        self.assertTrue(transaction.exists())
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertFalse(transaction.exists())
+        self.assert_installed_exact()
 
     def test_sigkill_after_install_module_publication_retains_recovery_gate(self):
         transaction = self.kill_at_durable_phase("install", "module-promoted")
