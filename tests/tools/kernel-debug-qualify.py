@@ -32,6 +32,7 @@ DEFAULT_BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 DEFAULT_MODULE = Path("build/kernel/experimental/dm-swapz.ko")
 MAX_RUNTIME_AGE_NS = 20 * 60 * 1_000_000_000
 MAX_RUNTIME_SNAPSHOT_CHARS = 16 * 1024
+MAX_CMDLINE_CHARS = 64 * 1024
 MAX_CONFIG_CHARS = 4 * 1024 * 1024
 MAX_DMESG_BYTES = 64 * 1024 * 1024
 MAX_EXECUTION_BYTES = 16 * 1024 * 1024
@@ -188,8 +189,12 @@ def probe(config_path: Path | None, cmdline_path: Path) -> dict[str, str]:
         return {feature: "UNKNOWN" for feature in FEATURE_SYMBOLS}
     config = load_config(config_path)
     try:
-        cmdline = cmdline_path.read_text(encoding="utf-8").split()
-    except (OSError, UnicodeError):
+        with cmdline_path.open("r", encoding="utf-8") as source:
+            cmdline_contents = source.read(MAX_CMDLINE_CHARS + 1)
+        if len(cmdline_contents) > MAX_CMDLINE_CHARS:
+            raise ValueError("kernel command line exceeds bounded parser input")
+        cmdline = cmdline_contents.split()
+    except (OSError, UnicodeError, ValueError):
         cmdline = None
     result = {}
     for feature, symbols in FEATURE_SYMBOLS.items():
@@ -807,12 +812,14 @@ def verify_owned_run(
         assert before_state is not None and after_state is not None
         if before_state["boot_id"] != current_boot_id:
             runtime_block_reason = (
-                f"runtime-before boot mismatch: observed {before_state['boot_id']}, "
-                f"current {current_boot_id}")
+                f"runtime-before boot mismatch: expected current boot {current_boot_id}, "
+                "observed different valid boot ID; next: recapture the pre/post "
+                "runtime snapshots and execution on one boot")
         elif after_state["boot_id"] != current_boot_id:
             runtime_block_reason = (
-                f"runtime-after boot mismatch: observed {after_state['boot_id']}, "
-                f"current {current_boot_id}")
+                f"runtime-after boot mismatch: expected current boot {current_boot_id}, "
+                "observed different valid boot ID; next: recapture the pre/post "
+                "runtime snapshots and execution on one boot")
         else:
             now = time.monotonic_ns()
             before_time = before_state["observed_monotonic_ns"]
@@ -881,6 +888,37 @@ def verify_owned_run(
         return "BLOCKED", "owned execution log missing or unreadable"
     if kernel_release is None:
         return "BLOCKED", "running kernel release unavailable for evidence binding"
+
+    assert before_state is not None
+    expected_boot_id = str(before_state["boot_id"])
+    boot_markers = [
+        line for line in execution_lines
+        if line.lstrip().startswith("BOOT_ID")
+    ]
+    expected_boot_marker = f"BOOT_ID={expected_boot_id}"
+    if not boot_markers:
+        return "BLOCKED", (
+            f"missing execution boot marker: expected {expected_boot_marker}; "
+            "observed missing; next: record the helper execution boot ID from "
+            "the same boot as both runtime snapshots")
+    if len(boot_markers) != 1:
+        return "BLOCKED", (
+            f"contradictory execution boot marker: expected {expected_boot_marker}; "
+            "observed duplicate markers; next: recapture one bounded owned session")
+    if boot_markers[0] != expected_boot_marker:
+        observed_boot = boot_markers[0].removeprefix("BOOT_ID=")
+        observed_category = (
+            "different valid boot ID"
+            if re.fullmatch(
+                r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}",
+                observed_boot,
+            )
+            else "missing/malformed boot ID"
+        )
+        return "BLOCKED", (
+            f"execution boot marker mismatch: expected {expected_boot_marker}; "
+            f"observed {observed_category}; next: rerun the owned helper and "
+            "runtime snapshots on one boot")
 
     source_markers = [
         line for line in execution_lines
@@ -977,22 +1015,26 @@ def verify_owned_run(
     observed_module_sha256 = module_evidence.get("sha256", "<missing>")
     if observed_module_sha256 != executed_module_sha256:
         observed_category = (
-            observed_module_sha256
+            "different valid SHA256"
             if isinstance(observed_module_sha256, str) and
             re.fullmatch(r"[0-9a-f]{64}", observed_module_sha256)
             else "missing/malformed SHA256"
         )
         return "BLOCKED", (
-            f"module SHA256 mismatch: executed {executed_module_sha256}, "
+            f"module SHA256 mismatch: expected executed module {executed_module_sha256}, "
             f"observed {observed_category}; "
             "next: inspect the exact executed module bytes")
     vermagic = module_evidence.get("vermagic", "")
     vermagic_fields = vermagic.split()
     if not vermagic_fields or vermagic_fields[0] != kernel_release:
-        observed_release = vermagic_fields[0] if vermagic_fields else "<missing>"
+        observed_category = (
+            "different kernel release" if vermagic_fields
+            else "missing kernel release"
+        )
         return "BLOCKED", (
             f"module vermagic kernel mismatch: expected {kernel_release}, "
-            f"observed {observed_release}")
+            f"observed {observed_category}; next: build the clean module for "
+            "the running kernel")
     symbols = module_evidence.get("symbols", "")
     if "kasan" in required and re.search(
             r"(__asan_|__hwasan_|kasan_report)", symbols) is None:
@@ -1060,7 +1102,10 @@ def main() -> int:
             # Reject inactive instrumentation before helper admission, not
             # merely after an otherwise clean I/O session has finished.
             snapshot = parse_runtime_snapshot(
-                arguments.snapshot.read_text(encoding="utf-8"), required)
+                _read_runtime_text(
+                    arguments.snapshot, "runtime-before snapshot"),
+                required,
+            )
             current_boot_id = _read_runtime_text(
                 DEFAULT_BOOT_ID, "kernel boot identity").strip()
             if snapshot["boot_id"] != current_boot_id:

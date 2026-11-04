@@ -35,11 +35,13 @@ CONFIG_DEBUG_LOCK_ALLOC=y
 """
 SOURCE_SHA = "a" * 40
 KERNEL_RELEASE = "test-debug-kernel"
+BOOT_ID = qualification.DEFAULT_BOOT_ID.read_text(encoding="utf-8").strip()
 MODULE_BYTES = b"synthetic module, never loaded"
 MODULE_SHA256 = hashlib.sha256(MODULE_BYTES).hexdigest()
 GOOD_LOG = f"""
 SOURCE_HEAD={SOURCE_SHA}
 RUNNING_KERNEL={KERNEL_RELEASE}
+BOOT_ID={BOOT_ID}
 MODULE_SHA256={MODULE_SHA256}  /repo/build/kernel/experimental/dm-swapz.ko
 PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0
 PASS_LOADED_COMPOUND_BIO=written_pages:384 verified_pages:384 segs_gt1:2 segs_max:3 nonzero_off:1 compound_pages:128 copy_fallbacks:1 failed:0
@@ -195,6 +197,30 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ("kasan", "lockdep")))
         self.assertIsNone(qualification.incomplete_loaded_lane_reason(
             ("kcsan",)))
+
+    def test_execution_boot_marker_binds_loaded_evidence(self) -> None:
+        without_boot = "\n".join(
+            line for line in GOOD_LOG.splitlines()
+            if not line.startswith("BOOT_ID=")
+        )
+        status, reason = self.verify(execution=without_boot)
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn(f"expected BOOT_ID={BOOT_ID}", reason)
+        self.assertIn("observed missing", reason)
+        self.assertIn("next:", reason)
+
+        other_boot = "00000000-0000-0000-0000-000000000000"
+        status, reason = self.verify(execution=GOOD_LOG.replace(
+            f"BOOT_ID={BOOT_ID}", f"BOOT_ID={other_boot}"))
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("observed different valid boot ID", reason)
+        self.assertNotIn(other_boot, reason)
+        self.assertIn("next:", reason)
+
+        status, reason = self.verify(
+            execution=GOOD_LOG + f"\nBOOT_ID={BOOT_ID}")
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("observed duplicate markers", reason)
 
     def test_runtime_state_must_be_active_before_and_after(self) -> None:
         required = ("kcsan",)
@@ -650,6 +676,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
         for field, value in (
             ("source_sha", private_detail),
             ("sha256", private_detail),
+            ("vermagic", private_detail),
         ):
             with self.subTest(field=field):
                 module_evidence = {
@@ -698,6 +725,15 @@ class KernelDebugQualificationTests(unittest.TestCase):
             "lockdep prove_locking=0",
             self.verify(runtime_after=self.runtime_snapshot(
                 ("kasan", "lockdep"), lockdep_prove_locking=False))[1])
+        other_boot_id = "00000000-0000-0000-0000-000000000000"
+        state = json.loads(self.runtime_snapshot(required))
+        state["boot_id"] = other_boot_id
+        status, reason = self.verify(
+            required=required, runtime_before=json.dumps(state))
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("observed different valid boot ID", reason)
+        self.assertNotIn(other_boot_id, reason)
+        self.assertIn("next:", reason)
 
     def test_bad_or_missing_module_provenance_blocks_clean_claim(self) -> None:
         clean = {
@@ -1292,8 +1328,23 @@ class KernelDebugQualificationTests(unittest.TestCase):
         snapshot["kcsan_enabled"] = True
         snapshot_file.write_text(json.dumps(snapshot))
         with mock.patch.object(sys, "argv", argv), \
-             mock.patch.object(qualification, "DEFAULT_BOOT_ID", boot_id):
+             mock.patch.object(qualification, "DEFAULT_BOOT_ID", boot_id), \
+             mock.patch.object(
+                 Path, "read_text",
+                 side_effect=AssertionError("snapshot-check used unbounded read_text"),
+             ):
             self.assertEqual(qualification.main(), 0)
+
+        snapshot_file.write_text(
+            " " * (qualification.MAX_RUNTIME_SNAPSHOT_CHARS + 1),
+            encoding="utf-8",
+        )
+        errors = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(qualification, "DEFAULT_BOOT_ID", boot_id), \
+             contextlib.redirect_stderr(errors):
+            self.assertEqual(qualification.main(), 2)
+        self.assertIn("exceeds bounded parser input", errors.getvalue())
 
     def test_owned_wrapper_rootless_replay_matrix(self) -> None:
         """Exercise the actual Bash control flow with inert commands and bounded children."""
@@ -1419,6 +1470,11 @@ class KernelDebugQualificationTests(unittest.TestCase):
                         if scenario == "missing_run_marker":
                             execution = execution.replace(
                                 "PASS_LOADED_LIVE_GC=", "SKIPPED_LIVE_GC=")
+                        if scenario == "changed_execution_boot":
+                            execution = execution.replace(
+                                f"BOOT_ID={boot_id}",
+                                "BOOT_ID=00000000-0000-0000-0000-000000000000",
+                            )
                         print(execution, end="")
                 else:
                     sys.exit(98)
@@ -1490,6 +1546,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ("instrumentation_query_failure", "kasan-lockdep", 2, "module kasan-lockdep instrumentation query failed (exit=24)"),
             ("module_hash_mismatch", "kasan-lockdep", 2, "module SHA256 mismatch"),
             ("changed_boot_id", "kasan-lockdep", 2, "runtime-after boot mismatch"),
+            ("changed_execution_boot", "kasan-lockdep", 2,
+             "execution boot marker mismatch"),
             ("truncated_dmesg", "kasan-lockdep", 2, "dmesg truncated"),
             ("missing_run_marker", "kasan-lockdep", 2, "missing loaded run marker"),
             ("timeout", "kasan-lockdep", 1, "helper exit=124"),
@@ -1511,8 +1569,10 @@ class KernelDebugQualificationTests(unittest.TestCase):
                 for name in ("sudo", "python3", "git", "make", "modinfo", "nm"):
                     (fake_bin / name).symlink_to(program.name)
                 (directory / "build/tests").mkdir(parents=True)
-                (directory / "boot-id").write_text(
-                    "01234567-89ab-cdef-0123-456789abcdef\n")
+                replay_boot_id = "01234567-89ab-cdef-0123-456789abcdef"
+                (directory / "boot-id").write_text(replay_boot_id + "\n")
+                replay_log = GOOD_LOG.replace(
+                    f"BOOT_ID={BOOT_ID}", f"BOOT_ID={replay_boot_id}")
                 configuration = CONFIG
                 if scenario == "missing_kconfig_option":
                     configuration = configuration.replace("CONFIG_KASAN=y\n", "")
@@ -1521,7 +1581,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
                         "CONFIG_KCSAN=y", "# CONFIG_KCSAN is not set")
                 (directory / "config").write_text(configuration)
                 (directory / "cmdline").write_text("quiet\n")
-                (directory / "good.log").write_text(GOOD_LOG + "\n")
+                (directory / "good.log").write_text(replay_log + "\n")
                 environment = {
                     **os.environ,
                     "PATH": str(fake_bin) + os.pathsep + os.defpath,

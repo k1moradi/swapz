@@ -6195,12 +6195,22 @@ synthetic evidence is `ROOTLESS_VALIDATOR_ONLY=PASS` only.
 The evidence verifier rejects incomplete or reordered KASAN/lockdep selections:
 only the full `kasan,lockdep` lane or separate `kcsan` lane can qualify,
 even when all synthetic loaded markers and module hashes otherwise match.
+It also requires exactly one execution `BOOT_ID=<uuid>` marker matching the
+same current boot as both runtime snapshots; missing, duplicated, malformed or
+different-boot execution identity blocks qualification with the expected boot
+identity and a safe observed category. The current read-only
+`deploy-nullblk.sh` producer does not emit that marker, so an actual loaded
+debug qualification remains intentionally BLOCKED until that producer's owner
+adds the marker. Rootless fixtures may inject it only into synthetic replay
+evidence and must still report `ROOTLESS_VALIDATOR_ONLY=PASS`, never a loaded
+PASS.
 The read-only feature probe can still report individual capabilities.
 Kernel diagnostics, helper failure reasons and contradictory source/module/
 kernel markers use fixed safe categories rather than echoing private dmesg
-records, arbitrary marker values or privileged evidence paths. Runtime JSON,
-kernel configuration, bounded session logs and execution records have finite
-parser limits; oversized evidence cannot produce PASS. The private rootless wrapper replay must assert the redacted lockdep
+records, arbitrary marker values or privileged evidence paths. Runtime JSON
+(including the `snapshot-check` CLI input), kernel command line, kernel
+configuration, bounded session logs and execution records have finite parser
+limits; oversized evidence cannot produce PASS. The private rootless wrapper replay must assert the redacted lockdep
 category rather than matching raw diagnostic text. A clean synthetic
 verifier result remains rootless-only, not proof of loaded instrumentation.
 The replay guard
