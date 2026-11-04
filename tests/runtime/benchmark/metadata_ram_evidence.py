@@ -393,6 +393,17 @@ def validate_metadata_ram_trace(
         previous_utc = utc_time
         phase_samples[phase].append(sample)
 
+    # Per-interval jitter is tolerated, but it must not systematically turn
+    # the declared 100 ms cadence into slower, under-sampled host evidence.
+    # Use integer arithmetic to avoid rounding multi-hour trace durations.
+    observed_span_ns = (
+        samples[-1]["monotonic_ns"] - samples[0]["monotonic_ns"])
+    expected_span_ns = (len(samples) - 1) * SAMPLING_INTERVAL_NS
+    if not (9 * expected_span_ns <= 10 * observed_span_ns <=
+            11 * expected_span_ns):
+        raise ValueError(
+            "metadata RAM observed sampling cadence differs from 100 ms")
+
     for phase, minimum in MINIMUM_PHASE_SAMPLES.items():
         if len(phase_samples[phase]) < minimum:
             raise ValueError(
@@ -480,18 +491,24 @@ def validate_metadata_ram_trace(
         index for index, sample in enumerate(absent_teardown)
         if sample["monotonic_ns"] <= recovery_cutoff_ns)
     recovery = absent_teardown[recovery_start:]
+    # Compare robust medians on both sides: a single low MemAvailable or
+    # high slab/vmalloc baseline outlier must not conceal a persistent leak.
+    baseline_s_unreclaim_twice_kib = _median_twice([
+        sample["s_unreclaim_kib"] for sample in baseline])
+    baseline_vmalloc_used_twice_kib = _median_twice([
+        sample["vmalloc_used_kib"] for sample in baseline])
     if (
             recovery[-1]["monotonic_ns"] -
             recovery[0]["monotonic_ns"] < 1_000_000_000 or
             _median_twice([
                 sample["mem_available_kib"] for sample in recovery]) <
-            2 * min(baseline_available_kib) or
+            baseline_median_available_twice_kib or
             _median_twice([
                 sample["s_unreclaim_kib"] for sample in recovery]) >
-            2 * max(sample["s_unreclaim_kib"] for sample in baseline) or
+            baseline_s_unreclaim_twice_kib or
             _median_twice([
                 sample["vmalloc_used_kib"] for sample in recovery]) >
-            2 * max(sample["vmalloc_used_kib"] for sample in baseline)):
+            baseline_vmalloc_used_twice_kib):
         raise ValueError(
             "metadata RAM teardown did not recover the pre-create envelope")
 

@@ -3478,6 +3478,28 @@ class PairReplayContract(unittest.TestCase):
             for sample in item["samples"][-10:]:
                 sample["mem_available_kib"] -= 100
 
+        def corrupt_baseline_outlier(item):
+            # The old minimum-baseline comparison hid 100 KiB of leaked RAM.
+            item["samples"][0]["mem_available_kib"] -= 1000
+            corrupt_recovery(item)
+
+        def corrupt_slab_outlier(item):
+            # A single slab spike must not excuse sustained teardown growth.
+            item["samples"][0]["s_unreclaim_kib"] += 1000
+            for sample in item["samples"][-10:]:
+                sample["s_unreclaim_kib"] += 100
+
+        def corrupt_vmalloc_outlier(item):
+            item["samples"][0]["vmalloc_used_kib"] += 1000
+            for sample in item["samples"][-10:]:
+                sample["vmalloc_used_kib"] += 100
+
+        def corrupt_actual_cadence(item):
+            # Every interval fits the existing jitter bound, yet the sampler
+            # averages 140 ms instead of its declared 100 ms.
+            for index, sample in enumerate(item["samples"], start=1):
+                sample["monotonic_ns"] = index * 140_000_000
+
         corruptions = (
             lambda item: item["samples"].pop(),
             lambda item: item["samples"][11].update(phase="baseline"),
@@ -3492,7 +3514,11 @@ class PairReplayContract(unittest.TestCase):
             lambda item: item.update(scope="target-owned-estimate"),
             lambda item: item.update(meminfo_unit="bytes"),
             lambda item: item.update(sampling_interval_ns=1_000_000_000),
+            corrupt_actual_cadence,
             corrupt_recovery,
+            corrupt_baseline_outlier,
+            corrupt_slab_outlier,
+            corrupt_vmalloc_outlier,
         )
         for corrupt in corruptions:
             damaged = copy.deepcopy(trace)
