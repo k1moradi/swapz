@@ -5564,7 +5564,8 @@ int main(void)
         self.assertIn("if (( available_kib >= MIN_AVAILABLE_KIB )); then", pressure)
         self.assertIn("sleep 1", pressure)
         self.assertIn("ID36_PARENT_CGROUP_MEMORY=source:", pressure)
-        self.assertIn("BLOCKED: ID36 parent cgroup budget below 896 MiB", pressure)
+        self.assertIn("root-exempt root-exempt", pressure)
+        self.assertNotIn("BLOCKED: ID36 parent cgroup budget below 896 MiB", pressure)
         self.assertIn("BLOCKED: ID36 host lacks 1 GiB MemAvailable", pressure)
         self.assertLess(
             pressure.index("START_ID36_RESOURCE_PRESSURE=admission"),
@@ -5604,6 +5605,51 @@ int main(void)
             ):
                 with self.subTest(bad=bad[-55:]):
                     self.assertNotEqual(observe(bad).returncode, 0)
+
+        cgroup_start = pressure.index("read_cgroup_root_memory_inventory() {")
+        cgroup_end = pressure.index("\n}\n", cgroup_start) + 2
+        cgroup_helper = pressure[cgroup_start:cgroup_end]
+        cgroup_command = (
+            "set -euo pipefail\nCGROUP_ROOT=$1\n" + cgroup_helper +
+            "\nread_cgroup_root_memory_inventory\n")
+        with tempfile.TemporaryDirectory(
+                prefix="swapz-id36-cgroup-root-") as folder:
+            root = Path(folder)
+
+            def cgroup_inventory():
+                return subprocess.run(
+                    ["bash", "-c", cgroup_command, "_", str(root)],
+                    capture_output=True, text=True, timeout=5)
+
+            result = cgroup_inventory()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(), "root-exempt root-exempt")
+
+            (root / "memory.max").write_text("max\n")
+            (root / "memory.current").write_text("123\n")
+            result = cgroup_inventory()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "max 123")
+
+            # memory.max is containment, not a second ID36 admission floor.
+            (root / "memory.max").write_text(str(512 * 1024 * 1024) + "\n")
+            result = cgroup_inventory()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(), f"{512 * 1024 * 1024} 123")
+
+            for maximum, current in (
+                    ("01\n", "123\n"),
+                    ("max\n", "0123\n"),
+                    ("garbage\n", "123\n")):
+                with self.subTest(maximum=maximum, current=current):
+                    (root / "memory.max").write_text(maximum)
+                    (root / "memory.current").write_text(current)
+                    self.assertNotEqual(cgroup_inventory().returncode, 0)
+
+            (root / "memory.current").unlink()
+            self.assertNotEqual(cgroup_inventory().returncode, 0)
 
 
     def test_id36_memory_events_and_cpu_psi_require_real_counters(self):

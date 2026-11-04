@@ -126,21 +126,39 @@ if (( available_kib < MIN_AVAILABLE_KIB )); then
 fi
 printf 'ID36_HOST_MEMORY=source:/proc/meminfo unit:kB total:%s initial_available:%s available:%s required:%s deficit:%s free:%s cached:%s sreclaimable:%s swap_total:%s swap_free:%s samples:%s\n'     "$total_kib" "$initial_available_kib" "$available_kib"     "$MIN_AVAILABLE_KIB" "$deficit_kib" "$free_kib" "$cached_kib"     "$reclaimable_kib" "$swap_total_kib" "$swap_free_kib"     "$admission_sample"
 
-# Report the parent cgroup budget separately from whole-host MemAvailable.
-# Neither value is interchangeable with the other.
-parent_memory_max="$(cat "$CGROUP_ROOT/memory.max" 2>/dev/null || true)"
-parent_memory_current="$(cat "$CGROUP_ROOT/memory.current" 2>/dev/null || true)"
-printf 'ID36_PARENT_CGROUP_MEMORY=source:%s memory_max:%s memory_current:%s\n'     "$CGROUP_ROOT" "${parent_memory_max:-unavailable}"     "${parent_memory_current:-unavailable}"
-if [[ $parent_memory_max != max &&
-      ! $parent_memory_max =~ ^(0|[1-9][0-9]*)$ ]]; then
-    printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max unavailable or malformed' >&2
+# Report the mounted cgroup hierarchy root separately from whole-host
+# MemAvailable. Linux cgroup v2 deliberately omits memory.max/current on the
+# true root cgroup because the root is exempt from resource control. A
+# namespaced/non-root hierarchy root may expose both files; validate those
+# values for provenance, but do not invent a second admission floor from the
+# 896 MiB child containment limit.
+read_cgroup_root_memory_inventory() {
+    local memory_max_path="$CGROUP_ROOT/memory.max"
+    local memory_current_path="$CGROUP_ROOT/memory.current"
+    local memory_max memory_current
+
+    if [[ ! -e $memory_max_path && ! -e $memory_current_path ]]; then
+        printf '%s\n' 'root-exempt root-exempt'
+        return 0
+    fi
+    [[ -e $memory_max_path && -e $memory_current_path ]] || return 1
+    memory_max="$(cat "$memory_max_path" 2>/dev/null)" || return 1
+    memory_current="$(cat "$memory_current_path" 2>/dev/null)" || return 1
+    if [[ $memory_max != max &&
+          ! $memory_max =~ ^(0|[1-9][0-9]*)$ ]]; then
+        return 1
+    fi
+    [[ $memory_current =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+    printf '%s %s\n' "$memory_max" "$memory_current"
+}
+
+if ! parent_memory_inventory="$(read_cgroup_root_memory_inventory)"; then
+    printf '%s\n' 'BLOCKED: ID36 cgroup-root memory inventory is inconsistent or malformed' >&2
     exit 2
 fi
-if [[ $parent_memory_max != max ]] &&
-   (( parent_memory_max < MEMORY_MAX_BYTES )); then
-    printf '%s\n' 'BLOCKED: ID36 parent cgroup budget below 896 MiB' >&2
-    exit 2
-fi
+read -r parent_memory_max parent_memory_current <<< "$parent_memory_inventory"
+printf 'ID36_PARENT_CGROUP_MEMORY=source:%s memory_max:%s memory_current:%s\n' \
+    "$CGROUP_ROOT" "$parent_memory_max" "$parent_memory_current"
 if (( available_kib < MIN_AVAILABLE_KIB )); then
     printf '%s\n' 'BLOCKED: ID36 host lacks 1 GiB MemAvailable safety headroom' >&2
     exit 2
