@@ -378,7 +378,14 @@ cleanup() {
             [[ -z $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]] && break
             sleep 0.05
         done
-        rmdir "$CGROUP" 2>/dev/null || result=1
+        if ! rmdir "$CGROUP" 2>/dev/null; then
+            if (( result == 0 || result == 2 )); then
+                printf '%s\n' 'BLOCKED: ID36 isolated cgroup cleanup did not complete; preserve only the private child cgroup for read-only investigation' >&2
+                result=2
+            else
+                printf '%s\n' 'FAIL: ID36 isolated cgroup cleanup also failed; preserve only the private child cgroup for read-only investigation' >&2
+            fi
+        fi
     fi
     if ! rm -rf -- "$SESSION" 2>/dev/null; then
         if (( result == 0 || result == 2 )); then
