@@ -3229,7 +3229,7 @@ class PairReplayContract(unittest.TestCase):
 
         def corrupt_recovery(item):
             for sample in item["samples"][-10:]:
-                sample["mem_available_bytes"] -= 100_000
+                sample["mem_available_bytes"] -= 100 * 1024
 
         corruptions = (
             lambda item: item["samples"].pop(),
