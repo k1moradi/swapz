@@ -4,6 +4,7 @@
 This does NOT load the swapz module: same regular-file replay code tests only
 the trace contract, oracle, safety guard and fail-closed pair comparator.
 """
+import copy
 import hashlib
 import json
 import os
@@ -2970,28 +2971,89 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(
             evidence.campaign_status("PASS", True, True, "STABLE"),
             "PASS")
+        source_sha = "a" * 40
+        mapper_uuid = "SWAPZ-PRIMARY-" + "f" * 32
+        trace = {
+            "schema": "swapz-metadata-ram-samples-v1",
+            "capture": "serialized-loaded-host",
+            "scope": "target-owned-resident-bytes-including-page-tables",
+            "source_sha": source_sha,
+            "mapper_uuid": mapper_uuid,
+            "host_boot_id": "11111111-1111-4111-8111-111111111111",
+            "sampling_interval_ns": 1000000000,
+            "samples": [
+                {
+                    "phase": phase,
+                    "monotonic_ns": (index + 1) * 1000000000,
+                    "timestamp_utc": f"2026-11-03T00:00:{index+1:02d}Z",
+                    "ram_bytes": value,
+                }
+                for index, (phase, value) in enumerate((
+                    ("baseline", 0), ("baseline", 0),
+                    ("initialization", 2048), ("initialization", 4096),
+                    ("steady", 6144), ("steady", 8192),
+                    ("gc", 8192), ("gc", 6144),
+                    ("teardown", 6144), ("teardown", 0),
+                ))
+            ],
+        }
         capacity_pair = {
             "workload": "sd-high-occupancy-churn",
             "status": "PASS",
             "excluded": False,
             "swapz": {
                 "logical_pages": 27,
+                "device_identity": {"dm_uuid": mapper_uuid},
                 "resources": {
                     "metadata_and_target_peak_ram_bytes": 8192,
+                    "metadata_ram_trace": trace,
                 },
             },
         }
         self.assertEqual(
             evidence.campaign_capacity_and_ram(
-                [capacity_pair], 27 * 4096 + 4096),
+                [capacity_pair], 27 * 4096 + 4096, source_sha),
             {
                 "page_bytes": 4096,
                 "logical_pages": 27,
                 "logical_capacity_bytes": 27 * 4096,
                 "peak_ram_bytes": 8192,
+                "mapper_uuid": mapper_uuid,
+                "metadata_ram_trace": trace,
             })
         self.assertIsNone(
-            evidence.campaign_capacity_and_ram([capacity_pair], 4096))
+            evidence.campaign_capacity_and_ram(
+                [capacity_pair], 4096, source_sha))
+        validator = evidence.RAM_VALIDATOR["validate_metadata_ram_trace"]
+        validator(trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
+                  expected_peak_ram_bytes=8192)
+        # A resource PASS must not survive a broken phase, cadence, provenance
+        # or incomplete teardown-memory recovery.
+        corruptions = (
+            lambda item: item["samples"].pop(),
+            lambda item: item["samples"][-1].update(ram_bytes=4096),
+            lambda item: item["samples"][6].update(phase="baseline"),
+            lambda item: item["samples"][6].update(monotonic_ns=6000000000),
+            lambda item: item["samples"][6].update(monotonic_ns=20000000000),
+            lambda item: item["samples"][6].update(
+                timestamp_utc="2026-11-03T00:00:01Z"),
+            lambda item: item.update(source_sha="b" * 40),
+            lambda item: item["samples"][5].update(ram_bytes=8193),
+            lambda item: item.update(capture="rootless-estimate"),
+        )
+        for corrupt in corruptions:
+            damaged = copy.deepcopy(trace)
+            corrupt(damaged)
+            with self.subTest(corrupt=corrupt):
+                with self.assertRaises(ValueError):
+                    validator(
+                        damaged, source_sha=source_sha,
+                        mapper_uuid=mapper_uuid, expected_peak_ram_bytes=8192)
+                bad_pair = copy.deepcopy(capacity_pair)
+                bad_pair["swapz"]["resources"]["metadata_ram_trace"] = damaged
+                self.assertIsNone(
+                    evidence.campaign_capacity_and_ram(
+                        [bad_pair], 27 * 4096 + 4096, source_sha))
 
         qualification_path = SCRIPT.with_name("qualification.py")
         qualification_spec = importlib.util.spec_from_file_location(
