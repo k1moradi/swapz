@@ -7563,6 +7563,94 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         with self.assertRaises(OverflowError):
             checked_length(1 << 32, 16, (1 << 32) - 1)
 
+    def test_ram_trace_rejects_forged_clock_and_hidden_teardown_leaks(self):
+        """Offline negative fixtures never qualify a real loaded host."""
+        import copy
+        import datetime
+        import runpy
+
+        evidence = runpy.run_path(
+            str(ROOT / "tests/runtime/benchmark/metadata_ram_evidence.py"))
+        source_sha = "a" * 40
+        mapper_uuid = "SWAPZ-PRIMARY-" + "f" * 32
+        start_utc = datetime.datetime(
+            2026, 11, 3, tzinfo=datetime.timezone.utc)
+        samples = []
+        phases = (
+            ("baseline", 11), ("initialization", 2), ("steady", 2),
+            ("gc", 2), ("teardown", 22),
+        )
+        for phase, count in phases:
+            for phase_index in range(count):
+                index = len(samples) + 1
+                timestamp = (
+                    start_utc +
+                    datetime.timedelta(milliseconds=100 * index))
+                present = (
+                    phase == "steady" or phase == "gc" or
+                    (phase == "initialization" and phase_index > 0) or
+                    (phase == "teardown" and phase_index == 0))
+                samples.append({
+                    "phase": phase,
+                    "monotonic_ns": index * 100_000_000,
+                    "timestamp_utc":
+                        timestamp.isoformat(timespec="milliseconds").replace(
+                            "+00:00", "Z"),
+                    "mem_available_kib":
+                        1_000_000 - (10_000 if present else 0),
+                    "s_unreclaim_kib": 1000 + (500 if present else 0),
+                    "vmalloc_used_kib": 2000 + (500 if present else 0),
+                    "mapper_present": present,
+                })
+        trace = {
+            "schema": "swapz-metadata-ram-samples-v1",
+            "capture": "serialized-loaded-host",
+            "scope": "whole-host-conservative-metadata-and-target-ram",
+            "source_sha": source_sha, "mapper_uuid": mapper_uuid,
+            "host_boot_id": "11111111-1111-4111-8111-111111111111",
+            "sampling_interval_ns": 100_000_000, "meminfo_unit": "kB",
+            "samples": samples,
+        }
+        validate = evidence["validate_metadata_ram_trace"]
+        self.assertEqual(
+            validate(trace, source_sha=source_sha, mapper_uuid=mapper_uuid)[
+                "peak_ram_bytes"],
+            10_000 * 1024)
+
+        def forged_middle_timestamp(damaged):
+            sample = damaged["samples"][15]
+            timestamp = datetime.datetime.fromisoformat(
+                sample["timestamp_utc"].replace("Z", "+00:00"))
+            sample["timestamp_utc"] = (
+                timestamp + datetime.timedelta(milliseconds=80)
+            ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+        def baseline_outlier(damaged):
+            damaged["samples"][0]["mem_available_kib"] -= 10_000
+
+        def final_memory_leak(damaged):
+            damaged["samples"][-1]["mem_available_kib"] -= 1
+
+        def final_slab_leak(damaged):
+            damaged["samples"][-1]["s_unreclaim_kib"] += 1
+
+        def final_vmalloc_leak(damaged):
+            damaged["samples"][-1]["vmalloc_used_kib"] += 1
+
+        def missing_teardown(damaged):
+            damaged["samples"].pop()
+
+        for corrupt in (
+                forged_middle_timestamp, baseline_outlier,
+                final_memory_leak, final_slab_leak, final_vmalloc_leak,
+                missing_teardown):
+            with self.subTest(corruption=corrupt.__name__):
+                invalid = copy.deepcopy(trace)
+                corrupt(invalid)
+                with self.assertRaises(ValueError):
+                    validate(invalid, source_sha=source_sha,
+                             mapper_uuid=mapper_uuid)
+
     def test_selected_card_allocation_free_bytes_and_addressability(self):
         # Independently compute the current admission result and page-rounded
         # allocation footprint. These estimates exclude vmalloc metadata, PTEs,
