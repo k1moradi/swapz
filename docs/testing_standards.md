@@ -4649,7 +4649,16 @@ installed sbin path into both lifecycle services without enabling or starting
 either one. The isolated systemd verifier fixture must run from the official
 rootless contract stage, covering arm/preflight/observe success and fail-closed
 raw-alias, identity, artifact, geometry, service and kernel-log cases without
-reading or changing host swap state. The primary mapper service and package
+reading or changing host swap state. The cross-boot preflight authorization is
+one-use volatile authority: every observation, including PASS, FAIL, INCOMPLETE
+and an unexpected persistence abort, must revoke it without touching active
+swap or durable recovery ownership. Unlink and runtime-directory sync must
+complete before PASS is persisted or announced. A revocation failure must
+produce a non-PASS, nonzero result with the failed token-lifecycle phase and
+original command exit status, retain earlier observation evidence, and never
+print token contents or the runtime authorization pathname. Rootless cases
+must cover missing, stale, duplicate and malformed authority, revocation
+failure, preserved evidence, explicit re-preflight retry and abort cleanup. The primary mapper service and package
 templates must not contain a device pathname,
 major:minor, UUID or PARTUUID. The installed systemd generator must derive
 the selected `.device` and by-PARTUUID `.swap` unit names through the manager's

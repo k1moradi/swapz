@@ -1780,6 +1780,87 @@ class BootVerifierTests(unittest.TestCase):
                 self.assertIn(marker, report)
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").exists())
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").exists())
+        self.assertEqual(observed.stderr, "")
+
+    def test_observation_unlink_failure_never_publishes_pass_and_can_retry(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        write_executable(
+            self.bin / "rm",
+            "#!/bin/sh\n"
+            'if [ "${MOCK_REVOKE_UNLINK_EXIT:-0}" != 0 ] && '
+            '[ "${3##*/}" = primary-execution.env ]; then\n'
+            '    exit "$MOCK_REVOKE_UNLINK_EXIT"\n'
+            "fi\n"
+            'exec /usr/bin/rm "$@"\n',
+        )
+        failing_env = self.env.copy()
+        failing_env["MOCK_REVOKE_UNLINK_EXIT"] = "73"
+        failed = self.run_verifier("observe", env=failing_env)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", failed.stdout)
+        self.assertIn("phase=token_revoke_unlink exit_status=73 reason=unlink_failed",
+                      failed.stderr)
+        self.assertNotIn(str(authorization), failed.stderr)
+        report = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("status=FAIL", report)
+        self.assertIn("runtime_preflight_authorization_revocation_failed", report)
+        self.assertTrue(authorization.is_file())
+        self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
+        self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").is_file())
+
+        # The operator must reissue authority through preflight for a retry.
+        preflight = self.run_verifier("preflight")
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        retried = self.run_verifier("observe")
+        self.assertEqual(retried.returncode, 0, retried.stderr)
+        self.assertFalse(authorization.exists())
+        self.assertIn("status=PASS", (self.report / "latest.env").read_text())
+
+    def test_observation_sync_failure_refuses_pass_and_retains_evidence(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        write_executable(
+            self.bin / "sync",
+            "#!/bin/sh\n"
+            'if [ "${MOCK_REVOKE_SYNC_EXIT:-0}" != 0 ] && '
+            '[ "$1" = -f ] && '
+            '[ "$2" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime" ]; then\n'
+            '    exit "$MOCK_REVOKE_SYNC_EXIT"\n'
+            "fi\n"
+            'exec /usr/bin/sync "$@"\n',
+        )
+        failing_env = self.env.copy()
+        failing_env["MOCK_REVOKE_SYNC_EXIT"] = "74"
+        failed = self.run_verifier("observe", env=failing_env)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", failed.stdout)
+        self.assertIn("phase=token_revoke_sync exit_status=74 reason=durability_sync_failed",
+                      failed.stderr)
+        self.assertNotIn(str(authorization), failed.stderr)
+        self.assertFalse(authorization.exists())
+        self.assertIn("status=FAIL", (self.report / "latest.env").read_text())
+        self.assertIn("runtime_preflight_authorization_revocation_failed",
+                      (self.report / "latest.env").read_text())
+        self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
+
+    def test_unexpected_observation_abort_revokes_preflight_authority(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        write_executable(
+            self.bin / "mktemp",
+            "#!/bin/sh\n"
+            'case "$1" in\n'
+            '*/.kernel-journal.XXXXXX) exit 75 ;;\n'
+            'esac\n'
+            'exec /usr/bin/mktemp "$@"\n',
+        )
+        aborted = self.run_verifier("observe")
+        self.assertEqual(aborted.returncode, 1, aborted.stderr)
+        self.assertIn("cannot create kernel-journal temporary", aborted.stderr)
+        self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", aborted.stdout)
+        self.assertFalse(authorization.exists())
+        self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
 
     def test_read_only_plan_exit_two_is_accepted_for_persistence_proof(self) -> None:
         self.write_proc_swaps(active=False)
@@ -1960,6 +2041,17 @@ class BootVerifierTests(unittest.TestCase):
             "runtime_preflight_authorization_missing_or_invalid",
             (self.report / "latest.env").read_text(encoding="utf-8"),
         )
+        self.assertFalse(authorization.exists())
+
+        preflight = self.run_verifier("preflight")
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        authorization.write_text(
+            authorization.read_text(encoding="ascii").replace(
+                f"boot_id={BOOT_B}", f"boot_id={BOOT_A}"), encoding="ascii")
+        stale = self.run_verifier("observe")
+        self.assertEqual(stale.returncode, 1, stale.stderr)
+        self.assertIn("runtime_preflight_authorization_missing_or_invalid",
+                      (self.report / "latest.env").read_text())
         self.assertFalse(authorization.exists())
 
     def test_successful_observation_revokes_one_use_preflight_token(self) -> None:

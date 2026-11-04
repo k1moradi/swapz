@@ -195,11 +195,48 @@ secure_runtime_directory()
 		fail "primary runtime directory must be owned mode 0700"
 }
 
+# Check and revoke volatile authorization without exiting the observer. An
+# observation may publish PASS only after unlink and directory sync succeed.
+# Never print token content or the sensitive runtime pathname on failure.
+revoke_runtime_authorization()
+{
+	if (secure_runtime_directory) >/dev/null 2>&1; then
+		:
+	else
+		authorization_revoke_exit_status=$?
+		authorization_revoke_phase=token_revoke_runtime_directory
+		authorization_revoke_reason=runtime_directory_unavailable_or_unsafe
+		return 1
+	fi
+	if rm -f -- "$runtime_enable_file" 2>/dev/null; then
+		:
+	else
+		authorization_revoke_exit_status=$?
+		authorization_revoke_phase=token_revoke_unlink
+		authorization_revoke_reason=unlink_failed
+		return 1
+	fi
+	if sync -f "$runtime_base" 2>/dev/null; then
+		return 0
+	else
+		authorization_revoke_exit_status=$?
+		authorization_revoke_phase=token_revoke_sync
+		authorization_revoke_reason=durability_sync_failed
+		return 1
+	fi
+}
+
 clear_runtime_authorization()
 {
-	secure_runtime_directory
-	rm -f -- "$runtime_enable_file"
-	sync -f "$runtime_base"
+	if ! revoke_runtime_authorization; then
+		fail "token_phase=$authorization_revoke_phase exit_status=$authorization_revoke_exit_status reason=$authorization_revoke_reason"
+	fi
+}
+
+report_observation_revocation_failure()
+{
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s\n' \
+		"$authorization_revoke_phase" "$authorization_revoke_exit_status" "$authorization_revoke_reason" >&2
 }
 
 commit_runtime_authorization()
@@ -1399,6 +1436,16 @@ SWAPS
 	fi
 	rm -f -- "$journal_raw"
 
+	# Revocation is part of acceptance, not a best-effort EXIT side effect.
+	# Preserve the observation reasons and persist FAIL on cleanup failure.
+	if revoke_runtime_authorization; then
+		observation_revocation_attempted=1
+	else
+		append_failure runtime_preflight_authorization_revocation_failed
+		report_observation_revocation_failure
+		observation_revocation_attempted=1
+	fi
+
 	if [ -n "$failure_reasons" ]; then
 		status=FAIL
 	elif [ -n "$incomplete_reasons" ]; then
@@ -1480,7 +1527,6 @@ REPORT
 	cat -- "$report" > "$latest_temporary"
 	commit_file "$latest_temporary" "$report_base/latest.env"
 	if [ "$status" != PASS ]; then
-		clear_runtime_authorization
 		printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=%s failure_reasons=%s incomplete_reasons=%s action=inspect_cold_boot_report_before_rearming\n' \
 			"$status" "${failure_reasons:-none}" "${incomplete_reasons:-none}" >&2
 	fi
@@ -1499,9 +1545,11 @@ case "$mode" in
 arm) arm_harness ;;
 preflight) preflight_boot ;;
 observe)
-	# Even an unexpected persistence abort cannot leave a reusable enable token.
+	# Unexpected persistence aborts must also revoke volatile authority.
+	# Preserve the original exit code when fallback cleanup succeeds.
 	# This observer never deactivates swap or removes an active mapper.
-	trap 'clear_runtime_authorization' EXIT
+	observation_revocation_attempted=0
+	trap 'observation_exit_status=$?; if [ "$observation_revocation_attempted" -eq 0 ] && ! revoke_runtime_authorization; then report_observation_revocation_failure; exit 1; fi; exit "$observation_exit_status"' EXIT
 	observe_boot
 	trap - EXIT
 	;;
