@@ -307,6 +307,12 @@ sample_host_memory_admission
         self.assertIn(
             "BLOCKED: ID36 pressure helper could not enter isolated cgroup",
             source)
+        self.assertIn(
+            'printf "%s\\\\n" "$" > "$cgroup/cgroup.procs"',
+            source)
+        self.assertNotIn(
+            'printf "%s\\\\n" "$BASHPID" > "$cgroup/cgroup.procs"',
+            source)
 
     def test_post_prewarm_blocked_diagnostics_are_classified_explicitly(self):
         helper = shell_function(QUALIFIER, "pair_blocked_is_prerequisite")
