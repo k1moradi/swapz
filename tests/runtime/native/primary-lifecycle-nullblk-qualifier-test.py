@@ -142,6 +142,10 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertLess(partition_write, partition_settle)
         self.assertNotIn('blockdev --rereadpt "$LOWER"', self.script)
 
+    def test_swap_signature_setup_uses_portable_mkswap_defaults(self):
+        self.assertIn('mkswap "$PARTITION" >/dev/null', self.script)
+        self.assertNotIn('mkswap --no-discard', self.script)
+
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)

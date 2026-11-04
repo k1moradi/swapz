@@ -1381,7 +1381,7 @@ else
 	blocked "udev did not publish the owned partition by-PARTUUID node"
 fi
 
-mkswap --no-discard "$PARTITION" >/dev/null ||
+mkswap "$PARTITION" >/dev/null ||
 	fail "cannot initialize original swap header on owned RAM partition"
 blockdev --flushbufs "$PARTITION" ||
 	fail "cannot flush owned RAM partition header"

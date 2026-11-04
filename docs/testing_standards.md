@@ -4442,7 +4442,9 @@ the alias with a shell symlink.
 Remove the temporary rule after null_blk teardown and require its alias to be
 gone. If publication fails, capture the exact fixture rule, relevant udev
 properties, and udev's event-rule diagnostic before cleanup. Initialize only
-that RAM partition, compile a noninstalled exact-source
+that RAM partition using the portable plain `mkswap <partition>` form; do not
+pass `--no-discard`, which is not an `mkswap` option. Compile a noninstalled
+exact-source
 `swapzctl` under a root-owned private prefix, and generate a private
 parser-valid qualification record bound to the exact test binary/module/oracle
 hashes and live host identity. The production coordinator must then complete
