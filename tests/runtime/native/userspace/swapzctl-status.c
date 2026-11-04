@@ -417,6 +417,12 @@ static void test_empty_dm_target_inventory(void)
 	status_free_observation(&second);
 }
 
+static void test_list_query_requests_mapping_uuids(void)
+{
+	assert(dm_query_input_flags(DM_LIST_DEVICES) == DM_UUID_FLAG);
+	assert(dm_query_input_flags(DM_TABLE_STATUS) == 0U);
+}
+
 static void test_dm_name_list_wire_records(void)
 {
 	unsigned char buffer[128];
@@ -1257,6 +1263,7 @@ int main(void)
 	test_checked_counter_arithmetic();
 	test_dm_wire_alignment_is_host_independent();
 	test_empty_dm_target_inventory();
+	test_list_query_requests_mapping_uuids();
 	test_dm_name_list_wire_records();
 	test_list_generation_binding();
 	test_dm_reply_boundaries_and_identity();

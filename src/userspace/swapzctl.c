@@ -761,6 +761,12 @@ static void dm_initialize_ioctl(struct dm_ioctl *io, size_t buffer_size,
 		memcpy(io->name, name, strlen(name) + 1U);
 }
 
+static uint32_t dm_query_input_flags(unsigned long request)
+{
+	/* Ask LIST_DEVICES for UUID metadata when the kernel supports it. */
+	return request == DM_LIST_DEVICES ? DM_UUID_FLAG : 0U;
+}
+
 static int dm_query(int fd, unsigned long request, const char *name,
 		    unsigned char **result, size_t *result_size)
 {
@@ -783,6 +789,7 @@ static int dm_query(int fd, unsigned long request, const char *name,
 			return -1;
 		io = (struct dm_ioctl *)buffer;
 		dm_initialize_ioctl(io, buffer_size, name);
+		io->flags = dm_query_input_flags(request);
 		if (ioctl(fd, request, io) < 0) {
 			saved_errno = errno;
 			free(buffer);

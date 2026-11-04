@@ -85,7 +85,10 @@ or reordered while the two per-mapping INFO reads succeed. After staging all
 status results, perform a final read-only DM_LIST_DEVICES and compare the
 complete ordered mapping names, device numbers, event generations, flags and
 bounded UUIDs (when present) against the initial list, before emitting any
-numeric results. A changed, malformed, oversized or unreadable final list
+numeric results. Production LIST_DEVICES requests must set `DM_UUID_FLAG` so
+the kernel returns UUID metadata where supported; a synthetic reply containing
+UUIDs is not sufficient evidence if the real ioctl never requests them. A
+changed, malformed, oversized or unreadable final list
 withholds every staged metric and reports a bounded BLOCKED or UNAVAILABLE
 diagnostic. This is drift detection between observations, **not** an atomic
 kernel-wide snapshot: changes after the final ioctl or changes that occur and
