@@ -3145,10 +3145,12 @@ as transfer/reset of both hit counters from private engines.
 
 An ordinary metadata-cache hit parses and sequence-checks the cached block
 directly against the compact per-extent sequence index. It must not copy all
-4096 bytes into read scratch merely to decode one record. If the selected
-payload overlaps block zero, copy only that exact payload fragment; CRC
-validation must cover the reconstructed contiguous payload and remain bound to
-the separately validated metadata/authority identity.
+4096 bytes into read scratch merely to decode one record. Metadata-only
+descriptor decode must not synthesize a payload pointer beyond the resident
+block-zero image; callers that only need descriptor fields pass no payload
+output pointer. If the selected payload overlaps block zero, copy only that
+exact payload fragment; CRC validation must cover the reconstructed contiguous
+payload and remain bound to the separately validated metadata/authority identity.
 A separately cached block zero must never be advertised as direct/extent
 read-scratch residency unless all 4096 bytes are actually present there.
 
