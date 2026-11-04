@@ -1579,6 +1579,9 @@ def pair_target_identity(pair: dict):
     if pair.get("workload") == "anonymous-swap":
         raw_identity = raw.get("swap_device_identity") or {}
         swapz_identity = swapz.get("swap_device_identity") or {}
+        if (not isinstance(raw_identity, dict) or
+                not isinstance(swapz_identity, dict)):
+            return None
         raw_device = raw_identity.get("device")
         raw_lower = raw_identity.get("lower_device")
         swapz_lower = swapz_identity.get("lower_device")
@@ -1613,6 +1616,9 @@ def pair_target_identity(pair: dict):
 
     raw_identity = raw.get("device_identity") or {}
     swapz_identity = swapz.get("device_identity") or {}
+    if (not isinstance(raw_identity, dict) or
+            not isinstance(swapz_identity, dict)):
+        return None
     fields = (
         "physical_partuuid", "physical_device_bytes", "lower_major_minor",
         "parent_major_minor", "parent_model", "parent_transport")
@@ -1643,11 +1649,9 @@ def pair_target_identity(pair: dict):
 
 
 def common_campaign_target(rows: list[dict]):
-    """Require every currently usable pair to resolve to one physical lower."""
+    """Require every attempted pair to resolve to one physical lower."""
     identities = []
     for row in rows:
-        if not row.get("analysis_usable"):
-            continue
         identity = pair_target_identity(row)
         if identity is None:
             return None, False

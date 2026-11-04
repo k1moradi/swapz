@@ -506,9 +506,12 @@ NaN/Infinity constants. Contract fields are presence- and type-strict:
 a missing field whose required value is JSON null is not equivalent to an
 explicit null, and booleans never satisfy integer workload geometry such as
 QD1.
-Every accepted pair must also resolve to one exact physical lower identity
+Every attempted pair, including failed or excluded attempts, must also resolve
+to one exact physical lower identity
 (PARTUUID, byte size, lower major:minor and parent major:minor/model/transport)
-for both block replay and anonymous swap, and all accepted pairs must agree.
+for both block replay and anonymous swap, and all attempts must agree. An
+excluded attempt with missing, malformed or different target identity cannot
+be filtered out to make the campaign appear single-target.
 The anonymous worker resolves these fields from the mapper's sole partition
 slave (or the raw partition itself) and rechecks the complete identity at arm
 completion; a matching recycled major:minor alone is not same-card evidence. Physical block replay arms now retain a monotonic begin/end interval

@@ -2905,9 +2905,9 @@ class PairReplayContract(unittest.TestCase):
             for reason in tampered["records"][0]["analysis_exclusion_reasons"]))
 
         # Internally matched pairs from a different physical lower cannot be
-        # pooled into one campaign even when their source SHA is identical.
-        other_raw = arm("raw", order=orders[1])
-        other_swapz = arm("swapz", order=orders[1])
+        # pooled into one campaign even when excluded by screening.
+        other_raw = arm("raw", screened=False, order=orders[1])
+        other_swapz = arm("swapz", screened=False, order=orders[1])
         for other_arm in (other_raw, other_swapz):
             other_arm["device_identity"] = {
                 **other_arm["device_identity"],
@@ -2918,12 +2918,17 @@ class PairReplayContract(unittest.TestCase):
         mixed_target_pairs[1] = qualification.compare_pair(
             other_raw, other_swapz,
             "sd-service-balanced", "other-target", 2, orders[1])
+        self.assertTrue(mixed_target_pairs[1]["excluded"])
         mixed_target = qualification.evaluate(mixed_target_pairs)
         self.assertFalse(mixed_target["campaign_target_consistent"])
         self.assertIsNone(mixed_target["campaign_target_identity"])
         self.assertEqual(
             mixed_target["decisions"]["sd-service-balanced"]["status"],
             "INCOMPLETE")
+        self.assertIsNone(qualification.pair_target_identity({
+            "workload": "anonymous-swap",
+            "raw": {"swap_device_identity": ["malformed"]},
+            "swapz": {"swap_device_identity": {}}}))
 
         missing_lower_raw = arm("raw")
         missing_lower_swapz = arm("swapz")
@@ -3198,8 +3203,9 @@ class PairReplayContract(unittest.TestCase):
                     qualification.sustained_coverage_reasons(
                         tampered, "swapz"))
 
-        # A locally valid changed minute p99 must not be able to rewrite
-        # the first/last-quartile drift independently of whole-arm evidence.
+        # A changed combined minute histogram must still agree with its
+        # independently counted READ and WRITE histograms before it can be
+        # used to alter the first/last-quartile drift.
         redistributed_latency = copy.deepcopy(raw)
         changed_minute = redistributed_latency["minute_buckets"][0]
         changed_index = qualification.latency_bin_index(2)
@@ -3260,13 +3266,15 @@ class PairReplayContract(unittest.TestCase):
             qualification.quartile_ratio(compensated["minute_buckets"], "p99_ns"),
             qualification.quartile_ratio(redistributed["minute_buckets"], "p99_ns"))
         self.assertTrue(any(
-            "minute combined histogram differs from READ/WRITE" in reason
+            "minute combined histogram differs from READ/WRITE distributions"
+            in reason
             for reason in qualification.sustained_coverage_reasons(
                 redistributed, "swapz")))
 
         outside_window_gc = copy.deepcopy(raw)
         outside_window_gc["sustained_intervals"][20]["gc"].update(
-            gc_victims=0, gc_pages=0)
+            gc_wall_ns=0, gc_victims=0, gc_pages=0,
+            segment_program_sum=0)
         after_measure = copy.deepcopy(
             outside_window_gc["sustained_intervals"][-1])
         after_measure.update(
@@ -3277,7 +3285,8 @@ class PairReplayContract(unittest.TestCase):
             end_seconds=3660.0,
         )
         after_measure["gc"].update(
-            gc_wall_ns=1, gc_victims=1, gc_pages=1)
+            gc_wall_ns=1, gc_victims=1, gc_pages=1,
+            segment_program_sum=1)
         outside_window_gc["sustained_intervals"].append(after_measure)
         # Preserve the enclosing target-counter totals so this mutant reaches
         # the absolute measured-window check rather than failing conservation.
