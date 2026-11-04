@@ -49,9 +49,11 @@ A native/rootless or CI PASS is **not** a loaded/physical PASS. Only
 `make test` can qualify exact-source artifacts on positively owned RAM
 backing; physical acceptance is a separate gate under the
 [frozen policy](production-acceptance.json) and
-[current device authorization](AGENT_CONTEXT.md). A full `make test`
-must report BLOCKED (nonzero) when safe noninteractive loaded qualification
-is unavailable.
+[current device authorization](AGENT_CONTEXT.md). Non-`null_blk` backing
+remains disabled by default and requires explicit `allow_physical_backing=1`
+plus a valid exact-size SWZ authorization header. A full `make test` must
+report BLOCKED (nonzero) when safe noninteractive loaded qualification is
+unavailable.
 
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
