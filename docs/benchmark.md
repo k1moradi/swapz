@@ -274,9 +274,9 @@ any v2 confirmatory result. Its own amendment Git blob
 `eac574fd204932e630e8bb45dca66b67c135a779` is pinned in the evaluator;
 an in-place criteria change must fail and be published as a new protocol.
 A v1-only evaluation keeps its historical workload set; a v2 evaluation requires
-all v1 and v2 workloads, without pooling their statistics. The host scheduler
-must explicitly select `qualification.py evaluate --protocol v2`, including
-when all new samples have failed or are missing, to prevent silent v1 promotion.
+all v1 and v2 workloads, without pooling their statistics. The host scheduler must explicitly select `--protocol v2` in the private
+`qualification.py` evaluator, including when all new samples have failed or
+are missing, to prevent silent v1 promotion.
 
 Two v1 short-service cohorts run on the exact card: one 50/50 synthetic
 medium/entropy cohort and one immutable owner-supplied representative cohort.
@@ -572,20 +572,21 @@ with a passing sample. Physical execution is scheduled exclusively by the
 host/Codex owner; no VM/fallback run is an acceptable substitute and no two
 host experiments may overlap.
 
-The read-only `tests/runtime/benchmark/physical-campaign-evidence.py` helper is
-the evidence boundary for that scheduler, not a scheduler itself. The host
-should run `snapshot --source-sha <exact-main-sha> --device <admitted-partition>`
-before the first arm and after the final arm. Snapshots bind the clean
+The read-only [private evidence helper](../tests/runtime/benchmark/physical-campaign-evidence.py#L1331-L1347)
+is the evidence boundary for that scheduler, not a scheduler or public command.
+Its `snapshot` subcommand requires `--source-sha`, `--device` and `--result`;
+the scheduler captures one observation before the first arm and one after the
+final arm. Snapshots bind the clean
 HEAD/origin-main source to kernel/CPU/affinity/frequency-policy, memory,
 admitted-device size/model/transport/queue/scheduler, direct holders, block
 ancestry, swap and mount inventories, PSI, thermal-zone readings and loaded
 swapz module parameters. In addition to requiring the full mount/swap
 inventories to remain stable, the admitted partition itself must be quiescent
 in both boundary snapshots: no direct holder, no active-swap row with its exact
-major:minor, and no mount with its exact major:minor. After
-`qualification.py evaluate --protocol v2 --result <summary.json>`, the scheduler
-runs `physical-campaign-evidence.py seal` with both snapshots, the evaluator
-summary and **every** pair JSON, including failed/excluded attempts. Sealing is
+major:minor, and no mount with its exact major:minor. After the [private evaluator](../tests/runtime/benchmark/qualification.py#L1989-L2003)
+receives `--protocol v2` and all pair-report inputs and writes its summary,
+the scheduler invokes the evidence helper's `seal` action with both snapshots,
+the summary and **every** pair JSON, including failed/excluded attempts. Sealing is
 create-only, requires distinct before/after/summary/pair input files and
 timezone-aware nondecreasing snapshot times, re-runs the qualification evaluator
 from the supplied pair JSONs, and requires the regenerated summary to match
@@ -711,7 +712,9 @@ merges a legacy report into an exact-computer history. An OS reinstall changes
 the history identity; cloned systems need distinct `/etc/machine-id` values.
 Install Python Matplotlib on each test computer. Rendering failures are reported
 as `NOT UPDATED` with a local diagnostic log, independently of qualification.
-Plots are local generated artifacts; report publication keeps them reproducible.
+For a failed gate, use the [original stage diagnostic](README.md#diagnose-the-first-record)
+before interpreting optional plot output. Plots are local generated artifacts;
+report publication keeps them reproducible.
 
 
 ### Memory-backed lower-device allocation scope

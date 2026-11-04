@@ -111,10 +111,12 @@ explicitly **historical**, not a live release verdict.
 
 ### Diagnose the first record
 
-Record **operation, earliest failed phase, numeric errno when emitted, observed
-prerequisite, retained ownership/state, and next safe action**. Prefer the
-producer's original FAIL/BLOCKED/UNAVAILABLE record over the last downstream
-exception. The primary lifecycle emits `PRIMARY_PREPARE`, `PRIMARY_START`,
+From the first non-`PASS` item in the report's `stages[]`, record `name`,
+optional `failed_phase` and `diagnostic`, and `exit_code`. Trace that gate to
+the producer's **earliest failed phase and original numeric errno**, when
+emitted; a downstream exception must not replace that diagnostic. Inspect the
+retained journal/backup and observed ownership **read-only** before selecting
+the safe recovery action below. The primary lifecycle emits `PRIMARY_PREPARE`, `PRIMARY_START`,
 `PRIMARY_STOP` and `PRIMARY_RECOVER` with `phase` and `errno` on
 many execution failures; `PRIMARY_PREPARE` additionally reports `claim=none`
 or `claim=retained` after its ownership decision. Other operations may not

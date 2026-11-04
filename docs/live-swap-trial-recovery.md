@@ -26,16 +26,16 @@ endurance measurement or performance claims.
 
 ## Current deployment boundary
 
-This retained one-use protocol is not a current operator procedure. The SD
-card's [standing authorization](AGENT_CONTEXT.md#standing-owner-authorization),
-[exact-source evidence taxonomy](README.md#evidence-boundaries-and-failure-triage),
-[physical benchmark protocol](benchmark.md#physical-media-and-workload-validity)
-and [transactional package recovery](compile.md#packaging) are separate
-requirements. Neither this old-host PASS nor its rootless mock coverage proves
-the current card, retained package state, cold boot, or recovery of pages after
-volatile mapper loss. Current use is **non-hibernation** swap only; the
-[runtime/hibernation boundary](handoff/systemd-runtime-health.md#hibernation-and-resume-boundary)
-remains in force. Codex must not reboot the host.
+This is an archive, not an operator runbook: `run`, `recover`, `gh run list`
+and the `/dev/sda4` steps below describe the consumed old-host trial, not
+commands or approval for the current card. Start a current failure at the
+[read-only gate-to-recovery triage](README.md#diagnose-the-first-record); follow
+the [standing authorization](AGENT_CONTEXT.md#standing-owner-authorization),
+[physical protocol](benchmark.md#physical-media-and-workload-validity),
+[package recovery](compile.md#packaging) and
+[non-hibernation boundary](handoff/systemd-runtime-health.md#hibernation-and-resume-boundary).
+The old PASS and mocks do not qualify the current card, its retained state or
+cold boot. Volatile mapper loss cannot recover swap pages; do not reboot.
 
 ## Trial boundary
 
