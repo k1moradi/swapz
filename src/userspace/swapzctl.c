@@ -36,6 +36,8 @@
 #define SWAPZ_DM_BUFFER_MAX (1024U * 1024U)
 #define SWAPZ_STATUS_SNAPSHOT_RETRIES 8U
 #define SWAPZ_FORMAT_PROC_LINE_BYTES 8192U
+#define SWAPZ_FORMAT_PROC_MAX_BYTES (16U * 1024U * 1024U)
+#define SWAPZ_FORMAT_PROC_MAX_ROWS 65536U
 #define SWAPZ_FORMAT_PARENT_MODEL_BYTES 128U
 
 static void usage(FILE *out)
@@ -849,6 +851,12 @@ static int format_read_text_file(const char *path, char *buffer,
 			return -1;
 		}
 	}
+	/* sysfs data is byte-counted; an embedded NUL must never hide a field. */
+	if (memchr(buffer, '\0', used)) {
+		close(fd);
+		errno = EPROTO;
+		return -1;
+	}
 	buffer[used] = '\0';
 	if (close(fd) < 0)
 		return -1;
@@ -1340,6 +1348,9 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 			if (parse_device_identity_fields(token, &mounted_major,
 							 &mounted_minor, 0) < 0)
 				return -1;
+		} else if ((field == 3U || field == 4U) && *cursor != '/') {
+			/* Kernel mount roots and mountpoints are absolute. */
+			return -1;
 		}
 		++field;
 		cursor = token_end;
@@ -1400,45 +1411,179 @@ static int format_swap_entry_conflicts(const struct stat *info, dev_t device,
  * entry disappears. Ignore only an unopened table whose namespace is also
  * absent; opened, malformed, unreadable or still-namespaced tables fail closed.
  */
+/*
+ * /proc inventories are records, not NUL-terminated user strings. Every
+ * kernel row ends in a newline; a truncated, embedded-NUL, control-byte or
+ * over-budget snapshot is never evidence that the device is idle.
+ */
+static int format_inventory_read_line(FILE *stream, char *line, size_t capacity,
+				      size_t *total_bytes)
+{
+	size_t used = 0;
+
+	if (!stream || !line || !total_bytes || capacity < 2U) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (;;) {
+		int character = fgetc(stream);
+
+		if (character == EOF) {
+			if (ferror(stream)) {
+				if (!errno)
+					errno = EIO;
+				return -1;
+			}
+			if (!used)
+				return 0;
+			errno = EPROTO;
+			return -1;
+		}
+		if (*total_bytes >= SWAPZ_FORMAT_PROC_MAX_BYTES ||
+		    used + 1U >= capacity) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+		if (character == '\0' ||
+		    (character < 0x20 && character != '\t' && character != '\n')) {
+			errno = EPROTO;
+			return -1;
+		}
+		line[used++] = (char)character;
+		++*total_bytes;
+		if (character == '\n') {
+			line[used] = '\0';
+			return 1;
+		}
+	}
+}
+
+/* A bounded contiguous set, sorted only once after the complete snapshot. */
+static int format_inventory_append(void **entries, size_t *count,
+				   size_t *capacity, const void *entry,
+				   size_t entry_size)
+{
+	if (!entries || !count || !capacity || !entry || !entry_size) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (*count >= SWAPZ_FORMAT_PROC_MAX_ROWS) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	if (*count == *capacity) {
+		size_t next_capacity = *capacity ? *capacity * 2U : 32U;
+		void *extended;
+
+		if (next_capacity > SWAPZ_FORMAT_PROC_MAX_ROWS)
+			next_capacity = SWAPZ_FORMAT_PROC_MAX_ROWS;
+		if (next_capacity > SIZE_MAX / entry_size) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+		extended = realloc(*entries, next_capacity * entry_size);
+		if (!extended)
+			return -1;
+		*entries = extended;
+		*capacity = next_capacity;
+	}
+	memcpy((unsigned char *)*entries + *count * entry_size,
+	       entry, entry_size);
+	++*count;
+	return 0;
+}
+
+static int format_mount_identifier_compare(const void *left, const void *right)
+{
+	const unsigned long long first = *(const unsigned long long *)left;
+	const unsigned long long second = *(const unsigned long long *)right;
+
+	return (first > second) - (first < second);
+}
+
+struct format_swap_inventory_identity {
+	dev_t device;
+	ino_t inode;
+	int block_entry;
+};
+
+static int format_swap_inventory_identity_compare(const void *left,
+						   const void *right)
+{
+	const struct format_swap_inventory_identity *first = left;
+	const struct format_swap_inventory_identity *second = right;
+
+	if (first->block_entry != second->block_entry)
+		return (first->block_entry > second->block_entry) -
+		       (first->block_entry < second->block_entry);
+	if (first->device != second->device)
+		return (first->device > second->device) -
+		       (first->device < second->device);
+	return (first->inode > second->inode) -
+	       (first->inode < second->inode);
+}
+
 static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 					 dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
-	int saw_mount = 0;
+	unsigned long long *mount_identifiers = NULL;
+	size_t mount_count = 0;
+	size_t mount_capacity = 0;
+	size_t total_bytes = 0;
+	int read_result;
+	int saved_errno;
 
 	if (!stream) {
 		errno = EINVAL;
 		return -1;
 	}
-	while (fgets(line, sizeof(line), stream)) {
+	while ((read_result = format_inventory_read_line(
+			stream, line, sizeof(line), &total_bytes)) > 0) {
 		dev_t mounted_device;
-		size_t length = strlen(line);
+		unsigned long long mount_identifier;
+		const char *identifier_end;
 
-		if (length && line[length - 1U] != '\n' && !feof(stream)) {
-			errno = EOVERFLOW;
-			return -1;
-		}
-		if (format_mountinfo_line_device(line, &mounted_device) < 0) {
+		if (format_mountinfo_line_device(line, &mounted_device) < 0 ||
+		    parse_unsigned_decimal(line, ULLONG_MAX, &identifier_end,
+					   &mount_identifier) < 0 ||
+		    !mount_identifier || *identifier_end != ' ') {
 			errno = EPROTO;
-			return -1;
+			goto failed;
 		}
-		saw_mount = 1;
 		if (format_inventory_device_conflicts(mounted_device, device,
 						     parent_device)) {
 			errno = EBUSY;
-			return -1;
+			goto failed;
+		}
+		if (format_inventory_append((void **)&mount_identifiers,
+					    &mount_count, &mount_capacity,
+					    &mount_identifier,
+					    sizeof(mount_identifier)) < 0)
+			goto failed;
+	}
+	if (read_result < 0)
+		goto failed;
+	if (!mount_count) {
+		errno = EPROTO;
+		goto failed;
+	}
+	qsort(mount_identifiers, mount_count, sizeof(*mount_identifiers),
+	      format_mount_identifier_compare);
+	for (size_t index = 1; index < mount_count; ++index) {
+		if (mount_identifiers[index] == mount_identifiers[index - 1U]) {
+			errno = EPROTO;
+			goto failed;
 		}
 	}
-	if (ferror(stream)) {
-		if (!errno)
-			errno = EIO;
-		return -1;
-	}
-	if (!saw_mount) {
-		errno = EPROTO;
-		return -1;
-	}
+	free(mount_identifiers);
 	return 0;
+
+failed:
+	saved_errno = errno;
+	free(mount_identifiers);
+	errno = saved_errno;
+	return -1;
 }
 
 static int format_mountinfo_path_clear(const char *path, dev_t device,
@@ -1663,7 +1808,8 @@ static int format_swap_inventory_entry_parse(const char *line,
 		return -1;
 
 	path_length = (size_t)(field_end[0] - field_begin[0]);
-	if (!path_length || path_length >= PATH_MAX)
+	if (!path_length || path_length >= PATH_MAX ||
+	    field_begin[0][0] != '/')
 		return -1;
 	if ((size_t)(field_end[1] - field_begin[1]) == sizeof("partition") - 1U &&
 	    !memcmp(field_begin[1], "partition", sizeof("partition") - 1U)) {
@@ -1680,7 +1826,7 @@ static int format_swap_inventory_entry_parse(const char *line,
 	    end != field_end[2] ||
 	    parse_unsigned_decimal(field_begin[3], ULLONG_MAX, &end,
 				   &used_kib) < 0 ||
-	    end != field_end[3] || used_kib > size_kib)
+	    end != field_end[3] || !size_kib || used_kib > size_kib)
 		return -1;
 
 	cursor = field_begin[4];
@@ -1706,57 +1852,82 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 					      dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
+	struct format_swap_inventory_identity *swap_identities = NULL;
+	size_t swap_count = 0;
+	size_t swap_capacity = 0;
+	size_t total_bytes = 0;
 	int saw_header = 0;
+	int read_result;
+	int saved_errno;
 
 	if (!stream) {
 		errno = EINVAL;
 		return -1;
 	}
-	while (fgets(line, sizeof(line), stream)) {
+	while ((read_result = format_inventory_read_line(
+			stream, line, sizeof(line), &total_bytes)) > 0) {
 		char swap_path[PATH_MAX];
 		struct stat info;
-		size_t length = strlen(line);
+		struct format_swap_inventory_identity identity;
 		int block_entry;
 
-		if (length && line[length - 1U] != '\n' && !feof(stream)) {
-			errno = EOVERFLOW;
-			return -1;
-		}
 		if (!saw_header) {
 			if (!format_swap_inventory_header_valid(line)) {
 				errno = EPROTO;
-				return -1;
+				goto failed;
 			}
 			saw_header = 1;
 			continue;
 		}
 		if (format_swap_inventory_entry_parse(line, swap_path,
-						     &block_entry) < 0) {
+						      &block_entry) < 0) {
 			errno = EPROTO;
-			return -1;
+			goto failed;
 		}
 		if (stat(swap_path, &info) < 0)
-			return -1;
+			goto failed;
 		if ((block_entry && !S_ISBLK(info.st_mode)) ||
 		    (!block_entry && !S_ISREG(info.st_mode))) {
 			errno = EPROTO;
-			return -1;
+			goto failed;
 		}
 		if (format_swap_entry_conflicts(&info, device, parent_device)) {
 			errno = EBUSY;
-			return -1;
+			goto failed;
 		}
+		/* Duplicate aliases of the same active swap are ambiguous. */
+		identity.device = block_entry ? info.st_rdev : info.st_dev;
+		identity.inode = block_entry ? 0 : info.st_ino;
+		identity.block_entry = block_entry;
+		if (format_inventory_append((void **)&swap_identities,
+					    &swap_count, &swap_capacity,
+					    &identity, sizeof(identity)) < 0)
+			goto failed;
 	}
-	if (ferror(stream)) {
-		if (!errno)
-			errno = EIO;
-		return -1;
-	}
+	if (read_result < 0)
+		goto failed;
 	if (!saw_header) {
 		errno = EPROTO;
-		return -1;
+		goto failed;
 	}
+	qsort(swap_identities, swap_count, sizeof(*swap_identities),
+	      format_swap_inventory_identity_compare);
+	for (size_t index = 1; index < swap_count; ++index) {
+		if (!format_swap_inventory_identity_compare(
+				&swap_identities[index - 1U],
+				&swap_identities[index])) {
+			errno = EPROTO;
+			goto failed;
+		}
+	}
+	free(swap_identities);
 	return 0;
+
+failed:
+	saved_errno = errno;
+	free(swap_identities);
+	errno = saved_errno;
+	return -1;
 }
 
 static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
@@ -1793,6 +1964,13 @@ static int format_identity_values_match(
 	return S_ISBLK(path_info->st_mode) &&
 	       S_ISBLK(opened_info->st_mode) &&
 	       S_ISBLK(partuuid_info->st_mode) &&
+	       path_info->st_uid == 0 && opened_info->st_uid == 0 &&
+	       partuuid_info->st_uid == 0 &&
+	       !(path_info->st_mode & S_IWOTH) &&
+	       !(opened_info->st_mode & S_IWOTH) &&
+	       !(partuuid_info->st_mode & S_IWOTH) &&
+	       path_info->st_dev == opened_info->st_dev &&
+	       path_info->st_ino == opened_info->st_ino &&
 	       path_info->st_rdev == expected_device &&
 	       opened_info->st_rdev == expected_device &&
 	       partuuid_info->st_rdev == expected_device &&
@@ -1832,10 +2010,13 @@ static int format_preopen_verify(const char *path,
 	}
 	expected_device = makedev(expected->device_major, expected->device_minor);
 	expected_parent = makedev(expected->parent_major, expected->parent_minor);
-	if (stat(path, &path_info) < 0 ||
+	if (lstat(path, &path_info) < 0 ||
 	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0)
 		return -1;
 	if (!S_ISBLK(path_info.st_mode) || !S_ISBLK(partuuid_info.st_mode) ||
+	    path_info.st_uid != 0 || partuuid_info.st_uid != 0 ||
+	    (path_info.st_mode & S_IWOTH) ||
+	    (partuuid_info.st_mode & S_IWOTH) ||
 	    path_info.st_rdev != expected_device ||
 	    partuuid_info.st_rdev != expected_device) {
 		errno = ESTALE;
@@ -1869,7 +2050,7 @@ static int format_opened_verify(int fd, const char *path,
 		errno = EINVAL;
 		return -1;
 	}
-	if (stat(path, &path_info) < 0 ||
+	if (lstat(path, &path_info) < 0 ||
 	    fstat(fd, &opened_info) < 0 ||
 	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0 ||
 	    ioctl(fd, BLKGETSIZE64, &opened_bytes) < 0 ||
@@ -1947,7 +2128,8 @@ static int format_default_preopen_verify(
 static int format_default_open_device(void *context, const char *path)
 {
 	(void)context;
-	return open(path, O_RDWR | O_EXCL | O_CLOEXEC);
+	/* Reject final-component symlinks; retain exclusive descriptor authority. */
+	return open(path, O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW);
 }
 
 static int format_default_verify_opened(
