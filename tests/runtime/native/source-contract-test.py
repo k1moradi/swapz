@@ -5538,6 +5538,63 @@ int main(void)
             'lz4_sweep.get("overall") != "PASS_LZ4_ACCELERATION_AB"',
             runner)
 
+
+    def test_id36_admission_inventory_and_phase_are_fail_closed(self):
+        """The early observation is advisory; only a valid late 1 GiB sample admits."""
+        import subprocess
+        import tempfile
+
+        pressure = (ROOT / "tests/tools/qualify-resource-pressure.sh").read_text()
+        preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
+        self.assertIn(
+            "OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo", preflight)
+        self.assertIn("admission:no", preflight)
+        self.assertIn("MIN_AVAILABLE_KIB=$((1024 * 1024))", pressure)
+        self.assertIn("for admission_sample in 1 2 3 4 5; do", pressure)
+        self.assertIn("if (( available_kib >= MIN_AVAILABLE_KIB )); then", pressure)
+        self.assertIn("sleep 1", pressure)
+        self.assertIn("ID36_PARENT_CGROUP_MEMORY=source:", pressure)
+        self.assertIn("BLOCKED: ID36 parent cgroup budget below 896 MiB", pressure)
+        self.assertIn("BLOCKED: ID36 host lacks 1 GiB MemAvailable", pressure)
+        self.assertLess(
+            pressure.index("START_ID36_RESOURCE_PRESSURE=admission"),
+            pressure.index('for admission_sample in 1 2 3 4 5; do'))
+        start = pressure.index("read_host_memory_inventory() {")
+        end = pressure.index("\n}\n", start) + 2
+        helper = pressure[start:end].replace("/proc/meminfo", '"$1"')
+        command = helper + "\nread_host_memory_inventory\n"
+        sample = (
+            "MemTotal: 3863624 kB\n"
+            "MemAvailable: 894992 kB\n"
+            "MemFree: 100000 kB\n"
+            "Cached: 400000 kB\n"
+            "SReclaimable: 90000 kB\n"
+            "SwapTotal: 2097152 kB\n"
+            "SwapFree: 1573076 kB\n"
+        )
+        with tempfile.TemporaryDirectory(prefix="swapz-id36-meminfo-") as folder:
+            path = Path(folder) / "meminfo"
+
+            def observe(contents):
+                path.write_text(contents)
+                return subprocess.run(
+                    ["bash", "-c", command, "_", str(path)],
+                    capture_output=True, text=True, timeout=5)
+
+            result = observe(sample)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                "3863624 894992 100000 400000 90000 2097152 1573076")
+            for bad in (
+                sample.replace("894992 kB", "894992 bytes"),
+                sample.replace("894992 kB", "0894992 kB"),
+                sample.replace("MemAvailable: 894992 kB\n", ""),
+                sample + "MemAvailable: 894992 kB\n",
+            ):
+                with self.subTest(bad=bad[-55:]):
+                    self.assertNotEqual(observe(bad).returncode, 0)
+
     def test_id36_resource_pressure_is_bounded_and_owned(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         pressure = (ROOT / "tests/tools/qualify-resource-pressure.sh").read_text()

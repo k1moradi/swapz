@@ -39,6 +39,29 @@ for cmd in rmmod dmsetup timeout awk tr findmnt cat readlink stat sleep id ls; d
 done
 [[ $(id -u) == 0 ]] || fail "root required for loaded preflight"
 
+# Diagnostic only: early loaded-stage RAM is not the later ID36 admission
+# sample. Never fail preflight from a transient low reading, and never mutate
+# host swap or kernel caches to improve this observation.
+early_available_kib="$(awk '
+    $1 == "MemAvailable:" {
+        if (NF != 3 || $2 !~ /^(0|[1-9][0-9]*)$/ ||
+            $3 != "kB" || ++seen != 1)
+            invalid = 1
+        else
+            value = $2
+    }
+    END {
+        if (invalid || seen != 1)
+            exit 1
+        print value
+    }
+' /proc/meminfo 2>/dev/null || true)"
+if is_uint "$early_available_kib"; then
+    note "OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo unit:kB available:$early_available_kib floor:1048576 admission:no"
+else
+    note 'OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo status:unavailable admission:no'
+fi
+
 clean_orphaned_nullb() {
     local cfgbase=/sys/kernel/config/nullb
     [[ -d $cfgbase ]] || return 0

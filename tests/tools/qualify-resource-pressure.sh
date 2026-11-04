@@ -68,11 +68,83 @@ grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
     exit 2
 }
 
-available_kib="$(awk '/^MemAvailable:/ { print $2; exit }' /proc/meminfo)"
-[[ $available_kib =~ ^[0-9]+$ && $available_kib -ge $MIN_AVAILABLE_KIB ]] || {
+# This marker precedes admission so an early BLOCKED result cannot inherit the
+# preceding synthetic storage envelope's last benchmark phase.
+printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
+
+# Read one coherent host snapshot with canonical kernel kB units. Reject
+# missing, duplicated, nondecimal or unitless fields instead of treating
+# malformed observations as enough free RAM.
+read_host_memory_inventory() {
+    awk '
+        $1 == "MemTotal:" || $1 == "MemAvailable:" ||
+        $1 == "MemFree:" || $1 == "Cached:" ||
+        $1 == "SReclaimable:" || $1 == "SwapTotal:" ||
+        $1 == "SwapFree:" {
+            if (NF != 3 || $2 !~ /^(0|[1-9][0-9]*)$/ ||
+                $3 != "kB" || ++seen[$1] != 1)
+                invalid = 1
+            else
+                values[$1] = $2
+        }
+        END {
+            if (invalid || seen["MemTotal:"] != 1 ||
+                seen["MemAvailable:"] != 1 || seen["MemFree:"] != 1 ||
+                seen["Cached:"] != 1 || seen["SReclaimable:"] != 1 ||
+                seen["SwapTotal:"] != 1 || seen["SwapFree:"] != 1)
+                exit 1
+            printf "%s %s %s %s %s %s %s\n",
+                values["MemTotal:"], values["MemAvailable:"],
+                values["MemFree:"], values["Cached:"],
+                values["SReclaimable:"], values["SwapTotal:"],
+                values["SwapFree:"]
+        }
+    ' /proc/meminfo
+}
+
+# A prior owned-device stage may have just finished kernel teardown. Give
+# normal reclaim a bounded four seconds to settle; do not drop caches, change
+# swap, or relax the exact 1 GiB admission floor.
+initial_available_kib=""
+for admission_sample in 1 2 3 4 5; do
+    if ! memory_inventory="$(read_host_memory_inventory)"; then
+        printf '%s\n' 'BLOCKED: ID36 cannot obtain canonical /proc/meminfo kB inventory' >&2
+        exit 2
+    fi
+    read -r total_kib available_kib free_kib cached_kib         reclaimable_kib swap_total_kib swap_free_kib <<< "$memory_inventory"
+    [[ -n $initial_available_kib ]] || initial_available_kib="$available_kib"
+    if (( available_kib >= MIN_AVAILABLE_KIB )); then
+        break
+    fi
+    if [[ $admission_sample != 5 ]]; then
+        sleep 1
+    fi
+done
+deficit_kib=0
+if (( available_kib < MIN_AVAILABLE_KIB )); then
+    deficit_kib=$((MIN_AVAILABLE_KIB - available_kib))
+fi
+printf 'ID36_HOST_MEMORY=source:/proc/meminfo unit:kB total:%s initial_available:%s available:%s required:%s deficit:%s free:%s cached:%s sreclaimable:%s swap_total:%s swap_free:%s samples:%s\n'     "$total_kib" "$initial_available_kib" "$available_kib"     "$MIN_AVAILABLE_KIB" "$deficit_kib" "$free_kib" "$cached_kib"     "$reclaimable_kib" "$swap_total_kib" "$swap_free_kib"     "$admission_sample"
+
+# Report the parent cgroup budget separately from whole-host MemAvailable.
+# Neither value is interchangeable with the other.
+parent_memory_max="$(cat "$CGROUP_ROOT/memory.max" 2>/dev/null || true)"
+parent_memory_current="$(cat "$CGROUP_ROOT/memory.current" 2>/dev/null || true)"
+printf 'ID36_PARENT_CGROUP_MEMORY=source:%s memory_max:%s memory_current:%s\n'     "$CGROUP_ROOT" "${parent_memory_max:-unavailable}"     "${parent_memory_current:-unavailable}"
+if [[ $parent_memory_max != max &&
+      ! $parent_memory_max =~ ^(0|[1-9][0-9]*)$ ]]; then
+    printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max unavailable or malformed' >&2
+    exit 2
+fi
+if [[ $parent_memory_max != max ]] &&
+   (( parent_memory_max < MEMORY_MAX_BYTES )); then
+    printf '%s\n' 'BLOCKED: ID36 parent cgroup budget below 896 MiB' >&2
+    exit 2
+fi
+if (( available_kib < MIN_AVAILABLE_KIB )); then
     printf '%s\n' 'BLOCKED: ID36 host lacks 1 GiB MemAvailable safety headroom' >&2
     exit 2
-}
+fi
 
 token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
 [[ $token =~ ^[a-f0-9]{16}$ ]] || {
