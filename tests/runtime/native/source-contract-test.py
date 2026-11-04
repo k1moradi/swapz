@@ -6933,6 +6933,13 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             "constructor direct allocation inventory changed; update the "
             "capacity/RAM accounting before accepting the change")
         self.assertEqual(sum(observed_allocations.values()), 47)
+        direct_allocator_calls = re.findall(
+            r"\b(?:kzalloc|kcalloc|kmalloc|kmalloc_array|kvmalloc|"
+            r"kvmalloc_array|kvcalloc|kvzalloc|vmalloc|vzalloc)\s*\(",
+            constructor)
+        self.assertEqual(
+            len(direct_allocator_calls), 47,
+            "constructor contains an unaccounted direct allocator call")
 
         free_pattern = re.compile(
             r"\b(kfree|kvfree|vfree)\s*\(\s*"
