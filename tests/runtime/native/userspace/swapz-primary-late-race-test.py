@@ -571,25 +571,15 @@ static int fixture_stat(const char *path, struct stat *info)
 #undef swapz_primary_read_swap_inventory
 
 /*
- * Keep the real production swap admission result. Only after the fourth
- * (final selected-device) inventory has returned safe do we inject a new
- * mount or swap. This is an observation of the remaining gap, NOT proof of
- * kernel exclusivity, and the header-write seam never touches a device.
+ * Count calls while preserving the real production swap admission result.
+ * The post-snapshot race itself is injected by the header-write seam below,
+ * after the coordinator has completed every final inventory observation.
  */
 static int fixture_observed_swap_device_active(dev_t device)
 {
     int active = swapz_primary_swap_device_active(device);
 
     ++active_inventory_reads;
-    if (late && active == 0 && active_inventory_reads == 4U &&
-        (scenario == FIXTURE_POST_SNAPSHOT_MOUNT ||
-         scenario == FIXTURE_POST_SNAPSHOT_SWAPON)) {
-        post_snapshot_injected = 1;
-        if (scenario == FIXTURE_POST_SNAPSHOT_MOUNT)
-            fixture_inventory_file("3031/mountinfo",
-                "36 25 259:9 / / rw - ext4 /dev/other rw\n"
-                "37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
-    }
     return active;
 }
 
@@ -699,17 +689,26 @@ static int fixture_intent(void)
 }
 static int fixture_header_write(void)
 {
-    /* A diagnostic reread proves that the post-snapshot change is visible,
-     * but it deliberately does not gate the simulated destructive boundary. */
+    /*
+     * This seam is entered only after production's final mount/parent/swap
+     * snapshot has returned safe. Inject immediately before the simulated
+     * block-zero write, then prove a fresh production inventory can see the
+     * change. That exposes the remaining interval without claiming an atomic
+     * kernel exclusion barrier.
+     */
     if (scenario == FIXTURE_POST_SNAPSHOT_MOUNT) {
         struct swapz_primary_mount_facts facts = {0};
 
-        assert(post_snapshot_injected);
+        assert(!post_snapshot_injected);
+        post_snapshot_injected = 1;
+        fixture_inventory_file("3031/mountinfo",
+            "36 25 259:9 / / rw - ext4 /dev/other rw\n"
+            "37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
         assert(swapz_primary_read_mount_facts(
             &facts, makedev(8U, 0U)) == 0 && facts.target_mounted);
-    }
-    if (scenario == FIXTURE_POST_SNAPSHOT_SWAPON) {
-        assert(post_snapshot_injected);
+    } else if (scenario == FIXTURE_POST_SNAPSHOT_SWAPON) {
+        assert(!post_snapshot_injected);
+        post_snapshot_injected = 1;
         assert(swapz_primary_swap_device_active(makedev(8U, 1U)) == 1);
     }
     ++header_writes;
@@ -962,9 +961,11 @@ static int check_case(enum fixture_scenario candidate)
         assert(prefix_length > 0 &&
                (size_t)prefix_length < sizeof(expected_diagnostic));
         if (result == 0 || result_errno != expected_error ||
+            diagnostic_length == 0U ||
             strncmp(diagnostic, expected_diagnostic,
                     (size_t)prefix_length) != 0 ||
-            strchr(diagnostic, '\n') != diagnostic + strlen(diagnostic) - 1U ||
+            diagnostic[diagnostic_length - 1U] != '\n' ||
+            memchr(diagnostic, '\n', diagnostic_length - 1U) != NULL ||
             strstr(diagnostic, "run_id") ||
             strstr(diagnostic, "0123456789abcdef") ||
             strstr(diagnostic, "secret") || strstr(diagnostic, "token") ||
