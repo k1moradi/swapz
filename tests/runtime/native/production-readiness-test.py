@@ -867,7 +867,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         result = evaluate(report, evidence, policy)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertTrue(any(
-            "exact-source PASS" in blocker for blocker in result["code_blockers"]))
+            blocker.startswith(
+                "required_ci: Native kernel-C project-goal regressions is not an "
+                "exact-source ")
+            for blocker in result["code_blockers"]))
 
     def test_systemd_package_workflow_is_a_required_release_gate(self):
         report = owner_report()
