@@ -439,7 +439,6 @@ class UnitSandboxContractTests(unittest.TestCase):
             ("NoNewPrivileges", "yes"),
             ("ProtectSystem", "full"),
             ("ProtectHome", "yes"),
-            ("PrivateTmp", "yes"),
             ("LockPersonality", "yes"),
             ("RestrictRealtime", "yes"),
             ("RestrictSUIDSGID", "yes"),
@@ -448,6 +447,9 @@ class UnitSandboxContractTests(unittest.TestCase):
             require("mapper", "Service", directive, value)
         self.assertNotIn(("Service", "ProtectKernelModules"), files["mapper"])
         self.assertNotIn(("Service", "PrivateDevices"), files["mapper"])
+        # tmp.mount can be ordered after swap.target; early PrivateTmp would
+        # introduce a boot cycle even when the rest of the sandbox is valid.
+        self.assertNotIn(("Service", "PrivateTmp"), files["mapper"])
 
         for unit in ("verifier", "health"):
             require(unit, "Service", "NoNewPrivileges", "yes")
@@ -511,6 +513,7 @@ class UnitSandboxContractTests(unittest.TestCase):
             ("privilege escalation", "mapper", "NoNewPrivileges=yes", "NoNewPrivileges=no"),
             ("module capability excluded", "mapper", "CAP_NET_RAW", "CAP_SYS_MODULE"),
             ("module loading disabled", "mapper", "ProtectSystem=full", "ProtectKernelModules=yes"),
+            ("early tmp.mount ordering cycle", "mapper", "ProtectHome=yes", "ProtectHome=yes\nPrivateTmp=yes"),
             ("unprotected filesystem", "mapper", "ProtectSystem=full", "ProtectSystem=no"),
             ("journal writable", "mapper", "ReadOnlyPaths=-/var/lib/swapz-package-transactions", "ReadOnlyPaths="),
             ("verifier starts mapper", "verifier", "After=swapz-primary-mapper.service", "Wants=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
