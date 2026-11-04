@@ -305,6 +305,38 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
     def test_missing_swap_path_cannot_be_counted_as_absent(self):
         self.assertIn('[[ -e "$swap_path" ]] || return 1', self.script)
 
+    def test_dmsetup_failure_is_not_mapper_absence_evidence(self):
+        oracle_start = self.script.index("mapper_absence_proven() {")
+        oracle_end = self.script.index("\n}", oracle_start)
+        oracle = self.script[oracle_start:oracle_end]
+        self.assertIn('dmsetup info "$DMNAME"', oracle)
+        self.assertIn('for mapper_sysfs in /sys/class/block/dm-*; do', oracle)
+        self.assertIn('[[ -r "$mapper_sysfs/dm/name" ]] || return 1', oracle)
+        self.assertIn('[[ "$observed_name" != "$DMNAME" ]] || return 1',
+                      oracle)
+        self.assertIn('mapper_absence_proven || return 1', self.script)
+        cleanup = self.script[self.script.index("cleanup() {"):]
+        self.assertIn('if ! mapper_absence_proven ||', cleanup)
+        self.assertNotIn(
+            'if dmsetup info "$DMNAME" >/dev/null 2>&1 || '
+            '[[ -d /sys/module/dm_swapz ]]', cleanup)
+
+    def test_cleanup_preserves_noncanonical_and_orphaned_owner_records(self):
+        cleanup = self.script[
+            self.script.index("cleanup() {"):
+            self.script.index("trap cleanup EXIT")]
+        claim_check = cleanup.index(
+            '! assert_owned_transaction_records 0 >/dev/null 2>&1')
+        quarantine = cleanup.index(
+            'QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE='
+            'noncanonical_consumed_owner_record')
+        deletion = cleanup.index('rm -rf --one-file-system -- "$TEST_BASE"')
+        self.assertLess(claim_check, quarantine)
+        self.assertLess(quarantine, deletion)
+        for orphan in ("consumed-*.json", "primary-manifest-*.txt",
+                       "primary-module-load-*.json"):
+            self.assertIn(orphan, cleanup)
+
     def test_privileged_qualifier_does_not_touch_git_metadata(self):
         self.assertNotIn("git diff --quiet --exit-code", self.script)
         self.assertNotIn("git diff --cached --quiet --exit-code", self.script)
@@ -322,7 +354,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             check=True,
         )
 
-    def test_fault_shim_executes_eleven_rootless_boundary_cases(self):
+    def test_fault_shim_executes_ten_injected_faults_plus_passthrough(self):
         # The harness provides fake syscall/open/fsync implementations: no
         # loaded kernel, swap device or privileged host action is touched.
         with TemporaryDirectory(prefix="swapz-primary-fault-") as directory:

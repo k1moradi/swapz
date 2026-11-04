@@ -47,6 +47,23 @@ block_node_devno() {
 	printf '%s\n' "$device_number"
 }
 
+# A failed dmsetup query is not proof of mapper absence. Check the independent
+# sysfs mapper inventory before mutating or destroying private RAM resources.
+mapper_absence_proven() {
+	local mapper_sysfs observed_name
+
+	if dmsetup info "$DMNAME" >/dev/null 2>&1; then
+		return 1
+	fi
+	[[ -d /sys/class/block && -r /sys/class/block ]] || return 1
+	for mapper_sysfs in /sys/class/block/dm-*; do
+		[[ -e "$mapper_sysfs" || -L "$mapper_sysfs" ]] || continue
+		[[ -r "$mapper_sysfs/dm/name" ]] || return 1
+		observed_name="$(cat "$mapper_sysfs/dm/name")" || return 1
+		[[ "$observed_name" != "$DMNAME" ]] || return 1
+	done
+}
+
 if [[ $# -ne 2 || $1 != --validated-source ]]; then
 	blocked "expected --validated-source <40-hex-sha>"
 fi
@@ -115,9 +132,8 @@ RUN_ID=
 	blocked "fresh owned-nullblk lifecycle evidence path already exists"
 [[ ! -d /sys/module/dm_swapz ]] ||
 	blocked "dm_swapz is already loaded before lifecycle rehearsal"
-if dmsetup info "$DMNAME" >/dev/null 2>&1; then
-	blocked "swapz-primary already exists before lifecycle rehearsal"
-fi
+mapper_absence_proven ||
+	blocked "swapz-primary exists or independent mapper absence is unproven"
 SWAPS_ID_BEFORE="$(swapz_swap_inventory_identity /proc/swaps)" ||
 	blocked "cannot snapshot host swap identity"
 
@@ -164,6 +180,7 @@ mapper_swap_entry_count() {
 	local count=0
 
 	if ! dmsetup info "$DMNAME" >/dev/null 2>&1; then
+		mapper_absence_proven || return 1
 		printf '0\n'
 		return 0
 	fi
@@ -193,7 +210,7 @@ assert_exact_owned_mapper() {
 	local table_start table_sectors table_target table_lower table_rest
 
 	if [[ "$expected_present" == 0 ]]; then
-		! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+		mapper_absence_proven ||
 			fail "unexpected mapper exists outside transaction ownership"
 		return 0
 	fi
@@ -230,6 +247,8 @@ unrelated_swap_inventory_identity() {
 			-o major,minor "$DMNAME" 2>/dev/null | tr -d '[:space:]')" ||
 			return 1
 		[[ "$mapper_device" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+	else
+		mapper_absence_proven || return 1
 	fi
 	python3 - "$mapper_device" <<'PY'
 import os
@@ -563,7 +582,7 @@ recover_interruption_run() {
 		fail "recovery after $phase lost consumed or released ownership incorrectly"
 	[[ ! -d /sys/module/dm_swapz ]] ||
 		fail "recovery after $phase left dm_swapz loaded"
-	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+	mapper_absence_proven ||
 		fail "recovery after $phase left swapz-primary mapper"
 	swaps_after="$(swapz_swap_inventory_identity /proc/swaps)" ||
 		fail "cannot snapshot host swap identity after $phase recovery"
@@ -599,7 +618,7 @@ assert_repeat_recovery_is_safe() {
 		fail "repeated recovery after $phase changed COMPLETE provenance"
 	[[ ! -d /sys/module/dm_swapz ]] ||
 		fail "repeated recovery after $phase loaded dm_swapz"
-	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+	mapper_absence_proven ||
 		fail "repeated recovery after $phase recreated swapz-primary"
 }
 
@@ -702,7 +721,7 @@ run_ambiguous_swapon_applied() {
 		fail "normal stop after ambiguous swapon did not complete"
 	[[ ! -d /sys/module/dm_swapz ]] ||
 		fail "normal stop after ambiguous swapon left dm_swapz loaded"
-	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+	mapper_absence_proven ||
 		fail "normal stop after ambiguous swapon left mapper present"
 	assert_unrelated_host_swap_identity "swapon-eintr-applied-stop"
 	assert_repeat_recovery_is_safe "swapon-eintr-applied" null
@@ -730,7 +749,7 @@ run_ambiguous_swapoff_applied() {
 		fail "ambiguous swapoff reconciliation did not publish COMPLETE"
 	[[ ! -d /sys/module/dm_swapz ]] ||
 		fail "ambiguous swapoff reconciliation left dm_swapz loaded"
-	! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+	mapper_absence_proven ||
 		fail "ambiguous swapoff reconciliation left mapper present"
 	assert_unrelated_host_swap_identity "swapoff-eintr-applied"
 	assert_repeat_recovery_is_safe "swapoff-eintr-applied" null
@@ -987,7 +1006,7 @@ cleanup() {
 
 	if [[ -x "$CONTROL" ]]; then
 		stage="$(state_stage 2>/dev/null)"
-		if dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+		if ! mapper_absence_proven ||
 		   [[ -d /sys/module/dm_swapz ]] ||
 		   [[ "$stage" == STARTING || "$stage" == ACTIVE ||
 		      "$stage" == STOPPING || "$stage" == RECOVERY_REQUIRED ||
@@ -1001,7 +1020,7 @@ cleanup() {
 		fi
 	fi
 
-	if dmsetup info "$DMNAME" >/dev/null 2>&1 || [[ -d /sys/module/dm_swapz ]]; then
+	if ! mapper_absence_proven || [[ -d /sys/module/dm_swapz ]]; then
 		QUARANTINE=1
 		note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=mapper_or_module_remains"
 	fi
@@ -1047,7 +1066,16 @@ PY
 				QUARANTINE=1
 				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=unfinished_or_ambiguous_durable_state"
 			fi
-		elif compgen -G "$RECOVERY_BASE/consumed-*.json" >/dev/null; then
+			# COMPLETE alone is insufficient: reject a malformed permanent
+			# owner record before discarding the last recovery evidence.
+			if [[ "$stage" == COMPLETE ]] &&
+			   ! assert_owned_transaction_records 0 >/dev/null 2>&1; then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=noncanonical_consumed_owner_record"
+			fi
+		elif compgen -G "$RECOVERY_BASE/consumed-*.json" >/dev/null ||
+		     compgen -G "$RECOVERY_BASE/primary-manifest-*.txt" >/dev/null ||
+		     compgen -G "$RECOVERY_BASE/primary-module-load-*.json" >/dev/null; then
 			QUARANTINE=1
 			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=lost_state_provenance"
 		fi
@@ -1513,7 +1541,7 @@ stop_run="$(printf '%s\n' "$stop_output" |
 	sed -n 's/^PRIMARY_STOP=COMPLETE run_id=\([0-9a-f]\{32\}\).*/\1/p')"
 [[ "$stop_run" == "$RUN_ID" ]] || fail "stop run ID differs from prepared run"
 [[ ! -d /sys/module/dm_swapz ]] || fail "stop left dm_swapz loaded"
-! dmsetup info "$DMNAME" >/dev/null 2>&1 ||
+mapper_absence_proven ||
 	fail "stop left swapz-primary mapper present"
 [[ ! -e "$RECOVERY_BASE/partition-$PARTUUID.active" ]] ||
 	fail "stop left the active owner marker"
