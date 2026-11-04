@@ -3163,7 +3163,10 @@ payload bytes, boundary lengths around 8-byte/CRC lanes and production packing
 cliffs, the maximum accepted payload, deliberately unaligned extent/payload
 addresses, and every stored encoding. These cases supplement, rather than
 replace, the full-page structured/entropy predictor corpus and independent
-scalar/SIMD transform/shuffle oracles.
+scalar/SIMD transform/shuffle oracles. A metadata-CRC-only descriptor lookup
+must reject zero generation and payload offsets inside the metadata envelope,
+even when the forged payload checksum also matches; callers retain responsibility
+for full descriptor order and mapping identity.
 
 Distinguish the stored-byte *envelope* oracle from a complete compressed page
 roundtrip: arbitrary record payload bytes verify descriptors, CRC, bounds and
