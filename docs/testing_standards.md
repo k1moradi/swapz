@@ -1477,6 +1477,30 @@ manifest, including measured liblz4 buckets and byte accounting, and compare
 JSON value types exactly; Python bool/int or float/int equality must never make
 mistyped metadata acceptable. Truncated, extra or changed records and any
 workload-metadata mismatch are failures, not qualification.
+
+The permanent rootless regression for this contract is
+`tests/runtime/benchmark/anon-page-fixture-test.py`, registered in
+`tests/Makefile` and invoked by the existing official rootless test stage.
+It must import the actual fixture generator/verifier, not a copied or
+mock-compressed implementation. Only real liblz4 (when available) may
+measure compression; missing liblz4 skips those measurements while the
+seed, page-index, schedule-limit, recipe and size guards remain exercised.
+Keep test payloads bounded to 18 regular-file pages (73,728 bytes) and
+persisted manifest reads bounded to 16 KiB. Verify the complete persisted
+manifest with exact JSON types, including boolean-as-integer rejection,
+RAW counts and bytes, compression descriptor, weighted profile quotas,
+nested measured histograms, unexpected or missing fields, and the fixture
+SHA-256. Check oversized seed text, invalid seeds/counts/indices, short
+and trailing records, tampered first/last page bytes, and the page/field
+diagnostic containing expected/observed sizes or SHA-256 digests for
+record failures. Never dump raw page contents in diagnostics.
+Freeze SHA-256 page digests for all nine existing recipes and complete
+16-page default-weight fixtures for seeds 0, 0x51A0A9 and UINT64_MAX to
+guard byte-identical existing workloads. A failed manifest write or
+temporary-file cleanup must not produce test PASS; the test framework
+must process cleanup errors before reporting success. Rootless synthetic
+PASS remains distinct from actual kernel anonymous swap-out/swap-in,
+loaded-host and physical-device qualification.
 The anonymous-swap worker independently compares every 4096-byte page on
 every admitted reread; failed comparisons report the phase, page index and
 expected/observed digests and cleanup outcome. PASS is written only after
