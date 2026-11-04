@@ -154,10 +154,12 @@ static int lower_write(void *opaque, swapz_u32 start, swapz_u8 blocks,
 		       const swapz_u8 *source, swapz_u8 *completed)
 {
 	struct memory_disk *memory = opaque;
+	const swapz_u32 physical_limit =
+		mixed_active ? MIXED_PHYSICAL_BLOCKS : PHYSICAL_BLOCKS;
 	swapz_u8 written = blocks;
 
 	*completed = 0;
-	if (start >= PHYSICAL_BLOCKS || blocks > PHYSICAL_BLOCKS - start)
+	if (start >= physical_limit || blocks > physical_limit - start)
 		return -ERANGE;
 	if (mixed_active) {
 		for (swapz_u32 block = start; block < start + blocks; ++block)
@@ -185,8 +187,10 @@ static int lower_read(void *opaque, swapz_u32 start, swapz_u8 blocks,
 		      swapz_u8 *destination)
 {
 	struct memory_disk *memory = opaque;
+	const swapz_u32 physical_limit =
+		mixed_active ? MIXED_PHYSICAL_BLOCKS : PHYSICAL_BLOCKS;
 
-	if (start >= PHYSICAL_BLOCKS || blocks > PHYSICAL_BLOCKS - start)
+	if (start >= physical_limit || blocks > physical_limit - start)
 		return -ERANGE;
 	memory->read_calls++;
 	if (memory->read_calls == memory->fail_read_on) {
