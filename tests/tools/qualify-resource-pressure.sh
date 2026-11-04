@@ -108,32 +108,52 @@ read_host_memory_inventory() {
                 values["SReclaimable:"], values["SwapTotal:"],
                 values["SwapFree:"]
         }
-    ' /proc/meminfo
+    ' "${1:-/proc/meminfo}"
 }
 
 # A prior owned-device stage may have just finished kernel teardown. Give
 # normal reclaim a bounded four seconds to settle; do not drop caches, change
-# swap, or relax the exact 1 GiB admission floor.
-initial_available_kib=""
-for admission_sample in 1 2 3 4 5; do
-    if ! memory_inventory="$(read_host_memory_inventory)"; then
-        printf '%s\n' 'BLOCKED: ID36 cannot obtain canonical /proc/meminfo kB inventory' >&2
-        exit 2
-    fi
-    read -r total_kib available_kib free_kib cached_kib         reclaimable_kib swap_total_kib swap_free_kib <<< "$memory_inventory"
-    [[ -n $initial_available_kib ]] || initial_available_kib="$available_kib"
-    if (( available_kib >= MIN_AVAILABLE_KIB )); then
-        break
-    fi
-    if [[ $admission_sample != 5 ]]; then
-        sleep 1
-    fi
-done
-deficit_kib=0
-if (( available_kib < MIN_AVAILABLE_KIB )); then
-    deficit_kib=$((MIN_AVAILABLE_KIB - available_kib))
-fi
-printf 'ID36_HOST_MEMORY=source:/proc/meminfo unit:kB total:%s initial_available:%s available:%s required:%s deficit:%s free:%s cached:%s sreclaimable:%s swap_total:%s swap_free:%s samples:%s\n'     "$total_kib" "$initial_available_kib" "$available_kib"     "$MIN_AVAILABLE_KIB" "$deficit_kib" "$free_kib" "$cached_kib"     "$reclaimable_kib" "$swap_total_kib" "$swap_free_kib"     "$admission_sample"
+# swap, or relax the exact 1 GiB admission floor. Two consecutive canonical
+# samples are required so a transient one-off high reading cannot admit ID36.
+sample_host_memory_admission() {
+    local inventory_source="${1:-/proc/meminfo}"
+    local admission_sample memory_inventory total_kib available_kib free_kib
+    local cached_kib reclaimable_kib swap_total_kib swap_free_kib
+    local initial_available_kib="" last_available_kib="" minimum_observed_kib=""
+    local maximum_observed_kib="" consecutive_sufficient=0
+
+    for admission_sample in 1 2 3 4 5; do
+        if ! memory_inventory="$(read_host_memory_inventory "$inventory_source")"; then
+            printf 'BLOCKED: ID36 MemAvailable unavailable or malformed (required:%s kB; /proc/meminfo must be readable with one canonical kB value for each inventory field)\\n' \
+                "$MIN_AVAILABLE_KIB" >&2
+            return 2
+        fi
+        read -r total_kib available_kib free_kib cached_kib \
+            reclaimable_kib swap_total_kib swap_free_kib <<< "$memory_inventory"
+        [[ -n $initial_available_kib ]] || initial_available_kib="$available_kib"
+        last_available_kib="$available_kib"
+        if [[ -z $minimum_observed_kib ]] || (( available_kib < minimum_observed_kib )); then
+            minimum_observed_kib="$available_kib"
+        fi
+        if [[ -z $maximum_observed_kib ]] || (( available_kib > maximum_observed_kib )); then
+            maximum_observed_kib="$available_kib"
+        fi
+        if (( available_kib >= MIN_AVAILABLE_KIB )); then
+            (( consecutive_sufficient += 1 ))
+        else
+            consecutive_sufficient=0
+        fi
+        (( consecutive_sufficient < 2 )) || return 0
+        if [[ $admission_sample != 5 ]]; then
+            sleep 1
+        fi
+    done
+    printf 'BLOCKED: ID36 host MemAvailable lacks two consecutive samples at the 1 GiB floor: initial:%s last:%s minimum:%s maximum:%s required:%s unit:kB samples:5; allow ordinary reclaim or free legitimate workloads, do not drop caches or alter host swap\\n' \
+        "$initial_available_kib" "$last_available_kib" "$minimum_observed_kib" \
+        "$maximum_observed_kib" "$MIN_AVAILABLE_KIB" >&2
+    return 2
+}
+sample_host_memory_admission || exit 2
 
 # Report the mounted cgroup hierarchy root separately from whole-host
 # MemAvailable. Linux cgroup v2 deliberately omits memory.max/current on the
@@ -147,12 +167,22 @@ read_cgroup_root_memory_inventory() {
     local memory_max memory_current headroom_status
 
     if [[ ! -e $memory_max_path && ! -e $memory_current_path ]]; then
-        printf '%s\n' 'root-exempt root-exempt unbounded'
+        printf '%s\\n' 'root-exempt root-exempt unbounded unbounded'
         return 0
     fi
-    [[ -e $memory_max_path && -e $memory_current_path ]] || return 1
-    memory_max="$(cat "$memory_max_path" 2>/dev/null)" || return 1
-    memory_current="$(cat "$memory_current_path" 2>/dev/null)" || return 1
+    if [[ ! -e $memory_max_path || ! -e $memory_current_path ]]; then
+        printf '%s\\n' 'BLOCKED: ID36 parent cgroup memory.max/current telemetry incomplete; restore both controls or a verified root-exempt hierarchy' >&2
+        return 2
+    fi
+    if ! memory_max="$(cat "$memory_max_path" 2>/dev/null)" ||
+       ! memory_current="$(cat "$memory_current_path" 2>/dev/null)"; then
+        printf '%s\\n' 'BLOCKED: ID36 parent cgroup memory.max/current unreadable; restore readable cgroup v2 memory controls' >&2
+        return 2
+    fi
+    if (( ${#memory_max} > 20 || ${#memory_current} > 20 )); then
+        printf '%s\\n' 'BLOCKED: ID36 parent cgroup memory.max/current exceeds unsigned 64-bit telemetry bounds; repair cgroup reporting' >&2
+        return 2
+    fi
     # cgroup byte counters are unsigned 64-bit values. Validate that range
     # exactly; digit-count checks alone admit malformed 20-digit values above
     # U64_MAX. Python also avoids Bash/awk signed or floating-point overflow.
@@ -166,42 +196,42 @@ canonical = re.compile(r"0|[1-9][0-9]*")
 u64_max = (1 << 64) - 1
 
 def parse_u64(token):
-    if canonical.fullmatch(token) is None:
-        raise SystemExit(1)
+    if len(token) > 20 or canonical.fullmatch(token) is None:
+        raise ValueError("noncanonical decimal")
     value = int(token)
     if value > u64_max:
-        raise SystemExit(1)
+        raise ValueError("unsigned 64-bit overflow")
     return value
 
-current = parse_u64(current_token)
-required = parse_u64(required_token)
-if maximum_token == "max":
-    print("unbounded")
-else:
-    maximum = parse_u64(maximum_token)
-    if current > maximum:
-        raise SystemExit(1)
-    print("sufficient" if maximum - current >= required else "insufficient")
+try:
+    current = parse_u64(current_token)
+    required = parse_u64(required_token)
+    if maximum_token == "max":
+        print("unbounded unbounded")
+    else:
+        maximum = parse_u64(maximum_token)
+        if current > maximum:
+            raise ValueError("memory.current exceeds memory.max")
+        headroom = maximum - current
+        status = "sufficient" if headroom >= required else "insufficient"
+        print(f"{status} {headroom}")
+except ValueError as error:
+    print(f"BLOCKED: ID36 parent cgroup memory.max/current invalid: {error}; repair canonical u64 cgroup telemetry", file=sys.stderr)
+    raise SystemExit(2)
 PY
-    )" || return 1
-    printf '%s %s %s\n' "$memory_max" "$memory_current" "$headroom_status"
+    )" || return 2
+    printf '%s %s %s\\n' "$memory_max" "$memory_current" "$headroom_status"
 }
 
 if ! parent_memory_inventory="$(read_cgroup_root_memory_inventory)"; then
-    printf '%s\n' 'BLOCKED: ID36 cgroup-root memory inventory is inconsistent or malformed' >&2
     exit 2
 fi
 read -r parent_memory_max parent_memory_current parent_headroom_status \
-    <<< "$parent_memory_inventory"
-printf 'ID36_PARENT_CGROUP_MEMORY=source:%s memory_max:%s memory_current:%s headroom:%s required_headroom_bytes:%s\n' \
-    "$CGROUP_ROOT" "$parent_memory_max" "$parent_memory_current" \
-    "$parent_headroom_status" "$MIN_AVAILABLE_BYTES"
+    parent_headroom_bytes <<< "$parent_memory_inventory"
 if [[ $parent_headroom_status == insufficient ]]; then
-    printf '%s\n' 'BLOCKED: ID36 cgroup root lacks 1 GiB effective memory headroom' >&2
-    exit 2
-fi
-if (( available_kib < MIN_AVAILABLE_KIB )); then
-    printf '%s\n' 'BLOCKED: ID36 host lacks 1 GiB MemAvailable safety headroom' >&2
+    printf 'BLOCKED: ID36 finite parent cgroup headroom insufficient: memory.max:%s memory.current:%s headroom:%s required:%s deficit:%s unit:bytes; raise the delegated parent limit or reduce its legitimate charge before retrying\\n' \
+        "$parent_memory_max" "$parent_memory_current" "$parent_headroom_bytes" \
+        "$MIN_AVAILABLE_BYTES" "$((MIN_AVAILABLE_BYTES - parent_headroom_bytes))" >&2
     exit 2
 fi
 
@@ -264,9 +294,9 @@ mkdir "$CGROUP" || {
     printf '%s\n' 'BLOCKED: ID36 cannot create isolated cgroup' >&2
     exit 2
 }
-for control in memory.max memory.high memory.current memory.events cpu.pressure cgroup.procs; do
+for control in memory.max memory.high memory.current memory.peak memory.events cpu.pressure cgroup.procs; do
     [[ -e "$CGROUP/$control" ]] || {
-        printf 'BLOCKED: ID36 missing cgroup control %s\n' "$control" >&2
+        printf 'BLOCKED: ID36 missing cgroup v2 control %s; provide delegated memory/CPU controllers and a kernel supporting this telemetry\n' "$control" >&2
         exit 2
     }
 done
@@ -414,11 +444,18 @@ done
     exit 1
 }
 
-pressure_current="$(cat "$CGROUP/memory.current")"
-[[ $pressure_current =~ ^[0-9]+$ &&
-   $pressure_current -ge $((READY_PRESSURE_MIB * 1024 * 1024)) ]] || {
-    printf 'FAIL: ID36 ready-stage resident pressure too small: %s bytes\n' \
-        "$pressure_current" >&2
+pressure_current="$(cat "$CGROUP/memory.current" 2>/dev/null)" || {
+    printf '%s\n' 'BLOCKED: ID36 ready-stage memory.current unreadable; restore cgroup memory telemetry' >&2
+    exit 2
+}
+[[ $pressure_current =~ ^(0|[1-9][0-9]*)$ &&
+   ${#pressure_current} -le 18 ]] || {
+    printf '%s\n' 'BLOCKED: ID36 ready-stage memory.current malformed or outside safe signed arithmetic range; restore canonical byte telemetry' >&2
+    exit 2
+}
+(( pressure_current >= READY_PRESSURE_MIB * 1024 * 1024 )) || {
+    printf 'FAIL: ID36 ready-stage resident pressure too small: observed:%s required:%s unit:bytes; inspect owned pressure helper readiness\n' \
+        "$pressure_current" "$((READY_PRESSURE_MIB * 1024 * 1024))" >&2
     exit 1
 }
 oom_ready="$(event_value oom)"
