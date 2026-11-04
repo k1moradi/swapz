@@ -290,24 +290,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 7137,
-"legacy_dead_probe_ns": 757257,
-"legacy_score_scan_ns": 6625648,
+"incremental_select_ns": 4115,
+"legacy_dead_probe_ns": 529690,
+"legacy_score_scan_ns": 5079772,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3783,
-"relocation_list_ns": 2618,
-"relocation_scan_ns": 1775136,
+"mapped_dead_probe_ns": 2393,
+"relocation_list_ns": 1982,
+"relocation_scan_ns": 1055057,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 25117,
-"legacy_dead_probe_ns": 3504005,
-"legacy_score_scan_ns": 22398462,
+"incremental_select_ns": 20641,
+"legacy_dead_probe_ns": 2247610,
+"legacy_score_scan_ns": 20764495,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 13066,
-"relocation_list_ns": 2486,
-"relocation_scan_ns": 6870357,
+"mapped_dead_probe_ns": 8816,
+"relocation_list_ns": 2228,
+"relocation_scan_ns": 4839584,
 "segments": 4096,
 "victim_records": 256
 }
@@ -321,14 +321,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1524,
+"inverse_ns_per_page": 855,
 "name": "scalar",
-"transform_ns_per_page": 1626
+"transform_ns_per_page": 891
 },
 {
-"inverse_ns_per_page": 1177,
+"inverse_ns_per_page": 647,
 "name": "sse2",
-"transform_ns_per_page": 767
+"transform_ns_per_page": 554
 }
 ],
 "classifier": {
@@ -338,9 +338,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 494,
+"ns_per_page": 539,
 "sample_pairs": 32,
-"scalar_ns_per_page": 494,
+"scalar_ns_per_page": 539,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -355,7 +355,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11542
+"wall_ns_per_page": 8097
 },
 {
 "acceleration": 2,
@@ -363,7 +363,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 10605
+"wall_ns_per_page": 7543
 },
 {
 "acceleration": 3,
@@ -371,7 +371,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 8088
+"wall_ns_per_page": 7389
 },
 {
 "acceleration": 4,
@@ -379,7 +379,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 6952
+"wall_ns_per_page": 7157
 }
 ],
 "negative_pages": 256,
@@ -396,9 +396,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6042,
-"modeled_wall_ns_total": 3480576,
-"ns_per_saved_block": 66934,
+"modeled_wall_ns_per_page": 5076,
+"modeled_wall_ns_total": 2923776,
+"ns_per_saved_block": 56226,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -423,29 +423,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 962,
+"baseline_ns_per_page": 537,
 "order": "baseline_first",
-"unrolled_ns_per_page": 788
+"unrolled_ns_per_page": 524
 },
 {
-"baseline_ns_per_page": 970,
+"baseline_ns_per_page": 571,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 783
+"unrolled_ns_per_page": 477
 },
 {
-"baseline_ns_per_page": 955,
+"baseline_ns_per_page": 564,
 "order": "baseline_first",
-"unrolled_ns_per_page": 785
+"unrolled_ns_per_page": 497
 },
 {
-"baseline_ns_per_page": 953,
+"baseline_ns_per_page": 535,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 788
+"unrolled_ns_per_page": 520
 },
 {
-"baseline_ns_per_page": 962,
+"baseline_ns_per_page": 551,
 "order": "baseline_first",
-"unrolled_ns_per_page": 785
+"unrolled_ns_per_page": 519
 }
 ],
 "repeats_per_arm": 64,
@@ -494,14 +494,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 68362,
+"ns_per_saved_block": 57282,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 6765,
-"routed_cpu_ns_total": 3896640,
+"routed_cpu_ns_per_page": 5668,
+"routed_cpu_ns_total": 3265095,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -549,14 +549,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 68784,
+"ns_per_saved_block": 57672,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 6568,
-"routed_cpu_ns_total": 3783168,
+"routed_cpu_ns_per_page": 5506,
+"routed_cpu_ns_total": 3172008,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -604,14 +604,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 66934,
+"ns_per_saved_block": 56226,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6042,
-"routed_cpu_ns_total": 3480576,
+"routed_cpu_ns_per_page": 5076,
+"routed_cpu_ns_total": 2923776,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -659,14 +659,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 66934,
+"ns_per_saved_block": 56226,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6042,
-"routed_cpu_ns_total": 3480576,
+"routed_cpu_ns_per_page": 5076,
+"routed_cpu_ns_total": 2923776,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -714,14 +714,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 66934,
+"ns_per_saved_block": 56226,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6042,
-"routed_cpu_ns_total": 3480576,
+"routed_cpu_ns_per_page": 5076,
+"routed_cpu_ns_total": 2923776,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -738,17 +738,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1177,
+"inverse_ns_per_page": 647,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1524,
-"scalar_transform_ns_per_page": 1626,
-"second_lz4_ns_per_page": 11841,
+"scalar_inverse_ns_per_page": 855,
+"scalar_transform_ns_per_page": 891,
+"second_lz4_ns_per_page": 9789,
 "transform_backend": "sse2",
-"transform_ns_per_page": 767
+"transform_ns_per_page": 554
 }
 ]
 }
@@ -762,46 +762,45 @@
 "overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "f5fd7699acb2f9dff44dbab8b26fa94a5a4e9e9d0933c140f0887acf6e1c211e",
-"module_sha256": "58589ccb6fbbbe18606d62a7b57d2612a0715d6f6d2a8065a5a6fd7dfd85e84b",
+"formatter_sha256": "642b8c2ee773e840c894b84c216b3e85d548742d85da9cd8ffc2594251684627",
+"module_sha256": "544f47a62d6e910b6e817608d36076ccca3024914bc43efd159b5cc9d3e31b38",
 "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "598dde211b8a16c6b4f36ff7927a2e657c1a407d",
+"source_sha": "442a468891ff9f09a9e9db43f2303ceb670384cd",
 "stages": [
 {
-"elapsed_s": 12.688,
+"elapsed_s": 13.082,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 424.777,
+"elapsed_s": 426.918,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 12.62,
+"elapsed_s": 12.868,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 12.479,
+"elapsed_s": 12.652,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: udev did not publish the owned partition by-PARTUUID node",
-"elapsed_s": 35.721,
-"exit_code": 2,
-"failed_phase": "owned RAM primary lifecycle setup",
+"diagnostic": "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator start: No such file or directory",
+"elapsed_s": 31.747,
+"exit_code": 1,
+"failed_phase": "owned RAM primary lifecycle start",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
-"PASS_DEFAULT_DELTA64_RESCUE",
 "PASS_WINDOW_CLOSE_REASONS",
 "PASS_WINDOW_OPEN_AGE",
 "PASS_ZERO_WRITE_LOWER_IO",
@@ -820,10 +819,11 @@
 "PASS_LOADED_PACKED_PLACEMENT",
 "PASS_LOADED_COMPLETION_HANDOFF",
 "PASS_LOADED_OWNED_NULLBLK_SMOKE",
-"BLOCKED_PRIMARY_NULLBLK_LIFECYCLE"
+"BLOCKED",
+"FAIL_PRIMARY_NULLBLK_LIFECYCLE"
 ],
 "status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "598dde211b8a16c6b4f36ff7927a2e657c1a407d"
+"tested_commit_sha": "442a468891ff9f09a9e9db43f2303ceb670384cd"
 }
