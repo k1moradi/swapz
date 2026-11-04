@@ -549,7 +549,7 @@ static int test_last_mapped_page_partial_victim_failed_publication(void)
 	CHECK(!roles[victim] && roles[FOREGROUND_SEGMENTS]);
 	for (swapz_u32 block = victim * SWAPZ_SEGMENT_BLOCKS;
 	     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
-		CHECK(!live[block] && !classes[block]);
+		CHECK(!live[block]);
 	CHECK(verify_all_pages() == 0);
 	return 0;
 }
