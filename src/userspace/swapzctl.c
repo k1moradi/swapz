@@ -1312,6 +1312,9 @@ static int report_device_status_with_reader(
 			return status_report_ioctl_failure(name, expected_device,
 							   1, saved_errno);
 		}
+		/* A second-read ioctl error must not inherit first-read diagnostics. */
+		memset(&problem, 0, sizeof(problem));
+		problem_target = 0;
 		result = read_observation(context, name, expected_device, &second,
 					  &problem, &problem_target);
 		if (result < 0) {

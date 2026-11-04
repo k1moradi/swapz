@@ -70,6 +70,8 @@ all numeric status output until every enumerated device validates. Distinguish
 BLOCKED, FAILED and UNAVAILABLE with device/index/generation/field or errno
 without echoing untrusted INFO text. Observational ioctl permission denial
 may require CAP_SYS_ADMIN and must never trigger privileged escalation.
+Reset per-read diagnostic state before observing the next generation so a
+second-read ioctl errno cannot inherit a prior target parser failure.
 
 Kernel information-status emission may use multiple bounded `DMEMIT` calls to
 keep callback stack use bounded. The externally concatenated INFO stream is the

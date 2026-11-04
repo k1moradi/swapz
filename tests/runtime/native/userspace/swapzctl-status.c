@@ -719,6 +719,7 @@ static void test_snapshot_retry_exhaustion_and_failures(void)
 	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
 						"fixture", 1, &report) == -2);
 	assert(!report.count && fixture.calls == 2);
+	assert(errno == ENXIO); /* The second ioctl errno, never a stale parser field. */
 
 	free(report.targets);
 	close(saved_stdout);
