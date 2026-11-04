@@ -665,12 +665,21 @@ cleanup_package_files() {
 # Failure paths must report unsuccessful quarantine/journaling rather than
 # hide a second failure behind the original command status.
 quarantine_activation() {
-  local quarantine_status=0
-  cleanup_activation_files || quarantine_status=$?
-  if (( quarantine_status != 0 )); then
-    printf 'BLOCKED: activation quarantine failed (status %d); manual intervention required\n' "$quarantine_status" >&2
+  local cleanup_status=0 durability_status=0
+  # Deactivation is part of the durable recovery state, not merely an
+  # in-memory best effort. Sync every directory whose entry set may change so
+  # a power loss cannot resurrect an activation entry after rollback failure.
+  cleanup_activation_files || cleanup_status=$?
+  durable_package_paths "$cli_dir" "$prefix/libexec" "$unit_dir" "$generator_dir" ||
+    durability_status=$?
+  if (( cleanup_status != 0 )); then
+    printf 'BLOCKED: activation quarantine failed (status %d); manual intervention required\n' "$cleanup_status" >&2
   fi
-  return "$quarantine_status"
+  if (( durability_status != 0 )); then
+    printf 'BLOCKED: activation quarantine durability failed (status %d); manual intervention required\n' "$durability_status" >&2
+  fi
+  (( cleanup_status == 0 )) || return "$cleanup_status"
+  return "$durability_status"
 }
 
 record_incomplete_rollback() {
@@ -2214,7 +2223,10 @@ rollback() {
     echo "BLOCKED: rollback left ambiguous module images; rollback incomplete; recovery-required journal retained" >&2
     exit "$rc"
   fi
-  durable_package_paths "$installed_module_dir" || {
+  # For an initial install there is no previous package to republish.
+  # Therefore every removed source/userspace/module directory entry must be
+  # durable before a rolled-back journal may cease to be recovery authority.
+  durable_package_paths "$srcbase" "$installed_module_dir" "$cli_dir"     "$prefix/libexec" "$unit_dir" "$generator_dir" || {
     quarantine_activation || true
     record_incomplete_rollback || true
     echo "BLOCKED: install rollback filesystem durability failed; rollback incomplete; recovery-required journal retained" >&2

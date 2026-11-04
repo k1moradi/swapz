@@ -1688,6 +1688,29 @@ exec "{flock_binary}" "$@"
         self.assert_installed_exact()
         self.assertEqual(self.uninstall_transactions(), [])
 
+    def test_uninstall_quarantine_durability_failure_is_reported(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed = self.invoke("uninstall", {
+            # Reuse the recovery fsync fault seam to fail every package
+            # durability boundary in this hermetic invocation.
+            "SWAPZ_PACKAGE_RECOVERY_ACTIVE": "1",
+            "SWAPZ_TEST_RECOVERY_IO_FAILURE": "fsync",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("attempting transaction rollback", failed.stderr)
+        self.assertIn("activation quarantine durability failed", failed.stderr)
+        transactions = self.uninstall_transactions()
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(
+            json.loads((transactions[0] / "state.json").read_text())["phase"],
+            "rollback-incomplete")
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
     def test_uninstall_depmod_and_daemon_reload_failures_restore(self):
         self.assertEqual(self.invoke("install").returncode, 0)
 
