@@ -3224,6 +3224,7 @@ class PairReplayContract(unittest.TestCase):
                     index = len(samples) + 1
                     seconds, tenths = divmod(index, 10)
                     present = (
+                        phase_index > 0 if phase == "initialization" else
                         phase_index == 0
                         if phase == "teardown" else mapper_state)
                     samples.append({
