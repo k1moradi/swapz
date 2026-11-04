@@ -119,7 +119,7 @@ secure_report_directory()
 	if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 		[ ! -L "$report_base" ] || fail "test report directory is a symlink"
 		mkdir -p -- "$report_base"
-		chmod 0700 "$report_base"
+		# Fixture metadata must not be silently repaired before validation.
 	else
 		[ "$(id -u)" -eq 0 ] || fail "root privileges are required"
 		parent=/var/lib/swapz
@@ -151,9 +151,19 @@ commit_file()
 {
 	temporary=$1
 	destination=$2
+	# Never follow or replace unsafe pre-existing evidence paths.
+	if [ -e "$destination" ] || [ -L "$destination" ]; then
+		if [ ! -f "$destination" ] || [ -L "$destination" ] ||
+		   [ "$(stat -c '%u' -- "$destination")" != "$expected_uid" ] ||
+		   [ "$(stat -c '%a' -- "$destination")" != 600 ] ||
+		   [ "$(stat -c '%h' -- "$destination")" != 1 ]; then
+			rm -f -- "$temporary"
+			fail "unsafe evidence destination: $destination"
+		fi
+	fi
 	chmod 0600 "$temporary"
 	sync -f "$temporary"
-	mv -f -- "$temporary" "$destination"
+	mv -fT -- "$temporary" "$destination"
 	sync -f "$report_base"
 }
 
@@ -211,7 +221,20 @@ validate_arm_file()
 	owner=$(stat -c '%u' -- "$arm_file") || return 1
 	permissions=$(stat -c '%a' -- "$arm_file") || return 1
 	links=$(stat -c '%h' -- "$arm_file") || return 1
-	[ "$owner" -eq "$expected_uid" ] && [ "$permissions" = 600 ] && [ "$links" -eq 1 ]
+	[ "$owner" -eq "$expected_uid" ] && [ "$permissions" = 600 ] &&
+		[ "$links" -eq 1 ] && [ "$(stat -c '%s' -- "$arm_file")" -le 4096 ] || return 1
+	# The arm record is complete and ordered; missing, duplicated, unexpected,
+	# empty, or rearranged fields never authorize a cold boot.
+	LC_ALL=C awk '
+		BEGIN { count = split("schema arm_boot_id arm_kernel_release armed_epoch expected_partuuid expected_target_size_bytes expected_target_model expected_target_serial expected_target_wwn expected_target_transport expected_target_removable expected_module_sha256 expected_module_source_sha expected_module_source_clean", keys, " ") }
+		NR > count { invalid = 1; next }
+		{
+			prefix = keys[NR] "="
+			if (index($0, prefix) != 1 || length($0) <= length(prefix))
+				invalid = 1
+		}
+		END { if (invalid || NR != count) exit 1 }
+	' "$arm_file"
 }
 
 arm_field()
@@ -676,6 +699,18 @@ maximum_logical_sectors()
 	printf '%s\n' $((low * 8))
 }
 
+canonical_status_error()
+{
+	value=$1
+	case "$value" in
+	0) return 0 ;;
+	-*) magnitude=$(printf '%s' "$value" | cut -c2-); limit=2147483648 ;;
+	*) magnitude=$value; limit=2147483647 ;;
+	esac
+	printf '%s\n' "$magnitude" | grep -Eq '^[1-9][0-9]{0,9}$' || return 1
+	[ "$(printf '%s' "$magnitude" | wc -c)" -lt 10 ] || [ "$magnitude" -le "$limit" ]
+}
+
 status_token()
 {
 	key=$1
@@ -683,12 +718,17 @@ status_token()
 	printf '%s\n' "$text" | awk -v wanted="$key" '
 		{
 			for (position = 1; position <= NF; ++position) {
-				split($position, pair, "=")
-				if (pair[1] == wanted && length(pair[2])) {
-					print pair[2]
-					exit
-				}
+				if (index($position, wanted "=") != 1)
+					continue
+				value = substr($position, length(wanted) + 2)
+				if (seen || value == "" || index(value, "=") != 0)
+					invalid = 1
+				else { result = value; seen = 1 }
 			}
+		}
+		END {
+			if (invalid) print "invalid"
+			else if (seen) print result
 		}
 	'
 }
@@ -844,13 +884,33 @@ observe_boot()
 	swapz_upper_write_completed_err=unavailable
 	swapz_endio_write_seen_err=unavailable
 	swapz_endio_write_forced_err=unavailable
+	gc_victims=unavailable
+	gc_pages=unavailable
+	gc_no_headroom_skips=unavailable
+	gc_reserve_segments_initial=unavailable
+	gc_reserve_segments_current=unavailable
+	gc_destination_advances=unavailable
+	window_gc_pressure=unavailable
 	mapper_major_minor=unavailable
+	mapper_sysfs_dm_name=unavailable
 	dm_status_file=$report_base/report-$boot_id.dm-status.txt
 	if command -v dmsetup >/dev/null 2>&1; then
 		dm_uuid=$(dmsetup info --columns --noheadings --separator '|' -o uuid swapz-primary 2>/dev/null | awk 'NR == 1 { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }' || true)
 		dm_table=$(dmsetup table swapz-primary 2>/dev/null || true)
 		dm_status=$(dmsetup status swapz-primary 2>/dev/null || true)
 		mapper_major_minor=$(lsblk -dnro MAJ:MIN -- "$mapper_path" 2>/dev/null || printf 'unavailable')
+		# The pathname must resolve to the exact DM object being observed.
+		if [ "$observation_expected" -eq 1 ] &&
+		   printf '%s\n' "$mapper_major_minor" | grep -Eq '^[0-9]+:[0-9]+$'; then
+			dm_name_path=$sys_root/dev/block/$mapper_major_minor/dm/name
+			if mapper_sysfs_dm_name=$(single_line_file "$dm_name_path" 2>/dev/null); then
+				[ "$mapper_sysfs_dm_name" = swapz-primary ] ||
+					append_failure mapper_sysfs_identity_mismatch
+			else
+				mapper_sysfs_dm_name=unavailable
+				append_incomplete mapper_sysfs_identity_unavailable
+			fi
+		fi
 		case "$dm_table" in *'
 '*)
 			if [ "$(printf '%s\n' "$dm_table" | wc -l)" -ne 1 ]; then
@@ -876,12 +936,24 @@ observe_boot()
 				[ "$expected_dm_logical_sectors" != unavailable ] && [ "$dm_logical_sectors" = "$expected_dm_logical_sectors" ] || append_failure mapper_logical_capacity_mismatch
 			fi
 		else
-			[ "$observation_expected" -eq 1 ] && append_failure mapper_table_invalid
+			if [ -z "$dm_table" ]; then
+				append_incomplete mapper_table_unavailable
+			elif [ "$observation_expected" -eq 1 ]; then
+				append_failure mapper_table_invalid
+			fi
 		fi
 		if [ "$observation_expected" -eq 1 ]; then
-			printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$' || append_failure mapper_uuid_invalid
-			[ "$expected_dm_uuid" != unavailable ] && [ "$dm_uuid" = "$expected_dm_uuid" ] || append_failure mapper_uuid_not_bound_to_active_run
-			printf '%s\n' "$mapper_major_minor" | grep -Eq '^[0-9]+:[0-9]+$' || append_failure mapper_device_unavailable
+			if [ -z "$dm_uuid" ]; then
+				append_incomplete mapper_uuid_unavailable
+			else
+				printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$' ||
+					append_failure mapper_uuid_invalid
+				[ "$expected_dm_uuid" != unavailable ] &&
+					[ "$dm_uuid" = "$expected_dm_uuid" ] ||
+					append_failure mapper_uuid_not_bound_to_active_run
+			fi
+			printf '%s\n' "$mapper_major_minor" | grep -Eq '^[0-9]+:[0-9]+$' ||
+				append_failure mapper_device_unavailable
 		fi
 		if [ "$dm_status" != unavailable ] && [ -n "$dm_status" ]; then
 			set -f
@@ -890,13 +962,26 @@ observe_boot()
 			# shellcheck disable=SC2086 # DM status prefix is intentionally tokenized.
 			set -- $dm_status
 			IFS=$old_ifs
-			if [ "$observation_expected" -eq 1 ]; then
-				[ "$#" -ge 3 ] && [ "$1" = 0 ] && [ "$2" = "$expected_dm_logical_sectors" ] && [ "$3" = swapz ] || append_failure mapper_status_geometry_invalid
+			# Without a complete single-target grammar no status token is trusted.
+			case "$dm_status" in
+			*'
+'*) append_incomplete mapper_status_not_single_target; dm_status=unavailable ;;
+			esac
+			if [ "$dm_status" != unavailable ]; then
+				if [ "$#" -lt 4 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
+				   ! printf '%s\n' "$2" | grep -Eq '^[1-9][0-9]{0,17}$'; then
+					append_incomplete mapper_status_invalid
+					dm_status=unavailable
+				elif [ "$observation_expected" -eq 1 ] &&
+				     [ "$2" != "$expected_dm_logical_sectors" ]; then
+					append_failure mapper_status_geometry_invalid
+				fi
 			fi
+			if [ "$dm_status" != unavailable ]; then
 			temporary=$(mktemp "$report_base/.dm-status.XXXXXX") || fail "cannot create DM status report"
 			printf '%s\n' "$dm_status" > "$temporary"
 			commit_file "$temporary" "$dm_status_file"
-			for token in failed error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
+			for token in failed error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err gc_victims gc_pages gc_no_headroom_skips gc_reserve_segments_initial gc_reserve_segments_current gc_destination_advances window_gc_pressure; do
 				value=$(status_token "$token" "$dm_status")
 				[ -n "$value" ] || value=unavailable
 				case "$token" in
@@ -907,19 +992,68 @@ observe_boot()
 				upper_write_completed_err) swapz_upper_write_completed_err=$value ;;
 				endio_write_seen_err) swapz_endio_write_seen_err=$value ;;
 				endio_write_forced_err) swapz_endio_write_forced_err=$value ;;
+				gc_victims) gc_victims=$value ;;
+				gc_pages) gc_pages=$value ;;
+				gc_no_headroom_skips) gc_no_headroom_skips=$value ;;
+				gc_reserve_segments_initial) gc_reserve_segments_initial=$value ;;
+				gc_reserve_segments_current) gc_reserve_segments_current=$value ;;
+				gc_destination_advances) gc_destination_advances=$value ;;
+				window_gc_pressure) window_gc_pressure=$value ;;
 				esac
 			done
 			if [ "$observation_expected" -eq 1 ]; then
-				[ "$swapz_failed" = 0 ] || append_failure swapz_target_failed
-				[ "$swapz_error" = 0 ] || append_failure swapz_target_error
-				[ "$swapz_flush_err" = 0 ] || append_failure swapz_flush_errors
-				[ "$swapz_segment_discards_failed" = 0 ] || append_failure swapz_segment_discard_failures
-				[ "$swapz_upper_write_completed_err" = 0 ] || append_failure swapz_upper_write_errors
-				[ "$swapz_endio_write_seen_err" = 0 ] || append_failure swapz_endio_seen_errors
-				[ "$swapz_endio_write_forced_err" = 0 ] || append_failure swapz_endio_forced_errors
+				case "$swapz_failed" in 0) ;; 1) append_failure swapz_target_failed ;; *) append_incomplete dm_status_counter_unavailable_or_invalid ;; esac
+				if canonical_status_error "$swapz_error"; then
+					[ "$swapz_error" = 0 ] || append_failure swapz_target_error
+				else
+					append_incomplete dm_status_counter_unavailable_or_invalid
+				fi
+				if printf '%s\n' "$swapz_flush_err" | grep -Eq '^(0|[1-9][0-9]{0,17})$'; then
+					[ "$swapz_flush_err" = 0 ] || append_failure swapz_flush_errors
+				else
+					append_incomplete dm_status_counter_unavailable_or_invalid
+				fi
+				if printf '%s\n' "$swapz_segment_discards_failed" | grep -Eq '^(0|[1-9][0-9]{0,17})$'; then
+					[ "$swapz_segment_discards_failed" = 0 ] || append_failure swapz_segment_discard_failures
+				else
+					append_incomplete dm_status_counter_unavailable_or_invalid
+				fi
+				if printf '%s\n' "$swapz_upper_write_completed_err" | grep -Eq '^(0|[1-9][0-9]{0,17})$'; then
+					[ "$swapz_upper_write_completed_err" = 0 ] || append_failure swapz_upper_write_errors
+				else
+					append_incomplete dm_status_counter_unavailable_or_invalid
+				fi
+				if printf '%s\n' "$swapz_endio_write_seen_err" | grep -Eq '^(0|[1-9][0-9]{0,17})$'; then
+					[ "$swapz_endio_write_seen_err" = 0 ] || append_failure swapz_endio_seen_errors
+				else
+					append_incomplete dm_status_counter_unavailable_or_invalid
+				fi
+				if printf '%s\n' "$swapz_endio_write_forced_err" | grep -Eq '^(0|[1-9][0-9]{0,17})$'; then
+					[ "$swapz_endio_write_forced_err" = 0 ] || append_failure swapz_endio_forced_errors
+				else
+					append_incomplete dm_status_counter_unavailable_or_invalid
+				fi
+				for gc_counter in "$gc_victims" "$gc_pages" "$gc_no_headroom_skips" \
+					"$gc_reserve_segments_initial" "$gc_reserve_segments_current" \
+					"$gc_destination_advances" "$window_gc_pressure"; do
+					if ! printf '%s\n' "$gc_counter" | grep -Eq '^(0|[1-9][0-9]{0,17})$'; then
+						append_incomplete gc_progress_telemetry_unavailable
+						break
+					fi
+				done
+				if printf '%s\n' "$gc_reserve_segments_initial" | grep -Eq '^(0|[1-9][0-9]{0,17})$' &&
+				   printf '%s\n' "$gc_reserve_segments_current" | grep -Eq '^(0|[1-9][0-9]{0,17})$'; then
+					if [ "$gc_reserve_segments_initial" = 0 ] ||
+					   [ "$gc_reserve_segments_current" = 0 ]; then
+						append_failure gc_reserve_exhausted
+					elif [ "$gc_reserve_segments_current" -gt "$gc_reserve_segments_initial" ]; then
+						append_failure gc_reserve_role_count_invalid
+					fi
+				fi
+			fi
 			fi
 		else
-			if [ "$observation_expected" -eq 1 ]; then append_failure mapper_status_unavailable; else append_incomplete mapper_status_unavailable; fi
+			append_incomplete mapper_status_unavailable
 		fi
 	else
 		append_incomplete dmsetup_unavailable
@@ -979,10 +1113,26 @@ SWAPS
 		swap_sub_state=$(systemctl show --property=SubState --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
 		swap_result=$(systemctl show --property=Result --value "$mapper_swap_unit" 2>/dev/null || printf 'unavailable')
 		if [ "$observation_expected" -eq 1 ]; then
-			[ "$mapper_active_state" = active ] || append_failure mapper_service_not_active
-			[ "$mapper_result" = success ] || append_failure mapper_service_result_failed
-			[ "$swap_active_state" = active ] || append_failure primary_swap_unit_not_active
-			[ "$swap_result" = success ] || append_failure primary_swap_unit_result_failed
+			case "$mapper_active_state" in
+			active) ;;
+			unavailable) append_incomplete mapper_service_state_unavailable ;;
+			*) append_failure mapper_service_not_active ;;
+			esac
+			case "$mapper_result" in
+			success) ;;
+			unavailable) append_incomplete mapper_service_result_unavailable ;;
+			*) append_failure mapper_service_result_failed ;;
+			esac
+			case "$swap_active_state" in
+			active) ;;
+			unavailable) append_incomplete primary_swap_unit_state_unavailable ;;
+			*) append_failure primary_swap_unit_not_active ;;
+			esac
+			case "$swap_result" in
+			success) ;;
+			unavailable) append_incomplete primary_swap_unit_result_unavailable ;;
+			*) append_failure primary_swap_unit_result_failed ;;
+			esac
 		fi
 	else
 		append_incomplete systemctl_unavailable
@@ -1049,6 +1199,7 @@ loaded_module_build_source_clean=$loaded_module_source_clean
 active_transaction_run_id=$active_run_id
 expected_dm_uuid=$expected_dm_uuid
 dm_uuid=$dm_uuid
+mapper_sysfs_dm_name=$mapper_sysfs_dm_name
 dm_table=$dm_table
 dm_logical_sectors=$dm_logical_sectors
 expected_dm_logical_sectors=$expected_dm_logical_sectors
@@ -1074,6 +1225,13 @@ swapz_segment_discards_failed=$swapz_segment_discards_failed
 swapz_upper_write_completed_err=$swapz_upper_write_completed_err
 swapz_endio_write_seen_err=$swapz_endio_write_seen_err
 swapz_endio_write_forced_err=$swapz_endio_write_forced_err
+gc_victims=$gc_victims
+gc_pages=$gc_pages
+gc_no_headroom_skips=$gc_no_headroom_skips
+gc_reserve_segments_initial=$gc_reserve_segments_initial
+gc_reserve_segments_current=$gc_reserve_segments_current
+gc_destination_advances=$gc_destination_advances
+window_gc_pressure=$window_gc_pressure
 kernel_error_count=$kernel_error_count
 kernel_error_log=$kernel_error_log
 failure_reasons=$failure_reasons
@@ -1100,5 +1258,11 @@ REPORT
 case "$mode" in
 arm) arm_harness ;;
 preflight) preflight_boot ;;
-observe) observe_boot ;;
+observe)
+	# Even an unexpected persistence abort cannot leave a reusable enable token.
+	# This observer never deactivates swap or removes an active mapper.
+	trap 'clear_runtime_authorization' EXIT
+	observe_boot
+	trap - EXIT
+	;;
 esac
