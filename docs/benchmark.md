@@ -380,6 +380,10 @@ measured-minute windows are also validated. These checks do not cryptographicall
 authenticate a wholly rewritten report; the campaign sealer's external artifact
 hashes and source/mapper identity evidence remain necessary. Host-visible
 lower-device bytes and requests are not direct physical NAND wear measurements.
+The block arm records the exact frozen claim boundary, and the evaluator
+rejects a strengthened NAND-wear claim. JSON numeric parsing also rejects
+NaN, Infinity and overflow exponents (for example, `1e999`) before the
+reported values can enter qualification.
 
 Every physical arm records useful READ/WRITE throughput, p95/p99 and maximum
 latency, replay CPU plus exported swapz worker CPU, host CPU/PSI context, replay

@@ -1248,9 +1248,7 @@ def run(args):
                     "not live physical-segment utilization"),
                 "max_no_progress_seconds": measured_max_no_progress_seconds,
                 "oracle": oracle,
-                "claim_boundary": (
-                    "host-visible lower bytes/requests are physical I/O cost, "
-                    "not direct NAND endurance"),
+                "claim_boundary": QUALIFICATION["CONTRACT"]["claim_boundary"],
             }
             args._partial_report = report
             write_new_json(Path(args.result), report)

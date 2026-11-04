@@ -57,11 +57,21 @@ def _reject_json_constant(value):
     raise ValueError(f"non-finite JSON number {value}")
 
 
+def _finite_json_float(value: str) -> float:
+    # JSON's exponent syntax can overflow Python's finite float range without
+    # spelling NaN or Infinity; reject before any aggregate is trusted.
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"non-finite JSON number {value}")
+    return result
+
+
 def _load_json_path(path: str | Path):
     return json.loads(
         Path(path).read_text(encoding="utf-8"),
         object_pairs_hook=_unique_object,
-        parse_constant=_reject_json_constant)
+        parse_constant=_reject_json_constant,
+        parse_float=_finite_json_float)
 
 
 def _load_frozen_physical_contract() -> dict:
@@ -69,7 +79,8 @@ def _load_frozen_physical_contract() -> dict:
         document = json.loads(
             ACCEPTANCE_MANIFEST.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_object,
-            parse_constant=_reject_json_constant)
+            parse_constant=_reject_json_constant,
+        parse_float=_finite_json_float)
     except (OSError, ValueError) as exc:
         raise ValueError(
             f"cannot load frozen production acceptance manifest: {exc}") from exc
@@ -104,7 +115,8 @@ def _load_frozen_amendment() -> dict:
         document = json.loads(
             AMENDMENT_MANIFEST.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_object,
-            parse_constant=_reject_json_constant)
+            parse_constant=_reject_json_constant,
+        parse_float=_finite_json_float)
     except (OSError, ValueError) as exc:
         raise ValueError(
             f"cannot load prospective physical amendment: {exc}") from exc
@@ -868,6 +880,12 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
 def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     spec = workload_spec(workload)
     reasons = validate_module_provenance(arm, label)
+    # Independent block counters establish lower-device traffic, not NAND wear
+    # or endurance. Reject a stronger claim attached to otherwise valid data.
+    if (workload != "anonymous-swap" and
+            arm.get("claim_boundary") != CONTRACT["claim_boundary"]):
+        reasons.append(
+            f"{label} lower-device claim boundary differs from frozen protocol")
     # Monotonic timestamps bind physical arm order; the campaign sealer pins boot ID.
     started = arm.get("arm_started_monotonic_ns")
     finished = arm.get("arm_finished_monotonic_ns")

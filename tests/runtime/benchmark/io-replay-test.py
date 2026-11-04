@@ -2475,6 +2475,7 @@ class PairReplayContract(unittest.TestCase):
             first = (candidate == "raw") == (order == "raw-first")
             return {
                 "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
+                "claim_boundary": qualification.CONTRACT["claim_boundary"],
                 "arm_started_monotonic_ns": (
                     1_000_000_000_000 if first else 2_000_000_000_000),
                 "measured_start_monotonic_ns": (
@@ -2651,6 +2652,8 @@ class PairReplayContract(unittest.TestCase):
                     row["raw"].update(operation_recipe_sha256="0" * 64),
                     row["swapz"].update(operation_recipe_sha256="0" * 64)),
                 lambda row: row["raw"]["latency"].update(read_p50_ns=101),
+                lambda row: row["swapz"].update(
+                    claim_boundary="direct NAND-wear reduction proven"),
                 lambda row: row["raw"]["measurement_snapshots"][
                     "lower_after"].__setitem__(6, 1),
                 lambda row: row["swapz"]["measurement_snapshots"][
@@ -2686,9 +2689,13 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
                 qualification._load_json_path(duplicate)
             nonfinite = Path(directory) / "nonfinite.json"
-            nonfinite.write_text('{"value":NaN}')
-            with self.assertRaisesRegex(ValueError, "non-finite JSON number"):
-                qualification._load_json_path(nonfinite)
+            for payload in ('NaN', 'Infinity', '-Infinity',
+                            '1e999', '-1e999'):
+                with self.subTest(nonfinite_json=payload):
+                    nonfinite.write_text('{"value":' + payload + '}')
+                    with self.assertRaisesRegex(
+                            ValueError, "non-finite JSON number"):
+                        qualification._load_json_path(nonfinite)
 
         # Python bool is an int subclass; QD1 must still require a JSON integer.
         qd1 = arm("raw")
