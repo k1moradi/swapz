@@ -1052,6 +1052,13 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertIn("AT_SYMLINK_NOFOLLOW", transaction_guard)
         self.assertIn("STATX_MNT_ID", transaction_guard)
         self.assertIn("stx_mnt_id", transaction_guard)
+        self.assertIn("named_transaction_mount", transaction_guard)
+        self.assertIn(
+            "named_transaction_mount.stx_mnt_id !=",
+            transaction_guard)
+        self.assertLess(
+            transaction_guard.index("readdir(entries)"),
+            transaction_guard.index("named_transaction_mount.stx_mnt_id !="))
         self.assertIn("EBUSY", transaction_guard)
         self.assertNotIn("state.json", transaction_guard)
 
