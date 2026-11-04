@@ -132,6 +132,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             "locking_or_type": 1, "address_space": 1, "endian_or_bitwise": 1,
         })
         self.assertEqual(qualification.scan_static("module built\n")[0], 0)
+        self.assertEqual(qualification.scan_static("warning: compiler differs\n")[1], {})
 
     def test_static_checker_requires_actual_check_and_zero_warnings(self) -> None:
         with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/sparse"), \

@@ -56,7 +56,10 @@ KERNEL_DIAGNOSTIC = re.compile(
     r"BUG: workqueue|INFO: task .* blocked for more than",
     re.IGNORECASE,
 )
-SOURCE_DIAGNOSTIC = re.compile(r"\b(?:warn|warning|error):", re.IGNORECASE)
+SOURCE_DIAGNOSTIC = re.compile(
+    r"^.*\.(?:c|h):[0-9]+(?::[0-9]+)?:\s*(?:warn|warning|error):",
+    re.IGNORECASE,
+)
 CHECK_RECORD = re.compile(r"\bCHECK\s+(\S+\.c)\b")
 
 
@@ -169,6 +172,16 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
         if SOURCE_DIAGNOSTIC.search(line):
             print(line, file=sys.stderr)
     if result.returncode != 0 or not required_sources.issubset(checked_sources) or warnings:
+        print(
+            f"FAIL_KERNEL_STATIC_{analyzer.upper()}: exit={result.returncode} "
+            f"checked={sorted(checked_sources)} "
+            f"missing={sorted(required_sources - checked_sources)}",
+            file=sys.stderr,
+        )
+        if result.returncode != 0 or not check_count:
+            print("KERNEL_STATIC_BUILD_TAIL_BEGIN", file=sys.stderr)
+            print("\n".join(result.stdout.splitlines()[-45:]), file=sys.stderr)
+            print("KERNEL_STATIC_BUILD_TAIL_END", file=sys.stderr)
         return "FAIL", check_count, warnings
     return "PASS", check_count, warnings
 
