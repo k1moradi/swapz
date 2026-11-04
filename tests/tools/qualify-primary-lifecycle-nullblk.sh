@@ -49,10 +49,41 @@ verify_prepare_failure_diagnostic() {
 			[[ "$description" == "$expected_error" ]] ||
 				fail "prepare refusal exposed a noncanonical diagnostic"
 			;;
+		identity-admission|configured-target-identity|recovery-directory-open|\
+		partition-lock-and-prior-claim|prior-claim-reconciliation|\
+		recovery-storage-inspection|recovery-directory-safety|\
+		recovery-filesystem-persistence|recovery-target-device-separation|\
+		recovery-physical-parent-identity|prior-active-marker|\
+		qualification-report-read|qualification-source-identity|\
+		qualified-artifact-hash-readback|qualified-artifact-identity|\
+		target-header-inspection|target-geometry-identity|\
+		original-header-rollback-proof|original-header-digest|\
+		raw-target-swap-inventory|target-physical-parent-identity|\
+		target-recovery-parent-separation|cross-namespace-mount-inventory|\
+		target-mounted-in-visible-namespace|root-device-parent-identity|\
+		target-root-device-parent-separation|\
+		repeated-raw-target-swap-inventory|\
+		repeated-target-physical-parent-identity|\
+		repeated-target-recovery-parent-separation|\
+		repeated-cross-namespace-mount-inventory|\
+		repeated-target-mounted-in-visible-namespace|\
+		repeated-root-device-parent-identity|\
+		repeated-target-root-parent-separation|physical-parent-swap-inventory|\
+		module-mapper-inventory|unexpected-module-or-mapper-present|\
+		final-raw-target-swap-inventory|final-preclaim-identity-revalidation|\
+		final-physical-parent-swap-inventory|run-id-and-header-construction|\
+		partition-owner-claim)
+			[[ "$description" == "$expected_error claim=none" ]] ||
+				fail "preclaim refusal exposed private state or wrong disposition"
+			;;
+		original-header-backup-write|manifest-write|\
+		original-header-backup-readback|manifest-readback|\
+		partition-lock-close|recovery-directory-close)
+			[[ "$description" == "$expected_error claim=retained target_unchanged=true" ]] ||
+				fail "postclaim refusal lacks retained ownership disposition"
+			;;
 		*)
-			[[ "$description" == "$expected_error claim=none" ||
-			   "$description" == "$expected_error claim=retained target_unchanged=true" ]] ||
-				fail "prepare refusal exposed private state or lacks disposition"
+			fail "prepare refusal has an unknown phase"
 			;;
 		esac
 		diagnostic="$line"

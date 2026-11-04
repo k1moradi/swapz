@@ -395,7 +395,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         permitted = "Operation not permitted"
         check(f"PRIMARY_PREPARE=FAILED phase=qualification-source-identity "
               f"errno=1 error={permitted} claim=none", True)
-        check(f"PRIMARY_PREPARE=FAILED phase=target-root-device-parent-separation "
+        check(f"PRIMARY_PREPARE=FAILED phase=manifest-write "
               f"errno=1 error={permitted} claim=retained target_unchanged=true",
               True)
         check("PRIMARY_PREPARE=FAILED phase=package-transaction-preflight "
@@ -409,6 +409,12 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "error=Device or resource busy claim=none",
             "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
             "error=Operation not permitted claim=none path=/private/secret",
+            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
+            "error=Operation not permitted claim=retained target_unchanged=true",
+            "PRIMARY_PREPARE=FAILED phase=manifest-write errno=1 "
+            "error=Operation not permitted claim=none",
+            "PRIMARY_PREPARE=FAILED phase=invented-unsafe-phase errno=1 "
+            "error=Operation not permitted claim=none",
             "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
             "error=Operation not permitted run_id=" + "a" * 32 +
             " claim=retained target_unchanged=true",
