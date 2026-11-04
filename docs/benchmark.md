@@ -221,7 +221,7 @@ performance qualification. The scalar sampled classifier runs before ordinary
 LZ4: score >=24 pages try rescue first, adopting results <=2024 bytes directly;
 lower-score pages take the ordinary-LZ4 route and may try threshold 16 only at
 an exact planner packing boundary. The module disable switch is solely for
-debug/compatibility. Scalar and selected SIMD transform/inverse backends must
+debug/compatibility. Scalar and every compiled SIMD transform/inverse backend must
 remain byte-exact, and loaded end-to-end timing—not offline ns/page—decides
 promotion. Console tables label compression-only time after a transform
 `LZ4 ns`; combine delta64+LZ4 in a label only when both operations are
