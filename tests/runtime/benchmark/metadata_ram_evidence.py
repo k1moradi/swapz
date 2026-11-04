@@ -262,7 +262,7 @@ def validate_metadata_ram_trace(
     # Use the last second of target-absent samples to prove the whole-host
     # counters returned to the pre-create envelope. This is intentionally
     # fail-closed on a noisy/non-quiescent host rather than manufacturing PASS.
-    recovery = absent_teardown[-10:]
+    recovery = absent_teardown[-11:]
     if (
             _median([sample["mem_available_bytes"] for sample in recovery]) <
             min(baseline_available) or
