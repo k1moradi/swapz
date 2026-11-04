@@ -3146,7 +3146,11 @@ uses the structured `LOADED_PREFLIGHT=BLOCKED`
 `check=completed_owned_tmp_cleanup_helper errno=unavailable` refusal with a
 bounded remedy. Rootless fixtures must prove both refusal paths using only the
 isolated bootstrap prefix, without executing privileged preflight or exposing
-private paths.
+private paths. After sourcing, loaded preflight handles a nonzero
+cleaner return as a named `completed_owned_tmp_cleanup` BLOCKED prerequisite
+with the observed helper status. Its completed-owned-only marker follows only
+successful cleanup. Rootless contracts must pin that fail-before-evidence
+branch rather than require an obsolete shell `||` spelling.
 
 The shared helper inspects the real root-owned mode-1777 `/tmp` and deletes
 only positively owned swapz benchmark sessions with matching completion proof

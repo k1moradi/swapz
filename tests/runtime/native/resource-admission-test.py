@@ -772,7 +772,24 @@ swapz_clear_tmp_before_memory_check
         self.assertEqual(result.returncode, 1)
         self.assertIn("BLOCKED: cannot safely remove verified completed", result.stderr)
         self.assertNotIn(str(self.root), result.stderr)
-        self.assertIn("swapz_clear_tmp_before_memory_check ||", PREFLIGHT.read_text())
+        preflight = PREFLIGHT.read_text(encoding="utf-8")
+        self.assertIn("if swapz_clear_tmp_before_memory_check; then", preflight)
+        self.assertIn("cleanup_status=$?", preflight)
+        self.assertIn(
+            'refuse BLOCKED completed_owned_tmp_cleanup unavailable',
+            preflight)
+        self.assertLess(
+            preflight.index("if swapz_clear_tmp_before_memory_check; then"),
+            preflight.index("cleanup_status=$?"))
+        self.assertLess(
+            preflight.index("cleanup_status=$?"),
+            preflight.index(
+                'refuse BLOCKED completed_owned_tmp_cleanup unavailable'))
+        self.assertLess(
+            preflight.index(
+                'refuse BLOCKED completed_owned_tmp_cleanup unavailable'),
+            preflight.index(
+                'note "LOADED_PREFLIGHT_TMP_CLEANUP=completed-owned-only"'))
         self.assertIn("swapz_clear_tmp_before_memory_check ||", QUALIFIER.read_text())
 
     def test_no_fixture_bypasses_privileged_admission_entrypoint(self):
