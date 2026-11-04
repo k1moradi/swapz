@@ -2025,6 +2025,25 @@ exec "{flock_binary}" "$@"
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate(timeout=8)
 
+    def test_modified_committed_install_does_not_auto_rollback(self):
+        transaction = self.kill_at_durable_phase("install", "committed")
+        helper = self.prefix / "libexec/swapz/device-roundtrip"
+        helper.write_bytes(b"tampered-after-commit\n")
+
+        refused = self.invoke("recover")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("committed install is not exact", refused.stderr)
+        self.assertIn("rollback not attempted", refused.stderr)
+        self.assertNotIn("recovery previous package rollback failed",
+                         refused.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue(transaction.exists())
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(transaction.exists())
+
     def test_failed_committed_post_rename_fsync_quarantines_and_recovers(self):
         failed = self.invoke("install", {
             "SWAPZ_TEST_FAIL_TRANSACTION_AFTER_RENAME_PHASE": "committed",

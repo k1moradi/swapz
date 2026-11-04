@@ -610,6 +610,14 @@ temporary_activation_paths_absent() {
   (( ${#pending_cli[@]} == 0 ))
 }
 
+activation_entry_points_absent() {
+  local activation_path
+  temporary_activation_paths_absent || return 1
+  for activation_path in "$cli" "$boot_verifier" "$runtime_health" "$helper"       "$module_snapshot" "$primary_generator" "$mapper_service"       "$boot_verifier_service" "$runtime_health_service" "$primary_swap"; do
+    [[ ! -e "$activation_path" && ! -L "$activation_path" ]] || return 1
+  done
+}
+
 cleanup_temporary_activation_files() {
   local candidate
   local -a pending_cli=()
@@ -1627,8 +1635,10 @@ PY
   if [[ "$recovery_phase" == committed && "$action" == install ]]; then
     if verify_owned; then
       recovery_quarantine_on_error=0
-    else
+    elif activation_entry_points_absent; then
       recovery_replay_previous=1
+    else
+      blocked "recovery committed install is not exact before preflight"
     fi
   fi
 
