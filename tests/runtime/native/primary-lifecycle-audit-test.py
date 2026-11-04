@@ -1486,6 +1486,8 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                 displaced = package.home / "transactions.before-statx"
                 self.assertTrue(transactions.is_dir())
                 self.assertTrue(displaced.is_dir())
+                self.assertTrue(
+                    (transactions / "swapz-package.substituted").is_dir())
                 self.assertNotEqual(
                     transactions.stat().st_ino, displaced.stat().st_ino)
                 self.assertEqual(result.returncode, 2, result)
@@ -1564,6 +1566,11 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
         self.assertEqual(state["schema"], "swapz-package-install-v1")
         self.assertEqual(state["phase"], "committed")
         package.assert_installed_exact()  # verified installed payload, not a guess
+        unavailable_recovery = package.invoke("install")
+        self.assertNotEqual(unavailable_recovery.returncode, 0)
+        self.assertIn(
+            "incomplete package transaction retained",
+            unavailable_recovery.stderr)
         # This is deliberately test-only trusted cleanup, not package recovery.
         # Production currently exposes no crash-recovery command; the P0
         # recovery-interface gap is reported separately rather than fabricated

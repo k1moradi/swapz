@@ -116,12 +116,22 @@ static int named_transaction_path(const char *pathname,
 static void substitute_transaction_directory(const char *transactions)
 {
 	char displaced[PATH_MAX];
-	int path_length;
+	char incomplete[PATH_MAX];
+	int displaced_length;
+	int incomplete_length;
 
-	path_length = snprintf(displaced, sizeof(displaced), "%s.before-statx",
+	displaced_length = snprintf(
+		displaced, sizeof(displaced), "%s.before-statx", transactions);
+	incomplete_length = snprintf(
+		incomplete, sizeof(incomplete), "%s/swapz-package.substituted",
 		transactions);
-	if (path_length < 0 || (size_t)path_length >= sizeof(displaced) ||
-	    rename(transactions, displaced) < 0 || mkdir(transactions, 0700) < 0)
+	if (displaced_length < 0 ||
+	    (size_t)displaced_length >= sizeof(displaced) ||
+	    incomplete_length < 0 ||
+	    (size_t)incomplete_length >= sizeof(incomplete) ||
+	    rename(transactions, displaced) < 0 ||
+	    mkdir(transactions, 0700) < 0 ||
+	    mkdir(incomplete, 0700) < 0)
 		abort();
 	transaction_directory_swapped = 1;
 }
