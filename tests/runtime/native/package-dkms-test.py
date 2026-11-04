@@ -1828,7 +1828,10 @@ exec "{flock_binary}" "$@"
             cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
-            deadline = time.monotonic() + 8
+            # An upgrade publishes and revalidates substantially more state
+            # than a first install. Keep the crash checkpoint bounded, but
+            # allow a slower rootless sandbox to reach the durable phase.
+            deadline = time.monotonic() + 20
             while time.monotonic() < deadline and not ready.exists():
                 if process.poll() is not None:
                     stdout, stderr = process.communicate(timeout=8)
