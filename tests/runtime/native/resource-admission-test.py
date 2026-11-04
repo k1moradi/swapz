@@ -346,6 +346,9 @@ sample_host_memory_admission
         self.assertIn(
             'if ! source "$cleanup_helper" 2>/dev/null; then',
             qualifier)
+        self.assertLess(
+            qualifier.index("START_ID36_RESOURCE_PRESSURE=admission"),
+            qualifier.index('if ! source "$cleanup_helper" 2>/dev/null; then'))
         self.assertIn(
             'source "$cleanup_helper" 2>/dev/null ||',
             preflight)
