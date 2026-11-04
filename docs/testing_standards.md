@@ -3743,6 +3743,14 @@ retroactively revoke. The C11 acquire/release shim and staged thread barriers
 are a race-test model, not a Linux memory-model proof or a substitute for
 loaded target, suspend/drain, completion-work and lower-I/O fault qualification.
 
+The submitter-path continuation adds 256 deterministic handoffs that model its
+release/acquire active-descriptor gate, one-reference prepared page, separately
+leased scratch lane, bounded active/peak accounting, exact error and a closed
+admission gate. Even when the BIO has completed and its page slot is free,
+drain cannot finish until the submitter has released its scratch lane. This
+is a C11 lifetime model, not proof of the kernel target's real wake/drain or
+completion-work interleavings.
+
 Rootless architecture coverage is continuous on both x86_64 and ARM64. The
 production-C workflow runs the same native suite on `ubuntu-24.04` and
 `ubuntu-24.04-arm`; x86 therefore compiles/exercises the SSE2, AVX2 and

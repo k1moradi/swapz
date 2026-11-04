@@ -264,10 +264,151 @@ static int test_drain_wake_gate_and_terminal_ack(void)
 	return 0;
 }
 
+/* Submitter work has one prepared-page reference, plus a separate lane lease.
+ * The ordered owner may finish the BIO after the active release store, but
+ * drain must still join the task's final scratch-lane release. */
+#define SUBMITTER_ROUNDS 256U
+struct submitter_handoff {
+	atomic_t state;
+	atomic_t active;
+	atomic_t terminal_error;
+	atomic64_t page_mask;
+	atomic64_t lane_mask;
+	pthread_barrier_t start;
+	pthread_barrier_t payload_published;
+	pthread_barrier_t clear_gate;
+	pthread_barrier_t gate_cleared;
+	pthread_barrier_t return_lane;
+	pthread_barrier_t lane_returned;
+	pthread_barrier_t next_iteration;
+	_Atomic unsigned int failures;
+	int codec_result;
+	unsigned int payload;
+};
+
+static void *prepare_in_submitter(void *opaque)
+{
+	struct submitter_handoff *handoff = opaque;
+	unsigned int iteration;
+
+	for (iteration = 0; iteration < SUBMITTER_ROUNDS; ++iteration) {
+		int old_state;
+
+		(void)pthread_barrier_wait(&handoff->start);
+		handoff->payload = iteration ^ 0xa5a5U;
+		if (handoff->codec_result < 0)
+			atomic_store_explicit(&handoff->terminal_error.value,
+					      handoff->codec_result, memory_order_release);
+		old_state = swapz_preparation_publish_codec_result(
+			&handoff->state, handoff->codec_result);
+		if (old_state != SWAPZ_PREPARATION_PREPARING)
+			atomic_fetch_add(&handoff->failures, 1);
+		(void)pthread_barrier_wait(&handoff->payload_published);
+		/* All descriptor and prepared-page accesses end before this gate. */
+		(void)pthread_barrier_wait(&handoff->clear_gate);
+		atomic_store_explicit(&handoff->active.value, 0,
+					      memory_order_release);
+		(void)pthread_barrier_wait(&handoff->gate_cleared);
+		/* The owner can end the BIO; drain still sees a leased lane. */
+		(void)pthread_barrier_wait(&handoff->return_lane);
+		swapz_preparation_release_slot(&handoff->lane_mask, 0);
+		(void)pthread_barrier_wait(&handoff->lane_returned);
+		(void)pthread_barrier_wait(&handoff->next_iteration);
+	}
+	return NULL;
+}
+
+static int test_submitter_active_gate_and_lane_drain(void)
+{
+	struct submitter_handoff handoff = { 0 };
+	pthread_t submitter;
+	unsigned int iteration, page_peak = 0, lane_peak = 0;
+	unsigned int page_current = 0, lane_current = 0;
+
+	atomic_init(&handoff.state.value, SWAPZ_PREPARATION_EMPTY);
+	atomic_init(&handoff.active.value, 0);
+	atomic_init(&handoff.terminal_error.value, 0);
+	atomic_init(&handoff.page_mask.value, (s64)(1ULL << 63));
+	atomic_init(&handoff.lane_mask.value, 1);
+	atomic_init(&handoff.failures, 0);
+	CHECK(pthread_barrier_init(&handoff.start, NULL, 2) == 0);
+	CHECK(pthread_barrier_init(&handoff.payload_published, NULL, 2) == 0);
+	CHECK(pthread_barrier_init(&handoff.clear_gate, NULL, 2) == 0);
+	CHECK(pthread_barrier_init(&handoff.gate_cleared, NULL, 2) == 0);
+	CHECK(pthread_barrier_init(&handoff.return_lane, NULL, 2) == 0);
+	CHECK(pthread_barrier_init(&handoff.lane_returned, NULL, 2) == 0);
+	CHECK(pthread_barrier_init(&handoff.next_iteration, NULL, 2) == 0);
+	CHECK(pthread_create(&submitter, NULL, prepare_in_submitter, &handoff) == 0);
+	for (iteration = 0; iteration < SUBMITTER_ROUNDS; ++iteration) {
+		const int codec_result = iteration % 3U == 0U ? 300 :
+			(iteration % 3U == 1U ? 0 : -EIO);
+		const int closed_admission = iteration % 2U == 0U;
+		int final_state;
+
+		CHECK(swapz_preparation_claim_slot(&handoff.page_mask) == 63);
+		CHECK(swapz_preparation_claim_slot(&handoff.lane_mask) == 0);
+		page_current++;
+		lane_current++;
+		if (page_current > page_peak)
+			page_peak = page_current;
+		if (lane_current > lane_peak)
+			lane_peak = lane_current;
+		atomic_store_explicit(&handoff.active.value, 1, memory_order_relaxed);
+		atomic_store_explicit(&handoff.state.value, SWAPZ_PREPARATION_PREPARING,
+					      memory_order_relaxed);
+		atomic_store_explicit(&handoff.terminal_error.value, 0,
+					      memory_order_relaxed);
+		handoff.codec_result = codec_result;
+		(void)pthread_barrier_wait(&handoff.start);
+		(void)pthread_barrier_wait(&handoff.payload_published);
+		/* A READY state cannot bypass a still-active submitter descriptor. */
+		CHECK(atomic_load_explicit(&handoff.active.value,
+						memory_order_acquire) == 1);
+		if (closed_admission)
+			CHECK(!swapz_preparation_owner_wake_allowed(0));
+		(void)pthread_barrier_wait(&handoff.clear_gate);
+		(void)pthread_barrier_wait(&handoff.gate_cleared);
+		CHECK(atomic_load_explicit(&handoff.active.value,
+						memory_order_acquire) == 0);
+		final_state = swapz_preparation_read_state(&handoff.state);
+		CHECK(final_state == swapz_preparation_codec_result_state(codec_result));
+		CHECK(handoff.payload == (iteration ^ 0xa5a5U));
+		if (codec_result < 0)
+			CHECK(swapz_preparation_read_state(&handoff.terminal_error) ==
+			      codec_result);
+		/* BIO completion returns the only prepared-page reference. */
+		atomic_store_explicit(&handoff.state.value, SWAPZ_PREPARATION_EMPTY,
+					      memory_order_relaxed);
+		swapz_preparation_release_slot(&handoff.page_mask, 63);
+		page_current--;
+		CHECK((uint64_t)atomic64_read(&handoff.page_mask) == (1ULL << 63));
+		CHECK(atomic64_read(&handoff.lane_mask) == 0);
+		/* No completed drain is possible until the submitter returns its lane. */
+		(void)pthread_barrier_wait(&handoff.return_lane);
+		(void)pthread_barrier_wait(&handoff.lane_returned);
+		lane_current--;
+		CHECK(atomic64_read(&handoff.lane_mask) == 1);
+		(void)pthread_barrier_wait(&handoff.next_iteration);
+	}
+	CHECK(pthread_join(submitter, NULL) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.start) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.payload_published) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.clear_gate) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.gate_cleared) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.return_lane) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.lane_returned) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.next_iteration) == 0);
+	CHECK(atomic_load(&handoff.failures) == 0);
+	CHECK(page_current == 0 && lane_current == 0);
+	CHECK(page_peak == 1 && lane_peak == 1);
+	return 0;
+}
+
 int main(void)
 {
 	CHECK(!test_ordered_ack_and_refcount_lifetime());
 	CHECK(!test_drain_wake_gate_and_terminal_ack());
-	puts("SWAPZ_PREPARATION_PUBLICATION_LIFETIME_PASS=2");
+	CHECK(!test_submitter_active_gate_and_lane_drain());
+	puts("SWAPZ_PREPARATION_PUBLICATION_LIFETIME_PASS=3");
 	return 0;
 }
