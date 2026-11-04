@@ -463,6 +463,13 @@ verify_qualification_identity() {
      "$(hash_file "$installed_module")" == "$module_sha" ]]
 }
 
+module_candidates_absent() {
+  local candidate
+  for candidate in "${module_candidate_paths[@]}"; do
+    [[ ! -e "$candidate" && ! -L "$candidate" ]] || return 1
+  done
+}
+
 verify_installed_module_set() {
   local candidate count=0 matched=""
   for candidate in "${module_candidate_paths[@]}"; do
@@ -1145,6 +1152,7 @@ if [[ "$action" == uninstall ]]; then
   query_dkms_status removed_dkms_status -m swapz -v "$version" ||
     blocked "cannot verify DKMS removal"
   [[ -z "$removed_dkms_status" ]] || blocked "DKMS removal left registered state"
+  module_candidates_absent || blocked "DKMS removal left current-kernel module images"
   durable_package_paths "$installed_module_dir"
   persist_transaction_state dkms-removed
   uninstall_test_checkpoint dkms-removed
@@ -1542,6 +1550,16 @@ rollback() {
   fi
   cleanup_package_files
   rm -f -- "$installed_module"
+  if ! module_candidates_absent; then
+    cleanup_activation_files || true
+    persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
+    echo "BLOCKED: rollback left ambiguous module images; recovery data retained at $transaction_dir" >&2
+    exit "$rc"
+  fi
+  durable_package_paths "$installed_module_dir" || {
+    persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
+    exit "$rc"
+  }
   if (( had_existing == 1 )); then
     if restore_previous_package && persist_transaction_state rolled-back; then
       rm -rf -- "$transaction_dir"
@@ -1584,6 +1602,7 @@ if (( had_existing == 1 )); then
   query_dkms_status removed_dkms_status -m swapz -v "$version" ||
     blocked "cannot verify DKMS removal"
   [[ -z "$removed_dkms_status" ]] || blocked "DKMS removal left registered state"
+  module_candidates_absent || blocked "DKMS removal left current-kernel module images"
   durable_package_paths "$installed_module_dir"
   persist_transaction_state dkms-removed
   install_test_checkpoint dkms-removed
