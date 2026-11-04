@@ -71,11 +71,27 @@ static void test_padding_refuses_compressed_extent_estimate(void)
 	const char *status =
 		"logical_write=16384 physical_write=12288 gc_write=0 "
 		"compressed=4 raw=0 zero_elided=0 bulk_mode=2 bulk_padding=1 failed=0 error=0";
+	const char *raw_with_padding =
+		"logical_write=4096 physical_write=8192 gc_write=0 "
+		"compressed=0 raw=1 zero_elided=0 bulk_mode=2 bulk_padding=1 failed=0 error=0";
 	struct swapz_ratio_status ratio;
+	struct status_problem problem;
 
-	assert(parse_swapz_ratio_status(status, &ratio) == 0);
+	assert(parse_swapz_ratio_status(status, &ratio) == STATUS_READY);
 	assert(ratio.compressed_extent_ratio_exact == 0);
+	assert(ratio.compressed_extent_bytes == 0ULL);
 	assert(ratio.overall_physical_bytes == 12288ULL);
+	assert(parse_swapz_ratio_status(raw_with_padding, &ratio) == STATUS_READY);
+	assert(ratio.compressed_extent_ratio_exact == 0);
+	assert(ratio.compressed_extent_bytes == 0ULL);
+	assert(ratio.overall_physical_bytes == 8192ULL);
+	assert(parse_swapz_ratio_status_diagnostic(
+		"logical_write=0 physical_write=4096 gc_write=0 "
+		"compressed=0 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=1 "
+		"failed=0 error=0",
+		&ratio, &problem) == STATUS_BLOCKED);
+	assert(!strcmp(problem.field, "bulk_padding"));
+	assert(strstr(problem.observed, "non-padding mode"));
 }
 
 static void test_inconsistent_live_snapshot_retries(void)
@@ -223,30 +239,45 @@ static void test_checked_counter_arithmetic(void)
 		STATUS_RETRY, "physical_write-gc_write-raw*4096", "disagree");
 }
 
+static size_t fixture_align_target_offset(size_t value)
+{
+	const size_t alignment = _Alignof(struct dm_target_spec);
+	const size_t remainder = value % alignment;
+
+	assert(value <= SIZE_MAX - (remainder ? alignment - remainder : 0U));
+	return remainder ? value + alignment - remainder : value;
+}
+
 static size_t make_dm_status_fixture(unsigned char *buffer, size_t capacity,
 				     const char *target_type, const char *parameters,
 				     int target_status)
 {
 	struct dm_ioctl header = { 0 };
 	struct dm_target_spec specification = { 0 };
-	const size_t length = strlen(parameters) + 1U;
-	const size_t size = sizeof(header) + sizeof(specification) + length;
+	const size_t parameter_bytes = strlen(parameters) + 1U;
+	const size_t payload_used = sizeof(specification) + parameter_bytes;
+	const size_t terminal_next = fixture_align_target_offset(payload_used);
+	const size_t data_size = sizeof(header) + payload_used;
+	const size_t reply_capacity = sizeof(header) + terminal_next;
 
-	assert(size <= capacity);
+	assert(reply_capacity <= capacity);
+	assert(terminal_next <= UINT32_MAX);
 	memset(buffer, 0, capacity);
 	header.data_start = sizeof(header);
-	header.data_size = (uint32_t)size;
+	header.data_size = (uint32_t)data_size;
 	header.target_count = 1;
 	header.dev = 1;
 	memcpy(header.name, "fixture", sizeof("fixture"));
 	specification.length = 1024;
 	specification.status = target_status;
+	specification.next = (uint32_t)terminal_next;
 	assert(strlen(target_type) < sizeof(specification.target_type));
 	memcpy(specification.target_type, target_type, strlen(target_type) + 1U);
 	memcpy(buffer, &header, sizeof(header));
 	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
-	memcpy(buffer + sizeof(header) + sizeof(specification), parameters, length);
-	return size;
+	memcpy(buffer + sizeof(header) + sizeof(specification),
+	       parameters, parameter_bytes);
+	return reply_capacity;
 }
 
 static void test_dm_reply_boundaries_and_identity(void)
@@ -258,25 +289,40 @@ static void test_dm_reply_boundaries_and_identity(void)
 	size_t size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
 					     fixture_valid_status, 0);
 
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	assert(specification.next != 0U);
+	assert((size_t)specification.next ==
+	       fixture_align_target_offset(
+		       (size_t)header.data_size - header.data_start));
 	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0, &snapshot) == 1);
 	assert(snapshot.ratio_state == STATUS_READY);
 	assert(snapshot.device_id == 1);
-	assert(parse_dm_target_snapshot(buffer, size - 1U, "fixture", 0,
-					&snapshot) < 0);
+	assert(parse_dm_target_snapshot(buffer, (size_t)header.data_size - 1U,
+					"fixture", 0, &snapshot) < 0);
 	assert(!strcmp(snapshot.problem.field, "dm_ioctl.data_start/data_size"));
 	assert(parse_dm_target_snapshot(buffer, size, "different", 0,
 					&snapshot) < 0);
 	assert(!strcmp(snapshot.problem.field, "dm_ioctl.name"));
 
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	specification.next = 0;
+	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
+	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0,
+					&snapshot) < 0);
+	assert(!strcmp(snapshot.problem.field, "dm_target_spec.next"));
+
+	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
+				      fixture_valid_status, 0);
 	memcpy(&header, buffer, sizeof(header));
 	header.target_count = 2;
 	memcpy(buffer, &header, sizeof(header));
 	assert(parse_dm_target_snapshot(buffer, size, "fixture", 0,
 					&snapshot) < 0);
 	assert(!strcmp(snapshot.problem.field, "dm_target_spec.next"));
-	header.target_count = 1;
-	memcpy(buffer, &header, sizeof(header));
 
+	size = make_dm_status_fixture(buffer, sizeof(buffer), "swapz",
+				      fixture_valid_status, 0);
 	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
 	specification.next = UINT_MAX;
 	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
@@ -324,18 +370,23 @@ static void test_absolute_offsets_for_multiple_dm_targets(void)
 	struct swapz_target_snapshot snapshot;
 	const char *const first_params = "not-a-swapz-status";
 	const char *const second_params = "another-linear-status";
-	const size_t first_record = sizeof(specification) + strlen(first_params) + 1U;
-	const size_t second_record = sizeof(specification) + strlen(second_params) + 1U;
-	const size_t third_record = sizeof(specification) +
-				    strlen(fixture_valid_status) + 1U;
-	const size_t length = sizeof(header) + first_record + second_record +
-			      third_record;
+	const size_t first_used = sizeof(specification) + strlen(first_params) + 1U;
+	const size_t first_next = fixture_align_target_offset(first_used);
+	const size_t second_used = first_next + sizeof(specification) +
+				   strlen(second_params) + 1U;
+	const size_t second_next = fixture_align_target_offset(second_used);
+	const size_t final_used = second_next + sizeof(specification) +
+				  strlen(fixture_valid_status) + 1U;
+	const size_t final_next = fixture_align_target_offset(final_used);
+	const size_t data_size = sizeof(header) + final_used;
+	const size_t capacity = sizeof(header) + final_next;
 	unsigned char *first = buffer + sizeof(header);
-	unsigned char *second = first + first_record;
-	unsigned char *third = second + second_record;
+	unsigned char *second = first + first_next;
+	unsigned char *third = first + second_next;
 
-	assert(length <= sizeof(buffer));
-	header.data_size = (uint32_t)length;
+	assert(capacity <= sizeof(buffer));
+	assert(final_next <= UINT32_MAX);
+	header.data_size = (uint32_t)data_size;
 	header.data_start = sizeof(header);
 	header.target_count = 3;
 	header.dev = 1;
@@ -343,25 +394,26 @@ static void test_absolute_offsets_for_multiple_dm_targets(void)
 	memcpy(buffer, &header, sizeof(header));
 	memcpy(specification.target_type, "linear", sizeof("linear"));
 	specification.length = 1024;
-	specification.next = (uint32_t)first_record;
+	specification.next = (uint32_t)first_next;
 	memcpy(first, &specification, sizeof(specification));
 	memcpy(first + sizeof(specification), first_params, strlen(first_params) + 1U);
-	specification.next = (uint32_t)(first_record + second_record);
+	specification.next = (uint32_t)second_next;
 	memcpy(second, &specification, sizeof(specification));
 	memcpy(second + sizeof(specification), second_params, strlen(second_params) + 1U);
 	memcpy(specification.target_type, "swapz", sizeof("swapz"));
-	specification.next = 0;
+	specification.next = (uint32_t)final_next;
 	memcpy(third, &specification, sizeof(specification));
 	memcpy(third + sizeof(specification), fixture_valid_status,
 	       strlen(fixture_valid_status) + 1U);
 
-	assert(parse_dm_target_snapshot(buffer, length, "fixture", 0,
+	assert(parse_dm_target_snapshot(buffer, capacity, "fixture", 0,
 					&snapshot) == 1);
 	assert(snapshot.ratio_state == STATUS_READY);
 	memcpy(&specification, second, sizeof(specification));
-	specification.next = (uint32_t)(first_record + 1U);
+	specification.next =
+		(uint32_t)(first_next + sizeof(specification) + 1U);
 	memcpy(second, &specification, sizeof(specification));
-	assert(parse_dm_target_snapshot(buffer, length, "fixture", 0,
+	assert(parse_dm_target_snapshot(buffer, capacity, "fixture", 0,
 					&snapshot) < 0);
 	assert(!strcmp(snapshot.problem.field, "dm_target_spec.next"));
 }

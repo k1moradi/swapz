@@ -611,21 +611,41 @@ static int parse_swapz_ratio_status_diagnostic(
 	}
 	ratio->compressed_extent_bytes =
 		ratio->overall_physical_bytes - raw_physical_bytes;
-	if ((!ratio->compressed_pages && ratio->compressed_extent_bytes) ||
-	    (ratio->compressed_pages && !ratio->compressed_extent_bytes)) {
-		status_set_problem(problem, "physical_write-gc_write-raw*4096",
-				   "zero exactly when compressed=0",
-				   "compressed lower extents disagree with compressed pages");
-		return STATUS_RETRY;
-	}
-
 	/*
-	 * lower_bulk=0/1 never writes padding. With mode 2, a nonzero cumulative
-	 * padding counter is not success- or foreground-partitioned, so do not
-	 * pretend it can be subtracted from compressed SWZ extent bytes.
+	 * lower_bulk=0/1 never writes padding. A nonzero padding counter in
+	 * either mode is malformed rather than evidence that may be folded into
+	 * compressed bytes.
+	 */
+	if (ratio->bulk_mode <= 1ULL && ratio->bulk_padding_blocks) {
+		status_set_problem(problem, "bulk_padding",
+				   "0 when bulk_mode is 0 or 1",
+				   "nonzero padding counter in a non-padding mode");
+		return STATUS_BLOCKED;
+	}
+	/*
+	 * With mode 2, a nonzero cumulative padding counter is not success- or
+	 * foreground-partitioned. The foreground lower-WRITE total remains exact,
+	 * but its bytes cannot be split between padding and compressed extents.
+	 * Do not retain an inferred compressed denominator.
 	 */
 	ratio->compressed_extent_ratio_exact =
-		ratio->bulk_mode <= 1ULL || ratio->bulk_padding_blocks == 0ULL;
+		ratio->bulk_padding_blocks == 0ULL;
+	if (ratio->compressed_pages && !ratio->compressed_extent_bytes) {
+		status_set_problem(problem, "physical_write-gc_write-raw*4096",
+				   "> 0 when compressed > 0",
+				   "no lower bytes remain for committed compressed pages");
+		return STATUS_RETRY;
+	}
+	if (!ratio->compressed_extent_ratio_exact) {
+		ratio->compressed_extent_bytes = 0;
+		return STATUS_READY;
+	}
+	if (!ratio->compressed_pages && ratio->compressed_extent_bytes) {
+		status_set_problem(problem, "physical_write-gc_write-raw*4096",
+				   "0 when compressed=0 and bulk_padding=0",
+				   "lower bytes remain without compressed pages or padding");
+		return STATUS_RETRY;
+	}
 	return STATUS_READY;
 }
 
@@ -751,6 +771,18 @@ static int dm_query(int fd, unsigned long request, const char *name,
  * unlike the relative offsets in DM_LIST_DEVICES. Decode bounded replies
  * without trusting kernel-provided alignment, record counts or terminators.
  */
+static int status_align_target_offset(size_t value, size_t *aligned)
+{
+	const size_t alignment = _Alignof(struct dm_target_spec);
+	const size_t remainder = value % alignment;
+	const size_t padding = remainder ? alignment - remainder : 0U;
+
+	if (value > SIZE_MAX - padding)
+		return -1;
+	*aligned = value + padding;
+	return 0;
+}
+
 static int parse_dm_target_snapshot(const unsigned char *buffer,
 				    size_t buffer_size, const char *expected_name,
 				    unsigned int wanted_target,
@@ -758,10 +790,14 @@ static int parse_dm_target_snapshot(const unsigned char *buffer,
 {
 	struct dm_ioctl header;
 	struct dm_target_spec selected_spec = { 0 };
+	const size_t target_alignment = _Alignof(struct dm_target_spec);
 	const char *record_base;
 	const char *cursor;
 	const char *data_end;
 	const char *selected_params = NULL;
+	size_t payload_size;
+	size_t payload_capacity;
+	size_t terminal_next;
 	uint32_t target;
 	unsigned int swapz_index = 0;
 
@@ -775,10 +811,24 @@ static int parse_dm_target_snapshot(const unsigned char *buffer,
 	if (header.data_size > buffer_size ||
 	    header.data_size < sizeof(header) ||
 	    header.data_start < sizeof(header) ||
-	    header.data_start > header.data_size) {
+	    header.data_start > header.data_size ||
+	    header.data_start % target_alignment) {
 		status_set_problem(&snapshot->problem, "dm_ioctl.data_start/data_size",
-				   "sizeof(dm_ioctl) <= start <= size <= reply capacity",
-				   "out-of-bounds DM INFO payload");
+				   "aligned sizeof(dm_ioctl) <= start <= size <= reply capacity",
+				   "out-of-bounds or misaligned DM INFO payload");
+		return -1;
+	}
+	payload_size = (size_t)header.data_size - header.data_start;
+	payload_capacity = buffer_size - header.data_start;
+	if ((header.target_count &&
+	     (payload_size < sizeof(struct dm_target_spec) + 1U ||
+	      header.target_count >
+		      payload_size / (sizeof(struct dm_target_spec) + 1U))) ||
+	    status_align_target_offset(payload_size, &terminal_next) < 0 ||
+	    terminal_next > payload_capacity || terminal_next > UINT32_MAX) {
+		status_set_problem(&snapshot->problem, "dm_target_spec.next",
+				   "bounded aligned target records inside the DM reply capacity",
+				   "target count or aligned terminal offset exceeds the reply");
 		return -1;
 	}
 	if (!memchr(header.name, '\0', sizeof(header.name)) ||
@@ -809,6 +859,7 @@ static int parse_dm_target_snapshot(const unsigned char *buffer,
 		const char *parameters_end;
 		size_t type_length;
 		size_t current_offset = (size_t)(cursor - record_base);
+		int final_target = target + 1U == header.target_count;
 
 		if ((size_t)(data_end - cursor) < sizeof(specification)) {
 			status_set_problem(&snapshot->problem, "dm_target_spec",
@@ -817,30 +868,34 @@ static int parse_dm_target_snapshot(const unsigned char *buffer,
 			return -1;
 		}
 		memcpy(&specification, cursor, sizeof(specification));
-		if (specification.next) {
-			if (specification.next <= current_offset ||
-			    specification.next - current_offset < sizeof(specification) ||
-			    (size_t)specification.next > (size_t)(data_end - record_base)) {
+		if (final_target) {
+			/*
+			 * DM_TABLE_STATUS uses an absolute offset from the first
+			 * target spec. Linux also fills the final next field with
+			 * the aligned end offset, while data_size stops at the
+			 * final status-string NUL before alignment padding.
+			 */
+			if ((size_t)specification.next != terminal_next) {
 				status_set_problem(&snapshot->problem, "dm_target_spec.next",
-						   "forward offset from first spec, within DM data_size",
-						   "backward, overlapping or truncated next record");
+						   "aligned terminal offset from the first target spec",
+						   "final offset does not match the aligned INFO payload end");
+				return -1;
+			}
+			record_end = data_end;
+		} else {
+			if (!specification.next ||
+			    specification.next % target_alignment ||
+			    specification.next <= current_offset ||
+			    specification.next - current_offset <= sizeof(specification) ||
+			    (size_t)specification.next > payload_size ||
+			    payload_size - (size_t)specification.next <
+				    sizeof(specification) + 1U) {
+				status_set_problem(&snapshot->problem, "dm_target_spec.next",
+						   "aligned forward absolute offset to a complete next target",
+						   "zero, unaligned, overlapping or truncated nonfinal offset");
 				return -1;
 			}
 			record_end = record_base + specification.next;
-			if (target + 1U == header.target_count) {
-				status_set_problem(&snapshot->problem, "dm_target_spec.next",
-						   "0 for the last target record",
-						   "extra target after advertised target_count");
-				return -1;
-			}
-		} else {
-			record_end = data_end;
-			if (target + 1U != header.target_count) {
-				status_set_problem(&snapshot->problem, "dm_target_spec.next",
-						   "forward offset for each nonfinal target",
-						   "early zero offset before target_count");
-				return -1;
-			}
 		}
 		type_length = strnlen(specification.target_type,
 				      sizeof(specification.target_type));
