@@ -463,11 +463,13 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
     elif rss > CONTRACT["acceptance"]["sustained"]["replay_peak_rss_bytes_max"]:
         reasons.append(f"{label} replay peak RSS exceeds prospective bound")
     if label == "swapz":
+        # The replay finishes before safe mapper teardown, so it cannot own the
+        # qualifying metadata/target RAM result. A legacy scalar may remain as
+        # a nonnegative diagnostic; the campaign sealer derives the actual
+        # frozen RAM gate from the separate post-teardown host trace.
         peak = resources.get("metadata_and_target_peak_ram_bytes")
-        if type(peak) is not int or peak < 0:
-            reasons.append("swapz metadata/target peak RAM is missing")
-        elif peak > CONTRACT["acceptance"]["sustained"]["metadata_and_target_peak_ram_bytes_max"]:
-            reasons.append("swapz metadata/target peak RAM exceeds prospective bound")
+        if peak is not None and (type(peak) is not int or peak < 0):
+            reasons.append("swapz metadata/target RAM diagnostic is malformed")
         if not target_health_ok(arm.get("gc")):
             reasons.append("swapz target health failed or is unavailable")
     return reasons
@@ -785,11 +787,6 @@ def sustained_decision(pair: dict) -> dict:
             integer_at_least(resources.get("replay_peak_rss_bytes"), 0) and
             resources["replay_peak_rss_bytes"] <=
             limit["replay_peak_rss_bytes_max"]),
-        "target_ram": (
-            integer_at_least(
-                resources.get("metadata_and_target_peak_ram_bytes"), 0) and
-            resources["metadata_and_target_peak_ram_bytes"] <=
-            limit["metadata_and_target_peak_ram_bytes_max"]),
         "oracle": (
             type((swapz.get("oracle") or {}).get("mismatches")) is int and
             (swapz.get("oracle") or {}).get("mismatches") == 0),
