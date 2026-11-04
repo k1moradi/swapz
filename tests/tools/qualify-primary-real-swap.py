@@ -71,6 +71,10 @@ RESULT_PREFIX = "PRIMARY_REAL_SWAP_RESULT="
 SOURCE_ADMISSION_SCHEMA = "swapz-primary-real-swap-admission-v1"
 SOURCE_ADMISSION_MAX_LINE_BYTES = 4096
 SOURCE_ADMISSION_TIMEOUT_SECONDS = 45
+MAX_ORACLE_RECORD_BYTES = 4096
+# A sustained memory stall is a safety stop, not an integrity oracle.
+PSI_STOP_FRACTION = 0.85
+PSI_STOP_GRACE_SECONDS = 5
 
 
 class Blocked(RuntimeError):
@@ -311,16 +315,24 @@ class PersistentEvidence:
         except OSError as exc:
             raise error_type(f"cannot persist real-swap evidence: {exc}") from exc
         finally:
-            if file_descriptor >= 0:
-                os.close(file_descriptor)
-            if directory_descriptor >= 0:
-                os.close(directory_descriptor)
+            original_error = sys.exc_info()[1]
+            cleanup_errors = []
+            for descriptor in (file_descriptor, directory_descriptor):
+                if descriptor >= 0:
+                    try:
+                        os.close(descriptor)
+                    except OSError as cleanup_error:
+                        cleanup_errors.append(
+                            f"persistent evidence descriptor: {cleanup_error}")
             try:
                 temporary.unlink()
             except FileNotFoundError:
                 pass
-            except OSError:
-                pass
+            except OSError as cleanup_error:
+                cleanup_errors.append(
+                    f"persistent evidence temporary artifact: {cleanup_error}")
+            _raise_cleanup_errors(original_error, cleanup_errors,
+                                  error_type=error_type)
 
     def update(self, phase: str, **fields) -> None:
         self.record.update(fields)
@@ -958,11 +970,13 @@ def read_vmstat() -> dict[str, int]:
         for line in Path("/proc/vmstat").read_text(encoding="ascii").splitlines():
             fields = line.split()
             if len(fields) == 2 and fields[0] in wanted:
+                if fields[0] in values:
+                    raise ValueError("duplicate swap counter")
                 values[fields[0]] = int(fields[1])
     except (OSError, ValueError) as exc:
         raise Blocked(f"cannot read /proc/vmstat swap counters: {exc}") from exc
-    if set(values) != wanted:
-        raise Blocked("/proc/vmstat lacks swap counters")
+    if set(values) != wanted or any(value < 0 for value in values.values()):
+        raise Blocked("/proc/vmstat lacks valid swap counters")
     return values
 
 
@@ -983,9 +997,13 @@ def _memory_events(path: Path) -> dict[str, int]:
             fields = line.split()
             if len(fields) != 2 or not re.fullmatch(r"[0-9]+", fields[1]):
                 raise ValueError(line)
+            if fields[0] in values:
+                raise ValueError("duplicate memory.events counter")
             values[fields[0]] = int(fields[1])
     except (OSError, ValueError) as exc:
         raise Blocked(f"cannot parse cgroup memory.events: {exc}") from exc
+    if not {"oom", "oom_kill"}.issubset(values):
+        raise Blocked("cgroup memory.events lacks required OOM counters")
     return values
 
 
@@ -1504,14 +1522,30 @@ def _cgroup_create(token: str, resident_mib: int, swap_limit_mib: int,
         if (cgroup / "memory.oom.group").exists():
             _write_control(cgroup / "memory.oom.group", "1", admitted=admitted)
         return cgroup
-    except Exception:
+    except BaseException as original_error:
         if created:
             try:
-                if not (cgroup / "cgroup.procs").read_text(encoding="ascii").strip():
-                    cgroup.rmdir()
-            except OSError:
-                pass
+                if (cgroup / "cgroup.procs").read_text(encoding="ascii").strip():
+                    raise error_type("partially created cgroup unexpectedly contains processes")
+                cgroup.rmdir()
+            except Exception as cleanup_error:
+                raise error_type(
+                    f"{original_error}; partial cgroup cleanup also failed: "
+                    f"{cleanup_error}") from original_error
         raise
+
+
+def _raise_cleanup_errors(original_error: BaseException | None,
+                          errors: list[str], *,
+                          error_type: type[Exception] = QualificationFailure) -> None:
+    """Keep the initiating failure visible when teardown also fails."""
+    if not errors:
+        return
+    disposition = Blocked if isinstance(original_error, Blocked) else error_type
+    details = "; ".join(errors)
+    if original_error is not None:
+        raise disposition(f"{original_error}; cleanup also failed: {details}") from original_error
+    raise disposition(f"cleanup failed: {details}")
 
 
 def preflight_workload_environment(workload_mib: int, resident_mib: int,
@@ -1537,14 +1571,13 @@ def preflight_workload_environment(workload_mib: int, resident_mib: int,
         _memory_events(cgroup / "memory.events")
         _psi_total(cgroup / "memory.pressure")
     finally:
+        original_error = sys.exc_info()[1]
         try:
-            if (cgroup / "cgroup.procs").read_text(encoding="ascii").strip():
-                raise Blocked("preflight cgroup unexpectedly contains processes")
-            cgroup.rmdir()
-        except Blocked:
-            raise
-        except OSError as exc:
-            raise Blocked(f"cannot remove preflight cgroup: {exc}") from exc
+            _remove_cgroup(cgroup)
+        except Exception as cleanup_error:
+            _raise_cleanup_errors(
+                original_error, [f"preflight cgroup: {cleanup_error}"],
+                error_type=Blocked)
 
 
 def _remove_cgroup(cgroup: Path) -> None:
@@ -1562,7 +1595,20 @@ def _remove_cgroup(cgroup: Path) -> None:
         raise QualificationFailure(f"cannot remove empty real-swap cgroup: {exc}") from exc
 
 
-def _terminate_child(process: subprocess.Popen[str], cgroup: Path) -> None:
+def _close_oracle_pipes(process: subprocess.Popen) -> None:
+    """Release all parent-owned pipe descriptors after failed worker admission."""
+    errors = []
+    for pipe in (process.stdin, process.stdout, process.stderr):
+        if pipe is not None:
+            try:
+                pipe.close()
+            except OSError as exc:
+                errors.append(str(exc))
+    if errors:
+        raise QualificationFailure("oracle pipe cleanup failed: " + "; ".join(errors))
+
+
+def _terminate_child(process: subprocess.Popen, cgroup: Path) -> None:
     if process.poll() is None:
         try:
             process.send_signal(signal.SIGTERM)
@@ -1590,40 +1636,53 @@ def _terminate_child(process: subprocess.Popen[str], cgroup: Path) -> None:
         time.sleep(0.05)
 
 
-def _oracle_event(process: subprocess.Popen[str], prefix: str, deadline: float,
-                  guard: Callable[[], None]) -> dict:
+def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
+                  guard: Callable[[], None], pending: bytearray) -> dict:
+    """Consume bounded records without TextIO/select buffering races.
+
+    A single os.read may contain multiple records; keep unread bytes for the
+    next phase. Buffered readline can block on incomplete records and hide
+    already-buffered records from a subsequent select call.
+    """
     if process.stdout is None:
         raise QualificationFailure("oracle stdout pipe is unavailable")
     fd = process.stdout.fileno()
+    prefix_bytes = prefix.encode("ascii")
     while True:
         guard()
+        if b"\n" in pending:
+            record, _, remainder = pending.partition(b"\n")
+            pending[:] = remainder
+            if len(record) > MAX_ORACLE_RECORD_BYTES or not record.startswith(prefix_bytes):
+                raise QualificationFailure("real-swap oracle emitted unexpected or oversized record")
+            try:
+                value = json.loads(
+                    record[len(prefix_bytes):].decode("ascii"),
+                    object_pairs_hook=_unique_json_object)
+            except (UnicodeError, ValueError, TypeError) as exc:
+                raise QualificationFailure("real-swap oracle emitted malformed JSON") from exc
+            if not isinstance(value, dict):
+                raise QualificationFailure("real-swap oracle record is not an object")
+            return value
+        if len(pending) > MAX_ORACLE_RECORD_BYTES:
+            raise QualificationFailure("real-swap oracle emitted oversized unterminated record")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise QualificationFailure(f"real-swap oracle timed out waiting for {prefix}")
         readable, _, _ = select.select([fd], [], [], min(0.1, remaining))
         if not readable:
             if process.poll() is not None:
-                stderr = process.stderr.read().strip() if process.stderr else ""
                 raise QualificationFailure(
-                    f"real-swap oracle exited before {prefix}: rc={process.returncode} {stderr}")
+                    f"real-swap oracle exited before {prefix}: rc={process.returncode}")
             continue
-        line = process.stdout.readline()
-        if not line:
-            if process.poll() is not None:
-                stderr = process.stderr.read().strip() if process.stderr else ""
-                raise QualificationFailure(
-                    f"real-swap oracle exited before {prefix}: rc={process.returncode} {stderr}")
-            continue
-        line = line.strip()
-        if not line.startswith(prefix):
-            raise QualificationFailure(f"real-swap oracle emitted unexpected record: {line}")
         try:
-            value = json.loads(line[len(prefix):])
-        except ValueError as exc:
-            raise QualificationFailure("real-swap oracle emitted malformed JSON") from exc
-        if not isinstance(value, dict):
-            raise QualificationFailure("real-swap oracle record is not an object")
-        return value
+            chunk = os.read(fd, MAX_ORACLE_RECORD_BYTES + 1)
+        except OSError as exc:
+            raise QualificationFailure("cannot read real-swap oracle record") from exc
+        if not chunk:
+            raise QualificationFailure(
+                f"real-swap oracle closed output before {prefix}: rc={process.poll()}")
+        pending.extend(chunk)
 
 
 def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
@@ -1782,10 +1841,20 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
     worker_memory_mib = split_concurrent_workload_mib(workload_mib)
     token = os.urandom(8).hex()
     cgroup = _cgroup_create(token, resident_mib, swap_limit_mib, admitted=True)
-    events_before = _memory_events(cgroup / "memory.events")
-    psi_before = _psi_total(cgroup / "memory.pressure")
+    # The first telemetry read may fail before the workload's main try/finally.
+    try:
+        events_before = _memory_events(cgroup / "memory.events")
+        psi_before = _psi_total(cgroup / "memory.pressure")
+    except BaseException as original_error:
+        try:
+            _remove_cgroup(cgroup)
+        except Exception as cleanup_error:
+            _raise_cleanup_errors(
+                original_error, [f"initial telemetry cgroup: {cleanup_error}"])
+        raise
+    pressure_started = time.monotonic()
     rounds: list[dict] = []
-    active_processes: list[subprocess.Popen[str]] = []
+    active_processes: list[subprocess.Popen] = []
 
     def guard() -> None:
         events = _memory_events(cgroup / "memory.events")
@@ -1794,8 +1863,14 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             raise QualificationFailure("cgroup OOM occurred during admitted real-swap workload")
         if _read_uint(cgroup / "memory.swap.current") > swap_limit_mib * MIB:
             raise QualificationFailure("cgroup exceeded configured swap-usage bound")
-        if _mem_available_mib() < 256:
-            raise QualificationFailure("host MemAvailable crossed 256 MiB early-stop threshold")
+        if _mem_available_mib() < MIN_AVAILABLE_MIB:
+            raise QualificationFailure(
+                f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
+        elapsed = time.monotonic() - pressure_started
+        if elapsed >= PSI_STOP_GRACE_SECONDS and (
+                _psi_total(cgroup / "memory.pressure") - psi_before >
+                PSI_STOP_FRACTION * elapsed * 1_000_000):
+            raise QualificationFailure("sustained cgroup memory PSI exceeded safe stop threshold")
 
     try:
         for round_index in range(1, REUSE_ROUNDS + 1):
@@ -1825,19 +1900,20 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                         text=True, bufsize=1,
                         env={**os.environ, "LC_ALL": "C", "LANG": "C"},
                     )
+                    # Own the worker and descriptors before cgroup migration.
+                    round_processes.append(process)
+                    active_processes.append(process)
                     try:
                         (cgroup / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
                     except OSError as exc:
-                        process.terminate()
-                        process.wait(timeout=5)
                         raise QualificationFailure(
                             f"cannot move admitted oracle into dedicated cgroup: {exc}") from exc
-                    round_processes.append(process)
-                    active_processes.append(process)
 
                 deadline = time.monotonic() + timeout_seconds
+                oracle_buffers = {process.pid: bytearray() for process in round_processes}
                 waiting = [
-                    _oracle_event(process, "ORACLE_WAITING=", deadline, guard)
+                    _oracle_event(process, "ORACLE_WAITING=", deadline, guard,
+                                  oracle_buffers[process.pid])
                     for process in round_processes
                 ]
                 waiting_pids = [int(record.get("pid", -1)) for record in waiting]
@@ -1861,7 +1937,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     process.stdin.write("FILL\n")
                     process.stdin.flush()
                 filled_records = [
-                    _oracle_event(process, "ORACLE_FILLED=", deadline, guard)
+                    _oracle_event(process, "ORACLE_FILLED=", deadline, guard,
+                                  oracle_buffers[process.pid])
                     for process in round_processes
                 ]
                 require_oracle_worker_geometry(
@@ -1908,7 +1985,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     process.stdin.write("VERIFY\n")
                     process.stdin.flush()
                 verified_records = [
-                    _oracle_event(process, "ORACLE_VERIFIED=", deadline, guard)
+                    _oracle_event(process, "ORACLE_VERIFIED=", deadline, guard,
+                                  oracle_buffers[process.pid])
                     for process in round_processes
                 ]
                 require_oracle_worker_geometry(
@@ -1993,10 +2071,24 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     "oom_kill_delta": oom_kill_delta,
                 }
             finally:
+                original_error = sys.exc_info()[1]
+                cleanup_errors = []
                 for process in round_processes:
-                    _terminate_child(process, cgroup)
-                    if process in active_processes:
+                    try:
+                        _terminate_child(process, cgroup)
+                    except Exception as cleanup_error:
+                        cleanup_errors.append(
+                            f"oracle pid {process.pid} termination: {cleanup_error}")
+                    try:
+                        _close_oracle_pipes(process)
+                    except Exception as cleanup_error:
+                        cleanup_errors.append(
+                            f"oracle pid {process.pid} pipes: {cleanup_error}")
+                    if process in active_processes and not any(
+                            error.startswith(f"oracle pid {process.pid} termination:")
+                            for error in cleanup_errors):
                         active_processes.remove(process)
+                _raise_cleanup_errors(original_error, cleanup_errors)
 
             if round_result is None:
                 raise QualificationFailure("real-swap round ended without evidence")
@@ -2042,9 +2134,25 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 events_after.get("oom_kill", 0) - events_before.get("oom_kill", 0),
         }
     finally:
+        original_error = sys.exc_info()[1]
+        cleanup_errors = []
         for process in list(active_processes):
-            _terminate_child(process, cgroup)
-        _remove_cgroup(cgroup)
+            try:
+                _terminate_child(process, cgroup)
+            except Exception as cleanup_error:
+                cleanup_errors.append(
+                    f"oracle pid {process.pid} termination: {cleanup_error}")
+            try:
+                _close_oracle_pipes(process)
+            except Exception as cleanup_error:
+                cleanup_errors.append(
+                    f"oracle pid {process.pid} pipes: {cleanup_error}")
+        try:
+            _remove_cgroup(cgroup)
+        except Exception as cleanup_error:
+            cleanup_errors.append(f"dedicated cgroup: {cleanup_error}")
+        _raise_cleanup_errors(original_error, cleanup_errors)
+
 
 def _mapper_sysfs_state(device: tuple[int, int], expected_uuid: str) -> tuple[bool, bool]:
     base = Path(f"/sys/dev/block/{device[0]}:{device[1]}")
@@ -2220,7 +2328,11 @@ def _verify_completed_cleanup(manifest: dict, baseline_identity: set[tuple], par
 
 def _cleanup_failed_start(swapzctl: Path, manifest: dict, baseline_identity: set[tuple],
                           partuuid: str, timeout_seconds: int, original_reason: str) -> None:
-    state = read_state()
+    try:
+        state = read_state()
+    except Exception as cleanup_error:
+        raise QualificationFailure(
+            f"{original_reason}; cannot read cleanup state: {cleanup_error}") from cleanup_error
     if state is None or state.get("run_id") != manifest["run_id"]:
         raise QualificationFailure(original_reason + "; durable state cannot be reconciled automatically")
     if state.get("stage") == "ACTIVE":
@@ -2232,7 +2344,12 @@ def _cleanup_failed_start(swapzctl: Path, manifest: dict, baseline_identity: set
     if cleanup.returncode != 0:
         detail = (cleanup.stderr or cleanup.stdout).strip().replace("\n", "; ")
         raise QualificationFailure(original_reason + f"; normal recovery cleanup failed rc={cleanup.returncode}: {detail}")
-    _verify_completed_cleanup(manifest, baseline_identity, partuuid)
+    try:
+        _verify_completed_cleanup(manifest, baseline_identity, partuuid)
+    except Exception as cleanup_error:
+        raise QualificationFailure(
+            f"{original_reason}; normal recovery verification also failed: "
+            f"{cleanup_error}") from cleanup_error
     raise QualificationFailure(original_reason)
 
 
@@ -2240,25 +2357,36 @@ def _normal_stop(swapzctl: Path, manifest: dict, active: dict | None,
                  baseline_identity: set[tuple], partuuid: str, timeout_seconds: int) -> dict | None:
     sampler = None
     sampler_evidence = None
-    if active is not None:
-        sampler = StopSampler(active["mapper_device"], active["mapper_uuid"], active["swap_path"])
-        sampler.start()
-        time.sleep(0.02)
-    primary_error = None
     sampler_error = None
+    sampler_started = False
+    if active is not None:
+        try:
+            sampler = StopSampler(active["mapper_device"], active["mapper_uuid"], active["swap_path"])
+            sampler.start()
+            sampler_started = True
+            time.sleep(0.02)
+        except Exception as exc:
+            # Sampling failure cannot strand an otherwise verified live mapper.
+            sampler_error = exc
+    primary_error = None
     stopped = None
     try:
         stopped = _primary(swapzctl, "stop", timeout_seconds, admitted=True)
     except Exception as exc:
         primary_error = exc
     finally:
-        if sampler is not None:
+        if sampler_started:
             time.sleep(0.05)
             try:
                 sampler_evidence = sampler.stop()
             except Exception as exc:
-                sampler_error = exc
+                sampler_error = (
+                    Blocked(f"{sampler_error}; sampler cleanup also failed: {exc}")
+                    if sampler_error is not None else exc)
     if primary_error is not None:
+        if sampler_error is not None:
+            raise QualificationFailure(
+                f"{primary_error}; stop sampler also failed: {sampler_error}") from primary_error
         raise primary_error
     assert stopped is not None
     if stopped.returncode != 0:
@@ -2308,7 +2436,14 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
     manifest = read_manifest(run_id)
     _validate_prepared_manifest(manifest, plan, validated_source, selector_partuuid)
 
-    started = _primary(swapzctl, "start", timeout_seconds, admitted=True)
+    try:
+        started = _primary(swapzctl, "start", timeout_seconds, admitted=True)
+    except Exception as start_error:
+        # A timeout can occur after swapon has succeeded: reconcile first.
+        _cleanup_failed_start(
+            swapzctl, manifest, baseline_identity, selector_partuuid,
+            timeout_seconds, f"primary start invocation failed: {start_error}")
+        raise
     if started.returncode != 0:
         detail = (started.stderr or started.stdout).strip().replace("\n", "; ")
         _cleanup_failed_start(
@@ -2416,8 +2551,13 @@ def _execute_admitted(arguments: argparse.Namespace,
             arguments.validated_source, qualified_swapzctl, private_directory)
         oracle_path, oracle_sha256 = pin_real_swap_oracle(
             requested_oracle_path, private_parent)
-    except Exception:
-        private_workspace.cleanup()
+    except BaseException as original_error:
+        try:
+            private_workspace.cleanup()
+        except Exception as cleanup_error:
+            _raise_cleanup_errors(
+                original_error, [f"private workspace: {cleanup_error}"],
+                error_type=Blocked)
         raise
 
     try:
@@ -2482,8 +2622,13 @@ def _execute_admitted(arguments: argparse.Namespace,
             },
         )
     
-    except Exception:
-        private_workspace.cleanup()
+    except BaseException as original_error:
+        try:
+            private_workspace.cleanup()
+        except Exception as cleanup_error:
+            _raise_cleanup_errors(
+                original_error, [f"private workspace: {cleanup_error}"],
+                error_type=Blocked)
         raise
 
     run_ids: set[str] = set()
@@ -2556,20 +2701,37 @@ def _execute_admitted(arguments: argparse.Namespace,
         return result
     except Blocked as exc:
         setattr(exc, "evidence_path", str(evidence.path))
-        evidence.finish("BLOCKED", str(exc), cycles=cycles)
+        try:
+            evidence.finish("BLOCKED", str(exc), cycles=cycles)
+        except Exception as write_error:
+            raise Blocked(
+                f"{exc}; failure evidence persistence also failed: {write_error}") from exc
         raise
     except QualificationFailure as exc:
         setattr(exc, "evidence_path", str(evidence.path))
-        evidence.finish("FAIL", str(exc), cycles=cycles)
+        try:
+            evidence.finish("FAIL", str(exc), cycles=cycles)
+        except Exception as write_error:
+            raise QualificationFailure(
+                f"{exc}; failure evidence persistence also failed: {write_error}") from exc
         raise
     except Exception as exc:
         failure = QualificationFailure(
             f"internal qualification error: {type(exc).__name__}: {exc}")
         setattr(failure, "evidence_path", str(evidence.path))
-        evidence.finish("FAIL", str(failure), cycles=cycles)
+        try:
+            evidence.finish("FAIL", str(failure), cycles=cycles)
+        except Exception as write_error:
+            raise QualificationFailure(
+                f"{failure}; failure evidence persistence also failed: {write_error}") from exc
         raise failure from exc
     finally:
-        private_workspace.cleanup()
+        original_error = sys.exc_info()[1]
+        try:
+            private_workspace.cleanup()
+        except Exception as cleanup_error:
+            _raise_cleanup_errors(
+                original_error, [f"private workspace: {cleanup_error}"])
 
 def execute(arguments: argparse.Namespace,
             admission: SourceAdmissionClient | None = None) -> dict:

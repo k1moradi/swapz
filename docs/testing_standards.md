@@ -173,6 +173,12 @@ the fresh zero-use baseline before the second allocation; only then is repeated
 swap-slot reuse proven. While a round is resident under pressure, exact mapper
 Used bytes must equal the dedicated cgroup's swap charge. Any difference is
 BLOCKED because traffic attribution or mapper ownership is ambiguous.
+The byte oracle expands the run/worker/round seed into position-distinct 4 KiB
+pages; swap-in checks every byte, counts all corrupt bytes and caps only the
+diagnostic samples. The cgroup's OOM event keys must be present and parseable.
+OOM, cgroup swap and PSI telemetry begin before FILL; guard checks enforce the
+1 GiB host MemAvailable floor and stop on sustained cgroup memory PSI "some"
+above 85% for at least five seconds.
 
 Once recovery-storage admission is proven and before `prepare`, the helper
 must durably create a root-owned 0600 attempt record under the validated
@@ -217,6 +223,13 @@ termination may use bounded TERM/KILL for the dedicated test processes only;
 signal-delivery exit races must not mask the underlying qualification failure,
 and one worker's cleanup must not wait for the other worker to leave the shared
 cgroup. Removal of the dedicated cgroup still requires every worker exited.
+Workers are tracked before cgroup migration and all parent pipe descriptors
+are closed even when admission fails. Bounded protocol reads retain multiple
+records from one read without blocking on partial records. Partial cgroup
+creation, first-telemetry failures and evidence temporary-file failures must
+clean up explicitly or expose the cleanup error alongside the original
+failure. A timed-out primary start must use only normal stop/recovery; a failed
+swapoff never authorizes forced mapper removal or module unload.
 
 At least two passing cycles require new run IDs and Linux swap UUIDs, zero
 initial mapper usage, no stale mapper/module/ownership state, durable

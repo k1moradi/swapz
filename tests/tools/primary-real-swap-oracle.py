@@ -40,8 +40,9 @@ def page_pattern(seed_hex: str, page_index: int) -> bytes:
     if page_index < 0:
         raise ValueError("page index must be nonnegative")
     seed = bytes.fromhex(seed_hex)
-    digest = hashlib.blake2s(seed + page_index.to_bytes(8, "little"), digest_size=32).digest()
-    return digest * (PAGE_BYTES // len(digest))
+    # Expand the run/page seed into position-distinct bytes across all 4 KiB.
+    # Repeating one 32-byte digest would miss within-page block transpositions.
+    return hashlib.shake_256(seed + page_index.to_bytes(8, "little")).digest(PAGE_BYTES)
 
 
 def _read_command() -> str:
@@ -108,38 +109,41 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         verify_started = time.monotonic()
         observed_digest = hashlib.blake2b(digest_size=32)
         mismatches = []
+        byte_mismatches = 0
         for page_index in range(pages):
             expected = page_pattern(seed_hex, page_index)
             offset = page_index * PAGE_BYTES
             observed = allocation[offset:offset + PAGE_BYTES]
             observed_digest.update(observed)
-            if observed != expected and len(mismatches) < 16:
-                first_difference = next(
-                    (index for index, (left, right) in enumerate(zip(observed, expected))
-                     if left != right),
-                    -1,
-                )
-                mismatches.append({
-                    "page": page_index,
-                    "byte": first_difference,
-                    "observed": observed[first_difference] if first_difference >= 0 else None,
-                    "expected": expected[first_difference] if first_difference >= 0 else None,
-                })
-            # An explicit same-value store makes every verified page writable
-            # again after swap-in without altering the deterministic oracle.
-            allocation[offset] = observed[0]
+            if observed != expected:
+                differences = [
+                    index for index, (left, right) in enumerate(zip(observed, expected))
+                    if left != right
+                ]
+                byte_mismatches += len(differences)
+                if len(mismatches) < 16:
+                    first_difference = differences[0]
+                    mismatches.append({
+                        "page": page_index,
+                        "byte": first_difference,
+                        "observed": observed[first_difference],
+                        "expected": expected[first_difference],
+                    })
+            # Store the expected value after reading the entire page: this
+            # forces a writable fault after swap-in without hiding corruption.
+            allocation[offset] = expected[0]
         actual_digest = observed_digest.hexdigest()
         expected_hex = expected_digest.hexdigest()
         _emit("ORACLE_VERIFIED=", {
             "verified_pages": pages,
             "verified_bytes": pages * PAGE_BYTES,
-            "mismatches": len(mismatches),
+            "mismatches": byte_mismatches,
             "mismatch_samples": mismatches,
             "digest": actual_digest,
             "expected_digest": expected_hex,
             "elapsed_seconds": round(time.monotonic() - verify_started, 6),
         })
-        return 0 if not mismatches and actual_digest == expected_hex else 1
+        return 0 if byte_mismatches == 0 and actual_digest == expected_hex else 1
     except (OSError, RuntimeError) as exc:
         print(f"FAIL: oracle workload failed: {exc}", file=sys.stderr)
         return 1

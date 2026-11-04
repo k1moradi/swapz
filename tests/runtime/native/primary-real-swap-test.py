@@ -2,7 +2,9 @@
 """Rootless contracts for the private primary real-swap qualification helper."""
 
 from dataclasses import replace
+import contextlib
 import importlib.util
+import io
 import hashlib
 import json
 import os
@@ -11,6 +13,7 @@ import stat
 import sys
 import struct
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -48,6 +51,58 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(len(first), qualify.PAGE_BYTES)
         self.assertEqual(first, again)
         self.assertNotEqual(first, other)
+
+    def test_oracle_page_stream_distinguishes_intra_page_positions(self):
+        page = oracle.page_pattern("ab" * 16, 3)
+        chunks = [page[index:index + 32] for index in range(0, len(page), 32)]
+        self.assertEqual(len(set(chunks)), qualify.PAGE_BYTES // 32)
+        self.assertNotEqual(page, oracle.page_pattern("cd" * 16, 3))
+
+    def test_oracle_counts_all_corrupted_bytes_without_misreporting_clean_data(self):
+        class MemoryFixture:
+            def __init__(self):
+                self.contents = bytearray(oracle.PAGE_BYTES)
+                self.closed = False
+
+            def __getitem__(self, key):
+                return self.contents[key]
+
+            def __setitem__(self, key, value):
+                self.contents[key] = value
+
+            def close(self):
+                self.closed = True
+
+        for corrupt in (False, True):
+            with self.subTest(corrupt=corrupt):
+                allocation = MemoryFixture()
+                output = io.StringIO()
+                commands = iter(("FILL", "VERIFY"))
+
+                def command():
+                    value = next(commands)
+                    if corrupt and value == "VERIFY":
+                        allocation.contents[9] ^= 1
+                        allocation.contents[20] ^= 2
+                    return value
+
+                with mock.patch.object(oracle, "MIB", oracle.PAGE_BYTES), \
+                        mock.patch.object(oracle, "MIN_MIB", 1), \
+                        mock.patch.object(oracle, "MAX_MIB", 1), \
+                        mock.patch.object(oracle, "_disable_dumps"), \
+                        mock.patch.object(oracle, "_read_command", side_effect=command), \
+                        mock.patch.object(oracle.mmap, "mmap", return_value=allocation), \
+                        contextlib.redirect_stdout(output):
+                    status = oracle.run_workload("12" * 16, 1)
+                verified = [
+                    json.loads(line[len("ORACLE_VERIFIED="):])
+                    for line in output.getvalue().splitlines()
+                    if line.startswith("ORACLE_VERIFIED=")
+                ][0]
+                self.assertEqual(status, 1 if corrupt else 0)
+                self.assertEqual(verified["mismatches"], 2 if corrupt else 0)
+                self.assertEqual(len(verified["mismatch_samples"]), 1 if corrupt else 0)
+                self.assertTrue(allocation.closed)
 
     def test_oracle_rejects_malformed_seed_and_negative_page(self):
         for seed in ("", "a" * 31, "A" * 32, "g" * 32):
@@ -785,6 +840,32 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with self.assertRaisesRegex(qualify.QualificationFailure, "identity changed"):
             qualify.evaluate_stop_samples(samples)
 
+    def test_oracle_protocol_consumes_buffered_records_and_rejects_duplicates(self):
+        read_fd, write_fd = os.pipe()
+        pending = bytearray()
+        try:
+            with os.fdopen(read_fd, "rb", buffering=0) as output:
+                process = mock.Mock(stdout=output)
+                process.poll.return_value = None
+                os.write(write_fd, (
+                    b'ORACLE_WAITING={"pid":123}\n'
+                    b'ORACLE_FILLED={"pages":4}\n'
+                ))
+                deadline = time.monotonic() + 1
+                self.assertEqual(
+                    qualify._oracle_event(process, "ORACLE_WAITING=",
+                                          deadline, lambda: None, pending)["pid"], 123)
+                self.assertEqual(
+                    qualify._oracle_event(process, "ORACLE_FILLED=",
+                                          deadline, lambda: None, pending)["pages"], 4)
+                os.write(write_fd, b'ORACLE_VERIFIED={"mismatches":0,"mismatches":0}\n')
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure, "malformed JSON"):
+                    qualify._oracle_event(process, "ORACLE_VERIFIED=",
+                                          deadline, lambda: None, pending)
+        finally:
+            os.close(write_fd)
+
     def test_oracle_cleanup_handles_exit_races_without_waiting_for_other_workers(self):
         with tempfile.TemporaryDirectory() as directory:
             cgroup = Path(directory)
@@ -1083,6 +1164,93 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(aggregated["digest"], aggregated["expected_digest"])
         with self.assertRaises(qualify.QualificationFailure):
             qualify.aggregate_oracle_verification([record])
+
+    def test_initial_telemetry_failure_removes_cgroup_and_preserves_cleanup_error(self):
+        cgroup = Path("/synthetic/swapz-cgroup")
+        with mock.patch.object(qualify, "_cgroup_create", return_value=cgroup), \
+                mock.patch.object(qualify, "_memory_events",
+                                  side_effect=qualify.Blocked("missing oom")), \
+                mock.patch.object(qualify, "_remove_cgroup") as remove:
+            with self.assertRaisesRegex(qualify.Blocked, "missing oom"):
+                qualify._run_workload({}, {}, ORACLE, 384, 128, 384, 60)
+            remove.assert_called_once_with(cgroup)
+
+        with mock.patch.object(qualify, "_cgroup_create", return_value=cgroup), \
+                mock.patch.object(qualify, "_memory_events",
+                                  side_effect=qualify.Blocked("missing oom")), \
+                mock.patch.object(qualify, "_remove_cgroup",
+                                  side_effect=qualify.QualificationFailure("rmdir failed")):
+            with self.assertRaisesRegex(
+                    qualify.Blocked, "missing oom; cleanup also failed: .*rmdir failed"):
+                qualify._run_workload({}, {}, ORACLE, 384, 128, 384, 60)
+
+    def test_preflight_telemetry_failure_keeps_both_causes_when_rmdir_fails(self):
+        with mock.patch.object(qualify, "_mem_available_mib", return_value=4096), \
+                mock.patch.object(qualify, "_cgroup_create",
+                                  return_value=Path("/synthetic/preflight")), \
+                mock.patch.object(qualify, "_read_uint",
+                                  side_effect=qualify.Blocked("missing swap.current")), \
+                mock.patch.object(qualify, "_remove_cgroup",
+                                  side_effect=qualify.QualificationFailure("rmdir refused")):
+            with self.assertRaisesRegex(
+                    qualify.Blocked, "missing swap.current; cleanup also failed: .*rmdir refused"):
+                qualify.preflight_workload_environment(384, 128, 384)
+
+    def test_worker_migration_failure_reaps_child_and_closes_every_pipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            child = mock.Mock(pid=321)
+            child.stdin, child.stdout, child.stderr = (
+                io.StringIO(), io.StringIO(), io.StringIO())
+            original_write_text = Path.write_text
+
+            def deny_migration(path, *args, **kwargs):
+                if path.name == "cgroup.procs":
+                    raise OSError("synthetic migration refusal")
+                return original_write_text(path, *args, **kwargs)
+
+            expected = qualify.SwapRow("/dev/dm-1", "partition", 512000, 0, 5, (252, 1))
+            with mock.patch.object(qualify, "_cgroup_create", return_value=cgroup), \
+                    mock.patch.object(qualify, "_memory_events",
+                                      return_value={"oom": 0, "oom_kill": 0}), \
+                    mock.patch.object(qualify, "_psi_total", return_value=0), \
+                    mock.patch.object(qualify, "_write_control"), \
+                    mock.patch.object(qualify, "read_swap_rows", return_value=[expected]), \
+                    mock.patch.object(qualify.subprocess, "Popen", return_value=child), \
+                    mock.patch.object(qualify, "_terminate_child") as terminate, \
+                    mock.patch.object(qualify, "_remove_cgroup") as remove, \
+                    mock.patch.object(Path, "write_text", deny_migration):
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure, "synthetic migration refusal"):
+                    qualify._run_workload(
+                        {"run_id": "a" * 32}, {"mapper_device": (252, 1)},
+                        ORACLE, 384, 128, 384, 60)
+            terminate.assert_called_once_with(child, cgroup)
+            remove.assert_called_once_with(cgroup)
+            self.assertTrue(all(pipe.closed for pipe in
+                                (child.stdin, child.stdout, child.stderr)))
+
+    def test_partial_cgroup_configuration_reports_cleanup_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(qualify, "CGROUP_ROOT", Path(directory)), \
+                    mock.patch.object(qualify, "_cgroup_prerequisites"):
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure,
+                        "dedicated cgroup lacks required control.*partial cgroup cleanup also failed"):
+                    qualify._cgroup_create("test", 128, 384)
+
+    def test_missing_or_duplicate_cgroup_oom_evidence_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            events = Path(directory) / "memory.events"
+            for payload in ("max 2\n", "oom 0\noom 1\noom_kill 0\n",
+                            "oom 0\noom_kill nope\n"):
+                with self.subTest(payload=payload):
+                    events.write_text(payload)
+                    with self.assertRaises(qualify.Blocked):
+                        qualify._memory_events(events)
+            events.write_text("oom 0\noom_kill 0\n")
+            self.assertEqual(qualify._memory_events(events),
+                             {"oom": 0, "oom_kill": 0})
 
     def test_slot_reuse_requires_full_release_then_second_concurrent_allocation(self):
         rounds = [
