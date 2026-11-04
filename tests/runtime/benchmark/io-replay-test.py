@@ -3329,6 +3329,17 @@ class PairReplayContract(unittest.TestCase):
                 "mapper_uuid": mapper_uuid,
                 "metadata_ram_trace": trace,
                 "metadata_ram_summary": ram_summary,
+                "metadata_ram_arm_binding": {
+                    "arm_started_monotonic_ns": 1_300_000_000,
+                    "arm_finished_monotonic_ns": 1_700_000_000,
+                    "gc_activity_intervals": [{
+                        "start_monotonic_ns": 1_300_000_000,
+                        "end_monotonic_ns": 1_700_000_000,
+                        "gc_wall_ns": 1,
+                        "gc_victims": 1,
+                        "gc_pages": 1,
+                    }],
+                },
             })
         self.assertIsNone(evidence.campaign_capacity_and_ram(
             [capacity_pair], 4096, source_sha, trace))
