@@ -652,8 +652,9 @@ def merge_phase(results, wall_ns: int, hot_pages: int | None = None,
         if phase_start_ns is not None:
             output["start_monotonic_ns"] = (
                 phase_start_ns + minute * 60_000_000_000)
-            output["end_monotonic_ns"] = (
-                output["start_monotonic_ns"] + 60_000_000_000)
+            output["end_monotonic_ns"] = min(
+                output["start_monotonic_ns"] + 60_000_000_000,
+                phase_start_ns + wall_ns)
         if hot_pages is not None:
             output["cumulative_overwrite"] = overwrite_coverage(
                 hot_pages, lane_count, cumulative_lane_writes)

@@ -2368,8 +2368,18 @@ class PairReplayContract(unittest.TestCase):
             self.assertIn("not live physical-segment utilization",
                           report["occupancy_scope"])
             self.assertGreaterEqual(report["max_no_progress_seconds"], 0)
-            self.assertTrue(report["minute_buckets"])
+            self.assertEqual(len(report["minute_buckets"]), 1)
             minute = report["minute_buckets"][0]
+            self.assertGreaterEqual(
+                minute["start_monotonic_ns"],
+                report["measured_start_monotonic_ns"])
+            self.assertLessEqual(
+                minute["end_monotonic_ns"],
+                report["measured_end_monotonic_ns"])
+            self.assertAlmostEqual(
+                (minute["end_monotonic_ns"] -
+                 minute["start_monotonic_ns"]) / 1e9,
+                minute["duration_seconds"], places=9)
             self.assertIn("p95_ns", minute)
             self.assertIn("read_p99_ns", minute)
             self.assertIn("write_p99_ns", minute)
