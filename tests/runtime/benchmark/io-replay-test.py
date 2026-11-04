@@ -2433,6 +2433,13 @@ class PairReplayContract(unittest.TestCase):
         qualification = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(qualification)
 
+        def histogram(sample_ns, count):
+            index = qualification.latency_bin_index(sample_ns)
+            return {
+                "count": count, "max_ns": sample_ns,
+                "bins": [[index, count]],
+            }
+
         def arm(candidate, raw_write=100.0, screened=True, order="raw-first"):
             swapz = candidate == "swapz"
             writes, reads = 838860, 209716
@@ -2452,13 +2459,17 @@ class PairReplayContract(unittest.TestCase):
                     "build_source_clean": "1",
                     "allow_physical_backing": "Y",
                 } if swapz else {"status": "NOT_LOADED"}),
-                "logical_pages": 4096, "occupied_pages": 408, "hot_pages": 328,
+                "logical_pages": 4096, "occupied_pages": 409, "hot_pages": 327,
                 "occupancy_percent": 10, "hot_percent": 8,
                 "qd": 8, "read_percent": 20, "fill_fixture_sha256": "f" * 64,
                 "churn_fixture_sha256": "c" * 64,
                 "fill_content_profile": "balanced", "churn_content_profile": "balanced",
                 "workload_seed": 1,
-                "operation_recipe_sha256": "r" * 64,
+                "operation_recipe_sha256": hashlib.sha256(json.dumps({
+                    "seed": 1, "logical": 4096, "occupied": 409,
+                    "hot": 327, "qd": 8, "read": 20,
+                    "fill": "f" * 64, "churn": "c" * 64,
+                }, sort_keys=True).encode()).hexdigest(),
                 "warmup_operations": 65536, "warmup_seconds": None,
                 "measure_operations": 1048576, "measure_seconds_requested": None,
                 "read_ops": reads,
@@ -2476,10 +2487,32 @@ class PairReplayContract(unittest.TestCase):
                     "lower_write_requests_per_1000_logical_writes":
                         lower_write_requests * 1000 / writes},
                 "latency": {
-                    "read_p95_ns": 105 if swapz else 100,
-                    "read_p99_ns": 105 if swapz else 100,
-                    "write_p95_ns": 105 if swapz else 100,
-                    "write_p99_ns": 105 if swapz else 100},
+                    "read_count": reads,
+                    "write_count": writes,
+                    "read_histogram": histogram(
+                        105 if swapz else 100, reads),
+                    "write_histogram": histogram(
+                        105 if swapz else 100, writes),
+                    "read_p50_ns": qualification.latency_bin_upper(
+                        qualification.latency_bin_index(
+                            105 if swapz else 100)),
+                    "read_p95_ns": qualification.latency_bin_upper(
+                        qualification.latency_bin_index(
+                            105 if swapz else 100)),
+                    "read_p99_ns": qualification.latency_bin_upper(
+                        qualification.latency_bin_index(
+                            105 if swapz else 100)),
+                    "read_max_ns": 105 if swapz else 100,
+                    "write_p50_ns": qualification.latency_bin_upper(
+                        qualification.latency_bin_index(
+                            105 if swapz else 100)),
+                    "write_p95_ns": qualification.latency_bin_upper(
+                        qualification.latency_bin_index(
+                            105 if swapz else 100)),
+                    "write_p99_ns": qualification.latency_bin_upper(
+                        qualification.latency_bin_index(
+                            105 if swapz else 100)),
+                    "write_max_ns": 105 if swapz else 100},
                 "cpu": {
                     "measured_cpu_seconds_per_useful_byte": cpu_per_byte,
                     "replay_user_seconds": cpu_per_byte * (reads + writes) * PAGE,
@@ -2556,6 +2589,13 @@ class PairReplayContract(unittest.TestCase):
                 lambda row: row["swapz"].pop("arm_boot_id"),
                 lambda row: row["swapz"]["lower_io"].update(
                     lower_write_requests=True),
+                lambda row: (
+                    row["raw"].pop("warmup_seconds"),
+                    row["swapz"].pop("warmup_seconds")),
+                lambda row: (
+                    row["raw"].update(operation_recipe_sha256="0" * 64),
+                    row["swapz"].update(operation_recipe_sha256="0" * 64)),
+                lambda row: row["raw"]["latency"].update(read_p50_ns=101),
         ):
             tampered_pairs = json.loads(json.dumps(stable_pairs))
             corrupt(tampered_pairs[0])
@@ -2564,6 +2604,31 @@ class PairReplayContract(unittest.TestCase):
                 tampered["decisions"]["sd-service-balanced"]["status"],
                 "INCOMPLETE")
             self.assertFalse(tampered["records"][0]["analysis_usable"])
+
+        # JSON decoding is strict: duplicate keys and non-standard numeric
+        # constants cannot be converted into apparently valid evidence.
+        with tempfile.TemporaryDirectory() as directory:
+            duplicate = Path(directory) / "duplicate.json"
+            duplicate.write_text('{"status":"PASS","status":"EXCLUDED"}')
+            with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+                qualification._load_json_path(duplicate)
+            nonfinite = Path(directory) / "nonfinite.json"
+            nonfinite.write_text('{"value":NaN}')
+            with self.assertRaisesRegex(ValueError, "non-finite JSON number"):
+                qualification._load_json_path(nonfinite)
+
+        # Python bool is an int subclass; QD1 must still require a JSON integer.
+        qd1 = arm("raw")
+        qd1["qd"] = True
+        qd1["operation_recipe_sha256"] = hashlib.sha256(json.dumps({
+            "seed": 1, "logical": 4096, "occupied": 409,
+            "hot": 327, "qd": True, "read": 20,
+            "fill": "f" * 64, "churn": "c" * 64,
+        }, sort_keys=True).encode()).hexdigest()
+        qd1_reasons = qualification.validate_arm(
+            qd1, "sd-service-qd1-balanced", "raw")
+        self.assertTrue(any(
+            "qd is missing, mistyped" in reason for reason in qd1_reasons))
 
         self.assertTrue(stable["campaign_target_consistent"])
         self.assertEqual(
@@ -2802,9 +2867,21 @@ class PairReplayContract(unittest.TestCase):
         qualification = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(qualification)
 
+        minute_latency_index = qualification.latency_bin_index(1)
+        minute_latency = qualification.latency_bin_upper(
+            minute_latency_index)
         minute_buckets = [
-            {"minute": index, "read_operations": 1, "write_operations": 1,
-             "operations": 2}
+            {
+                "minute": index, "duration_seconds": 60.0,
+                "read_operations": 1, "write_operations": 1,
+                "operations": 2,
+                "logical_write_mbps": PAGE / 60.0 / 1_000_000,
+                "p95_ns": minute_latency, "p99_ns": minute_latency,
+                "latency_histogram": {
+                    "count": 2, "max_ns": 1,
+                    "bins": [[minute_latency_index, 2]],
+                },
+            }
             for index in range(60)]
         intervals = [
             {"interval": index, "start_seconds": float(index * 60),
@@ -2830,6 +2907,11 @@ class PairReplayContract(unittest.TestCase):
             lambda arm: arm.update(seconds=3599.0),
             lambda arm: arm["minute_buckets"].pop(30),
             lambda arm: arm["minute_buckets"][0].update(write_operations=0),
+            lambda arm: arm["minute_buckets"][0].update(
+                logical_write_mbps=999.0),
+            lambda arm: arm["minute_buckets"][0].update(duration_seconds=59.0),
+            lambda arm: arm["minute_buckets"][0][
+                "latency_histogram"]["bins"][0].__setitem__(1, 1),
             lambda arm: arm["sustained_intervals"].pop(),
             lambda arm: arm["sustained_intervals"][1].update(start_seconds=61.0),
             lambda arm: arm["sustained_intervals"][20].update(
@@ -2971,6 +3053,12 @@ class PairReplayContract(unittest.TestCase):
                     result, {"status": "FAIL", "value": 2})
             self.assertEqual(result.read_bytes(), expected)
 
+            nonfinite = root / "nonfinite.json"
+            with self.assertRaisesRegex(ValueError, "Out of range float"):
+                evidence_io.write_new_json(
+                    nonfinite, {"status": "PASS", "value": float("nan")})
+            self.assertFalse(nonfinite.exists())
+
             failed = root / "link-failure.json"
             with mock.patch.object(
                     evidence_io.os, "link",
@@ -3061,6 +3149,12 @@ class PairReplayContract(unittest.TestCase):
             "swapz_campaign_evidence", evidence_path)
         evidence = importlib.util.module_from_spec(evidence_spec)
         evidence_spec.loader.exec_module(evidence)
+
+        with tempfile.TemporaryDirectory() as directory:
+            nonfinite = Path(directory) / "nonfinite.json"
+            nonfinite.write_text('{"value":Infinity}')
+            with self.assertRaisesRegex(ValueError, "invalid JSON evidence"):
+                evidence.read_json(nonfinite)
 
         self.assertEqual(
             evidence.campaign_status(
@@ -3800,8 +3894,29 @@ class PairReplayContract(unittest.TestCase):
         qualification = importlib.util.module_from_spec(qualification_spec)
         qualification_spec.loader.exec_module(qualification)
         spec = qualification.CONTRACT["workloads"]["anonymous-swap"]
+        pages = spec["bytes"] // PAGE
+        anonymous_latency_index = qualification.latency_bin_index(1)
+        anonymous_latency = qualification.latency_bin_upper(
+            anonymous_latency_index)
+        round_latency = {
+            "count": pages,
+            "p50_ns": anonymous_latency,
+            "p95_ns": anonymous_latency,
+            "p99_ns": anonymous_latency,
+            "max_ns": 1,
+            "histogram": {
+                "count": pages, "max_ns": 1,
+                "bins": [[anonymous_latency_index, pages]],
+            },
+        }
+        rounds = [
+            {"seconds": 1.0, "latency": copy.deepcopy(round_latency)}
+            for _ in range(spec["rounds"])]
+        useful_read_bytes = spec["bytes"] * spec["rounds"]
         arm = {
-            "bytes": spec["bytes"], "round_count": spec["rounds"],
+            "source_sha": "a" * 40,
+            "bytes": spec["bytes"], "pages": pages,
+            "round_count": spec["rounds"], "rounds": rounds,
             "required_swap_bytes": spec["minimum_observed_swap_bytes"],
             "content": spec["content"],
             "arm_started_monotonic_ns": 100,
@@ -3810,11 +3925,101 @@ class PairReplayContract(unittest.TestCase):
             "loaded_module_provenance": {"status": "NOT_LOADED"},
             "swap_device_identity": {
                 "device": "8:1", "dm_uuid": None, "dm_target": None,
-                "lower_device": "8:1"},
-            "cgroup_before": {"memory_max": spec["memory_max_bytes"]},
+                "lower_device": "8:1",
+                "physical_partuuid": "f13428f6-01",
+                "physical_device_bytes": 124787884032,
+                "parent_major_minor": "8:0",
+                "parent_model": "SD",
+                "parent_transport": "usb"},
+            "cgroup_before": {
+                "path": "/sys/fs/cgroup/swapz-audit",
+                "memory_max": spec["memory_max_bytes"],
+                "memory_swap_max": "max",
+            },
+            "cgroup_after": {
+                "path": "/sys/fs/cgroup/swapz-audit",
+            },
+            "swap_inventory_before": [{
+                "device": "8:1", "used_kib": 0,
+            }],
+            "swap_inventory_after": [{
+                "device": "8:1", "used_kib": 128 * 1024,
+            }],
+            "throughput": {
+                "useful_read_bytes": useful_read_bytes,
+                "read_seconds": float(spec["rounds"]),
+                "useful_read_mbps":
+                    useful_read_bytes / spec["rounds"] / 1_000_000,
+            },
+            "lower_io": {
+                "lower_write_bytes": spec["bytes"],
+                "lower_write_requests": pages,
+                "lower_read_bytes": useful_read_bytes,
+                "lower_write_bytes_per_logical_fill_byte": 1.0,
+                "lower_write_requests_per_1000_fill_pages": 1000.0,
+                "lower_read_bytes_per_logical_read_byte": 1.0,
+            },
+            "cpu": {
+                "workload_process_user_seconds": 1.0,
+                "workload_process_system_seconds": .5,
+                "workload_process_cpu_seconds": 1.5,
+                "exported_swapz_worker_cpu_seconds": 0.0,
+                "attributed_cpu_seconds": 1.5,
+                "measured_cpu_seconds_per_useful_byte":
+                    1.5 / (spec["bytes"] + useful_read_bytes),
+            },
+            "swapin_latency": {
+                "count": pages * spec["rounds"],
+                "p50_ns": anonymous_latency,
+                "p95_ns": anonymous_latency,
+                "p99_ns": anonymous_latency,
+                "max_ns": 1,
+                "histogram": {
+                    "count": pages * spec["rounds"], "max_ns": 1,
+                    "bins": [[
+                        anonymous_latency_index,
+                        pages * spec["rounds"]]],
+                },
+            },
+            "oracle": {
+                "mismatches": 0,
+                "verified_pages": pages * spec["rounds"],
+            },
         }
         self.assertEqual(
             qualification.validate_arm(arm, "anonymous-swap", "raw"), [])
+        tampered_accounting = copy.deepcopy(arm)
+        tampered_accounting["lower_io"][
+            "lower_write_bytes_per_logical_fill_byte"] = 0.0
+        self.assertTrue(any(
+            "anonymous accounting" in reason
+            for reason in qualification.validate_arm(
+                tampered_accounting, "anonymous-swap", "raw")))
+        tampered_latency = copy.deepcopy(arm)
+        tampered_latency["swapin_latency"]["p99_ns"] += 1
+        self.assertTrue(any(
+            "aggregate swap-in latency evidence" in reason
+            for reason in qualification.validate_arm(
+                tampered_latency, "anonymous-swap", "raw")))
+        insufficient_swap_max = copy.deepcopy(arm)
+        insufficient_swap_max["cgroup_before"]["memory_swap_max"] = 1
+        self.assertTrue(any(
+            "memory.swap.max" in reason
+            for reason in qualification.validate_arm(
+                insufficient_swap_max, "anonymous-swap", "raw")))
+        wrong_inventory = copy.deepcopy(arm)
+        wrong_inventory["swap_inventory_after"][0]["device"] = "8:17"
+        self.assertTrue(any(
+            "swap_inventory_after" in reason
+            for reason in qualification.validate_arm(
+                wrong_inventory, "anonymous-swap", "raw")))
+        malformed_identity = copy.deepcopy(arm)
+        malformed_identity["swap_device_identity"][
+            "physical_partuuid"] = "F13428F6-01"
+        self.assertTrue(any(
+            "anonymous physical lower identity" in reason
+            for reason in qualification.validate_arm(
+                malformed_identity, "anonymous-swap", "raw")))
         # A synthetic arm cannot bypass the physical chronology contract.
         missing_boot = {**arm, "arm_boot_id": None}
         self.assertTrue(any(

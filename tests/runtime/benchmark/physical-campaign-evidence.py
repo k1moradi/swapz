@@ -46,6 +46,10 @@ def unique_object(pairs):
     return result
 
 
+def reject_json_constant(value):
+    raise ValueError(f"non-finite JSON number {value}")
+
+
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -81,7 +85,8 @@ def read_json(path: Path) -> tuple[dict, bytes]:
     data = read_regular_bytes(path)
     try:
         value = json.loads(
-            data.decode("utf-8"), object_pairs_hook=unique_object)
+            data.decode("utf-8"), object_pairs_hook=unique_object,
+            parse_constant=reject_json_constant)
     except (UnicodeDecodeError, ValueError) as exc:
         raise ValueError(f"invalid JSON evidence {path}: {exc}") from exc
     if not isinstance(value, dict):

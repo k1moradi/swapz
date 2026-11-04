@@ -536,10 +536,12 @@ counter, require its presence as a nonnegative integer, and enforce the frozen
 `gc_no_headroom_skips_max` bound. Missing/negative counters cannot be treated
 as zero skips; this is fail-closed evidence validation, not a new threshold.
 It also verifies that each arm actually measured at least 3,600 seconds,
-preserved all consecutive one-minute operation buckets with matching whole-arm
-READ/WRITE counts, covered the full measured hour with gap-free telemetry,
-and recorded no greater than 10-second progress gap or target failure/no-
-headroom skip in any swapz interval. Logical occupancy transitions must prove
+preserved exactly 60 consecutive one-minute operation buckets with matching
+whole-arm READ/WRITE counts, and independently recomputes each bucket's useful
+WRITE throughput from its write count and 60-second duration before evaluating
+first/last-quartile drift. The telemetry must cover the full measured hour
+without gaps and record no greater than 10-second progress gap or target
+failure/no-headroom skip in any swapz interval. Logical occupancy transitions must prove
 the filled 90% region remained covered through the measured end; final byte
 oracle evidence must cover that occupied region. These checks cannot replace
 the final full-byte verification or imply 90% *physical-segment* occupancy.
@@ -605,10 +607,13 @@ the signal. Worker and campaign JSON publication is atomic and create-only:
 complete 0600 bytes are fsync'd before the final name is linked, and an existing
 file or symlink is never followed or replaced. A failed storage write removes
 its private temporary inode instead of exposing partial JSON. A later invocation
-therefore cannot erase an interrupted attempt. Sustained
-latency histograms use 16 sub-buckets per power-of-two range, bounding
-percentile bucket width to 6.25% so the 25% p95/p99 gates are not dominated by
-coarse quantization. The swapz scheduler samples
+therefore cannot erase an interrupted attempt. Physical acceptance latency
+uses 16 sub-buckets per power-of-two range, bounding percentile bucket width to
+6.25% so the 25% p95/p99 gates are not dominated by coarse quantization.
+Block-service, cold-read, sustained-minute and anonymous-swap evidence persists
+the nonzero histogram bins plus exact sample count and maximum. The evaluator
+reconstructs every acceptance-critical p50/p95/p99 from those bins; editable
+percentile summaries cannot independently promote a result. The swapz scheduler samples
 \`/proc/meminfo\` every 100 ms from a one-second pre-create baseline through mapper
 creation, the measured workload and two seconds of post-workload quiescence. It
 records the minimum \`MemAvailable\` plus \`SUnreclaim\`/\`VmallocUsed\` context and
@@ -658,15 +663,29 @@ For block replay, it independently recomputes useful WRITE throughput and
 normalized lower WRITE bytes/requests from elapsed measured seconds, completed
 READ/WRITE operation counts and parent-device WRITE counters. It reconstructs
 the CPU/useful-byte metric from measured process user/system plus exported
-worker seconds, and reconciles the absolute Linux VmHWM, process peak,
-measurement-start HWM and diagnostic growth. Missing, nonfinite, negative or
-contradictory counters never qualify, even when favorable normalized fields
-are supplied. Fixed-work service arms must complete the specified operation
-count, not just echo the requested count.
+worker seconds, reconciles the absolute Linux VmHWM, process peak,
+measurement-start HWM and diagnostic growth, and re-derives occupied/hot page
+counts plus the deterministic operation-recipe digest from the recorded
+logical geometry, fixture hashes and seed. READ/WRITE latency summaries must
+exactly match their serialized sparse histograms and recorded operation counts.
+Anonymous arms likewise re-derive useful READ throughput, normalized lower
+WRITE/READ accounting and attributed CPU from raw byte, request, round-duration
+and CPU components; aggregate and per-round sparse latency histograms must match
+the exact page/round geometry and oracle coverage.
+Missing, nonfinite, negative or contradictory counters never qualify, even
+when favorable normalized fields are supplied. Fixed-work service arms must
+complete the specified operation count, not just echo the requested count.
+JSON evidence decoding rejects duplicate object keys and non-standard
+NaN/Infinity constants. Contract fields are presence- and type-strict:
+a missing field whose required value is JSON null is not equivalent to an
+explicit null, and booleans never satisfy integer workload geometry such as
+QD1.
 Every accepted pair must also resolve to one exact physical lower identity
-(PARTUUID, byte size, major:minor and parent major:minor/model/transport for block
-replay; exact lower major:minor for anonymous swap), and all accepted pairs
-must agree. Physical block replay arms now retain a monotonic begin/end interval
+(PARTUUID, byte size, lower major:minor and parent major:minor/model/transport)
+for both block replay and anonymous swap, and all accepted pairs must agree.
+The anonymous worker resolves these fields from the mapper's sole partition
+slave (or the raw partition itself) and rechecks the complete identity at arm
+completion; a matching recycled major:minor alone is not same-card evidence. Physical block replay arms now retain a monotonic begin/end interval
 and boot ID. The evaluator proves the selected raw-first/swapz-first order from
 non-overlapping actual intervals and requires matching boot IDs, not merely
 the user-supplied order label. The campaign sealer also compares each arm's

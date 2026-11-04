@@ -37,7 +37,9 @@ def write_new_json(path: Path, value: dict) -> None:
         if not stat.S_ISDIR(directory_info.st_mode):
             raise ValueError("evidence result parent is not a directory")
 
-        payload = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+        payload = (
+            json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        ).encode()
         create_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
         if hasattr(os, "O_NOFOLLOW"):
             create_flags |= os.O_NOFOLLOW

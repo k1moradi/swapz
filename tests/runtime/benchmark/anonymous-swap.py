@@ -10,6 +10,7 @@ import argparse
 import array
 import hashlib
 import json
+import math
 import mmap
 import os
 import re
@@ -204,6 +205,41 @@ def _device_sysfs(expected_device: str) -> tuple[Path, os.stat_result]:
     return sysdev, info
 
 
+def physical_lower_identity(sysdev: Path) -> dict:
+    """Resolve the exact removable partition backing one anonymous swap arm."""
+    if not (sysdev / "partition").is_file():
+        raise ValueError("anonymous physical lower must be a partition")
+    lower_device = (sysdev / "dev").read_text().strip()
+    if not re.fullmatch(r"[0-9]+:[0-9]+", lower_device):
+        raise ValueError("anonymous physical lower major:minor is malformed")
+    partuuid = subprocess.run(
+        ["lsblk", "-dnro", "PARTUUID", "/dev/" + sysdev.name],
+        text=True, capture_output=True, check=True, timeout=10).stdout.strip()
+    partuuid = QUALIFICATION["normalize_partuuid"](partuuid)
+    if partuuid is None:
+        raise ValueError("anonymous physical lower PARTUUID is malformed")
+    size_bytes = int((sysdev / "size").read_text()) * 512
+    parent = sysdev.parent
+    parent_device = (parent / "dev").read_text().strip()
+    if (not re.fullmatch(r"[0-9]+:[0-9]+", parent_device) or
+            (parent / "removable").read_text().strip() != "1"):
+        raise ValueError("anonymous physical parent identity is invalid")
+    parent_model = (parent / "device/model").read_text().strip()
+    parent_transport = subprocess.run(
+        ["lsblk", "-dnro", "TRAN", "/dev/" + parent.name],
+        text=True, capture_output=True, check=True, timeout=10).stdout.strip()
+    if not parent_model or not parent_transport or size_bytes <= 0:
+        raise ValueError("anonymous physical lower/parent identity is incomplete")
+    return {
+        "lower_device": lower_device,
+        "physical_partuuid": partuuid,
+        "physical_device_bytes": size_bytes,
+        "parent_major_minor": parent_device,
+        "parent_model": parent_model,
+        "parent_transport": parent_transport,
+    }
+
+
 def device_stat(expected_device: str | None):
     if not expected_device:
         return None
@@ -236,6 +272,11 @@ def swap_device_identity(expected_device: str, candidate: str,
         "dm_uuid": None,
         "dm_target": None,
         "lower_device": None,
+        "physical_partuuid": None,
+        "physical_device_bytes": None,
+        "parent_major_minor": None,
+        "parent_model": None,
+        "parent_transport": None,
     }
     if sysdev.name.startswith("dm-"):
         if candidate != "swapz":
@@ -260,14 +301,16 @@ def swap_device_identity(expected_device: str, candidate: str,
             "dm_name": dm_name,
             "dm_uuid": dm_uuid,
             "dm_target": "swapz",
-            "lower_device": (lower / "dev").read_text().strip(),
+            **physical_lower_identity(lower),
         })
     else:
         if candidate != "raw":
             raise ValueError("swapz anonymous arm requires the exact DM mapper")
         if expected_dm_uuid:
             raise ValueError("raw anonymous arm must not name a DM UUID")
-        identity["lower_device"] = identity["device"]
+        identity.update(physical_lower_identity(sysdev))
+        if identity["lower_device"] != identity["device"]:
+            raise ValueError("raw anonymous lower identity differs from device")
     return identity
 
 
@@ -351,11 +394,40 @@ def quiet_window():
 
 
 def latency_summary(values: array.array) -> dict:
-    if not values: return {"count": 0, "p50_ns": None, "p95_ns": None, "p99_ns": None, "max_ns": None}
-    ordered = sorted(values)
-    def percentile(fraction): return ordered[min(len(ordered) - 1, int((len(ordered) - 1) * fraction))]
-    return {"count": len(ordered), "p50_ns": percentile(.50), "p95_ns": percentile(.95),
-            "p99_ns": percentile(.99), "max_ns": ordered[-1]}
+    if not values:
+        return {
+            "count": 0, "p50_ns": None, "p95_ns": None,
+            "p99_ns": None, "max_ns": None,
+            "histogram": {"count": 0, "max_ns": None, "bins": []},
+        }
+    bins = {}
+    maximum = 0
+    for raw_value in values:
+        value = int(raw_value)
+        index = QUALIFICATION["latency_bin_index"](value)
+        bins[index] = bins.get(index, 0) + 1
+        maximum = max(maximum, value)
+    rows = [[index, bins[index]] for index in sorted(bins)]
+
+    def percentile(fraction):
+        target = max(1, math.ceil(len(values) * fraction))
+        seen = 0
+        for index, count in rows:
+            seen += count
+            if seen >= target:
+                return QUALIFICATION["latency_bin_upper"](index)
+        raise ValueError("anonymous latency histogram is incomplete")
+
+    return {
+        "count": len(values),
+        "p50_ns": percentile(.50),
+        "p95_ns": percentile(.95),
+        "p99_ns": percentile(.99),
+        "max_ns": maximum,
+        "histogram": {
+            "count": len(values), "max_ns": maximum, "bins": rows,
+        },
+    }
 
 
 def run(args):

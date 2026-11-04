@@ -154,6 +154,16 @@ class LatencyHistogram:
                 "p50_ns": self.percentile(.50), "p95_ns": self.percentile(.95),
                 "p99_ns": self.percentile(.99), "max_ns": self.max_ns if self.count else None}
 
+    def evidence(self) -> dict:
+        return {
+            "count": self.count,
+            "max_ns": self.max_ns if self.count else None,
+            "bins": [
+                [index, int(value)]
+                for index, value in enumerate(self.bins) if value
+            ],
+        }
+
 
 class ProgressTracker:
     def __init__(self):
@@ -621,10 +631,12 @@ def merge_phase(results, wall_ns: int, hot_pages: int | None = None):
         ]
         output = {
             "minute": minute,
+            "duration_seconds": seconds,
             "logical_write_mbps":
                 row["writes"] * PAGE / max(seconds, 1e-9) / 1_000_000,
             "p95_ns": combined.percentile(.95),
             "p99_ns": combined.percentile(.99),
+            "latency_histogram": combined.evidence(),
             "read_p95_ns": row["read"].percentile(.95),
             "read_p99_ns": row["read"].percentile(.99),
             "write_p95_ns": row["write"].percentile(.95),
@@ -724,7 +736,9 @@ def cold_read(fd, data_offset, args, occupied, hot, fill_chunks):
     cold = occupied - hot
     count = min(args.cold_read_pages, cold)
     if count <= 0:
-        return {"pages": 0, **LatencyHistogram().summary()}
+        histogram = LatencyHistogram()
+        return {"pages": 0, **histogram.summary(),
+                "histogram": histogram.evidence()}
     hist = LatencyHistogram()
     buffer = mmap.mmap(-1, PAGE)
     view = memoryview(buffer)
@@ -738,7 +752,7 @@ def cold_read(fd, data_offset, args, occupied, hot, fill_chunks):
     finally:
         view.release()
         buffer.close()
-    return {"pages": count, **hist.summary()}
+    return {"pages": count, **hist.summary(), "histogram": hist.evidence()}
 
 
 def status_snapshot(path: Path, identity: dict):
@@ -1132,6 +1146,10 @@ def run(args):
                     "logical_read_mbps": logical_read_bytes / seconds / 1_000_000,
                     "logical_total_mbps": useful / seconds / 1_000_000},
                 "latency": {
+                    "read_count": read_hist.count,
+                    "write_count": write_hist.count,
+                    "read_histogram": read_hist.evidence(),
+                    "write_histogram": write_hist.evidence(),
                     "read_p50_ns": read_hist.percentile(.50),
                     "read_p95_ns": read_hist.percentile(.95),
                     "read_p99_ns": read_hist.percentile(.99),

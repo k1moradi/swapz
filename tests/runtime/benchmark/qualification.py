@@ -29,6 +29,7 @@ AMENDMENT_SCHEMA = "swapz-performance-qualification-amendment-v2"
 AMENDMENT_GIT_BLOB_SHA = "eac574fd204932e630e8bb45dca66b67c135a779"
 MAJOR_MINOR_RE = re.compile(r"[0-9]+:[0-9]+")
 PARTUUID_RE = re.compile(r"[0-9a-f]+(?:-[0-9a-f]+)*")
+DM_UUID_RE = re.compile(r"SWAPZ-(?:PRIMARY|BENCH)-[a-f0-9]{32}")
 
 
 def normalize_partuuid(value):
@@ -47,16 +48,28 @@ def _unique_object(pairs):
     result = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError(f"duplicate acceptance-manifest key {key}")
+            raise ValueError(f"duplicate JSON key {key}")
         result[key] = value
     return result
+
+
+def _reject_json_constant(value):
+    raise ValueError(f"non-finite JSON number {value}")
+
+
+def _load_json_path(path: str | Path):
+    return json.loads(
+        Path(path).read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_object,
+        parse_constant=_reject_json_constant)
 
 
 def _load_frozen_physical_contract() -> dict:
     try:
         document = json.loads(
             ACCEPTANCE_MANIFEST.read_text(encoding="utf-8"),
-            object_pairs_hook=_unique_object)
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_json_constant)
     except (OSError, ValueError) as exc:
         raise ValueError(
             f"cannot load frozen production acceptance manifest: {exc}") from exc
@@ -90,7 +103,8 @@ def _load_frozen_amendment() -> dict:
             raise ValueError("prospective physical amendment blob hash changed")
         document = json.loads(
             AMENDMENT_MANIFEST.read_text(encoding="utf-8"),
-            object_pairs_hook=_unique_object)
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_json_constant)
     except (OSError, ValueError) as exc:
         raise ValueError(
             f"cannot load prospective physical amendment: {exc}") from exc
@@ -155,6 +169,251 @@ def number(value, name: str) -> float:
     if not math.isfinite(result):
         raise ValueError(f"{name} must be finite")
     return result
+
+
+def exact_json_value(value, expected) -> bool:
+    """JSON scalar comparisons must not coerce bools to ints or omit nulls."""
+    return type(value) is type(expected) and value == expected
+
+
+LATENCY_SUB_BUCKETS = 16
+LATENCY_EXPONENTS = 65
+LATENCY_BIN_COUNT = LATENCY_SUB_BUCKETS * LATENCY_EXPONENTS
+
+
+def latency_bin_index(value: int) -> int:
+    if type(value) is not int or value <= 0:
+        raise ValueError("latency sample must be a positive integer")
+    exponent = min(LATENCY_EXPONENTS - 1, max(0, value.bit_length() - 1))
+    base = 1 << exponent
+    sub_bucket = min(
+        LATENCY_SUB_BUCKETS - 1,
+        ((value - base) * LATENCY_SUB_BUCKETS) // base)
+    return exponent * LATENCY_SUB_BUCKETS + sub_bucket
+
+
+def latency_bin_upper(index: int) -> int:
+    if type(index) is not int or not 0 <= index < LATENCY_BIN_COUNT:
+        raise ValueError("latency histogram bin index is invalid")
+    exponent, sub_bucket = divmod(index, LATENCY_SUB_BUCKETS)
+    base = 1 << exponent
+    return base + (
+        (sub_bucket + 1) * base + LATENCY_SUB_BUCKETS - 1
+    ) // LATENCY_SUB_BUCKETS
+
+
+def latency_histogram_summary(evidence, label: str,
+                              expected_count: int | None = None) -> dict:
+    if not isinstance(evidence, dict) or set(evidence) != {
+            "count", "max_ns", "bins"}:
+        raise ValueError(f"{label} latency histogram fields are incomplete")
+    count = evidence["count"]
+    maximum = evidence["max_ns"]
+    bins = evidence["bins"]
+    if (type(count) is not int or count <= 0 or
+            type(maximum) is not int or maximum <= 0 or
+            not isinstance(bins, list) or not bins):
+        raise ValueError(f"{label} latency histogram is malformed")
+    if expected_count is not None and count != expected_count:
+        raise ValueError(f"{label} latency histogram count differs from measured operations")
+    parsed = []
+    total = 0
+    previous_index = -1
+    for row in bins:
+        if (not isinstance(row, list) or len(row) != 2 or
+                type(row[0]) is not int or type(row[1]) is not int or
+                not 0 <= row[0] < LATENCY_BIN_COUNT or row[1] <= 0 or
+                row[0] <= previous_index):
+            raise ValueError(f"{label} latency histogram bins are malformed")
+        previous_index = row[0]
+        total += row[1]
+        parsed.append((row[0], row[1]))
+    if total != count or latency_bin_index(maximum) != parsed[-1][0]:
+        raise ValueError(f"{label} latency histogram count/max is inconsistent")
+
+    def percentile(fraction: float) -> int:
+        target = max(1, math.ceil(count * fraction))
+        seen = 0
+        for index, bin_count in parsed:
+            seen += bin_count
+            if seen >= target:
+                return latency_bin_upper(index)
+        raise ValueError(f"{label} latency histogram percentile is incomplete")
+
+    return {
+        "count": count,
+        "p50_ns": percentile(.50),
+        "p95_ns": percentile(.95),
+        "p99_ns": percentile(.99),
+        "max_ns": maximum,
+    }
+
+
+def latency_histogram_reasons(summary, evidence, label: str,
+                              expected_count: int | None = None) -> list[str]:
+    try:
+        derived = latency_histogram_summary(
+            evidence, label, expected_count=expected_count)
+        if not isinstance(summary, dict):
+            raise ValueError("latency summary is missing")
+        for field in ("count", "p50_ns", "p95_ns", "p99_ns", "max_ns"):
+            if metric(summary, field) != derived[field]:
+                raise ValueError(
+                    f"{field} differs from serialized latency histogram")
+        return []
+    except (TypeError, ValueError) as exc:
+        return [f"{label} latency evidence: {exc}"]
+
+
+def block_geometry_reasons(arm: dict, label: str) -> list[str]:
+    """Recompute derived logical geometry and deterministic recipe provenance."""
+    reasons = []
+    try:
+        logical = metric(arm, "logical_pages")
+        occupied = metric(arm, "occupied_pages")
+        hot = metric(arm, "hot_pages")
+        occupancy_percent = metric(arm, "occupancy_percent")
+        hot_percent = metric(arm, "hot_percent")
+        seed = metric(arm, "workload_seed")
+        if (type(logical) is not int or logical <= 0 or
+                type(occupied) is not int or occupied <= 0 or
+                type(hot) is not int or hot <= 0 or
+                type(occupancy_percent) is not int or
+                type(hot_percent) is not int or type(seed) is not int):
+            raise ValueError("logical geometry/seed is missing or mistyped")
+        if occupied != logical * occupancy_percent // 100:
+            raise ValueError("occupied_pages differs from logical occupancy")
+        if hot != logical * hot_percent // 100 or hot >= occupied:
+            raise ValueError("hot_pages differs from logical hot region")
+        fill_sha = metric(arm, "fill_fixture_sha256")
+        churn_sha = metric(arm, "churn_fixture_sha256")
+        if (not isinstance(fill_sha, str) or
+                not re.fullmatch(r"[0-9a-f]{64}", fill_sha) or
+                not isinstance(churn_sha, str) or
+                not re.fullmatch(r"[0-9a-f]{64}", churn_sha)):
+            raise ValueError("fixture SHA-256 is malformed")
+        recipe = hashlib.sha256(json.dumps({
+            "seed": seed, "logical": logical, "occupied": occupied,
+            "hot": hot, "qd": metric(arm, "qd"),
+            "read": metric(arm, "read_percent"),
+            "fill": fill_sha, "churn": churn_sha,
+        }, sort_keys=True).encode()).hexdigest()
+        if metric(arm, "operation_recipe_sha256") != recipe:
+            raise ValueError("operation recipe digest differs from arm geometry")
+    except (TypeError, ValueError) as exc:
+        reasons.append(f"{label} block geometry: {exc}")
+    return reasons
+
+
+def anonymous_accounting_reasons(arm: dict, label: str) -> list[str]:
+    """Recompute anonymous throughput, lower-I/O and attributed CPU columns."""
+    reasons = []
+    try:
+        byte_count = metric(arm, "bytes")
+        pages = metric(arm, "pages")
+        rounds = metric(arm, "rounds")
+        if (type(byte_count) is not int or byte_count <= 0 or
+                type(pages) is not int or pages != byte_count // 4096 or
+                not isinstance(rounds, list)):
+            raise ValueError("byte/page/round accounting is malformed")
+        expected_rounds = workload_spec("anonymous-swap")["rounds"]
+        if len(rounds) != expected_rounds:
+            raise ValueError("round count differs from workload contract")
+        round_seconds = []
+        for index, row in enumerate(rounds):
+            seconds = number(metric(row, "seconds"), f"round[{index}].seconds")
+            if seconds <= 0:
+                raise ValueError("round duration must be positive")
+            round_seconds.append(seconds)
+            reasons += latency_histogram_reasons(
+                row.get("latency"),
+                (row.get("latency") or {}).get("histogram"),
+                f"{label} round[{index}]", expected_count=pages)
+
+        useful_read_bytes = byte_count * expected_rounds
+        recorded_useful = metric(arm, "throughput.useful_read_bytes")
+        read_seconds = number(
+            metric(arm, "throughput.read_seconds"), "throughput.read_seconds")
+        useful_read_mbps = number(
+            metric(arm, "throughput.useful_read_mbps"),
+            "throughput.useful_read_mbps")
+        if type(recorded_useful) is not int or recorded_useful != useful_read_bytes:
+            raise ValueError("useful read byte count is inconsistent")
+        if not math.isclose(
+                read_seconds, math.fsum(round_seconds),
+                rel_tol=1e-12, abs_tol=1e-12):
+            raise ValueError("read_seconds differs from round durations")
+        if not math.isclose(
+                useful_read_mbps,
+                useful_read_bytes / read_seconds / 1_000_000,
+                rel_tol=1e-9, abs_tol=1e-12):
+            raise ValueError("useful read throughput differs from measured work")
+
+        lower_bytes = metric(arm, "lower_io.lower_write_bytes")
+        lower_requests = metric(arm, "lower_io.lower_write_requests")
+        lower_reads = metric(arm, "lower_io.lower_read_bytes")
+        if (type(lower_bytes) is not int or lower_bytes <= 0 or
+                type(lower_requests) is not int or lower_requests <= 0 or
+                type(lower_reads) is not int or lower_reads <= 0):
+            raise ValueError("lower-device counters are missing or nonpositive")
+        expected_lower = {
+            "lower_io.lower_write_bytes_per_logical_fill_byte":
+                lower_bytes / byte_count,
+            "lower_io.lower_write_requests_per_1000_fill_pages":
+                lower_requests * 1000 / pages,
+            "lower_io.lower_read_bytes_per_logical_read_byte":
+                lower_reads / useful_read_bytes,
+        }
+        for path, calculated in expected_lower.items():
+            if not math.isclose(
+                    number(metric(arm, path), path), calculated,
+                    rel_tol=1e-9, abs_tol=1e-12):
+                raise ValueError(f"{path} differs from lower-device counters")
+
+        process_user = number(
+            metric(arm, "cpu.workload_process_user_seconds"),
+            "cpu.workload_process_user_seconds")
+        process_system = number(
+            metric(arm, "cpu.workload_process_system_seconds"),
+            "cpu.workload_process_system_seconds")
+        process_total = number(
+            metric(arm, "cpu.workload_process_cpu_seconds"),
+            "cpu.workload_process_cpu_seconds")
+        worker = number(
+            metric(arm, "cpu.exported_swapz_worker_cpu_seconds"),
+            "cpu.exported_swapz_worker_cpu_seconds")
+        attributed = number(
+            metric(arm, "cpu.attributed_cpu_seconds"),
+            "cpu.attributed_cpu_seconds")
+        observed_cpu = number(
+            metric(arm, "cpu.measured_cpu_seconds_per_useful_byte"),
+            "cpu.measured_cpu_seconds_per_useful_byte")
+        if min(process_user, process_system, process_total, worker, attributed) < 0:
+            raise ValueError("CPU components must be nonnegative")
+        if label == "raw" and worker != 0:
+            raise ValueError("raw arm unexpectedly reports swapz worker CPU")
+        if (not math.isclose(process_total, process_user + process_system,
+                             rel_tol=1e-12, abs_tol=1e-12) or
+                not math.isclose(attributed, process_total + worker,
+                                 rel_tol=1e-12, abs_tol=1e-12) or
+                not math.isclose(
+                    observed_cpu,
+                    attributed / (byte_count + useful_read_bytes),
+                    rel_tol=1e-9, abs_tol=1e-15)):
+            raise ValueError("attributed CPU columns are inconsistent")
+
+        verified_pages = metric(arm, "oracle.verified_pages")
+        if (type(verified_pages) is not int or
+                verified_pages != pages * expected_rounds):
+            raise ValueError("byte oracle coverage differs from workload pages")
+        reasons += latency_histogram_reasons(
+            arm.get("swapin_latency"),
+            (arm.get("swapin_latency") or {}).get("histogram"),
+            f"{label} aggregate swap-in",
+            expected_count=pages * expected_rounds)
+    except (TypeError, ValueError) as exc:
+        reasons.append(f"{label} anonymous accounting: {exc}")
+    return reasons
 
 
 def metric(record: dict, path: str):
@@ -240,7 +499,7 @@ def measured_block_accounting_reasons(arm: dict, workload: str,
                                       label: str) -> list[str]:
     """Do not trust normalized columns detached from completed I/O counters."""
     if workload == "anonymous-swap":
-        return []
+        return anonymous_accounting_reasons(arm, label)
     reasons = []
     try:
         reads = metric(arm, "read_ops")
@@ -309,7 +568,7 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
         if seconds < spec["measure_seconds"]:
             raise ValueError("one-hour measured duration not completed")
         minutes = metric(arm, "minute_buckets")
-        if (not isinstance(minutes, list) or len(minutes) < 60 or
+        if (not isinstance(minutes, list) or len(minutes) != 60 or
                 any(not isinstance(row, dict) or
                     type(row.get("minute")) is not int or
                     row["minute"] != index or
@@ -321,6 +580,27 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                 sum(row["read_operations"] for row in minutes) != arm.get("read_ops") or
                 sum(row["write_operations"] for row in minutes) != arm.get("write_ops")):
             raise ValueError("minute bucket coverage or operation conservation is invalid")
+        for row in minutes:
+            duration = number(
+                metric(row, "duration_seconds"), "minute.duration_seconds")
+            throughput = number(
+                metric(row, "logical_write_mbps"),
+                "minute.logical_write_mbps")
+            p95 = number(metric(row, "p95_ns"), "minute.p95_ns")
+            p99 = number(metric(row, "p99_ns"), "minute.p99_ns")
+            histogram = latency_histogram_summary(
+                metric(row, "latency_histogram"), "minute combined",
+                expected_count=row["operations"])
+            if (not math.isclose(duration, 60.0, abs_tol=1e-6) or
+                    not math.isclose(
+                        throughput,
+                        row["write_operations"] * 4096 /
+                        duration / 1_000_000,
+                        rel_tol=1e-9, abs_tol=1e-12) or
+                    p95 != histogram["p95_ns"] or
+                    p99 != histogram["p99_ns"]):
+                raise ValueError(
+                    "minute throughput/duration or tail latency is inconsistent")
         intervals = metric(arm, "sustained_intervals")
         if not isinstance(intervals, list) or not intervals:
             raise ValueError("one-hour telemetry intervals are absent")
@@ -385,8 +665,12 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
                                 ("round_count", spec["rounds"]),
                                 ("required_swap_bytes", spec["minimum_observed_swap_bytes"]),
                                 ("content", spec["content"])):
-            if arm.get(field) != expected:
-                reasons.append(f"{label} {field} differs from prospective workload")
+            if field not in arm or not exact_json_value(arm[field], expected):
+                reasons.append(
+                    f"{label} {field} is missing, mistyped or differs from prospective workload")
+        if (not isinstance(arm.get("source_sha"), str) or
+                not re.fullmatch(r"[0-9a-f]{40}", arm["source_sha"])):
+            reasons.append(f"{label} source SHA is missing or malformed")
         identity = arm.get("swap_device_identity")
         if not isinstance(identity, dict):
             reasons.append(f"{label} admitted swap-device identity is missing")
@@ -395,24 +679,58 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
             if not isinstance(device, str) or not MAJOR_MINOR_RE.fullmatch(device):
                 reasons.append(
                     f"{label} admitted swap-device major:minor is malformed")
+            lower_device = identity.get("lower_device")
             if label == "raw":
                 if identity.get("dm_uuid") is not None:
                     reasons.append(
                         "raw anonymous arm unexpectedly carries a DM UUID")
-                if identity.get("lower_device") != device:
+                if lower_device != device:
                     reasons.append(
                         "raw anonymous arm lower identity differs from device")
             else:
-                lower_device = identity.get("lower_device")
-                if (not identity.get("dm_uuid") or
+                if (not isinstance(identity.get("dm_uuid"), str) or
+                        not DM_UUID_RE.fullmatch(identity["dm_uuid"]) or
                         identity.get("dm_target") != "swapz" or
                         not isinstance(lower_device, str) or
                         not MAJOR_MINOR_RE.fullmatch(lower_device)):
                     reasons.append(
                         "swapz anonymous arm lacks exact mapper/lower identity")
+            partuuid = identity.get("physical_partuuid")
+            device_bytes = identity.get("physical_device_bytes")
+            parent_device = identity.get("parent_major_minor")
+            if (normalize_partuuid(partuuid) != partuuid or
+                    type(device_bytes) is not int or device_bytes <= 0 or
+                    not isinstance(parent_device, str) or
+                    not MAJOR_MINOR_RE.fullmatch(parent_device) or
+                    any(not isinstance(identity.get(key), str) or
+                        not identity[key] for key in
+                        ("parent_model", "parent_transport"))):
+                reasons.append(
+                    f"{label} anonymous physical lower identity is missing or malformed")
         cgroup = arm.get("cgroup_before") or {}
-        if cgroup.get("memory_max") != spec["memory_max_bytes"]:
-            reasons.append(f"{label} cgroup memory.max differs from prospective workload")
+        if (not isinstance(cgroup, dict) or
+                "memory_max" not in cgroup or
+                not exact_json_value(cgroup["memory_max"],
+                                     spec["memory_max_bytes"])):
+            reasons.append(
+                f"{label} cgroup memory.max is missing, mistyped or differs from prospective workload")
+        required_swap_headroom = spec["bytes"] - spec["memory_max_bytes"]
+        swap_max = cgroup.get("memory_swap_max") if isinstance(cgroup, dict) else None
+        if swap_max != "max" and (
+                type(swap_max) is not int or swap_max < required_swap_headroom):
+            reasons.append(
+                f"{label} cgroup memory.swap.max cannot cover prospective working-set excess")
+        after_cgroup = arm.get("cgroup_after")
+        if (not isinstance(after_cgroup, dict) or
+                cgroup.get("path") != after_cgroup.get("path")):
+            reasons.append(f"{label} cgroup identity changed during arm")
+        for inventory_name in ("swap_inventory_before", "swap_inventory_after"):
+            inventory = arm.get(inventory_name)
+            if (not isinstance(inventory, list) or len(inventory) != 1 or
+                    not isinstance(inventory[0], dict) or
+                    inventory[0].get("device") != identity.get("device")):
+                reasons.append(
+                    f"{label} {inventory_name} does not contain exactly the admitted swap target")
         return reasons
 
     expected = {
@@ -426,13 +744,45 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
         "warmup_seconds": spec.get("warmup_seconds"),
         "measure_seconds_requested": spec.get("measure_seconds"),
     }
+    duration_fields = {"warmup_seconds", "measure_seconds_requested"}
     for field, expected_value in expected.items():
-        if arm.get(field) != expected_value:
-            reasons.append(f"{label} {field} differs from prospective workload")
+        valid = field in arm
+        if valid and expected_value is None:
+            valid = arm[field] is None
+        elif valid and field in duration_fields:
+            try:
+                valid = number(arm[field], field) == float(expected_value)
+            except ValueError:
+                valid = False
+        elif valid:
+            valid = exact_json_value(arm[field], expected_value)
+        if not valid:
+            reasons.append(
+                f"{label} {field} is missing, mistyped or differs from prospective workload")
+    reasons += block_geometry_reasons(arm, label)
+    latency = arm.get("latency")
+    if isinstance(latency, dict):
+        for operation in ("read", "write"):
+            summary = {
+                "count": latency.get(f"{operation}_count"),
+                "p50_ns": latency.get(f"{operation}_p50_ns"),
+                "p95_ns": latency.get(f"{operation}_p95_ns"),
+                "p99_ns": latency.get(f"{operation}_p99_ns"),
+                "max_ns": latency.get(f"{operation}_max_ns"),
+            }
+            reasons += latency_histogram_reasons(
+                summary, latency.get(f"{operation}_histogram"),
+                f"{label} {operation}",
+                expected_count=arm.get(f"{operation}_ops"))
+    else:
+        reasons.append(f"{label} latency summary is missing")
     identity = arm.get("device_identity") or {}
     partuuid = identity.get("physical_partuuid")
     device_bytes = identity.get("physical_device_bytes")
     lower_major_minor = identity.get("lower_major_minor")
+    if (not isinstance(arm.get("source_sha"), str) or
+            not re.fullmatch(r"[0-9a-f]{40}", arm["source_sha"])):
+        reasons.append(f"{label} source SHA is missing or malformed")
     if (normalize_partuuid(partuuid) != partuuid or
             type(device_bytes) is not int or device_bytes <= 0 or
             not isinstance(lower_major_minor, str) or
@@ -440,8 +790,10 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
         reasons.append(f"{label} physical identity is missing or malformed")
     if label == "raw" and identity.get("dm_uuid") is not None:
         reasons.append("raw arm unexpectedly carries a DM UUID")
-    if label == "swapz" and not identity.get("dm_uuid"):
-        reasons.append("swapz arm has no pinned DM UUID")
+    if label == "swapz" and (
+            not isinstance(identity.get("dm_uuid"), str) or
+            not DM_UUID_RE.fullmatch(identity["dm_uuid"])):
+        reasons.append("swapz arm has no valid pinned DM UUID")
     if (not isinstance(identity.get("parent_major_minor"), str) or
             not MAJOR_MINOR_RE.fullmatch(identity["parent_major_minor"]) or
             not isinstance(identity.get("parent_model"), str) or
@@ -456,6 +808,11 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
                 not math.isfinite(elapsed) or
                 elapsed < spec["measure_seconds"]):
             reasons.append(f"{label} sustained measured duration is shorter than one hour")
+    if workload == "sd-high-occupancy-churn":
+        cold = arm.get("cold_read") or {}
+        reasons += latency_histogram_reasons(
+            cold, cold.get("histogram"), f"{label} cold read",
+            expected_count=cold.get("pages"))
     resources = arm.get("resources") or {}
     rss = resources.get("replay_peak_rss_bytes")
     if type(rss) is not int or rss < 0:
@@ -483,7 +840,7 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
         raise ValueError("pair requires one raw and one swapz arm")
     spec = workload_spec(workload)
     reasons = list(extra_reasons or [])
-    if not 1 <= pair_index <= spec["pairs"]:
+    if type(pair_index) is not int or not 1 <= pair_index <= spec["pairs"]:
         reasons.append("pair index is outside prospective repetition plan")
     elif order != spec["counterbalanced_order"][pair_index - 1]:
         reasons.append("pair order differs from prospective order")
@@ -517,6 +874,12 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
         swapz_identity = swapz.get("swap_device_identity") or {}
         if raw_identity.get("device") != swapz_identity.get("lower_device"):
             reasons.append("anonymous pair physical lower identity mismatch")
+        for field in (
+                "physical_partuuid", "physical_device_bytes",
+                "parent_major_minor", "parent_model", "parent_transport"):
+            if raw_identity.get(field) != swapz_identity.get(field):
+                reasons.append(
+                    "anonymous pair physical lower identity mismatch: " + field)
     for label, arm in (("raw", raw), ("swapz", swapz)):
         if arm.get("verdict") != "PASS":
             reasons.append(f"{label} arm verdict is not PASS")
@@ -624,12 +987,36 @@ def pair_target_identity(pair: dict):
         raw_identity = raw.get("swap_device_identity") or {}
         swapz_identity = swapz.get("swap_device_identity") or {}
         raw_device = raw_identity.get("device")
+        raw_lower = raw_identity.get("lower_device")
         swapz_lower = swapz_identity.get("lower_device")
-        if (isinstance(raw_device, str) and
-                MAJOR_MINOR_RE.fullmatch(raw_device) and
-                raw_device == swapz_lower):
-            return {"lower_major_minor": raw_device}
-        return None
+        physical_fields = (
+            "physical_partuuid", "physical_device_bytes",
+            "parent_major_minor", "parent_model", "parent_transport")
+        if (not isinstance(raw_device, str) or
+                not MAJOR_MINOR_RE.fullmatch(raw_device) or
+                raw_device != raw_lower or raw_lower != swapz_lower or
+                any(raw_identity.get(field) != swapz_identity.get(field)
+                    for field in physical_fields)):
+            return None
+        partuuid = raw_identity.get("physical_partuuid")
+        device_bytes = raw_identity.get("physical_device_bytes")
+        parent_device = raw_identity.get("parent_major_minor")
+        if (normalize_partuuid(partuuid) != partuuid or
+                type(device_bytes) is not int or device_bytes <= 0 or
+                not isinstance(parent_device, str) or
+                not MAJOR_MINOR_RE.fullmatch(parent_device) or
+                any(not isinstance(raw_identity.get(key), str) or
+                    not raw_identity[key] for key in
+                    ("parent_model", "parent_transport"))):
+            return None
+        return {
+            "physical_partuuid": partuuid,
+            "physical_device_bytes": device_bytes,
+            "lower_major_minor": raw_lower,
+            "parent_major_minor": parent_device,
+            "parent_model": raw_identity["parent_model"],
+            "parent_transport": raw_identity["parent_transport"],
+        }
 
     raw_identity = raw.get("device_identity") or {}
     swapz_identity = swapz.get("device_identity") or {}
@@ -979,8 +1366,15 @@ def write_qualification_artifact(path: Path, value: dict,
 def load_records(paths: list[str]) -> list[dict]:
     result = []
     for path in paths:
-        value = json.loads(Path(path).read_text())
-        result.extend(value if isinstance(value, list) else [value])
+        value = _load_json_path(path)
+        if isinstance(value, list):
+            if any(not isinstance(item, dict) for item in value):
+                raise ValueError("qualification report list contains non-object evidence")
+            result.extend(value)
+        elif isinstance(value, dict):
+            result.append(value)
+        else:
+            raise ValueError("qualification report must be one object or an object list")
     return result
 
 
@@ -1006,7 +1400,10 @@ def main() -> None:
         elif args.command == "amendment":
             print(json.dumps(amendment(), sort_keys=True))
         elif args.command == "pair":
-            raw = json.loads(Path(args.raw).read_text()); swapz = json.loads(Path(args.swapz).read_text())
+            raw = _load_json_path(args.raw)
+            swapz = _load_json_path(args.swapz)
+            if not isinstance(raw, dict) or not isinstance(swapz, dict):
+                raise ValueError("qualification pair arms must be JSON objects")
             record = compare_pair(raw, swapz, args.workload, args.pair_id,
                                   args.pair_index, args.order, args.exclude)
             write_qualification_artifact(
