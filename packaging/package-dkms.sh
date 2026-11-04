@@ -13,16 +13,21 @@ transaction_phase="preflight"
 # install may temporarily preserve activation while read-only recovery admission
 # checks run.
 recovery_quarantine_on_error=1
-# Set only after recovery has durably journaled the rollback-started phase.
-recovery_rollback_attempted=0
+# Recovery diagnostics distinguish read-only refusal, an incomplete replay,
+# and a replay that already restored and durably verified the previous state.
+recovery_rollback_outcome="not attempted"
 
 staging_abort() {
   local rc="${1:-1}" reason="${2:-failure}"
   trap - ERR HUP INT TERM
   transaction_active=0
   echo "BLOCKED: package $reason before mutation; removing staging data" >&2
-  if [[ -n "$transaction_dir" ]] && ! rm -rf -- "$transaction_dir"; then
-    echo "BLOCKED: staging cleanup failed; recovery-required transaction may remain" >&2
+  local cleanup_status=0
+  if [[ -n "$transaction_dir" ]]; then
+    remove_transaction_record || cleanup_status=$?
+  fi
+  if (( cleanup_status != 0 )); then
+    printf 'BLOCKED: staging transaction-record cleanup failed (status %d); no package mutation occurred\n' "$cleanup_status" >&2
   fi
   exit "$rc"
 }
@@ -37,14 +42,10 @@ blocked() {
   elif (( transaction_active == 3 )); then
     uninstall_rollback 2 "$condition (phase: $transaction_phase)"
   elif (( transaction_active == 4 )); then
-    local rollback_outcome="not attempted"
-    if (( recovery_rollback_attempted == 1 )); then
-      rollback_outcome="incomplete"
-    fi
     if (( recovery_quarantine_on_error == 1 )); then
       quarantine_activation || true
     fi
-    printf 'BLOCKED: recovery phase %s refused (%s); rollback %s; recovery-required record retained\n' "$transaction_phase" "$condition" "$rollback_outcome" >&2
+    printf 'BLOCKED: recovery phase %s refused (%s); rollback %s; recovery-required record retained\n' "$transaction_phase" "$condition" "$recovery_rollback_outcome" >&2
   else
     printf 'BLOCKED: preflight phase %s refused (%s); rollback not attempted\n' "$transaction_phase" "$condition" >&2
   fi
@@ -732,6 +733,21 @@ for path in sorted(paths, key=lambda candidate: len(candidate.parts), reverse=Tr
 PY
 }
 
+# Transaction state stops being recovery authority only after the verified final
+# package state exists. Make removal of that authority durable in its parent.
+# Test-only failures exercise cleanup ordering without weakening production I/O.
+remove_transaction_record() {
+  local cleanup_failure="${SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE:-never}"
+  if [[ -n "$test_root" && "$cleanup_failure" == remove ]]; then
+    return 73
+  fi
+  rm -rf -- "$transaction_dir" || return $?
+  if [[ -n "$test_root" && "$cleanup_failure" == fsync ]]; then
+    return 74
+  fi
+  durable_package_paths "$transaction_parent"
+}
+
 ensure_transaction_parent() {
   if [[ -e "$transaction_parent" || -L "$transaction_parent" ]]; then
     installed_directory_metadata "$transaction_parent" 700 ||
@@ -1412,11 +1428,12 @@ uninstall_rollback() {
     exit "$rc"
   fi
   if restore_uninstall_backup && persist_transaction_state rolled-back; then
-    if rm -rf -- "$transaction_dir"; then
+    local cleanup_status=0
+    remove_transaction_record || cleanup_status=$?
+    if (( cleanup_status == 0 )); then
       echo "BLOCKED: uninstall rollback succeeded; previous installation verified and journal cleared" >&2
     else
-      quarantine_activation || true
-      echo "BLOCKED: uninstall rollback restored package but journal cleanup failed; activation blocked" >&2
+      printf 'BLOCKED: uninstall rollback succeeded; previous installation verified; transaction-record cleanup failed (status %d)\n'         "$cleanup_status" >&2
     fi
   else
     # A failed final check must never leave activation entry points online.
@@ -1498,6 +1515,7 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     print(json.load(stream)["phase"])
 PY
   )" || blocked "recovery cannot read validated journal phase"
+  transaction_phase="$recovery_phase"
 
   # A committed install is already the published final state. Preserve its
   # activation files through read-only admission refusals only after proving
@@ -1541,7 +1559,7 @@ PY
     # install or uninstall. A rolled-back journal is also safe to re-verify.
     persist_transaction_state rollback-started ||
       blocked "recovery rollback-started journal not durable"
-    recovery_rollback_attempted=1
+    recovery_rollback_outcome="incomplete"
     if [[ "$recovery_kind" == none ]]; then
       recovery_status=""
       query_dkms_status recovery_status -m swapz -v "$version" ||
@@ -1574,6 +1592,7 @@ PY
     fi
     persist_transaction_state rolled-back ||
       blocked "recovery rolled-back journal not durable"
+    recovery_rollback_outcome="succeeded"
   fi
 
   # A crash after committed must not uninstall an already-published package.
@@ -1609,11 +1628,13 @@ PY
   verify_transaction_snapshot && verify_recovery_backup >/dev/null ||
     blocked "recovery final rollback record re-verification failed"
 
-  rm -rf -- "$transaction_dir" ||
-    blocked "recovery completed but transaction directory removal failed"
-  durable_package_paths "$transaction_parent" ||
-    blocked "recovery transaction parent fsync failed"
   transaction_active=0
+  cleanup_status=0
+  remove_transaction_record || cleanup_status=$?
+  if (( cleanup_status != 0 )); then
+    printf 'BLOCKED: recovery phase %s final state verified; rollback %s; transaction-record cleanup failed (status %d)\n'       "$transaction_phase" "$recovery_rollback_outcome" "$cleanup_status" >&2
+    exit "$cleanup_status"
+  fi
   echo "Recovered verified swapz package transaction ($action: $recovery_phase)"
   exit 0
 fi
@@ -1743,7 +1764,12 @@ if [[ "$action" == uninstall ]]; then
 
   transaction_active=0
   trap - ERR HUP INT TERM
-  rm -rf -- "$transaction_dir"
+  cleanup_status=0
+  remove_transaction_record || cleanup_status=$?
+  if (( cleanup_status != 0 )); then
+    printf 'BLOCKED: uninstall committed and empty state verified; transaction-record cleanup failed (status %d)\n'       "$cleanup_status" >&2
+    exit "$cleanup_status"
+  fi
   echo "Uninstalled owned swapz package without touching swap"
   exit 0
 fi
@@ -2086,7 +2112,17 @@ rollback() {
   trap - ERR HUP INT TERM
   echo "BLOCKED: package $reason; attempting transaction rollback" >&2
   if [[ -n "${temporary_cli:-}" ]]; then
-    rm -f -- "$temporary_cli" || true
+    local temporary_cleanup_status=0
+    rm -f -- "$temporary_cli" || temporary_cleanup_status=$?
+    if (( temporary_cleanup_status == 0 )); then
+      durable_package_paths "$cli_dir" || temporary_cleanup_status=$?
+    fi
+    if (( temporary_cleanup_status != 0 )); then
+      quarantine_activation || true
+      record_incomplete_rollback || true
+      printf 'BLOCKED: rollback temporary CLI cleanup failed (status %d); rollback incomplete; recovery-required journal retained\n'         "$temporary_cleanup_status" >&2
+      exit "$rc"
+    fi
   fi
   if ! verify_transaction_snapshot; then
     quarantine_activation || true
@@ -2134,11 +2170,12 @@ rollback() {
   }
   if (( had_existing == 1 )); then
     if restore_previous_package && persist_transaction_state rolled-back; then
-      if rm -rf -- "$transaction_dir"; then
+      local cleanup_status=0
+      remove_transaction_record || cleanup_status=$?
+      if (( cleanup_status == 0 )); then
         echo "BLOCKED: install rollback succeeded; previous installation verified and journal cleared" >&2
       else
-        quarantine_activation || true
-        echo "BLOCKED: install rollback restored package but journal cleanup failed; activation blocked" >&2
+        printf 'BLOCKED: install rollback succeeded; previous installation verified; transaction-record cleanup failed (status %d)\n'           "$cleanup_status" >&2
       fi
     else
       # Do not publish a CLI after failed rollback re-verification.
@@ -2151,11 +2188,12 @@ rollback() {
     "$depmod_bin" "$kernel_release" >/dev/null 2>&1 || cleanup_ok=0
     "$systemctl_bin" daemon-reload >/dev/null 2>&1 || cleanup_ok=0
     if (( cleanup_ok == 1 )) && persist_transaction_state rolled-back; then
-      if rm -rf -- "$transaction_dir"; then
+      local cleanup_status=0
+      remove_transaction_record || cleanup_status=$?
+      if (( cleanup_status == 0 )); then
         echo "BLOCKED: initial install rollback succeeded; empty state verified and journal cleared" >&2
       else
-        quarantine_activation || true
-        echo "BLOCKED: initial install rollback cleaned package but journal removal failed" >&2
+        printf 'BLOCKED: initial install rollback succeeded; empty state verified; transaction-record cleanup failed (status %d)\n'           "$cleanup_status" >&2
       fi
     else
       record_incomplete_rollback || true
@@ -2357,5 +2395,10 @@ persist_transaction_state committed
 
 transaction_active=0
 trap - ERR HUP INT TERM
-rm -rf -- "$transaction_dir"
+cleanup_status=0
+remove_transaction_record || cleanup_status=$?
+if (( cleanup_status != 0 )); then
+  printf 'BLOCKED: install committed and exact package verified; transaction-record cleanup failed (status %d)\n'     "$cleanup_status" >&2
+  exit "$cleanup_status"
+fi
 echo "Installed exact qualified swapz artifacts with DKMS compatibility registration; primary-swap units remain disabled"
