@@ -579,14 +579,17 @@ for argument in sys.argv[1:]:
         raise SystemExit("unsafe package durability path")
     if path.exists():
         paths.add(path)
+    # Each newly created directory also needs its *parent* entry synced.
+    # Walk every ancestor, not just the leaf's directory: install -d and
+    # DKMS can create multiple nested directories in a single operation.
     directory = path.parent
-    while not directory.exists():
-        if directory == directory.parent or directory.is_symlink():
+    while True:
+        if directory.is_symlink() or not directory.is_dir():
             raise SystemExit("unsafe package durability parent")
+        paths.add(directory)
+        if directory == directory.parent:
+            break
         directory = directory.parent
-    if directory.is_symlink() or not directory.is_dir():
-        raise SystemExit("unsafe package durability parent")
-    paths.add(directory)
 
 for path in sorted(paths, key=lambda candidate: len(candidate.parts), reverse=True):
     metadata = path.lstat()
