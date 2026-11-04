@@ -539,9 +539,13 @@ It also verifies that each arm actually measured at least 3,600 seconds,
 preserved exactly 60 consecutive one-minute operation buckets with matching
 whole-arm READ/WRITE counts, and independently recomputes each bucket's useful
 WRITE throughput from its write count and 60-second duration before evaluating
-first/last-quartile drift. The telemetry must cover the full measured hour
-without gaps and record no greater than 10-second progress gap or target
-failure/no-headroom skip in any swapz interval. Logical occupancy transitions must prove
+first/last-quartile drift. Each report records the measured phase's absolute
+monotonic start/end; continuous telemetry must cover those exact bounds, not
+merely another hour elsewhere in the broader arm. At least one fully contained
+swapz telemetry interval must show positive GC victim and relocated-page
+counters. The telemetry must cover the full measured hour without gaps and
+record no greater than 10-second progress gap or target failure/no-headroom
+skip in any swapz interval. Logical occupancy transitions must prove
 the filled 90% region remained covered through the measured end; final byte
 oracle evidence must cover that occupied region. These checks cannot replace
 the final full-byte verification or imply 90% *physical-segment* occupancy.

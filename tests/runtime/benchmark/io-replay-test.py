@@ -2341,6 +2341,19 @@ class PairReplayContract(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr)
             report = json.loads(result.read_text())
             self.assertEqual(report["verdict"], "PASS")
+            self.assertLessEqual(
+                report["arm_started_monotonic_ns"],
+                report["measured_start_monotonic_ns"])
+            self.assertGreater(
+                report["measured_end_monotonic_ns"],
+                report["measured_start_monotonic_ns"])
+            self.assertLessEqual(
+                report["measured_end_monotonic_ns"],
+                report["arm_finished_monotonic_ns"])
+            self.assertAlmostEqual(
+                (report["measured_end_monotonic_ns"] -
+                 report["measured_start_monotonic_ns"]) / 1e9,
+                report["seconds"], places=6)
             self.assertEqual(report["read_ops"] + report["write_ops"], 256)
             self.assertEqual(report["oracle"]["mismatches"], 0)
             self.assertEqual(report["oracle"]["verified_pages"], 96)
@@ -2887,6 +2900,8 @@ class PairReplayContract(unittest.TestCase):
             }
             for index in range(60)]
         arm_started_ns = 1_000_000_000
+        measured_started_ns = arm_started_ns
+        measured_finished_ns = measured_started_ns + 3600_000_000_000
         intervals = [
             {
                 "interval": index,
@@ -2908,8 +2923,10 @@ class PairReplayContract(unittest.TestCase):
             for index in range(60)]
         raw = {
             "arm_started_monotonic_ns": arm_started_ns,
+            "measured_start_monotonic_ns": measured_started_ns,
+            "measured_end_monotonic_ns": measured_finished_ns,
             "arm_finished_monotonic_ns":
-                arm_started_ns + 3600_000_000_000,
+                measured_finished_ns + 60_000_000_000,
             "seconds": 3600.0, "logical_pages": 100,
             "occupied_pages": 90, "read_ops": 60, "write_ops": 60,
             "minute_buckets": minute_buckets, "sustained_intervals": intervals,
@@ -2925,6 +2942,12 @@ class PairReplayContract(unittest.TestCase):
             qualification.sustained_coverage_reasons(raw, "swapz"), [])
         corruptions = (
             lambda arm: arm.update(seconds=3599.0),
+            lambda arm: arm.update(
+                measured_start_monotonic_ns=
+                    arm["measured_start_monotonic_ns"] + 1_000_000_000),
+            lambda arm: arm.update(
+                measured_end_monotonic_ns=
+                    arm["measured_end_monotonic_ns"] + 1_000_000_000),
             lambda arm: arm["minute_buckets"].pop(30),
             lambda arm: arm["minute_buckets"][0].update(write_operations=0),
             lambda arm: arm["minute_buckets"][0].update(
@@ -2954,6 +2977,26 @@ class PairReplayContract(unittest.TestCase):
                 self.assertTrue(
                     qualification.sustained_coverage_reasons(
                         tampered, "swapz"))
+
+        outside_window_gc = copy.deepcopy(raw)
+        outside_window_gc["sustained_intervals"][20]["gc"].update(
+            gc_victims=0, gc_pages=0)
+        after_measure = copy.deepcopy(
+            outside_window_gc["sustained_intervals"][-1])
+        after_measure.update(
+            interval=60,
+            start_monotonic_ns=measured_finished_ns,
+            end_monotonic_ns=measured_finished_ns + 60_000_000_000,
+            start_seconds=3600.0,
+            end_seconds=3660.0,
+        )
+        after_measure["gc"].update(
+            gc_wall_ns=1, gc_victims=1, gc_pages=1)
+        outside_window_gc["sustained_intervals"].append(after_measure)
+        self.assertTrue(any(
+            "fully measured interval with GC relocation" in reason
+            for reason in qualification.sustained_coverage_reasons(
+                outside_window_gc, "swapz")))
 
     def test_sustained_interval_sampler_gc_and_trailing_gap(self):
         import importlib.util

@@ -603,13 +603,22 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                     "minute throughput/duration or tail latency is inconsistent")
         intervals = metric(arm, "sustained_intervals")
         arm_started = arm.get("arm_started_monotonic_ns")
+        measured_started = arm.get("measured_start_monotonic_ns")
+        measured_finished = arm.get("measured_end_monotonic_ns")
         arm_finished = arm.get("arm_finished_monotonic_ns")
         if (not isinstance(intervals, list) or not intervals or
                 type(arm_started) is not int or arm_started <= 0 or
+                type(measured_started) is not int or
+                measured_started < arm_started or
+                type(measured_finished) is not int or
+                measured_finished <= measured_started or
                 type(arm_finished) is not int or
-                arm_finished <= arm_started):
+                arm_finished < measured_finished or
+                not math.isclose(
+                    (measured_finished - measured_started) / 1e9, seconds,
+                    rel_tol=1e-9, abs_tol=1e-6)):
             raise ValueError(
-                "one-hour telemetry intervals or arm chronology are absent")
+                "one-hour telemetry intervals or measured-arm chronology are absent")
         previous_end = 0.0
         previous_monotonic_end = None
         positive_gc_interval = False
@@ -651,16 +660,21 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                     if type(gc.get(field)) is not int or gc[field] < 0:
                         raise ValueError(
                             "interval GC activity counters are missing or malformed")
-                positive_gc_interval = positive_gc_interval or any(
-                    gc[field] > 0
-                    for field in ("gc_wall_ns", "gc_victims", "gc_pages"))
+                positive_gc_interval = positive_gc_interval or (
+                    monotonic_start >= measured_started and
+                    monotonic_end <= measured_finished and
+                    gc["gc_victims"] > 0 and gc["gc_pages"] > 0)
             previous_end = end
             previous_monotonic_end = monotonic_end
+        if (intervals[0]["start_monotonic_ns"] > measured_started or
+                intervals[-1]["end_monotonic_ns"] < measured_finished):
+            raise ValueError(
+                "telemetry intervals do not cover the measured monotonic window")
         if previous_end < spec["measure_seconds"]:
             raise ValueError("telemetry does not cover the full measured hour")
         if label == "swapz" and not positive_gc_interval:
             raise ValueError(
-                "telemetry contains no interval with measured GC activity")
+                "telemetry contains no fully measured interval with GC relocation")
         occupancy = metric(arm, "occupancy_transitions")
         required_phases = ("initial", "post-fill", "post-warmup", "measured-end")
         occupied = metric(arm, "occupied_pages")

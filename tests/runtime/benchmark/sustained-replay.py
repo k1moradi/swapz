@@ -1120,6 +1120,8 @@ def run(args):
                 "workload_id": args.workload_id, "candidate": args.candidate,
                 "source_sha": args.source_sha, "device_identity": identity,
                 "arm_started_monotonic_ns": arm_started_monotonic_ns,
+                "measured_start_monotonic_ns": start,
+                "measured_end_monotonic_ns": end,
                 "arm_finished_monotonic_ns": time.monotonic_ns(),
                 "arm_boot_id": arm_boot_id,
                 "loaded_module_provenance":
