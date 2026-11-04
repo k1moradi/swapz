@@ -941,7 +941,7 @@ static int test_engine_prepare_boundary_contact_and_packed_siblings(void)
 		diagnostic.category = index == 0 ?
 			"compressed-left-contact" : "compressed-right-contact";
 		diagnostic.boundary_offset = index == 0 ?
-			-96 : SWAPZ_BLOCK_BYTES;
+			-96L : (long)SWAPZ_BLOCK_BYTES;
 		input[0].logical_page = 20U + index;
 		input[0].payload = contact;
 		input[0].length = 96;
