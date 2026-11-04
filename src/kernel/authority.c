@@ -577,19 +577,23 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
  *
  * The primary logical map is the final ownership authority. Exact segment
  * sidecars reject obvious live candidates cheaply, while every zero-sidecar
- * segment receives an independent full-map proof before reuse. That proof also
- * authenticates every surviving map's extent class and start-block liveness;
- * false-zero cached metadata must never waive or weaken the ownership scan.
+ * segment receives an independent full-map proof before reuse. Recovery/role
+ * exchange additionally authenticates every surviving map's extent class and
+ * start-block liveness; false-zero cached metadata must never weaken either
+ * proof at the transition where that metadata is authoritative.
  */
 static int swapz_verify_segment_authoritative_maps(
 	const struct swapz_authority *a, swapz_u32 segment,
-	swapz_u32 expected_logical, swapz_u32 expected_count)
+	swapz_u32 expected_logical, swapz_u32 expected_count,
+	int verify_physical_metadata)
 {
 	const swapz_u32 none = ~(swapz_u32)0;
 	swapz_u32 logical, start_block, end_block, found_count = 0;
 
-	if (!a || !a->maps || !a->live_records || !a->extent_classes ||
-	    segment >= a->segment_count || expected_count > a->logical_pages ||
+	if (!a || !a->maps || segment >= a->segment_count ||
+	    expected_count > a->logical_pages ||
+	    (verify_physical_metadata &&
+	     (!a->live_records || !a->extent_classes)) ||
 	    (expected_logical != none &&
 	     (expected_logical >= a->logical_pages || expected_count != 1U)))
 		return -EINVAL;
@@ -606,9 +610,11 @@ static int swapz_verify_segment_authoritative_maps(
 		    !swapz_legal_class(map->extent_blocks) ||
 		    map->extent_blocks > a->physical_blocks - map->start_block ||
 		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
-			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
-		    a->extent_classes[map->start_block] != map->extent_blocks ||
-		    !a->live_records[map->start_block])
+			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
+			return -EUCLEAN;
+		if (verify_physical_metadata &&
+		    (a->extent_classes[map->start_block] != map->extent_blocks ||
+		     !a->live_records[map->start_block]))
 			return -EUCLEAN;
 		map_end_block = map->start_block + map->extent_blocks;
 		if (map->start_block >= end_block || map_end_block <= start_block)
@@ -650,7 +656,7 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 		 * proof: both cached witnesses may be falsely zero after corruption.
 		 */
 		if (swapz_verify_segment_authoritative_maps(
-			    a, segment, ~(swapz_u32)0, 0U))
+			    a, segment, ~(swapz_u32)0, 0U, 0))
 			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
 	} else {
 		if (live_total)
@@ -922,7 +928,7 @@ static int swapz_verify_recovery_victim_dead(
 	if (!a || !a->live_records || segment >= a->segment_count)
 		return -EINVAL;
 	error = swapz_verify_segment_authoritative_maps(
-		a, segment, ~(swapz_u32)0, 0U);
+		a, segment, ~(swapz_u32)0, 0U, 1);
 	if (error)
 		return error;
 	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
@@ -1636,7 +1642,7 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	    old_segment != new_segment &&
 	    a->segment_mapped_pages[old_segment] == 1U &&
 	    swapz_verify_segment_authoritative_maps(
-		    a, old_segment, page, 1U)) {
+		    a, old_segment, page, 1U, 0)) {
 		error = -EUCLEAN;
 		goto fail;
 	}
@@ -1724,7 +1730,7 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 		if (old_segment != a->open_segment &&
 		    a->segment_mapped_pages[old_segment] == 1U &&
 		    swapz_verify_segment_authoritative_maps(
-			    a, old_segment, logical_page, 1U))
+			    a, old_segment, logical_page, 1U, 0))
 			return -EUCLEAN;
 	}
 	if (swapz_page_list_validate_entry(a, logical_page))
@@ -2050,7 +2056,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 				    delta->mapped_pages &&
 			    swapz_verify_segment_authoritative_maps(
 				    a, delta->segment, ~(swapz_u32)0,
-				    delta->mapped_pages)) {
+				    delta->mapped_pages, 0)) {
 				error = -EUCLEAN;
 				goto fail;
 			}
