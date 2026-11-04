@@ -327,12 +327,15 @@ neither may appear mounted or as active swap. Active swap block nodes conflict
 by their `st_rdev`, and regular swapfiles conflict by their filesystem
 `st_dev` when it matches the partition or parent. Other swap-entry file types
 and unreadable entries refuse formatting. The readable `/proc/swaps` inventory
-must contain the kernel's five-column header; empty, headerless, malformed or
-type-inconsistent rows refuse formatting rather than being interpreted as no
-active swap. Every record must terminate in a newline; embedded NULs and
-control bytes, records of 8192 bytes or longer, inventories over 16 MiB or
-65536 rows, and duplicate swap backing identities (block `st_rdev`, regular
-`st_dev` and `st_ino`) are not clearance. This catches directly backed swapfiles visible through
+must contain the kernel's exact tabbed five-column header; empty, headerless,
+malformed or type-inconsistent rows refuse formatting rather than being
+interpreted as no active swap. Kernel-escaped swap paths must decode
+`\\040`, `\\011`, `\\012` and `\\134` before filesystem identity
+checks, while other raw non-NUL filename bytes remain valid. Every record must
+terminate in a newline; embedded NULs, records of 8192 bytes or longer,
+inventories over 16 MiB or 65536 data rows, and duplicate swap backing
+identities (block `st_rdev`, regular `st_dev` and `st_ino`) are not
+clearance. This catches directly backed swapfiles visible through
 `/proc/swaps` even if their mount is outside the formatter's mount namespace;
 it does not prove ancestry through arbitrary stacked filesystems.
 Mount inventory must inspect the formatter's own mount table and each
@@ -346,10 +349,15 @@ mounts, detached namespace file descriptors or inaccessible mount namespaces.
 Mount inventory parsing
 must accept Linux pseudo-filesystem major-zero device identifiers (for example
 `0:20`) without mistaking them for the selected nonzero-major block device.
-Every opened mount table must contain at least one complete row, including
-both numeric mount IDs, absolute mount root/path with valid octal escaping,
-valid optional propagation tags, and the three required post-separator fields.
-Duplicate mount IDs within one table are malformed. An empty table or a structurally incomplete unrelated
+Every opened mount table must contain at least one complete row. Mount IDs
+and known numeric propagation IDs are canonical positive signed-int decimal;
+the device field is a valid major:minor; the mountpoint is an absolute path
+with the kernel's octal escaping; and all three post-separator fields are
+required. The root field is filesystem-specific and may be a non-path token
+(for example nsfs), so it is required but not assumed absolute. Known optional
+propagation tags must validate, while unknown optional fields are ignored as
+required by the extensible Linux mountinfo grammar. Duplicate mount IDs within
+one table are malformed. An empty table or a structurally incomplete unrelated
 sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
 unverified target identities still fail closed.
 Missing evidence for an existing mount namespace, malformed, unreadable,
