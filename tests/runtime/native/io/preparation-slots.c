@@ -12,6 +12,19 @@ typedef int64_t s64;
 typedef struct { _Atomic int64_t value; } atomic64_t;
 typedef struct { _Atomic int value; } atomic_t;
 
+/* The producer is forced to publish between the consumer's initial acquire
+ * and its RAW CAS. Relaxed scheduling flags intentionally publish no payload. */
+struct forced_terminal_publication {
+	atomic_t state;
+	_Atomic int publisher_requested;
+	_Atomic int publication_done;
+	int terminal_state;
+	uint64_t expected_metadata;
+	uint64_t metadata;
+};
+
+static struct forced_terminal_publication *forced_publication;
+
 /* A deterministic producer publication between the first read and raw CAS.
  * Counts API-level acquire observations; it is not a hardware reordering or
  * LKMM proof. The contract allows an unordered failed conditional RMW. */
@@ -49,6 +62,13 @@ static int atomic_cmpxchg(atomic_t *value, int old, int replacement)
 		atomic_store_explicit(&value->value, publication.ready_state,
 				      memory_order_release);
 		publication.publish_before_cas = 0;
+	}
+	if (value == publication.state && forced_publication) {
+		atomic_store_explicit(&forced_publication->publisher_requested, 1,
+				      memory_order_relaxed);
+		while (!atomic_load_explicit(&forced_publication->publication_done,
+						    memory_order_relaxed))
+			sched_yield();
 	}
 	/* Do not give Linux's failed-CAS path stronger ordering in this shim. */
 	atomic_compare_exchange_strong_explicit(&value->value, &old, replacement,
@@ -179,7 +199,8 @@ static int test_capacity_high_bit_and_reuse(void)
 static int test_ready_publication_wins_raw_cas(void)
 {
 	const int states[] = { SWAPZ_PREPARATION_READY_COMPRESSED,
-			       SWAPZ_PREPARATION_READY_RAW };
+			       SWAPZ_PREPARATION_READY_RAW,
+			       SWAPZ_PREPARATION_ERROR };
 	atomic_t state;
 	unsigned int i;
 
@@ -232,6 +253,71 @@ static int test_ready_publication_wins_raw_cas(void)
 	CHECK(publication.ready_acquires == 0);
 	CHECK(publication.failed_cas == 0);
 	publication.state = NULL;
+	return 0;
+}
+
+static void *publish_terminal_between_read_and_cas(void *opaque)
+{
+	struct forced_terminal_publication *handoff = opaque;
+
+	while (!atomic_load_explicit(&handoff->publisher_requested,
+				     memory_order_relaxed))
+		sched_yield();
+	handoff->metadata = handoff->expected_metadata;
+	atomic_store_explicit(&handoff->state.value, handoff->terminal_state,
+			      memory_order_release);
+	atomic_store_explicit(&handoff->publication_done, 1,
+			      memory_order_relaxed);
+	return NULL;
+}
+
+static int test_thread_published_terminal_metadata_after_failed_cas(void)
+{
+	const int states[] = { SWAPZ_PREPARATION_READY_COMPRESSED,
+			       SWAPZ_PREPARATION_READY_RAW,
+			       SWAPZ_PREPARATION_ERROR };
+	unsigned int iteration, state_index;
+
+	for (state_index = 0; state_index < sizeof(states) / sizeof(states[0]);
+	     ++state_index) {
+		for (iteration = 0; iteration < 64U; ++iteration) {
+			struct forced_terminal_publication handoff;
+			pthread_t producer;
+
+			atomic_init(&handoff.state.value, SWAPZ_PREPARATION_PREPARING);
+			atomic_init(&handoff.publisher_requested, 0);
+			atomic_init(&handoff.publication_done, 0);
+			handoff.terminal_state = states[state_index];
+			handoff.expected_metadata =
+				((uint64_t)states[state_index] << 48) ^
+				((uint64_t)iteration * UINT64_C(0x9e3779b97f4a7c15));
+			handoff.metadata = 0;
+			publication.state = &handoff.state;
+			publication.ready_state = handoff.terminal_state;
+			publication.publish_before_cas = 0;
+			publication.acquire_reads = 0;
+			publication.ready_acquires = 0;
+			publication.failed_cas = 0;
+			forced_publication = &handoff;
+			CHECK(pthread_create(&producer, NULL,
+					     publish_terminal_between_read_and_cas,
+					     &handoff) == 0);
+			CHECK(swapz_preparation_select_raw(&handoff.state) ==
+			      handoff.terminal_state);
+			/*
+			 * The relaxed publication_done flag is only a schedule gate.
+			 * This ordinary metadata read must be justified by the failed
+			 * CAS path's second acquire, not by thread join or a barrier.
+			 */
+			CHECK(handoff.metadata == handoff.expected_metadata);
+			CHECK(publication.failed_cas == 1);
+			CHECK(publication.acquire_reads == 2);
+			CHECK(publication.ready_acquires == 1);
+			CHECK(pthread_join(producer, NULL) == 0);
+			forced_publication = NULL;
+			publication.state = NULL;
+		}
+	}
 	return 0;
 }
 
@@ -337,6 +423,8 @@ static int test_production_failure_and_wake_gates(void)
 }
 
 #define TRANSFERS 8192U
+#define PRODUCERS 4U
+_Static_assert(TRANSFERS % PRODUCERS == 0, "even producer sequence ranges");
 static struct {
 	atomic64_t mask;
 	atomic_uint ready[SWAPZ_MAX_RECORDS];
@@ -344,12 +432,16 @@ static struct {
 	atomic_int failed;
 } exchange;
 
-static void *produce(void *unused)
+static void *produce(void *opaque)
 {
+	const unsigned int producer_index = *(const unsigned int *)opaque;
+	const unsigned int first_sequence =
+		producer_index * (TRANSFERS / PRODUCERS) + 1U;
+	const unsigned int final_sequence =
+		(producer_index + 1U) * (TRANSFERS / PRODUCERS);
 	unsigned int sequence, i;
 
-	(void)unused;
-	for (sequence = 1; sequence <= TRANSFERS; ++sequence) {
+	for (sequence = first_sequence; sequence <= final_sequence; ++sequence) {
 		int slot;
 
 		while ((slot = swapz_preparation_claim_slot(&exchange.mask)) < 0) {
@@ -402,16 +494,22 @@ static void *consume(void *unused)
 
 static int test_concurrent_reuse(void)
 {
-	pthread_t producer, consumer;
+	pthread_t producers[PRODUCERS], consumer;
+	unsigned int producer_indices[PRODUCERS];
 	unsigned int i;
 
 	atomic_init(&exchange.mask.value, (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic_init(&exchange.failed, 0);
 	for (i = 0; i < SWAPZ_MAX_RECORDS; ++i)
 		atomic_init(&exchange.ready[i], 0);
-	CHECK(pthread_create(&producer, NULL, produce, NULL) == 0);
 	CHECK(pthread_create(&consumer, NULL, consume, NULL) == 0);
-	CHECK(pthread_join(producer, NULL) == 0);
+	for (i = 0; i < PRODUCERS; ++i) {
+		producer_indices[i] = i;
+		CHECK(pthread_create(&producers[i], NULL, produce,
+				     &producer_indices[i]) == 0);
+	}
+	for (i = 0; i < PRODUCERS; ++i)
+		CHECK(pthread_join(producers[i], NULL) == 0);
 	CHECK(pthread_join(consumer, NULL) == 0);
 	CHECK(!atomic_load(&exchange.failed));
 	CHECK((uint64_t)atomic64_read(&exchange.mask) ==
@@ -425,10 +523,11 @@ int main(void)
 {
 	CHECK(!test_representation_race());
 	CHECK(!test_ready_publication_wins_raw_cas());
+	CHECK(!test_thread_published_terminal_metadata_after_failed_cas());
 	CHECK(!test_closed_admission_suppresses_producer_owner_wake());
 	CHECK(!test_production_failure_and_wake_gates());
 	CHECK(!test_capacity_high_bit_and_reuse());
 	CHECK(!test_concurrent_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=6");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=7");
 	return 0;
 }

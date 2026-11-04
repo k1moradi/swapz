@@ -282,6 +282,96 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 	return 0;
 }
 
+/*
+ * A background preparer may finish first and drop its own reference while the
+ * ordered owner still needs the prepared bytes. A relaxed completion flag only
+ * fixes scheduling; the consumer's payload visibility comes from READY acquire.
+ * The final consumer release, not producer completion, returns slot 63.
+ */
+#define EARLY_RELEASE_ROUNDS 512U
+struct early_producer_release {
+	atomic_t state;
+	atomic64_t free_mask;
+	_Atomic unsigned int references;
+	_Atomic int producer_finished;
+	_Atomic unsigned int failures;
+	pthread_barrier_t start;
+	pthread_barrier_t end;
+	unsigned char payload[RAW_SNAPSHOT_BYTES];
+};
+
+static void *finish_preparation_before_consumer(void *opaque)
+{
+	struct early_producer_release *handoff = opaque;
+	unsigned int iteration, byte;
+
+	for (iteration = 0; iteration < EARLY_RELEASE_ROUNDS; ++iteration) {
+		(void)pthread_barrier_wait(&handoff->start);
+		for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
+			handoff->payload[byte] = (unsigned char)(iteration ^ byte);
+		if (swapz_preparation_publish_codec_result(
+			    &handoff->state, 0) != SWAPZ_PREPARATION_PREPARING)
+			atomic_fetch_add(&handoff->failures, 1);
+		if (atomic_fetch_sub_explicit(&handoff->references, 1,
+					      memory_order_acq_rel) != 2)
+			atomic_fetch_add(&handoff->failures, 1);
+		atomic_store_explicit(&handoff->producer_finished, 1,
+				      memory_order_relaxed);
+		(void)pthread_barrier_wait(&handoff->end);
+	}
+	return NULL;
+}
+
+static int test_producer_releases_first_consumer_reclaims_last(void)
+{
+	struct early_producer_release handoff = { 0 };
+	pthread_t producer;
+	unsigned int iteration, byte;
+
+	atomic_init(&handoff.state.value, SWAPZ_PREPARATION_EMPTY);
+	atomic_init(&handoff.free_mask.value, (s64)(1ULL << 63));
+	atomic_init(&handoff.references, 0);
+	atomic_init(&handoff.producer_finished, 0);
+	atomic_init(&handoff.failures, 0);
+	CHECK(pthread_barrier_init(&handoff.start, NULL, 2) == 0);
+	CHECK(pthread_barrier_init(&handoff.end, NULL, 2) == 0);
+	CHECK(pthread_create(&producer, NULL,
+			     finish_preparation_before_consumer, &handoff) == 0);
+
+	for (iteration = 0; iteration < EARLY_RELEASE_ROUNDS; ++iteration) {
+		CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == 63);
+		atomic_store_explicit(&handoff.references, 2, memory_order_relaxed);
+		atomic_store_explicit(&handoff.producer_finished, 0,
+				      memory_order_relaxed);
+		atomic_store_explicit(&handoff.state.value,
+				      SWAPZ_PREPARATION_PREPARING,
+				      memory_order_relaxed);
+		(void)pthread_barrier_wait(&handoff.start);
+		while (!atomic_load_explicit(&handoff.producer_finished,
+						     memory_order_relaxed))
+			sched_yield();
+		CHECK(swapz_preparation_read_state(&handoff.state) ==
+		      SWAPZ_PREPARATION_READY_RAW);
+		/* This is the first synchronizing payload observation. */
+		for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
+			CHECK(handoff.payload[byte] == (unsigned char)(iteration ^ byte));
+		CHECK(atomic64_read(&handoff.free_mask) == 0);
+		CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == -1);
+		CHECK(atomic_fetch_sub_explicit(&handoff.references, 1,
+						memory_order_acq_rel) == 1);
+		atomic_store_explicit(&handoff.state.value, SWAPZ_PREPARATION_EMPTY,
+				      memory_order_relaxed);
+		swapz_preparation_release_slot(&handoff.free_mask, 63);
+		CHECK((uint64_t)atomic64_read(&handoff.free_mask) == (1ULL << 63));
+		(void)pthread_barrier_wait(&handoff.end);
+	}
+	CHECK(pthread_join(producer, NULL) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.start) == 0);
+	CHECK(pthread_barrier_destroy(&handoff.end) == 0);
+	CHECK(atomic_load_explicit(&handoff.failures, memory_order_relaxed) == 0);
+	return 0;
+}
+
 static int test_closed_admission_suppresses_owner_wake(void)
 {
 	CHECK(swapz_preparation_owner_wake_allowed(1));
@@ -453,8 +543,9 @@ static int test_submitter_active_gate_and_lane_drain(void)
 int main(void)
 {
 	CHECK(!test_ordered_ack_and_refcount_lifetime());
+	CHECK(!test_producer_releases_first_consumer_reclaims_last());
 	CHECK(!test_closed_admission_suppresses_owner_wake());
 	CHECK(!test_submitter_active_gate_and_lane_drain());
-	puts("SWAPZ_PREPARATION_PUBLICATION_LIFETIME_PASS=3");
+	puts("SWAPZ_PREPARATION_PUBLICATION_LIFETIME_PASS=4");
 	return 0;
 }

@@ -122,6 +122,37 @@ static int test_raw_selection_wins_late_codec_error(void)
 	return 0;
 }
 
+/*
+ * Terminal publications are one-shot: neither a later successful codec
+ * result nor a late failure may overwrite READY, ERROR or RAW_SELECTED.
+ * Invalid direct ready-state requests must not mutate PREPARING either.
+ */
+static int test_terminal_states_reject_republication(void)
+{
+	const int states[] = { SWAPZ_PREPARATION_READY_COMPRESSED,
+			       SWAPZ_PREPARATION_READY_RAW,
+			       SWAPZ_PREPARATION_ERROR,
+			       SWAPZ_PREPARATION_RAW_SELECTED };
+	atomic_t state;
+	unsigned int index;
+
+	for (index = 0; index < sizeof(states) / sizeof(states[0]); ++index) {
+		atomic_init(&state.value, states[index]);
+		CHECK(swapz_preparation_publish_codec_result(&state, -EIO) ==
+		      states[index]);
+		CHECK(swapz_preparation_read_state(&state) == states[index]);
+		CHECK(swapz_preparation_publish_codec_result(&state, 2048) ==
+		      states[index]);
+		CHECK(swapz_preparation_read_state(&state) == states[index]);
+	}
+	atomic_init(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_publish_result(&state,
+					      SWAPZ_PREPARATION_ERROR) ==
+	      SWAPZ_PREPARATION_ERROR);
+	CHECK(swapz_preparation_read_state(&state) == SWAPZ_PREPARATION_PREPARING);
+	return 0;
+}
+
 #define PUBLICATION_RACE_ITERATIONS 8192U
 
 struct publication_race_context {
@@ -262,7 +293,8 @@ int main(void)
 	CHECK(!test_codec_success_publication());
 	CHECK(!test_codec_error_publication_wins());
 	CHECK(!test_raw_selection_wins_late_codec_error());
+	CHECK(!test_terminal_states_reject_republication());
 	CHECK(!test_concurrent_codec_publication_preserves_payload_visibility());
-	puts("SWAPZ_PREPARATION_CODEC_RESULT_PASS=5");
+	puts("SWAPZ_PREPARATION_CODEC_RESULT_PASS=6");
 	return 0;
 }
