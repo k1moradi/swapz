@@ -158,12 +158,13 @@ def _readiness_artifact_hashes_valid(hashes):
 
 
 def _readiness_run_id_valid(value):
-    """Match GitHub's concrete positive workflow-run ID contract."""
+    """Match GitHub's canonical positive ASCII workflow-run ID contract."""
     if isinstance(value, bool):
         return False
     if isinstance(value, int):
         return value > 0
-    return isinstance(value, str) and value.isdigit() and int(value) > 0
+    return (isinstance(value, str) and
+            re.fullmatch(r"[1-9][0-9]*", value) is not None)
 
 
 def owner_qualification_artifacts_available(artifacts):

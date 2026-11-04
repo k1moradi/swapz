@@ -5259,7 +5259,10 @@ release source. Required CI evidence must also bind a completed workflow run
 with conclusion success; pending, failed or cancelled GitHub runs remain BLOCKED
 even when the summary claims PASS. The official runner's embedded readiness
 summary and the canonical standalone release evaluator must enforce this same
-exact-source, completed-success and concrete-positive-run-ID contract. A rootless mismatch regression must assert
+exact-source, completed-success and concrete-positive-run-ID contract. Run-ID
+syntax checks must be non-throwing for pathological input and accept only
+canonical positive ASCII decimal identifiers, never Unicode digits or
+leading-zero text. A rootless mismatch regression must assert
 that the blocker names the affected workflow and the exact-source condition;
 it must not depend on stale abbreviated diagnostic wording. The
 `unresolved_critical_issues` release record must carry a real JSON integer

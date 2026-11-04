@@ -798,6 +798,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "concrete run ID" in blocker
             for blocker in result["code_blockers"]))
 
+    def test_required_ci_run_id_validation_is_nonthrowing_and_ascii(self):
+        self.assertFalse(EVALUATOR._valid_run_id("0" * 5000))
+        self.assertFalse(EVALUATOR._valid_run_id("01"))
+        self.assertFalse(EVALUATOR._valid_run_id("١"))
+        self.assertTrue(EVALUATOR._valid_run_id("123456789"))
+
     def test_cancelled_or_pending_ci_never_satisfies_release_readiness(self):
         report = owner_report()
         policy = acceptance_policy()

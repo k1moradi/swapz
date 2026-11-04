@@ -37,6 +37,7 @@ KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9._+-]{1,127}$")
 BOOT_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+RUN_ID_DECIMAL_RE = re.compile(r"^[1-9][0-9]*$")
 ENV_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 UTC_TIMESTAMP_RE = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
@@ -207,7 +208,8 @@ def _valid_run_id(value: Any) -> bool:
         return False
     if isinstance(value, int):
         return value > 0
-    return isinstance(value, str) and value.isdigit() and int(value) > 0
+    return (isinstance(value, str) and
+            RUN_ID_DECIMAL_RE.fullmatch(value) is not None)
 
 
 def _normalize_target(value: Any) -> tuple[str, int] | None:
