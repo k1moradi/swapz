@@ -717,6 +717,29 @@ def campaign_capacity_and_ram(
     }
 
 
+def metadata_ram_trace_within_host_window(
+        capacity: dict, before: dict, after: dict) -> bool:
+    """Require samples in the same physical boot and snapshot time envelope."""
+    trace = capacity.get("metadata_ram_trace")
+    samples = trace.get("samples") if isinstance(trace, dict) else None
+    first_kernel = before.get("kernel")
+    last_kernel = after.get("kernel")
+    if (not isinstance(samples, list) or not samples or
+            not isinstance(first_kernel, dict) or
+            not isinstance(last_kernel, dict) or
+            trace.get("host_boot_id") != first_kernel.get("boot_id") or
+            trace.get("host_boot_id") != last_kernel.get("boot_id")):
+        return False
+    try:
+        first = datetime.datetime.fromisoformat(
+            samples[0]["timestamp_utc"].replace("Z", "+00:00"))
+        last = datetime.datetime.fromisoformat(
+            samples[-1]["timestamp_utc"].replace("Z", "+00:00"))
+        return snapshot_time(before) <= first < last <= snapshot_time(after)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def campaign_status(summary_status: str, source_consistent: bool,
                     protocol_v2: bool, stability_status: str,
                     target_consistent: bool = True) -> str:
@@ -858,6 +881,9 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
     target_binding = qualification_target_binding(summary, before)
     capacity_and_ram = campaign_capacity_and_ram(
         pair_records, target_identity["device_bytes"], source_sha)
+    if capacity_and_ram is not None and not metadata_ram_trace_within_host_window(
+            capacity_and_ram, before, after):
+        capacity_and_ram = None
     summary_status = summary.get("status")
     sealed_status = campaign_status(
         summary_status, source_consistent, protocol_v2, stability["status"],
