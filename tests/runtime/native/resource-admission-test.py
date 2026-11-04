@@ -31,7 +31,7 @@ def shell_function(path: Path, name: str) -> str:
 def parent_gate() -> str:
     source = QUALIFIER.read_text(encoding="utf-8")
     begin = source.index('if ! parent_memory_inventory="$(read_cgroup_root_memory_inventory)"; then')
-    end = source.index('\ntoken="$(od ', begin)
+    end = source.index('\nif ! token="$(od ', begin)
     return source[begin:end]
 
 
@@ -269,6 +269,12 @@ sample_host_memory_admission
         source = QUALIFIER.read_text(encoding="utf-8")
         self.assertIn(
             'BLOCKED: ID36 missing required command %s;', source)
+        self.assertLess(
+            source.index("for required_command in"),
+            source.index("[[ $(id -u) == 0 ]]"))
+        self.assertLess(
+            source.index("for required_command in"),
+            source.index('grep -qw memory "$CGROUP_ROOT/cgroup.controllers"'))
         self.assertIn(
             'if ! token="$(od -An -N8 -tx1 /dev/urandom', source)
         self.assertIn(
