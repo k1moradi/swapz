@@ -1687,6 +1687,67 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "sealed campaign evidence bytes are invalid" in blocker
             for blocker in result["code_blockers"]))
 
+    def test_nested_campaign_numeric_types_must_remain_exact(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+
+        changes = {
+            "ram_summary": (
+                lambda campaign: campaign["capacity_and_ram"][
+                    "metadata_ram_summary"].update(
+                        gc_peak_ram_bytes=float(900 * 1024 * 1024)),
+                "sealed campaign RAM trace summary does not match raw samples"),
+            "target_observation": (
+                lambda campaign: campaign["qualification_target_binding"][
+                    "observed"].update(
+                        physical_device_bytes=float(TARGET["size_bytes"])),
+                "qualification target observations disagree"),
+        }
+        for name, (damage, expected) in changes.items():
+            with self.subTest(case=name):
+                campaign = physical_campaign_evidence(policy_raw)
+                damage(campaign)
+                campaign_raw = encoded(campaign)
+                evidence = current_evidence(
+                    report_raw, policy_raw, physical_raw, campaign_raw)
+                result = EVALUATOR.evaluate_release(
+                    SOURCE, report, report_raw, evidence, policy, policy_raw,
+                    physical, physical_raw, campaign, campaign_raw)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(
+                    result["METADATA_RAM_MEASUREMENT"]["status"],
+                    "NOT_MEASURED")
+                self.assertTrue(any(
+                    expected in blocker for blocker in result["code_blockers"]),
+                    (name, result["code_blockers"]))
+
+    def test_real_swap_numeric_fields_require_exact_integer_types(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        numeric_value = physical["cycles_requested"]
+        physical["cycles_requested"] = float(numeric_value)
+        physical["result"]["cycles_requested"] = float(numeric_value)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "nested result cycles_requested is not an exact integer" in blocker
+            for blocker in result["code_blockers"]))
+
     def test_campaign_raw_numeric_type_mismatch_is_not_authenticated(self):
         report = owner_report()
         policy = acceptance_policy()
