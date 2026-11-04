@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+PRIMARY_MANAGER_SOURCE = REPO_ROOT / "src" / "userspace" / "swapz-primary.c"
 PACKAGING = REPO_ROOT / "packaging"
 GENERATOR = PACKAGING / "swapz-primary-generator"
 MAPPER_SERVICE = PACKAGING / "swapz-primary-mapper.service"
@@ -422,14 +423,14 @@ class UnitSandboxContractTests(unittest.TestCase):
         require("mapper", "Service", "RuntimeDirectory", "swapz")
         require("mapper", "Service", "RuntimeDirectoryMode", "0700")
         require("mapper", "Install", "WantedBy", "swap.target")
-        # This exclusion mask keeps CAP_SYS_ADMIN (DM/swapon/swapoff),
-        # CAP_SYS_MODULE (finit_module), and native device-node access.
+        # The lifecycle needs CAP_SYS_ADMIN (DM/swapon/swapoff),
+        # CAP_SYS_MODULE (finit_module/delete_module), and CAP_SYS_PTRACE so
+        # hidepid cannot conceal another process's mount namespace inventory.
         require(
             "mapper", "Service", "CapabilityBoundingSet",
             "~CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE "
-            "CAP_SYS_PTRACE CAP_SYS_BOOT CAP_SYS_TIME CAP_SYSLOG "
-            "CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_BPF CAP_PERFMON "
-            "CAP_CHECKPOINT_RESTORE",
+            "CAP_SYS_BOOT CAP_SYS_TIME CAP_SYSLOG CAP_MAC_ADMIN "
+            "CAP_MAC_OVERRIDE CAP_BPF CAP_PERFMON CAP_CHECKPOINT_RESTORE",
         )
         # ReadOnlyPaths binds would change the journal mount ID, which the
         # native manager deliberately checks against its parent.
@@ -442,6 +443,8 @@ class UnitSandboxContractTests(unittest.TestCase):
             ("RestrictRealtime", "yes"),
             ("RestrictSUIDSGID", "yes"),
             ("SystemCallArchitectures", "native"),
+            ("SystemCallFilter", "~@mount"),
+            ("SystemCallErrorNumber", "EPERM"),
         ):
             require("mapper", "Service", directive, value)
         self.assertNotIn(("Service", "ProtectKernelModules"), files["mapper"])
@@ -457,10 +460,10 @@ class UnitSandboxContractTests(unittest.TestCase):
             require(unit, "Service", "CapabilityBoundingSet", "CAP_SYS_ADMIN")
             require(unit, "Service", "ProtectHome", "yes")
             require(unit, "Service", "PrivateTmp", "yes")
-            require(unit, "Service", "ProtectKernelModules", "yes")
             require(unit, "Service", "RestrictRealtime", "yes")
             require(unit, "Service", "LockPersonality", "yes")
             require(unit, "Service", "SystemCallArchitectures", "native")
+            require(unit, "Service", "SystemCallErrorNumber", "EPERM")
             self.assertNotIn(("Unit", "Wants"), files[unit])
             self.assertNotIn(("Unit", "Requires"), files[unit])
         require(
@@ -468,12 +471,19 @@ class UnitSandboxContractTests(unittest.TestCase):
             r"swapz-primary-mapper.service dev-mapper-swapz\x2dprimary.swap",
         )
         require("verifier", "Service", "ProtectSystem", "full")
+        require("verifier", "Service", "SystemCallFilter", "~@mount @module")
+        # The verifier authenticates /lib/modules, so ProtectKernelModules
+        # would hide required evidence. Module mutation is blocked by both the
+        # capability boundary and the @module syscall deny-list.
+        self.assertNotIn(("Service", "ProtectKernelModules"), files["verifier"])
         # The read-only probe must not introduce bind mounts that appear as
         # forged recovery storage or package-journal mount substitution.
         self.assertNotIn(("Service", "ReadOnlyPaths"), files["verifier"])
         require("verifier", "Service", "TimeoutStartSec", "30s")
         require("verifier", "Install", "WantedBy", "multi-user.target")
         require("health", "Service", "ProtectSystem", "strict")
+        require("health", "Service", "ProtectKernelModules", "yes")
+        require("health", "Service", "SystemCallFilter", "~@mount")
         require("health", "Service", "Restart", "on-failure")
         require("health", "Service", "TimeoutStopSec", "10s")
         require("health", "Unit", "ConditionPathExists", "/dev/mapper/swapz-primary")
@@ -494,6 +504,38 @@ class UnitSandboxContractTests(unittest.TestCase):
             passive_swap=read_text(PRIMARY_SWAP),
         )
 
+    def test_sandbox_matches_native_visibility_and_module_evidence(self) -> None:
+        primary_manager = read_text(PRIMARY_MANAGER_SOURCE)
+        verifier_helper = read_text(BOOT_VERIFY)
+        mapper = self.directives(read_text(MAPPER_SERVICE))
+        verifier = self.directives(read_text(BOOT_VERIFY_SERVICE))
+
+        # The native manager deliberately audits every visible process mount
+        # namespace, so CAP_SYS_PTRACE must remain outside the exclusion mask.
+        self.assertIn('"/proc/%s/mountinfo"', primary_manager)
+        mapper_bound = mapper[("Service", "CapabilityBoundingSet")][0]
+        self.assertTrue(mapper_bound.startswith("~"))
+        excluded_capabilities = set(mapper_bound[1:].split())
+        self.assertNotIn("CAP_SYS_PTRACE", excluded_capabilities)
+
+        # Mapper lifecycle owns module load/unload; observers must not.
+        self.assertIn("SYS_finit_module", primary_manager)
+        self.assertIn("SYS_delete_module", primary_manager)
+        self.assertNotIn("CAP_SYS_MODULE", excluded_capabilities)
+
+        # Cold-boot observation authenticates the installed module image.
+        # Keep that path readable while denying module mutation by syscall.
+        self.assertIn(
+            "installed_image=/lib/modules/$installed_kernel_release/"
+            "updates/dkms/dm-swapz.ko",
+            verifier_helper,
+        )
+        self.assertNotIn(("Service", "ProtectKernelModules"), verifier)
+        self.assertEqual(
+            verifier[("Service", "SystemCallFilter")],
+            ("~@mount @module",),
+        )
+
     def test_unit_drift_is_rejected_without_systemd_or_root(self) -> None:
         original = {
             "mapper": read_text(MAPPER_SERVICE),
@@ -509,14 +551,19 @@ class UnitSandboxContractTests(unittest.TestCase):
             ("unbounded stop", "mapper", "TimeoutStopSec=120s", "TimeoutStopSec=infinity"),
             ("privilege escalation", "mapper", "NoNewPrivileges=yes", "NoNewPrivileges=no"),
             ("module capability excluded", "mapper", "CAP_NET_RAW", "CAP_SYS_MODULE"),
+            ("cross-process visibility excluded", "mapper", "CAP_SYS_BOOT", "CAP_SYS_PTRACE CAP_SYS_BOOT"),
             ("module loading disabled", "mapper", "ProtectSystem=full", "ProtectKernelModules=yes"),
+            ("mapper mount namespace mutable", "mapper", "SystemCallFilter=~@mount", "SystemCallFilter="),
             ("early tmp.mount ordering cycle", "mapper", "ProtectHome=yes", "ProtectHome=yes\nPrivateTmp=yes"),
             ("unprotected filesystem", "mapper", "ProtectSystem=full", "ProtectSystem=no"),
             ("journal mount substitution", "mapper", "ProtectSystem=full", "ProtectSystem=full\nReadOnlyPaths=-/var/lib/swapz-package-transactions"),
             ("verifier starts mapper", "verifier", "After=swapz-primary-mapper.service", "Wants=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
             ("verifier recovery mount substitution", "verifier", "ProtectSystem=full", "ProtectSystem=full\nReadOnlyPaths=-/var/lib/swapz/physical-recovery"),
+            ("verifier module evidence hidden", "verifier", "ProtectControlGroups=yes", "ProtectControlGroups=yes\nProtectKernelModules=yes"),
             ("verifier can load modules", "verifier", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
+            ("verifier module syscall allowed", "verifier", "SystemCallFilter=~@mount @module", "SystemCallFilter=~@mount"),
             ("health can load modules", "health", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
+            ("health mount namespace mutable", "health", "SystemCallFilter=~@mount", "SystemCallFilter="),
             ("health can edit filesystem", "health", "ProtectSystem=strict", "ProtectSystem=full"),
             ("health starts mapper", "health", "After=swapz-primary-mapper.service", "Requires=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
             ("passive swap enabled", "passive_swap", "TimeoutSec=120s", "TimeoutSec=120s\n\n[Install]\nWantedBy=swap.target"),
