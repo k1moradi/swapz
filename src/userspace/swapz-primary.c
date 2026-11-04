@@ -26,6 +26,7 @@
 #include <sys/vfs.h>
 #include <sys/wait.h>
 #include <sys/utsname.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "../kernel/authority.h"
@@ -196,6 +197,8 @@ _Static_assert(SWAPZ_BLOCK_BYTES % 512U == 0U,
 #define SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES (64ULL * 1024ULL * 1024ULL)
 #define SWAPZ_PRIMARY_DM_CONTROL_PATH "/dev/mapper/control"
 #define SWAPZ_PRIMARY_DM_BUFFER_BYTES 4096U
+#define SWAPZ_PRIMARY_MAPPER_NODE_RETRY_ATTEMPTS 100U
+#define SWAPZ_PRIMARY_MAPPER_NODE_RETRY_NS 50000000L
 #define SWAPZ_PRIMARY_MODULE_SUFFIX "/sbin/swapzctl"
 #define SWAPZ_PRIMARY_MODULE_RELATIVE_PATH "libexec/swapz/dm-swapz.ko"
 #define SWAPZ_PRIMARY_STATE_JSON_PREFIX \
@@ -7076,7 +7079,12 @@ static int swapz_primary_dm_prove_mapper_absent(
 	return 0;
 }
 
-static int swapz_primary_mapper_device_open(
+static int swapz_primary_mapper_node_retryable_errno(int error)
+{
+	return error == ENOENT;
+}
+
+static int swapz_primary_mapper_device_open_once(
 	const char *mapper_name, dev_t expected_device,
 	uint64_t expected_bytes)
 {
@@ -7118,6 +7126,38 @@ failed:
 		(void)close(fd);
 		errno = saved_errno;
 	}
+	return -1;
+}
+
+static int swapz_primary_mapper_device_open(
+	const char *mapper_name, dev_t expected_device,
+	uint64_t expected_bytes)
+{
+	const struct timespec delay = {
+		.tv_sec = 0,
+		.tv_nsec = SWAPZ_PRIMARY_MAPPER_NODE_RETRY_NS,
+	};
+	unsigned int attempt;
+
+	for (attempt = 0; attempt < SWAPZ_PRIMARY_MAPPER_NODE_RETRY_ATTEMPTS;
+	     ++attempt) {
+		struct timespec request = delay;
+		struct timespec remaining;
+		int fd = swapz_primary_mapper_device_open_once(
+			mapper_name, expected_device, expected_bytes);
+
+		if (fd >= 0)
+			return fd;
+		if (!swapz_primary_mapper_node_retryable_errno(errno) ||
+		    attempt + 1U == SWAPZ_PRIMARY_MAPPER_NODE_RETRY_ATTEMPTS)
+			return -1;
+		while (nanosleep(&request, &remaining) < 0) {
+			if (errno != EINTR)
+				return -1;
+			request = remaining;
+		}
+	}
+	errno = EIO;
 	return -1;
 }
 
@@ -8957,6 +8997,7 @@ static int swapz_primary_start_prepared(void)
 	int starting_persisted = 0;
 	int result = -1;
 	int saved_errno = EIO;
+	const char *failure_phase = "admission";
 
 	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
 		errno = ENOTSUP;
@@ -9071,6 +9112,7 @@ static int swapz_primary_start_prepared(void)
 		goto out;
 	starting_persisted = 1;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting");
+	failure_phase = "header-write";
 	if (swapz_primary_module_load_intent_write_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0 ||
 	    swapz_primary_write_header_checked_fd(
@@ -9082,14 +9124,17 @@ static int swapz_primary_start_prepared(void)
 	}
 	target_fd = -1;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-header-written");
+	failure_phase = "module-load";
 	if (swapz_primary_load_qualified_module(&module_loaded_by_call) < 0 ||
 	    module_loaded_by_call != 1)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-module-inserted");
+	failure_phase = "module-wal";
 	if (swapz_primary_module_load_mark_loaded_at(
 		    recovery_fd, lock_fd, &manifest, 0) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-module-loaded");
+	failure_phase = "mapper-create";
 	if (swapz_primary_dm_create_mapper(
 		    recovery_fd, lock_fd, &manifest, module_loaded_by_call,
 		    &mapper_created_by_call, &mapper_resumed_by_call,
@@ -9098,16 +9143,19 @@ static int swapz_primary_start_prepared(void)
 	    mapper_device == 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mapper-resumed");
+	failure_phase = "mapper-format";
 	if (swapz_primary_format_mapper_swap(
 		    recovery_fd, lock_fd, &manifest, mapper_device) < 0)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mkswap");
+	failure_phase = "swapon";
 	if (swapz_primary_activate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest, mapper_device,
 		    &swap_activated_by_call) < 0 ||
 	    !swap_activated_by_call)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-swapon");
+	failure_phase = "state-active";
 	active_state = starting_state;
 	active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
 	if (swapz_primary_state_write_at(
@@ -9116,6 +9164,10 @@ static int swapz_primary_start_prepared(void)
 	result = 0;
 out:
 	saved_errno = errno ? errno : EIO;
+	if (result < 0)
+		fprintf(stderr,
+			"PRIMARY_START=FAILED phase=%s errno=%d error=%s\n",
+			failure_phase, saved_errno, strerror(saved_errno));
 	if (result < 0 && starting_persisted && recovery_fd >= 0 &&
 	    lock_fd >= 0) {
 		int failure_errno = saved_errno;

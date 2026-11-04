@@ -1531,6 +1531,22 @@ static void test_primary_dm_operations_disabled(void)
 	assert(deactivated == 0);
 }
 
+static void test_mapper_node_retry_policy(void)
+{
+	const uint64_t maximum_wait_ns =
+		(uint64_t)SWAPZ_PRIMARY_MAPPER_NODE_RETRY_ATTEMPTS *
+		(uint64_t)SWAPZ_PRIMARY_MAPPER_NODE_RETRY_NS;
+
+	assert(SWAPZ_PRIMARY_MAPPER_NODE_RETRY_ATTEMPTS > 1U);
+	assert(SWAPZ_PRIMARY_MAPPER_NODE_RETRY_NS > 0L);
+	assert(maximum_wait_ns <= 5000000000ULL);
+	assert(swapz_primary_mapper_node_retryable_errno(ENOENT));
+	assert(!swapz_primary_mapper_node_retryable_errno(ENODEV));
+	assert(!swapz_primary_mapper_node_retryable_errno(EACCES));
+	assert(!swapz_primary_mapper_node_retryable_errno(ESTALE));
+	assert(!swapz_primary_mapper_node_retryable_errno(EIO));
+}
+
 static void test_recoverable_lifecycle_stages(void)
 {
 	const char *run_id = "0123456789abcdef0123456789abcdef";
@@ -2681,6 +2697,7 @@ int main(void)
 	test_primary_run_id_and_header_builder();
 	test_primary_stage_policy();
 	test_primary_state_records();
+	test_mapper_node_retry_policy();
 	test_recoverable_lifecycle_stages();
 	test_recovery_header_recognition();
 	test_checked_header_write();

@@ -559,7 +559,14 @@ logical sector count and backing major:minor before admitting use. The mapper
 name is the stable `swapz-primary` path consumed by the packaged systemd swap
 unit; the DM UUID includes the fresh run ID and remains the authoritative
 ownership binding. A matching name with a different UUID is foreign and must
-never be adopted or removed.
+never be adopted or removed. Device Mapper ioctls may complete before udev has
+published the matching `/dev/mapper/swapz-primary` node. Only after the exact
+UUID/table/dev_t have already been verified through the control fd may opening
+that node retry a missing-path `ENOENT` for a finite maximum of five seconds.
+An existing wrong node, wrong dev_t/size, permission error, `ENODEV`, or any
+other failure is immediate and must never be retried. The opened descriptor and
+a second pathname identity snapshot must still match the expected dev_t and
+logical size before mkswap, swapon, swapoff, or other lifecycle use.
 
 Persist and verify the matching owner claim, immutable manifest and
 `STARTING` state before mapper creation. Preserve side-effect flags when an
