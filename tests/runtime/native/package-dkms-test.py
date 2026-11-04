@@ -165,6 +165,11 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_FAKE_DEPMOD_FAIL_ONCE="0",
             SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE="0",
             SWAPZ_FAKE_TAMPER_INSTALLED="0",
+            SWAPZ_FAKE_TAMPER_BEFORE_CLI="0",
+            SWAPZ_TEST_INSTALLED_HELPER=str(
+                self.home / "usr/local/libexec/swapz/device-roundtrip"),
+            SWAPZ_TAMPER_BEFORE_CLI_MARKER=str(
+                self.home / "tamper-before-cli.once"),
             SWAPZ_FAKE_SECURE_BOOT="disabled",
             SWAPZ_FAKE_MOK_ENROLLED="1",
             SWAPZ_FAKE_SIGNATURE_VALID="1",
@@ -359,6 +364,12 @@ case "${1:-}" in
     if [[ "${SWAPZ_TEST_ASSERT_CLI_ABSENT_AT_RELOAD:-0}" == 1 &&
           -e "$SWAPZ_TEST_INSTALLED_CLI" ]]; then
       exit 57
+    fi
+    if [[ "$SWAPZ_FAKE_TAMPER_BEFORE_CLI" == 1 &&
+          ! -e "$SWAPZ_TAMPER_BEFORE_CLI_MARKER" &&
+          -f "$SWAPZ_TEST_INSTALLED_HELPER" ]]; then
+      : > "$SWAPZ_TAMPER_BEFORE_CLI_MARKER"
+      printf 'tampered-after-reload\n' > "$SWAPZ_TEST_INSTALLED_HELPER"
     fi
     ;;
   is-active)
@@ -1026,6 +1037,28 @@ exec "{flock_binary}" "$@"
         self.assertEqual(self.installed_module.read_bytes(), old_module)
         self.assertFalse(compressed_module.exists())
         self.assertEqual(self.uninstall_transactions(), [])
+
+    def test_noncli_payload_changed_during_reload_never_publishes_cli(self):
+        first = self.invoke("install", {"SWAPZ_FAKE_TAMPER_BEFORE_CLI": "1"})
+        self.assertNotEqual(first.returncode, 0)
+        self.assertIn("before CLI publication", first.stderr)
+        self.assert_absent()
+        self.assertFalse(list(
+            (self.home / "transactions").glob("swapz-package.*")))
+
+    def test_upgrade_rechecks_userspace_before_restoring_activation(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        old_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        old_module = self.installed_module.read_bytes()
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        failed = self.invoke("install", {"SWAPZ_FAKE_TAMPER_BEFORE_CLI": "1"})
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("before CLI publication", failed.stderr)
+        self.assertEqual((self.prefix / "sbin/swapzctl").read_bytes(), old_cli)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        self.assertFalse(list(
+            (self.home / "transactions").glob("swapz-package.*")))
 
     def test_install_cli_only_published_after_systemd_reload(self):
         gated = {"SWAPZ_TEST_ASSERT_CLI_ABSENT_AT_RELOAD": "1"}
