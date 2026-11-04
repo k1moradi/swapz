@@ -548,6 +548,60 @@ static int test_metadata_and_format_guards(void)
 	return 0;
 }
 
+/*
+ * A correct metadata CRC alone does not prove a descriptor is semantically
+ * valid. Give a forged header alias its own matching payload CRC, so rejection
+ * must come from the descriptor's placement rather than the checksum.
+ */
+static int test_authenticated_descriptor_semantic_guards(void)
+{
+	struct swapz_builder builder;
+	struct swapz_record record;
+	struct swapz_decoded decoded;
+	const uint8_t *readable;
+	uint8_t *record_bytes = extent + sizeof(struct swapz_header);
+
+	set_payload(128, 17);
+	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 105) == 0);
+	CHECK(swapz_append_encoded(&builder, 42, 9, payload, 128,
+				   SWAPZ_ENCODING_DELTA64_SHUF8) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	memcpy(&record, record_bytes, sizeof(record));
+	record.payload_offset_le = 0;
+	record.payload_length_le = 1U | SWAPZ_RECORD_DELTA64_FLAG |
+		SWAPZ_RECORD_SHUF8_FLAG;
+	record.payload_crc32c_le = reference_crc32c(extent, 1);
+	memcpy(record_bytes, &record, sizeof(record));
+	reseal_metadata(extent, 1);
+	CHECK(swapz_validate_metadata_crc(extent, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_validate(extent, SWAPZ_BLOCK_BYTES) == -EUCLEAN);
+	readable = payload;
+	CHECK(swapz_lookup_validated_descriptor(extent, SWAPZ_BLOCK_BYTES, 0,
+					       &decoded, &readable) == -EUCLEAN);
+	CHECK(readable == NULL && decoded.payload_length == 0);
+	readable = payload;
+	CHECK(swapz_lookup_validated(extent, SWAPZ_BLOCK_BYTES, 0,
+				     &decoded, &readable) == -EUCLEAN);
+	CHECK(readable == NULL && decoded.payload_length == 0);
+
+	/* Even with a valid stored payload and CRC, generation zero is invalid. */
+	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 106) == 0);
+	CHECK(swapz_append_encoded(&builder, 43, 10, payload, 128,
+				   SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	memcpy(&record, record_bytes, sizeof(record));
+	record.generation_le = 0;
+	memcpy(record_bytes, &record, sizeof(record));
+	reseal_metadata(extent, 1);
+	CHECK(swapz_validate_metadata_crc(extent, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_validate(extent, SWAPZ_BLOCK_BYTES) == -EUCLEAN);
+	readable = payload;
+	CHECK(swapz_lookup_validated_descriptor(extent, SWAPZ_BLOCK_BYTES, 0,
+					       &decoded, &readable) == -EUCLEAN);
+	CHECK(readable == NULL && decoded.generation == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int tests = 0;
@@ -569,6 +623,7 @@ int main(void)
 	CHECK(test_integrity() == 0); tests++;
 	CHECK(test_read_spans() == 0); tests++;
 	CHECK(test_metadata_and_format_guards() == 0); tests++;
+	CHECK(test_authenticated_descriptor_semantic_guards() == 0); tests++;
 	printf("SWAPZ_EXACT_PRODUCTION_C_TESTS_PASS=%d\n", tests);
 	return 0;
 }
