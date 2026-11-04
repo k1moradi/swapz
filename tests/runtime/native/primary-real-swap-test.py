@@ -1135,6 +1135,26 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         result = qualify.evaluate_stop_samples(samples)
         self.assertTrue(result["swapoff_before_remove_witness"])
 
+    def test_stop_order_tracker_is_constant_memory(self):
+        tracker = qualify.StopOrderTracker()
+        timestamp = 1
+        for _ in range(10000):
+            tracker.observe(
+                qualify.StopSample(timestamp, True, True, True, True))
+            timestamp += 1
+        tracker.observe(
+            qualify.StopSample(timestamp, True, True, False, True))
+        timestamp += 1
+        tracker.observe(
+            qualify.StopSample(timestamp, False, False, False, True))
+        evidence = tracker.result()
+        self.assertEqual(evidence["samples"], 10002)
+        self.assertFalse(hasattr(tracker, "samples"))
+
+        sampler = qualify.StopSampler(
+            (252, 1), "SWAPZ-PRIMARY-" + "1" * 32, "/dev/dm-1")
+        self.assertFalse(hasattr(sampler, "samples"))
+
     def test_stop_order_rejects_out_of_order_and_regressing_witnesses(self):
         active = lambda timestamp: qualify.StopSample(
             timestamp, True, True, True, True)

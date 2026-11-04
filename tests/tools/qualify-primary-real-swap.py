@@ -2428,48 +2428,73 @@ def _mapper_sysfs_state(device: tuple[int, int], expected_uuid: str) -> tuple[bo
     return True, observed == expected_uuid
 
 
-def evaluate_stop_samples(samples: list[StopSample]) -> dict:
-    if not samples:
-        raise Blocked("stop sampler collected no observations")
-    # Only stable two-sided observations can advance the proof. Their order is
-    # essential: witnessing all three states in arbitrary order is not proof
-    # that ordinary swapoff preceded mapper removal.
-    phase = 0  # 0: no active witness; 1: active; 2: swapoff; 3: removed
-    last_timestamp = -1
-    for sample in samples:
-        if sample.monotonic_ns <= last_timestamp:
+class StopOrderTracker:
+    """Constant-memory proof of active -> swapoff -> mapper removal ordering."""
+
+    def __init__(self):
+        self.phase = 0  # 0: none; 1: active; 2: swapoff; 3: removed
+        self.last_timestamp = -1
+        self.sample_count = 0
+
+    def observe(self, sample: StopSample) -> None:
+        if sample.monotonic_ns <= self.last_timestamp:
             raise Blocked("stop sampler timestamps are not strictly increasing")
-        last_timestamp = sample.monotonic_ns
-        if not sample.identity_valid and (sample.mapper_before or sample.mapper_after):
+        self.last_timestamp = sample.monotonic_ns
+        self.sample_count += 1
+        if not sample.identity_valid and (
+                sample.mapper_before or sample.mapper_after):
             raise QualificationFailure("mapper identity changed during stop")
-        if not sample.mapper_before and not sample.mapper_after and sample.swap_active:
-            raise QualificationFailure("mapper disappeared while still present in swap inventory")
+        if not sample.mapper_before and not sample.mapper_after and \
+                sample.swap_active:
+            raise QualificationFailure(
+                "mapper disappeared while still present in swap inventory")
         if sample.mapper_before != sample.mapper_after:
-            continue
+            return
         if sample.mapper_before:
             if sample.swap_active:
-                if phase >= 2:
-                    raise QualificationFailure("mapper swap reactivated after swapoff during stop")
-                phase = 1
+                if self.phase >= 2:
+                    raise QualificationFailure(
+                        "mapper swap reactivated after swapoff during stop")
+                self.phase = 1
             else:
-                if phase == 0:
-                    raise Blocked("stop sampler did not witness initial active mapper")
-                if phase == 3:
-                    raise QualificationFailure("mapper reappeared after removal during stop")
-                phase = 2
+                if self.phase == 0:
+                    raise Blocked(
+                        "stop sampler did not witness initial active mapper")
+                if self.phase == 3:
+                    raise QualificationFailure(
+                        "mapper reappeared after removal during stop")
+                self.phase = 2
         else:
-            if phase < 2:
+            if self.phase < 2:
                 raise Blocked(
-                    "stop completed but sampler did not independently witness swapoff before mapper removal")
-            phase = 3
-    if phase == 0:
-        raise Blocked("stop sampler did not witness initial active mapper")
-    if phase == 1:
-        raise Blocked("stop completed but sampler did not independently witness swapoff before mapper removal")
-    if phase == 2:
-        raise Blocked("stop sampler did not witness final mapper absence")
-    return {"initial_active": True, "swapoff_before_remove_witness": True,
-            "final_absent": True, "samples": len(samples)}
+                    "stop completed but sampler did not independently witness "
+                    "swapoff before mapper removal")
+            self.phase = 3
+
+    def result(self) -> dict:
+        if self.sample_count == 0:
+            raise Blocked("stop sampler collected no observations")
+        if self.phase == 0:
+            raise Blocked("stop sampler did not witness initial active mapper")
+        if self.phase == 1:
+            raise Blocked(
+                "stop completed but sampler did not independently witness "
+                "swapoff before mapper removal")
+        if self.phase == 2:
+            raise Blocked("stop sampler did not witness final mapper absence")
+        return {
+            "initial_active": True,
+            "swapoff_before_remove_witness": True,
+            "final_absent": True,
+            "samples": self.sample_count,
+        }
+
+
+def evaluate_stop_samples(samples: list[StopSample]) -> dict:
+    tracker = StopOrderTracker()
+    for sample in samples:
+        tracker.observe(sample)
+    return tracker.result()
 
 
 class CycleTelemetrySampler:
@@ -2597,7 +2622,7 @@ class StopSampler:
         self.mapper_device = mapper_device
         self.expected_uuid = expected_uuid
         self.known_swap_path = known_swap_path
-        self.samples: list[StopSample] = []
+        self._tracker = StopOrderTracker()
         self.error: Exception | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="swapz-stop-sampler", daemon=True)
@@ -2612,7 +2637,7 @@ class StopSampler:
             raise Blocked("stop sampler thread did not terminate")
         if self.error:
             raise Blocked(f"stop sampler failed: {self.error}")
-        return evaluate_stop_samples(self.samples)
+        return self._tracker.result()
 
     def _run(self) -> None:
         try:
@@ -2624,7 +2649,7 @@ class StopSampler:
                     for row in rows
                 )
                 after, identity_after = _mapper_sysfs_state(self.mapper_device, self.expected_uuid)
-                self.samples.append(StopSample(
+                self._tracker.observe(StopSample(
                     time.monotonic_ns(), before, after, swap_active,
                     (not before or identity_before) and (not after or identity_after),
                 ))
