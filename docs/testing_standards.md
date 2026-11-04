@@ -4728,7 +4728,10 @@ produce a non-PASS, nonzero result with the failed token-lifecycle phase and
 original command exit status, retain earlier observation evidence, and never
 print token contents or the runtime authorization pathname. Rootless cases
 must cover missing, stale, duplicate and malformed authority, revocation
-failure, preserved evidence, explicit re-preflight retry and abort cleanup. The primary mapper service and package
+failure, preserved evidence, explicit re-preflight retry and abort cleanup.
+Only completed unlink plus runtime-directory sync may suppress the EXIT
+fallback; a failed revocation attempt must leave that fallback armed for a
+later persistence abort or final process exit. The primary mapper service and package
 templates must not contain a device pathname,
 major:minor, UUID or PARTUUID. The installed systemd generator must derive
 the selected `.device` and by-PARTUUID `.swap` unit names through the manager's

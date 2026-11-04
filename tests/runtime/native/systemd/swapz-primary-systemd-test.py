@@ -1862,6 +1862,44 @@ class BootVerifierTests(unittest.TestCase):
         self.assertFalse(authorization.exists())
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
 
+    def test_revocation_failure_keeps_abort_cleanup_retry_armed(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        first_failure_marker = self.root / "revocation-first-failure"
+        write_executable(
+            self.bin / "rm",
+            "#!/bin/sh\n"
+            'if [ "$3" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/primary-execution.env" ] && '
+            '[ ! -e "$MOCK_REVOKE_FIRST_FAILURE_MARKER" ]; then\n'
+            '    : > "$MOCK_REVOKE_FIRST_FAILURE_MARKER"\n'
+            "    exit 73\n"
+            "fi\n"
+            'exec /usr/bin/rm "$@"\n',
+        )
+        write_executable(
+            self.bin / "mktemp",
+            "#!/bin/sh\n"
+            'case "$1" in\n'
+            '*/.boot-report.XXXXXX) exit 75 ;;\n'
+            'esac\n'
+            'exec /usr/bin/mktemp "$@"\n',
+        )
+        env = self.env.copy()
+        env["MOCK_REVOKE_FIRST_FAILURE_MARKER"] = str(first_failure_marker)
+        aborted = self.run_verifier("observe", env=env)
+        self.assertEqual(aborted.returncode, 1, aborted.stderr)
+        self.assertTrue(first_failure_marker.is_file())
+        self.assertIn("phase=token_revoke_unlink exit_status=73 reason=unlink_failed",
+                      aborted.stderr)
+        self.assertIn("cannot create boot report", aborted.stderr)
+        self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", aborted.stdout)
+        self.assertFalse(
+            authorization.exists(),
+            "EXIT cleanup did not retry a failed revocation before aborting",
+        )
+        self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
+        self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").is_file())
+
     def test_read_only_plan_exit_two_is_accepted_for_persistence_proof(self) -> None:
         self.write_proc_swaps(active=False)
         arm = self.run_verifier("arm")

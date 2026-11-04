@@ -1439,11 +1439,10 @@ SWAPS
 	# Revocation is part of acceptance, not a best-effort EXIT side effect.
 	# Preserve the observation reasons and persist FAIL on cleanup failure.
 	if revoke_runtime_authorization; then
-		observation_revocation_attempted=1
+		observation_runtime_authorization_revoked=1
 	else
 		append_failure runtime_preflight_authorization_revocation_failed
 		report_observation_revocation_failure
-		observation_revocation_attempted=1
 	fi
 
 	if [ -n "$failure_reasons" ]; then
@@ -1548,8 +1547,8 @@ observe)
 	# Unexpected persistence aborts must also revoke volatile authority.
 	# Preserve the original exit code when fallback cleanup succeeds.
 	# This observer never deactivates swap or removes an active mapper.
-	observation_revocation_attempted=0
-	trap 'observation_exit_status=$?; if [ "$observation_revocation_attempted" -eq 0 ] && ! revoke_runtime_authorization; then report_observation_revocation_failure; exit 1; fi; exit "$observation_exit_status"' EXIT
+	observation_runtime_authorization_revoked=0
+	trap 'observation_exit_status=$?; if [ "$observation_runtime_authorization_revoked" -eq 0 ]; then if ! revoke_runtime_authorization; then report_observation_revocation_failure; exit 1; fi; fi; exit "$observation_exit_status"' EXIT
 	observe_boot
 	trap - EXIT
 	;;
