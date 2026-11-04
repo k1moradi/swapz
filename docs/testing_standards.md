@@ -4447,7 +4447,8 @@ pass `--no-discard`, which is not an `mkswap` option. Compile a noninstalled
 exact-source
 `swapzctl` under a root-owned private prefix, and generate a private
 parser-valid qualification record bound to the exact test binary/module/oracle
-hashes and live host identity. The production coordinator must then complete
+hashes, live host identity, and running kernel release. The production coordinator
+must then complete
 `prepare -> start -> stop` using its normal module load, Device Mapper,
 `mkswap`, native `swapon` and native `swapoff` paths. The rehearsal must
 prove one run ID through READY/ACTIVE/COMPLETE, the run-bound DM UUID, exact

@@ -1168,6 +1168,7 @@ report = {
     },
     "source_sha": os.environ["SOURCE_HEAD"],
     "tested_commit_sha": os.environ["SOURCE_HEAD"],
+    "kernel_release": os.uname().release,
     "overall": "PASS",
     "qualification": "RAM_BACKED_NULL_BLK_ONLY",
     "stages": [
