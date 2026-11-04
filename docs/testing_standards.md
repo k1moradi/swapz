@@ -917,7 +917,10 @@ engine-GC fixtures remain required for actual encoded-byte relocation and
 partial lower-run completion; synthetic map metadata alone is not a
 compressed byte oracle. A recovery that cannot fit an extent or claim another
 reserve must preserve published authority and **fail closed**, not retry the
-same uncertain physical blocks or report foreground progress. Deterministic
+same uncertain physical blocks or report foreground progress. In the
+finite-reserve regression, multiple physically full uncertain destinations
+must refuse role exchange; a live last-survivor mapping remains byte-exact,
+and exhausted recovery returns `-ENOSPC` without reusing either destination. Deterministic
 churn failures must emit a fixed seed, operation index, short bounded
 recent-operation trace, failed invariant, expected/actual generation and
 errno. Successful operations must not log individually or allocate model

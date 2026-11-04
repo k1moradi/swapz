@@ -758,6 +758,116 @@ static int test_full_destination_raw_roll_forward(void)
 	return 0;
 }
 
+
+/*
+ * Fail-closed recovery when the last authoritative RAW survivor cannot move:
+ * two successive reserve destinations can be consumed by writes with unknown
+ * completion. Neither the physical bytes nor the zero live sidecars permit
+ * claiming those blocks again. There is no safe third destination.
+ */
+static int test_uncertain_recovery_exhausts_reserves(void)
+{
+	const swapz_u32 victim = LOGICAL_SEGMENTS - 1U;
+	const swapz_u32 last_logical = LOGICAL_PAGES - 1U;
+	const swapz_u32 first_destination = FOREGROUND_SEGMENTS;
+	const swapz_u32 second_destination = FOREGROUND_SEGMENTS + 1U;
+	struct swapz_map authoritative_last;
+	struct swapz_tx transaction;
+	swapz_u32 logical, uncertain_block = 0U;
+	unsigned int attempt;
+
+	CHECK(setup() == 0);
+	CHECK(fill_all_pages(1U) == 0);
+	for (logical = victim * SWAPZ_SEGMENT_BLOCKS;
+	     logical < victim * SWAPZ_SEGMENT_BLOCKS + 8U; ++logical)
+		CHECK(write_page(logical, 2U) == 0);
+	authoritative_last = maps[last_logical];
+	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
+	CHECK(a.gc_destination == first_destination);
+
+	for (logical = victim * SWAPZ_SEGMENT_BLOCKS + 8U;
+	     logical < last_logical; ++logical) {
+		const swapz_u32 source = maps[logical].start_block;
+
+		CHECK(source / SWAPZ_SEGMENT_BLOCKS == victim);
+		memcpy(page_bytes, media + (size_t)source * SWAPZ_BLOCK_BYTES,
+		       SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_verify_raw(&a, logical, page_bytes) == 0);
+		CHECK(swapz_stage(&a, &logical, 1U, 1U, &transaction) == 0);
+		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+		       page_bytes, SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1U, 0) == 0);
+	}
+	CHECK(segment_maps[victim] == 1U);
+	CHECK(a.next_block == first_destination * SWAPZ_SEGMENT_BLOCKS +
+	      SWAPZ_SEGMENT_BLOCKS - 9U);
+
+	memcpy(page_bytes,
+	       media + (size_t)authoritative_last.start_block * SWAPZ_BLOCK_BYTES,
+	       SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_verify_raw(&a, last_logical, page_bytes) == 0);
+	for (attempt = 0; attempt < 9U; ++attempt) {
+		CHECK(swapz_stage(&a, &last_logical, 1U, 1U, &transaction) == 0);
+		if (attempt)
+			CHECK(transaction.start_block > uncertain_block);
+		uncertain_block = transaction.start_block;
+		memcpy(media + (size_t)uncertain_block * SWAPZ_BLOCK_BYTES,
+		       page_bytes, SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_finish_raw(&a, &transaction, page_bytes,
+				       0U, -EIO) == -EIO);
+		CHECK(maps[last_logical].start_block ==
+		      authoritative_last.start_block &&
+		      maps[last_logical].generation ==
+		      authoritative_last.generation);
+		CHECK(!live[uncertain_block] && !classes[uncertain_block]);
+	}
+	CHECK(a.next_block == (first_destination + 1U) *
+	      SWAPZ_SEGMENT_BLOCKS);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -ENOSPC);
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &a, first_destination) == -EUCLEAN);
+	CHECK(a.gc_allocation && a.gc_destination == first_destination &&
+	      roles[victim] && !roles[first_destination]);
+	CHECK(verify_all_pages() == 0);
+
+	CHECK(swapz_gc_advance_rotation_destination(
+		      &a, first_destination) == 0);
+	CHECK(a.gc_destination == second_destination &&
+	      roles[first_destination] && !roles[second_destination]);
+	CHECK(a.next_block == second_destination * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(verify_all_pages() == 0);
+
+	for (attempt = 0; attempt < SWAPZ_SEGMENT_BLOCKS; ++attempt) {
+		CHECK(swapz_stage(&a, &last_logical, 1U, 1U, &transaction) == 0);
+		CHECK(transaction.start_block ==
+		      second_destination * SWAPZ_SEGMENT_BLOCKS + attempt);
+		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+		       page_bytes, SWAPZ_BLOCK_BYTES);
+		CHECK(swapz_finish_raw(&a, &transaction, page_bytes,
+				       0U, -EIO) == -EIO);
+		CHECK(maps[last_logical].start_block ==
+		      authoritative_last.start_block &&
+		      maps[last_logical].generation ==
+		      authoritative_last.generation);
+	}
+	CHECK(a.abandoned_blocks == SWAPZ_SEGMENT_BLOCKS + 9U);
+	CHECK(a.next_block == PHYSICAL_BLOCKS);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -ENOSPC);
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &a, second_destination) == -EUCLEAN);
+	CHECK(swapz_gc_advance_rotation_destination(
+		      &a, second_destination) == -ENOSPC);
+	CHECK(a.gc_allocation && a.gc_destination == second_destination &&
+	      a.gc_forbidden_victim == victim &&
+	      roles[victim] && roles[first_destination] &&
+	      !roles[second_destination]);
+	CHECK(swapz_stage(&a, &last_logical, 1U, 1U, &transaction) == -ENOSPC);
+	CHECK(!a.in_flight && !a.batch_pending);
+	CHECK(maps[last_logical].generation == authoritative_last.generation);
+	CHECK(verify_all_pages() == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -769,6 +879,8 @@ int main(void)
 	CHECK(test_last_mapped_page_partial_victim_failed_publication() == 0);
 	passed++;
 	CHECK(test_full_destination_raw_roll_forward() == 0);
+	passed++;
+	CHECK(test_uncertain_recovery_exhausts_reserves() == 0);
 	passed++;
 	printf("SWAPZ_GC_HIGH_OCCUPANCY_PASS=%d "
 	       "foreground_writes=%llu gc_reads=%llu gc_writes=%llu "
