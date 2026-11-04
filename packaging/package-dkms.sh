@@ -9,6 +9,9 @@ transaction_active=0
 transaction_dir=""
 # Describes the attempted transition, including journal-write failures.
 transaction_phase="preflight"
+# Updated only after the state-file replacement and transaction-directory fsync
+# both succeed. Signal traps must never infer durability from transaction_phase.
+durable_transaction_phase="preflight"
 # Recovery is fail-closed by default. Only an independently verified committed
 # install may temporarily preserve activation while read-only recovery admission
 # checks run.
@@ -1021,12 +1024,20 @@ if (os.environ.get("SWAPZ_PACKAGE_RECOVERY_ACTIVE") == "1"
         and os.environ.get("SWAPZ_TEST_RECOVERY_IO_FAILURE") == "rename"):
     raise OSError(errno.EIO, "injected recovery journal rename failure")
 os.replace(temporary, final)
+if (os.environ.get("SWAPZ_PACKAGE_TEST_ROOT")
+        and os.environ.get(
+            "SWAPZ_TEST_FAIL_TRANSACTION_AFTER_RENAME_PHASE", "never") == phase):
+    raise OSError(errno.EIO, "injected post-rename package journal failure")
 descriptor = os.open(transaction, os.O_RDONLY | os.O_DIRECTORY)
 try:
     os.fsync(descriptor)
 finally:
     os.close(descriptor)
 PY
+  # Only a fully completed state-file replacement plus directory fsync owns a
+  # durable phase. Set this before the crash checkpoint so a trapped signal at
+  # that checkpoint cannot misclassify the journal as uncertain.
+  durable_transaction_phase="$phase"
   # Hermetic crash injection occurs only after the journal and parent fsync.
   # SIGKILL here models a power loss without executing Bash rollback traps.
   if [[ -n "$test_root" && ${SWAPZ_TEST_PAUSE_AFTER:-never} == "$phase" ]]; then
@@ -1498,7 +1509,8 @@ uninstall_rollback() {
   transaction_active=0
   if [[ "$transaction_phase" == committed ]]; then
     transaction_active=0
-    if durable_committed_transaction_record; then
+    if [[ "$durable_transaction_phase" == committed ]] &&
+       durable_committed_transaction_record; then
       echo "BLOCKED: package uninstall $reason after durable committed phase; committed uninstall verified; rollback not attempted; recovery-required journal retained" >&2
     else
       quarantine_activation || true
@@ -1607,14 +1619,17 @@ PY
   )" || blocked "recovery cannot read validated journal phase"
   transaction_phase="$recovery_phase"
 
-  # A committed install is already the published final state. Preserve its
-  # activation files through read-only admission refusals only after proving
-  # that the installed bytes and ownership are still exact. Unknown,
-  # noncommitted or modified states remain quarantined on every failure.
+  # A valid committed record normally preserves the exact published install.
+  # If activation was deliberately quarantined because the commit transition
+  # failed after rename but before durability was established, explicit recover
+  # instead replays the independently verified previous snapshot.
+  recovery_replay_previous=0
   if [[ "$recovery_phase" == committed && "$action" == install ]]; then
-    verify_owned ||
-      blocked "recovery committed install is not exact before preflight"
-    recovery_quarantine_on_error=0
+    if verify_owned; then
+      recovery_quarantine_on_error=0
+    else
+      recovery_replay_previous=1
+    fi
   fi
 
   # These preflight checks happen under the existing package lock before any
@@ -1636,7 +1651,7 @@ PY
   # From this point onward rollback or final verification can expose an
   # ambiguous package, so failures quarantine activation entry points again.
   recovery_quarantine_on_error=1
-  if [[ "$recovery_phase" != committed ]]; then
+  if [[ "$recovery_phase" != committed || "$recovery_replay_previous" == 1 ]]; then
     # Do not normalize substituted live destinations during rollback.
     for recovery_path in "$src" "$cli" "$boot_verifier" "$runtime_health" \
         "$helper" "$module_snapshot" "$primary_generator" "$mapper_service" \
@@ -1690,7 +1705,8 @@ PY
   final_status=""
   query_dkms_status final_status -m swapz -v "$version" ||
     blocked "recovery final DKMS query failed"
-  if [[ "$recovery_phase" == committed && "$action" == install ]]; then
+  if [[ "$recovery_phase" == committed && "$action" == install &&
+        "$recovery_replay_previous" == 0 ]]; then
     verify_owned && dkms_status_exact_installed "$final_status" ||
       blocked "recovery committed install verification failed"
   elif [[ "$recovery_phase" == committed && "$action" == uninstall ||
@@ -2204,7 +2220,8 @@ rollback() {
   trap - ERR HUP INT TERM
   if [[ "$transaction_phase" == committed ]]; then
     transaction_active=0
-    if durable_committed_transaction_record; then
+    if [[ "$durable_transaction_phase" == committed ]] &&
+       durable_committed_transaction_record; then
       echo "BLOCKED: package $reason after durable committed phase; committed install verified; rollback not attempted; recovery-required journal retained" >&2
     else
       quarantine_activation || true

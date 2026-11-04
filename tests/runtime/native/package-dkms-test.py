@@ -160,6 +160,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_TEST_DKMS_VERSION=VERSION,
             SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS="0",
             SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
+            SWAPZ_TEST_FAIL_TRANSACTION_AFTER_RENAME_PHASE="never",
             SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE="never",
             SWAPZ_TEST_PAUSE_TRANSACTION_CLEANUP="0",
             SWAPZ_FAKE_FAIL_AT="never",
@@ -2023,6 +2024,31 @@ exec "{flock_binary}" "$@"
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate(timeout=8)
+
+    def test_failed_committed_post_rename_fsync_quarantines_and_recovers(self):
+        failed = self.invoke("install", {
+            "SWAPZ_TEST_FAIL_TRANSACTION_AFTER_RENAME_PHASE": "committed",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("committed journal durability is uncertain", failed.stderr)
+        self.assertIn("rollback not attempted", failed.stderr)
+        self.assertNotIn("attempting transaction rollback", failed.stderr)
+        self.assertNotIn(str(self.home), failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+
+        transactions = list(
+            (self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(transactions), 1)
+        # The rename is visible, but the injected failure occurs before the
+        # transaction-directory fsync that would make committed authoritative.
+        self.assertEqual(
+            json.loads((transactions[0] / "state.json").read_text())["phase"],
+            "committed")
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(transactions[0].exists())
 
     def test_failed_committed_journal_write_retains_precommit_recovery(self):
         failed = self.invoke("install", {
