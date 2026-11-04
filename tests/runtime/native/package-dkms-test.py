@@ -961,7 +961,7 @@ exec "{flock_binary}" "$@"
 
     def interrupt_upgrade_with_snapshot(
             self, corrupt_backup, corrupt_metadata=False,
-            corrupt_journal_metadata=False):
+            corrupt_journal_metadata=False, collide_journal_temp=False):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_module = self.installed_module.read_bytes()
         self.module.write_bytes(b"replacement-qualified-module\n")
@@ -1005,11 +1005,28 @@ exec "{flock_binary}" "$@"
                 (transaction / "backup/source/dkms.conf").chmod(0o666)
             if corrupt_journal_metadata:
                 state_path.chmod(0o666)
+            journal_temp_sentinel = None
+            if collide_journal_temp:
+                journal_temp_sentinel = self.home / "journal-temp-sentinel"
+                journal_temp_sentinel.write_bytes(b"must-not-change\n")
+                (transaction / "state.json.tmp").symlink_to(
+                    journal_temp_sentinel)
 
             os.killpg(process.pid, signal.SIGTERM)
             stdout, stderr = process.communicate(timeout=8)
             self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
-            if corrupt_backup or corrupt_metadata or corrupt_journal_metadata:
+            if collide_journal_temp:
+                self.assertIn("cannot journal install rollback", stderr)
+                self.assertEqual(
+                    journal_temp_sentinel.read_bytes(), b"must-not-change\n")
+                self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+                self.assertEqual(
+                    len(list((self.home / "transactions").glob(
+                        "swapz-package.*"))), 1)
+                refused = self.invoke("install")
+                self.assertIn("incomplete package transaction retained",
+                              refused.stderr)
+            elif corrupt_backup or corrupt_metadata or corrupt_journal_metadata:
                 self.assertIn("rollback snapshot invalid", stderr)
                 self.assertFalse((self.prefix / "sbin/swapzctl").exists())
                 self.assertEqual(
@@ -1045,13 +1062,19 @@ exec "{flock_binary}" "$@"
 
     def test_transaction_journal_mode_is_durable_before_publish(self):
         source = self.script.read_text()
-        start = source.index('with temporary.open("w", encoding="utf-8") as stream:')
+        start = source.index("temporary_flags = (os.O_WRONLY | os.O_CREAT")
         end = source.index("os.replace(temporary, final)", start)
         journal_write = source[start:end]
+        self.assertIn("os.O_EXCL", journal_write)
+        self.assertIn("os.O_NOFOLLOW", journal_write)
         mode_set = journal_write.index("os.fchmod(stream.fileno(), 0o600)")
         durable_write = journal_write.index("os.fsync(stream.fileno())")
         self.assertLess(mode_set, durable_write)
-        self.assertNotIn("os.chmod(temporary, 0o600)", journal_write)
+        self.assertNotIn('temporary.open("w"', journal_write)
+
+    def test_stale_journal_temp_symlink_is_never_followed(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, collide_journal_temp=True)
 
     def test_upgrade_rollback_dkms_status_uncertainty_revokes_activation(self):
         self.assertEqual(self.invoke("install").returncode, 0)

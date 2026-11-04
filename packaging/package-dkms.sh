@@ -647,9 +647,12 @@ if final.exists() or final.is_symlink():
     for field in ("schema", "version", "kernel_release", "backup_files"):
         if previous.get(field) != state[field]:
             raise SystemExit(f"package rollback snapshot changed: {field}")
-with temporary.open("w", encoding="utf-8") as stream:
-    # Make the private mode part of the same durable file state as the
-    # journal contents; chmod after fsync can lose the mode on power failure.
+temporary_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                   os.O_NOFOLLOW | os.O_CLOEXEC)
+temporary_descriptor = os.open(temporary, temporary_flags, 0o600)
+with os.fdopen(temporary_descriptor, "w", encoding="utf-8") as stream:
+    # Create the private journal temp exclusively without following a stale
+    # path, then make its exact mode durable with the journal contents.
     os.fchmod(stream.fileno(), 0o600)
     json.dump(state, stream, sort_keys=True, separators=(",", ":"))
     stream.write("\n")
