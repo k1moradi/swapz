@@ -409,13 +409,18 @@ static int test_production_failure_and_wake_gates(void)
 	static const char marker[] = "tests/runtime/native/io/preparation-slots.c";
 	static const char target[] = "src/kernel/dm-target.c";
 	char source_path[4096], line[1024], failure_body[2048] = { 0 };
+	char drain_body[6144] = { 0 };
 	const char *marker_position = strstr(__FILE__, marker);
 	const char *lock_position, *condition_position, *error_position;
 	const char *publication_position, *unlock_position, *log_position;
+	const char *drain_lock, *admission_close, *drain_unlock, *submitter_wait;
+	const char *first_preparation_drain, *ordered_flush, *ordered_drain;
+	const char *last_preparation_drain, *reclaim_check;
 	FILE *source;
-	size_t failure_bytes = 0;
+	size_t failure_bytes = 0, drain_bytes = 0;
 	unsigned int wake_guards = 0, wake_publications = 0;
-	int in_producer = 0, in_failure = 0, producer_locked = 0;
+	int in_producer = 0, in_failure = 0, in_drain = 0;
+	int producer_locked = 0;
 	int pending_wake = 0, path_length;
 
 	CHECK(marker_position != NULL);
@@ -439,6 +444,17 @@ static int test_production_failure_and_wake_gates(void)
 			failure_bytes += length;
 			if (line[0] == '}')
 				in_failure = 0;
+		}
+		if (strstr(line, "static void swapz_drain("))
+			in_drain = 1;
+		if (in_drain) {
+			size_t length = strlen(line);
+
+			CHECK(drain_bytes + length < sizeof(drain_body));
+			memcpy(drain_body + drain_bytes, line, length);
+			drain_bytes += length;
+			if (line[0] == '}')
+				in_drain = 0;
 		}
 		if (!in_producer)
 			continue;
@@ -464,7 +480,8 @@ static int test_production_failure_and_wake_gates(void)
 	}
 	CHECK(!ferror(source));
 	CHECK(!fclose(source));
-	CHECK(!in_failure && !pending_wake);
+	CHECK(!in_failure && !in_drain && !pending_wake);
+	CHECK(drain_bytes > 0);
 	CHECK(wake_guards == 2 && wake_publications == 2);
 	lock_position = strstr(failure_body, "spin_lock_irqsave(&ctx->queue_lock, flags)");
 	condition_position = strstr(failure_body, "if (!ctx->failed)");
@@ -479,6 +496,31 @@ static int test_production_failure_and_wake_gates(void)
 	      error_position < publication_position &&
 	      publication_position < unlock_position &&
 	      unlock_position < log_position);
+	/* This is a source-order guard, not a substitute for loaded drain testing.
+	 * The last producer drain is necessary because the ordered worker can
+	 * schedule a final producer even after the first preparation drain. */
+	drain_lock = strstr(drain_body, "spin_lock_irqsave(&ctx->queue_lock, flags)");
+	admission_close = strstr(drain_body, "WRITE_ONCE(ctx->accepting, false)");
+	drain_unlock = strstr(drain_body, "spin_unlock_irqrestore(&ctx->queue_lock, flags)");
+	submitter_wait = strstr(drain_body, "while (ctx->submitter_prepare &&");
+	first_preparation_drain = strstr(drain_body,
+					 "drain_workqueue(ctx->preparation_workqueue);");
+	ordered_flush = strstr(drain_body, "flush_delayed_work(&ctx->worker);");
+	ordered_drain = strstr(drain_body, "drain_workqueue(ctx->workqueue);");
+	last_preparation_drain = first_preparation_drain ?
+		strstr(first_preparation_drain + 1,
+		       "drain_workqueue(ctx->preparation_workqueue);") : NULL;
+	reclaim_check = strstr(drain_body, "SWAPZ_PREPARATION_FREE_MASK");
+	CHECK(drain_lock && admission_close && drain_unlock && submitter_wait &&
+	      first_preparation_drain && ordered_flush && ordered_drain &&
+	      last_preparation_drain && reclaim_check);
+	CHECK(drain_lock < admission_close && admission_close < drain_unlock &&
+	      drain_unlock < submitter_wait &&
+	      submitter_wait < first_preparation_drain &&
+	      first_preparation_drain < ordered_flush &&
+	      ordered_flush < ordered_drain &&
+	      ordered_drain < last_preparation_drain &&
+	      last_preparation_drain < reclaim_check);
 	return 0;
 }
 
