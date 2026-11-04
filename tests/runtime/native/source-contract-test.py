@@ -3484,7 +3484,8 @@ int main(void)
             "a->gc_forbidden_victim = exhausted_destination",
             roll_forward)
         self.assertIn("a->gc_destination = evacuated_victim", roll_forward)
-        self.assertIn("swapz_verify_recovery_victim_dead(a, segment)", advance)
+        self.assertIn(
+            "swapz_verify_recovery_victim_dead(a, segment, 0)", advance)
         self.assertLess(
             advance.index("swapz_claim_dead_segment(a, segment, probe_start)"),
             advance.index("a->segment_foreground[blocked_destination] = 1"))
