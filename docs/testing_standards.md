@@ -985,8 +985,12 @@ When the coordinator itself emits the fixed
 `BLOCKED: primary-swap <operation> failed: <strerror>` line before the helper's
 generic lifecycle marker, the reporter must attach only the strictly allowlisted
 operation and strerror-shaped tail. Path-, ID-, or arbitrary-text-shaped tails
-remain excluded from published diagnostics. Each owned-null_blk lifecycle
-rehearsal must allocate a fresh root-owned evidence directory bound to the same
+remain excluded from published diagnostics. An explicit
+`FAIL_PRIMARY_NULLBLK_LIFECYCLE:` marker takes precedence over a
+missing overall lifecycle PASS record: classify it as FAIL and use the named
+phase plus only the sanitized coordinator detail, rather than the generic
+incomplete-evidence phase. Each owned-null_blk lifecycle rehearsal must allocate
+a fresh root-owned evidence directory bound to the same
 random ownership token used for its null_blk config. Clean teardown may remove
 only that exact token-bound directory after the holder/mount/swap identity
 checks pass. Quarantined evidence from an earlier run is retained for

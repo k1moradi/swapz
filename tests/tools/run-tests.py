@@ -2624,7 +2624,14 @@ def run_stage(title, command, result, *, parse_bench=False):
         # The sanitized report may be published via Git only.
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
-        if predictor_failure:
+        # A primary lifecycle FAIL marker is the most specific diagnosis even
+        # when the same output is also missing the overall loaded PASS record.
+        # Keep the FAIL marker's phase and use failure_context() to attach only
+        # its sanitized, allowlisted coordinator detail.
+        if explicit_primary_failure:
+            record["failed_phase"], record["diagnostic"] = failure_context(
+                output, loaded=True)
+        elif predictor_failure:
             record["failed_phase"] = "predictive-compression screening"
             record["diagnostic"] = (
                 "Native predictor evidence marker missing, malformed or incomplete")
