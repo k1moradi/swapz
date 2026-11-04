@@ -255,12 +255,32 @@ static void test_checked_counter_arithmetic(void)
 		"no lower bytes remain for committed compressed pages");
 }
 
+struct fixture_c32_aligned_record {
+	uint32_t words[2];
+};
+
 static size_t fixture_align_target_offset(size_t value)
 {
 	size_t aligned = 0;
 
 	assert(status_align_target_offset(value, &aligned) == 0);
 	return aligned;
+}
+
+static void test_dm_wire_alignment_is_host_independent(void)
+{
+	/*
+	 * Model a common 32-bit C ABI record alignment explicitly. DM output
+	 * records still use the Linux UAPI's fixed eight-byte wire alignment.
+	 */
+	assert(_Alignof(struct fixture_c32_aligned_record) == 4U);
+	assert(_Alignof(struct fixture_c32_aligned_record) !=
+	       SWAPZ_DM_WIRE_ALIGNMENT);
+	assert(fixture_align_target_offset(8U) == 8U);
+	assert(fixture_align_target_offset(9U) == 16U);
+	assert(fixture_align_target_offset(16U) == 16U);
+	assert(fixture_align_target_offset(17U) == 24U);
+	assert(fixture_align_target_offset(24U) == 24U);
 }
 
 /* Construct real absolute DM_TABLE_STATUS offsets without touching a mapper. */
@@ -316,6 +336,26 @@ static size_t make_dm_status_fixture(unsigned char *buffer, size_t capacity,
 	return make_dm_multi_fixture(buffer, capacity, types, texts, codes, 1, 1);
 }
 
+static size_t make_dm_empty_status_fixture(unsigned char *buffer, size_t capacity,
+					   uint64_t device_id)
+{
+	struct dm_ioctl header = { 0 };
+
+	assert(capacity >= sizeof(header));
+	assert(capacity <= UINT32_MAX);
+	memset(buffer, 0, capacity);
+	header.data_start = sizeof(header);
+	/*
+	 * Linux leaves the requested data_size unchanged when no live table is
+	 * present because retrieve_status() is not called.
+	 */
+	header.data_size = (uint32_t)capacity;
+	header.dev = device_id;
+	memcpy(header.name, "fixture", sizeof("fixture"));
+	memcpy(buffer, &header, sizeof(header));
+	return capacity;
+}
+
 static int parse_fixture(const unsigned char *buffer, size_t size,
 			 uint64_t expected_device,
 			 struct dm_status_observation *observation,
@@ -324,6 +364,31 @@ static int parse_fixture(const unsigned char *buffer, size_t size,
 	memset(observation, 0, sizeof(*observation));
 	return parse_dm_status_observation(buffer, size, "fixture", expected_device,
 					   observation, problem, problem_target);
+}
+
+static void test_empty_dm_target_inventory(void)
+{
+	unsigned char first_buffer[2048];
+	unsigned char second_buffer[2048];
+	struct dm_status_observation first = { 0 };
+	struct dm_status_observation second = { 0 };
+	struct status_problem problem;
+	unsigned int problem_target = UINT_MAX;
+	size_t first_size = make_dm_empty_status_fixture(
+		first_buffer, sizeof(first_buffer), 1);
+	size_t second_size = make_dm_empty_status_fixture(
+		second_buffer, sizeof(second_buffer), 1);
+
+	assert(parse_fixture(first_buffer, first_size, 1, &first,
+			     &problem, &problem_target) == 0);
+	assert(first.target_count == 0);
+	assert(!first.targets);
+	assert(parse_fixture(second_buffer, second_size, 1, &second,
+			     &problem, &problem_target) == 0);
+	assert(status_observations_equal(&first, &second, &problem,
+					 &problem_target));
+	status_free_observation(&first);
+	status_free_observation(&second);
 }
 
 static void test_dm_reply_boundaries_and_identity(void)
@@ -339,12 +404,7 @@ static void test_dm_reply_boundaries_and_identity(void)
 
 	/* These are wire records, not _Alignof(struct dm_target_spec). */
 	assert(SWAPZ_DM_WIRE_ALIGNMENT == 8U);
-	assert(fixture_align_target_offset(8) == 8U);
-	assert(fixture_align_target_offset(9) == 16U);
-	assert(fixture_align_target_offset(16) == 16U);
-	assert(fixture_align_target_offset(17) == 24U);
-	assert(fixture_align_target_offset(24) == 24U);
-	assert(fixture_align_target_offset(25) == 32U);
+	assert(fixture_align_target_offset(25U) == 32U);
 	memcpy(&header, buffer, sizeof(header));
 	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
 	assert((size_t)specification.next == fixture_align_target_offset(
@@ -582,6 +642,8 @@ static void test_padding_output_has_no_fabricated_compressed_ratio(void)
 	output[bytes] = '\0';
 	assert(strstr(output, "compressed ratio (SWZ extents): UNAVAILABLE"));
 	assert(strstr(output, "field 'bulk_padding'"));
+	assert(strstr(output, "nonzero staged padding"));
+	assert(!strstr(output, "cumulative padding"));
 	assert(strstr(output, "overall ratio (compressed + RAW + zero): 1.33:1"));
 	assert(!strstr(output, "compressed ratio (SWZ extents): 1.33:1"));
 	close(saved_stdout);
@@ -776,6 +838,8 @@ int main(void)
 	test_ratio_snapshot_equality_covers_all_inputs();
 	test_required_tokens_duplicates_and_canonical_numbers();
 	test_checked_counter_arithmetic();
+	test_dm_wire_alignment_is_host_independent();
+	test_empty_dm_target_inventory();
 	test_dm_reply_boundaries_and_identity();
 	test_absolute_offsets_for_multiple_dm_targets();
 	test_full_target_inventory_comparison();

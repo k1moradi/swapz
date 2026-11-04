@@ -839,7 +839,7 @@ static int parse_dm_status_observation(
 	struct dm_ioctl header;
 	const unsigned char *record_base;
 	size_t payload_size;
-	size_t terminal_next;
+	size_t terminal_next = 0;
 	size_t current_offset = 0;
 	uint32_t target;
 
@@ -866,15 +866,19 @@ static int parse_dm_status_observation(
 	    (header.target_count &&
 	     (payload_size < sizeof(struct dm_target_spec) + 1U ||
 	      header.target_count > payload_size /
-		      (sizeof(struct dm_target_spec) + 1U))) ||
-	    (!header.target_count && payload_size) ||
-	    status_align_target_offset(payload_size, &terminal_next) < 0 ||
-	    terminal_next > UINT32_MAX) {
+		      (sizeof(struct dm_target_spec) + 1U) ||
+	      status_align_target_offset(payload_size, &terminal_next) < 0 ||
+	      terminal_next > UINT32_MAX))) {
 		status_set_problem(problem, "dm_target_spec.next",
 				   "bounded target count and representable 8-byte terminal offset",
-				   "impossible count, nonempty zero-target payload or terminal overflow");
+				   "impossible count or terminal offset overflow");
 		return -1;
 	}
+	/*
+	 * With no live table, DM_TABLE_STATUS leaves data_size at the caller's
+	 * request capacity. target_count=0 is authoritative: those bytes are
+	 * request-buffer slack, not target records to infer or validate.
+	 */
 	if (!memchr(header.name, '\0', sizeof(header.name)) ||
 	    strcmp(header.name, expected_name)) {
 		status_set_problem(problem, "dm_ioctl.name",
@@ -1104,7 +1108,8 @@ static void report_swapz_target(const char *name, unsigned int target_index,
 		else
 			puts("  compressed ratio (SWZ extents): UNAVAILABLE: field 'bulk_padding' "
 			     "expected 0 with bulk_mode=2 for exact compressed lower bytes; "
-			     "observed nonzero cumulative padding without foreground/GC separation");
+			     "observed nonzero staged padding without committed "
+			     "foreground/GC separation");
 	} else {
 		puts("  compressed ratio (SWZ extents): n/a (no compressed pages)");
 	}

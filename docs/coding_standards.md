@@ -71,7 +71,10 @@ BLOCKED, FAILED and UNAVAILABLE with device/index/generation/field or errno
 without echoing untrusted INFO text. Observational ioctl permission denial
 may require CAP_SYS_ADMIN and must never trigger privileged escalation.
 Reset per-read diagnostic state before observing the next generation so a
-second-read ioctl errno cannot inherit a prior target parser failure.
+second-read ioctl errno cannot inherit a prior target parser failure. A
+tableless mapping legitimately reports target_count=0 while DM_TABLE_STATUS
+may leave data_size at the caller's request capacity; treat that as an empty
+target inventory and never parse request-buffer slack as returned records.
 
 Kernel information-status emission may use multiple bounded `DMEMIT` calls to
 keep callback stack use bounded. The externally concatenated INFO stream is the
