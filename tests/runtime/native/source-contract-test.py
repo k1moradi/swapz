@@ -6770,7 +6770,7 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 re.escape(token) + r"\b")
         self.assertIn("goto fail;", constructor[preflight:])
         self.assertLess(constructor.index("swapz_authority_validate_geometry("),
-                        constructor.index("swapz_authority_init("))
+                        constructor.index("error = swapz_authority_init("))
         self.assertIn("swapz_free(ctx);", constructor)
 
     def test_exact_allocations_widths_frees_and_rejection_order(self):
