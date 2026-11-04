@@ -28,6 +28,7 @@ static unsigned int prepare_calls;
 static unsigned int start_calls;
 static unsigned int stop_calls;
 static unsigned int recover_calls;
+static int transaction_directory_swapped;
 
 int swapz_primary_privileged_execution_enabled(void)
 {
@@ -98,19 +99,56 @@ int swapz_primary_qualification_import_serialized(const char *report_path)
 }
 
 /*
- * Inject a mount-ID disagreement in statx metadata only; never mount or
- * bind-mount anything. The production guard still checks both identities.
+ * Rootless statx seams inject either a mount-ID disagreement or a same-mount
+ * pathname substitution. Neither performs mount, namespace or privileged I/O.
  */
+static int named_transaction_path(const char *pathname,
+	const char *transactions)
+{
+	const char *basename;
+
+	if (!pathname || !transactions)
+		return 0;
+	basename = strrchr(transactions, '/');
+	return basename && basename[1] && !strcmp(pathname, basename + 1);
+}
+
+static void substitute_transaction_directory(const char *transactions)
+{
+	char displaced[PATH_MAX];
+	int path_length;
+
+	path_length = snprintf(displaced, sizeof(displaced), "%s.before-statx",
+		transactions);
+	if (path_length < 0 || (size_t)path_length >= sizeof(displaced) ||
+	    rename(transactions, displaced) < 0 || mkdir(transactions, 0700) < 0)
+		abort();
+	transaction_directory_swapped = 1;
+}
+
 int statx(int directory_fd, const char *pathname, int flags,
 	unsigned int mask, struct statx *metadata)
 {
 	const char *change_mount = getenv("SWAPZ_TEST_CHANGED_MOUNT_ID");
-	int result = (int)syscall(SYS_statx, directory_fd, pathname, flags,
-		mask, metadata);
+	const char *substitute_directory = getenv(
+		"SWAPZ_TEST_SUBSTITUTE_TRANSACTION_DURING_STATX");
+	const char *transactions = getenv("SWAPZ_TEST_PACKAGE_TRANSACTIONS");
+	int result;
 
+	/* Deliberately replace the pathname after production's fstatat() recheck
+	 * and before its named statx() call. This deterministic seam exposes a
+	 * split-identity TOCTOU without mount, namespace or privileged syscalls. */
+	if (!transaction_directory_swapped && substitute_directory &&
+	    !strcmp(substitute_directory, "1") &&
+	    (flags & AT_SYMLINK_NOFOLLOW) != 0 &&
+	    named_transaction_path(pathname, transactions))
+		substitute_transaction_directory(transactions);
+
+	result = (int)syscall(SYS_statx, directory_fd, pathname, flags,
+		mask, metadata);
 	if (result == 0 && change_mount && !strcmp(change_mount, "1") &&
 	    (flags & AT_SYMLINK_NOFOLLOW) != 0 &&
-	    !strcmp(pathname, "transactions") &&
+	    named_transaction_path(pathname, transactions) &&
 	    (metadata->stx_mask & STATX_MNT_ID) != 0)
 		++metadata->stx_mnt_id;
 	return result;
