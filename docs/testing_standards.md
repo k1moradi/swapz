@@ -958,18 +958,23 @@ only that exact token-bound directory after the holder/mount/swap identity
 checks pass. Quarantined evidence from an earlier run is retained for
 investigation but must not block a later independent rehearsal merely because a
 fixed historical evidence path still exists. Loaded correctness qualification
-must require the canonical primary lifecycle PASS record, the exact ordered ten
-initial start/stop fresh-process interruption PASS phases plus the five
-fresh-process recovery interruption phases, the resulting fifteen-case
+must require the canonical primary lifecycle PASS record, the exact ordered
+thirteen initial start/stop fresh-process interruption PASS phases plus the five
+fresh-process recovery interruption phases, the resulting eighteen-case
 interruption-recovery aggregate, and the separate thirteen-case negative-recovery
 aggregate. Missing, duplicated (including repeated lifecycle or aggregate PASS
 records), substituted or malformed lifecycle markers make Stage 5 evidence
 incomplete; the parser must not silently overwrite an earlier PASS match.
 Merely executing the helper or recognizing its failure markers is not sufficient
 for a qualification PASS. The loaded report parser must require those same
-fifteen phases in canonical order and the `cases:15` interruption-recovery
-aggregate; an older thirteen-phase aggregate is incomplete evidence. The start
-matrix must include the post-header/pre-module INTENT shape, the
+eighteen phases in canonical order and the `cases:18` interruption-recovery
+aggregate; any smaller aggregate is incomplete evidence. The normal-stop matrix
+must include fresh-process death after durable STOPPING, after native swapoff,
+after exact mapper removal, after owned-module unload, and after durable
+RESTORED before terminal COMPLETE/owner release. Recovery from those later
+stop checkpoints must not recreate already-removed kernel state and must retain
+the durable interrupted-stage provenance. The start matrix must include the
+post-header/pre-module INTENT shape, the
 post-`finit_module`/pre-LOADED INTENT shape, the verified inactive-table
 mapper shape before resume, and the post-mkswap/pre-swapon shape. This exercises
 recovery with module-absent/module-present INTENT state, exact inactive-table

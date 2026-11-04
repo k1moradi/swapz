@@ -44,6 +44,9 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "start-swapon",
             "stop-stopping",
             "stop-swapoff",
+            "stop-mapper-removed",
+            "stop-module-unloaded",
+            "stop-restored",
             "recover-recovering",
             "recover-swapoff",
             "recover-mapper-removed",
@@ -55,7 +58,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
                 f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{phase}")',
                 self.primary)
         self.assertIn(
-            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15",
+            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:18",
             self.script)
         for case in (
             "swapon-eintr-applied",

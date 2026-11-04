@@ -363,10 +363,10 @@ assert_interruption_kernel_facts() {
 		stop-swapoff|recover-swapoff)
 			expected_module=1; expected_mapper=1; expected_swap=0
 			;;
-		recover-mapper-removed)
+		stop-mapper-removed|recover-mapper-removed)
 			expected_module=1; expected_mapper=0; expected_swap=0
 			;;
-		recover-module-unloaded|recover-restored)
+		stop-module-unloaded|stop-restored|recover-module-unloaded|recover-restored)
 			expected_module=0; expected_mapper=0; expected_swap=0
 			;;
 		*)
@@ -418,6 +418,8 @@ if (len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id) or
                       "start-mapper-inactive", "start-mapper-resumed",
                       "start-mkswap", "start-swapon",
                       "stop-stopping", "stop-swapoff",
+                      "stop-mapper-removed", "stop-module-unloaded",
+                      "stop-restored",
                       "recover-recovering", "recover-swapoff",
                       "recover-mapper-removed", "recover-module-unloaded",
                       "recover-restored"}):
@@ -1512,16 +1514,32 @@ for phase in start-starting start-header-written start-module-inserted \
 	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
 done
 
-for phase in stop-stopping stop-swapoff; do
+for phase in stop-stopping stop-swapoff stop-mapper-removed stop-module-unloaded stop-restored; do
 	prepare_interruption_run
 	start_interruption_baseline
 	note "START_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase run_id:$RUN_ID"
-	interrupt_lifecycle stop "$phase" STOPPING
-	if [[ "$phase" == stop-stopping ]]; then
-		recover_interruption_run "$phase" STOPPING true true true
+	if [[ "$phase" == stop-restored ]]; then
+		interrupt_lifecycle stop "$phase" RESTORED
 	else
-		recover_interruption_run "$phase" STOPPING false true true
+		interrupt_lifecycle stop "$phase" STOPPING
 	fi
+	case "$phase" in
+		stop-stopping)
+			recover_interruption_run "$phase" STOPPING true true true
+			;;
+		stop-swapoff)
+			recover_interruption_run "$phase" STOPPING false true true
+			;;
+		stop-mapper-removed)
+			recover_interruption_run "$phase" STOPPING false false true
+			;;
+		stop-module-unloaded)
+			recover_interruption_run "$phase" STOPPING false false false
+			;;
+		stop-restored)
+			recover_interruption_run "$phase" RESTORED false false false
+			;;
+	esac
 	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
 done
 
@@ -1554,7 +1572,7 @@ for phase in recover-recovering recover-swapoff recover-mapper-removed \
 	note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=$phase"
 done
 
-note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
+note "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:18 fresh_process:true host_swap_identity:preserved repeat_recovery:safe"
 
 # These cases mutate only the private process boundary or an inactive run-owned
 # mapper/state record. Every destructive mapper operation is a normal removal

@@ -873,12 +873,15 @@ def synthetic_log():
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=start-swapon",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-stopping",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-swapoff",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-mapper-removed",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-module-unloaded",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=stop-restored",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-recovering",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-swapoff",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-mapper-removed",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-module-unloaded",
            "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION=recover-restored",
-           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:15 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
+           "PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:18 fresh_process:true host_swap_identity:preserved repeat_recovery:safe",
            "PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY=cases:13 ambiguous_syscall:true inventory_failure:true definite_io_error:true wrong_mapper:true failed_swapoff:true stale_run:true fsync_failure:true lost_provenance:true repeat_recovery:safe host_swap_identity:preserved",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
     for regime in runner.MODEL_ORDER:
@@ -1164,7 +1167,7 @@ class ReportContract(unittest.TestCase):
         evidence = runner.parse_loaded_correctness(output)
         self.assertEqual(evidence["overall"], "PASS")
         self.assertEqual(evidence["primary_lifecycle"], "PASS")
-        self.assertEqual(evidence["primary_lifecycle_interruptions"], 15)
+        self.assertEqual(evidence["primary_lifecycle_interruptions"], 18)
         self.assertEqual(evidence["primary_lifecycle_negative_cases"], 13)
 
         required_markers = (

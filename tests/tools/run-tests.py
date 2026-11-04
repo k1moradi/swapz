@@ -1735,7 +1735,7 @@ def parse_loaded_correctness(output):
             r"swapon:true stop:COMPLETE recovery_required:false$"),
         "primary_interruption_recovery": re.compile(
             r"PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY="
-            r"cases:15 fresh_process:true host_swap_identity:preserved "
+            r"cases:18 fresh_process:true host_swap_identity:preserved "
             r"repeat_recovery:safe$"),
         "primary_negative_recovery": re.compile(
             r"PASS_LOADED_PRIMARY_NULLBLK_NEGATIVE_RECOVERY="
@@ -1748,7 +1748,8 @@ def parse_loaded_correctness(output):
         "start-starting", "start-header-written", "start-module-inserted",
         "start-module-loaded", "start-mapper-inactive",
         "start-mapper-resumed", "start-mkswap", "start-swapon",
-        "stop-stopping", "stop-swapoff",
+        "stop-stopping", "stop-swapoff", "stop-mapper-removed",
+        "stop-module-unloaded", "stop-restored",
         "recover-recovering", "recover-swapoff",
         "recover-mapper-removed", "recover-module-unloaded",
         "recover-restored",

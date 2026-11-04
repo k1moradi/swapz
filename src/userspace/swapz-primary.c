@@ -9264,11 +9264,15 @@ static int swapz_primary_stop_active(void)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-swapoff");
 	if (swapz_primary_dm_remove_mapper(
-		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0 ||
-	    swapz_primary_unload_owned_module(
+		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-mapper-removed");
+	if (swapz_primary_unload_owned_module(
 		    recovery_fd, lock_fd, &manifest, 0,
-		    &module_unloaded_by_call) < 0 ||
-	    swapz_primary_header_build(
+		    &module_unloaded_by_call) < 0)
+		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-module-unloaded");
+	if (swapz_primary_header_build(
 		    manifest.run_id, manifest.target.device_bytes,
 		    expected_header) < 0)
 		goto out;
@@ -9291,6 +9295,7 @@ static int swapz_primary_stop_active(void)
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
 		goto out;
+	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-restored");
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
 	if (swapz_primary_state_write_at(
