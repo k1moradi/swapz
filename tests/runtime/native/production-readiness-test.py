@@ -1404,9 +1404,15 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                          900 * 1024 * 1024)
         self.assertEqual(measured["initialization_peak_ram_bytes"],
                          400 * 1024 * 1024)
+        self.assertEqual(measured["constructor_peak_ram_bytes"],
+                         400 * 1024 * 1024)
         self.assertEqual(measured["steady_peak_ram_bytes"],
                          800 * 1024 * 1024)
+        self.assertEqual(measured["steady_state_peak_ram_bytes"],
+                         800 * 1024 * 1024)
         self.assertEqual(measured["gc_peak_ram_bytes"],
+                         900 * 1024 * 1024)
+        self.assertEqual(measured["gc_pressure_peak_ram_bytes"],
                          900 * 1024 * 1024)
         self.assertEqual(measured["teardown_recovery"],
                          "MEASURED_RECOVERED")
@@ -1587,6 +1593,72 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "cold-boot arm evidence: parsed object differs from serialized "
             "bytes" in blocker
             for blocker in result["deployment_blockers"]))
+
+    def test_malformed_campaign_top_level_blocks_without_exception(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = b"[]\n"
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertTrue(any(
+            "sealed campaign evidence bytes have invalid top level" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_oversized_decimal_cold_boot_fields_block_without_exception(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        huge_decimal = "9" * 5000
+        arm_raw = cold_boot_arm_evidence_raw(
+            expected_target_size_bytes=huge_decimal)
+        arm = EVALUATOR.parse_env_strict(arm_raw)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw, arm_raw)
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw,
+            None, None, arm, arm_raw)
+        self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "cold-boot arm authorized target identity mismatch" in blocker
+            for blocker in result["deployment_blockers"]))
+
+        cold_raw = cold_boot_evidence_raw(dm_logical_bytes=huge_decimal)
+        cold = EVALUATOR.parse_env_strict(cold_raw)
+        arm_raw = cold_boot_arm_evidence_raw()
+        arm = EVALUATOR.parse_env_strict(arm_raw)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw, arm_raw)
+        reboot = evidence["release_evidence"]["owner_observed_reboot"]
+        reboot.update(
+            status="PASS", observed=True, overall="PASS",
+            evidence_sha256=hashlib.sha256(cold_raw).hexdigest())
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw,
+            cold, cold_raw, arm, arm_raw)
+        self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+        self.assertTrue(any(
+            "mapper capacity differs from authorized target" in blocker
+            for blocker in result["cold_boot_blockers"]))
 
     def test_campaign_raw_numeric_type_mismatch_is_not_authenticated(self):
         report = owner_report()
