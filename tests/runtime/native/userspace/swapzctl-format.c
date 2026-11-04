@@ -791,6 +791,7 @@ static void test_swap_adversarial_inventory(void)
 	FILE *stream;
 	int fd;
 	int second_fd;
+	int alias_fd;
 	int length;
 	char parsed_path[PATH_MAX];
 	int block_entry;
@@ -823,7 +824,10 @@ static void test_swap_adversarial_inventory(void)
 	assert(fclose(stream) == 0);
 
 	/* A hard-link alias of the SAME inode must not become a second swap. */
-	assert(unlink(alias_path) < 0 && errno == ENOENT);
+	alias_fd = mkstemp(alias_path);
+	assert(alias_fd >= 0);
+	assert(close(alias_fd) == 0);
+	assert(unlink(alias_path) == 0);
 	assert(link(file_path, alias_path) == 0);
 	length = snprintf(duplicate, sizeof(duplicate),
 			  "%s%s file 1 0 -2\n%s file 1 0 -3\n",
@@ -1151,6 +1155,41 @@ static void test_device_disappearance_before_write_refuses(void)
 	assert(context.close_calls == 1U);
 }
 
+static void test_inventory_gate_errors_never_reach_header_write(void)
+{
+	static const int inventory_errors[] = {
+		EPROTO, EOVERFLOW, EBUSY, EACCES,
+	};
+	struct format_expectation expected = authorized_expectation();
+
+	for (size_t index = 0;
+	     index < sizeof(inventory_errors) / sizeof(inventory_errors[0]);
+	     ++index) {
+		struct mock_format_context preopen = {
+			.preopen_error = inventory_errors[index],
+		};
+		struct format_runtime_ops preopen_ops = mock_ops(&preopen);
+		struct mock_format_context recheck = {
+			.verify_errors = { 0 },
+			.verify_error_count = 2U,
+		};
+		struct format_runtime_ops recheck_ops = mock_ops(&recheck);
+
+		/* Even a late discovered mount/swap/parse ambiguity is no-write. */
+		recheck.verify_errors[1] = inventory_errors[index];
+		assert(format_device_with_ops("/synthetic/card", &expected,
+					      &preopen_ops) == 2);
+		assert(preopen.open_calls == 0U);
+		assert(preopen.write_calls == 0U);
+		assert(format_device_with_ops("/synthetic/card", &expected,
+					      &recheck_ops) == 2);
+		assert(recheck.read_calls == 1U);
+		assert(recheck.random_calls == 1U);
+		assert(recheck.write_calls == 0U);
+		assert(recheck.sync_calls == 0U);
+	}
+}
+
 static void test_read_only_transition_before_write_refuses(void)
 {
 	struct format_expectation expected = authorized_expectation();
@@ -1321,6 +1360,7 @@ int main(void)
 	test_wrong_opened_device_refuses_before_read_or_write();
 	test_invalid_header_refuses_without_write();
 	test_stale_identity_refuses_at_last_prewrite_gate();
+	test_inventory_gate_errors_never_reach_header_write();
 	test_device_disappearance_before_write_refuses();
 	test_read_only_transition_before_write_refuses();
 	test_publication_failures_are_explicitly_uncertain();
