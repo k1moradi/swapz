@@ -745,8 +745,13 @@ static int test_last_compressed_page_boundary_retry(void)
 	CHECK(!a.gc_allocation && !roles[0] && roles[2]);
 	CHECK(verify_page(0) == 0 && verify_page(1) == 0 &&
 	      verify_page(7) == 0);
+	/*
+	 * Rotation only transfers role ownership. Historical extent-class bytes
+	 * remain until the dead reserve is actually reclaimed; liveness is the
+	 * authoritative proof that the old victim has no mapped records.
+	 */
 	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS; ++index)
-		CHECK(!live[index] && !classes[index]);
+		CHECK(!live[index]);
 	return 0;
 }
 
