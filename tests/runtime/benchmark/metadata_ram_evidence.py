@@ -39,6 +39,38 @@ SAMPLE_FIELDS = {
     "phase", "monotonic_ns", "timestamp_utc", "mem_available_kib",
     "s_unreclaim_kib", "vmalloc_used_kib", "mapper_present",
 }
+MEMINFO_FIELDS = {
+    "MemAvailable": "mem_available_kib",
+    "SUnreclaim": "s_unreclaim_kib",
+    "VmallocUsed": "vmalloc_used_kib",
+}
+
+
+def parse_meminfo_counters(text: Any) -> dict[str, int]:
+    """Parse the required /proc/meminfo counters without unit coercion."""
+    if not isinstance(text, str) or not text:
+        raise ValueError("meminfo evidence is empty")
+    values: dict[str, int] = {}
+    maximum_kib = ((1 << 64) - 1) // MEMINFO_UNIT_BYTES
+    for line in text.splitlines():
+        match = re.fullmatch(
+            r"(MemAvailable|SUnreclaim|VmallocUsed):[ 	]+([0-9]+)[ 	]+kB",
+            line)
+        if match is None:
+            continue
+        source_name, value_text = match.groups()
+        destination = MEMINFO_FIELDS[source_name]
+        if destination in values:
+            raise ValueError(f"duplicate meminfo counter: {source_name}")
+        value = int(value_text, 10)
+        if value > maximum_kib:
+            raise ValueError(f"meminfo counter overflows bytes: {source_name}")
+        values[destination] = value
+    if set(values) != set(MEMINFO_FIELDS.values()):
+        raise ValueError("required meminfo counters are missing or use wrong units")
+    if values["mem_available_kib"] <= 0:
+        raise ValueError("MemAvailable must be positive")
+    return values
 
 
 def maximum_logical_pages_for_partition(
