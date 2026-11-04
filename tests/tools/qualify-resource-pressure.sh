@@ -162,7 +162,7 @@ import re
 import sys
 
 maximum_token, current_token, required_token = sys.argv[1:]
-canonical = re.compile(r"(?:0|[1-9][0-9]*)\\Z")
+canonical = re.compile(r"0|[1-9][0-9]*")
 u64_max = (1 << 64) - 1
 
 def parse_u64(token):
