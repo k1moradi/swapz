@@ -6048,6 +6048,7 @@ int main(void)
         # sequence mismatch is rejected before any lower payload read.
         self.assertIn("metadata_already_validated", read)
         self.assertIn("swapz_lookup_validated_descriptor(", read)
+        self.assertIn("&peek, NULL);", read)
         self.assertIn("swapz_extent_sequence_lookup(", read)
         self.assertIn("metadata_sequence != expected_sequence", read)
         self.assertLess(read.index("metadata_sequence != expected_sequence"),
