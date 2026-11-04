@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -33,8 +34,13 @@ CONFIG_LOCKDEP=y
 CONFIG_DEBUG_LOCK_ALLOC=y
 """
 SOURCE_SHA = "a" * 40
+KERNEL_RELEASE = "test-debug-kernel"
+MODULE_BYTES = b"synthetic module, never loaded"
+MODULE_SHA256 = hashlib.sha256(MODULE_BYTES).hexdigest()
 GOOD_LOG = f"""
 SOURCE_HEAD={SOURCE_SHA}
+RUNNING_KERNEL={KERNEL_RELEASE}
+MODULE_SHA256={MODULE_SHA256}  /repo/build/kernel/experimental/dm-swapz.ko
 PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0
 PASS_LOADED_COMPOUND_BIO=written_pages:384 verified_pages:384 segs_gt1:2 segs_max:3 nonzero_off:1 compound_pages:128 copy_fallbacks:1 failed:0
 PASS_LOADED_LIVE_GC=victims:2 rotations:2 pages:64 read_bytes:262144 write_bytes:131072 read_reqs:64 write_reqs:32 distinct:3 victim_min:1 victim_max:2 last:1->2 discards:2 discard_sectors:4096 discard_unsupported:0 discard_failed:0 verified_pages:4096
@@ -108,7 +114,10 @@ class KernelDebugQualificationTests(unittest.TestCase):
             # Synthetic evidence exercises only the pure verifier. The CLI
             # inspects real module metadata and never accepts this shortcut.
             module_evidence = {
-                "source_sha": SOURCE_SHA, "source_clean": "1",
+                "source_sha": SOURCE_SHA,
+                "source_clean": "1",
+                "sha256": MODULE_SHA256,
+                "vermagic": KERNEL_RELEASE + " SMP preempt mod_unload",
                 "symbols": "__asan_load8 __tsan_read8",
             }
         return qualification.verify_owned_run(
@@ -116,6 +125,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             runtime_before, runtime_after, SOURCE_SHA,
             module_evidence=module_evidence,
             configuration=qualification.load_config(self.configuration),
+            kernel_release=KERNEL_RELEASE,
         )
 
     def test_detected_is_not_executed(self) -> None:
@@ -238,32 +248,39 @@ class KernelDebugQualificationTests(unittest.TestCase):
             qualification.parse_runtime_snapshot("{}", required)
 
     def test_owned_source_marker_is_bound_to_validated_source(self) -> None:
-        self.assertEqual(
-            self.verify(execution=GOOD_LOG.replace(
-                f"SOURCE_HEAD={SOURCE_SHA}", "SOURCE_HEAD=" + "b" * 40))[0],
-            "FAIL",
-        )
+        status, reason = self.verify(execution=GOOD_LOG.replace(
+            f"SOURCE_HEAD={SOURCE_SHA}", "SOURCE_HEAD=" + "b" * 40))
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("source run marker mismatch", reason)
 
     def test_no_pass_without_required_debug_feature(self) -> None:
         self.configuration.write_text(CONFIG.replace("CONFIG_KASAN=y", "# CONFIG_KASAN is not set"))
         self.assertEqual(self.verify()[0], "BLOCKED")
         self.assertEqual(self.verify(required=())[0], "BLOCKED")
 
-    def test_missing_repeated_or_fabricated_marker_fails(self) -> None:
-        self.assertEqual(self.verify(execution=GOOD_LOG.replace("PASS_LOADED_LIVE_GC=", "SKIPPED="))[0], "FAIL")
-        self.assertEqual(self.verify(execution=GOOD_LOG + "\n" + GOOD_LOG.splitlines()[0])[0], "FAIL")
-        self.assertEqual(self.verify(execution=GOOD_LOG.replace("active_after:0", "active_after:1"))[0], "FAIL")
+    def test_missing_repeated_or_fabricated_marker_blocks(self) -> None:
+        self.assertEqual(self.verify(execution=GOOD_LOG.replace(
+            "PASS_LOADED_LIVE_GC=", "SKIPPED="))[0], "BLOCKED")
+        self.assertEqual(self.verify(
+            execution=GOOD_LOG + "\n" + GOOD_LOG.splitlines()[0])[0], "BLOCKED")
+        self.assertEqual(self.verify(execution=GOOD_LOG.replace(
+            "active_after:0", "active_after:1"))[0], "BLOCKED")
         self.assertEqual(
             self.verify(execution=GOOD_LOG.replace(
                 "segs_gt1:2", "segs_gt1:2 failed:1"))[0],
-            "FAIL",
+            "BLOCKED",
         )
         self.assertEqual(
             self.verify(execution=GOOD_LOG.replace(
                 "victims:2", "victims:2 contradiction:1"))[0],
-            "FAIL",
+            "BLOCKED",
         )
-        self.assertEqual(self.verify(execution=GOOD_LOG + "\nQUARANTINED: teardown uncertain")[0], "FAIL")
+        self.assertEqual(self.verify(
+            execution=GOOD_LOG + "\nQUARANTINED: teardown uncertain")[0],
+            "BLOCKED")
+        self.assertEqual(self.verify(
+            execution=GOOD_LOG + "\nBLOCKED: helper precondition unavailable")[0],
+            "BLOCKED")
 
     def test_log_truncation_and_unavailable_dmesg_block(self) -> None:
         self.assertEqual(self.verify(baseline="", final="new\n")[0], "BLOCKED")
@@ -295,7 +312,11 @@ class KernelDebugQualificationTests(unittest.TestCase):
         runtime_before = directory / "runtime-before"
         runtime_after = directory / "runtime-after"
         baseline.write_text("old\n", encoding="utf-8")
-        execution.write_text(GOOD_LOG + "\n", encoding="utf-8")
+        cli_log = GOOD_LOG.replace(
+            f"RUNNING_KERNEL={KERNEL_RELEASE}",
+            f"RUNNING_KERNEL={qualification.running_kernel_release()}",
+        )
+        execution.write_text(cli_log + "\n", encoding="utf-8")
         required = ("kasan", "lockdep")
         runtime_before.write_text(
             self.runtime_snapshot(required), encoding="utf-8")
@@ -379,11 +400,22 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.cmdline.write_text("kasan=off\n", encoding="utf-8")
         self.assertIn("kasan=off", self.verify()[1])
 
+    def test_duplicate_debug_config_symbol_is_ambiguous(self) -> None:
+        self.configuration.write_text(
+            CONFIG + "\n# CONFIG_KCSAN is not set\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate symbol: CONFIG_KCSAN"):
+            qualification.load_config(self.configuration)
+        with self.assertRaisesRegex(ValueError, "duplicate symbol: CONFIG_KCSAN"):
+            self.features()
+
     def test_missing_duplicate_and_mismatched_run_markers_identified(self) -> None:
+        compound_record = next(
+            line for line in GOOD_LOG.splitlines()
+            if line.startswith("PASS_LOADED_COMPOUND_BIO="))
         cases = (
             (GOOD_LOG.replace("PASS_LOADED_LIVE_GC=", "SKIPPED="),
              "missing loaded run marker: PASS_LOADED_LIVE_GC"),
-            (GOOD_LOG + "\n" + GOOD_LOG.splitlines()[2],
+            (GOOD_LOG + "\n" + compound_record,
              "duplicated loaded run marker: PASS_LOADED_COMPOUND_BIO"),
             (GOOD_LOG.replace("segs_gt1:2", "segs_gt1:2 invalid:1"),
              "malformed loaded run marker: PASS_LOADED_COMPOUND_BIO"),
@@ -398,8 +430,64 @@ class KernelDebugQualificationTests(unittest.TestCase):
         for execution, explanation in cases:
             with self.subTest(explanation=explanation):
                 status, reason = self.verify(execution=execution)
-                self.assertEqual(status, "FAIL")
+                self.assertEqual(status, "BLOCKED")
                 self.assertIn(explanation, reason)
+
+    def test_kernel_and_module_hash_markers_bind_execution(self) -> None:
+        without_kernel = "\n".join(
+            line for line in GOOD_LOG.splitlines()
+            if not line.startswith("RUNNING_KERNEL="))
+        without_module_hash = "\n".join(
+            line for line in GOOD_LOG.splitlines()
+            if not line.startswith("MODULE_SHA256="))
+        cases = (
+            (without_kernel, "missing running-kernel marker"),
+            (GOOD_LOG + f"\nRUNNING_KERNEL={KERNEL_RELEASE}",
+             "duplicated RUNNING_KERNEL marker"),
+            (GOOD_LOG.replace(
+                f"RUNNING_KERNEL={KERNEL_RELEASE}",
+                "RUNNING_KERNEL=other-kernel"),
+             "running-kernel marker mismatch"),
+            (without_module_hash, "missing module SHA256 run marker"),
+            (GOOD_LOG + f"\nMODULE_SHA256={MODULE_SHA256}  /duplicate/module",
+             "duplicated MODULE_SHA256 run marker"),
+            (GOOD_LOG.replace(
+                f"MODULE_SHA256={MODULE_SHA256}",
+                "MODULE_SHA256=broken"),
+             "malformed MODULE_SHA256 run marker"),
+            (GOOD_LOG.replace(
+                f"MODULE_SHA256={MODULE_SHA256}",
+                "MODULE_SHA256=" + "b" * 64),
+             "module SHA256 mismatch"),
+        )
+        for execution, explanation in cases:
+            with self.subTest(explanation=explanation):
+                status, reason = self.verify(execution=execution)
+                self.assertEqual(status, "BLOCKED")
+                self.assertIn(explanation, reason)
+
+    def test_verified_failure_precedes_incomplete_evidence(self) -> None:
+        incomplete = GOOD_LOG.replace("PASS_LOADED_LIVE_GC=", "SKIPPED=")
+        status, reason = self.verify(
+            execution=incomplete,
+            final="old\nBUG: KCSAN: data-race in swapz\n",
+        )
+        self.assertEqual(status, "FAIL")
+        self.assertIn("KCSAN", reason)
+        status, reason = self.verify(
+            execution=incomplete,
+            runtime_after=self.runtime_snapshot(
+                ("kasan", "lockdep"), lockdep_debug_locks=False),
+        )
+        self.assertEqual(status, "FAIL")
+        self.assertIn("lockdep debug_locks=0", reason)
+        status, reason = self.verify(
+            execution=incomplete + "\nBLOCKED: helper uncertainty"
+                       "\nFAIL: byte verification failed",
+            baseline="", final="", runtime_after="{}",
+        )
+        self.assertEqual(status, "FAIL")
+        self.assertIn("byte verification failed", reason)
 
     def test_bounded_fault_diagnostics_and_historical_warning(self) -> None:
         baseline = "WARNING: historical boot warning\nold\n"
@@ -453,7 +541,10 @@ class KernelDebugQualificationTests(unittest.TestCase):
 
     def test_bad_or_missing_module_provenance_blocks_clean_claim(self) -> None:
         clean = {
-            "source_sha": SOURCE_SHA, "source_clean": "1",
+            "source_sha": SOURCE_SHA,
+            "source_clean": "1",
+            "sha256": MODULE_SHA256,
+            "vermagic": KERNEL_RELEASE + " SMP preempt mod_unload",
             "symbols": "__asan_load8 __tsan_read8",
         }
         cases = (
@@ -462,6 +553,9 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ({}, "module source SHA mismatch"),
             ({**clean, "source_sha": "b" * 40}, "module source SHA mismatch"),
             ({**clean, "source_clean": "0"}, "clean validated source"),
+            ({**clean, "sha256": "b" * 64}, "module SHA256 mismatch"),
+            ({**clean, "vermagic": "other-kernel SMP"},
+             "module vermagic kernel mismatch"),
             ({**clean, "symbols": "__tsan_read8"}, "KASAN instrumentation"),
         )
         for evidence, explanation in cases:
@@ -484,7 +578,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
         module = Path(self.temporary_directory.name) / "dm-swapz.ko"
         self.assertIn("module artifact missing",
                       qualification.inspect_module_provenance(module)["error"])
-        module.write_bytes(b"synthetic module, never loaded")
+        module.write_bytes(MODULE_BYTES)
         with mock.patch.object(qualification.shutil, "which", return_value=None):
             self.assertIn("tool unavailable: modinfo",
                           qualification.inspect_module_provenance(module)["error"])
@@ -493,13 +587,18 @@ class KernelDebugQualificationTests(unittest.TestCase):
             runner.side_effect = [
                 subprocess.CompletedProcess([], 0, SOURCE_SHA + "\n", ""),
                 subprocess.CompletedProcess([], 0, "1\n", ""),
-                subprocess.CompletedProcess([], 0, "U __asan_load8\nU __tsan_read8\n", ""),
+                subprocess.CompletedProcess(
+                    [], 0, KERNEL_RELEASE + " SMP preempt mod_unload\n", ""),
+                subprocess.CompletedProcess(
+                    [], 0, "U __asan_load8\nU __tsan_read8\n", ""),
             ]
             observed = qualification.inspect_module_provenance(module)
             self.assertEqual(observed["source_sha"], SOURCE_SHA)
             self.assertEqual(observed["source_clean"], "1")
+            self.assertEqual(observed["sha256"], MODULE_SHA256)
+            self.assertEqual(observed["vermagic"].split()[0], KERNEL_RELEASE)
             self.assertIn("__tsan_read8", observed["symbols"])
-            self.assertEqual(runner.call_count, 3)
+            self.assertEqual(runner.call_count, 4)
             runner.side_effect = None
             runner.return_value = subprocess.CompletedProcess([], 1, "", "bad")
             self.assertIn("query failed",
@@ -520,6 +619,17 @@ class KernelDebugQualificationTests(unittest.TestCase):
             runner.return_value = subprocess.CompletedProcess(
                 [], 1, "  CHECK /repo/build/kernel/w1/dm-target.c\n"
                 "dm-target.c:20:3: warning: incorrect type in argument\n")
+            status, checks, warnings = qualification.run_static(
+                Path("/repo"), headers, "sparse")
+            self.assertEqual(status, "FAIL")
+            self.assertEqual(warnings["locking_or_type"], 1)
+
+            # An independent Kbuild inventory problem must not hide an actual
+            # source diagnostic emitted by this analyzer invocation.
+            (headers / ".config").write_text(
+                "CONFIG_SMP=y\n", encoding="utf-8")
+            runner.return_value = subprocess.CompletedProcess(
+                [], 1, "dm-target.c:20:3: warning: incorrect type in argument\n")
             status, checks, warnings = qualification.run_static(
                 Path("/repo"), headers, "sparse")
             self.assertEqual(status, "FAIL")
@@ -647,6 +757,10 @@ class KernelDebugQualificationTests(unittest.TestCase):
                 "/repo/build/kernel/w1/predictor-avx2.c",
                 "/other/build/kernel/w1/predictor-avx2.c")), "BLOCKED")
             self.assertEqual(verdict(complete + (
+                "  CHECK /other/build/kernel/w1/dm-target.c\n")), "BLOCKED")
+            self.assertEqual(verdict(complete + (
+                "  CHECK /repo/build/kernel/w1/predictor-neon.c\n")), "BLOCKED")
+            self.assertEqual(verdict(complete + (
                 "predictor-avx512.c:17:4: error: invalid initializer\n")),
                 "FAIL")
             self.assertEqual(verdict(complete + (
@@ -720,7 +834,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             self.verify(required=required,
                         runtime_after=json.dumps(future))[0], "BLOCKED")
 
-    def test_contradictory_and_malformed_success_claims_fail(self) -> None:
+    def test_contradictory_and_malformed_success_claims_block(self) -> None:
         for execution in (
             GOOD_LOG + "\nSOURCE_HEAD=" + "b" * 40,
             GOOD_LOG + "\nSOURCE_HEAD=broken",
@@ -730,7 +844,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             GOOD_LOG + "\nPASS: loaded isolated swapz byte-exact I/O, clean teardown",
         ):
             with self.subTest(execution=execution.splitlines()[-1]):
-                self.assertEqual(self.verify(execution=execution)[0], "FAIL")
+                self.assertEqual(self.verify(execution=execution)[0], "BLOCKED")
         self.assertEqual(
             self.verify(execution=GOOD_LOG + "\nFAIL: lower device damaged",
                         baseline="", final="", runtime_after="{}")[0], "FAIL")
@@ -743,7 +857,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
         )
         self.assertEqual(
             self.verify(execution=GOOD_LOG + "\nQUARANTINED: teardown uncertain",
-                        baseline="", final="")[0], "FAIL")
+                        baseline="", final="")[0], "BLOCKED")
 
     def test_missing_late_cli_files_cannot_hide_prior_failure(self) -> None:
         directory = Path(self.temporary_directory.name)
@@ -838,6 +952,9 @@ class KernelDebugQualificationTests(unittest.TestCase):
 
     def test_loaded_helper_exposes_required_debug_evidence_markers(self) -> None:
         source = DEPLOY_HELPER.read_text(encoding="utf-8")
+        self.assertEqual(source.count('note "RUNNING_KERNEL=$(uname -r)"'), 1)
+        self.assertEqual(
+            source.count('note "MODULE_SHA256=$(sha256sum "$MODULE")"'), 1)
         labels = (
             "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP",
             "PASS_LOADED_COMPOUND_BIO",

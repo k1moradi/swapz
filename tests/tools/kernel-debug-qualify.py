@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import re
 import time
@@ -122,15 +123,36 @@ def load_config(path: Path) -> dict[str, str]:
     for line in contents.splitlines():
         match = re.fullmatch(r"(CONFIG_[A-Z0-9_]+)=(y|m|n)", line)
         if match:
-            values[match.group(1)] = match.group(2)
-        match = re.fullmatch(r"# (CONFIG_[A-Z0-9_]+) is not set", line)
-        if match:
-            values[match.group(1)] = "n"
+            symbol, value = match.groups()
+        else:
+            match = re.fullmatch(r"# (CONFIG_[A-Z0-9_]+) is not set", line)
+            if match is None:
+                continue
+            symbol, value = match.group(1), "n"
+        if symbol in values:
+            raise ValueError(f"kernel configuration has duplicate symbol: {symbol}")
+        values[symbol] = value
     return values
 
 
+def running_kernel_release() -> str:
+    try:
+        result = subprocess.run(
+            ["uname", "-r"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding="utf-8", errors="replace", timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"running kernel release unavailable: {error}") from error
+    release = result.stdout.strip()
+    if result.returncode != 0 or not release or any(
+            character.isspace() for character in release):
+        raise ValueError(
+            f"running kernel release unavailable (exit={result.returncode})")
+    return release
+
+
 def host_config_path() -> Path | None:
-    release = subprocess.check_output(["uname", "-r"], text=True).strip()
+    release = running_kernel_release()
     candidates = (
         Path("/proc/config.gz"),
         Path(f"/boot/config-{release}"),
@@ -480,30 +502,29 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
     except (OSError, subprocess.TimeoutExpired) as error:
         print(f"BLOCKED_KERNEL_STATIC_{analyzer.upper()}: {error}", file=sys.stderr)
         return "BLOCKED", 0, {}
+    check_records = CHECK_RECORD.findall(result.stdout)
     check_count, warnings = scan_static(result.stdout)
     stage_directory = (root / "build/kernel/w1").resolve()
-    checked_names = [
-        source_name
-        for record in CHECK_RECORD.findall(result.stdout)
-        if (source_name := _checked_stage_source(
-            record, root, kdir, stage_directory)) is not None
-    ]
+    checked_names: list[str] = []
+    unresolved_records: list[str] = []
+    for record in check_records:
+        source_name = _checked_stage_source(
+            record, root, kdir, stage_directory)
+        if source_name is None:
+            unresolved_records.append(record)
+        else:
+            checked_names.append(source_name)
     checked_sources = set(checked_names)
     duplicated_sources = {
         name for name in checked_sources if checked_names.count(name) != 1
     }
-    try:
-        required_sources = static_required_sources(kdir)
-    except ValueError as error:
-        print(f"BLOCKED_KERNEL_STATIC_{analyzer.upper()}: {error}", file=sys.stderr)
-        return "BLOCKED", check_count, warnings
     diagnostics = [
         line for line in result.stdout.splitlines()
         if SOURCE_DIAGNOSTIC.search(line)
     ]
     if diagnostics:
-        # Bounded fail-only logging: emit a representative sample and exact
-        # counts without flooding CI with repeated SIMD parser errors.
+        # Source diagnostics are defects even if a separate Kbuild/tooling
+        # problem also prevents a complete translation-unit inventory.
         for line in diagnostics[:16]:
             print(line, file=sys.stderr)
         if len(diagnostics) > 16:
@@ -511,22 +532,45 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
                 f"KERNEL_STATIC_DIAGNOSTICS_SUPPRESSED={len(diagnostics) - 16}",
                 file=sys.stderr,
             )
+    try:
+        required_sources = static_required_sources(kdir)
+    except ValueError as error:
+        if warnings:
+            print(
+                f"FAIL_KERNEL_STATIC_{analyzer.upper()}: "
+                f"source_diagnostics={sum(warnings.values())} "
+                f"inventory_unavailable={error}",
+                file=sys.stderr,
+            )
+            return "FAIL", check_count, warnings
+        print(f"BLOCKED_KERNEL_STATIC_{analyzer.upper()}: {error}", file=sys.stderr)
+        return "BLOCKED", check_count, warnings
+
     missing_sources = required_sources - checked_sources
+    unexpected_sources = checked_sources - required_sources
+    unresolved_sources = sorted({
+        Path(record).name for record in unresolved_records
+    })
     if warnings:
         print(
             f"FAIL_KERNEL_STATIC_{analyzer.upper()}: exit={result.returncode} "
             f"checked={sorted(checked_sources)} "
             f"missing={sorted(missing_sources)} "
-            f"duplicate={sorted(duplicated_sources)}",
+            f"unexpected={sorted(unexpected_sources)} "
+            f"duplicate={sorted(duplicated_sources)} "
+            f"unresolved={unresolved_sources}",
             file=sys.stderr,
         )
         return "FAIL", check_count, warnings
-    if result.returncode != 0 or missing_sources or duplicated_sources:
+    if (result.returncode != 0 or missing_sources or unexpected_sources or
+            duplicated_sources or unresolved_records):
         print(
             f"BLOCKED_KERNEL_STATIC_{analyzer.upper()}: exit={result.returncode} "
             f"checked={sorted(checked_sources)} "
             f"missing={sorted(missing_sources)} "
-            f"duplicate={sorted(duplicated_sources)}",
+            f"unexpected={sorted(unexpected_sources)} "
+            f"duplicate={sorted(duplicated_sources)} "
+            f"unresolved={unresolved_sources}",
             file=sys.stderr,
         )
         if result.returncode != 0 or not check_count:
@@ -592,9 +636,18 @@ def inspect_module_provenance(module: Path) -> dict[str, str]:
     if not module.is_file():
         return {"error": f"module artifact missing: {module}"}
     evidence: dict[str, str] = {}
+    try:
+        digest = hashlib.sha256()
+        with module.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        evidence["sha256"] = digest.hexdigest()
+    except OSError as error:
+        return {"error": f"module artifact unreadable: {error}"}
     commands = (
         ("source_sha", ("modinfo", "-F", "swapz_build_source_sha", str(module))),
         ("source_clean", ("modinfo", "-F", "swapz_build_source_clean", str(module))),
+        ("vermagic", ("modinfo", "-F", "vermagic", str(module))),
         ("symbols", ("nm", "-u", str(module))),
     )
     for field, command in commands:
@@ -622,6 +675,7 @@ def verify_owned_run(
     runtime_before: str, runtime_after: str, source_sha: str,
     module_evidence: dict[str, str] | None = None,
     configuration: dict[str, str] | None = None,
+    kernel_release: str | None = None,
 ) -> tuple[str, str]:
     # Defect evidence is monotonic only when its observation is attributable
     # to this bounded run. A missing/truncated dmesg baseline is incomplete
@@ -636,76 +690,159 @@ def verify_owned_run(
         for line in delta.splitlines():
             diagnostic = KERNEL_DIAGNOSTIC.search(line)
             if diagnostic:
-                # Attribute the actual bounded splat without dumping dmesg.
+                # A verified in-interval kernel defect outranks later evidence
+                # gaps: never demote a real splat to BLOCKED.
                 excerpt = line[max(0, diagnostic.start() - 30):].strip()[:180]
                 return "FAIL", f"kernel diagnostic in bounded dmesg: {excerpt}"
-    if execution is not None:
-        for line in execution.splitlines():
-            if re.match(r"^[ \t]*(?:FAIL|BLOCKED|QUARANTINED)(?::|_)", line):
-                return "FAIL", f"owned lower reported: {line.strip()[:180]}"
+
+    execution_lines = execution.splitlines() if execution is not None else []
+    explicit_failures = [
+        line.strip() for line in execution_lines
+        if re.match(r"^[ \t]*FAIL(?::|_)", line)
+    ]
+    if explicit_failures:
+        return "FAIL", f"owned lower reported: {explicit_failures[0][:180]}"
+
+    # Parse runtime state before returning any ordinary BLOCKED reason so a
+    # verified transition from active instrumentation to disabled state keeps
+    # FAIL precedence even when another evidence artifact is incomplete.
+    before_state: dict[str, object] | None = None
+    after_state: dict[str, object] | None = None
+    runtime_block_reason: str | None = None
+    try:
+        before_state = parse_runtime_snapshot(runtime_before, required)
+    except ValueError as error:
+        runtime_block_reason = f"runtime-before: {error}"
+    if runtime_block_reason is None:
+        try:
+            after_state = parse_runtime_snapshot(runtime_after, required)
+        except ValueError as error:
+            runtime_block_reason = f"runtime-after: {error}"
+    if runtime_block_reason is None:
+        try:
+            current_boot_id = _read_runtime_text(
+                DEFAULT_BOOT_ID, "kernel boot identity").strip()
+        except ValueError as error:
+            runtime_block_reason = str(error)
+    if runtime_block_reason is None:
+        assert before_state is not None and after_state is not None
+        if before_state["boot_id"] != current_boot_id:
+            runtime_block_reason = (
+                f"runtime-before boot mismatch: observed {before_state['boot_id']}, "
+                f"current {current_boot_id}")
+        elif after_state["boot_id"] != current_boot_id:
+            runtime_block_reason = (
+                f"runtime-after boot mismatch: observed {after_state['boot_id']}, "
+                f"current {current_boot_id}")
+        else:
+            now = time.monotonic_ns()
+            before_time = before_state["observed_monotonic_ns"]
+            after_time = after_state["observed_monotonic_ns"]
+            if not 0 < before_time < after_time <= now:
+                runtime_block_reason = (
+                    "runtime snapshot times are reversed, equal or in the future")
+            elif now - before_time > MAX_RUNTIME_AGE_NS:
+                runtime_block_reason = "runtime-before snapshot is stale (>20 minutes)"
+    if runtime_block_reason is None:
+        assert before_state is not None and after_state is not None
+        before_inactive = inactive_runtime_reason(before_state, required)
+        after_inactive = inactive_runtime_reason(after_state, required)
+        if before_inactive is None and after_inactive is not None:
+            return "FAIL", (
+                f"debug instrumentation disabled during I/O: {after_inactive}")
+    else:
+        before_inactive = None
+        after_inactive = None
+
+    blocked_lines = [
+        line.strip() for line in execution_lines
+        if re.match(r"^[ \t]*BLOCKED(?::|_)", line)
+    ]
+    quarantined_lines = [
+        line.strip() for line in execution_lines
+        if re.match(r"^[ \t]*QUARANTINED(?::|_)", line)
+    ]
+    if blocked_lines:
+        return "BLOCKED", f"owned lower blocked: {blocked_lines[0][:180]}"
+    if quarantined_lines:
+        return "BLOCKED", f"owned lower quarantined: {quarantined_lines[0][:180]}"
+
     if not required or not check_features(features, required):
         return "BLOCKED", missing_debug_feature_reason(
             required, features, configuration)
+    if runtime_block_reason is not None:
+        return "BLOCKED", runtime_block_reason
+    if before_inactive is not None:
+        return "BLOCKED", (
+            f"debug instrumentation inactive before I/O: {before_inactive}")
+    if after_inactive is not None:
+        # Both snapshots were inactive; this is missing instrumentation rather
+        # than evidence that an active checker failed during the owned run.
+        return "BLOCKED", (
+            f"debug instrumentation inactive after I/O: {after_inactive}")
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
         return "BLOCKED", "validated source SHA is malformed (expected 40 hex digits)"
     if execution is None:
         return "BLOCKED", "owned execution log missing or unreadable"
+    if kernel_release is None:
+        return "BLOCKED", "running kernel release unavailable for evidence binding"
 
-    lines = execution.splitlines()
     source_markers = [
-        line for line in lines if line.lstrip().startswith("SOURCE_HEAD")
+        line for line in execution_lines
+        if line.lstrip().startswith("SOURCE_HEAD")
     ]
     if not source_markers:
-        return "FAIL", f"missing source run marker: SOURCE_HEAD={source_sha}"
+        return "BLOCKED", f"missing source run marker: SOURCE_HEAD={source_sha}"
     if len(source_markers) != 1:
-        return "FAIL", "duplicated SOURCE_HEAD run marker"
+        return "BLOCKED", "duplicated SOURCE_HEAD run marker"
     if source_markers[0] != f"SOURCE_HEAD={source_sha}":
-        return "FAIL", (
+        return "BLOCKED", (
             f"source run marker mismatch: expected SOURCE_HEAD={source_sha}, "
             f"observed {source_markers[0].strip()[:90]}")
+
+    kernel_markers = [
+        line for line in execution_lines
+        if line.lstrip().startswith("RUNNING_KERNEL")
+    ]
+    expected_kernel_marker = f"RUNNING_KERNEL={kernel_release}"
+    if not kernel_markers:
+        return "BLOCKED", f"missing running-kernel marker: {expected_kernel_marker}"
+    if len(kernel_markers) != 1:
+        return "BLOCKED", "duplicated RUNNING_KERNEL marker"
+    if kernel_markers[0] != expected_kernel_marker:
+        return "BLOCKED", (
+            f"running-kernel marker mismatch: expected {expected_kernel_marker}, "
+            f"observed {kernel_markers[0].strip()[:120]}")
+
+    module_hash_markers = [
+        line for line in execution_lines
+        if line.lstrip().startswith("MODULE_SHA256")
+    ]
+    if not module_hash_markers:
+        return "BLOCKED", "missing module SHA256 run marker"
+    if len(module_hash_markers) != 1:
+        return "BLOCKED", "duplicated MODULE_SHA256 run marker"
+    module_hash_match = re.fullmatch(
+        r"MODULE_SHA256=([0-9a-f]{64})[ \t]+\S.*",
+        module_hash_markers[0],
+    )
+    if module_hash_match is None:
+        return "BLOCKED", "malformed MODULE_SHA256 run marker"
+    executed_module_sha256 = module_hash_match.group(1)
+
     for record in REQUIRED_RECORDS:
         marker = record.split("=", 1)[0]
-        candidates = [line for line in lines if line.lstrip().startswith(marker)]
+        candidates = [
+            line for line in execution_lines if line.lstrip().startswith(marker)
+        ]
         if not candidates:
-            return "FAIL", f"missing loaded run marker: {marker}"
+            return "BLOCKED", f"missing loaded run marker: {marker}"
         if len(candidates) != 1:
-            return "FAIL", f"duplicated loaded run marker: {marker}"
+            return "BLOCKED", f"duplicated loaded run marker: {marker}"
         if (re.fullmatch(record, candidates[0]) is None or
                 not _record_shape_matches(candidates[0], marker)):
-            return "FAIL", f"malformed loaded run marker: {marker}"
+            return "BLOCKED", f"malformed loaded run marker: {marker}"
 
-    try:
-        before_state = parse_runtime_snapshot(runtime_before, required)
-    except ValueError as error:
-        return "BLOCKED", f"runtime-before: {error}"
-    try:
-        after_state = parse_runtime_snapshot(runtime_after, required)
-    except ValueError as error:
-        return "BLOCKED", f"runtime-after: {error}"
-    try:
-        current_boot_id = _read_runtime_text(
-            DEFAULT_BOOT_ID, "kernel boot identity").strip()
-    except ValueError as error:
-        return "BLOCKED", str(error)
-    if before_state["boot_id"] != current_boot_id:
-        return "BLOCKED", (
-            f"runtime-before boot mismatch: observed {before_state['boot_id']}, "
-            f"current {current_boot_id}")
-    if after_state["boot_id"] != current_boot_id:
-        return "BLOCKED", (
-            f"runtime-after boot mismatch: observed {after_state['boot_id']}, "
-            f"current {current_boot_id}")
-    now = time.monotonic_ns()
-    before_time = before_state["observed_monotonic_ns"]
-    after_time = after_state["observed_monotonic_ns"]
-    if not 0 < before_time < after_time <= now:
-        return "BLOCKED", "runtime snapshot times are reversed, equal or in the future"
-    if now - before_time > MAX_RUNTIME_AGE_NS:
-        return "BLOCKED", "runtime-before snapshot is stale (>20 minutes)"
-    if inactive := inactive_runtime_reason(before_state, required):
-        return "BLOCKED", f"debug instrumentation inactive before I/O: {inactive}"
-    if inactive := inactive_runtime_reason(after_state, required):
-        return "FAIL", f"debug instrumentation disabled during I/O: {inactive}"
     if not dmesg_contiguous:
         if not baseline:
             return "BLOCKED", "dmesg baseline missing or unreadable"
@@ -715,10 +852,10 @@ def verify_owned_run(
     if not final.endswith("\n"):
         return "BLOCKED", "dmesg final snapshot truncated mid-line"
 
-    # The caller's validated source marker is not a substitute for modinfo or
-    # observable sanitizer references in the actual exact-source .ko artifact.
+    # The caller's validated source marker is not a substitute for modinfo,
+    # exact module bytes or observable sanitizer references.
     if module_evidence is None:
-        return "BLOCKED", "module provenance missing: modinfo and nm evidence required"
+        return "BLOCKED", "module provenance missing: modinfo, hash and nm evidence required"
     if "error" in module_evidence:
         return "BLOCKED", module_evidence["error"]
     observed_sha = module_evidence.get("source_sha", "<missing>")
@@ -727,7 +864,21 @@ def verify_owned_run(
             f"module source SHA mismatch: expected {source_sha}, "
             f"observed {observed_sha}")
     if module_evidence.get("source_clean") != "1":
-        return "BLOCKED", "module provenance lacks clean validated source (modinfo source_clean != 1)"
+        return "BLOCKED", (
+            "module provenance lacks clean validated source "
+            "(modinfo source_clean != 1)")
+    observed_module_sha256 = module_evidence.get("sha256", "<missing>")
+    if observed_module_sha256 != executed_module_sha256:
+        return "BLOCKED", (
+            f"module SHA256 mismatch: executed {executed_module_sha256}, "
+            f"observed {observed_module_sha256}")
+    vermagic = module_evidence.get("vermagic", "")
+    vermagic_fields = vermagic.split()
+    if not vermagic_fields or vermagic_fields[0] != kernel_release:
+        observed_release = vermagic_fields[0] if vermagic_fields else "<missing>"
+        return "BLOCKED", (
+            f"module vermagic kernel mismatch: expected {kernel_release}, "
+            f"observed {observed_release}")
     symbols = module_evidence.get("symbols", "")
     if "kasan" in required and re.search(
             r"(__asan_|__hwasan_|kasan_report)", symbols) is None:
@@ -737,8 +888,7 @@ def verify_owned_run(
         return "BLOCKED", "module lacks observable KCSAN instrumentation references"
     return "PASS", (
         "owned RAM lower executed; runtime instrumentation remained active, "
-        "module source verified and bounded dmesg clean")
-
+        "module bytes/source verified and bounded dmesg clean")
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -785,7 +935,8 @@ def main() -> int:
             snapshot = capture_runtime_snapshot(required)
             print(json.dumps(snapshot, sort_keys=True, separators=(",", ":")))
             return 0
-        features = probe(arguments.config or host_config_path(), arguments.cmdline)
+        config_path = arguments.config or host_config_path()
+        features = probe(config_path, arguments.cmdline)
         print("KERNEL_DEBUG_PROBE=" + json.dumps(features, sort_keys=True))
         if arguments.action == "probe":
             return 0 if check_features(features, required) else 2
@@ -802,13 +953,13 @@ def main() -> int:
         execution = read_optional(arguments.execution)
         runtime_before = read_optional(arguments.runtime_before) or ""
         runtime_after = read_optional(arguments.runtime_after) or ""
-        config_path = arguments.config or host_config_path()
         configuration = load_config(config_path) if config_path is not None else None
         status, reason = verify_owned_run(
             required, features, baseline, final, execution,
             runtime_before, runtime_after, arguments.source_sha,
             module_evidence=inspect_module_provenance(arguments.module),
             configuration=configuration,
+            kernel_release=running_kernel_release(),
         )
         print(f"{status}_KERNEL_DEBUG_OWNED=features:{','.join(required)} reason:{reason}")
         return {"PASS": 0, "FAIL": 1, "BLOCKED": 2}[status]
