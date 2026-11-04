@@ -294,7 +294,8 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError(f"runtime snapshot has duplicate JSON key: {key}")
+            safe_key = key if re.fullmatch(r"[a-z_]{1,64}", key) else "<invalid-field>"
+            raise ValueError(f"runtime snapshot has duplicate JSON key: {safe_key}")
         result[key] = value
     return result
 
@@ -890,9 +891,14 @@ def verify_owned_run(
     if len(source_markers) != 1:
         return "BLOCKED", "duplicated SOURCE_HEAD run marker"
     if source_markers[0] != f"SOURCE_HEAD={source_sha}":
+        observed_source = source_markers[0].removeprefix("SOURCE_HEAD=")
+        observed_category = (
+            "different SHA" if re.fullmatch(r"[0-9a-f]{40}", observed_source)
+            else "missing/malformed SHA"
+        )
         return "BLOCKED", (
             f"source run marker mismatch: expected SOURCE_HEAD={source_sha}, "
-            f"observed {source_markers[0].strip()[:90]}")
+            f"observed {observed_category}; next: rerun the validated source")
 
     kernel_markers = [
         line for line in execution_lines
@@ -906,7 +912,8 @@ def verify_owned_run(
     if kernel_markers[0] != expected_kernel_marker:
         return "BLOCKED", (
             f"running-kernel marker mismatch: expected {expected_kernel_marker}, "
-            f"observed {kernel_markers[0].strip()[:120]}")
+            "observed different/malformed release; "
+            "next: rerun on the matching running kernel")
 
     module_hash_markers = [
         line for line in execution_lines
@@ -954,18 +961,31 @@ def verify_owned_run(
         return "BLOCKED", module_evidence["error"]
     observed_sha = module_evidence.get("source_sha", "<missing>")
     if observed_sha != source_sha:
+        observed_category = (
+            "different SHA" if isinstance(observed_sha, str) and
+            re.fullmatch(r"[0-9a-f]{40}", observed_sha)
+            else "missing/malformed SHA"
+        )
         return "BLOCKED", (
             f"module source SHA mismatch: expected {source_sha}, "
-            f"observed {observed_sha}")
+            f"observed {observed_category}; "
+            "next: inspect a clean module built from the validated source")
     if module_evidence.get("source_clean") != "1":
         return "BLOCKED", (
             "module provenance lacks clean validated source "
             "(modinfo source_clean != 1)")
     observed_module_sha256 = module_evidence.get("sha256", "<missing>")
     if observed_module_sha256 != executed_module_sha256:
+        observed_category = (
+            observed_module_sha256
+            if isinstance(observed_module_sha256, str) and
+            re.fullmatch(r"[0-9a-f]{64}", observed_module_sha256)
+            else "missing/malformed SHA256"
+        )
         return "BLOCKED", (
             f"module SHA256 mismatch: executed {executed_module_sha256}, "
-            f"observed {observed_module_sha256}")
+            f"observed {observed_category}; "
+            "next: inspect the exact executed module bytes")
     vermagic = module_evidence.get("vermagic", "")
     vermagic_fields = vermagic.split()
     if not vermagic_fields or vermagic_fields[0] != kernel_release:

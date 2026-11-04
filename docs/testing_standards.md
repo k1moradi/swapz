@@ -6146,8 +6146,9 @@ The evidence verifier rejects incomplete or reordered KASAN/lockdep selections:
 only the full `kasan,lockdep` lane or separate `kcsan` lane can qualify,
 even when all synthetic loaded markers and module hashes otherwise match.
 The read-only feature probe can still report individual capabilities.
-Kernel diagnostics and helper failure reasons use fixed safe categories rather
-than echoing private dmesg records or privileged evidence paths. Runtime JSON,
+Kernel diagnostics, helper failure reasons and contradictory source/module/
+kernel markers use fixed safe categories rather than echoing private dmesg
+records, arbitrary marker values or privileged evidence paths. Runtime JSON,
 kernel configuration, bounded session logs and execution records have finite
 parser limits; oversized evidence cannot produce PASS. A clean synthetic
 verifier result remains rootless-only, not proof of loaded instrumentation.

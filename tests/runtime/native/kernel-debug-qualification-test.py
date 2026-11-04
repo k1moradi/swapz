@@ -637,6 +637,37 @@ class KernelDebugQualificationTests(unittest.TestCase):
                 Path(self.temporary_directory.name) / "private-boot-id",
                 "kernel boot identity")
         self.assertNotIn(self.temporary_directory.name, str(failure.exception))
+        for evidence in (
+            GOOD_LOG.replace(f"SOURCE_HEAD={SOURCE_SHA}",
+                             f"SOURCE_HEAD={private_detail}"),
+            GOOD_LOG.replace(f"RUNNING_KERNEL={KERNEL_RELEASE}",
+                             f"RUNNING_KERNEL={private_detail}"),
+        ):
+            with self.subTest(evidence=evidence.splitlines()[0]):
+                status, reason = self.verify(execution=evidence)
+                self.assertEqual(status, "BLOCKED")
+                self.assertNotIn(private_detail, reason)
+        for field, value in (
+            ("source_sha", private_detail),
+            ("sha256", private_detail),
+        ):
+            with self.subTest(field=field):
+                module_evidence = {
+                    "source_sha": SOURCE_SHA,
+                    "source_clean": "1",
+                    "sha256": MODULE_SHA256,
+                }
+                module_evidence[field] = value
+                status, reason = self.verify(module_evidence=module_evidence)
+                self.assertEqual(status, "BLOCKED")
+                self.assertNotIn(private_detail, reason)
+        duplicate_private_key = json.dumps({
+            private_detail: 1,
+        })[:-1] + f', "{private_detail}": 2}}'
+        with self.assertRaises(ValueError) as malformed:
+            qualification.parse_runtime_snapshot(
+                duplicate_private_key, ("kcsan",))
+        self.assertNotIn(private_detail, str(malformed.exception))
         with self.assertRaisesRegex(ValueError, "bounded parser input"):
             qualification.parse_runtime_snapshot(
                 " " * (qualification.MAX_RUNTIME_SNAPSHOT_CHARS + 1),
