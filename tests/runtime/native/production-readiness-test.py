@@ -1307,8 +1307,15 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertEqual(
                     result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
                     "NOT_MEASURED")
+                expected_gap = (
+                    "sealed campaign evidence bytes are malformed"
+                    if name in {
+                        "nonfinite_counter", "overflow_counter",
+                        "overflow_clock",
+                    }
+                    else "sealed campaign RAM trace is invalid")
                 self.assertTrue(any(
-                    "sealed campaign RAM trace is invalid" in blocker
+                    expected_gap in blocker
                     for blocker in result["code_blockers"]),
                     (name, result["code_blockers"]))
 
