@@ -874,6 +874,8 @@ class SustainedIntervalSampler:
             if previous["lower"] is not None else None)
         self.rows.append({
             "interval": len(self.rows),
+            "start_monotonic_ns": previous["time_ns"],
+            "end_monotonic_ns": current["time_ns"],
             "start_seconds": (previous["time_ns"] - self.start_ns) / 1e9,
             "end_seconds": (current["time_ns"] - self.start_ns) / 1e9,
             "duration_seconds": duration_ns / 1e9,
