@@ -75,6 +75,8 @@ MAX_ORACLE_RECORD_BYTES = 4096
 # A sustained memory stall is a safety stop, not an integrity oracle.
 PSI_STOP_FRACTION = 0.85
 PSI_STOP_GRACE_SECONDS = 5
+CYCLE_TELEMETRY_INTERVAL_SECONDS = 0.1
+CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS = 5
 
 
 class Blocked(RuntimeError):
@@ -150,15 +152,26 @@ class SourceAdmissionClient:
                 stat.S_IMODE(after.st_mode), after.st_nlink)
             if peer_uid != parent_uid or before_identity != after_identity:
                 raise Blocked("source admission parent identity changed")
-        except Blocked:
-            channel.close()
+        except Blocked as exc:
+            try:
+                channel.close()
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    exc, [f"source admission socket: {cleanup_error}"],
+                    error_type=Blocked)
             raise
         except (OSError, struct.error) as exc:
-            channel.close()
-            raise Blocked(
-                "source admission parent connection failed") from exc
+            failure = Blocked("source admission parent connection failed")
+            try:
+                channel.close()
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    failure, [f"source admission socket: {cleanup_error}"],
+                    error_type=Blocked)
+            raise failure from exc
         self._channel = channel
         self._validated_source = validated_source
+        self._oracle_sha256: str | None = None
 
     def close(self) -> None:
         channel = getattr(self, "_channel", None)
@@ -177,7 +190,7 @@ class SourceAdmissionClient:
             data.extend(chunk)
         raise Blocked("source admission response is oversized")
 
-    def require(self, phase: str) -> None:
+    def require(self, phase: str) -> str:
         if not re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase):
             raise Blocked("source admission phase is invalid")
         nonce = os.urandom(16).hex()
@@ -202,16 +215,28 @@ class SourceAdmissionClient:
                 object_pairs_hook=_unique_json_object)
         except (UnicodeError, ValueError, TypeError) as exc:
             raise Blocked("source admission response is malformed") from exc
-        required = {"schema", "status", "phase", "source_sha", "nonce"}
+        required = {
+            "schema", "status", "phase", "source_sha", "nonce",
+            "oracle_sha256",
+        }
+        oracle_sha256 = (
+            str(response.get("oracle_sha256", ""))
+            if isinstance(response, dict) else "")
         if (not isinstance(response, dict) or set(response) != required or
                 response.get("schema") != SOURCE_ADMISSION_SCHEMA or
                 response.get("phase") != phase or
                 response.get("source_sha") != self._validated_source or
-                response.get("nonce") != nonce):
+                response.get("nonce") != nonce or
+                not re.fullmatch(r"[0-9a-f]{64}", oracle_sha256)):
             raise Blocked("source admission response identity mismatch")
         if response.get("status") != "PASS":
             raise Blocked(
                 f"unprivileged source admission refused at {phase}")
+        if self._oracle_sha256 is None:
+            self._oracle_sha256 = oracle_sha256
+        elif self._oracle_sha256 != oracle_sha256:
+            raise Blocked("source admission oracle identity changed")
+        return oracle_sha256
 
 
 @dataclass(frozen=True)
@@ -414,8 +439,11 @@ def _sha256_file(path: Path) -> str:
 
 
 
-def pin_real_swap_oracle(oracle_path: Path, private_directory: Path) -> tuple[Path, str]:
-    """Pin the exact source-controlled byte oracle before admitted mutation."""
+def pin_real_swap_oracle(oracle_path: Path, private_directory: Path,
+                         expected_sha256: str) -> tuple[Path, str]:
+    """Pin exact commit-bound oracle bytes before admitted mutation."""
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise Blocked("validated real-swap oracle digest is malformed")
     try:
         canonical = REAL_SWAP_ORACLE.resolve(strict=True)
         supplied = oracle_path.resolve(strict=True)
@@ -452,8 +480,20 @@ def pin_real_swap_oracle(oracle_path: Path, private_directory: Path) -> tuple[Pa
     except OSError as exc:
         raise Blocked(f"cannot pin real-swap oracle: {exc}") from exc
     finally:
+        original_error = sys.exc_info()[1]
         if source_fd >= 0:
-            os.close(source_fd)
+            try:
+                os.close(source_fd)
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error,
+                    [f"real-swap oracle source descriptor: {cleanup_error}"],
+                    error_type=Blocked)
+
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != expected_sha256:
+        raise Blocked(
+            "real-swap oracle bytes differ from validated source commit")
 
     pinned = private_directory / "primary-real-swap-oracle.py"
     output_fd = -1
@@ -477,10 +517,16 @@ def pin_real_swap_oracle(oracle_path: Path, private_directory: Path) -> tuple[Pa
     except OSError as exc:
         raise Blocked(f"cannot create pinned real-swap oracle: {exc}") from exc
     finally:
+        original_error = sys.exc_info()[1]
         if output_fd >= 0:
-            os.close(output_fd)
+            try:
+                os.close(output_fd)
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error,
+                    [f"pinned real-swap oracle descriptor: {cleanup_error}"],
+                    error_type=Blocked)
 
-    digest = hashlib.sha256(payload).hexdigest()
     if _sha256_file(pinned) != digest:
         raise Blocked("pinned real-swap oracle digest mismatch")
     return pinned, digest
@@ -864,14 +910,23 @@ def linux_swap_header(header: bytes, logical_pages: int) -> dict:
 
 
 def _read_mapper_header(path: Path, logical_pages: int) -> dict:
+    fd = -1
     try:
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOCTTY)
-        try:
-            header = os.pread(fd, PAGE_BYTES, 0)
-        finally:
-            os.close(fd)
+        header = os.pread(fd, PAGE_BYTES, 0)
     except OSError as exc:
-        raise QualificationFailure(f"cannot independently read mapper swap header: {exc}") from exc
+        raise QualificationFailure(
+            f"cannot independently read mapper swap header: {exc}") from exc
+    finally:
+        original_error = sys.exc_info()[1]
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error,
+                    [f"mapper swap-header descriptor: {cleanup_error}"],
+                    error_type=QualificationFailure)
     return linux_swap_header(header, logical_pages)
 
 
@@ -1104,14 +1159,23 @@ def _mem_available_mib() -> int:
 
 
 def _block_size(path: Path) -> int:
+    fd = -1
     try:
         fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOCTTY)
-        try:
-            return struct.unpack("=Q", fcntl.ioctl(fd, BLKGETSIZE64, bytes(8)))[0]
-        finally:
-            os.close(fd)
+        return struct.unpack(
+            "=Q", fcntl.ioctl(fd, BLKGETSIZE64, bytes(8)))[0]
     except OSError as exc:
         raise Blocked(f"cannot verify block geometry for {path}: {exc}") from exc
+    finally:
+        original_error = sys.exc_info()[1]
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error,
+                    [f"block-geometry descriptor: {cleanup_error}"],
+                    error_type=Blocked)
 
 
 def _flatten_lsblk(rows: list[dict]) -> list[dict]:
@@ -1948,7 +2012,8 @@ def _wait_for_round_release(cgroup: Path, mapper_device: tuple[int, int],
 
 def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                   workload_mib: int, resident_mib: int, swap_limit_mib: int,
-                  timeout_seconds: int) -> dict:
+                  timeout_seconds: int,
+                  telemetry_check: Callable[[], None] | None = None) -> dict:
     worker_memory_mib = split_concurrent_workload_mib(workload_mib)
     token = os.urandom(8).hex()
     cgroup = _cgroup_create(token, resident_mib, swap_limit_mib, admitted=True)
@@ -1970,6 +2035,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
 
     def guard() -> None:
         nonlocal last_psi_total
+        if telemetry_check is not None:
+            telemetry_check()
         events = _memory_events(cgroup / "memory.events")
         if events.get("oom", 0) > events_before.get("oom", 0) or \
                 events.get("oom_kill", 0) > events_before.get("oom_kill", 0):
@@ -2334,6 +2401,119 @@ def evaluate_stop_samples(samples: list[StopSample]) -> dict:
             "final_absent": True, "samples": len(samples)}
 
 
+class CycleTelemetrySampler:
+    """Constant-memory host telemetry spanning pressure through normal teardown."""
+
+    def __init__(self):
+        self.error: Exception | None = None
+        self.samples = 0
+        self.started_monotonic_ns = 0
+        self.ended_monotonic_ns = 0
+        self.minimum_mem_available_mib: int | None = None
+        self._first_memory_psi_total: int | None = None
+        self._last_memory_psi_total: int | None = None
+        self._first_vmstat: dict[str, int] | None = None
+        self._last_vmstat: dict[str, int] | None = None
+        self._ready = threading.Event()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="swapz-cycle-telemetry", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+        if not self._ready.wait(CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS):
+            self._stop.set()
+            self._thread.join(timeout=CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS)
+            if self._thread.is_alive():
+                raise Blocked(
+                    "cycle telemetry sampler did not terminate after start timeout")
+            raise Blocked("cycle telemetry sampler produced no initial observation")
+        try:
+            self.check()
+        except BaseException as original_error:
+            self._stop.set()
+            self._thread.join(timeout=CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS)
+            if self._thread.is_alive():
+                raise QualificationFailure(
+                    f"{_exception_text(original_error)}; cycle telemetry thread "
+                    "cleanup also failed after startup"
+                ) from original_error
+            raise
+
+    def check(self) -> None:
+        if self.error is None:
+            return
+        if isinstance(self.error, QualificationFailure):
+            raise QualificationFailure(
+                f"cycle telemetry failed: {self.error}") from self.error
+        raise Blocked(f"cycle telemetry failed: {self.error}") from self.error
+
+    def stop(self) -> dict:
+        self._stop.set()
+        self._thread.join(timeout=CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS)
+        if self._thread.is_alive():
+            raise Blocked("cycle telemetry sampler thread did not terminate")
+        self.check()
+        if self.samples <= 0 or self.minimum_mem_available_mib is None or \
+                self._first_memory_psi_total is None or \
+                self._last_memory_psi_total is None or \
+                self._first_vmstat is None or self._last_vmstat is None or \
+                self.ended_monotonic_ns <= self.started_monotonic_ns:
+            raise Blocked("cycle telemetry sampler evidence is incomplete")
+        return {
+            "samples": self.samples,
+            "started_monotonic_ns": self.started_monotonic_ns,
+            "ended_monotonic_ns": self.ended_monotonic_ns,
+            "minimum_mem_available_mib": self.minimum_mem_available_mib,
+            "memory_psi_some_usec_delta":
+                self._last_memory_psi_total - self._first_memory_psi_total,
+            "pswpin_delta":
+                self._last_vmstat["pswpin"] - self._first_vmstat["pswpin"],
+            "pswpout_delta":
+                self._last_vmstat["pswpout"] - self._first_vmstat["pswpout"],
+        }
+
+    def _run(self) -> None:
+        try:
+            self.started_monotonic_ns = time.monotonic_ns()
+            while True:
+                mem_available_mib = _mem_available_mib()
+                memory_psi_total = _psi_total(
+                    Path("/proc/pressure/memory"))
+                vmstat = read_vmstat()
+                if mem_available_mib < MIN_AVAILABLE_MIB:
+                    raise QualificationFailure(
+                        f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB "
+                        "during cycle telemetry")
+                if self._last_memory_psi_total is not None and \
+                        memory_psi_total < self._last_memory_psi_total:
+                    raise Blocked(
+                        "host memory PSI total regressed during cycle telemetry")
+                if self._last_vmstat is not None and (
+                        vmstat["pswpin"] < self._last_vmstat["pswpin"] or
+                        vmstat["pswpout"] < self._last_vmstat["pswpout"]):
+                    raise Blocked(
+                        "kernel swap counters regressed during cycle telemetry")
+                if self.samples == 0:
+                    self._first_memory_psi_total = memory_psi_total
+                    self._first_vmstat = dict(vmstat)
+                    self.minimum_mem_available_mib = mem_available_mib
+                else:
+                    self.minimum_mem_available_mib = min(
+                        self.minimum_mem_available_mib, mem_available_mib)
+                self._last_memory_psi_total = memory_psi_total
+                self._last_vmstat = dict(vmstat)
+                self.samples += 1
+                self._ready.set()
+                if self._stop.wait(CYCLE_TELEMETRY_INTERVAL_SECONDS):
+                    break
+        except Exception as exc:
+            self.error = exc
+            self._ready.set()
+        finally:
+            self.ended_monotonic_ns = time.monotonic_ns()
+
+
 class StopSampler:
     def __init__(self, mapper_device: tuple[int, int], expected_uuid: str, known_swap_path: str):
         self.mapper_device = mapper_device
@@ -2634,8 +2814,10 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
             f"primary start failed after admitted prepare rc={started.returncode}: {detail}")
 
     active = None
-    original_failure = None
+    original_failure: BaseException | None = None
     workload_result = None
+    cycle_telemetry_sampler: CycleTelemetrySampler | None = None
+    cycle_telemetry_result = None
     try:
         _read_primary_output(started, f"PRIMARY_START=ACTIVE run_id={run_id} ")
         state = read_state()
@@ -2646,36 +2828,72 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
         active = verify_active_mapper(manifest, baseline_identity)
         if active["swap_uuid"] in prior_swap_uuids:
             raise QualificationFailure("fresh mapper reused a previous Linux swap UUID")
+        telemetry_candidate = CycleTelemetrySampler()
+        telemetry_candidate.start()
+        cycle_telemetry_sampler = telemetry_candidate
         workload_result = _run_workload(
             manifest, active, oracle_path,
             workload_mib, resident_mib, swap_limit_mib, timeout_seconds,
+            telemetry_check=cycle_telemetry_sampler.check,
         )
     except BaseException as exc:
         original_failure = exc
 
+    cleanup_failure: BaseException | None = None
+    stop_evidence = None
     try:
         if original_failure is not None and active is None:
             # We cannot safely assume the start failed merely because independent
             # verification did. Reconcile the durable stage and request only the
             # coordinator's normal stop/recover path.
             state = read_state()
-            if state is not None and state.get("run_id") == run_id and state.get("stage") == "ACTIVE":
+            if state is not None and state.get("run_id") == run_id and \
+                    state.get("stage") == "ACTIVE":
                 _normal_stop(
-                    swapzctl, manifest, None, baseline_identity, selector_partuuid, timeout_seconds)
+                    swapzctl, manifest, None, baseline_identity,
+                    selector_partuuid, timeout_seconds)
             else:
-                _cleanup_failed_start(
-                    swapzctl, manifest, baseline_identity, selector_partuuid, timeout_seconds,
-                    _exception_text(original_failure))
-            stop_evidence = None
+                _reconcile_primary_cleanup(
+                    swapzctl, manifest, baseline_identity,
+                    selector_partuuid, timeout_seconds)
         else:
             stop_evidence = _normal_stop(
-                swapzctl, manifest, active, baseline_identity, selector_partuuid, timeout_seconds)
-    except BaseException as cleanup_error:
+                swapzctl, manifest, active, baseline_identity,
+                selector_partuuid, timeout_seconds)
+    except BaseException as exc:
+        cleanup_failure = exc
+
+    telemetry_failure: BaseException | None = None
+    if cycle_telemetry_sampler is not None:
+        try:
+            cycle_telemetry_result = cycle_telemetry_sampler.stop()
+        except BaseException as exc:
+            telemetry_failure = exc
+
+    if cleanup_failure is not None:
+        if original_failure is not None:
+            details = (
+                f"{_exception_text(original_failure)}; normal stop/recovery also "
+                f"failed: {_exception_text(cleanup_failure)}")
+            if telemetry_failure is not None:
+                details += (
+                    f"; cycle telemetry also failed: "
+                    f"{_exception_text(telemetry_failure)}")
+            raise QualificationFailure(details) from cleanup_failure
+        if telemetry_failure is not None:
+            raise QualificationFailure(
+                f"{_exception_text(cleanup_failure)}; cycle telemetry also "
+                f"failed: {_exception_text(telemetry_failure)}"
+            ) from cleanup_failure
+        raise cleanup_failure
+    if telemetry_failure is not None:
         if original_failure is not None:
             raise QualificationFailure(
-                f"{_exception_text(original_failure)}; normal stop/recovery also "
-                f"failed: {_exception_text(cleanup_error)}") from cleanup_error
-        raise
+                f"{_exception_text(original_failure)}; cycle telemetry also "
+                f"failed: {_exception_text(telemetry_failure)}"
+            ) from telemetry_failure
+        raise telemetry_failure
+
     kernel_after = _kernel_log_snapshot()
     _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
     if original_failure is not None:
@@ -2691,6 +2909,7 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
         "swap_priority": active["swap_priority"],
         "loaded_module": loaded_module,
         "workload": workload_result,
+        "cycle_telemetry": cycle_telemetry_result,
         "stop_order": stop_evidence,
         "fresh_mapper_used_kib": 0,
         "durable_final_stage": "COMPLETE",
@@ -2709,7 +2928,7 @@ def _import_qualification(swapzctl: Path, report_path: Path) -> None:
 
 def _execute_admitted(arguments: argparse.Namespace,
                       admission: SourceAdmissionClient) -> dict:
-    admission.require("initial")
+    expected_oracle_sha256 = admission.require("initial")
     _ensure_commands(("cc", "dmsetup", "lsblk", "dmesg"))
     if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
         raise Blocked("primary real-swap qualification requires a 4096-byte host page")
@@ -2738,7 +2957,7 @@ def _execute_admitted(arguments: argparse.Namespace,
         swapzctl, execution_control_sha256 = build_physical_execution_control(
             arguments.validated_source, qualified_swapzctl, private_directory)
         oracle_path, oracle_sha256 = pin_real_swap_oracle(
-            requested_oracle_path, private_parent)
+            requested_oracle_path, private_parent, expected_oracle_sha256)
     except BaseException as original_error:
         try:
             private_workspace.cleanup()

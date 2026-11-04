@@ -10,6 +10,7 @@ and again before a PASS can be emitted.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -75,6 +76,23 @@ def _check_git_source(validated_source: str) -> None:
         raise Blocked("production source tree is not clean")
 
 
+def _git_file_sha256(validated_source: str, path: Path) -> str:
+    """Hash exact bytes from the validated commit, not the mutable worktree."""
+    try:
+        relative = path.resolve().relative_to(ROOT.resolve()).as_posix()
+    except (OSError, ValueError) as exc:
+        raise Blocked("source admission file is outside the repository") from exc
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{validated_source}:{relative}"],
+            cwd=ROOT, capture_output=True, check=False, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Blocked("cannot read source admission file from validated commit") from exc
+    if result.returncode != 0:
+        raise Blocked("validated commit lacks required source admission file")
+    return hashlib.sha256(result.stdout).hexdigest()
+
+
 def _trusted_executable(name: str) -> str:
     candidate = shutil.which(name)
     if not candidate:
@@ -125,13 +143,17 @@ def _read_request(stream, validated_source: str) -> dict:
     return request
 
 
-def _reply(stream, request: dict, status: str) -> None:
+def _reply(stream, request: dict, status: str,
+           oracle_sha256: str) -> None:
+    if not re.fullmatch(r"[0-9a-f]{64}", oracle_sha256):
+        raise Blocked("source admission oracle digest is malformed")
     response = {
         "schema": SOURCE_ADMISSION_SCHEMA,
         "status": status,
         "phase": request["phase"],
         "source_sha": request["source_sha"],
         "nonce": request["nonce"],
+        "oracle_sha256": oracle_sha256,
     }
     stream.write(
         json.dumps(
@@ -154,6 +176,7 @@ def _stop_unadmitted_child(child: subprocess.Popen) -> None:
 def _serve_admission(server: socket.socket,
                      child: subprocess.Popen,
                      validated_source: str,
+                     oracle_sha256: str,
                      cycles: int) -> int:
     expected_phases = (
         ["initial"] +
@@ -191,7 +214,7 @@ def _serve_admission(server: socket.socket,
                     expected_phases[len(passed_phases)]
                     if len(passed_phases) < len(expected_phases) else None)
                 if request["phase"] != expected_phase:
-                    _reply(stream, request, "BLOCKED")
+                    _reply(stream, request, "BLOCKED", oracle_sha256)
                     print(
                         "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
                         "unexpected_source_admission_phase",
@@ -200,12 +223,12 @@ def _serve_admission(server: socket.socket,
                 try:
                     _check_git_source(validated_source)
                 except Blocked as exc:
-                    _reply(stream, request, "BLOCKED")
+                    _reply(stream, request, "BLOCKED", oracle_sha256)
                     print(
                         "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
                         file=sys.stderr)
                     break
-                _reply(stream, request, "PASS")
+                _reply(stream, request, "PASS", oracle_sha256)
                 passed_phases.append(request["phase"])
 
     result = child.wait()
@@ -279,6 +302,8 @@ def main() -> int:
 
     try:
         _check_git_source(arguments.validated_source)
+        oracle_sha256 = _git_file_sha256(
+            arguments.validated_source, DEFAULT_ORACLE)
         sudo = _trusted_executable("sudo")
         python3 = _trusted_executable("python3")
         true = _trusted_executable("true")
@@ -305,7 +330,7 @@ def main() -> int:
                     cwd=ROOT)
                 return _serve_admission(
                     server, child, arguments.validated_source,
-                    arguments.cycles)
+                    oracle_sha256, arguments.cycles)
     except Blocked as exc:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),

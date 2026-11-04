@@ -109,11 +109,15 @@ BLOCKED, not equivalent to false.
 
 The real-swap byte oracle is qualification authority: `--oracle` must resolve
 to the exact source-controlled `tests/tools/primary-real-swap-oracle.py`, never
-an arbitrary replacement. After the clean-source gate and before any admitted
-lifecycle mutation, the helper must snapshot those stable bytes into its
-root-only temporary workspace, record their SHA-256, and execute only that
-pinned copy for every cycle. A mid-run pathname replacement must therefore be
-unable to fabricate byte-exact PASS evidence.
+an arbitrary replacement. The unprivileged admission parent derives the
+oracle SHA-256 from the exact validated Git commit object and carries that
+digest in every nonce-bound admission response. After the clean-source gate
+and before any admitted lifecycle mutation, the privileged helper must snapshot
+the current oracle bytes into its root-only temporary workspace, require their
+SHA-256 to match that commit-derived digest, record it, and execute only that
+pinned copy for every cycle. An alter-pin-restore worktree race or a mid-run
+pathname replacement must therefore be unable to fabricate byte-exact PASS
+evidence.
 
 The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
 artifact identity, derive the same
@@ -188,6 +192,12 @@ boolean. A failed dmsetup-info query is never mapper-absence evidence by
 itself; absence requires an independent readable sysfs Device Mapper inventory.
 Path-inspection errors for durable state, mapper/module identity, ownership
 markers and cgroup teardown are errors, not silently equivalent to ENOENT.
+A constant-memory cycle telemetry sampler must complete its first host
+`MemAvailable`, global memory-PSI and `pswpin`/`pswpout` observation before
+the workload can begin pressure. It remains active through ordinary
+stop/recovery and records only bounded aggregates (sample count, timestamps,
+minimum available memory and counter deltas), so telemetry covers normal
+teardown without accumulating an unbounded sample log.
 
 Once recovery-storage admission is proven and before `prepare`, the helper
 must durably create a root-owned 0600 attempt record under the validated

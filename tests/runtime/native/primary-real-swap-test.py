@@ -537,13 +537,21 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_real_swap_oracle_is_canonical_and_pinned_before_use(self):
         with tempfile.TemporaryDirectory(prefix="swapz-real-oracle-") as directory:
             private = Path(directory)
-            pinned, digest = qualify.pin_real_swap_oracle(ORACLE, private)
+            expected_digest = hashlib.sha256(ORACLE.read_bytes()).hexdigest()
+            pinned, digest = qualify.pin_real_swap_oracle(
+                ORACLE, private, expected_digest)
             self.assertEqual(pinned.parent, private)
             self.assertNotEqual(pinned, ORACLE)
             self.assertEqual(pinned.read_bytes(), ORACLE.read_bytes())
             self.assertEqual(
                 digest, hashlib.sha256(ORACLE.read_bytes()).hexdigest())
             self.assertEqual(stat.S_IMODE(pinned.stat().st_mode), 0o500)
+
+        with tempfile.TemporaryDirectory(prefix="swapz-wrong-oracle-digest-") as directory:
+            with self.assertRaisesRegex(
+                    qualify.Blocked, "validated source commit"):
+                qualify.pin_real_swap_oracle(
+                    ORACLE, Path(directory), "0" * 64)
 
         with tempfile.TemporaryDirectory(prefix="swapz-fake-oracle-") as directory:
             private = Path(directory)
@@ -554,7 +562,88 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             destination.mkdir()
             with self.assertRaisesRegex(
                     qualify.Blocked, "exact source-controlled oracle"):
-                qualify.pin_real_swap_oracle(fake, destination)
+                qualify.pin_real_swap_oracle(
+                    fake, destination,
+                    hashlib.sha256(ORACLE.read_bytes()).hexdigest())
+
+    def test_oracle_pin_preserves_read_failure_when_descriptor_close_also_fails(self):
+        real_close = os.close
+
+        def close_then_fail(descriptor):
+            real_close(descriptor)
+            raise OSError("synthetic close failure")
+
+        with tempfile.TemporaryDirectory(prefix="swapz-oracle-close-") as directory, \
+                mock.patch.object(
+                    qualify.os, "read",
+                    side_effect=OSError("synthetic read failure")), \
+                mock.patch.object(
+                    qualify.os, "close", side_effect=close_then_fail), \
+                self.assertRaisesRegex(
+                    qualify.Blocked,
+                    "cannot pin real-swap oracle: synthetic read failure; "
+                    "cleanup also failed: .*synthetic close failure"):
+            qualify.pin_real_swap_oracle(
+                ORACLE, Path(directory),
+                hashlib.sha256(ORACLE.read_bytes()).hexdigest())
+
+    def test_source_admission_binds_commit_oracle_digest(self):
+        source_sha = "a" * 40
+        oracle_digest = "b" * 64
+        nonce_bytes = b"\x12" * 16
+        client = object.__new__(qualify.SourceAdmissionClient)
+        client._validated_source = source_sha
+        client._oracle_sha256 = None
+
+        def channel_for(phase: str, digest: str):
+            response = {
+                "schema": qualify.SOURCE_ADMISSION_SCHEMA,
+                "status": "PASS",
+                "phase": phase,
+                "source_sha": source_sha,
+                "nonce": nonce_bytes.hex(),
+                "oracle_sha256": digest,
+            }
+            encoded = (
+                json.dumps(
+                    response, sort_keys=True, separators=(",", ":")
+                ).encode("ascii") + b"\n")
+            channel = mock.Mock()
+            channel.recv.side_effect = [bytes([value]) for value in encoded]
+            return channel
+
+        client._channel = channel_for("initial", oracle_digest)
+        with mock.patch.object(qualify.os, "urandom", return_value=nonce_bytes):
+            self.assertEqual(client.require("initial"), oracle_digest)
+        self.assertEqual(client._oracle_sha256, oracle_digest)
+
+        client._channel = channel_for("cycle-1", "c" * 64)
+        with mock.patch.object(qualify.os, "urandom", return_value=nonce_bytes), \
+                self.assertRaisesRegex(
+                    qualify.Blocked, "oracle identity changed"):
+            client.require("cycle-1")
+
+        malformed = mock.Mock()
+        malformed.recv.side_effect = [bytes([value]) for value in b"[]\n"]
+        client._channel = malformed
+        with mock.patch.object(qualify.os, "urandom", return_value=nonce_bytes), \
+                self.assertRaisesRegex(
+                    qualify.Blocked, "response identity mismatch"):
+            client.require("cycle-1")
+
+    def test_parent_hashes_oracle_from_validated_commit_object(self):
+        source_sha = "a" * 40
+        payload = b"exact committed oracle bytes\n"
+        completed = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0, stdout=payload, stderr=b"")
+        with mock.patch.object(
+                    parent.subprocess, "run", return_value=completed) as run:
+            observed = parent._git_file_sha256(source_sha, ORACLE)
+        self.assertEqual(observed, hashlib.sha256(payload).hexdigest())
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "show",
+             f"{source_sha}:tests/tools/primary-real-swap-oracle.py"])
 
     def test_default_control_path_uses_installed_package_layout(self):
         args = qualify.build_parser().parse_args([
@@ -811,6 +900,25 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify.QualificationFailure):
                 qualify.parse_status(malformed)
 
+    def test_block_geometry_preserves_ioctl_failure_when_close_also_fails(self):
+        real_close = os.close
+
+        def close_then_fail(descriptor):
+            real_close(descriptor)
+            raise OSError("synthetic close failure")
+
+        with tempfile.NamedTemporaryFile() as temporary, \
+                mock.patch.object(
+                    qualify.fcntl, "ioctl",
+                    side_effect=OSError("synthetic ioctl failure")), \
+                mock.patch.object(
+                    qualify.os, "close", side_effect=close_then_fail), \
+                self.assertRaisesRegex(
+                    qualify.Blocked,
+                    "cannot verify block geometry.*synthetic ioctl failure; "
+                    "cleanup also failed: .*synthetic close failure"):
+            qualify._block_size(Path(temporary.name))
+
     def test_psi_and_memavailable_parsers_fail_closed_on_malformed_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             pressure = Path(directory) / "memory.pressure"
@@ -1016,6 +1124,41 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify._terminate_child(timed_out, cgroup)
             self.assertEqual(timed_out.wait.call_count, 2)
 
+    def test_cycle_telemetry_sampler_is_bounded_and_brackets_cycle(self):
+        sampler = qualify.CycleTelemetrySampler()
+        with mock.patch.object(
+                    qualify, "_mem_available_mib", return_value=2048), \
+                mock.patch.object(qualify, "_psi_total", return_value=100), \
+                mock.patch.object(
+                    qualify, "read_vmstat",
+                    return_value={"pswpin": 7, "pswpout": 11}):
+            sampler.start()
+            evidence = sampler.stop()
+        self.assertGreaterEqual(evidence["samples"], 1)
+        self.assertGreater(
+            evidence["ended_monotonic_ns"],
+            evidence["started_monotonic_ns"])
+        self.assertEqual(evidence["minimum_mem_available_mib"], 2048)
+        self.assertEqual(evidence["memory_psi_some_usec_delta"], 0)
+        self.assertEqual(evidence["pswpin_delta"], 0)
+        self.assertEqual(evidence["pswpout_delta"], 0)
+        self.assertFalse(hasattr(sampler, "samples_log"))
+
+    def test_cycle_telemetry_sampler_fails_closed_on_low_memavailable(self):
+        sampler = qualify.CycleTelemetrySampler()
+        with mock.patch.object(
+                    qualify, "_mem_available_mib",
+                    return_value=qualify.MIN_AVAILABLE_MIB - 1), \
+                mock.patch.object(qualify, "_psi_total", return_value=100), \
+                mock.patch.object(
+                    qualify, "read_vmstat",
+                    return_value={"pswpin": 7, "pswpout": 11}), \
+                self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "MemAvailable crossed"):
+            sampler.start()
+        self.assertFalse(sampler._thread.is_alive())
+
     def test_stop_sampler_is_stopped_when_final_delay_is_interrupted(self):
         run_id = "1" * 32
         manifest = {"run_id": run_id}
@@ -1162,6 +1305,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                    "mapper=/dev/mapper/swapz-primary swapon=true\n",
             stderr="")
         normal_stop = mock.Mock(return_value={"normal": True})
+        telemetry = mock.Mock()
+        telemetry.stop.return_value = {
+            "samples": 1,
+            "started_monotonic_ns": 1,
+            "ended_monotonic_ns": 2,
+            "minimum_mem_available_mib": 2048,
+            "memory_psi_some_usec_delta": 0,
+            "pswpin_delta": 0,
+            "pswpout_delta": 0,
+        }
         admission = mock.Mock()
         with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
                 mock.patch.object(qualify, "_validate_precycle_state"), \
@@ -1181,6 +1334,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify, "verify_active_mapper", return_value=active), \
                 mock.patch.object(
                     qualify, "_run_workload", side_effect=KeyboardInterrupt()), \
+                mock.patch.object(
+                    qualify, "CycleTelemetrySampler",
+                    return_value=telemetry), \
                 mock.patch.object(qualify, "_normal_stop", normal_stop), \
                 self.assertRaises(KeyboardInterrupt):
             qualify.run_cycle(
@@ -1192,6 +1348,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
                 timeout_seconds=60, prior_run_ids=set(),
                 prior_swap_uuids=set(), admission=admission)
+        telemetry.start.assert_called_once_with()
+        telemetry.stop.assert_called_once_with()
         normal_stop.assert_called_once()
         self.assertEqual(normal_stop.call_args.args[2], active)
 
@@ -1299,12 +1457,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertNotIn("_check_git_source", source)
         self.assertNotIn('["git",', source)
         self.assertIn("SO_PEERCRED", source)
+        self.assertIn('"oracle_sha256"', source)
         self.assertIn('admission.require(f"cycle-{index}")', source)
         self.assertIn('admission.require("final")', source)
         self.assertIn("def _check_git_source(", admission_parent)
         self.assertIn('["git", "ls-remote"', admission_parent)
         self.assertIn("os.geteuid() == 0", admission_parent)
         self.assertIn("SO_PEERCRED", admission_parent)
+        self.assertIn("def _git_file_sha256(", admission_parent)
+        self.assertIn('"git", "show"', admission_parent)
+        self.assertIn('"oracle_sha256"', admission_parent)
 
     def test_helper_has_no_direct_swapoff_swapon_or_mapper_remove_command(self):
         source = HELPER.read_text(encoding="utf-8")
