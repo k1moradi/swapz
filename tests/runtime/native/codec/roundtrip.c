@@ -1421,7 +1421,6 @@ static int test_seeded_descriptor_mutations(void)
  * Invalid counts must fail from the header before accessing descriptors. */
 static int test_truncated_and_corrupt_descriptor_counts(void)
 {
-	static const swapz_u8 bad_counts[] = { 0U, 65U, 255U };
 	static const swapz_u32 bad_sizes[] = {
 		0U, 1U, 15U, 16U, SWAPZ_BLOCK_BYTES - 1U,
 		SWAPZ_BLOCK_BYTES + 1U, 2U * SWAPZ_BLOCK_BYTES - 1U,
@@ -1431,28 +1430,41 @@ static int test_truncated_and_corrupt_descriptor_counts(void)
 	uint8_t header_only[sizeof(struct swapz_header)] = { 'S', 'W', 'Z' };
 	struct swapz_decoded decoded;
 	const uint8_t *readable;
-	unsigned int index;
+	unsigned int record_count, index;
 
 	header_only[6] = SWAPZ_MAX_BLOCKS;
 	header_only[8] = 1U;
-	for (index = 0; index < sizeof(bad_counts); ++index) {
-		header_only[7] = bad_counts[index];
-		CHECK(swapz_validate_metadata_crc(header_only,
-						   SWAPZ_MAX_EXTENT_BYTES) ==
-		      -EUCLEAN);
-		CHECK(swapz_validate(header_only, SWAPZ_MAX_EXTENT_BYTES) ==
-		      -EUCLEAN);
-		CHECK(swapz_peek(header_only, SWAPZ_MAX_EXTENT_BYTES, 0U,
-				 &decoded) == -EUCLEAN);
-		CHECK(decoded.generation == 0U && decoded.payload_length == 0U);
+	/* Exhaust the complete invalid u8 count domain using only a header-sized
+	 * allocation. Any descriptor read on these paths is an ASan failure. */
+#define COUNT_CHECK(expression) do { \
+	if (!(expression)) { \
+		fprintf(stderr, "SWAPZ_CODEC_COUNT_MUTATION_FAIL count=%u " \
+			"line=%d check=%s\n", record_count, __LINE__, \
+			#expression); \
+		return 1; \
+	} \
+} while (0)
+	for (record_count = 0; record_count <= UINT8_MAX; ++record_count) {
+		if (record_count && record_count <= SWAPZ_MAX_RECORDS)
+			continue;
+		header_only[7] = (uint8_t)record_count;
+		COUNT_CHECK(swapz_validate_metadata_crc(
+			    header_only, SWAPZ_MAX_EXTENT_BYTES) == -EUCLEAN);
+		COUNT_CHECK(swapz_validate(
+			    header_only, SWAPZ_MAX_EXTENT_BYTES) == -EUCLEAN);
+		COUNT_CHECK(swapz_peek(header_only, SWAPZ_MAX_EXTENT_BYTES, 0U,
+				       &decoded) == -EUCLEAN);
+		COUNT_CHECK(decoded.generation == 0U &&
+			    decoded.payload_length == 0U);
 		readable = payload;
-		CHECK(swapz_lookup(header_only, SWAPZ_MAX_EXTENT_BYTES, 0U,
-				   &decoded, &readable) == -EUCLEAN);
-		CHECK(!readable && decoded.payload_length == 0U);
-		CHECK(swapz_lookup_validated_descriptor(
-			      header_only, SWAPZ_MAX_EXTENT_BYTES, 0U,
-			      &decoded, NULL) == -ERANGE);
+		COUNT_CHECK(swapz_lookup(header_only, SWAPZ_MAX_EXTENT_BYTES, 0U,
+					 &decoded, &readable) == -EUCLEAN);
+		COUNT_CHECK(!readable && decoded.payload_length == 0U);
+		COUNT_CHECK(swapz_lookup_validated_descriptor(
+			    header_only, SWAPZ_MAX_EXTENT_BYTES, 0U,
+			    &decoded, NULL) == -EUCLEAN);
 	}
+#undef COUNT_CHECK
 	for (index = 0; index < sizeof(bad_sizes) / sizeof(bad_sizes[0]);
 	     ++index) {
 		CHECK(swapz_validate_metadata_crc(header_only, bad_sizes[index]) ==
@@ -1477,6 +1489,18 @@ static int test_rejected_append_never_hashes(void)
 	unsigned int index;
 
 	set_payload(SWAPZ_MAX_COMPRESSED, 53U);
+	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 900U) == 0);
+#if defined(SWAPZ_TEST_ASAN)
+	__asan_poison_memory_region(payload, 600U);
+#endif
+	CHECK(swapz_append(&builder, 6U, 0U, payload, 32U) == -EINVAL);
+	CHECK(swapz_append_encoded_unique(&builder, 6U, 1U, payload, 32U,
+					  SWAPZ_ENCODING_INVALID) == -EINVAL);
+#if defined(SWAPZ_TEST_ASAN)
+	__asan_unpoison_memory_region(payload, 600U);
+#endif
+	CHECK(builder.count == 0U && builder.payload_start == SWAPZ_BLOCK_BYTES);
+
 	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 901U) == 0);
 	CHECK(swapz_append(&builder, 7U, 1U, payload, 32U) == 0);
 #if defined(SWAPZ_TEST_ASAN)
