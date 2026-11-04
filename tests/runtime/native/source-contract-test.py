@@ -4688,12 +4688,17 @@ int main(void)
 
     def test_dead_segment_trim_is_post_deadness_and_advisory(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
+        claim = source_body("swapz_claim_dead_segment", authority)
         gc = body("swapz_gc_compact_one_inner")
         discard = body("swapz_discard_dead_segment")
         status = body("swapz_status")
         self.assertIn("a->dead_segment_recycle", authority)
-        self.assertLess(authority.index("if (used && a->dead_segment_recycle)"),
-                        authority.index("memset(a->extent_classes + start"))
+        map_validation = claim.index("swapz_verify_segment_authoritative_maps(")
+        recycle = claim.index(
+            "if (reclaim_required && a->dead_segment_recycle)")
+        descriptor_clear = claim.index("memset(a->extent_classes + start")
+        self.assertLess(map_validation, recycle)
+        self.assertLess(recycle, descriptor_clear)
         self.assertIn("swapz_gc_commit_rotation(a, victim)", gc)
         self.assertLess(gc.index("swapz_gc_commit_rotation(a, victim)"),
                         gc.index("swapz_discard_dead_segment(ctx, victim)"))

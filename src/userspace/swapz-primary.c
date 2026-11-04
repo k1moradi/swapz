@@ -46,6 +46,8 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_NAME "primary-execution.env"
 #define SWAPZ_PRIMARY_BOOT_ID_LENGTH 36U
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES 512U
+#define SWAPZ_PRIMARY_VISIBLE_PIDS_MAX 16384U
+#define SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES (64U * 1024U * 1024U)
 #if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
 	defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
 #error "primary lifecycle test modes are mutually exclusive"
@@ -3009,8 +3011,24 @@ static int swapz_primary_swap_inventory_target_is_quiescent(
 		return -1;
 	}
 	for (index = 0; index < count; ++index) {
-		if (!resolved_is_block[index] ||
-		    resolved_devices[index] != target_device)
+		if (!strcmp(entries[index].type, "file")) {
+			/* A swapfile's st_dev is the backing filesystem device. */
+			if (resolved_is_block[index]) {
+				errno = EINVAL;
+				return -1;
+			}
+			if (resolved_devices[index] == target_device) {
+				errno = EBUSY;
+				return -1;
+			}
+			continue;
+		}
+		if (strcmp(entries[index].type, "partition") ||
+		    !resolved_is_block[index]) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (resolved_devices[index] != target_device)
 			continue;
 		++target_entries;
 		if (target_entries > 1U ||
@@ -3049,8 +3067,17 @@ static int swapz_primary_original_swap_is_quiescent(void)
 	for (index = 0; index < count; ++index) {
 		if (stat(entries[index].path, &info) < 0)
 			return -1;
-		resolved_devices[index] = info.st_rdev;
-		resolved_is_block[index] = S_ISBLK(info.st_mode) ? 1U : 0U;
+		if (!strcmp(entries[index].type, "partition") &&
+		    S_ISBLK(info.st_mode)) {
+			resolved_devices[index] = info.st_rdev;
+			resolved_is_block[index] = 1U;
+		} else if (!strcmp(entries[index].type, "file") &&
+			   S_ISREG(info.st_mode)) {
+			resolved_devices[index] = info.st_dev;
+		} else {
+			errno = EINVAL;
+			return -1;
+		}
 	}
 	return swapz_primary_swap_inventory_target_is_quiescent(
 		entries, resolved_devices, resolved_is_block, count,
@@ -3231,6 +3258,7 @@ struct swapz_primary_mount_facts {
 
 static int swapz_primary_parse_mountinfo(const char *text,
 					       dev_t target_device,
+					       dev_t parent_device,
 					       struct swapz_primary_mount_facts *facts)
 {
 	const char *line = text;
@@ -3278,7 +3306,8 @@ static int swapz_primary_parse_mountinfo(const char *text,
 		}
 		if (separator_index < 6U || separator_index + 3U >= field_count)
 			return -1;
-		if (mounted_device == target_device)
+		if (mounted_device == target_device ||
+		    (parent_device && mounted_device == parent_device))
 			parsed.target_mounted = 1;
 		if (!strcmp(fields[4], "/")) {
 			if (parsed.root_mount_seen)
@@ -3293,44 +3322,204 @@ static int swapz_primary_parse_mountinfo(const char *text,
 	return 0;
 }
 
-static int swapz_primary_read_mount_facts(
-	struct swapz_primary_mount_facts *facts)
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+static int swapz_primary_proc_entry_is_pid(const char *name)
 {
-#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
-	(void)facts;
-	errno = ENODEV;
-	return -1;
-#else
+	const unsigned char *cursor;
+
+	if (!name || !name[0])
+		return 0;
+	for (cursor = (const unsigned char *)name; *cursor; ++cursor)
+		if (*cursor < '0' || *cursor > '9')
+			return 0;
+	return 1;
+}
+
+static int swapz_primary_mountinfo_read_fd(
+	int fd, dev_t parent_device, struct swapz_primary_mount_facts *facts,
+	size_t *bytes_read)
+{
 	char buffer[SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES];
 	size_t used = 0;
-	int fd = open("/proc/self/mountinfo", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	int read_error = 0;
 
-	if (fd < 0)
+	if (fd < 0 || !facts) {
+		errno = EINVAL;
 		return -1;
+	}
 	while (used + 1U < sizeof(buffer)) {
 		ssize_t count = read(fd, buffer + used, sizeof(buffer) - used - 1U);
 
 		if (count < 0 && errno == EINTR)
 			continue;
 		if (count < 0) {
-			int saved_errno = errno;
-
-			close(fd);
-			errno = saved_errno;
-			return -1;
+			read_error = errno ? errno : EIO;
+			break;
 		}
 		if (!count)
 			break;
 		used += (size_t)count;
 	}
-	if (close(fd) < 0)
+	if (read_error) {
+		(void)close(fd);
+		errno = read_error;
 		return -1;
+	}
 	if (used + 1U == sizeof(buffer)) {
+		(void)close(fd);
 		errno = EOVERFLOW;
 		return -1;
 	}
+	if (close(fd) < 0)
+		return -1;
 	buffer[used] = '\0';
-	return swapz_primary_parse_mountinfo(buffer, SWAPZ_PRIMARY_TARGET_DEVICE, facts);
+	if (swapz_primary_parse_mountinfo(
+		    buffer, SWAPZ_PRIMARY_TARGET_DEVICE, parent_device, facts) < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (bytes_read)
+		*bytes_read = used;
+	return 0;
+}
+
+static int swapz_primary_mountinfo_exit_error(int error)
+{
+	return error == EINVAL || error == ENOENT || error == ESRCH;
+}
+#endif
+
+static int swapz_primary_read_mount_facts(
+	struct swapz_primary_mount_facts *facts, dev_t parent_device)
+{
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	(void)facts;
+	(void)parent_device;
+	errno = ENODEV;
+	return -1;
+#else
+	struct swapz_primary_mount_facts combined = {0};
+	struct swapz_primary_mount_facts local = {0};
+	DIR *proc_directory = NULL;
+	struct dirent *entry;
+	char self_pid[32];
+	char path[PATH_MAX];
+	size_t pid_count = 0;
+	size_t total_bytes = 0;
+	int fd;
+	int result = -1;
+	int saved_errno = 0;
+	int path_length;
+	size_t bytes_read = 0;
+
+	if (!facts) {
+		errno = EINVAL;
+		return -1;
+	}
+	fd = open("/proc/self/mountinfo", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (fd < 0)
+		return -1;
+	if (swapz_primary_mountinfo_read_fd(
+		    fd, parent_device, &local, &bytes_read) < 0)
+		return -1;
+	combined = local;
+	total_bytes = bytes_read;
+	if (combined.target_mounted) {
+		*facts = combined;
+		return 0;
+	}
+	/*
+	 * mountinfo is scoped to a mount namespace. Check every visible process;
+	 * a self-only check can miss the target mounted by another namespace.
+	 * This is a bounded snapshot, so every unreadable or ambiguous table fails
+	 * closed rather than being treated as evidence that the device is unused.
+	 */
+	path_length = snprintf(self_pid, sizeof(self_pid), "%lu",
+			       (unsigned long)getpid());
+	if (path_length <= 0 || (size_t)path_length >= sizeof(self_pid)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	proc_directory = opendir("/proc");
+	if (!proc_directory)
+		return -1;
+	for (;;) {
+		int open_error;
+		int namespace_error;
+		struct stat namespace_info;
+
+		errno = 0;
+		entry = readdir(proc_directory);
+		if (!entry) {
+			if (errno)
+				saved_errno = errno;
+			break;
+		}
+		if (!swapz_primary_proc_entry_is_pid(entry->d_name))
+			continue;
+		if (++pid_count > SWAPZ_PRIMARY_VISIBLE_PIDS_MAX) {
+			saved_errno = EOVERFLOW;
+			break;
+		}
+		if (!strcmp(entry->d_name, self_pid))
+			continue;
+		path_length = snprintf(path, sizeof(path), "/proc/%s/mountinfo",
+				      entry->d_name);
+		if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
+			saved_errno = EOVERFLOW;
+			break;
+		}
+		fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+		if (fd < 0) {
+			open_error = errno ? errno : EIO;
+			if (!swapz_primary_mountinfo_exit_error(open_error)) {
+				saved_errno = open_error;
+				break;
+			}
+			path_length = snprintf(path, sizeof(path), "/proc/%s/ns/mnt",
+					      entry->d_name);
+			if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
+				saved_errno = EOVERFLOW;
+				break;
+			}
+			if (stat(path, &namespace_info) < 0) {
+				namespace_error = errno ? errno : EIO;
+				if (namespace_error == ENOENT || namespace_error == ESRCH)
+					continue;
+				saved_errno = namespace_error;
+				break;
+			}
+			saved_errno = open_error;
+			break;
+		}
+		if (swapz_primary_mountinfo_read_fd(
+			    fd, parent_device, &local, &bytes_read) < 0) {
+			saved_errno = errno ? errno : EIO;
+			break;
+		}
+		if (bytes_read > SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES - total_bytes) {
+			saved_errno = EOVERFLOW;
+			break;
+		}
+		total_bytes += bytes_read;
+		if (local.target_mounted) {
+			combined.target_mounted = 1;
+			break;
+		}
+	}
+	if (saved_errno)
+		errno = saved_errno;
+	if (closedir(proc_directory) < 0) {
+		if (!saved_errno)
+			saved_errno = errno ? errno : EIO;
+	}
+	if (saved_errno) {
+		errno = saved_errno;
+		return -1;
+	}
+	*facts = combined;
+	result = 0;
+	return result;
 #endif
 }
 
@@ -6706,8 +6895,28 @@ static int swapz_primary_swap_device_active(dev_t expected_device)
 
 		if (stat(entries[i].path, &info) < 0)
 			return -1;
-		if (S_ISBLK(info.st_mode) && info.st_rdev == expected_device)
-			return 1;
+		if (!strcmp(entries[i].type, "partition")) {
+			if (!S_ISBLK(info.st_mode)) {
+				errno = EINVAL;
+				return -1;
+			}
+			if (info.st_rdev == expected_device)
+				return 1;
+		} else if (!strcmp(entries[i].type, "file")) {
+			/*
+			 * /proc/swaps names a file, but its filesystem st_dev lets us
+			 * reject swapfiles stored on the selected block device.
+			 */
+			if (!S_ISREG(info.st_mode)) {
+				errno = EINVAL;
+				return -1;
+			}
+			if (info.st_dev == expected_device)
+				return 1;
+		} else {
+			errno = EINVAL;
+			return -1;
+		}
 	}
 	return 0;
 }
@@ -8690,18 +8899,28 @@ static int swapz_primary_prepare_metadata(void)
 	}
 	if (swapz_primary_original_swap_is_quiescent() < 0)
 		goto out;
-	if (swapz_primary_read_mount_facts(&mount_facts) < 0 ||
-	    mount_facts.target_mounted ||
-	    !swapz_primary_recovery_source_chain(
+	if (!swapz_primary_recovery_source_chain(
 		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent) ||
+	    target_parent == makedev(recovery_parent_major,
+				      recovery_parent_minor) ||
+	    swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0 ||
+	    mount_facts.target_mounted ||
 	    !swapz_primary_recovery_source_chain(
 		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
 		    &root_parent) ||
-	    target_parent == root_parent ||
-	    target_parent == makedev(recovery_parent_major,
-				      recovery_parent_minor)) {
+	    target_parent == root_parent) {
 		errno = EPERM;
 		goto out;
+	}
+	{
+		int parent_swap_active =
+			swapz_primary_swap_device_active(target_parent);
+
+		if (parent_swap_active != 0) {
+			if (parent_swap_active > 0)
+				errno = EBUSY;
+			goto out;
+		}
 	}
 	if (swapz_primary_read_module_mapper_inventory(
 		    &module_loaded, &mapper_present) < 0 || module_loaded ||
@@ -8738,16 +8957,17 @@ static int swapz_primary_prepare_metadata(void)
 		    memcmp(&target, &verified_target, sizeof(target)) ||
 		    memcmp(original_header, verified_current_header,
 			   sizeof(original_header)) ||
-		    swapz_primary_read_mount_facts(&verified_mount_facts) < 0 ||
-		    verified_mount_facts.target_mounted ||
-		    verified_mount_facts.root_device != mount_facts.root_device ||
 		    !swapz_primary_recovery_source_chain(
 			    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0,
 			    &verified_target_parent) ||
+		    verified_target_parent != target_parent ||
+		    swapz_primary_read_mount_facts(
+			    &verified_mount_facts, verified_target_parent) < 0 ||
+		    verified_mount_facts.target_mounted ||
+		    verified_mount_facts.root_device != mount_facts.root_device ||
 		    !swapz_primary_recovery_source_chain(
 			    "/sys", verified_mount_facts.root_device,
 			    SWAPZ_PRIMARY_TARGET_DEVICE, &verified_root_parent) ||
-		    verified_target_parent != target_parent ||
 		    verified_root_parent != root_parent ||
 		    swapz_primary_recovery_preflight(
 			    &verified_directory_safe,
@@ -8769,6 +8989,17 @@ static int swapz_primary_prepare_metadata(void)
 		    verified_recovery_parent_minor != recovery_parent_minor) {
 			errno = ESTALE;
 			goto out;
+		}
+		{
+			int verified_parent_swap_active =
+				swapz_primary_swap_device_active(
+					verified_target_parent);
+
+			if (verified_parent_swap_active != 0) {
+				if (verified_parent_swap_active > 0)
+					errno = EBUSY;
+				goto out;
+			}
 		}
 	}
 	if (swapz_primary_run_id_generate(run_id) < 0 ||
@@ -9064,16 +9295,16 @@ static int swapz_primary_start_prepared(void)
 		errno = EPERM;
 		goto out;
 	}
-	if (swapz_primary_read_mount_facts(&mount_facts) < 0 ||
-	    mount_facts.target_mounted ||
-	    !swapz_primary_recovery_source_chain(
+	if (!swapz_primary_recovery_source_chain(
 		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent) ||
+	    target_parent == makedev(recovery_parent_major,
+				      recovery_parent_minor) ||
+	    swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0 ||
+	    mount_facts.target_mounted ||
 	    !swapz_primary_recovery_source_chain(
 		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
 		    &root_parent) ||
-	    target_parent == root_parent ||
-	    target_parent == makedev(recovery_parent_major,
-				      recovery_parent_minor)) {
+	    target_parent == root_parent) {
 		errno = EPERM;
 		goto out;
 	}
@@ -9082,6 +9313,16 @@ static int swapz_primary_start_prepared(void)
 	    module_loaded || mapper_present) {
 		errno = EBUSY;
 		goto out;
+	}
+	{
+		int parent_swap_active =
+			swapz_primary_swap_device_active(target_parent);
+
+		if (parent_swap_active != 0) {
+			if (parent_swap_active > 0)
+				errno = EBUSY;
+			goto out;
+		}
 	}
 	target_swap_active =
 		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
@@ -9750,13 +9991,14 @@ static int swapz_primary_read_only_plan(void)
 		&recovery_directly_not_target, &recovery_source_chain_checked,
 		&recovery_physical_parent_major, &recovery_physical_parent_minor,
 		&recovery_active_marker_clear) == 0;
-	mount_inventory_read =
-		swapz_primary_read_mount_facts(&mount_facts) == 0;
-	target_not_mounted = mount_inventory_read && !mount_facts.target_mounted;
 	target_device_chain_checked = target_device_preflight &&
 		swapz_primary_recovery_source_chain(
 			"/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0,
 			&target_physical_parent);
+	mount_inventory_read = target_device_chain_checked &&
+		swapz_primary_read_mount_facts(
+			&mount_facts, target_physical_parent) == 0;
+	target_not_mounted = mount_inventory_read && !mount_facts.target_mounted;
 	recovery_same_physical_disk = recovery_source_chain_checked &&
 		target_device_chain_checked &&
 		makedev(recovery_physical_parent_major,

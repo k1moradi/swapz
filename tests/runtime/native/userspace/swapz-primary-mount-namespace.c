@@ -240,7 +240,7 @@ static void expect_mount_admission(const char *case_name, int should_allow)
 	int allowed;
 
 	errno = 0;
-	result = swapz_primary_read_mount_facts(&facts);
+	result = swapz_primary_read_mount_facts(&facts, makedev(8U, 0U));
 	allowed = result == 0 && !facts.target_mounted;
 	if (allowed != should_allow ||
 	    (result == 0 && (!facts.root_mount_seen ||
@@ -326,6 +326,27 @@ static void test_active_swapfile_gate(void)
 		fprintf(stderr,
 			"FAIL: parent-filesystem swapfile active result=%d errno=%d\n",
 			active, errno);
+		++fixture_failures;
+	}
+
+	/* /proc/swaps type and stat mode must agree before identity is trusted. */
+	fixture_file("swaps",
+		     "Filename Type Size Used Priority\n"
+		     "/synthetic-selected-swapfile partition 8192 1 -2\n");
+	active = swapz_primary_swap_device_active(makedev(8U, 0U));
+	if (active >= 0) {
+		fprintf(stderr,
+			"FAIL: swap partition type accepted a regular file: %d\n",
+			active);
+		++fixture_failures;
+	}
+	fixture_file("swaps",
+		     "Filename Type Size Used Priority\n"
+		     "/synthetic-selected-swapfile unknown 8192 1 -2\n");
+	active = swapz_primary_swap_device_active(makedev(8U, 0U));
+	if (active >= 0) {
+		fprintf(stderr,
+			"FAIL: unknown swap type was accepted: %d\n", active);
 		++fixture_failures;
 	}
 }

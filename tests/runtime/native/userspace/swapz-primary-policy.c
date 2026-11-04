@@ -568,6 +568,13 @@ static void test_selected_target_swap_quiescence(void)
 	assert(swapz_primary_swap_inventory_target_is_quiescent(
 		rows, devices, is_block, 1U, makedev(8, 4),
 		SWAPZ_PRIMARY_SWAP_SIZE_KIB) == 0);
+	devices[0] = makedev(8, 4);
+	errno = 0;
+	assert(swapz_primary_swap_inventory_target_is_quiescent(
+		rows, devices, is_block, 1U, makedev(8, 4),
+		SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+	assert(errno == EBUSY);
+	devices[0] = 0;
 
 	strcpy(rows[1].path, "/dev/target-alias");
 	strcpy(rows[1].type, "partition");
@@ -2002,25 +2009,30 @@ static void test_mountinfo_parser(void)
 		"36 25 8:3 / / rw,relatime - f2fs /dev/sda3 rw\n"
 		"37 36 8:3 /data /data\\040archive rw - f2fs /dev/sda3 rw\n"
 		"38 37 0:5 mnt:[4026531840] /run/ns rw - nsfs nsfs rw\n",
-		makedev(8U, 4U), &facts) == 0);
+		makedev(8U, 4U), makedev(8U, 0U), &facts) == 0);
 	assert(facts.root_mount_seen);
 	assert(facts.root_device == makedev(8U, 3U));
 	assert(!facts.target_mounted);
 	assert(swapz_primary_parse_mountinfo(
 		"36 25 8:3 / / rw - f2fs /dev/sda3 rw\n"
 		"37 36 8:4 / /mnt/swap rw - swap /dev/sda4 rw\n",
-		makedev(8U, 4U), &facts) == 0);
+		makedev(8U, 4U), makedev(8U, 0U), &facts) == 0);
+	assert(facts.target_mounted);
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 259:0 / / rw - ext4 /dev/root rw\n"
+		"37 36 8:0 / /mnt/parent rw - ext4 /dev/sda rw\n",
+		makedev(8U, 1U), makedev(8U, 0U), &facts) == 0);
 	assert(facts.target_mounted);
 	assert(swapz_primary_parse_mountinfo(
 		"36 25 8:x / / rw - f2fs /dev/sda3 rw\n",
-		makedev(8U, 4U), &facts) < 0);
+		makedev(8U, 4U), makedev(8U, 0U), &facts) < 0);
 	assert(swapz_primary_parse_mountinfo(
 		"36 25 8:3 / / rw - f2fs /dev/sda3 rw\n"
 		"37 36 8:3 / / rw - f2fs /dev/sda3 rw\n",
-		makedev(8U, 4U), &facts) < 0);
+		makedev(8U, 4U), makedev(8U, 0U), &facts) < 0);
 	assert(swapz_primary_parse_mountinfo(
 		"36 25 8:3 / / rw - f2fs /dev/sda3\n",
-		makedev(8U, 4U), &facts) < 0);
+		makedev(8U, 4U), makedev(8U, 0U), &facts) < 0);
 }
 
 static void test_module_mapper_identity_policy(void)

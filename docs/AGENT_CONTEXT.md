@@ -349,8 +349,12 @@ Unless evidence changes the order, work on:
    private selector/recovery/qualification authority. The public Makefile never selects that seam. The latest source
    also permits unrelated swap entries such as
    `/swapfile` while rejecting an active or ambiguous alias of the selected
-   target. Do not arm production runtime authorization before exact-source and
-   card-specific acceptance gates pass.
+   target. Admission now scans every visible PID's mountinfo for the selected
+   partition and its physical parent, recognizes swapfiles by filesystem
+   `st_dev`, and rejects unknown or type-inconsistent `/proc/swaps` rows.
+   Focused production-C mount/swap inventory regressions pass; exact-source
+   owner qualification remains pending. Do not arm production runtime
+   authorization before exact-source and card-specific acceptance gates pass.
 3. actual Linux swap correctness on the authorized card;
 4. maximum safe full-card capacity and bounded metadata RAM. The authority
    policy for the current `/dev/sda1` geometry admits 27,080,192 logical pages,
