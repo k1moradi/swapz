@@ -93,6 +93,13 @@ partial evidence:
 the exact-SHA conclusion rejects failed, skipped, and cancelled dependencies
 and never substitutes for owner-run `make test` qualification.
 
+CI patch-hygiene checks must inspect each pushed commit against its first
+parent. A bare `git diff --check` on a clean checkout only examines uncommitted
+working-tree changes and cannot qualify the committed patch. Exact-SHA jobs
+that perform the committed-diff check must fetch the parent needed for that
+comparison; a separate bare `git diff --check` may remain after tests to catch
+whitespace errors introduced into the workspace during execution.
+
 ## Incremental builds
 
 Kernel staging compares content before copying so unchanged source does not invalidate all object timestamps. W=1, W=2 and normal builds use separate output directories. Userspace/helper changes should not force unrelated kernel recompilation.

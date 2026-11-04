@@ -70,10 +70,11 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
                     r"          ref: \$\{\{ github\.sha \}\}$",
                     "checkout must pin github.sha, not a moving main ref",
                 )
+                self.assertRegex(job, r"(?m)^          fetch-depth: 2$")
                 self.assertRegex(job, r"(?m)^          persist-credentials: false$")
                 self.assertNotRegex(job, r"(?m)^    concurrency:", "no shared job queue")
 
-    def test_existing_rootless_suites_and_patch_hygiene_remain(self) -> None:
+    def test_existing_rootless_suites_remain(self) -> None:
         required = (
             "command -v systemd-analyze",
             "command -v timeout",
@@ -86,7 +87,6 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
             "python3 -B tests/runtime/native/package-dkms-test.py -v",
             "python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v",
             "python3 -B tests/runtime/native/systemd/systemd-package-workflow-contract-test.py -v",
-            "git diff --check",
         )
         for command in required:
             with self.subTest(command=command):
@@ -101,12 +101,20 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
                 self.jobs,
                 rf"(?m)^        run: python3 -B {re.escape(script)} -v$",
             )
-        self.assertRegex(self.jobs, r"(?m)^        run: git diff --check$")
         self.assertNotRegex(
             self.jobs,
             r"(?m)^\s*(?:run:\s*)?(?:sudo|modprobe|swapon|swapoff|dmsetup|"
             r"apt-get|systemctl\s+(?:enable|start|restart))\b",
             "CI must not execute privileged operations",
+        )
+
+    def test_patch_hygiene_checks_commit_and_workspace(self) -> None:
+        self.assertRegex(self.jobs, r"(?m)^          git diff --check HEAD\^ HEAD$")
+        self.assertRegex(self.jobs, r"(?m)^          git diff --check$")
+        self.assertNotRegex(
+            self.jobs,
+            r"(?m)^        run: git diff --check$",
+            "a clean checkout alone does not check the committed patch",
         )
 
     def test_executed_failures_are_source_bound_and_not_queue_failures(self) -> None:
