@@ -103,21 +103,33 @@ static uint64_t thread_cpu_ns(void)
 
 
 /*
- * Reference CPU traversal of precisely the same logical-map allocation.
- * This is a baseline for touching memory, not an unprotected GC algorithm.
- * Unlike the production verifier, it deliberately does not validate bounds,
- * extent containment or candidate ownership; never use it for reclaim.
+ * Reference CPU traversal of the same logical map and map-indexed liveness /
+ * class sidecars. This is a baseline for dependent memory touches, not an
+ * unprotected GC algorithm. Unlike the production verifier, it deliberately
+ * does not prove bounds, extent containment or candidate ownership; never use
+ * it for reclaim.
  */
 static volatile uint64_t scan_touch_sink;
 
 static swapz_u32 touch_map_control(const struct swapz_map *maps,
-				   swapz_u32 logical_pages)
+				   const swapz_u16 *live_records,
+				   const swapz_u8 *extent_classes,
+				   swapz_u32 logical_pages,
+				   swapz_u32 physical_blocks)
 {
 	swapz_u32 logical, touched = 0;
 
-	for (logical = 0; logical < logical_pages; ++logical)
-		touched += maps[logical].valid &&
-			   maps[logical].start_block != ~(swapz_u32)0;
+	for (logical = 0; logical < logical_pages; ++logical) {
+		const struct swapz_map *map = &maps[logical];
+
+		if (!map->valid)
+			continue;
+		if (map->start_block >= physical_blocks)
+			return ~(swapz_u32)0;
+		touched += live_records[map->start_block] &&
+			   extent_classes[map->start_block] ==
+				   map->extent_blocks;
+	}
 	scan_touch_sink += touched;
 	return touched;
 }
@@ -189,6 +201,8 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		large_maps[logical].raw = 1;
 		large_maps[logical].extent_blocks = 1;
 		large_maps[logical].payload_length = SWAPZ_BLOCK_BYTES;
+		large_live[logical] = 1U;
+		large_classes[logical] = 1U;
 		large_counts[logical / SWAPZ_SEGMENT_BLOCKS]++;
 	}
 	authority.open_segment = 0;
@@ -226,8 +240,9 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		 * includes its reduction and volatile sink publication. */
 		clock_start = now_ns();
 		cpu_start = thread_cpu_ns();
-		REQUIRE_CLAIM(touch_map_control(large_maps, logical_pages) ==
-			      logical_pages);
+		REQUIRE_CLAIM(touch_map_control(
+			      large_maps, large_live, large_classes,
+			      logical_pages, physical_blocks) == logical_pages);
 		traversal_wall[repeat] = now_ns() - clock_start;
 		traversal_cpu[repeat] = thread_cpu_ns() - cpu_start;
 	}
@@ -267,9 +282,16 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			reserve_segment * SWAPZ_SEGMENT_BLOCKS;
 
 		for (logical = SWAPZ_SEGMENT_BLOCKS;
-		     logical < 2U * SWAPZ_SEGMENT_BLOCKS; ++logical)
-			large_maps[logical].start_block =
+		     logical < 2U * SWAPZ_SEGMENT_BLOCKS; ++logical) {
+			swapz_u32 new_start =
 				spare_start + logical - SWAPZ_SEGMENT_BLOCKS;
+
+			large_maps[logical].start_block = new_start;
+			large_live[logical] = 0U;
+			large_classes[logical] = 0U;
+			large_live[new_start] = 1U;
+			large_classes[new_start] = 1U;
+		}
 		large_counts[1U] = 0;
 		large_counts[spare_start / SWAPZ_SEGMENT_BLOCKS] =
 			SWAPZ_SEGMENT_BLOCKS;
@@ -290,8 +312,10 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 				reserve_start;
 			large_counts[spare_start / SWAPZ_SEGMENT_BLOCKS]--;
 			large_counts[reserve_segment]++;
-			large_live[reserve_start] = 1;
-			large_classes[reserve_start] = 1;
+			large_live[spare_start] = 0U;
+			large_classes[spare_start] = 0U;
+			large_live[reserve_start] = 1U;
+			large_classes[reserve_start] = 1U;
 			sample.next_block = reserve_start + 1U;
 			clock_start = now_ns();
 			cpu_start = thread_cpu_ns();
@@ -308,8 +332,10 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 				spare_start;
 			large_counts[spare_start / SWAPZ_SEGMENT_BLOCKS]++;
 			large_counts[reserve_segment]--;
-			large_live[reserve_start] = 0;
-			large_classes[reserve_start] = 0;
+			large_live[spare_start] = 1U;
+			large_classes[spare_start] = 1U;
+			large_live[reserve_start] = 0U;
+			large_classes[reserve_start] = 0U;
 		}
 	}
 

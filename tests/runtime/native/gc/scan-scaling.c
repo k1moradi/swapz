@@ -227,9 +227,13 @@ static uint64_t mapped_dead_probe(const swapz_u16 *live_records,
  * Model the no-reference, successful production ownership proof. This is
  * an OFFLINE host-memory model, not the production entry point: the matched
  * actual production-C claim is timed in mapping/authority-throughput.c.
- * The candidate begins immediately after the mapped foreground range.
+ * This model also performs the current map-indexed extent-class/liveness
+ * authentication. The candidate begins immediately after the mapped
+ * foreground range.
  */
 static uint64_t authoritative_negative_scan(const struct swapz_map *maps,
+					     const swapz_u16 *live_records,
+					     const swapz_u8 *extent_classes,
 					     swapz_u32 logical_pages,
 					     int *safe)
 {
@@ -251,7 +255,9 @@ static uint64_t authoritative_negative_scan(const struct swapz_map *maps,
 		     map->extent_blocks != 4) ||
 		    map->extent_blocks > physical_blocks - map->start_block ||
 		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
-			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
+			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+		    extent_classes[map->start_block] != map->extent_blocks ||
+		    !live_records[map->start_block])
 			return now_ns() - start;
 		end_block = map->start_block + map->extent_blocks;
 		if (map->start_block < physical_blocks &&
@@ -263,17 +269,28 @@ static uint64_t authoritative_negative_scan(const struct swapz_map *maps,
 	return now_ns() - start;
 }
 
-/* Matched host-memory sweep without authoritative safety validation. */
+/* Matched map + physical-sidecar touches without ownership validation. */
 static uint64_t mapped_touch_control(const struct swapz_map *maps,
-				      swapz_u32 logical_pages)
+				      const swapz_u16 *live_records,
+				      const swapz_u8 *extent_classes,
+				      swapz_u32 logical_pages,
+				      swapz_u32 physical_blocks)
 {
 	swapz_u32 logical;
 	uint64_t touched = 0;
 	uint64_t start = now_ns();
 
-	for (logical = 0; logical < logical_pages; ++logical)
-		touched += maps[logical].valid &&
-			   maps[logical].start_block != ~(swapz_u32)0;
+	for (logical = 0; logical < logical_pages; ++logical) {
+		const struct swapz_map *map = &maps[logical];
+
+		if (!map->valid)
+			continue;
+		if (map->start_block >= physical_blocks)
+			return 0;
+		touched += live_records[map->start_block] &&
+			   extent_classes[map->start_block] ==
+				   map->extent_blocks;
+	}
 	evidence_sink += touched;
 	return now_ns() - start;
 }
@@ -281,6 +298,7 @@ static uint64_t mapped_touch_control(const struct swapz_map *maps,
 static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 {
 	swapz_u32 segments = logical_pages / SWAPZ_SEGMENT_BLOCKS;
+	swapz_u32 physical_blocks;
 	struct swapz_map *maps = NULL;
 	swapz_u32 *bytes = NULL, *io = NULL, *mapped_pages = NULL;
 	swapz_u32 *first_page = NULL, *last_page = NULL;
@@ -296,8 +314,10 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 	int safe;
 	int rc = 1;
 
-	if (!segments || logical_pages % SWAPZ_SEGMENT_BLOCKS)
+	if (!segments || logical_pages % SWAPZ_SEGMENT_BLOCKS ||
+	    logical_pages > ~(swapz_u32)0 - SWAPZ_SEGMENT_BLOCKS)
 		return 1;
+	physical_blocks = logical_pages + SWAPZ_SEGMENT_BLOCKS;
 	maps = calloc(logical_pages, sizeof(*maps));
 	bytes = calloc(segments, sizeof(*bytes));
 	io = calloc(segments, sizeof(*io));
@@ -308,8 +328,8 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 	last_page = malloc((size_t)segments * sizeof(*last_page));
 	prev_page = malloc((size_t)logical_pages * sizeof(*prev_page));
 	next_page = malloc((size_t)logical_pages * sizeof(*next_page));
-	live_records = calloc(logical_pages, sizeof(*live_records));
-	extent_classes = calloc(logical_pages, sizeof(*extent_classes));
+	live_records = calloc(physical_blocks, sizeof(*live_records));
+	extent_classes = calloc(physical_blocks, sizeof(*extent_classes));
 	if (!maps || !bytes || !io || !counts || !min_blocks ||
 	    !mapped_pages || !first_page || !last_page || !prev_page ||
 	    !next_page || !live_records || !extent_classes)
@@ -375,13 +395,27 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 			segments, &selected);
 		if (selected != segments - 1U)
 			goto out;
+	}
+
+	/*
+	 * Reuse the physical sidecar arrays after the dead-probe measurements.
+	 * Current production authoritative-map verification authenticates every
+	 * valid map against its class byte and nonzero start-block liveness.
+	 */
+	for (logical = 0; logical < logical_pages; ++logical) {
+		live_records[logical] = 1U;
+		extent_classes[logical] = 1U;
+	}
+	for (repeat = 0; repeat < REPEATS; ++repeat) {
 		authoritative_scan[repeat] = authoritative_negative_scan(
-			maps, logical_pages, &safe);
+			maps, live_records, extent_classes, logical_pages, &safe);
 		if (!safe)
 			goto out;
 		if (authoritative_scan[repeat] > authoritative_worst_ns)
 			authoritative_worst_ns = authoritative_scan[repeat];
-		touch_control[repeat] = mapped_touch_control(maps, logical_pages);
+		touch_control[repeat] = mapped_touch_control(
+			maps, live_records, extent_classes, logical_pages,
+			physical_blocks);
 	}
 	if (records != SWAPZ_SEGMENT_BLOCKS)
 		goto out;
