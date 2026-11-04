@@ -1496,9 +1496,14 @@ uninstall_rollback() {
   local rc="${1:-1}" reason="${2:-failure}"
   trap - ERR HUP INT TERM
   transaction_active=0
-  if [[ "$transaction_phase" == committed ]] &&
-     durable_committed_transaction_record; then
-    echo "BLOCKED: package uninstall $reason after durable committed phase; committed uninstall verified; rollback not attempted; recovery-required journal retained" >&2
+  if [[ "$transaction_phase" == committed ]]; then
+    transaction_active=0
+    if durable_committed_transaction_record; then
+      echo "BLOCKED: package uninstall $reason after durable committed phase; committed uninstall verified; rollback not attempted; recovery-required journal retained" >&2
+    else
+      quarantine_activation || true
+      echo "BLOCKED: package uninstall $reason while committed journal durability is uncertain; rollback not attempted; recovery-required journal retained" >&2
+    fi
     exit "$rc"
   fi
   echo "BLOCKED: package uninstall $reason; attempting transaction rollback" >&2
@@ -2197,10 +2202,14 @@ rollback() {
   (( rollback_in_progress == 0 )) || exit "$rc"
   rollback_in_progress=1
   trap - ERR HUP INT TERM
-  if [[ "$transaction_phase" == committed ]] &&
-     durable_committed_transaction_record; then
+  if [[ "$transaction_phase" == committed ]]; then
     transaction_active=0
-    echo "BLOCKED: package $reason after durable committed phase; committed install verified; rollback not attempted; recovery-required journal retained" >&2
+    if durable_committed_transaction_record; then
+      echo "BLOCKED: package $reason after durable committed phase; committed install verified; rollback not attempted; recovery-required journal retained" >&2
+    else
+      quarantine_activation || true
+      echo "BLOCKED: package $reason while committed journal durability is uncertain; rollback not attempted; recovery-required journal retained" >&2
+    fi
     exit "$rc"
   fi
   echo "BLOCKED: package $reason; attempting transaction rollback" >&2

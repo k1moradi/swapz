@@ -2024,6 +2024,28 @@ exec "{flock_binary}" "$@"
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate(timeout=8)
 
+    def test_failed_committed_journal_write_retains_precommit_recovery(self):
+        failed = self.invoke("install", {
+            "SWAPZ_TEST_FAIL_TRANSACTION_PHASE": "committed",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("committed journal durability is uncertain", failed.stderr)
+        self.assertIn("rollback not attempted", failed.stderr)
+        self.assertNotIn("attempting transaction rollback", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+
+        transactions = list(
+            (self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(
+            json.loads((transactions[0] / "state.json").read_text())["phase"],
+            "cli-published")
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(transactions[0].exists())
+
     def test_sigterm_after_committed_phase_preserves_terminal_state(self):
         install_transaction, install_stderr = self.terminate_at_durable_phase(
             "install", "committed")
