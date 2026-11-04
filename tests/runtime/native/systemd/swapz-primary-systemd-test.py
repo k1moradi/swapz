@@ -431,10 +431,9 @@ class UnitSandboxContractTests(unittest.TestCase):
             "CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_BPF CAP_PERFMON "
             "CAP_CHECKPOINT_RESTORE",
         )
-        require(
-            "mapper", "Service", "ReadOnlyPaths",
-            "-/var/lib/swapz-package-transactions",
-        )
+        # ReadOnlyPaths binds would change the journal mount ID, which the
+        # native manager deliberately checks against its parent.
+        self.assertNotIn(("Service", "ReadOnlyPaths"), files["mapper"])
         for directive, value in (
             ("NoNewPrivileges", "yes"),
             ("ProtectSystem", "full"),
@@ -469,11 +468,9 @@ class UnitSandboxContractTests(unittest.TestCase):
             r"swapz-primary-mapper.service dev-mapper-swapz\x2dprimary.swap",
         )
         require("verifier", "Service", "ProtectSystem", "full")
-        require(
-            "verifier", "Service", "ReadOnlyPaths",
-            "-/var/lib/swapz/physical-recovery "
-            "-/var/lib/swapz-package-transactions",
-        )
+        # The read-only probe must not introduce bind mounts that appear as
+        # forged recovery storage or package-journal mount substitution.
+        self.assertNotIn(("Service", "ReadOnlyPaths"), files["verifier"])
         require("verifier", "Service", "TimeoutStartSec", "30s")
         require("verifier", "Install", "WantedBy", "multi-user.target")
         require("health", "Service", "ProtectSystem", "strict")
@@ -515,9 +512,9 @@ class UnitSandboxContractTests(unittest.TestCase):
             ("module loading disabled", "mapper", "ProtectSystem=full", "ProtectKernelModules=yes"),
             ("early tmp.mount ordering cycle", "mapper", "ProtectHome=yes", "ProtectHome=yes\nPrivateTmp=yes"),
             ("unprotected filesystem", "mapper", "ProtectSystem=full", "ProtectSystem=no"),
-            ("journal writable", "mapper", "ReadOnlyPaths=-/var/lib/swapz-package-transactions", "ReadOnlyPaths="),
+            ("journal mount substitution", "mapper", "ProtectSystem=full", "ProtectSystem=full\nReadOnlyPaths=-/var/lib/swapz-package-transactions"),
             ("verifier starts mapper", "verifier", "After=swapz-primary-mapper.service", "Wants=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
-            ("verifier may alter recovery", "verifier", "ReadOnlyPaths=-/var/lib/swapz/physical-recovery", "ReadOnlyPaths="),
+            ("verifier recovery mount substitution", "verifier", "ProtectSystem=full", "ProtectSystem=full\nReadOnlyPaths=-/var/lib/swapz/physical-recovery"),
             ("verifier can load modules", "verifier", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
             ("health can load modules", "health", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
             ("health can edit filesystem", "health", "ProtectSystem=strict", "ProtectSystem=full"),
