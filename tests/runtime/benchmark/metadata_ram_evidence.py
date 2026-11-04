@@ -20,6 +20,7 @@ PHYSICAL_LIVENESS_RECORD_BYTES = 2
 SAMPLING_INTERVAL_NS = 100_000_000
 MEMINFO_UNIT_BYTES = 1024
 CLOCK_AGREEMENT_TOLERANCE_NS = 500_000_000
+UNIX_EPOCH_ORDINAL = datetime.date(1970, 1, 1).toordinal()
 SIZE_T_MAX = (1 << (8 * struct.calcsize("P"))) - 1
 PHASES = ("baseline", "initialization", "steady", "gc", "teardown")
 MINIMUM_PHASE_SAMPLES = {
@@ -264,9 +265,8 @@ def _parse_utc_ns(value: Any, pattern: re.Pattern[str]) -> int | None:
             int(core[11:13]), int(core[14:16]), int(core[17:19]))
     except ValueError:
         return None
-    epoch_ordinal = datetime.date(1970, 1, 1).toordinal()
     whole_seconds = (
-        (observed.toordinal() - epoch_ordinal) * 86400 +
+        (observed.toordinal() - UNIX_EPOCH_ORDINAL) * 86400 +
         observed.hour * 3600 + observed.minute * 60 + observed.second)
     return whole_seconds * 1_000_000_000 + fraction_ns
 
