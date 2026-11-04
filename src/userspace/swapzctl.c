@@ -38,6 +38,7 @@
 #define SWAPZ_FORMAT_PROC_LINE_BYTES 8192U
 #define SWAPZ_FORMAT_PROC_MAX_BYTES (16U * 1024U * 1024U)
 #define SWAPZ_FORMAT_PROC_MAX_ROWS 65536U
+#define SWAPZ_FORMAT_PROC_MAX_PID_TABLES 262144U
 #define SWAPZ_FORMAT_PARENT_MODEL_BYTES 128U
 
 static void usage(FILE *out)
@@ -1494,8 +1495,9 @@ static int format_swap_entry_conflicts(const struct stat *info, dev_t device,
  */
 /*
  * /proc inventories are records, not NUL-terminated user strings. Every
- * kernel row ends in a newline; a truncated, embedded-NUL, control-byte or
- * over-budget snapshot is never evidence that the device is idle.
+ * kernel row ends in a newline; a truncated, embedded-NUL or over-budget
+ * snapshot is never evidence that the device is idle. Other filename bytes
+ * remain opaque because Linux can emit them literally.
  */
 static int format_inventory_read_line(FILE *stream, char *line, size_t capacity,
 				      size_t *total_bytes)
@@ -1756,6 +1758,7 @@ static int format_mount_inventory_clear_from_proc(
 	struct dirent *entry;
 	int length;
 	int saved_errno = 0;
+	size_t pid_tables = 0;
 
 	if (!proc_path) {
 		errno = EINVAL;
@@ -1780,6 +1783,11 @@ static int format_mount_inventory_clear_from_proc(
 		}
 		if (!format_proc_entry_is_pid(entry->d_name))
 			continue;
+		if (pid_tables >= SWAPZ_FORMAT_PROC_MAX_PID_TABLES) {
+			saved_errno = EOVERFLOW;
+			break;
+		}
+		++pid_tables;
 		length = snprintf(path, sizeof(path), "%s/%s/mountinfo",
 				  proc_path, entry->d_name);
 		if (length < 0 || (size_t)length >= sizeof(path)) {
