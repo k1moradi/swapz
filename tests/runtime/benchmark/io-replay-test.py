@@ -3088,39 +3088,67 @@ class PairReplayContract(unittest.TestCase):
             "BLOCKED_ARM_BOOT_IDENTITY_CHANGED")
         source_sha = "a" * 40
         mapper_uuid = "SWAPZ-PRIMARY-" + "f" * 32
-        trace = {
-            "schema": "swapz-metadata-ram-samples-v1",
-            "capture": "serialized-loaded-host",
-            "scope": "target-owned-resident-bytes-including-page-tables",
-            "source_sha": source_sha,
-            "mapper_uuid": mapper_uuid,
-            "host_boot_id": "11111111-1111-4111-8111-111111111111",
-            "sampling_interval_ns": 1000000000,
-            "samples": [
-                {
-                    "phase": phase,
-                    "monotonic_ns": (index + 1) * 1000000000,
-                    "timestamp_utc": f"2026-11-03T00:00:{index+1:02d}Z",
-                    "ram_bytes": value,
-                }
-                for index, (phase, value) in enumerate((
-                    ("baseline", 0), ("baseline", 0),
-                    ("initialization", 2048), ("initialization", 4096),
-                    ("steady", 6144), ("steady", 8192),
-                    ("gc", 8192), ("gc", 6144),
-                    ("teardown", 6144), ("teardown", 0),
-                ))
-            ],
-        }
+
+        def ram_trace(peak=8192):
+            baseline_available = 1_000_000
+            samples = []
+            phases = (
+                ("baseline", [0] * 10, False),
+                ("initialization", [2048, 4096], True),
+                ("steady", [6144, peak], True),
+                ("gc", [peak, 6144], True),
+                ("teardown", [6144] + [0] * 21, None),
+            )
+            for phase, deltas, mapper_state in phases:
+                for phase_index, delta in enumerate(deltas):
+                    index = len(samples) + 1
+                    seconds, tenths = divmod(index, 10)
+                    present = (
+                        phase_index == 0
+                        if phase == "teardown" else mapper_state)
+                    samples.append({
+                        "phase": phase,
+                        "monotonic_ns": index * 100_000_000,
+                        "timestamp_utc":
+                            f"2026-11-03T00:00:{seconds:02d}.{tenths}Z",
+                        "mem_available_bytes": baseline_available - delta,
+                        "s_unreclaim_bytes":
+                            100_000 + (delta // 8 if present else 0),
+                        "vmalloc_used_bytes":
+                            200_000 + (delta // 16 if present else 0),
+                        "mapper_present": present,
+                    })
+            return {
+                "schema": "swapz-metadata-ram-samples-v1",
+                "capture": "serialized-loaded-host",
+                "scope": "whole-host-conservative-metadata-and-target-ram",
+                "source_sha": source_sha,
+                "mapper_uuid": mapper_uuid,
+                "host_boot_id":
+                    "11111111-1111-4111-8111-111111111111",
+                "sampling_interval_ns": 100_000_000,
+                "samples": samples,
+            }
+
+        trace = ram_trace()
+        validator = evidence.RAM_VALIDATOR["validate_metadata_ram_trace"]
+        ram_summary = validator(
+            trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
+            expected_peak_ram_bytes=8192)
+        self.assertEqual(ram_summary["peak_ram_bytes"], 8192)
+
         # Four segment-rounded data segments support exactly 256 pages after
         # the separate two-segment GC reserve and foreground headroom.
         target_bytes = (1024 + 1) * 4096
-        self.assertEqual(
-            evidence.RAM_VALIDATOR["maximum_logical_pages_for_partition"](
-                target_bytes), 256)
-        self.assertEqual(
-            evidence.RAM_VALIDATOR["maximum_logical_pages_for_partition"](
-                124787884032), 27080192)
+        maximum_pages = evidence.RAM_VALIDATOR[
+            "maximum_logical_pages_for_partition"]
+        self.assertEqual(maximum_pages(target_bytes), 256)
+        self.assertEqual(maximum_pages(124787884032), 27080192)
+        self.assertIsNone(maximum_pages(target_bytes + 1))
+        near_u32_partition_bytes = (0xffffff00 + 1) * 4096
+        self.assertIsNone(maximum_pages(
+            near_u32_partition_bytes, size_t_max=0xffffffff))
+
         capacity_pair = {
             "workload": "sd-high-occupancy-churn",
             "status": "PASS",
@@ -3129,7 +3157,8 @@ class PairReplayContract(unittest.TestCase):
                 "logical_pages": 256,
                 "device_identity": {"dm_uuid": mapper_uuid},
                 "resources": {
-                    "metadata_and_target_peak_ram_bytes": 8192,
+                    # A pre-teardown replay scalar has no qualifying authority.
+                    "metadata_and_target_peak_ram_bytes": 0,
                 },
             },
         }
@@ -3143,57 +3172,69 @@ class PairReplayContract(unittest.TestCase):
                 "peak_ram_bytes": 8192,
                 "mapper_uuid": mapper_uuid,
                 "metadata_ram_trace": trace,
+                "metadata_ram_summary": ram_summary,
             })
-        self.assertIsNone(
-            evidence.campaign_capacity_and_ram(
-                [capacity_pair], 4096, source_sha, trace))
-        validator = evidence.RAM_VALIDATOR["validate_metadata_ram_trace"]
-        validator(trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
-                  expected_peak_ram_bytes=8192)
-        # A scalar-only pair cannot be sealed without post-teardown RAM samples.
+        self.assertIsNone(evidence.campaign_capacity_and_ram(
+            [capacity_pair], 4096, source_sha, trace))
         self.assertIsNone(evidence.campaign_capacity_and_ram(
             [capacity_pair], target_bytes, source_sha))
+        contradictory = copy.deepcopy(capacity_pair)
+        contradictory["swapz"]["resources"][
+            "metadata_and_target_peak_ram_bytes"] = 8193
+        self.assertIsNone(evidence.campaign_capacity_and_ram(
+            [contradictory], target_bytes, source_sha, trace))
+
         capacity = evidence.campaign_capacity_and_ram(
             [capacity_pair], target_bytes, source_sha, trace)
         before = {
-            "kernel": {"boot_id": trace["host_boot_id"]},
+            "kernel": {
+                "boot_id": trace["host_boot_id"],
+                "uptime_seconds": 0.0,
+            },
             "captured_at_utc": "2026-11-03T00:00:00Z",
         }
         after = {
-            "kernel": {"boot_id": trace["host_boot_id"]},
-            "captured_at_utc": "2026-11-03T00:01:00Z",
+            "kernel": {
+                "boot_id": trace["host_boot_id"],
+                "uptime_seconds": 10.0,
+            },
+            "captured_at_utc": "2026-11-03T00:00:10Z",
         }
-        self.assertTrue(
-            evidence.metadata_ram_trace_within_host_window(
-                capacity, before, after))
+        self.assertTrue(evidence.metadata_ram_trace_within_host_window(
+            capacity, before, after))
         invalid_before = copy.deepcopy(before)
-        invalid_before["kernel"]["boot_id"] = "22222222-2222-4222-8222-222222222222"
-        self.assertFalse(
-            evidence.metadata_ram_trace_within_host_window(
-                capacity, invalid_before, after))
+        invalid_before["kernel"]["boot_id"] = (
+            "22222222-2222-4222-8222-222222222222")
+        self.assertFalse(evidence.metadata_ram_trace_within_host_window(
+            capacity, invalid_before, after))
         invalid_before = copy.deepcopy(before)
         invalid_before["captured_at_utc"] = "2026-11-03T00:00:02Z"
-        self.assertFalse(
-            evidence.metadata_ram_trace_within_host_window(
-                capacity, invalid_before, after))
+        self.assertFalse(evidence.metadata_ram_trace_within_host_window(
+            capacity, invalid_before, after))
+        invalid_before = copy.deepcopy(before)
+        invalid_before["kernel"]["uptime_seconds"] = 20.0
+        self.assertFalse(evidence.metadata_ram_trace_within_host_window(
+            capacity, invalid_before, after))
         invalid_after = copy.deepcopy(after)
-        invalid_after["captured_at_utc"] = "2026-11-03T00:00:09Z"
-        self.assertFalse(
-            evidence.metadata_ram_trace_within_host_window(
-                capacity, before, invalid_after))
-        # A resource PASS must not survive a broken phase, cadence, provenance
-        # or incomplete teardown-memory recovery.
+        invalid_after["captured_at_utc"] = "2026-11-03T00:00:03Z"
+        self.assertFalse(evidence.metadata_ram_trace_within_host_window(
+            capacity, before, invalid_after))
+
+        def corrupt_recovery(item):
+            for sample in item["samples"][-10:]:
+                sample["mem_available_bytes"] -= 100_000
+
         corruptions = (
             lambda item: item["samples"].pop(),
-            lambda item: item["samples"][-1].update(ram_bytes=4096),
-            lambda item: item["samples"][6].update(phase="baseline"),
-            lambda item: item["samples"][6].update(monotonic_ns=6000000000),
-            lambda item: item["samples"][6].update(monotonic_ns=20000000000),
-            lambda item: item["samples"][6].update(
-                timestamp_utc="2026-11-03T00:00:01Z"),
+            lambda item: item["samples"][10].update(phase="baseline"),
+            lambda item: item["samples"][12].update(monotonic_ns=1),
+            lambda item: item["samples"][12].update(
+                timestamp_utc="2026-11-03T00:00:00Z"),
             lambda item: item.update(source_sha="b" * 40),
-            lambda item: item["samples"][5].update(ram_bytes=8193),
-            lambda item: item.update(capture="rootless-estimate"),
+            lambda item: item["samples"][12].update(mapper_present=False),
+            lambda item: item.update(scope="target-owned-estimate"),
+            lambda item: item.update(sampling_interval_ns=1_000_000_000),
+            corrupt_recovery,
         )
         for corrupt in corruptions:
             damaged = copy.deepcopy(trace)
@@ -3202,10 +3243,10 @@ class PairReplayContract(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validator(
                         damaged, source_sha=source_sha,
-                        mapper_uuid=mapper_uuid, expected_peak_ram_bytes=8192)
-                self.assertIsNone(
-                    evidence.campaign_capacity_and_ram(
-                        [capacity_pair], target_bytes, source_sha, damaged))
+                        mapper_uuid=mapper_uuid,
+                        expected_peak_ram_bytes=8192)
+                self.assertIsNone(evidence.campaign_capacity_and_ram(
+                    [capacity_pair], target_bytes, source_sha, damaged))
 
         qualification_path = SCRIPT.with_name("qualification.py")
         qualification_spec = importlib.util.spec_from_file_location(
