@@ -468,12 +468,19 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			      !large_roles[reserve_segment]);
 		large_counts[1U] = 0U;
 
-		/* The last valid map has a false-zero physical start. */
+		/* The last valid map has a false-zero physical class at its start. */
 		large_classes[tail] = 0U;
 		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_classes[tail] = 1U;
+
+		/* Start-block liveness is an independent physical witness. */
+		large_live[tail] = 0U;
+		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
+			      !large_roles[reserve_segment]);
+		large_live[tail] = 1U;
 
 		/* A false-zero victim count cannot hide a tail reference. */
 		large_maps[tail].start_block = victim_start;
@@ -484,16 +491,30 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			      !large_roles[reserve_segment]);
 		large_maps[tail].start_block = tail;
 
-		/* One clean two-block survivor, then corrupt its interior block. */
+		/*
+		 * Build one otherwise-clean two-block survivor. Class and liveness
+		 * interior corruption are rejected independently; neither witness
+		 * may be dropped from the recovery-role proof.
+		 */
 		large_maps[tail - 1U].valid = 0U;
 		large_maps[tail].start_block = tail - 1U;
 		large_maps[tail].extent_blocks = 2U;
 		large_classes[tail - 1U] = 2U;
+		large_classes[tail] = 0U;
+		large_live[tail] = 0U;
+
+		large_classes[tail] = 1U;
 		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_classes[tail] = 0U;
+
+		large_live[tail] = 1U;
+		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
+			      !large_roles[reserve_segment]);
 		large_live[tail] = 0U;
+
 		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == 0);
 		REQUIRE_CLAIM(!sample.gc_allocation && !large_roles[1U] &&
 			      large_roles[reserve_segment]);
