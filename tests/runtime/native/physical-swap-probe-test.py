@@ -1521,12 +1521,24 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with ExitStack() as active_patches:
                 for patch in patches:
                     active_patches.enter_context(patch)
-                if fault or identity_failure_at is not None or \
+                if teardown_not_complete:
+                    with self.assertRaises(probe.ProbeError) as rejected:
+                        probe.run_probe(target["device_arg"], target["device_arg"],
+                                        directory, "/reviewed/review.json")
+                    self.assertEqual(
+                        str(rejected.exception),
+                        "partition ownership release refused: "
+                        "restoration_stage expected='COMPLETE' "
+                        "observed='ORACLE_PASS'; "
+                        "active recovery marker not removed")
+                    # Read the durable failure record, not a synthetic PASS.
+                    state["_test_results"] = json.loads(
+                        (Path(directory) / probe.RESULTS_NAME).read_text())
+                elif fault or identity_failure_at is not None or \
                         oracle_failure_at is not None or \
                         missing_lower_after_at is not None or \
                         truncated_oracle_at is not None or \
-                        teardown_missing_gate or teardown_not_complete or \
-                        teardown_fabricated_lower:
+                        teardown_missing_gate or teardown_fabricated_lower:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
                             "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state"):
@@ -2392,12 +2404,53 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn(("recover",), events)
 
     def test_incomplete_normal_teardown_never_publishes_smoke_pass(self):
-        events, state, _ = self.simulate_physical_run(
-            teardown_not_complete=True)
-        self.assertEqual(state["stage"], "ORACLE_PASS")
+        with mock.patch("builtins.print") as printed:
+            events, state, _ = self.simulate_physical_run(
+                teardown_not_complete=True)
+        self.assertEqual(state["stage"], "RECOVERY_REQUIRED")
+        self.assertEqual(state["stage_before_recovery"], "ORACLE_PASS")
         self.assertEqual(state["_test_results"]["final_recovery_state"],
-                         "ORACLE_PASS")
+                         "RECOVERY_REQUIRED")
+        self.assertEqual(
+            state["_test_results"]["recovery_error"],
+            "partition ownership release refused: "
+            "restoration_stage expected='COMPLETE' observed='ORACLE_PASS'; "
+            "active recovery marker not removed")
         self.assertIn(("recover",), events)
+        self.assertIn(("save", "RECOVERY_REQUIRED"), events)
+        self.assertFalse(any(
+            call.args and str(call.args[0]).startswith("PHYSICAL_SMOKE=")
+            for call in printed.call_args_list))
+
+    def test_incomplete_restoration_cannot_release_partition_owner(self):
+        target, _, review = self.reviewed_device_fixture()
+        probe._consume_review(target, review["run_id"])
+        owner_marker = (
+            self.recovery_base / f"partition-{target['partuuid']}.active")
+        consumed_review = (
+            self.recovery_base / f"consumed-{review['run_id']}.json")
+        state = {
+            "run_id": review["run_id"],
+            "partuuid": target["partuuid"],
+            "major": target["major"],
+            "minor": target["minor"],
+        }
+        for stage, observed in (
+                ("ORACLE_PASS", "ORACLE_PASS"),
+                ("/private/source/secret-" + "x" * 4096,
+                 "invalid_or_unknown")):
+            with self.subTest(stage=observed):
+                state["stage"] = stage
+                with self.assertRaises(probe.ProbeError) as rejected:
+                    probe._release_partition_ownership(state)
+                self.assertEqual(
+                    str(rejected.exception),
+                    "partition ownership release refused: "
+                    "restoration_stage expected='COMPLETE' "
+                    f"observed={observed!r}; "
+                    "active recovery marker not removed")
+                self.assertTrue(owner_marker.is_file())
+                self.assertTrue(consumed_review.is_file())
 
     def test_read_only_plan_blocks_missing_lower_counters(self):
         target, _, _ = self.reviewed_device_fixture()

@@ -3965,7 +3965,13 @@ New mapper-name allocation must use the same checked decoder to detect
 existing name/UUID collisions, including colon-delimited report rows.
 The standalone recovery path must continue to refuse module unloading
 without same-process ownership; a recovered parser is not permission to
-bypass that limitation.
+bypass that limitation. An incomplete physical-probe restoration must refuse
+partition ownership release until the saved state reaches durable COMPLETE.
+The rootless teardown regression must prove that ORACLE_PASS instead preserves
+RECOVERY_REQUIRED evidence, leaves the partition ownership marker and one-use
+review intact, and cannot publish a smoke PASS. Failure diagnostics must state
+the expected and observed known restoration stages without echoing unknown
+untrusted stage data or private source paths.
 
 The helper's read-only Device Mapper inventory must treat a successful
 `dmsetup info -c --noheadings -o name,uuid` response containing only the

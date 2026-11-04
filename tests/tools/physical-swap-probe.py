@@ -968,8 +968,19 @@ def _consume_review(target, run_id, *, preburned=False):
 
 def _release_partition_ownership(state):
     """Release an active marker only after durable COMPLETE, never the consumption."""
-    if state.get("stage") != "COMPLETE":
-        raise ProbeError("cannot release ownership before full restoration")
+    stage = state.get("stage")
+    if stage != "COMPLETE":
+        # Persisted state is untrusted; name only known stages in diagnostics.
+        observed_stage = (
+            stage if type(stage) is str and stage in {
+                "BACKED_UP", "SWAP_OFF", "HEADER_CLEARED", "SWZ_FORMATTED",
+                "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS",
+                "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED",
+            } else "invalid_or_unknown")
+        raise ProbeError(
+            "partition ownership release refused: "
+            "restoration_stage expected='COMPLETE' "
+            f"observed={observed_stage!r}; active recovery marker not removed")
     base = _recovery_base(state)
     active_path = base / f"partition-{state['partuuid']}.active"
     try:
