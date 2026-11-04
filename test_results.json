@@ -256,23 +256,23 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "69aaee8f472edc42e0c06ead25ded411cfa23e73af93ac484aebe73faeb9226a",
-"module_sha256": "eadbe8f9c588a79fee12846b58ebedf995062bfdc0ac61f1fc1e52e21fe275b3",
+"formatter_sha256": "3e12208de831a156d04421f6a445fe8b5f6af9721642428e970e83cde5ad8589",
+"module_sha256": "16d5ae53415bfb7c2b725bfadb0725321829623df04b205e466ebf930d7858a3",
 "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "88616e663b21e9e2fdc679c7f83cd26931619150",
+"source_sha": "ec2a431457d95e65d58ce4ec4602362b08d6f631",
 "stages": [
 {
-"elapsed_s": 14.647,
+"elapsed_s": 14.312,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Native build error: operand of ??:? changes signedness from ?int? to ?unsigned int? due to unsignedness of other operand [-Werror=sign-compare]",
-"elapsed_s": 10.983,
+"diagnostic": "Native build error: ?failed_block? may be used uninitialized [-Werror=maybe-uninitialized]",
+"elapsed_s": 5.754,
 "exit_code": 2,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -282,5 +282,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "88616e663b21e9e2fdc679c7f83cd26931619150"
+"tested_commit_sha": "ec2a431457d95e65d58ce4ec4602362b08d6f631"
 }
