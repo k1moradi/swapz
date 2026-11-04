@@ -1743,14 +1743,29 @@ def _remove_cgroup(cgroup: Path) -> None:
         return
     try:
         procs = (cgroup / "cgroup.procs").read_text(encoding="ascii").split()
-    except OSError:
-        procs = ["unknown"]
+    except OSError as inspection_error:
+        # Ordinary cgroup rmdir is a safe independent emptiness check: the
+        # kernel refuses a non-empty cgroup. Do not leave an empty group behind
+        # merely because its process inventory became unreadable.
+        try:
+            cgroup.rmdir()
+        except OSError as cleanup_error:
+            raise QualificationFailure(
+                f"cannot inspect dedicated real-swap cgroup processes: "
+                f"{inspection_error}; empty-group removal also failed: "
+                f"{cleanup_error}") from cleanup_error
+        raise QualificationFailure(
+            "dedicated real-swap cgroup process inventory was unreadable; "
+            f"empty cgroup was removed: {inspection_error}") from inspection_error
     if procs:
-        raise QualificationFailure("dedicated real-swap cgroup still has processes; no force cleanup attempted")
+        raise QualificationFailure(
+            "dedicated real-swap cgroup still has processes; "
+            "no force cleanup attempted")
     try:
         cgroup.rmdir()
     except OSError as exc:
-        raise QualificationFailure(f"cannot remove empty real-swap cgroup: {exc}") from exc
+        raise QualificationFailure(
+            f"cannot remove empty real-swap cgroup: {exc}") from exc
 
 
 def require_oracle_worker_cgroup_ownership(

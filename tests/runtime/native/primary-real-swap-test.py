@@ -1703,6 +1703,30 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             self.assertEqual(
                 json.loads(evidence.path.read_text())["phase"], "ADMITTED")
 
+    def test_final_cgroup_cleanup_removes_empty_group_when_process_inventory_is_unreadable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory) / "empty-cgroup"
+            cgroup.mkdir()
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "process inventory was unreadable; empty cgroup was removed"):
+                qualify._remove_cgroup(cgroup)
+            self.assertFalse(cgroup.exists())
+
+    def test_final_cgroup_cleanup_preserves_unreadable_inventory_and_rmdir_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory) / "empty-cgroup"
+            cgroup.mkdir()
+            with mock.patch.object(
+                    Path, "rmdir",
+                    side_effect=OSError("synthetic rmdir failure")), \
+                    self.assertRaisesRegex(
+                        qualify.QualificationFailure,
+                        "cannot inspect dedicated real-swap cgroup processes: "
+                        ".*empty-group removal also failed: synthetic rmdir failure"):
+                qualify._remove_cgroup(cgroup)
+            self.assertTrue(cgroup.exists())
+
     def test_missing_or_duplicate_cgroup_oom_evidence_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             events = Path(directory) / "memory.events"
