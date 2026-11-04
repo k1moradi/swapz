@@ -41,12 +41,35 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            build-essential linux-headers-generic sparse
+            build-essential linux-headers-generic-hwe-24.04 curl
       - name: Run kernel sparse and optional installed Smatch
         shell: bash
         run: |
           set -euo pipefail
-          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-6.8.*-generic' | sort -V | tail -1)"
+          # HWE 7.0 is required by the module; distro sparse 0.6.4 cannot
+          # handle __typeof_unqual__ and Kbuild disables its CHECK phase.
+          # Build exactly the Debian source release in CI (no host install).
+          sparse_archive="build/tests/sparse-0.6.5-rc1.tar.gz"
+          sparse_description="build/tests/sparse-0.6.5-rc1.dsc"
+          sparse_source="$PWD/build/tests/sparse-0.6.5-rc1-src"
+          mkdir -p build/tests "$sparse_source"
+          curl --fail --location --silent --show-error --retry 3 \
+            'https://deb.debian.org/debian/pool/main/s/sparse/sparse_0.6.5~rc1.orig.tar.gz' \
+            --output "$sparse_archive"
+          curl --fail --location --silent --show-error --retry 3 \
+            'https://deb.debian.org/debian/pool/main/s/sparse/sparse_0.6.5~rc1-2.dsc' \
+            --output "$sparse_description"
+          # Debian's published archive MD5 gives an independent fixed
+          # identity; the exact SHA256 is also checked against its .dsc.
+          printf '%s  %s\n' '45c43188a3021711ef92f187729d0656' "$sparse_archive" | md5sum --check -
+          expected_sha="$(awk '/^Checksums-Sha256:/{in_section=1;next} in_section && $3=="sparse_0.6.5~rc1.orig.tar.gz" { print $1; exit }' "$sparse_description")"
+          [[ "$expected_sha" =~ ^[a-f0-9]{64}$ ]]
+          printf '%s  %s\n' "$expected_sha" "$sparse_archive" | sha256sum --check -
+          tar -xzf "$sparse_archive" -C "$sparse_source" --strip-components=1
+          make -C "$sparse_source" -j2 sparse
+          export PATH="$sparse_source:$PATH"
+          sparse --version
+          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -1)"
           test -n "$KDIR"
           python3 -B tests/tools/kernel-debug-qualify.py static --kdir "$KDIR"
           echo "KERNEL_DEBUG_STATIC_COMPILE_ONLY_NO_MODULE_LOADING"
