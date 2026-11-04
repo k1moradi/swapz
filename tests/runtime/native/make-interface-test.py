@@ -1013,6 +1013,11 @@ class PublicMakeContract(unittest.TestCase):
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"
+                      "printf '%s\\n' "
+                      "'KERNEL_DEBUG_FEATURES=kasan:0 kcsan:0 lockdep:0 config:build'\n"
+                      "printf '%s\\n' "
+                      "'KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 "
+                      "reports:0 swapz_reports:0'\n"
                       "cat <<'MOCK_RECORDS'\n" + "\n".join(records) +
                       "\nMOCK_RECORDS\n")
             (fixture / "tests/tools/test-loaded.sh").write_text(script)
@@ -1188,11 +1193,12 @@ class PublicMakeContract(unittest.TestCase):
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
-        for executable in (
-                "tests/tools/deploy-nullblk.sh",
-                "packaging/package-dkms.sh",
-                "tests/runtime/native/package-dkms-test.py"):
-            self.assertTrue((ROOT / executable).stat().st_mode & 0o100)
+        deploy = ROOT / "tests/tools/deploy-nullblk.sh"
+        self.assertTrue(deploy.stat().st_mode & 0o100)
+        self.assertIn("bash packaging/package-dkms.sh", MAKE)
+        self.assertIn(
+            "python3 -B tests/runtime/native/package-dkms-test.py",
+            (ROOT / "tests/tools/test-rootless.sh").read_text())
         self.assertIn("sudo -n true", loaded)
         self.assertIn("sudo -n bash", loaded)
         self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)

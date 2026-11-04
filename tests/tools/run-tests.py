@@ -170,11 +170,14 @@ def _readiness_run_id_valid(value):
 
 def owner_qualification_artifacts_available(artifacts):
     """An owner PASS requires all three final artifact digests."""
-    return (isinstance(artifacts, dict) and
-            set(artifacts) == {"status", "formatter_sha256",
-                               "module_sha256", "oracle_sha256"} and
-            artifacts["status"] == "AVAILABLE" and
-            _readiness_artifact_hashes_valid(artifacts))
+    if (not isinstance(artifacts, dict) or
+            set(artifacts) != {"status", "formatter_sha256",
+                               "module_sha256", "oracle_sha256"} or
+            artifacts["status"] != "AVAILABLE"):
+        return False
+    hashes = {name: artifacts[name] for name in (
+        "formatter_sha256", "module_sha256", "oracle_sha256")}
+    return _readiness_artifact_hashes_valid(hashes)
 
 
 def _readiness_target_key(target):

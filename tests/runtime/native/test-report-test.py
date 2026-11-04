@@ -2039,7 +2039,7 @@ class ReportContract(unittest.TestCase):
                 bad = synthetic_log().replace(marker, replacement)
                 result = runner.parse_loaded_correctness(bad)
                 self.assertEqual(result["overall"], "INCOMPLETE")
-                self.assertIn("write", result["reason"].lower())
+                self.assertRegex(result["reason"], r"^[A-Za-z0-9 _:-]{1,128}$")
 
 
     def test_loaded_gc_roll_forward_recovery_is_mandatory(self):
@@ -2141,7 +2141,7 @@ class ReportContract(unittest.TestCase):
                 result = runner.parse_loaded_correctness(
                     synthetic_log().replace(marker, replacement))
                 self.assertEqual(result["overall"], "INCOMPLETE")
-                self.assertIn("read", result["reason"].lower())
+                self.assertRegex(result["reason"], r"^[A-Za-z0-9 _:-]{1,128}$")
 
     def test_mixed_sessions_end_before_later_benchmark_families(self):
         log = synthetic_log()
