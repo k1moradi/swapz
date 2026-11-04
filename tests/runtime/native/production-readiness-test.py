@@ -1271,6 +1271,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "duplicate_utc": duplicate_utc,
             "nonfinite_counter": lambda trace: trace["samples"][15].update(
                 mem_available_kib=float("nan")),
+            "infinite_counter": lambda trace: trace["samples"][15].update(
+                mem_available_kib=float("inf")),
+            "boolean_byte_counter": lambda trace: trace["samples"][15].update(
+                mem_available_kib=True),
+            "float_byte_counter": lambda trace: trace["samples"][15].update(
+                mem_available_kib=float(8 * 1024 * 1024 - 900 * 1024)),
             "overflow_counter": lambda trace: trace["samples"][15].update(
                 vmalloc_used_kib=1 << 64),
             "overflow_clock": lambda trace: trace["samples"][15].update(
@@ -1278,6 +1284,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "float_sampling_interval": lambda trace: trace.update(
                 sampling_interval_ns=100_000_000.0),
             "persistent_teardown_leak": persistent_teardown_leak,
+            "recovered_but_mapper_reappeared": lambda trace: trace[
+                "samples"][-1].update(mapper_present=True),
             "source_mismatch": lambda trace: trace.update(source_sha="b" * 40),
             "boot_mismatch": lambda trace: trace.update(
                 host_boot_id="22222222-2222-4222-8222-222222222222"),
@@ -1303,14 +1311,22 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 expected_gap = (
                     "sealed campaign evidence bytes are malformed"
                     if name in {
-                        "nonfinite_counter", "overflow_counter",
-                        "overflow_clock",
+                        "nonfinite_counter", "infinite_counter",
+                        "overflow_counter", "overflow_clock",
                     }
                     else "sealed campaign RAM trace is invalid")
                 self.assertTrue(any(
                     expected_gap in blocker
                     for blocker in result["code_blockers"]),
                     (name, result["code_blockers"]))
+                if name in ("source_mismatch", "boot_mismatch"):
+                    identity_metric = (
+                        "metric=source_sha" if name == "source_mismatch"
+                        else "metric=host_boot_id")
+                    self.assertTrue(any(
+                        identity_metric in blocker
+                        for blocker in result["code_blockers"]),
+                        (name, result["code_blockers"]))
 
     def test_missing_or_mismatched_capacity_provenance_never_passes(self):
         report = owner_report()
