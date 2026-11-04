@@ -152,9 +152,10 @@ def _valid_sha256(value):
 
 
 def _readiness_artifact_hashes_valid(hashes):
-    return isinstance(hashes, dict) and all(
-        _valid_sha256(hashes.get(name))
-        for name in ("formatter_sha256", "module_sha256", "oracle_sha256"))
+    return (isinstance(hashes, dict) and
+            set(hashes) == {"formatter_sha256", "module_sha256", "oracle_sha256"} and
+            all(_valid_sha256(hashes.get(name))
+                for name in ("formatter_sha256", "module_sha256", "oracle_sha256")))
 
 
 def _readiness_run_id_valid(value):
@@ -241,7 +242,8 @@ def _readiness_pass_payload_valid(
                 _readiness_artifact_hashes_valid(entry.get("hashes")))
     if name == "required_ci":
         runs = entry.get("runs")
-        if not isinstance(runs, list):
+        if (not isinstance(runs, list) or
+                len(runs) != len(PRODUCTION_READINESS_REQUIRED_CI)):
             return False
         for workflow in PRODUCTION_READINESS_REQUIRED_CI:
             matching = [run for run in runs if isinstance(run, dict) and
@@ -255,7 +257,9 @@ def _readiness_pass_payload_valid(
                     run.get("conclusion") != "success" or
                     not _readiness_run_id_valid(run.get("run_id"))):
                 return False
-        return True
+        # A GitHub run belongs to one workflow: aliases cannot supply three.
+        run_ids = [str(run["run_id"]) for run in runs]
+        return len(run_ids) == len(set(run_ids))
     if name == "exact_source_owner_make_test":
         return (entry.get("overall") == "PASS" and
                 entry.get("tested_source_sha") == current_source_sha and
@@ -1795,14 +1799,15 @@ def parse_loaded_correctness(output):
         for name, pattern in patterns.items():
             match = pattern.fullmatch(text)
             if match:
-                # Repeated lifecycle PASS claims are not independent proof.
+                # Repeated PASS claims are not independent proof.
                 # Earlier matches must never be silently overwritten.
-                if name in (
-                        "primary_lifecycle", "primary_interruption_recovery",
-                        "primary_negative_recovery") and name in found:
+                if name in found:
                     return {
                         "overall": "INCOMPLETE",
-                        "reason": "duplicate primary lifecycle evidence marker",
+                        "reason": (
+                            "duplicate primary lifecycle evidence marker"
+                            if name.startswith("primary_") else
+                            "duplicate loaded correctness evidence marker"),
                     }
                 found[name] = tuple(int(value) for value in match.groups())
     missing = [name for name in patterns if name not in found]

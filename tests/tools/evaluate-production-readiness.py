@@ -1017,6 +1017,17 @@ def evaluate_release(
         runs = ci.get("runs")
         valid_runs = {}
         if isinstance(runs, list):
+            if (len(runs) != len(REQUIRED_CI_WORKFLOWS) or
+                    any(not isinstance(run, dict) or
+                        run.get("workflow") not in REQUIRED_CI_WORKFLOWS
+                        for run in runs)):
+                block_code("required_ci: workflow run set has extra or malformed entries")
+            # An Actions run ID is globally unique, not reusable across jobs.
+            run_ids = [str(run["run_id"]) for run in runs
+                       if isinstance(run, dict) and
+                       _valid_run_id(run.get("run_id"))]
+            if len(run_ids) != len(set(run_ids)):
+                block_code("required_ci: duplicate GitHub workflow run IDs")
             for run in runs:
                 if not isinstance(run, dict):
                     continue

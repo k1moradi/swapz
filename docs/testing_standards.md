@@ -5239,6 +5239,13 @@ not read the physical qualification marker, and a private seam cannot
 substitute for the production boot token. Comments and string literals
 containing fake gate or syscall text never satisfy safety assertions.
 
+Canonical CI release evidence contains exactly one row for each of the three
+mandatory workflows, with distinct positive GitHub run IDs. Extra, malformed,
+or duplicated rows cannot qualify the release even when the required rows
+claim completed success. Every mandatory loaded correctness marker is
+single-occurrence evidence, including the fault, kernel-debug and
+resource-pressure markers; duplicate PASS claims are incomplete.
+
 The official rootless stage directly executes every mandatory Python contract
 owned by that stage, including the owned-null_blk lifecycle qualifier and
 `primary-real-swap-test.py`; the latter remains unit-only in GitHub Actions

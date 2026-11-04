@@ -850,6 +850,32 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 "completed-success" in blocker
                 for blocker in result["code_blockers"]), (field, value))
 
+    def test_required_ci_rejects_duplicate_run_ids_and_extra_rows(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        for mutation in ("shared_run_id", "extra_workflow", "malformed_row"):
+            with self.subTest(mutation=mutation):
+                evidence = current_evidence(encoded(report), encoded(policy))
+                runs = evidence["release_evidence"]["required_ci"]["runs"]
+                if mutation == "shared_run_id":
+                    # Decimal text and integer identify the same Actions run.
+                    runs[1]["run_id"] = 1
+                elif mutation == "extra_workflow":
+                    runs.append({
+                        "workflow": "Optional unrelated workflow",
+                        "head_sha": SOURCE, "result": "PASS",
+                        "status": "completed", "conclusion": "success",
+                        "run_id": "4",
+                    })
+                else:
+                    runs.append(None)
+                verdict = evaluate(report, evidence, policy)
+                self.assertEqual(
+                    verdict["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    "required_ci:" in reason for reason
+                    in verdict["code_blockers"]))
+
     def test_zero_critical_count_requires_an_empty_issue_list(self):
         report = owner_report()
         policy = acceptance_policy()

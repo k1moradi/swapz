@@ -1210,6 +1210,21 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(result["overall"], "INCOMPLETE")
                 self.assertIn("duplicate primary", result["reason"])
 
+    def test_repeated_loaded_fault_and_resource_markers_are_incomplete(self):
+        output = synthetic_log()
+        for prefix in (
+                "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=",
+                "PASS_ID36_RESOURCE_PRESSURE="):
+            with self.subTest(marker=prefix):
+                marker = next(
+                    line for line in output.splitlines()
+                    if line.startswith(prefix))
+                repeated = output.replace(
+                    marker + "\n", marker + "\n" + marker + "\n", 1)
+                verdict = runner.parse_loaded_correctness(repeated)
+                self.assertEqual(verdict["overall"], "INCOMPLETE")
+                self.assertIn("duplicate loaded correctness", verdict["reason"])
+
     def test_raw_read_fanout_evidence_is_mandatory(self):
         marker = ("PASS_LOADED_RAW_READ_FANOUT=profiles:2 verified_pages:2048 "
                   "async_batches:64 lower_read_reqs:512")
@@ -4482,6 +4497,39 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                     verdict["evidence_statuses"]["required_ci"], "BLOCKED")
                 self.assertEqual(
                     verdict["CODE_PRODUCTION_READY"], "BLOCKED")
+
+    def test_required_ci_rejects_duplicate_run_ids_and_extra_rows(self):
+        for mutation in ("shared_run_id", "extra_workflow", "malformed_row"):
+            with self.subTest(mutation=mutation):
+                snapshot = self.passing_snapshot()
+                runs = snapshot["release_evidence"]["required_ci"]["runs"]
+                if mutation == "shared_run_id":
+                    # int and canonical decimal text denote the same Actions run.
+                    runs[1]["run_id"] = 1
+                elif mutation == "extra_workflow":
+                    runs.append({
+                        "workflow": "Optional unrelated workflow",
+                        "head_sha": self.SOURCE_SHA, "result": "PASS",
+                        "status": "completed", "conclusion": "success",
+                        "run_id": "4",
+                    })
+                else:
+                    runs.append(None)
+                verdict = runner.evaluate_production_readiness(
+                    snapshot, self.SOURCE_SHA)
+                self.assertEqual(
+                    verdict["evidence_statuses"]["required_ci"], "BLOCKED")
+                self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED")
+
+    def test_qualified_artifact_hashes_reject_extra_fields(self):
+        snapshot = self.passing_snapshot()
+        snapshot["release_evidence"]["qualified_artifact_hashes"]["hashes"][
+            "unverified_sha256"] = self.DIGEST
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["qualified_artifact_hashes"],
+            "BLOCKED")
 
     def test_release_hashes_are_cross_bound(self):
         owner_mismatch = self.passing_snapshot()
