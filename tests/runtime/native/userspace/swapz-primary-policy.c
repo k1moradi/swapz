@@ -2831,6 +2831,21 @@ static void test_package_transaction_process_death_guard(void)
 	assert(swapz_primary_package_transactions_clear_at(
 		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(close(lock_fd) == 0);
+	{
+		struct stat retained_journal;
+		struct stat retained_module;
+		struct stat retained_cli;
+
+		/* A denied preparation must not consume the transaction journal
+		 * or damage an unrelated published package artifact. */
+		assert(stat(journal, &retained_journal) == 0);
+		assert(S_ISREG(retained_journal.st_mode));
+		assert(retained_journal.st_size == (off_t)(sizeof(journal_record) - 1U));
+		assert(stat(module_artifact, &retained_module) == 0);
+		assert(retained_module.st_size == (off_t)(sizeof("module-published\\n") - 1U));
+		assert(stat(cli_artifact, &retained_cli) == 0);
+		assert(retained_cli.st_size == (off_t)(sizeof("cli-published\\n") - 1U));
+	}
 
 	/* Journal validity is not permission to activate before completion. */
 	assert(truncate(journal, 0) == 0);

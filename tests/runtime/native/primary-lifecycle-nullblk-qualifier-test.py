@@ -350,13 +350,15 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "if (swapz_primary_target_preflight(")]
         self.assertIn('failure_phase = "final-preclaim-identity-revalidation";',
                       identity_check)
+        # The parent-swap phase must be selected before invoking the reader,
+        # so an unreadable inventory keeps its own errno and diagnostic.
         parent_check = final_check[
-            final_check.index("int verified_parent_swap_active ="):]
+            final_check.index("errno = ESTALE;"):
+            final_check.index("int verified_parent_swap_active =")]
         self.assertIn('failure_phase = "final-physical-parent-swap-inventory";',
-                      parent_check[:parent_check.index(
-                          "if (verified_parent_swap_active != 0)")])
+                      parent_check)
         self.assertIn("errno = ESTALE;", final_check)
-        self.assertIn("errno = EBUSY;", parent_check)
+        self.assertIn("errno = EBUSY;", final_check)
 
     def test_preparation_failure_formats_do_not_expose_transaction_ids(self):
         preparation = self.primary[
