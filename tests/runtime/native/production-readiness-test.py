@@ -265,6 +265,7 @@ def sampled_metadata_ram_trace(peak_ram_bytes=900 * 1024 * 1024):
             index = len(samples) + 1
             seconds, tenths = divmod(index, 10)
             present = (
+                phase_index > 0 if phase == "initialization" else
                 phase_index == 0 if phase == "teardown" else mapper_present)
             samples.append({
                 "phase": phase,
