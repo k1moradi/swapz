@@ -2127,6 +2127,38 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "metric=sealed_at_utc" in blocker
             for blocker in result["code_blockers"]))
 
+    def test_gc_binding_handles_many_ordered_activity_windows(self):
+        # Rootless stress of the declared evidence bounds, with no loaded
+        # target and no quadratic per-sample rescan of GC telemetry.
+        windows = [{
+            "start_monotonic_ns": 100 + index * 4,
+            "end_monotonic_ns": 103 + index * 4,
+            "gc_wall_ns": 1,
+            "gc_victims": 1,
+            "gc_pages": 1,
+        } for index in range(2000)]
+        trace = {"samples": [
+            {"phase": "baseline", "monotonic_ns": 1},
+            {"phase": "initialization", "monotonic_ns": 50},
+            {"phase": "steady", "monotonic_ns": 90},
+            *({"phase": "gc",
+               "monotonic_ns": window["start_monotonic_ns"] + 1}
+              for window in windows),
+            {"phase": "teardown", "monotonic_ns": 9000},
+        ]}
+        binding = {
+            "arm_started_monotonic_ns": 80,
+            "arm_finished_monotonic_ns": 8500,
+            "gc_activity_intervals": windows,
+        }
+        verify = EVALUATOR.RAM_TRACE_VALIDATOR[
+            "validate_metadata_ram_arm_binding"]
+        verify(trace, binding)
+        trace["samples"][-2]["monotonic_ns"] = 100
+        with self.assertRaisesRegex(
+                ValueError, "GC sample chronology is invalid"):
+            verify(trace, binding)
+
     def test_adversarial_ram_diagnostics_are_bounded(self):
         validator = EVALUATOR.RAM_TRACE_VALIDATOR[
             "validate_metadata_ram_trace"]
