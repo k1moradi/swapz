@@ -4430,7 +4430,14 @@ issuing a second unlocked `blockdev --rereadpt` that can race with udevd. Settle
 udev before enumerating the partition. Then
 verify its PARTUUID against the partition's sysfs uevent, trigger udev's add
 event only for that exact sysfs partition path, and require udev to publish the
-by-PARTUUID block-device alias with the same major:minor. Some host persistent-
+by-PARTUUID block-device alias with the same major:minor. Before any physical-
+backing mapper admission, the fixture must preserve the manager-written SWZ
+authorization header at block zero and the source contract must prove that the
+kernel accepts the header-backed nullblk path without weakening the ordinary
+physical-backing opt-in or superblock validation. A fixture that overwrites the
+SWZ header with generic swap metadata before mapper construction is invalid
+because it no longer rehearses the production lifecycle authorization boundary.
+Some host persistent-
 storage rule sets deliberately exclude `nullb*`; when the normal rules do not
 publish the link, install one temporary udev rule matching only the verified
 partition's exact `DEVPATH` rule key and PARTUUID, reload the rules, and trigger that
