@@ -471,7 +471,7 @@ class UnitSandboxContractTests(unittest.TestCase):
             r"swapz-primary-mapper.service dev-mapper-swapz\x2dprimary.swap",
         )
         require("verifier", "Service", "ProtectSystem", "full")
-        require("verifier", "Service", "SystemCallFilter", "~@mount @module")
+        require("verifier", "Service", "SystemCallFilter", "~@mount @module @swap")
         # The verifier authenticates /lib/modules, so ProtectKernelModules
         # would hide required evidence. Module mutation is blocked by both the
         # capability boundary and the @module syscall deny-list.
@@ -483,7 +483,7 @@ class UnitSandboxContractTests(unittest.TestCase):
         require("verifier", "Install", "WantedBy", "multi-user.target")
         require("health", "Service", "ProtectSystem", "strict")
         require("health", "Service", "ProtectKernelModules", "yes")
-        require("health", "Service", "SystemCallFilter", "~@mount")
+        require("health", "Service", "SystemCallFilter", "~@mount @swap")
         require("health", "Service", "Restart", "on-failure")
         require("health", "Service", "TimeoutStopSec", "10s")
         require("health", "Unit", "ConditionPathExists", "/dev/mapper/swapz-primary")
@@ -518,13 +518,18 @@ class UnitSandboxContractTests(unittest.TestCase):
         excluded_capabilities = set(mapper_bound[1:].split())
         self.assertNotIn("CAP_SYS_PTRACE", excluded_capabilities)
 
-        # Mapper lifecycle owns module load/unload; observers must not.
+        # Mapper lifecycle owns module load/unload and swap activation; observers must not.
         self.assertIn("SYS_finit_module", primary_manager)
         self.assertIn("SYS_delete_module", primary_manager)
+        self.assertIn("SYS_swapon", primary_manager)
+        self.assertIn("SYS_swapoff", primary_manager)
         self.assertNotIn("CAP_SYS_MODULE", excluded_capabilities)
+        self.assertNotIn(
+            "@swap", mapper[("Service", "SystemCallFilter")][0].split()
+        )
 
         # Cold-boot observation authenticates the installed module image.
-        # Keep that path readable while denying module mutation by syscall.
+        # Keep that path readable while denying module and swap mutation by syscall.
         self.assertIn(
             "installed_image=/lib/modules/$installed_kernel_release/"
             "updates/dkms/dm-swapz.ko",
@@ -533,7 +538,7 @@ class UnitSandboxContractTests(unittest.TestCase):
         self.assertNotIn(("Service", "ProtectKernelModules"), verifier)
         self.assertEqual(
             verifier[("Service", "SystemCallFilter")],
-            ("~@mount @module",),
+            ("~@mount @module @swap",),
         )
 
     def test_unit_drift_is_rejected_without_systemd_or_root(self) -> None:
@@ -561,9 +566,11 @@ class UnitSandboxContractTests(unittest.TestCase):
             ("verifier recovery mount substitution", "verifier", "ProtectSystem=full", "ProtectSystem=full\nReadOnlyPaths=-/var/lib/swapz/physical-recovery"),
             ("verifier module evidence hidden", "verifier", "ProtectControlGroups=yes", "ProtectControlGroups=yes\nProtectKernelModules=yes"),
             ("verifier can load modules", "verifier", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
-            ("verifier module syscall allowed", "verifier", "SystemCallFilter=~@mount @module", "SystemCallFilter=~@mount"),
+            ("verifier module syscall allowed", "verifier", "SystemCallFilter=~@mount @module @swap", "SystemCallFilter=~@mount @swap"),
+            ("verifier swap syscall allowed", "verifier", "SystemCallFilter=~@mount @module @swap", "SystemCallFilter=~@mount @module"),
             ("health can load modules", "health", "CapabilityBoundingSet=CAP_SYS_ADMIN", "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE"),
-            ("health mount namespace mutable", "health", "SystemCallFilter=~@mount", "SystemCallFilter="),
+            ("health mount namespace mutable", "health", "SystemCallFilter=~@mount @swap", "SystemCallFilter=~@swap"),
+            ("health swap syscall allowed", "health", "SystemCallFilter=~@mount @swap", "SystemCallFilter=~@mount"),
             ("health can edit filesystem", "health", "ProtectSystem=strict", "ProtectSystem=full"),
             ("health starts mapper", "health", "After=swapz-primary-mapper.service", "Requires=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
             ("passive swap enabled", "passive_swap", "TimeoutSec=120s", "TimeoutSec=120s\n\n[Install]\nWantedBy=swap.target"),
