@@ -614,12 +614,18 @@ Block-service, cold-read, sustained-minute and anonymous-swap evidence persists
 the nonzero histogram bins plus exact sample count and maximum. The evaluator
 reconstructs every acceptance-critical p50/p95/p99 from those bins; editable
 percentile summaries cannot independently promote a result. The swapz scheduler samples
-\`/proc/meminfo\` every 100 ms from a one-second pre-create baseline through mapper
-creation, the measured workload and two seconds of post-workload quiescence. It
-records the minimum \`MemAvailable\` plus \`SUnreclaim\`/\`VmallocUsed\` context and
-supplies \`max(0, median(pre-create MemAvailable) - minimum MemAvailable)\` as the
-conservative observed metadata+target peak. The same host sampler surrounds the
-raw control so unrelated host drift is visible. This is a whole-host upper-bound
+\`/proc/meminfo\` every 100 ms from a one-second target-absent pre-create
+baseline through mapper creation, the sustained workload, ordinary mapper
+teardown and at least two seconds with the exact mapper UUID observed absent.
+The trace keeps the kernel-reported \`MemAvailable\`, \`SUnreclaim\` and
+\`VmallocUsed\` KiB integers plus UTC/monotonic timestamps and
+mapper-presence state. The qualifying peak is derived as median(pre-create
+\`MemAvailable\`) minus the minimum \`MemAvailable\` while the mapper is
+present; the final target-absent second must recover to the baseline envelope.
+RAM samples labeled GC must overlap sustained telemetry intervals whose
+exported \`gc_wall_ns\`, \`gc_victims\` or \`gc_pages\` counter advanced.
+The same host sampler surrounds the raw control so unrelated host drift is
+visible. This is a whole-host upper-bound
 observation, not exact per-allocation attribution; compiled array-size evidence
 remains complementary and cannot substitute for it. The fixed ceilings are 128
 MiB absolute post-exec replay-process peak RSS through measured completion and
