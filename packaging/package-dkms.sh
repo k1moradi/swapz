@@ -7,6 +7,8 @@ umask 022
 
 transaction_active=0
 transaction_dir=""
+# Describes the attempted transition, including journal-write failures.
+transaction_phase="preflight"
 # Recovery is fail-closed by default. Only an independently verified committed
 # install may temporarily preserve activation while read-only recovery admission
 # checks run.
@@ -17,23 +19,28 @@ staging_abort() {
   trap - ERR HUP INT TERM
   transaction_active=0
   echo "BLOCKED: package $reason before mutation; removing staging data" >&2
-  [[ -z "$transaction_dir" ]] || rm -rf -- "$transaction_dir"
+  if [[ -n "$transaction_dir" ]] && ! rm -rf -- "$transaction_dir"; then
+    echo "BLOCKED: staging cleanup failed; recovery-required transaction may remain" >&2
+  fi
   exit "$rc"
 }
 
 blocked() {
-  printf 'BLOCKED: %s\n' "$*" >&2
+  local condition="$*"
+  printf 'BLOCKED: %s\n' "$condition" >&2
   if (( transaction_active == 1 )); then
-    rollback 2 failure
+    rollback 2 "$condition (phase: $transaction_phase)"
   elif (( transaction_active == 2 )); then
-    staging_abort 2 failure
+    staging_abort 2 "$condition (phase: $transaction_phase)"
   elif (( transaction_active == 3 )); then
-    uninstall_rollback 2 failure
+    uninstall_rollback 2 "$condition (phase: $transaction_phase)"
   elif (( transaction_active == 4 )); then
     if (( recovery_quarantine_on_error == 1 )); then
-      cleanup_activation_files || true
+      quarantine_activation || true
     fi
-    printf "BLOCKED: recovery record retained at %s\n" "$transaction_dir" >&2
+    printf 'BLOCKED: recovery phase %s refused (%s); rollback not attempted or incomplete; recovery-required record retained\n' "$transaction_phase" "$condition" >&2
+  else
+    printf 'BLOCKED: preflight phase %s refused (%s); rollback not attempted\n' "$transaction_phase" "$condition" >&2
   fi
   exit 2
 }
@@ -644,6 +651,26 @@ cleanup_package_files() {
   cleanup_source_files
 }
 
+# Failure paths must report unsuccessful quarantine/journaling rather than
+# hide a second failure behind the original command status.
+quarantine_activation() {
+  local quarantine_status=0
+  cleanup_activation_files || quarantine_status=$?
+  if (( quarantine_status != 0 )); then
+    printf 'BLOCKED: activation quarantine failed (status %d); manual intervention required\n' "$quarantine_status" >&2
+  fi
+  return "$quarantine_status"
+}
+
+record_incomplete_rollback() {
+  local journal_status=0
+  persist_transaction_state rollback-incomplete || journal_status=$?
+  if (( journal_status != 0 )); then
+    printf 'BLOCKED: rollback-incomplete journal update failed (status %d); original recovery record retained\n' "$journal_status" >&2
+  fi
+  return "$journal_status"
+}
+
 # Sync payloads and their directory entries before journaling publication.
 # A missing path records a deletion; no symlink or special file is followed.
 durable_package_paths() {
@@ -722,11 +749,13 @@ assert_no_incomplete_package_transactions() {
   )
   shopt -u nullglob
   (( ${#stale_transactions[@]} == 0 )) ||
-    blocked "incomplete package transaction retained at ${stale_transactions[0]}"
+    blocked "incomplete package transaction retained (explicit recover required)"
 }
 
 persist_transaction_state() {
   local phase="$1"
+  # The active operation owns this phase until the next durable transition.
+  transaction_phase="$phase"
   if [[ -n "$test_root" && ${SWAPZ_TEST_FAIL_TRANSACTION_PHASE:-never} == "$phase" ]]; then
     return 1
   fi
@@ -1117,13 +1146,13 @@ def digest(path):
 
 def check_file(path, mode):
     if path.is_symlink() or not path.is_file():
-        raise SystemExit(f"unsafe recovery backup file: {path}")
+        raise SystemExit("unsafe recovery backup file")
     metadata = path.stat()
     if (metadata.st_uid != os.geteuid()
             or metadata.st_gid != os.getegid()
             or stat.S_IMODE(metadata.st_mode) != mode
             or metadata.st_nlink != 1):
-        raise SystemExit(f"wrong recovery backup provenance: {path}")
+        raise SystemExit("wrong recovery backup provenance")
 
 source_files = {
     str(path.relative_to(source)): path
@@ -1180,10 +1209,27 @@ if actual_backups != expected_backups:
 
 binary_manifest = {}
 for line in source_files[".swapz-binaries.sha256"].read_text().splitlines():
-    match = re.fullmatch(r"([0-9a-f]{64})  (/[^\r\n]+)", line)
-    if not match or match[2] in binary_manifest:
+    # GNU sha256sum prefixes the digest with '\\' and escapes backslashes in
+    # filenames (notably the literal systemd '\\x2d' swap unit). Decode only
+    # its canonical spelling, then compare the exact round-trip representation.
+    match = re.fullmatch(r"(\\?)([0-9a-f]{64})  (/[^\r\n]+)", line)
+    if not match:
         raise SystemExit("noncanonical recovery binary manifest")
-    binary_manifest[match[2]] = match[1]
+    prefix, expected_hash, encoded_path = match.groups()
+    if prefix:
+        # Decode escapes in pairs. A stray backslash fails the canonical
+        # round trip below; a doubled one is never treated as a stray.
+        path = re.sub(r"\\(\\|n)",
+                      lambda escaped: "\\" if escaped[1] == "\\" else "\n",
+                      encoded_path)
+    else:
+        path = encoded_path
+    canonical_path = path.replace("\\", r"\\").replace("\n", r"\n")
+    canonical_prefix = "\\" if canonical_path != path else ""
+    if (line != f"{canonical_prefix}{expected_hash}  {canonical_path}"
+            or path in binary_manifest):
+        raise SystemExit("noncanonical recovery binary manifest")
+    binary_manifest[path] = expected_hash
 if set(binary_manifest) != set(paths) | {installed_module}:
     raise SystemExit("recovery binary manifest destination mismatch")
 for path in paths:
@@ -1278,9 +1324,9 @@ restore_uninstall_backup() {
   query_dkms_status current_status -m swapz -v "$version" || return 1
   dkms_status_single_kernel_scope "$current_status" &&
     other_kernel_module_candidates_absent || return 1
-  cleanup_activation_files
-  cleanup_source_files
-  rm -f -- "$installed_module"
+  cleanup_activation_files || return 1
+  cleanup_source_files || return 1
+  rm -f -- "$installed_module" || return 1
   if [[ -n "$current_status" ]]; then
     "$dkms_bin" remove -m swapz -v "$version" --all || return 1
   fi
@@ -1338,11 +1384,9 @@ restore_uninstall_backup() {
   if [[ -n "$test_root" && ${SWAPZ_TEST_UNINSTALL_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
     return 1
   fi
-  if [[ "$existing_kind" == legacy ]]; then
-    verify_owned_legacy || return 1
-  else
-    verify_owned || return 1
-  fi
+  # Uninstall admits only a verified *current* package. The install-only
+  # existing_kind variable is not owned by this rollback or by recover.
+  verify_owned || return 1
   durable_package_paths "$cli" "$installed_module" || return 1
 }
 
@@ -1352,22 +1396,27 @@ uninstall_rollback() {
   transaction_active=0
   echo "BLOCKED: package uninstall $reason; attempting transaction rollback" >&2
   if ! verify_transaction_snapshot; then
-    cleanup_activation_files || true
-    echo "BLOCKED: uninstall rollback snapshot invalid; recovery data retained at $transaction_dir" >&2
+    quarantine_activation || true
+    echo "BLOCKED: uninstall rollback snapshot invalid; rollback not attempted; recovery-required journal retained" >&2
     exit "$rc"
   fi
   if ! persist_transaction_state rollback-started; then
-    cleanup_activation_files || true
-    echo "BLOCKED: cannot journal uninstall rollback; recovery data retained at $transaction_dir" >&2
+    quarantine_activation || true
+    echo "BLOCKED: cannot journal uninstall rollback; recovery-required journal retained" >&2
     exit "$rc"
   fi
   if restore_uninstall_backup && persist_transaction_state rolled-back; then
-    rm -rf -- "$transaction_dir"
+    if rm -rf -- "$transaction_dir"; then
+      echo "BLOCKED: uninstall rollback succeeded; previous installation verified and journal cleared" >&2
+    else
+      quarantine_activation || true
+      echo "BLOCKED: uninstall rollback restored package but journal cleanup failed; activation blocked" >&2
+    fi
   else
     # A failed final check must never leave activation entry points online.
-    cleanup_activation_files || true
-    persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
-    echo "BLOCKED: uninstall rollback incomplete; verified recovery data retained at $transaction_dir" >&2
+    quarantine_activation || true
+    record_incomplete_rollback || true
+    echo "BLOCKED: uninstall rollback incomplete at phase $transaction_phase; verified recovery-required journal retained" >&2
   fi
   exit "$rc"
 }
@@ -1480,7 +1529,7 @@ PY
         "$boot_verifier_service" "$runtime_health_service" "$primary_swap" \
         "$installed_module" "${module_candidate_paths[@]}"; do
       [[ ! -L "$recovery_path" ]] ||
-        blocked "recovery found symlinked installed package path: $recovery_path"
+        blocked "recovery found symlinked installed package destination"
     done
     # Replay the saved *previous* state, never forward-complete an ambiguous
     # install or uninstall. A rolled-back journal is also safe to re-verify.
@@ -1619,7 +1668,7 @@ if [[ "$action" == uninstall ]]; then
   transaction_dir="$(mktemp -d "$transaction_parent/swapz-uninstall.XXXXXXXX")"
   chmod 0700 "$transaction_dir"
   transaction_active=2
-  trap 'staging_abort $? failure' ERR
+  trap 'staging_abort $? "command failed during $transaction_phase"' ERR
   trap 'staging_abort 129 interruption' HUP
   trap 'staging_abort 130 interruption' INT
   trap 'staging_abort 143 interruption' TERM
@@ -1627,7 +1676,7 @@ if [[ "$action" == uninstall ]]; then
   persist_transaction_state prepared
 
   transaction_active=3
-  trap 'uninstall_rollback $? failure' ERR
+  trap 'uninstall_rollback $? "command failed during $transaction_phase"' ERR
   trap 'uninstall_rollback 129 interruption' HUP
   trap 'uninstall_rollback 130 interruption' INT
   trap 'uninstall_rollback 143 interruption' TERM
@@ -1693,7 +1742,7 @@ fi
 # never rebuilds or re-signs them, because either operation would change the
 # bytes whose digests were admitted by the qualification report.
 for input in "$cli_artifact" "$oracle_artifact" "$module_artifact" "$build_info" "$qualification_report"; do
-  safe_input_file "$input" || blocked "unsafe or missing package input: $input"
+  safe_input_file "$input" || blocked "unsafe or missing qualified package input"
 done
 [[ -x "$cli_artifact" && -x "$oracle_artifact" ]] ||
   blocked "qualified userspace artifacts are not executable"
@@ -1704,7 +1753,7 @@ for payload in dkms.conf src/kernel/VERSION \
     packaging/swapz-primary-boot-verify.service \
     packaging/swapz-primary-runtime-health.service \
     packaging/swapz-primary-generator packaging/swapz-primary.swap; do
-  safe_input_file "$payload" || blocked "unsafe package payload: $payload"
+  safe_input_file "$payload" || blocked "unsafe package payload"
 done
 
 qualification_output="$(python3 - "$qualification_report" "$kernel_release" <<'PY'
@@ -1831,12 +1880,12 @@ fi
 current_dkms_status=""
 query_dkms_status current_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
   blocked "cannot inspect current-kernel DKMS state"
+if [[ -n "$existing_kind" ]] && ! dkms_status_exact_installed "$current_dkms_status"; then
+  blocked "verified package does not have an installed current-kernel DKMS state"
+fi
 assert_single_kernel_dkms_scope
 if [[ -z "$existing_kind" && -n "$current_dkms_status" ]]; then
   blocked "DKMS state exists without a verified package"
-fi
-if [[ -n "$existing_kind" ]] && ! dkms_status_exact_installed "$current_dkms_status"; then
-  blocked "verified package does not have an installed current-kernel DKMS state"
 fi
 if [[ -n "$existing_kind" ]]; then
   verify_installed_module_set ||
@@ -1860,7 +1909,7 @@ assert_no_primary_recovery_authority upgrade
 ensure_transaction_parent
 transaction_dir="$(mktemp -d "$transaction_parent/swapz-package.XXXXXXXX")"
 transaction_active=2
-trap 'staging_abort $? failure' ERR
+trap 'staging_abort $? "command failed during $transaction_phase"' ERR
 trap 'staging_abort 129 interruption' HUP
 trap 'staging_abort 130 interruption' INT
 trap 'staging_abort 143 interruption' TERM
@@ -1961,8 +2010,8 @@ restore_cli_backup() {
 restore_previous_package() {
   local restored_status=""
   (( had_existing == 1 )) || return 0
-  cleanup_package_files
-  install -d -m0755 "$src/src/kernel"
+  cleanup_package_files || return 1
+  install -d -m0755 "$src/src/kernel" || return 1
   cp -a -- "$backup_dir/source/dkms.conf" "$src/dkms.conf"
   cp -a -- "$backup_dir/source/$marker" "$src/$marker"
   cp -a -- "$backup_dir/source/$source_manifest" "$src/$source_manifest"
@@ -2030,67 +2079,77 @@ rollback() {
     rm -f -- "$temporary_cli" || true
   fi
   if ! verify_transaction_snapshot; then
-    cleanup_activation_files || true
-    echo "BLOCKED: install rollback snapshot invalid; recovery data retained at $transaction_dir" >&2
+    quarantine_activation || true
+    echo "BLOCKED: install rollback snapshot invalid; rollback not attempted; recovery-required journal retained" >&2
     exit "$rc"
   fi
   if ! persist_transaction_state rollback-started; then
-    cleanup_activation_files || true
-    echo "BLOCKED: cannot journal install rollback; recovery data retained at $transaction_dir" >&2
+    quarantine_activation || true
+    echo "BLOCKED: cannot journal install rollback; recovery-required journal retained" >&2
     exit "$rc"
   fi
   if ! query_dkms_status rollback_dkms_status -m swapz -v "$version" ||
      ! dkms_status_single_kernel_scope "$rollback_dkms_status" ||
      ! other_kernel_module_candidates_absent; then
-      cleanup_activation_files || true
-      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
-      echo "BLOCKED: rollback DKMS scope uncertain (query, other kernel or variant); recovery data retained at $transaction_dir" >&2
+      quarantine_activation || true
+      record_incomplete_rollback || true
+      echo "BLOCKED: rollback DKMS scope uncertain (query, other kernel or variant); recovery-required journal retained" >&2
       exit "$rc"
   fi
   if [[ -n "$rollback_dkms_status" ]]; then
     if ! "$dkms_bin" remove -m swapz -v "$version" --all >/dev/null 2>&1; then
-      cleanup_activation_files || true
-      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
-      echo "BLOCKED: cannot clear DKMS state during rollback; recovery data retained at $transaction_dir" >&2
+      quarantine_activation || true
+      record_incomplete_rollback || true
+      echo "BLOCKED: cannot clear DKMS state during rollback; recovery-required journal retained" >&2
       exit "$rc"
     fi
   fi
   cleanup_package_files
   rm -f -- "$installed_module"
   if ! module_candidates_absent; then
-    cleanup_activation_files || true
-    persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
-    echo "BLOCKED: rollback left ambiguous module images; recovery data retained at $transaction_dir" >&2
+    quarantine_activation || true
+    record_incomplete_rollback || true
+    echo "BLOCKED: rollback left ambiguous module images; recovery-required journal retained" >&2
     exit "$rc"
   fi
   durable_package_paths "$installed_module_dir" || {
-    persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
+    record_incomplete_rollback || true
     exit "$rc"
   }
   if (( had_existing == 1 )); then
     if restore_previous_package && persist_transaction_state rolled-back; then
-      rm -rf -- "$transaction_dir"
+      if rm -rf -- "$transaction_dir"; then
+        echo "BLOCKED: install rollback succeeded; previous installation verified and journal cleared" >&2
+      else
+        quarantine_activation || true
+        echo "BLOCKED: install rollback restored package but journal cleanup failed; activation blocked" >&2
+      fi
     else
       # Do not publish a CLI after failed rollback re-verification.
-      cleanup_activation_files || true
-      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
-      echo "BLOCKED: previous package restoration failed; preserved rollback data at $transaction_dir" >&2
+      quarantine_activation || true
+      record_incomplete_rollback || true
+      echo "BLOCKED: previous package restoration failed; verified recovery-required journal retained" >&2
     fi
   else
     local cleanup_ok=1
     "$depmod_bin" "$kernel_release" >/dev/null 2>&1 || cleanup_ok=0
     "$systemctl_bin" daemon-reload >/dev/null 2>&1 || cleanup_ok=0
     if (( cleanup_ok == 1 )) && persist_transaction_state rolled-back; then
-      rm -rf -- "$transaction_dir"
+      if rm -rf -- "$transaction_dir"; then
+        echo "BLOCKED: initial install rollback succeeded; empty state verified and journal cleared" >&2
+      else
+        quarantine_activation || true
+        echo "BLOCKED: initial install rollback cleaned package but journal removal failed" >&2
+      fi
     else
-      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
-      echo "BLOCKED: rollback cleanup incomplete; preserved transaction data at $transaction_dir" >&2
+      record_incomplete_rollback || true
+      echo "BLOCKED: rollback cleanup incomplete; recovery-required journal retained" >&2
     fi
   fi
   exit "$rc"
 }
 transaction_active=1
-trap 'rollback $? failure' ERR
+trap 'rollback $? "command failed during $transaction_phase"' ERR
 trap 'rollback 129 interruption' HUP
 trap 'rollback 130 interruption' INT
 trap 'rollback 143 interruption' TERM
@@ -2129,7 +2188,7 @@ new_source_created=1
 install -m0644 dkms.conf "$src/dkms.conf"
 install -m0644 src/kernel/VERSION "$src/src/kernel/VERSION"
 for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
-  safe_input_file "$file" || blocked "unsafe kernel package source: $file"
+  safe_input_file "$file" || blocked "unsafe kernel package source"
   install -m0644 "$file" "$src/src/kernel/$(basename "$file")"
 done
 install -m0644 "$build_info" "$src/src/kernel/swapz-build-info.h"

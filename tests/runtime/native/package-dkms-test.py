@@ -537,7 +537,7 @@ exec "{flock_binary}" "$@"
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
         self.assertIn("already matches", repeated.stdout)
         self.assertEqual(
-            self.dkms_log.read_text().splitlines(), before + ["status"])
+            self.dkms_log.read_text().splitlines(), before + ["status", "status"])
 
         mapper = self.prefix / "lib/systemd/system/swapz-primary-mapper.service"
         verifier = self.prefix / "lib/systemd/system/swapz-primary-boot-verify.service"
@@ -898,17 +898,28 @@ exec "{flock_binary}" "$@"
 
         # A stale file matching the accidental historical literal temp name
         # must not prevent PID-scoped atomic CLI restoration.
+        # It is still an unowned activation entry: preflight must refuse rather
+        # than silently accept or erase it before a transaction is journaled.
         stale_cli_restore = self.prefix / "sbin/.swapzctl.restore.$"
         stale_cli_restore.write_text("foreign stale rollback temp\n")
         self.systemctl_fail_marker.unlink(missing_ok=True)
         result = self.invoke(
             "install", {"SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1"})
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("existing package is partial, foreign, or modified",
+                      result.stderr)
+        self.assertIn("rollback not attempted", result.stderr)
         self.assertEqual(
             (self.prefix / "sbin/swapzctl").read_bytes(), old_binary)
         self.assertEqual(self.installed_module.read_bytes(), old_module)
         self.assertEqual(
             stale_cli_restore.read_text(), "foreign stale rollback temp\n")
+        self.assertEqual(
+            list((self.home / "transactions").glob("swapz-package.*")), [])
+        stale_cli_restore.unlink()
+        result = self.invoke(
+            "install", {"SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1"})
+        self.assertNotEqual(result.returncode, 0)
         self.assertIn("daemon-reload", self.systemctl_log.read_text())
 
         # Deliberate failure after the old CLI is restored must revoke it
@@ -1162,7 +1173,7 @@ exec "{flock_binary}" "$@"
             stdout, stderr = process.communicate(timeout=8)
             self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
             if collide_journal_temp:
-                self.assertIn("cannot journal install rollback", stderr)
+                self.assertIn("install rollback snapshot invalid", stderr)
                 self.assertEqual(
                     journal_temp_sentinel.read_bytes(), b"must-not-change\n")
                 self.assertFalse((self.prefix / "sbin/swapzctl").exists())
@@ -1603,6 +1614,18 @@ exec "{flock_binary}" "$@"
         self.assert_installed_exact()
         self.assertEqual(self.uninstall_transactions(), [])
 
+    def test_uninstall_after_dkms_removal_uses_uninstall_snapshot_identity(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        stopped = self.invoke("uninstall", {
+            "SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed",
+        })
+        self.assertEqual(stopped.returncode, 2, stopped.stderr)
+        self.assertIn("uninstall rollback succeeded", stopped.stderr)
+        self.assertNotIn("unbound variable", stopped.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+        self.assertEqual(self.invoke("recover").returncode, 0)
+
     def test_uninstall_depmod_and_daemon_reload_failures_restore(self):
         self.assertEqual(self.invoke("install").returncode, 0)
 
@@ -1961,6 +1984,14 @@ exec "{flock_binary}" "$@"
 
         committed_uninstall = self.kill_at_durable_phase(
             "uninstall", "committed")
+        # A systemd unit filename contains a literal backslash; GNU sha256sum
+        # emits its canonical escaped form in the backed-up binary manifest.
+        binary_manifest = (
+            committed_uninstall / "backup/source/.swapz-binaries.sha256"
+        ).read_text()
+        self.assertTrue(any(
+            line.startswith("\\") and r"\\x2d" in line
+            for line in binary_manifest.splitlines()))
         self.assert_absent()
         finished = self.invoke("recover")
         self.assertEqual(finished.returncode, 0, finished.stderr)
@@ -2026,6 +2057,33 @@ exec "{flock_binary}" "$@"
         self.assert_absent()
         self.assertFalse(Path(str(self.installed_module) + ".zst").exists())
         self.assertFalse(compressed.exists())
+
+    def test_recover_rejects_rehashed_noncanonical_escaped_binary_manifest(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase("uninstall", "dkms-removed")
+        manifest = transaction / "backup/source/.swapz-binaries.sha256"
+        original = manifest.read_text()
+        # A syntactically rehashed journal is not authority to change the
+        # GNU checksum escaping or the prior package's destination identity.
+        changed = original.replace(r"\\x2d", r"\x2d", 1)
+        self.assertNotEqual(changed, original)
+        manifest.write_text(changed)
+        state_file = transaction / "state.json"
+        state = json.loads(state_file.read_text())
+        for entry in state["backup_files"]:
+            if entry["path"] == "source/.swapz-binaries.sha256":
+                entry["sha256"] = sha256(manifest)
+                entry["size"] = manifest.stat().st_size
+                break
+        else:
+            self.fail("recovery manifest absent from rollback journal")
+        state_file.write_text(
+            json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
+        refused = self.invoke("recover")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("noncanonical recovery binary manifest", refused.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue(transaction.exists())
 
     def test_recover_interrupted_upgrade_restores_original_provenance(self):
         self.assertEqual(self.invoke("install").returncode, 0)
