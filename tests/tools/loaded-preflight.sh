@@ -44,7 +44,7 @@ done
 [[ $(id -u) == 0 ]] || fail "root required for loaded preflight"
 
 swapz_clear_tmp_before_memory_check ||
-    fail "cannot safely clean completed swapz scratch before the early memory observation"
+    fail "completed-owned /tmp cleanup refused; verify private session completion proofs, ownership, mounts and helper availability before retrying (no broad cleanup attempted)"
 note "LOADED_PREFLIGHT_TMP_CLEANUP=completed-owned-only"
 
 # Diagnostic only: early loaded-stage RAM is not the later ID36 admission
@@ -53,7 +53,7 @@ note "LOADED_PREFLIGHT_TMP_CLEANUP=completed-owned-only"
 early_available_kib="$(awk '
     $1 == "MemAvailable:" {
         if (NF != 3 || $2 !~ /^(0|[1-9][0-9]*)$/ ||
-            $3 != "kB" || ++seen != 1)
+            $3 != "kB" || length($2) > 18 || ++seen != 1)
             invalid = 1
         else
             value = $2
@@ -64,10 +64,11 @@ early_available_kib="$(awk '
         print value
     }
 ' /proc/meminfo 2>/dev/null || true)"
-if is_uint "$early_available_kib"; then
-    note "OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo unit:kB available:$early_available_kib floor:1048576 admission:no"
-else
-    note 'OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo status:unavailable admission:no'
+if ! is_uint "$early_available_kib"; then
+    printf '%s\n' 'OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo status:unavailable required:1048576 unit:kB admission:no; restore readable canonical MemAvailable telemetry before ID36' >&2
+elif (( early_available_kib < 1048576 )); then
+    printf 'OBSERVED_ID36_EARLY_HOST_MEMORY=source:/proc/meminfo available:%s required:1048576 unit:kB admission:no; allow ordinary reclaim before ID36\n' \
+        "$early_available_kib" >&2
 fi
 
 clean_orphaned_nullb() {
