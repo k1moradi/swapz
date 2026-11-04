@@ -359,6 +359,16 @@ def physical_campaign_evidence(policy_raw):
             },
         },
         "artifacts": {
+            "metadata_ram_trace": {
+                "name": "metadata-ram-trace.json",
+                "size_bytes": len((
+                    json.dumps(sampled_metadata_ram_trace(),
+                               indent=2, sort_keys=True) + "\n").encode()),
+                "sha256": hashlib.sha256((
+                    json.dumps(sampled_metadata_ram_trace(),
+                               indent=2, sort_keys=True) + "\n").encode()
+                ).hexdigest(),
+            },
             "host_before": campaign_artifact("host-before.json", "4"),
             "host_after": campaign_artifact("host-after.json", "5"),
             "qualification_summary": campaign_artifact("summary.json", "6"),
