@@ -1073,7 +1073,9 @@ exec "{flock_binary}" "$@"
 
     def interrupt_upgrade_with_snapshot(
             self, corrupt_backup, corrupt_metadata=False,
-            corrupt_journal_metadata=False, collide_journal_temp=False):
+            corrupt_journal_metadata=False, collide_journal_temp=False,
+            missing_journal=False, substitute_directory=False,
+            unsafe_transaction_mode=False, corrupt_journal_phase=False):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_module = self.installed_module.read_bytes()
         self.module.write_bytes(b"replacement-qualified-module\n")
@@ -1124,6 +1126,19 @@ exec "{flock_binary}" "$@"
                 (transaction / "state.json.tmp").symlink_to(
                     journal_temp_sentinel)
 
+            if missing_journal:
+                state_path.unlink()
+            if unsafe_transaction_mode:
+                transaction.chmod(0o755)
+            if corrupt_journal_phase:
+                state["phase"] = "unrecognized-package-phase"
+                state_path.write_text(
+                    json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
+            if substitute_directory:
+                transaction.rename(transaction.with_name(
+                    transaction.name + ".original"))
+                transaction.mkdir(mode=0o700)
+
             os.killpg(process.pid, signal.SIGTERM)
             stdout, stderr = process.communicate(timeout=8)
             self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
@@ -1138,7 +1153,9 @@ exec "{flock_binary}" "$@"
                 refused = self.invoke("install")
                 self.assertIn("incomplete package transaction retained",
                               refused.stderr)
-            elif corrupt_backup or corrupt_metadata or corrupt_journal_metadata:
+            elif (corrupt_backup or corrupt_metadata or corrupt_journal_metadata
+                  or missing_journal or substitute_directory
+                  or unsafe_transaction_mode or corrupt_journal_phase):
                 self.assertIn("rollback snapshot invalid", stderr)
                 self.assertFalse((self.prefix / "sbin/swapzctl").exists())
                 self.assertEqual(
@@ -1171,6 +1188,32 @@ exec "{flock_binary}" "$@"
     def test_upgrade_journal_metadata_tamper_quarantines_activation(self):
         self.interrupt_upgrade_with_snapshot(
             corrupt_backup=False, corrupt_journal_metadata=True)
+
+    def test_missing_rollback_journal_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, missing_journal=True)
+
+    def test_directory_substitution_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, substitute_directory=True)
+
+    def test_unsafe_transaction_directory_mode_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, unsafe_transaction_mode=True)
+
+    def test_noncanonical_rollback_phase_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, corrupt_journal_phase=True)
+
+    def test_stale_unjournaled_transaction_blocks_new_install(self):
+        parent = self.home / "transactions"
+        parent.mkdir(mode=0o700)
+        stale = parent / "swapz-package.stale-without-state"
+        stale.mkdir(mode=0o700)
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("incomplete package transaction retained", result.stderr)
+        self.assert_absent()
 
     def test_transaction_journal_mode_is_durable_before_publish(self):
         source = self.script.read_text()
