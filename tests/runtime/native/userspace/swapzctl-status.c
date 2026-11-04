@@ -214,7 +214,7 @@ static void test_checked_counter_arithmetic(void)
 		"compressed=2 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=0",
 		STATUS_RETRY, "gc_write", "exceed");
 	assert_status_problem(
-		"failed=0 error=0 logical_write=8192 physical_write=4096 gc_write=0 "
+		"failed=0 error=0 logical_write=8192 physical_write=2048 gc_write=0 "
 		"compressed=1 raw=1 zero_elided=0 bulk_mode=1 bulk_padding=0",
 		STATUS_RETRY, "physical_write-gc_write", "smaller");
 	assert_status_problem(
