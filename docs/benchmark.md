@@ -166,14 +166,13 @@ sampled by `io-replay.py` at this same measured boundary. Full-process
 it also contains prefill, warmup and post-mixed packed-read population.
 `retained_burst_target` is an end-of-interval gauge, not a delta.
 
-The current unqualified candidate also retains successfully read payload blocks
-from one immutable 16KiB extent so sequential sibling records do not re-read a
-block already present in `read_scratch`. This is a duplicate-I/O elimination
-experiment, not yet evidence that the faster packed-read verdict becomes
-FASTER. The next owner run must report actual lower READ bytes/requests and
-latency before any such claim. It also reports
-`batch_snapshot_crc_wall_ns` for the unchanged full-transaction pause/resume
-CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
+Partial 4-block extent residency is qualified production behavior (ROADMAP
+ID45), not a pending experiment. Successfully fetched 4KiB blocks from the
+current immutable extent may remain resident and suppress duplicate sibling
+reads only until an authority-changing mutation invalidates them. Normal
+generation, descriptor and payload-CRC validation remains mandatory. The split
+`batch_snapshot_crc_wall_ns` timing is attribution only: pause and resume still
+hash the complete transaction and do not change publication semantics.
 
 ## Current directional result
 
@@ -185,21 +184,17 @@ is not a current-source result. Consult the source-bound
 
 ## Confirmation gate
 
-Fast and serial ID63 remain five-pair confirmations because they are promoted
-request-efficiency mechanisms. The owner run must continue to report paired
-95% CIs for useful read throughput, p99, lower bytes and lower requests, with
-zero `parallel_read_coalesce_extra_blocks`.
+ID63 remains the promoted adjacent-request confirmation surface. Fast and serial
+runs use five matched rounds that vary only `read_coalesce=0/1`; independent
+READ fan-out stays fixed on in both arms. Report paired 95% confidence intervals
+for useful READ throughput, p99, lower bytes and lower requests. The merge-off
+arm must emit zero ID63 adjacency/coalescing activity, while the merge-on arm
+must keep `parallel_read_coalesce_extra_blocks=0`.
 
-ID64 no longer has a confirmation gate. Its loaded A/B is removed. The active scheduling question is shallow K=1 detachment: fast QD4/QD8/QD32 use five matched sync/async rounds while fast mixed retains five matched pairs.
-
-ID65 and ID66 are owner-qualified at source
-`2fabd0dc4b3fe09b8e52e9a624e9452647229e09`. The READ helper remains absent
-and compatibility read-worker telemetry stays zero. ID63 owns adjacent-range
-coalescing, while the ordered worker separately has bounded independent
-lower-READ fan-out through the same private-slot infrastructure. Standalone
-same-extent grouping is retired. The final fan-out decision at `11fbc839...`
-established large useful-service and tail-latency gains with ID63 disabled, so
-fan-out is now fixed on and its runtime selector/routine A/B are retired.
+Independent READ fan-out is fixed-on production infrastructure. The retired
+ID39 helper workqueue, standalone same-extent grouping and fan-out routine A/B
+must remain absent; do not restore a retired selector to reproduce old
+experiments.
 
 Multi-page DISCARD retains all-or-nothing
 generation/mapping/shared-extent-liveness validation with no per-physical-block
