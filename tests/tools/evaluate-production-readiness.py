@@ -8,8 +8,10 @@ privileged actions and never upgrades historical observations into PASS.
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
+import math
 import re
 import runpy
 import sys
@@ -26,6 +28,7 @@ PHYSICAL_CAMPAIGN_EVALUATOR = (
 METADATA_RAM_VALIDATOR = (
     ROOT / "tests/runtime/benchmark/metadata_ram_evidence.py")
 RAM_TRACE_VALIDATOR = runpy.run_path(str(METADATA_RAM_VALIDATOR))
+MAX_EVIDENCE_INPUT_BYTES = 256 * 1024 * 1024
 PHYSICAL_CAMPAIGN_AMENDMENT = (
     ROOT / "tests/runtime/benchmark/physical-qualification-amendment-v2.json")
 
@@ -110,11 +113,28 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise EvidenceError("nonfinite JSON number is not evidence")
+    return parsed
+
+
+def _reject_json_constant(value: str) -> None:
+    raise EvidenceError(f"nonfinite JSON constant is not evidence: {value}")
+
+
 def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
-    raw = path.read_bytes()
+    with path.open("rb") as evidence_file:
+        raw = evidence_file.read(MAX_EVIDENCE_INPUT_BYTES + 1)
+    if len(raw) > MAX_EVIDENCE_INPUT_BYTES:
+        raise EvidenceError(
+            f"{path}: evidence exceeds {MAX_EVIDENCE_INPUT_BYTES}-byte input bound")
     try:
         value = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=_unique_object)
+            raw.decode("utf-8"), object_pairs_hook=_unique_object,
+            parse_float=_finite_json_float,
+            parse_constant=_reject_json_constant)
     except (UnicodeDecodeError, json.JSONDecodeError, EvidenceError) as exc:
         raise EvidenceError(f"{path}: invalid JSON: {exc}") from exc
     if not isinstance(value, dict):
@@ -153,7 +173,10 @@ def parse_env_strict(raw: bytes) -> dict[str, str]:
 
 
 def load_env_strict(path: Path) -> tuple[dict[str, str], bytes]:
-    raw = path.read_bytes()
+    with path.open("rb") as evidence_file:
+        raw = evidence_file.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise EvidenceError(f"{path}: cold-boot evidence exceeds 1 MiB")
     return parse_env_strict(raw), raw
 
 
@@ -200,7 +223,13 @@ def _valid_source(value: Any) -> bool:
 
 
 def _valid_observed_at_utc(value: Any) -> bool:
-    return isinstance(value, str) and bool(UTC_TIMESTAMP_RE.fullmatch(value))
+    if not isinstance(value, str) or not UTC_TIMESTAMP_RE.fullmatch(value):
+        return False
+    try:
+        observed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return observed.utcoffset() == datetime.timedelta(0)
 
 
 def _valid_run_id(value: Any) -> bool:
@@ -270,7 +299,8 @@ def validate_acceptance_policy(
     memory_limit = (
         sustained.get("metadata_and_target_peak_ram_bytes_max")
         if isinstance(sustained, dict) else None)
-    if not isinstance(memory_limit, int) or isinstance(memory_limit, bool) or             memory_limit <= 0:
+    if (type(memory_limit) is not int or
+            not 0 < memory_limit <= RAM_TRACE_VALIDATOR["MAX_UINT64"]):
         raise EvidenceError("missing positive production RAM limit")
     return sha256_bytes(raw), memory_limit
 
@@ -527,12 +557,17 @@ def validate_physical_campaign_evidence(
                 type(logical_pages) is not int or logical_pages <= 0 or
                 type(logical_capacity_bytes) is not int or
                 logical_capacity_bytes <= 0 or
-                logical_capacity_bytes != logical_pages * 4096 or
+                logical_pages > RAM_TRACE_VALIDATOR["MAX_UINT32"] or
+                logical_capacity_bytes > RAM_TRACE_VALIDATOR["MAX_UINT64"] or
+                RAM_TRACE_VALIDATOR["_checked_product"](
+                    logical_pages, page_bytes,
+                    RAM_TRACE_VALIDATOR["MAX_UINT64"]) != logical_capacity_bytes or
                 target is None or logical_capacity_bytes > target[1] or
                 logical_pages != RAM_TRACE_VALIDATOR[
                     "maximum_logical_pages_for_partition"](
                         target[1] if target is not None else None) or
-                type(peak_ram_bytes) is not int or peak_ram_bytes <= 0):
+                type(peak_ram_bytes) is not int or
+                not 0 < peak_ram_bytes <= RAM_TRACE_VALIDATOR["MAX_UINT64"]):
             reject("sealed campaign capacity/RAM evidence is invalid")
         else:
             try:
@@ -1124,20 +1159,44 @@ def evaluate_release(
     capacity = pass_record("maximum_capacity_and_ram")
     require_target("maximum_capacity_and_ram", capacity)
     require_policy("maximum_capacity_and_ram", capacity)
+    # A page-rounded index estimate is an admission calculation, never proof
+    # of full-capacity loaded construction or the measured host RAM peak.
+    memory_measurement = {
+        "status": "NOT_MEASURED",
+        "observed_peak_ram_bytes": None,
+        "limit_bytes": peak_ram_limit,
+        "initialization_peak_ram_bytes": None,
+        "steady_peak_ram_bytes": None,
+        "gc_peak_ram_bytes": None,
+    }
+    campaign_issues = None
+    if (physical_campaign_evidence is not None and
+            physical_campaign_evidence_raw is not None):
+        campaign_issues = validate_physical_campaign_evidence(
+            physical_campaign_evidence, physical_campaign_evidence_raw,
+            source_sha, policy_sha256, target)
     if capacity is not None:
         logical = capacity.get("logical_capacity_bytes")
         peak = capacity.get("peak_ram_bytes")
-        if not isinstance(logical, int) or isinstance(logical, bool) or logical <= 0:
+        valid_logical = (
+            type(logical) is int and
+            0 < logical <= RAM_TRACE_VALIDATOR["MAX_UINT64"])
+        valid_peak = (
+            type(peak) is int and
+            0 < peak <= RAM_TRACE_VALIDATOR["MAX_UINT64"])
+        if not valid_logical:
             block_code("maximum_capacity_and_ram: logical capacity is invalid")
-        if not isinstance(peak, int) or isinstance(peak, bool) or peak <= 0:
+        if not valid_peak:
             block_code("maximum_capacity_and_ram: peak RAM is invalid")
         elif peak_ram_limit is not None and peak > peak_ram_limit:
-            block_code("maximum_capacity_and_ram: measured peak exceeds frozen limit")
-        if (
-                physical_campaign_evidence is None or
-                physical_campaign_evidence_raw is None):
             block_code(
-                "maximum_capacity_and_ram: persistent campaign evidence is missing")
+                "maximum_capacity_and_ram: measured peak exceeds frozen limit "
+                f"(metric=metadata_and_target_peak_ram_bytes "
+                f"observed={peak} limit={peak_ram_limit})")
+        if campaign_issues is None:
+            block_code(
+                "maximum_capacity_and_ram: NOT_MEASURED; "
+                "persistent loaded-host campaign evidence is missing")
         else:
             if capacity.get("evidence_sha256") != sha256_bytes(
                     physical_campaign_evidence_raw):
@@ -1145,20 +1204,40 @@ def evaluate_release(
                     "maximum_capacity_and_ram: campaign evidence digest binding mismatch")
             sealed_capacity = physical_campaign_evidence.get(
                 "capacity_and_ram")
-            if (
-                    not isinstance(sealed_capacity, dict) or
-                    logical != sealed_capacity.get("logical_capacity_bytes") or
-                    peak != sealed_capacity.get("peak_ram_bytes")):
+            matches_campaign = (
+                isinstance(sealed_capacity, dict) and
+                valid_logical and valid_peak and
+                logical == sealed_capacity.get("logical_capacity_bytes") and
+                peak == sealed_capacity.get("peak_ram_bytes"))
+            if not matches_campaign:
                 block_code(
                     "maximum_capacity_and_ram: sealed campaign measurement mismatch")
+            for issue in campaign_issues:
+                block_code("maximum_capacity_and_ram: " + issue)
+            # Only actual, sealed, source-bound samples can set a measured
+            # verdict. An interrupted/missing trace cannot inherit PASS from
+            # calculated capacity or a self-declared scalar report.
+            if (not campaign_issues and matches_campaign and
+                    peak_ram_limit is not None and
+                    capacity.get("evidence_sha256") ==
+                    sha256_bytes(physical_campaign_evidence_raw)):
+                summary = sealed_capacity["metadata_ram_summary"]
+                memory_measurement.update({
+                    "status": (
+                        "MEASURED_WITHIN_LIMIT" if peak <= peak_ram_limit
+                        else "MEASURED_OVER_LIMIT"),
+                    "observed_peak_ram_bytes": peak,
+                    "initialization_peak_ram_bytes":
+                        summary["initialization_peak_ram_bytes"],
+                    "steady_peak_ram_bytes": summary["steady_peak_ram_bytes"],
+                    "gc_peak_ram_bytes": summary["gc_peak_ram_bytes"],
+                })
 
     physical = pass_record("sustained_physical_performance")
     require_target("sustained_physical_performance", physical)
     require_policy("sustained_physical_performance", physical)
     if physical is not None:
-        if (
-                physical_campaign_evidence is None or
-                physical_campaign_evidence_raw is None):
+        if campaign_issues is None:
             block_code(
                 "sustained_physical_performance: persistent campaign evidence is missing")
         else:
@@ -1166,10 +1245,7 @@ def evaluate_release(
                     physical_campaign_evidence_raw):
                 block_code(
                     "sustained_physical_performance: campaign evidence digest binding mismatch")
-            for issue in validate_physical_campaign_evidence(
-                    physical_campaign_evidence,
-                    physical_campaign_evidence_raw,
-                    source_sha, policy_sha256, target):
+            for issue in campaign_issues:
                 block_code("sustained_physical_performance: " + issue)
 
     lifecycle = pass_record("lifecycle_deployment_state", deployment=True)
@@ -1278,6 +1354,13 @@ def evaluate_release(
             "PASS" if deployment_ready and harness_armed else "NO"),
         "COLD_BOOT_HARNESS": "ARMED" if harness_armed else "NOT_ARMED",
         "COLD_BOOT_OBSERVED": cold_boot_observed,
+        "METADATA_RAM_MEASUREMENT": memory_measurement,
+        "FULL_CAPACITY_LOADED_CONSTRUCTION": (
+            "SAMPLED_LOADED_HOST"
+            if memory_measurement["status"] != "NOT_MEASURED"
+            else "NOT_MEASURED"),
+        "CAPACITY_INDEX_ESTIMATE": "PREDICTED_ONLY",
+        "ALLOCATION_FAILURE_COVERAGE": "SEPARATE_NOT_CONSTRUCTION_EVIDENCE",
         "code_blockers": code_blockers,
         "deployment_blockers": deployment_blockers,
         "cold_boot_blockers": cold_boot_blockers,
@@ -1353,6 +1436,15 @@ def main() -> int:
             "PRODUCTION_READY_FOR_OWNER_REBOOT": "NO",
             "COLD_BOOT_HARNESS": "NOT_ARMED",
             "COLD_BOOT_OBSERVED": "NO",
+            "METADATA_RAM_MEASUREMENT": {
+                "status": "NOT_MEASURED", "observed_peak_ram_bytes": None,
+                "limit_bytes": None, "initialization_peak_ram_bytes": None,
+                "steady_peak_ram_bytes": None, "gc_peak_ram_bytes": None,
+            },
+            "FULL_CAPACITY_LOADED_CONSTRUCTION": "NOT_MEASURED",
+            "CAPACITY_INDEX_ESTIMATE": "PREDICTED_ONLY",
+            "ALLOCATION_FAILURE_COVERAGE":
+                "SEPARATE_NOT_CONSTRUCTION_EVIDENCE",
             "code_blockers": [str(exc)],
             "deployment_blockers": [
                 "code production-readiness gates are not all PASS"],
