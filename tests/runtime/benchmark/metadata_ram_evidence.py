@@ -397,14 +397,17 @@ def validate_metadata_ram_trace(
     baseline_available_kib = [
         sample["mem_available_kib"] for sample in baseline]
     baseline_median_available_kib = _median(baseline_available_kib)
-    post_baseline = [
-        sample for phase in PHASES[1:] for sample in phase_samples[phase]]
+    mapper_present_samples = [
+        sample for phase in PHASES[1:] for sample in phase_samples[phase]
+        if sample["mapper_present"]]
+    if not mapper_present_samples:
+        raise ValueError("metadata RAM trace never observed the mapper")
     minimum_sample = min(
-        post_baseline, key=lambda sample: sample["mem_available_kib"])
+        mapper_present_samples, key=lambda sample: sample["mem_available_kib"])
     peak_ram_bytes = (
         baseline_median_available_kib - minimum_sample["mem_available_kib"]
     ) * MEMINFO_UNIT_BYTES
-    if peak_ram_bytes <= 0 or not minimum_sample["mapper_present"]:
+    if peak_ram_bytes <= 0:
         raise ValueError(
             "metadata RAM peak was not observed while mapper was present")
     if (
@@ -417,8 +420,15 @@ def validate_metadata_ram_trace(
     # Use the last second of target-absent samples to prove the whole-host
     # counters returned to the pre-create envelope. This is intentionally
     # fail-closed on a noisy/non-quiescent host rather than manufacturing PASS.
-    recovery = absent_teardown[-11:]
+    recovery_cutoff_ns = (
+        absent_teardown[-1]["monotonic_ns"] - 1_000_000_000)
+    recovery_start = max(
+        index for index, sample in enumerate(absent_teardown)
+        if sample["monotonic_ns"] <= recovery_cutoff_ns)
+    recovery = absent_teardown[recovery_start:]
     if (
+            recovery[-1]["monotonic_ns"] -
+            recovery[0]["monotonic_ns"] < 1_000_000_000 or
             _median([sample["mem_available_kib"] for sample in recovery]) <
             min(baseline_available_kib) or
             _median([sample["s_unreclaim_kib"] for sample in recovery]) >
