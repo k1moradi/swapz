@@ -718,8 +718,12 @@ constructor order. It mutates a copy of the constructor to demonstrate that
 an early or resized index is rejected. This is a reproducible production
 source-size audit, NOT an allocator success, page-table estimate or host RAM
 PASS. Constructor failure injection on owned RAM-backed `null_blk` and
-repeated create/destroy require serialized loaded-host verification; never
-run a full-capacity allocation stress merely to exercise this inventory.
+repeated create/destroy require serialized loaded-host verification; the
+native authority suite also performs 17 deterministic small-index failure
+injections and a successful attach, repeated eight times with reverse-order
+cleanup and AddressSanitizer coverage. That rootless fixture tests owned array
+unwind, not a loaded Device Mapper constructor. Never run full-capacity
+allocation stress merely to exercise this inventory.
 The same preflight must exercise an aligned near-`u32` physical
 geometry without allocating it, proving reserve arithmetic and one-past-limit
 rejection do not truncate or wrap. On 32-bit builds, reject otherwise-admissible
@@ -5270,7 +5274,15 @@ observed sample, not an asserted constant. Teardown must show recovery to or
 below the stable pre-create baseline after the observed allocation peak.
 The sample scope includes metadata and target resident memory plus page tables;
 unmeasured vmalloc/slab costs may not be excluded by relabeling them as
-estimates. Missing phases, inconsistent timestamps, peak mismatch, malformed
+estimates. Since mapper teardown happens after the replay arm is written, the
+serialized loaded-host sampler must publish a separate, immutable post-teardown
+JSON artifact using the canonical JSON evidence writer. The campaign sealer
+takes `--metadata-ram-trace` on its `seal` subcommand, verifies canonical bytes
+and SHA-256 provenance, checks the boot ID against both host snapshots, and
+requires sample timestamps within the host snapshot window. The release
+evaluator checks the sealed trace against its artifact size and digest. A
+scalar embedded in an early replay pair cannot substitute for this later
+artifact. Missing phases, inconsistent timestamps, peak mismatch, malformed
 provenance or unrecovered teardown block the campaign and the release
 evaluator, even if the supplied campaign digest was recomputed. The serialized
 Codex loaded-host collector remains a separate required qualification; an
