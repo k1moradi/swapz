@@ -776,7 +776,10 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
                 expected_count=arm.get(f"{operation}_ops"))
     else:
         reasons.append(f"{label} latency summary is missing")
-    identity = arm.get("device_identity") or {}
+    identity = arm.get("device_identity")
+    if not isinstance(identity, dict):
+        reasons.append(f"{label} physical identity is missing or malformed")
+        identity = {}
     partuuid = identity.get("physical_partuuid")
     device_bytes = identity.get("physical_device_bytes")
     lower_major_minor = identity.get("lower_major_minor")
@@ -809,11 +812,17 @@ def validate_arm(arm: dict, workload: str, label: str) -> list[str]:
                 elapsed < spec["measure_seconds"]):
             reasons.append(f"{label} sustained measured duration is shorter than one hour")
     if workload == "sd-high-occupancy-churn":
-        cold = arm.get("cold_read") or {}
+        cold = arm.get("cold_read")
+        if not isinstance(cold, dict):
+            reasons.append(f"{label} cold-read evidence is missing or malformed")
+            cold = {}
         reasons += latency_histogram_reasons(
             cold, cold.get("histogram"), f"{label} cold read",
             expected_count=cold.get("pages"))
-    resources = arm.get("resources") or {}
+    resources = arm.get("resources")
+    if not isinstance(resources, dict):
+        reasons.append(f"{label} resource evidence is missing or malformed")
+        resources = {}
     rss = resources.get("replay_peak_rss_bytes")
     if type(rss) is not int or rss < 0:
         reasons.append(f"{label} replay peak RSS is missing")
