@@ -402,7 +402,20 @@ qualified_installed_package()
 
 	qualification_issue=qualified_package_marker_missing_or_invalid
 	qualified_count=0
-	for marker in "$package_sources_root"/swapz-*/.swapz-qualification; do
+	# The trusted parser intentionally disables pathname expansion. Expand
+	# only the controlled package path, then restore the caller's shell state.
+	case $- in
+	*f*)
+		set +f
+		set -- "$package_sources_root"/swapz-*/.swapz-qualification
+		set -f
+		;;
+	*) set -- "$package_sources_root"/swapz-*/.swapz-qualification ;;
+	esac
+	marker_count=0
+	for marker do
+		marker_count=$((marker_count + 1))
+		[ "$marker_count" -le 16 ] || return 1
 		[ -e "$marker" ] || [ -L "$marker" ] || continue
 		[ -f "$marker" ] && [ ! -L "$marker" ] || return 1
 		[ "$(stat -c '%u' -- "$marker")" = "$expected_uid" ] &&
