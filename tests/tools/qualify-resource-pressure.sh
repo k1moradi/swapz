@@ -93,8 +93,9 @@ require_cgroup_word() {
 
     if grep -qw "$word" "$telemetry_path" 2>/dev/null; then
         return 0
+    else
+        grep_rc=$?
     fi
-    grep_rc=$?
     if (( grep_rc == 1 )); then
         printf 'BLOCKED: ID36 %s\n' "$absent_message" >&2
     else
