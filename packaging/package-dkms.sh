@@ -788,6 +788,12 @@ try:
 finally:
     os.close(descriptor)
 PY
+  # Hermetic crash injection occurs only after the journal and parent fsync.
+  # SIGKILL here models a power loss without executing Bash rollback traps.
+  if [[ -n "$test_root" && ${SWAPZ_TEST_PAUSE_AFTER:-never} == "$phase" ]]; then
+    : > "$sandbox/package-checkpoint.ready"
+    sleep 30
+  fi
 }
 
 verify_transaction_snapshot() {
