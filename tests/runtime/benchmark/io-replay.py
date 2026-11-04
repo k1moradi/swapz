@@ -2145,12 +2145,18 @@ def replay(args):
                             try:
                                 os.fsync(fd)
                             except OSError as exc:
-                                observed_measured_ops = len(samples["W"]) + len(samples["R"])
+                                expected_write_bytes = sum(
+                                    PAGE for item in trace
+                                    if item["phase"] == "measure" and
+                                    item["op"] == "W")
+                                observed_write_bytes = len(samples["W"]) * PAGE
                                 raise OSError(
                                     f"{args.candidate}:mixed final fsync failed "
-                                    f"(expected {mf['measure_ops']} measured operations, "
-                                    f"observed {observed_measured_ops}): "
-                                    f"{exc.strerror or 'I/O error'}"
+                                    f"(expected measured WRITE bytes "
+                                    f"{expected_write_bytes}, observed completed "
+                                    f"WRITE bytes {observed_write_bytes}; expected "
+                                    f"final-drain oracle=success, observed="
+                                    f"{exc.strerror or 'I/O error'})"
                                 ) from exc
                         finally:
                             if gc_was_enabled:

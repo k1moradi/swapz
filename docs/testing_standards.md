@@ -459,8 +459,9 @@ retain byte-exact timed READs and complete final-image verification. For both
 Python-threaded wave and persistent lanes, all measured worker completions must
 precede a checked final fsync of the opened target, within the timed interval
 and before the final lower-I/O/CPU snapshots or a PASS result. A failed drain
-must identify the candidate/mixed phase, errno reason and expected versus
-observed measured operation count; final byte readback cannot replace it.
+must identify the candidate/mixed phase, OS failure reason, expected versus
+observed measured WRITE byte counts and the failed final-drain oracle; final
+byte readback cannot replace it.
 The native-C engine retains its independently checked final fsync.
 Results must identify the replay mode and remain outside the existing history series.
 This is workload sensitivity, not a production-source performance A/B; actual
