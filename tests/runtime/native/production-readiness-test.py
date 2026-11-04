@@ -1517,6 +1517,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "sealed campaign object differs from artifact bytes" in blocker
             for blocker in result["code_blockers"]))
+        self.assertFalse(any(
+            "observation predates sealed campaign" in blocker
+            for blocker in result["code_blockers"]))
 
     def test_serialized_owner_report_is_authoritative(self):
         policy = acceptance_policy()
