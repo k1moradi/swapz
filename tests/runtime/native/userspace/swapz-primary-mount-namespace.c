@@ -25,6 +25,9 @@ static char fixture_proc_root[PATH_MAX];
 static int fixture_mount_open_error;
 static int fixture_self_mount_open_error;
 static int fixture_inventory_error;
+static int fixture_inventory_readdir_error;
+static int fixture_inventory_seen_foreign_pid;
+static int fixture_mount_vanish_on_read;
 static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
 static int fixture_mount_fd = -1;
@@ -112,11 +115,40 @@ static int fixture_openat(int directory_fd, const char *path, int flags, ...)
 
 static ssize_t fixture_read(int fd, void *buffer, size_t length)
 {
+	/*
+	 * An opened mountinfo fd must not be treated as a harmless exited PID:
+	 * losing its pathname while read(2) fails still leaves an unknown table.
+	 */
+	if (fd == fixture_mount_fd && fixture_mount_vanish_on_read) {
+		char converted[PATH_MAX];
+
+		fixture_mount_vanish_on_read = 0;
+		assert(unlink(fixture_path("/proc/3031/mountinfo", converted)) == 0);
+		assert(unlink(fixture_path("/proc/3031/ns/mnt", converted)) == 0);
+		errno = ESRCH;
+		return -1;
+	}
 	if (fd == fixture_mount_fd && fixture_mount_read_error) {
 		errno = fixture_mount_read_error;
 		return -1;
 	}
 	return read(fd, buffer, length);
+}
+
+static struct dirent *fixture_readdir(DIR *directory)
+{
+	struct dirent *entry;
+
+	/* Fail after delivering the foreign PID, not at opendir(3). */
+	if (fixture_inventory_readdir_error &&
+	    fixture_inventory_seen_foreign_pid) {
+		errno = fixture_inventory_readdir_error;
+		return NULL;
+	}
+	entry = readdir(directory);
+	if (entry && !strcmp(entry->d_name, "3031"))
+		fixture_inventory_seen_foreign_pid = 1;
+	return entry;
 }
 
 static int fixture_close(int fd)
@@ -190,6 +222,7 @@ static int fixture_lstat(const char *path, struct stat *info)
 #define close(...) fixture_close(__VA_ARGS__)
 #define fopen(...) fixture_fopen(__VA_ARGS__)
 #define opendir(...) fixture_opendir(__VA_ARGS__)
+#define readdir(...) fixture_readdir(__VA_ARGS__)
 #define stat(...) fixture_stat(__VA_ARGS__)
 #define lstat(...) fixture_lstat(__VA_ARGS__)
 /* Keep the synthetic foreign PID distinct from the production reader's self. */
@@ -200,6 +233,7 @@ static int fixture_lstat(const char *path, struct stat *info)
 #undef getpid
 #undef lstat
 #undef stat
+#undef readdir
 #undef opendir
 #undef fopen
 #undef close
@@ -256,6 +290,9 @@ static void fixture_reset(void)
 	fixture_mount_open_error = 0;
 	fixture_self_mount_open_error = 0;
 	fixture_inventory_error = 0;
+	fixture_inventory_readdir_error = 0;
+	fixture_inventory_seen_foreign_pid = 0;
+	fixture_mount_vanish_on_read = 0;
 	fixture_namespace_stat_error = 0;
 	fixture_mount_read_error = 0;
 	fixture_mount_fd = -1;
@@ -473,6 +510,12 @@ int main(void)
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
 	expect_mount_admission("selected partition in another namespace", 0, 0);
+	/* An unrelated sibling earlier in the same remote table cannot mask it. */
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n"
+		     "38 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
+	expect_mount_admission("foreign sibling followed by selected partition", 0, 0);
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
@@ -548,6 +591,12 @@ int main(void)
 	fixture_reset();
 	fixture_inventory_error = EACCES;
 	expect_mount_admission("permission-denied PID inventory", 0, EACCES);
+	fixture_reset();
+	fixture_inventory_readdir_error = EIO;
+	expect_mount_admission("PID inventory fails after enumerating foreign PID", 0, EIO);
+	fixture_reset();
+	fixture_mount_vanish_on_read = 1;
+	expect_mount_admission("opened foreign table vanishes during read", 0, ESRCH);
 	fixture_reset();
 	fixture_mount_open_error = EACCES;
 	expect_mount_admission("permission-denied remote table", 0, EACCES);

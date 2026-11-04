@@ -125,6 +125,7 @@ struct swapz_primary_swap_entry {
 enum fixture_scenario {
     FIXTURE_CLEAN, FIXTURE_SELECTED_MOUNT, FIXTURE_PARENT_MOUNT,
     FIXTURE_FOREIGN_SELECTED, FIXTURE_FOREIGN_PARENT,
+    FIXTURE_FOREIGN_SELECTED_INITIAL, FIXTURE_PID_REPLACED_SELECTED,
     FIXTURE_SELECTED_SWAPFILE, FIXTURE_PARENT_SWAPFILE,
     FIXTURE_SELECTED_SWAP_PARTITION, FIXTURE_UNRELATED_SIBLING,
     FIXTURE_DISAPPEARED_PID, FIXTURE_PID_STILL_PRESENT,
@@ -136,15 +137,19 @@ enum fixture_scenario {
     FIXTURE_HOLDER_INITIAL, FIXTURE_UNRELATED_SWAPFILE,
     FIXTURE_WRONG_MOUNT_DEVICE, FIXTURE_REMOTE_OVERSIZED,
     FIXTURE_LOCAL_OVERSIZED, FIXTURE_PID_INVENTORY_EACCES,
+    FIXTURE_PID_INVENTORY_EIO,
     FIXTURE_SYMLINK_MOUNTINFO, FIXTURE_WRONG_TARGET_OPEN,
     FIXTURE_TRUNCATED_REMOTE, FIXTURE_TRUNCATED_LOCAL,
     FIXTURE_NAMESPACE_STAT_EACCES, FIXTURE_STALE_PARTUUID,
     FIXTURE_POST_SNAPSHOT_MOUNT, FIXTURE_POST_SNAPSHOT_SWAPON,
+    FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES,
     FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
     "safe control", "selected mount late", "selected parent mount late",
     "foreign selected mount late", "foreign parent mount late",
+    "foreign selected mount at initial admission",
+    "replacement PID mounts selected partition late",
     "selected swapfile late", "parent swapfile late",
     "selected swap partition late", "unrelated sibling late",
     "disappeared PID late", "PID still present late",
@@ -157,11 +162,13 @@ static const char *const scenario_names[] = {
     "unrelated /swapfile late", "wrong-device mount alias late",
     "oversized remote mountinfo late", "oversized local mountinfo late",
     "unreadable PID inventory late", "symlink mountinfo late",
+    "PID inventory I/O failure late",
     "selected device identity changed before exclusive open",
     "truncated remote mountinfo late", "truncated local mountinfo late",
     "inaccessible PID namespace late", "stale PARTUUID on exclusive open",
     "new mount immediately after final safe inventory",
-    "new swap immediately after final safe inventory"
+    "new swap immediately after final safe inventory",
+    "PID inventory becomes unreadable after final safe inventory"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -254,6 +261,26 @@ static void fixture_oversized_mountinfo(const char *relative)
 
 static void fixture_reset_mount_inventory(void)
 {
+    /*
+     * A preceding case may have replaced PID 3031 with PID 4040 between
+     * admission scans. Restore the private directory before the next case.
+     */
+    {
+        char previous_pid[PATH_MAX];
+        char replacement_pid[PATH_MAX];
+        int previous_length = snprintf(previous_pid, sizeof(previous_pid),
+                                       "%s/3031", fixture_proc_root);
+        int replacement_length = snprintf(replacement_pid,
+                                          sizeof(replacement_pid),
+                                          "%s/4040", fixture_proc_root);
+
+        assert(previous_length > 0 &&
+               (size_t)previous_length < sizeof(previous_pid));
+        assert(replacement_length > 0 &&
+               (size_t)replacement_length < sizeof(replacement_pid));
+        if (rename(replacement_pid, previous_pid) < 0)
+            assert(errno == ENOENT);
+    }
     fixture_mount_fd = -1;
     fixture_mount_open_error = fixture_mount_read_error = fixture_inventory_error = 0;
     fixture_mount_open_count = fixture_mount_read_count = 0U;
@@ -276,6 +303,7 @@ static void fixture_reset_mount_inventory(void)
 static void fixture_apply_late_inventory(void)
 {
     char path[PATH_MAX];
+    char replacement_path[PATH_MAX];
     int length;
 
     switch (scenario) {
@@ -298,6 +326,18 @@ static void fixture_apply_late_inventory(void)
         fixture_inventory_file("3031/mountinfo",
             "36 25 259:9 / / rw - ext4 /dev/other rw\n"
             "37 36 8:0 / /mnt/parent rw - ext4 /dev/sda rw\n");
+        break;
+    case FIXTURE_PID_REPLACED_SELECTED:
+        /* An entirely new visible PID must be scanned on final admission. */
+        length = snprintf(path, sizeof(path), "%s/3031", fixture_proc_root);
+        assert(length > 0 && (size_t)length < sizeof(path));
+        length = snprintf(replacement_path, sizeof(replacement_path),
+                          "%s/4040", fixture_proc_root);
+        assert(length > 0 && (size_t)length < sizeof(replacement_path));
+        assert(rename(path, replacement_path) == 0);
+        fixture_inventory_file("4040/mountinfo",
+            "36 25 259:9 / / rw - ext4 /dev/other rw\n"
+            "37 36 8:1 / /mnt/selected rw - ext4 /dev/sda1 rw\n");
         break;
     case FIXTURE_UNRELATED_SIBLING:
         fixture_inventory_file("3031/mountinfo",
@@ -341,6 +381,9 @@ static void fixture_apply_late_inventory(void)
     case FIXTURE_PID_INVENTORY_EACCES:
         fixture_inventory_error = EACCES;
         break;
+    case FIXTURE_PID_INVENTORY_EIO:
+        fixture_inventory_error = EIO;
+        break;
     case FIXTURE_SYMLINK_MOUNTINFO:
         fixture_inventory_remove("self/mountinfo");
         length = snprintf(path, sizeof(path), "%s/self/mountinfo", fixture_proc_root);
@@ -370,7 +413,8 @@ static int fixture_proc_open(const char *path, int flags)
 {
     char converted[PATH_MAX];
     int fd;
-    int remote = !strcmp(path, "/proc/3031/mountinfo");
+    int remote = !strcmp(path, "/proc/3031/mountinfo") ||
+                 !strcmp(path, "/proc/4040/mountinfo");
 
     if (strstr(path, "/mountinfo")) {
         ++fixture_mount_open_count;
@@ -710,6 +754,16 @@ static int fixture_header_write(void)
         assert(!post_snapshot_injected);
         post_snapshot_injected = 1;
         assert(swapz_primary_swap_device_active(makedev(8U, 1U)) == 1);
+    } else if (scenario == FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES) {
+        struct swapz_primary_mount_facts facts = {0};
+
+        /* This becomes unreadable only after final prewrite verification. */
+        assert(!post_snapshot_injected);
+        post_snapshot_injected = 1;
+        fixture_inventory_error = EACCES;
+        errno = 0;
+        assert(swapz_primary_read_mount_facts(
+            &facts, makedev(8U, 0U)) < 0 && errno == EACCES);
     }
     ++header_writes;
     return 0;
@@ -823,6 +877,10 @@ static int check_case(enum fixture_scenario candidate)
     admission_reads = prewrite_reads = active_inventory_reads = 0U;
     post_snapshot_injected = 0;
     fixture_reset_mount_inventory();
+    if (candidate == FIXTURE_FOREIGN_SELECTED_INITIAL)
+        fixture_inventory_file("3031/mountinfo",
+            "36 25 259:9 / / rw - ext4 /dev/other rw\n"
+            "37 36 8:1 / /mnt/selected rw - ext4 /dev/sda1 rw\n");
     header_writes = mapper_mutations = mkswap_calls = swapon_calls = 0U;
     module_loads = recovery_marks = owner_release_calls = 0U;
     starting_state_writes = active_state_writes = 0U;
@@ -845,7 +903,8 @@ static int check_case(enum fixture_scenario candidate)
     assert(fclose(diagnostic_stream) == 0);
     diagnostic[diagnostic_length] = '\0';
     gap_probe = candidate == FIXTURE_POST_SNAPSHOT_MOUNT ||
-                candidate == FIXTURE_POST_SNAPSHOT_SWAPON;
+                candidate == FIXTURE_POST_SNAPSHOT_SWAPON ||
+                candidate == FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES;
     expected_safe = candidate == FIXTURE_CLEAN ||
         candidate == FIXTURE_UNRELATED_SIBLING ||
         candidate == FIXTURE_UNRELATED_SWAPFILE ||
@@ -856,6 +915,8 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_PARENT_MOUNT:
     case FIXTURE_FOREIGN_SELECTED:
     case FIXTURE_FOREIGN_PARENT:
+    case FIXTURE_FOREIGN_SELECTED_INITIAL:
+    case FIXTURE_PID_REPLACED_SELECTED:
     case FIXTURE_SELECTED_SWAPFILE:
     case FIXTURE_PARENT_SWAPFILE:
     case FIXTURE_SELECTED_SWAP_PARTITION:
@@ -875,6 +936,7 @@ static int check_case(enum fixture_scenario candidate)
         expected_error = EACCES;
         break;
     case FIXTURE_REMOTE_EIO:
+    case FIXTURE_PID_INVENTORY_EIO:
         expected_error = EIO;
         break;
     case FIXTURE_MALFORMED:
@@ -932,9 +994,12 @@ static int check_case(enum fixture_scenario candidate)
                     active_inventory_reads, writes, diagnostic_length);
             return 1;
         }
-        printf("UNPROVEN: %s: post-final-snapshot mount/swapon exclusivity "
-               "requires a separate host-only kernel proof\n",
-               scenario_names[candidate]);
+        printf("UNPROVEN: %s phase=post-final-snapshot errno=%d "
+               "prevented=none mutations=4; a read-only scan cannot "
+               "exclude changes after it returns\n",
+               scenario_names[candidate],
+               candidate == FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES
+                   ? EACCES : 0);
         return 0;
     }
     if (expected_safe) {
@@ -953,23 +1018,23 @@ static int check_case(enum fixture_scenario candidate)
         }
     } else {
         const char *phase = late ? "header-write" : "admission";
-        int prefix_length = snprintf(expected_diagnostic,
+        int expected_length = snprintf(expected_diagnostic,
             sizeof(expected_diagnostic),
-            "PRIMARY_START=FAILED phase=%s errno=%d error=",
-            phase, expected_error);
+            "PRIMARY_START=FAILED phase=%s errno=%d error=%s\n",
+            phase, expected_error, strerror(expected_error));
 
-        assert(prefix_length > 0 &&
-               (size_t)prefix_length < sizeof(expected_diagnostic));
+        assert(expected_length > 0 &&
+               (size_t)expected_length < sizeof(expected_diagnostic));
         if (result == 0 || result_errno != expected_error ||
             diagnostic_length == 0U ||
-            strncmp(diagnostic, expected_diagnostic,
-                    (size_t)prefix_length) != 0 ||
+            strcmp(diagnostic, expected_diagnostic) != 0 ||
             diagnostic[diagnostic_length - 1U] != '\n' ||
             memchr(diagnostic, '\n', diagnostic_length - 1U) != NULL ||
             strstr(diagnostic, "run_id") ||
             strstr(diagnostic, "0123456789abcdef") ||
             strstr(diagnostic, "secret") || strstr(diagnostic, "token") ||
-            strstr(diagnostic, "passphrase") || writes || module_loads ||
+            strstr(diagnostic, "passphrase") ||
+            strstr(diagnostic, "/proc/") || writes || module_loads ||
             starting_state_writes != (unsigned int)late ||
             active_state_writes != 0U ||
             recovery_marks != (unsigned int)late ||
@@ -981,7 +1046,8 @@ static int check_case(enum fixture_scenario candidate)
               candidate == FIXTURE_WRONG_TARGET_OPEN ||
               candidate == FIXTURE_STALE_PARTUUID ||
               candidate == FIXTURE_PARENT_SUBSTITUTED ||
-              candidate == FIXTURE_HOLDER_LATE) ?
+              candidate == FIXTURE_HOLDER_LATE ||
+              candidate == FIXTURE_FOREIGN_SELECTED_INITIAL) ?
                  prewrite_reads != 0U : prewrite_reads != 1U)) {
             fprintf(stderr, "FAIL: %s: refusal result=%d errno=%d expected=%d "
                     "initial+late=%u late=%u header_write=%u mapper=%u mkswap=%u swapon=%u\n",
@@ -992,9 +1058,11 @@ static int check_case(enum fixture_scenario candidate)
                     diagnostic_length);
             return 1;
         }
-        printf("DENY: %s phase=%s errno=%d claim=retained "
-               "state=%s mutations=0\n", scenario_names[candidate],
-               phase, expected_error, late ? "recovery-requested" : "READY");
+        printf("DENY: %s phase=%s category=\"%s\" errno=%d "
+               "claim=retained state=%s "
+               "prevented=header-write,mapper,mkswap,swapon mutations=0\n",
+               scenario_names[candidate], phase, scenario_names[candidate],
+               expected_error, late ? "recovery-requested" : "READY");
     }
     return 0;
 }

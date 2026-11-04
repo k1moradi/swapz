@@ -61,6 +61,34 @@ remaining disabled is a safety block, not lifecycle qualification. Synthetic
 model PASS does not establish current-host or production-C lifecycle correctness;
 bounded real anonymous-page swap-out/swap-in evidence remains required.
 
+### Primary cross-namespace mount admission evidence (issue #94)
+
+The direct-C mount reader fixture must exercise the actual production reader
+with private, regular-file proc inventories: selected partition and parent
+only in a foreign visible PID, a sibling before a selected row, an unreadable
+PID directory, an enumeration error after returning a valid PID, and a
+foreign mountinfo descriptor whose namespace disappears during a failed read.
+Only an unopened PID table with a separately proven absent mount namespace
+may be skipped for process-exit errors. Preserve the coordinator's own root
+mount identity independently from the foreign namespace's root.
+
+The primary-start rootless lifecycle fixture must independently show a
+foreign-PID conflict on the initial admission and a replaced visible PID
+with a selected mount appearing between initial and final scans. Inject
+ambiguous late inventory errors as well as conflicts. For every rejection
+before the header-write boundary, assert the captured production failure
+phase and *original* errno, zero intercepted header writes, mapper operations,
+`mkswap` and `swapon`, and retention of the READY or recovery-requested
+owner state. Case diagnostics must identify the safe conflict category and
+which mutation was prevented without printing private proc paths or run IDs.
+Keep a negative control that removes final revalidation and demonstrates
+intercepted mutations. Evidence created **after** the last successful
+read-only snapshot, including a new mount, swap activation or now-unreadable
+PID inventory, is an explicit **UNPROVEN** exclusion interval: do not relabel
+it as a prevented mutation or as loaded kernel safety. Closing #94 requires
+separate loaded evidence of the kernel-side exclusion and recovery behavior;
+snapshot-only rootless results cannot provide that proof.
+
 ### Primary real-swap native-host qualification
 
 `docs/production-acceptance.json` is the canonical frozen quantitative
