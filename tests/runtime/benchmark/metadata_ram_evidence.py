@@ -567,20 +567,31 @@ def validate_metadata_ram_trace(
         sample["s_unreclaim_kib"] for sample in baseline])
     baseline_vmalloc_used_twice_kib = _median_twice([
         sample["vmalloc_used_kib"] for sample in baseline])
-    if (
-            recovery[-1]["monotonic_ns"] -
-            recovery[0]["monotonic_ns"] < 1_000_000_000 or
-            _median_twice([
-                sample["mem_available_kib"] for sample in recovery]) <
-            baseline_median_available_twice_kib or
-            _median_twice([
-                sample["s_unreclaim_kib"] for sample in recovery]) >
-            baseline_s_unreclaim_twice_kib or
-            _median_twice([
-                sample["vmalloc_used_kib"] for sample in recovery]) >
-            baseline_vmalloc_used_twice_kib):
+    recovery_span_ns = (
+        recovery[-1]["monotonic_ns"] - recovery[0]["monotonic_ns"])
+    if recovery_span_ns < 1_000_000_000:
         raise ValueError(
-            "metadata RAM teardown did not recover the pre-create envelope")
+            "metadata RAM teardown recovery evidence gap: "
+            f"metric=recovery_span_ns observed={recovery_span_ns} "
+            "required=1000000000")
+    for metric, observed_twice_kib, baseline_twice_kib, recovered in (
+            ("MemAvailable_median_twice_kib", _median_twice([
+                sample["mem_available_kib"] for sample in recovery]),
+             baseline_median_available_twice_kib, "minimum"),
+            ("SUnreclaim_median_twice_kib", _median_twice([
+                sample["s_unreclaim_kib"] for sample in recovery]),
+             baseline_s_unreclaim_twice_kib, "maximum"),
+            ("VmallocUsed_median_twice_kib", _median_twice([
+                sample["vmalloc_used_kib"] for sample in recovery]),
+             baseline_vmalloc_used_twice_kib, "maximum")):
+        if ((recovered == "minimum" and observed_twice_kib <
+             baseline_twice_kib) or
+                (recovered == "maximum" and observed_twice_kib >
+                 baseline_twice_kib)):
+            raise ValueError(
+                "metadata RAM teardown did not recover the pre-create "
+                f"envelope: metric={metric} observed={observed_twice_kib} "
+                f"limit={baseline_twice_kib} evidence=last-second-median")
 
     # These are observed 100 ms sample-window maxima, not a prediction of
     # constructor allocation sizes or an unsampled instantaneous maximum.
