@@ -3723,6 +3723,16 @@ Alpha.29 source qualification follows ownership after the refcount split:
 return the final reference to the free mask.
 
 
+The dedicated native `preparation-publication-lifetime` regression executes the
+production preparation-slot helpers in both deterministic state-publication
+orders. Its 2,048 handoffs per run cover compressed success, no-fit RAW, exact
+negative errno, RAW_SELECTED racing a late negative result, result-ready ACK
+gating, the last producer/consumer reference, slot-63 reclamation and reuse,
+and a preexisting acknowledged success that a later terminal error cannot
+retroactively revoke. The C11 acquire/release shim and staged thread barriers
+are a race-test model, not a Linux memory-model proof or a substitute for
+loaded target, suspend/drain, completion-work and lower-I/O fault qualification.
+
 Rootless architecture coverage is continuous on both x86_64 and ARM64. The
 production-C workflow runs the same native suite on `ubuntu-24.04` and
 `ubuntu-24.04-arm`; x86 therefore compiles/exercises the SSE2, AVX2 and
