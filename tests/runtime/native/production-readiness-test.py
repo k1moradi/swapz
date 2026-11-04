@@ -247,36 +247,53 @@ def campaign_artifact(name, byte):
 
 def sampled_metadata_ram_trace(peak_ram_bytes=900000000):
     # Rootless fixture only. Real RAM must come from the serialized loaded host.
-    phases = (
-        ("baseline", 0, 0),
-        ("initialization", 400000000, 600000000),
-        ("steady", 650000000, 850000000),
-        ("gc", peak_ram_bytes, 870000000),
-        ("teardown", 870000000, 0),
+    baseline_available = 8_000_000_000
+    baseline_s_unreclaim = 100_000_000
+    baseline_vmalloc = 200_000_000
+    phase_values = (
+        ("baseline", [0] * 10, False),
+        ("initialization", [200_000_000, 400_000_000], True),
+        ("steady", [600_000_000, 800_000_000], True),
+        ("gc", [peak_ram_bytes, 850_000_000], True),
+        ("teardown", [850_000_000] + [0] * 21, None),
     )
     samples = []
-    for phase, *values in phases:
-        for value in values:
+    for phase, deltas, mapper_present in phase_values:
+        for phase_index, delta in enumerate(deltas):
             index = len(samples) + 1
+            seconds, tenths = divmod(index, 10)
+            present = (
+                phase_index == 0 if phase == "teardown" else mapper_present)
             samples.append({
                 "phase": phase,
-                "monotonic_ns": index * 1000000000,
-                "timestamp_utc": f"2026-11-03T00:00:{index:02d}Z",
-                "ram_bytes": value,
+                "monotonic_ns": index * 100_000_000,
+                "timestamp_utc":
+                    f"2026-11-03T00:00:{seconds:02d}.{tenths}Z",
+                "mem_available_bytes": baseline_available - delta,
+                "s_unreclaim_bytes": (
+                    baseline_s_unreclaim + (delta // 8 if present else 0)),
+                "vmalloc_used_bytes": (
+                    baseline_vmalloc + (delta // 16 if present else 0)),
+                "mapper_present": present,
             })
     return {
         "schema": "swapz-metadata-ram-samples-v1",
         "capture": "serialized-loaded-host",
-        "scope": "target-owned-resident-bytes-including-page-tables",
+        "scope": "whole-host-conservative-metadata-and-target-ram",
         "source_sha": SOURCE,
         "mapper_uuid": "SWAPZ-PRIMARY-" + "f" * 32,
         "host_boot_id": "11111111-1111-4111-8111-111111111111",
-        "sampling_interval_ns": 1000000000,
+        "sampling_interval_ns": 100_000_000,
         "samples": samples,
     }
 
-
 def physical_campaign_evidence(policy_raw):
+    trace = sampled_metadata_ram_trace()
+    ram_summary = EVALUATOR.RAM_TRACE_VALIDATOR[
+        "validate_metadata_ram_trace"](
+            trace, source_sha=SOURCE,
+            mapper_uuid="SWAPZ-PRIMARY-" + "f" * 32,
+            expected_peak_ram_bytes=900000000)
     return {
         "schema": "swapz-performance-campaign-evidence-v1",
         "sealed_at_utc": "2026-11-03T00:00:00+00:00",
@@ -312,7 +329,8 @@ def physical_campaign_evidence(policy_raw):
             "logical_capacity_bytes": 110920466432,
             "peak_ram_bytes": 900000000,
             "mapper_uuid": "SWAPZ-PRIMARY-" + "f" * 32,
-            "metadata_ram_trace": sampled_metadata_ram_trace(),
+            "metadata_ram_trace": trace,
+            "metadata_ram_summary": ram_summary,
         },
         "host_stability": {
             "status": "STABLE",
