@@ -372,6 +372,20 @@ parent-device \`/sys/block/<disk>/stat\` deltas bracket only the measured phase;
 lower WRITE bytes/requests are normalized by completed useful writes for the
 hour-long throughput comparison.
 
+Every physical block replay retains the measured-boundary raw lower
+`/sys/block/<disk>/stat` counters, process user/system CPU and post-exec
+VmHWM, and exported worker-CPU boundaries. The evaluator independently
+recomputes lower READ/WRITE bytes and request deltas from 512-byte sectors,
+logical READ/WRITE/total MB/s, process CPU and absolute peak RSS, and rejects
+counter resets, missing snapshots, or inconsistent derived fields. Sustained
+minute histograms separately persist READ and WRITE bins and their combined
+projection, so an altered combined tail that does not conserve the original
+per-operation minute evidence is rejected. Chronology and 60 consecutive
+measured-minute windows are also validated. These checks do not cryptographically
+authenticate a wholly rewritten report; the campaign sealer's external artifact
+hashes and source/mapper identity evidence remain necessary. Host-visible
+lower-device bytes and requests are not direct physical NAND wear measurements.
+
 Every physical arm records useful READ/WRITE throughput, p95/p99 and maximum
 latency, replay CPU plus exported swapz worker CPU, host CPU/PSI context, replay
 RSS, a separately measured mapper metadata/target peak-RAM observation, lower
