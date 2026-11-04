@@ -223,8 +223,12 @@ termination may use bounded TERM/KILL for the dedicated test processes only;
 signal-delivery exit races must not mask the underlying qualification failure,
 and one worker's cleanup must not wait for the other worker to leave the shared
 cgroup. Removal of the dedicated cgroup still requires every worker exited.
-Workers are tracked before cgroup migration and all parent pipe descriptors
-are closed even when admission fails. Bounded protocol reads retain multiple
+Workers are tracked before cgroup migration, and cgroup.procs must show
+exactly those workers with no extra or duplicate PIDs before the first FILL
+and again after FILL. If the process inventory of an empty preflight cgroup
+is unreadable, an ordinary rmdir is still attempted; failure cannot silently
+leave that directory behind. All parent pipe descriptors are closed even when
+admission fails. Bounded protocol reads retain multiple
 records from one read without blocking on partial records. Partial cgroup
 creation, first-telemetry failures and evidence temporary-file failures must
 clean up explicitly or expose the cleanup error alongside the original

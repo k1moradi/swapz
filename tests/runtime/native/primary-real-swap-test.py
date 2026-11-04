@@ -1239,6 +1239,53 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                         "dedicated cgroup lacks required control.*partial cgroup cleanup also failed"):
                     qualify._cgroup_create("test", 128, 384)
 
+    def test_cgroup_membership_is_exact_before_and_after_oracle_fill(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            membership = cgroup / "cgroup.procs"
+            workers = [mock.Mock(pid=501), mock.Mock(pid=502)]
+            membership.write_text("501\n502\n", encoding="ascii")
+            qualify.require_oracle_worker_cgroup_ownership(cgroup, workers)
+            for contents in (
+                    "501\n", "501\n502\n503\n", "501\n501\n",
+                    "501\ninvalid\n", "-1\n502\n"):
+                with self.subTest(contents=contents):
+                    membership.write_text(contents, encoding="ascii")
+                    with self.assertRaises(qualify.QualificationFailure):
+                        qualify.require_oracle_worker_cgroup_ownership(cgroup, workers)
+            membership.unlink()
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "cannot read dedicated oracle cgroup"):
+                qualify.require_oracle_worker_cgroup_ownership(cgroup, workers)
+
+    def test_partial_cgroup_without_process_inventory_removes_empty_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory) / "swapz-primary-real-swap-preflight"
+            with mock.patch.object(qualify, "CGROUP_ROOT", Path(directory)), \
+                    mock.patch.object(qualify, "_cgroup_prerequisites"):
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure, "cgroup was removed"):
+                    qualify._cgroup_create("preflight", 128, 384, admitted=True)
+            self.assertFalse(cgroup.exists())
+
+    def test_persistent_evidence_failed_sync_removes_temporary_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            base.chmod(0o700)
+            evidence = qualify.PersistentEvidence(
+                base, "e" * 32, {"source_sha": "a" * 40},
+                expected_uid=os.geteuid())
+            with mock.patch.object(qualify.os, "fsync",
+                                   side_effect=OSError("synthetic sync failure")):
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure, "synthetic sync failure"):
+                    evidence.update("FAULT_INJECTED")
+            self.assertEqual(
+                sorted(path.name for path in base.iterdir()),
+                [evidence.path.name])
+            self.assertEqual(
+                json.loads(evidence.path.read_text())["phase"], "ADMITTED")
+
     def test_missing_or_duplicate_cgroup_oom_evidence_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             events = Path(directory) / "memory.events"

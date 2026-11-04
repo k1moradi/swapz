@@ -1524,14 +1524,32 @@ def _cgroup_create(token: str, resident_mib: int, swap_limit_mib: int,
         return cgroup
     except BaseException as original_error:
         if created:
+            # This admission path has not launched any workers. Even if the
+            # kernel process file became unreadable, try an ordinary rmdir:
+            # cgroup v2 refuses to remove a group still containing processes.
+            inspection_error = None
             try:
                 if (cgroup / "cgroup.procs").read_text(encoding="ascii").strip():
                     raise error_type("partially created cgroup unexpectedly contains processes")
-                cgroup.rmdir()
+            except OSError as exc:
+                inspection_error = exc
             except Exception as cleanup_error:
                 raise error_type(
                     f"{original_error}; partial cgroup cleanup also failed: "
                     f"{cleanup_error}") from original_error
+            try:
+                cgroup.rmdir()
+            except OSError as cleanup_error:
+                inspection_detail = (
+                    f"process inventory unavailable: {inspection_error}; "
+                    if inspection_error is not None else "")
+                raise error_type(
+                    f"{original_error}; partial cgroup cleanup also failed: "
+                    f"{inspection_detail}{cleanup_error}") from original_error
+            if inspection_error is not None:
+                raise error_type(
+                    f"{original_error}; cgroup was removed despite unreadable "
+                    f"process inventory: {inspection_error}") from original_error
         raise
 
 
@@ -1593,6 +1611,23 @@ def _remove_cgroup(cgroup: Path) -> None:
         cgroup.rmdir()
     except OSError as exc:
         raise QualificationFailure(f"cannot remove empty real-swap cgroup: {exc}") from exc
+
+
+def require_oracle_worker_cgroup_ownership(
+        cgroup: Path, processes: list[subprocess.Popen]) -> None:
+    """Require exclusive cgroup membership before any pressure is applied."""
+    try:
+        raw_processes = (cgroup / "cgroup.procs").read_text(encoding="ascii").split()
+    except OSError as exc:
+        raise QualificationFailure("cannot read dedicated oracle cgroup membership") from exc
+    if any(not re.fullmatch(r"[1-9][0-9]*", value) for value in raw_processes):
+        raise QualificationFailure("dedicated oracle cgroup has malformed process identity")
+    observed = {int(value) for value in raw_processes}
+    expected = {process.pid for process in processes}
+    if len(observed) != len(raw_processes) or observed != expected or \
+            len(expected) != len(processes):
+        raise QualificationFailure(
+            "dedicated oracle cgroup membership differs from exact worker PIDs")
 
 
 def _close_oracle_pipes(process: subprocess.Popen) -> None:
@@ -1925,6 +1960,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 expected_pages = workload_mib * MIB // PAGE_BYTES
                 require_oracle_worker_geometry(
                     waiting, worker_memory_mib, "pages", "bytes", "readiness")
+                require_oracle_worker_cgroup_ownership(cgroup, round_processes)
 
                 fill_status_before = read_status()
                 lower_before = read_block_stats(
@@ -1946,6 +1982,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 if any(not re.fullmatch(r"[0-9a-f]{64}", str(record.get("digest", "")))
                        for record in filled_records):
                     raise QualificationFailure("concurrent oracle fill digests are malformed")
+                require_oracle_worker_cgroup_ownership(cgroup, round_processes)
 
                 swap_current = _read_uint(cgroup / "memory.swap.current")
                 swap_peak = _read_uint(cgroup / "memory.swap.peak")
