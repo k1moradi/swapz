@@ -697,7 +697,17 @@ boundary is 776,114,176 bytes, 43,208 bytes of page rounding. The largest one
 is the 433,283,072-byte mapping array. vmalloc
 metadata, page tables, fixed target scratch/caches/workspaces and allocator
 implementation overhead remain outside those figures and require loaded-host
-measurement. The same preflight must exercise an aligned near-`u32` physical
+measurement. The source-contract allocation inventory independently requires
+exactly 17 capacity-scaled `kvcalloc` sites (three logical-page indexes, three
+physical-block indexes and eleven per-segment indexes), every matching
+`kvfree`, exact element types and lengths, and preflight-before-allocation
+constructor order. It mutates a copy of the constructor to demonstrate that
+an early or resized index is rejected. This is a reproducible production
+source-size audit, NOT an allocator success, page-table estimate or host RAM
+PASS. Constructor failure injection on owned RAM-backed `null_blk` and
+repeated create/destroy require serialized loaded-host verification; never
+run a full-capacity allocation stress merely to exercise this inventory.
+The same preflight must exercise an aligned near-`u32` physical
 geometry without allocating it, proving reserve arithmetic and one-past-limit
 rejection do not truncate or wrap. On 32-bit builds, reject otherwise-admissible
 geometries with -EOVERFLOW if map or physical-liveness array byte lengths exceed
@@ -5218,7 +5228,27 @@ count-consistent. Missing or stale sealed campaign evidence is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
 derives maximum logical pages/bytes and measured target/metadata peak RAM from
 the accepted `sd-high-occupancy-churn` swapz arm, and a PASS campaign is invalid
-without that tuple. The `maximum_capacity_and_ram` release record must SHA-256
+without that tuple. The same sealer now rejects a smaller logical mapper
+even if a plausible capacity/peak scalar is provided: capacity is independently
+recomputed from the target partition, its SWZ header reservation, GC reserve,
+segment alignment and foreground headroom. Rootless synthetic traces never
+qualify the host. A resource PASS must carry source-bound and mapper-UUID-bound
+serialized loaded-host metadata RAM samples including a boot identity, strict
+UTC and monotonic timestamps, a bounded declared sample interval with no
+unexplained gaps, and ordered baseline, initialization, steady, GC and teardown
+phases (at least two samples each). The sealed peak must equal the maximum
+observed sample, not an asserted constant. Teardown must show recovery to or
+below the stable pre-create baseline after the observed allocation peak.
+The sample scope includes metadata and target resident memory plus page tables;
+unmeasured vmalloc/slab costs may not be excluded by relabeling them as
+estimates. Missing phases, inconsistent timestamps, peak mismatch, malformed
+provenance or unrecovered teardown block the campaign and the release
+evaluator, even if the supplied campaign digest was recomputed. The serialized
+Codex loaded-host collector remains a separate required qualification; an
+unbound scalar from `--metadata-and-target-peak-ram-bytes` alone is not a
+resource PASS.
+
+The `maximum_capacity_and_ram` release record must SHA-256
 bind the same campaign bytes and exactly match the sealed logical capacity and
 peak RAM. Peak RAM must remain no greater than the frozen
 `metadata_and_target_peak_ram_bytes_max`. Current code readiness also requires
