@@ -187,8 +187,9 @@ The byte oracle expands the run/worker/round seed into position-distinct 4 KiB
 pages; swap-in checks every byte, counts all corrupt bytes and caps only the
 diagnostic samples. The cgroup's OOM event keys must be present and parseable.
 OOM, cgroup swap and PSI telemetry begin before FILL; guard checks enforce the
-1 GiB host MemAvailable floor and stop on sustained cgroup memory PSI "some"
-above 85% for at least five seconds. Kernel/cgroup evidence is parsed
+1 GiB host MemAvailable floor and stop when any rolling interval of at least
+five seconds has cgroup memory PSI "some" above 85%. Earlier quiet time must
+not dilute a later sustained-stall stop condition. Kernel/cgroup evidence is parsed
 fail-closed: MemAvailable must retain its canonical kB unit, PSI has one
 monotonic numeric total, swapz byte counters are nonnegative, and failed= is
 boolean. A failed dmsetup-info query is never mapper-absence evidence by
@@ -200,7 +201,9 @@ A constant-memory cycle telemetry sampler must complete its first host
 the workload can begin pressure. It remains active through ordinary
 stop/recovery and records only bounded aggregates (sample count, timestamps,
 minimum available memory and counter deltas), so telemetry covers normal
-teardown without accumulating an unbounded sample log.
+teardown without accumulating an unbounded sample log. An interruption while
+starting that sampler must signal and join the sampler thread before the
+interruption is propagated.
 
 Once recovery-storage admission is proven and before `prepare`, the helper
 must durably create a root-owned 0600 attempt record under the validated
@@ -246,9 +249,11 @@ termination may use bounded TERM/KILL for the dedicated test processes only;
 signal-delivery exit races must not mask the underlying qualification failure,
 and one worker's cleanup must not wait for the other worker to leave the shared
 cgroup. Removal of the dedicated cgroup still requires every worker exited.
-Workers are tracked before cgroup migration, and cgroup.procs must show
-exactly those workers with no extra or duplicate PIDs before the first FILL
-and again after FILL. If the process inventory of an empty preflight or final workload cgroup
+Workers are tracked before cgroup migration. `cgroup.procs` must show
+exactly those workers before pressure, must contain no foreign PID while
+workers are active, may shrink only after a worker has entered its verified
+exit phase, and must be empty after every worker is reaped. If the process
+inventory of an empty preflight or final workload cgroup
 is unreadable, an ordinary rmdir is still attempted; the kernel refuses that
 operation for a non-empty cgroup, so an empty group is removed without treating
 missing process-inventory evidence as PASS. Failure cannot silently leave that

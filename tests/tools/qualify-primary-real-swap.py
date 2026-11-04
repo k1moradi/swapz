@@ -13,6 +13,7 @@ when required independent evidence cannot be established.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from dataclasses import dataclass, asdict
 import errno
 import fcntl
@@ -75,6 +76,8 @@ MAX_ORACLE_RECORD_BYTES = 4096
 # A sustained memory stall is a safety stop, not an integrity oracle.
 PSI_STOP_FRACTION = 0.85
 PSI_STOP_GRACE_SECONDS = 5
+PSI_STOP_SAMPLE_INTERVAL_SECONDS = 0.05
+PSI_STOP_MAX_SAMPLES = 256
 CYCLE_TELEMETRY_INTERVAL_SECONDS = 0.1
 CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS = 5
 
@@ -85,6 +88,43 @@ class Blocked(RuntimeError):
 
 class QualificationFailure(RuntimeError):
     pass
+
+
+class PsiStallWindow:
+    """Bounded rolling detector for sustained cgroup memory-pressure stalls."""
+
+    def __init__(self, monotonic_seconds: float, total_usec: int):
+        self._samples: deque[tuple[float, int]] = deque(
+            [(monotonic_seconds, total_usec)], maxlen=PSI_STOP_MAX_SAMPLES)
+        self._last_observed_time = monotonic_seconds
+        self._last_observed_total = total_usec
+
+    def observe(self, monotonic_seconds: float, total_usec: int) -> bool:
+        if monotonic_seconds < self._last_observed_time:
+            raise QualificationFailure(
+                "monotonic clock regressed during cgroup PSI monitoring")
+        if total_usec < self._last_observed_total:
+            raise QualificationFailure(
+                "cgroup memory PSI total regressed during workload")
+        self._last_observed_time = monotonic_seconds
+        self._last_observed_total = total_usec
+
+        if monotonic_seconds - self._samples[-1][0] < \
+                PSI_STOP_SAMPLE_INTERVAL_SECONDS:
+            return False
+        self._samples.append((monotonic_seconds, total_usec))
+
+        cutoff = monotonic_seconds - PSI_STOP_GRACE_SECONDS
+        while len(self._samples) >= 2 and self._samples[1][0] <= cutoff:
+            self._samples.popleft()
+
+        oldest_time, oldest_total = self._samples[0]
+        elapsed_seconds = monotonic_seconds - oldest_time
+        if elapsed_seconds < PSI_STOP_GRACE_SECONDS:
+            return False
+        stalled_usec = total_usec - oldest_total
+        return stalled_usec > (
+            PSI_STOP_FRACTION * elapsed_seconds * 1_000_000)
 
 
 def _unique_json_object(pairs):
@@ -1769,8 +1809,9 @@ def _remove_cgroup(cgroup: Path) -> None:
 
 
 def require_oracle_worker_cgroup_ownership(
-        cgroup: Path, processes: list[subprocess.Popen]) -> None:
-    """Require exclusive cgroup membership before any pressure is applied."""
+        cgroup: Path, processes: list[subprocess.Popen], *,
+        allow_worker_exit: bool = False) -> None:
+    """Require no foreign cgroup members and, unless allowed, every worker."""
     try:
         raw_processes = (cgroup / "cgroup.procs").read_text(encoding="ascii").split()
     except OSError as exc:
@@ -1779,10 +1820,12 @@ def require_oracle_worker_cgroup_ownership(
         raise QualificationFailure("dedicated oracle cgroup has malformed process identity")
     observed = {int(value) for value in raw_processes}
     expected = {process.pid for process in processes}
-    if len(observed) != len(raw_processes) or observed != expected or \
+    membership_valid = (
+        observed.issubset(expected) if allow_worker_exit else observed == expected)
+    if len(observed) != len(raw_processes) or not membership_valid or \
             len(expected) != len(processes):
         raise QualificationFailure(
-            "dedicated oracle cgroup membership differs from exact worker PIDs")
+            "dedicated oracle cgroup membership differs from owned worker PIDs")
 
 
 def _close_oracle_pipes(process: subprocess.Popen) -> None:
@@ -2043,15 +2086,19 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             _raise_cleanup_errors(
                 original_error, [f"initial telemetry cgroup: {cleanup_error}"])
         raise
-    pressure_started = time.monotonic()
-    last_psi_total = psi_before
+    psi_window = PsiStallWindow(time.monotonic(), psi_before)
     rounds: list[dict] = []
     active_processes: list[subprocess.Popen] = []
+    guard_processes: list[subprocess.Popen] | None = None
+    guard_allow_worker_exit = False
 
     def guard() -> None:
-        nonlocal last_psi_total
         if telemetry_check is not None:
             telemetry_check()
+        if guard_processes is not None:
+            require_oracle_worker_cgroup_ownership(
+                cgroup, guard_processes,
+                allow_worker_exit=guard_allow_worker_exit)
         events = _memory_events(cgroup / "memory.events")
         if events.get("oom", 0) > events_before.get("oom", 0) or \
                 events.get("oom_kill", 0) > events_before.get("oom_kill", 0):
@@ -2062,14 +2109,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             raise QualificationFailure(
                 f"host MemAvailable crossed {MIN_AVAILABLE_MIB} MiB early-stop threshold")
         current_psi_total = _psi_total(cgroup / "memory.pressure")
-        if current_psi_total < last_psi_total:
-            raise QualificationFailure("cgroup memory PSI total regressed during workload")
-        last_psi_total = current_psi_total
-        elapsed = time.monotonic() - pressure_started
-        if elapsed >= PSI_STOP_GRACE_SECONDS and (
-                current_psi_total - psi_before >
-                PSI_STOP_FRACTION * elapsed * 1_000_000):
-            raise QualificationFailure("sustained cgroup memory PSI exceeded safe stop threshold")
+        if psi_window.observe(time.monotonic(), current_psi_total):
+            raise QualificationFailure(
+                "sustained cgroup memory PSI exceeded safe stop threshold")
 
     try:
         for round_index in range(1, REUSE_ROUNDS + 1):
@@ -2108,6 +2150,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                         raise QualificationFailure(
                             f"cannot move admitted oracle into dedicated cgroup: {exc}") from exc
 
+                guard_processes = round_processes
+                guard_allow_worker_exit = False
                 deadline = time.monotonic() + timeout_seconds
                 oracle_buffers = {process.pid: bytearray() for process in round_processes}
                 waiting = [
@@ -2183,6 +2227,12 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     str((workload_mib + VERIFY_HEADROOM_MIB) * MIB),
                     admitted=True,
                 )
+                require_oracle_worker_cgroup_ownership(
+                    cgroup, round_processes)
+                # A worker may exit immediately after emitting VERIFIED.
+                # From this point the live set may shrink, but no foreign PID
+                # may enter the dedicated cgroup.
+                guard_allow_worker_exit = True
                 for process in round_processes:
                     if process.stdin is None:
                         raise QualificationFailure("oracle command pipe is unavailable")
@@ -2211,6 +2261,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                         raise QualificationFailure(
                             f"oracle verification failed rc={process.returncode}: {stderr}")
 
+                guard_processes = None
+                guard_allow_worker_exit = False
+                require_oracle_worker_cgroup_ownership(cgroup, [])
                 verified = aggregate_oracle_verification(verified_records)
                 verify_status_after = read_status()
                 lower_after_verify = read_block_stats(
@@ -2275,6 +2328,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     "oom_kill_delta": oom_kill_delta,
                 }
             finally:
+                guard_processes = None
+                guard_allow_worker_exit = False
                 original_error = sys.exc_info()[1]
                 cleanup_errors = []
                 for process in round_processes:
@@ -2305,8 +2360,9 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
         reuse = evaluate_reuse_rounds(rounds)
         events_after = _memory_events(cgroup / "memory.events")
         psi_after = _psi_total(cgroup / "memory.pressure")
-        if psi_after < last_psi_total:
-            raise QualificationFailure("cgroup memory PSI total regressed at workload completion")
+        if psi_window.observe(time.monotonic(), psi_after):
+            raise QualificationFailure(
+                "sustained cgroup memory PSI exceeded safe stop threshold")
         return {
             "concurrent_workers": CONCURRENT_ORACLE_PROCESSES,
             "reuse_rounds": len(rounds),
@@ -2436,24 +2492,31 @@ class CycleTelemetrySampler:
 
     def start(self) -> None:
         self._thread.start()
-        if not self._ready.wait(CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS):
-            self._stop.set()
-            self._thread.join(timeout=CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS)
-            if self._thread.is_alive():
-                raise Blocked(
-                    "cycle telemetry sampler did not terminate after start timeout")
-            raise Blocked("cycle telemetry sampler produced no initial observation")
+        startup_error: BaseException | None = None
         try:
-            self.check()
-        except BaseException as original_error:
-            self._stop.set()
+            if not self._ready.wait(CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS):
+                startup_error = Blocked(
+                    "cycle telemetry sampler produced no initial observation")
+            else:
+                self.check()
+        except BaseException as exc:
+            startup_error = exc
+
+        if startup_error is None:
+            return
+
+        self._stop.set()
+        cleanup_errors = []
+        try:
             self._thread.join(timeout=CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS)
-            if self._thread.is_alive():
-                raise QualificationFailure(
-                    f"{_exception_text(original_error)}; cycle telemetry thread "
-                    "cleanup also failed after startup"
-                ) from original_error
-            raise
+        except BaseException as cleanup_error:
+            cleanup_errors.append(
+                f"cycle telemetry thread join: {_exception_text(cleanup_error)}")
+        if self._thread.is_alive():
+            cleanup_errors.append(
+                "cycle telemetry sampler did not terminate after startup failure")
+        _raise_cleanup_errors(startup_error, cleanup_errors)
+        raise startup_error
 
     def check(self) -> None:
         if self.error is None:

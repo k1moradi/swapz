@@ -1038,6 +1038,21 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     self.assertRaises(qualify.Blocked):
                 qualify._mem_available_mib()
 
+    def test_sustained_psi_window_detects_late_high_stall_period(self):
+        window = qualify.PsiStallWindow(0.0, 0)
+        # Ten quiet seconds must not dilute a later five-second high-stall
+        # interval below the stop threshold.
+        for second in range(1, 11):
+            self.assertFalse(window.observe(float(second), 0))
+        for second in range(11, 15):
+            self.assertFalse(
+                window.observe(float(second), (second - 10) * 900_000))
+        self.assertTrue(window.observe(15.0, 4_500_000))
+
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure, "PSI total regressed"):
+            window.observe(16.0, 4_499_999)
+
     def positive_evidence(self):
         return dict(
             cgroup_swap_bytes=32 * qualify.MIB,
@@ -1236,6 +1251,22 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(evidence["pswpin_delta"], 0)
         self.assertEqual(evidence["pswpout_delta"], 0)
         self.assertFalse(hasattr(sampler, "samples_log"))
+
+    def test_cycle_telemetry_start_interrupt_reaps_sampler_thread(self):
+        sampler = qualify.CycleTelemetrySampler()
+        fake_thread = mock.Mock()
+        fake_thread.is_alive.return_value = False
+        sampler._thread = fake_thread
+        sampler._ready = mock.Mock()
+        sampler._ready.wait.side_effect = KeyboardInterrupt()
+        sampler._stop = mock.Mock()
+
+        with self.assertRaises(KeyboardInterrupt):
+            sampler.start()
+
+        sampler._stop.set.assert_called_once_with()
+        fake_thread.join.assert_called_once_with(
+            timeout=qualify.CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS)
 
     def test_cycle_telemetry_sampler_fails_closed_on_low_memavailable(self):
         sampler = qualify.CycleTelemetrySampler()
@@ -1736,6 +1767,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             workers = [mock.Mock(pid=501), mock.Mock(pid=502)]
             membership.write_text("501\n502\n", encoding="ascii")
             qualify.require_oracle_worker_cgroup_ownership(cgroup, workers)
+            membership.write_text("501\n", encoding="ascii")
+            qualify.require_oracle_worker_cgroup_ownership(
+                cgroup, workers, allow_worker_exit=True)
+            membership.write_text("501\n503\n", encoding="ascii")
+            with self.assertRaises(qualify.QualificationFailure):
+                qualify.require_oracle_worker_cgroup_ownership(
+                    cgroup, workers, allow_worker_exit=True)
             for contents in (
                     "501\n", "501\n502\n503\n", "501\n501\n",
                     "501\ninvalid\n", "-1\n502\n"):
