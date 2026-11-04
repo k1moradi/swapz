@@ -1767,7 +1767,9 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 	return DM_ENDIO_DONE;
 }
 
-static void swapz_fail(struct swapz_dm *ctx, int error)
+static void swapz_fail_at(struct swapz_dm *ctx, int error,
+			  const char *operation, const char *category,
+			  const char *stage)
 {
 	unsigned long flags;
 	int terminal_error;
@@ -1794,8 +1796,15 @@ static void swapz_fail(struct swapz_dm *ctx, int error)
 	}
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	if (first_failure)
-		DMERR("swapz alpha: lower or mapping error %d; rejecting subsequent I/O",
-		      terminal_error);
+		DMERR("terminal failure op=%s category=%s stage=%s errno=%d; rejecting subsequent I/O",
+		      operation, category, stage, terminal_error);
+}
+
+/* Keep unclassified worker failures fail-closed, without logging success. */
+static void swapz_fail(struct swapz_dm *ctx, int error)
+{
+	swapz_fail_at(ctx, error, "target", "integrity-or-io",
+		      "ordered-worker");
 }
 
 /*
@@ -1827,12 +1836,13 @@ static int swapz_dm_io(struct dm_io_request *req,
 #ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
 #define SWAPZ_DM_IO_NOTIFY_PARAMETERS(error_name, context_name) \
 	unsigned long error_name, unsigned long unsupported, void *context_name
-#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) \
-	do { (error_name) |= unsupported; } while (0)
+#define SWAPZ_DM_IO_NOTIFY_ERROR(error_bits) \
+	((error_bits) ? -EIO : (unsupported ? -EOPNOTSUPP : 0))
 #else
 #define SWAPZ_DM_IO_NOTIFY_PARAMETERS(error_name, context_name) \
 	unsigned long error_name, void *context_name
-#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) do { } while (0)
+#define SWAPZ_DM_IO_NOTIFY_ERROR(error_bits) \
+	((error_bits) ? -EIO : 0)
 #endif
 
 static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
@@ -1981,11 +1991,12 @@ static void swapz_async_lower_write_done(
 {
 	struct swapz_inflight_write *inflight = context;
 
-	SWAPZ_DM_IO_MERGE_UNSUPPORTED(error);
+	/* Distinguish unsupported service from media EIO; both are terminal. */
+	int lower_error = SWAPZ_DM_IO_NOTIFY_ERROR(error);
 	struct swapz_dm *ctx = inflight->ctx;
 	unsigned long flags;
 
-	WRITE_ONCE(inflight->lower_error, error ? -EIO : 0);
+	WRITE_ONCE(inflight->lower_error, lower_error);
 	WRITE_ONCE(inflight->lower_end_ns, ktime_get_ns());
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	ctx->prep_lower_write_end_queued += ctx->preparation_queued;
@@ -2300,7 +2311,10 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		ctx->single_tail_lower_done_seen = true;
 	if (error || committed != inflight->count) {
 		error = error ? error : -EIO;
-		swapz_fail(ctx, error);
+		swapz_fail_at(ctx, error, "write",
+			      lower_error ? (lower_error == -EOPNOTSUPP ?
+				"unsupported" : "lower-io") : "publication",
+			      lower_error ? "async-completion" : "authority-finish");
 		for (index = 0; index < inflight->count; ++index)
 			swapz_complete(inflight->bios[index], error);
 		inflight->count = 0;
@@ -2542,7 +2556,9 @@ static int swapz_issue_flush(void *opaque)
 				      swapz_kernel_lower_flush, ctx);
 
 	if (error)
-		swapz_fail(ctx, error);
+		swapz_fail_at(ctx, error, "flush",
+			      error == -EOPNOTSUPP ? "unsupported" : "lower-io",
+			      "durability-fence");
 	return error;
 }
 
@@ -2720,9 +2736,10 @@ static void swapz_async_lower_read_done(
 {
 	struct swapz_read_slot *slot = context;
 
-	SWAPZ_DM_IO_MERGE_UNSUPPORTED(error);
+	/* A lower unsupported READ must not turn into an apparent success. */
+	int lower_error = SWAPZ_DM_IO_NOTIFY_ERROR(error);
 
-	WRITE_ONCE(slot->lower_error, error ? -EIO : 0);
+	WRITE_ONCE(slot->lower_error, lower_error);
 	WRITE_ONCE(slot->lower_end_ns, ktime_get_ns());
 	complete(&slot->lower_done);
 }
@@ -7295,14 +7312,31 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			swapz_refresh_accepted_followup(ctx);
 		break;
 	case REQ_OP_DISCARD:
+		/* A flagged DISCARD advances the logical generation without a lower
+		 * WRITE. Fence its predecessors before publishing that mutation. */
+		if (bio->bi_opf & REQ_FUA) {
+			error = swapz_issue_flush(ctx);
+			if (error)
+				break;
+		}
 		error = swapz_discard(ctx, bio);
 		break;
 	default:
 		error = -EOPNOTSUPP;
 		break;
 	}
-	if (error && error != -EOPNOTSUPP && error != -ENOSPC)
-		swapz_fail(ctx, error);
+	/* Only an unsupported *upper opcode* is nonterminal. A supported
+	 * READ/WRITE with lower unsupported bits is a failed target, not a
+	 * permanently retriable per-BIO exception. */
+	if (error && error != -ENOSPC &&
+	    (error != -EOPNOTSUPP || op == REQ_OP_READ ||
+	     op == REQ_OP_WRITE))
+		swapz_fail_at(ctx, error,
+			      op == REQ_OP_READ ? "read" :
+			      op == REQ_OP_DISCARD ? "discard" : "write",
+			      error == -EOPNOTSUPP ? "unsupported" :
+			      error == -EIO ? "lower-io" : "integrity",
+			      "ordered-completion");
 	swapz_complete(bio, error);
 }
 

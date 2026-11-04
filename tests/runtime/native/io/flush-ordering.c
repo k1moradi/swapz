@@ -94,6 +94,69 @@ static int test_prepublication_fua_write_gate(void)
 	return 0;
 }
 
+
+/*
+ * The ordered target's WRITE success can be acknowledged only after the
+ * production prepublication FUA gate observes the real lower flush result.
+ * This model has no block devices or synthetic successful completions.
+ *
+ * Negative control: compile with SWAPZ_TEST_BYPASS_FUA_GATE to publish the
+ * generation BEFORE the gate. The failed-flush assertion must then fail.
+ */
+struct durable_upper {
+	struct fake_lower flush;
+	unsigned int generation;
+	unsigned int success_acks;
+	unsigned int lower_write_calls;
+	int lower_write_error;
+};
+
+static int submit_durable_upper(struct durable_upper *upper, int fua)
+{
+	int error;
+
+	upper->lower_write_calls++;
+#ifdef SWAPZ_TEST_BYPASS_FUA_GATE
+	/* Deliberately broken publication order; never used by production. */
+	if (!upper->lower_write_error) {
+		upper->generation++;
+		upper->success_acks++;
+	}
+#endif
+	error = swapz_write_flush_before_publish(upper->lower_write_error, fua,
+						  lower_flush, &upper->flush);
+#ifndef SWAPZ_TEST_BYPASS_FUA_GATE
+	if (!error) {
+		upper->generation++;
+		upper->success_acks++;
+	}
+#endif
+	return error;
+}
+
+static int test_no_ack_or_new_generation_before_fua(void)
+{
+	struct durable_upper upper = { 0 };
+
+	CHECK(submit_durable_upper(&upper, 1) == 0);
+	CHECK(upper.generation == 1 && upper.success_acks == 1);
+	upper.flush.next_error = -EIO;
+	CHECK(submit_durable_upper(&upper, 1) == -EIO);
+	CHECK(upper.generation == 1 && upper.success_acks == 1);
+	CHECK(upper.flush.called == 2);
+	upper.flush.next_error = 0;
+	upper.lower_write_error = -EIO;
+	CHECK(submit_durable_upper(&upper, 1) == -EIO);
+	CHECK(upper.flush.called == 2);
+	CHECK(upper.generation == 1 && upper.success_acks == 1);
+	upper.lower_write_error = 0;
+	CHECK(submit_durable_upper(&upper, 1) == 0);
+	CHECK(upper.flush.called == 3);
+	CHECK(upper.generation == 2 && upper.success_acks == 2);
+	CHECK(upper.lower_write_calls == 4);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -103,6 +166,7 @@ int main(void)
 	CHECK(test_genuine_lower_error() == 0); passed++;
 	CHECK(test_null_argument_rejected() == 0); passed++;
 	CHECK(test_prepublication_fua_write_gate() == 0); passed++;
+	CHECK(test_no_ack_or_new_generation_before_fua() == 0); passed++;
 	printf("SWAPZ_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
 	return 0;
 }

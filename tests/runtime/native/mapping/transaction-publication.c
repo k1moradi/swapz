@@ -10,6 +10,7 @@
 #include <string.h>
 #include <errno.h>
 #include "authority.h"
+#include "flush-qual.h"
 /* Compile the exact production engine body into this test: no change to
  * shared suite/link rules or a duplicated read-range model. */
 #include "engine.c"
@@ -258,6 +259,121 @@ static int test_engine_extent_geometry_before_lower_read(void)
 	return 0;
 }
 
+
+/*
+ * An existing generation remains authoritative if a replacement's lower
+ * WRITE fails (even after a partial media write) or if its required FUA
+ * flush fails. Only the production gate can authorize the finish call.
+ * SWAPZ_TEST_PUBLISH_BEFORE_FUA is a deliberately failing negative control.
+ */
+struct durability_fault {
+	unsigned int flush_calls;
+	int flush_error;
+};
+
+static int durable_flush(void *opaque)
+{
+	struct durability_fault *fault = opaque;
+
+	fault->flush_calls++;
+	return fault->flush_error;
+}
+
+static int finish_fua_replacement(struct swapz_tx *tx,
+				  struct durability_fault *fault,
+				  int write_error, swapz_u8 completed_blocks)
+{
+	int error;
+
+#ifdef SWAPZ_TEST_PUBLISH_BEFORE_FUA
+	/* Negative control: an acknowledged lower WRITE is not necessarily durable. */
+	if (!write_error) {
+		int published = swapz_finish(&a, tx, bytes, SWAPZ_BLOCK_BYTES,
+					   completed_blocks, 0);
+
+		if (published)
+			return published;
+		return swapz_write_flush_before_publish(
+			write_error, 1, durable_flush, fault);
+	}
+#endif
+	error = swapz_write_flush_before_publish(
+		write_error, 1, durable_flush, fault);
+	return swapz_finish(&a, tx, bytes, SWAPZ_BLOCK_BYTES,
+			    error ? 0 : completed_blocks, error);
+}
+
+static int test_fua_failure_preserves_prior_generation(void)
+{
+	const swapz_u32 pages[] = { 7 };
+	struct durability_fault fault = { 0 };
+	struct swapz_tx transaction;
+	struct swapz_map previous;
+	unsigned int attempt;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&a, pages, 1, 1, &transaction) == 0);
+	CHECK(encode(&transaction) == 0);
+	CHECK(swapz_finish(&a, &transaction, bytes, SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+	previous = maps[7];
+	CHECK(previous.valid && previous.generation == 1);
+
+	/* Lower EIO, partial dm_io EIO, and post-WRITE flush EIO all abort. */
+	for (attempt = 0; attempt < 3U; ++attempt) {
+		int write_error = attempt == 2U ? 0 : -EIO;
+		swapz_u8 completed_blocks = attempt == 1U ? 1 : 0;
+		unsigned int before_flushes = fault.flush_calls;
+
+		CHECK(swapz_stage(&a, pages, 1, 1, &transaction) == 0);
+		CHECK(encode(&transaction) == 0);
+		fault.flush_error = attempt == 2U ? -EIO : 0;
+		CHECK(finish_fua_replacement(&transaction, &fault,
+					     write_error, completed_blocks) == -EIO);
+		CHECK(!a.in_flight);
+		CHECK(maps[7].valid &&
+		      maps[7].generation == previous.generation &&
+		      maps[7].start_block == previous.start_block);
+		CHECK(live[previous.start_block] == 1);
+		CHECK(fault.flush_calls == before_flushes +
+		      (attempt == 2U ? 1U : 0U));
+	}
+	CHECK(a.abandoned_blocks == 3);
+	CHECK(swapz_stage(&a, pages, 1, 1, &transaction) == 0);
+	CHECK(encode(&transaction) == 0);
+	fault.flush_error = 0;
+	CHECK(finish_fua_replacement(&transaction, &fault, 0, 1) == 0);
+	CHECK(maps[7].valid && maps[7].generation == 2 &&
+	      maps[7].start_block != previous.start_block);
+	CHECK(live[previous.start_block] == 0);
+	return 0;
+}
+
+static int test_discard_fua_fences_before_generation_change(void)
+{
+	const swapz_u32 pages[] = { 4 };
+	struct durability_fault fault = { .flush_error = -EIO };
+	struct swapz_tx transaction;
+	struct swapz_map previous;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&a, pages, 1, 1, &transaction) == 0);
+	CHECK(encode(&transaction) == 0);
+	CHECK(swapz_finish(&a, &transaction, bytes, SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+	previous = maps[4];
+	/* Exactly the same prepublication fence used by the target DISCARD path. */
+	CHECK(swapz_write_flush_before_publish(0, 1, durable_flush,
+						&fault) == -EIO);
+	CHECK(maps[4].valid && maps[4].generation == previous.generation);
+	CHECK(live[previous.start_block] == 1);
+	fault.flush_error = 0;
+	CHECK(swapz_write_flush_before_publish(0, 1, durable_flush,
+						&fault) == 0);
+	CHECK(swapz_discard_page(&a, 4) == 0);
+	CHECK(!maps[4].valid && maps[4].generation == 2);
+	CHECK(live[previous.start_block] == 0 && fault.flush_calls == 2);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -268,6 +384,8 @@ int main(void)
 	CHECK(test_duplicate_media_descriptor_fails_closed() == 0); passed++;
 	CHECK(test_mutated_replacement_preserves_prior_authority() == 0); passed++;
 	CHECK(test_engine_extent_geometry_before_lower_read() == 0); passed++;
+	CHECK(test_fua_failure_preserves_prior_generation() == 0); passed++;
+	CHECK(test_discard_fua_fences_before_generation_change() == 0); passed++;
 	printf("SWAPZ_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=%d\n", passed);
 	return 0;
 }
