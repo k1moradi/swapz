@@ -3262,6 +3262,16 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(
             evidence.RAM_VALIDATOR["_median_twice"]([16_384, 16_383]),
             32_767)
+        constructor_peak = copy.deepcopy(trace)
+        first_initialization = next(
+            sample for sample in constructor_peak["samples"]
+            if sample["phase"] == "initialization")
+        self.assertFalse(first_initialization["mapper_present"])
+        first_initialization["mem_available_kib"] -= 9
+        constructor_summary = validator(
+            constructor_peak, source_sha=source_sha,
+            mapper_uuid=mapper_uuid, expected_peak_ram_bytes=11 * 1024)
+        self.assertEqual(constructor_summary["peak_ram_bytes"], 11 * 1024)
 
         parse_meminfo = evidence.RAM_VALIDATOR["parse_meminfo_counters"]
         self.assertEqual(
