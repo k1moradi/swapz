@@ -1315,21 +1315,21 @@ restore_uninstall_file_backups_except_cli() {
   [[ -f "$backup_dir/file-paths" && ! -L "$backup_dir/file-paths" ]] || return 1
   while IFS= read -r path; do
     [[ "$path" == "$cli" ]] && continue
-    digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')"
+    digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')" || return 1
     backup_path="$backup_dir/files/$digest"
     [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
-    install -d -m0755 "$(dirname "$path")"
-    cp -a -- "$backup_path" "$path"
+    install -d -m0755 "$(dirname "$path")" || return 1
+    cp -a -- "$backup_path" "$path" || return 1
     cmp -s "$backup_path" "$path" || return 1
   done < "$backup_dir/file-paths"
 }
 
 restore_uninstall_cli_backup() {
   local digest backup_path temporary_cli
-  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')"
+  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')" || return 1
   backup_path="$backup_dir/files/$digest"
   [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
-  install -d -m0755 "$cli_dir"
+  install -d -m0755 "$cli_dir" || return 1
   temporary_cli="$cli_dir/.swapzctl.restore.$$"
   [[ ! -e "$temporary_cli" && ! -L "$temporary_cli" ]] || return 1
   install -m0755 "$backup_path" "$temporary_cli" || return 1
@@ -1337,7 +1337,7 @@ restore_uninstall_cli_backup() {
     rm -f -- "$temporary_cli"
     return 1
   }
-  mv -f -- "$temporary_cli" "$cli"
+  mv -f -- "$temporary_cli" "$cli" || return 1
 }
 
 restore_uninstall_backup() {
@@ -1358,15 +1358,18 @@ restore_uninstall_backup() {
   query_dkms_status current_status -m swapz -v "$version" || return 1
   [[ -z "$current_status" ]] && module_candidates_absent || return 1
 
-  install -d -m0755 "$src/src/kernel"
-  cp -a -- "$backup_dir/source/dkms.conf" "$src/dkms.conf"
-  cp -a -- "$backup_dir/source/$marker" "$src/$marker"
+  install -d -m0755 "$src/src/kernel" || return 1
+  cp -a -- "$backup_dir/source/dkms.conf" "$src/dkms.conf" || return 1
+  cp -a -- "$backup_dir/source/$marker" "$src/$marker" || return 1
   if [[ -f "$backup_dir/source/$qualification_marker" ]]; then
-    cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker"
+    cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker" ||
+      return 1
   fi
-  cp -a -- "$backup_dir/source/$source_manifest" "$src/$source_manifest"
-  cp -a -- "$backup_dir/source/$binary_manifest" "$src/$binary_manifest"
-  cp -a -- "$backup_dir/source/src/kernel/"* "$src/src/kernel/"
+  cp -a -- "$backup_dir/source/$source_manifest" "$src/$source_manifest" ||
+    return 1
+  cp -a -- "$backup_dir/source/$binary_manifest" "$src/$binary_manifest" ||
+    return 1
+  cp -a -- "$backup_dir/source/src/kernel/"* "$src/src/kernel/" || return 1
   (cd "$src" && sha256sum -c "$source_manifest" >/dev/null) || return 1
 
   "$dkms_bin" add -m swapz -v "$version" || return 1
@@ -1379,7 +1382,7 @@ restore_uninstall_backup() {
   dkms_status_exact_installed "$restored_status" || return 1
   other_kernel_module_candidates_absent || return 1
   prepare_exact_module_restore || return 1
-  install -d -m0755 "$installed_module_dir"
+  install -d -m0755 "$installed_module_dir" || return 1
   install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   "$depmod_bin" "$kernel_release" || return 1
@@ -2023,11 +2026,11 @@ restore_file_backups_except_cli() {
   [[ -f "$backup_dir/file-paths" ]] || return 0
   while IFS= read -r path; do
     [[ "$path" == "$cli" ]] && continue
-    digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')"
+    digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')" || return 1
     backup_path="$backup_dir/files/$digest"
     [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
-    install -d -m0755 "$(dirname "$path")"
-    cp -a -- "$backup_path" "$path"
+    install -d -m0755 "$(dirname "$path")" || return 1
+    cp -a -- "$backup_path" "$path" || return 1
     cmp -s "$backup_path" "$path" || return 1
   done < "$backup_dir/file-paths"
 }
@@ -2035,10 +2038,10 @@ restore_file_backups_except_cli() {
 restore_cli_backup() {
   local digest backup_path temporary_cli
   [[ -f "$backup_dir/file-paths" ]] || return 0
-  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')"
+  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')" || return 1
   backup_path="$backup_dir/files/$digest"
   [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
-  install -d -m0755 "$cli_dir"
+  install -d -m0755 "$cli_dir" || return 1
   temporary_cli="$cli_dir/.swapzctl.restore.$$"
   [[ ! -e "$temporary_cli" && ! -L "$temporary_cli" ]] || return 1
   install -m0755 "$backup_path" "$temporary_cli" || return 1
@@ -2046,7 +2049,7 @@ restore_cli_backup() {
     rm -f -- "$temporary_cli"
     return 1
   }
-  mv -f -- "$temporary_cli" "$cli"
+  mv -f -- "$temporary_cli" "$cli" || return 1
 }
 
 restore_previous_package() {
@@ -2054,14 +2057,17 @@ restore_previous_package() {
   (( had_existing == 1 )) || return 0
   cleanup_package_files || return 1
   install -d -m0755 "$src/src/kernel" || return 1
-  cp -a -- "$backup_dir/source/dkms.conf" "$src/dkms.conf"
-  cp -a -- "$backup_dir/source/$marker" "$src/$marker"
-  cp -a -- "$backup_dir/source/$source_manifest" "$src/$source_manifest"
-  cp -a -- "$backup_dir/source/$binary_manifest" "$src/$binary_manifest"
+  cp -a -- "$backup_dir/source/dkms.conf" "$src/dkms.conf" || return 1
+  cp -a -- "$backup_dir/source/$marker" "$src/$marker" || return 1
+  cp -a -- "$backup_dir/source/$source_manifest" "$src/$source_manifest" ||
+    return 1
+  cp -a -- "$backup_dir/source/$binary_manifest" "$src/$binary_manifest" ||
+    return 1
   if [[ -f "$backup_dir/source/$qualification_marker" ]]; then
-    cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker"
+    cp -a -- "$backup_dir/source/$qualification_marker" "$src/$qualification_marker" ||
+      return 1
   fi
-  cp -a -- "$backup_dir/source/src/kernel/"* "$src/src/kernel/"
+  cp -a -- "$backup_dir/source/src/kernel/"* "$src/src/kernel/" || return 1
   (cd "$src" && sha256sum -c "$source_manifest" >/dev/null) || return 1
   "$dkms_bin" add -m swapz -v "$version" || return 1
   "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
@@ -2075,7 +2081,7 @@ restore_previous_package() {
   prepare_exact_module_restore || return 1
   [[ -f "$backup_dir/installed-module" && ! -L "$backup_dir/installed-module" ]] ||
     return 1
-  install -d -m0755 "$installed_module_dir"
+  install -d -m0755 "$installed_module_dir" || return 1
   install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   "$depmod_bin" "$kernel_release" || return 1
