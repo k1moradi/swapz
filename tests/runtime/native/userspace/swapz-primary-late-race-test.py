@@ -41,6 +41,15 @@ def production_function(source: str, name: str) -> str:
     raise AssertionError(f"Unclosed production function: {name}")
 
 
+def production_define(source: str, name: str) -> str:
+    """Return one simple production #define verbatim."""
+    matches = re.findall(
+        rf'^#define[ \t]+{re.escape(name)}[ \t]+[^\n]+$', source, re.M)
+    if len(matches) != 1:
+        raise AssertionError(f"Expected one production define for {name}")
+    return matches[0]
+
+
 def omit_final_revalidation(function: str) -> str:
     """Negative control: remove exactly the block between intent and header write."""
     masked = code_only(function)
@@ -85,13 +94,9 @@ HARNESS = r'''
 #include <unistd.h>
 #include "swapz-primary.h"
 
-#define SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES 65536U
-#define SWAPZ_PRIMARY_VISIBLE_PIDS_MAX 16384U
-#define SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES (64U * 1024U * 1024U)
+@@PRODUCTION_DEFINES@@
 #define SWAPZ_PRIMARY_BLOCK_BYTES 4096U
-#define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/fixture/recovery"
-#define SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT "/dev/disk/by-partuuid/%s"
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
 #define SWAPZ_BUILD_SOURCE_CLEAN 1
 #define SWAPZ_BUILD_SOURCE_SHA "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -716,6 +721,8 @@ static int check_case(enum fixture_scenario candidate)
     unsigned int writes;
     scenario = candidate;
     late = 0;
+    memset(&swapz_primary_selected_target, 0,
+           sizeof(swapz_primary_selected_target));
     admission_reads = prewrite_reads = 0U;
     fixture_reset_mount_inventory();
     header_writes = mapper_mutations = mkswap_calls = swapon_calls = 0U;
@@ -852,6 +859,13 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         "swapz_primary_parse_mountinfo",
     )
     parser_source = '\n\n'.join(production_function(source, helper) for helper in helpers)
+    production_defines = '\n'.join(production_define(source, name) for name in (
+        "SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES",
+        "SWAPZ_PRIMARY_VISIBLE_PIDS_MAX",
+        "SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES",
+        "SWAPZ_PRIMARY_STATE_RECORD_MAX",
+        "SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT",
+    ))
     swap_function = production_function(source, "swapz_primary_swap_device_active")
     target_helpers = '\n\n'.join(production_function(source, name) for name in (
         "swapz_primary_partuuid_normalize",
@@ -868,7 +882,8 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     coordinator = production_function(source, "swapz_primary_start_prepared")
     if mutant:
         coordinator = omit_final_revalidation(coordinator)
-    unit = HARNESS.replace('@@PARSERS@@', parser_source).replace(
+    unit = HARNESS.replace('@@PRODUCTION_DEFINES@@', production_defines).replace(
+        '@@PARSERS@@', parser_source).replace(
         '@@MOUNT_READER@@', mount_reader).replace(
         '@@SWAP_FUNCTION@@', swap_function).replace(
         '@@TARGET_HELPERS@@', target_helpers).replace(
