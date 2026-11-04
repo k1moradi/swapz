@@ -139,6 +139,14 @@ The first sample explicitly retains the claim; the second does **not** state
 whether the mapper is still live. Preserve recovery files and inspect the
 exact selected device, `/proc/swaps`, mapper and journal before any action.
 
+Durable primary stages are `READY` (prepared), `STARTING` (activation pending),
+`ACTIVE` (recorded live), `STOPPING` (drain/teardown pending),
+`RECOVERING` (reconciliation pending), `RESTORED` (owned resources restored),
+`DISABLING` (pre-activation cleanup), `COMPLETE` (finalized) and
+`RECOVERY_REQUIRED` (interrupted/uncertain). These are **journal claims**:
+verify the observed mapper, swap, header and module before treating a stage
+as completion or permitting cleanup.
+
 | First failure / operation | Read-only prerequisite and safe response |
 | :--- | :--- |
 | Build, W=1/W=2, signature or native contracts | Read first compiler/assertion error, current source, running-kernel headers and [signing boundary](compile.md#secure-boot-module-signing). A missing `sudo -n`, key or load permission is BLOCKED, not a verified module. |
