@@ -601,6 +601,25 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                     p99 != histogram["p99_ns"]):
                 raise ValueError(
                     "minute throughput/duration or tail latency is inconsistent")
+        # A combined per-minute histogram must conserve every bin from the
+        # independent whole-arm READ and WRITE histograms. Comparing only
+        # bucket counts and p99 lets rewritten bins alter the drift verdict.
+        minute_bin_totals = [0] * LATENCY_BIN_COUNT
+        for row in minutes:
+            for bin_index, bin_count in row["latency_histogram"]["bins"]:
+                minute_bin_totals[bin_index] += bin_count
+        arm_latency = metric(arm, "latency")
+        arm_bin_totals = [0] * LATENCY_BIN_COUNT
+        for operation in ("read", "write"):
+            histogram = metric(arm_latency, f"{operation}_histogram")
+            latency_histogram_summary(
+                histogram, f"whole-arm {operation}",
+                expected_count=metric(arm, f"{operation}_ops"))
+            for bin_index, bin_count in histogram["bins"]:
+                arm_bin_totals[bin_index] += bin_count
+        if minute_bin_totals != arm_bin_totals:
+            raise ValueError(
+                "minute latency histogram bins differ from whole-arm evidence")
         intervals = metric(arm, "sustained_intervals")
         arm_started = arm.get("arm_started_monotonic_ns")
         measured_started = arm.get("measured_start_monotonic_ns")

@@ -2930,6 +2930,16 @@ class PairReplayContract(unittest.TestCase):
             "seconds": 3600.0, "logical_pages": 100,
             "occupied_pages": 90, "read_ops": 60, "write_ops": 60,
             "minute_buckets": minute_buckets, "sustained_intervals": intervals,
+            "latency": {
+                "read_histogram": {
+                    "count": 60, "max_ns": 1,
+                    "bins": [[minute_latency_index, 60]],
+                },
+                "write_histogram": {
+                    "count": 60, "max_ns": 1,
+                    "bins": [[minute_latency_index, 60]],
+                },
+            },
             "occupancy_transitions": [
                 {"phase": phase, "occupied_pages": 0 if index == 0 else 90}
                 for index, phase in enumerate((
@@ -2977,6 +2987,33 @@ class PairReplayContract(unittest.TestCase):
                 self.assertTrue(
                     qualification.sustained_coverage_reasons(
                         tampered, "swapz"))
+
+        # A locally valid changed minute p99 must not be able to rewrite
+        # the first/last-quartile drift independently of whole-arm evidence.
+        redistributed_latency = copy.deepcopy(raw)
+        changed_minute = redistributed_latency["minute_buckets"][0]
+        changed_index = qualification.latency_bin_index(2)
+        changed_tail_ns = qualification.latency_bin_upper(changed_index)
+        changed_minute["latency_histogram"] = {
+            "count": 2, "max_ns": 2, "bins": [[changed_index, 2]],
+        }
+        changed_minute["p95_ns"] = changed_tail_ns
+        changed_minute["p99_ns"] = changed_tail_ns
+        self.assertTrue(any(
+            "minute latency histogram bins differ from whole-arm evidence"
+            in reason for reason in qualification.sustained_coverage_reasons(
+                redistributed_latency, "swapz")))
+
+        # Rewriting a whole-arm histogram without updating the original
+        # minute distributions is equally inconsistent.
+        altered_whole_arm = copy.deepcopy(raw)
+        altered_whole_arm["latency"]["read_histogram"] = {
+            "count": 60, "max_ns": 2, "bins": [[changed_index, 60]],
+        }
+        self.assertTrue(any(
+            "minute latency histogram bins differ from whole-arm evidence"
+            in reason for reason in qualification.sustained_coverage_reasons(
+                altered_whole_arm, "swapz")))
 
         outside_window_gc = copy.deepcopy(raw)
         outside_window_gc["sustained_intervals"][20]["gc"].update(
