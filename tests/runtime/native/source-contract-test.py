@@ -7542,10 +7542,13 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             constructor.index("if (!ctx->preparation_pages ||"),
             constructor.index("for (prep_lane = 0; prep_lane < "
                               "ctx->preparation_worker_count"))
-        self.assertLess(
-            constructor.index("ctx->preparation_workqueue = alloc_workqueue("),
-            constructor.index(
-                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE"))
+        preparation_workqueue_allocation = constructor.index(
+            "ctx->preparation_workqueue = alloc_workqueue(")
+        preparation_workqueue_fault = constructor.index(
+            "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE",
+            preparation_workqueue_allocation)
+        self.assertLess(preparation_workqueue_allocation,
+                        preparation_workqueue_fault)
 
         # All eight post-acquisition fault injections explicitly return
         # ENOMEM via the common idempotent cleanup, never by falling through.
