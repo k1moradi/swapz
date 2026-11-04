@@ -198,6 +198,7 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 	uint64_t virgin_worst = 0;
 	uint64_t virgin_corrupt_wall = 0;
 	uint64_t claimed_worst = 0, corrupt_wall;
+	uint64_t recovery_metadata_worst = 0;
 	uint64_t map_bytes = (uint64_t)logical_pages * sizeof(*large_maps);
 	uint64_t reserve = (uint64_t)logical_pages / 8U +
 			   (logical_pages % 8U != 0U);
@@ -211,6 +212,17 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		__FILE__, __LINE__, logical_pages, #condition); \
 	goto cleanup; \
 } } while (0)
+#define REQUIRE_TIMED_CLAIM(call, expected_result) do { \
+	uint64_t timed_start = now_ns(); \
+	int timed_result = (call); \
+	uint64_t timed_end = now_ns(); \
+	uint64_t timed_elapsed; \
+	REQUIRE_CLAIM(timed_start && timed_end >= timed_start); \
+	timed_elapsed = timed_end - timed_start; \
+	if (timed_elapsed > recovery_metadata_worst) \
+		recovery_metadata_worst = timed_elapsed; \
+	REQUIRE_CLAIM(timed_result == (expected_result)); \
+} while (0)
 
 	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
 		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
@@ -488,6 +500,7 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		const swapz_u32 reserve_start =
 			reserve_segment * SWAPZ_SEGMENT_BLOCKS;
 		const swapz_u32 tail = logical_pages - 1U;
+		const swapz_u32 tail_segment = tail / SWAPZ_SEGMENT_BLOCKS;
 
 		large_roles[1U] = 1U;
 		large_roles[reserve_segment] = 0U;
@@ -505,21 +518,21 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 
 		/* The cached victim occupancy alone may not authorize reuse. */
 		large_counts[1U] = 1U;
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_TIMED_CLAIM(swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_counts[1U] = 0U;
 
 		/* The last valid map has a false-zero physical class at its start. */
 		large_classes[tail] = 0U;
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_TIMED_CLAIM(swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_classes[tail] = 1U;
 
 		/* Start-block liveness is an independent physical witness. */
 		large_live[tail] = 0U;
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_TIMED_CLAIM(swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_live[tail] = 1U;
@@ -528,7 +541,7 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		large_maps[tail].start_block = victim_start;
 		/* Physical sidecars remain zero, so only the full logical-map
 		 * proof can find this forged final-entry victim reference. */
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_TIMED_CLAIM(swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_maps[tail].start_block = tail;
@@ -538,21 +551,29 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		 * interior corruption are rejected independently; neither witness
 		 * may be dropped from the recovery-role proof.
 		 */
+		REQUIRE_CLAIM(large_counts[tail_segment] >= 2U);
 		large_maps[tail - 1U].valid = 0U;
+		large_counts[tail_segment]--;
 		large_maps[tail].start_block = tail - 1U;
+		large_maps[tail].payload_offset =
+			sizeof(struct swapz_header) + sizeof(struct swapz_record);
+		large_maps[tail].payload_length = 128U;
+		large_maps[tail].record_index = 0U;
 		large_maps[tail].extent_blocks = 2U;
+		large_maps[tail].raw = 0U;
+		REQUIRE_CLAIM(!large_maps[tail].raw);
 		large_classes[tail - 1U] = 2U;
 		large_classes[tail] = 0U;
 		large_live[tail] = 0U;
 
 		large_classes[tail] = 1U;
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_TIMED_CLAIM(swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_classes[tail] = 0U;
 
 		large_live[tail] = 1U;
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_TIMED_CLAIM(swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_live[tail] = 0U;
@@ -565,8 +586,8 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			sample.next_block =
 				reserve_start + SWAPZ_SEGMENT_BLOCKS - 1U;
 			large_classes[tail] = 1U;
-			REQUIRE_CLAIM(swapz_gc_advance_rotation_destination(
-				      &sample, reserve_segment) == -EUCLEAN);
+			REQUIRE_TIMED_CLAIM(swapz_gc_advance_rotation_destination(
+				      &sample, reserve_segment), -EUCLEAN);
 			REQUIRE_CLAIM(sample.next_block ==
 				      reserve_start + SWAPZ_SEGMENT_BLOCKS - 1U &&
 				      sample.gc_destination == reserve_segment &&
@@ -578,10 +599,14 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 
 		/* Retain the historical two-block checks above, then authenticate
 		 * all three interiors of a four-block compressed tail extent. */
+		REQUIRE_CLAIM(large_counts[tail_segment] >= 3U);
 		large_maps[tail - 3U].valid = 0U;
 		large_maps[tail - 2U].valid = 0U;
+		large_counts[tail_segment] -= 2U;
 		large_maps[tail].start_block = tail - 3U;
 		large_maps[tail].extent_blocks = 4U;
+		large_maps[tail].raw = 0U;
+		REQUIRE_CLAIM(!large_maps[tail].raw);
 		large_classes[tail - 3U] = 4U;
 		large_live[tail - 3U] = 1U;
 		large_classes[tail - 2U] = 0U;
@@ -590,18 +615,26 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		large_live[tail - 1U] = 0U;
 		large_classes[tail] = 0U;
 		large_live[tail] = 0U;
-		large_classes[tail - 2U] = 1U;
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
-		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
-			      !large_roles[reserve_segment]);
-		large_classes[tail - 2U] = 0U;
-		large_live[tail - 1U] = 1U;
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
-		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
-			      !large_roles[reserve_segment]);
-		large_live[tail - 1U] = 0U;
+		for (swapz_u8 block_offset = 1U; block_offset < 4U;
+		     ++block_offset) {
+			const swapz_u32 interior = tail - 3U + block_offset;
 
-		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == 0);
+			large_classes[interior] = 1U;
+			REQUIRE_TIMED_CLAIM(
+				swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
+			REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
+				      !large_roles[reserve_segment]);
+			large_classes[interior] = 0U;
+
+			large_live[interior] = 1U;
+			REQUIRE_TIMED_CLAIM(
+				swapz_gc_commit_rotation(&sample, 1U), -EUCLEAN);
+			REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
+				      !large_roles[reserve_segment]);
+			large_live[interior] = 0U;
+		}
+
+		REQUIRE_TIMED_CLAIM(swapz_gc_commit_rotation(&sample, 1U), 0);
 		REQUIRE_CLAIM(!sample.gc_allocation && !large_roles[1U] &&
 			      large_roles[reserve_segment]);
 	}
@@ -631,6 +664,8 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			maximum_verified_wall_ns = corrupt_wall;
 		if (virgin_corrupt_wall > maximum_verified_wall_ns)
 			maximum_verified_wall_ns = virgin_corrupt_wall;
+		if (recovery_metadata_worst > maximum_verified_wall_ns)
+			maximum_verified_wall_ns = recovery_metadata_worst;
 		if (max_verified_latency_gate_ns &&
 		    maximum_verified_wall_ns > max_verified_latency_gate_ns) {
 			fprintf(stderr, "FAIL proof latency geometry=%u observed=%" PRIu64
@@ -664,6 +699,7 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		       "\"synthetic_gc_commit_wall_median_ns\":%" PRIu64 ","
 		       "\"synthetic_gc_commit_cpu_median_ns\":%" PRIu64 ","
 		       "\"synthetic_gc_commit_max_observed_ns\":%" PRIu64 ","
+		       "\"recovery_metadata_wall_max_observed_ns\":%" PRIu64 ","
 		       "\"max_verified_transition_wall_ns\":%" PRIu64 ","
 		       "\"latency_gate_ns\":%" PRIu64 ","
 		       "\"claimed_last_entry_corruption_rejected_wall_ns\":%" PRIu64 ","
@@ -680,7 +716,8 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		       final_publish_wall_median, final_publish_cpu_median,
 		       final_publish_worst,
 		       commit_wall_median, commit_cpu_median, commit_worst,
-		       maximum_verified_wall_ns, max_verified_latency_gate_ns,
+		       recovery_metadata_worst, maximum_verified_wall_ns,
+		       max_verified_latency_gate_ns,
 		       corrupt_wall, virgin_corrupt_wall);
 	}
 	result = 0;
@@ -691,6 +728,7 @@ cleanup:
 	free(large_classes);
 	free(large_live);
 	free(large_maps);
+#undef REQUIRE_TIMED_CLAIM
 #undef REQUIRE_CLAIM
 	return result;
 }

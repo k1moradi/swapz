@@ -904,7 +904,10 @@ a host-memory scan model is only a comparator. A forged last-entry reference
 must be refused even with false-zero victim/reserve sidecars. Recovery role
 transitions authenticate physical extent starts and each interior block of
 two- and four-block compressed extents, including independent class-only
-and liveness-only corruption. Refusals leave roles, cursor and the last
+and liveness-only corruption. Synthetic compressed-map fixtures must clear
+the RAW map bit, populate compressed payload metadata, and keep exact
+mapped-page sidecars consistent when replacing multiple one-page maps with
+one multi-block survivor. Refusals leave roles, cursor and the last
 authoritative generation intact. Never replace full-map verification with
 cached counts or a reverse-list-only witness.
 
@@ -923,8 +926,8 @@ must refuse role exchange; a live last-survivor mapping remains byte-exact,
 and exhausted recovery returns `-ENOSPC` without reusing either destination. Deterministic
 churn failures must emit a fixed seed, operation index, short bounded
 recent-operation trace, failed invariant, expected/actual generation and
-errno, with generation values read from authoritative map records rather
-than mapped-page occupancy sidecars. Successful operations must not log individually or allocate model
+the failing invariant's own errno, with generation values read from
+authoritative map records rather than mapped-page occupancy sidecars. Successful operations must not log individually or allocate model
 nodes.
 
 The kernel-only `cond_resched()` scheduling opportunity occurs at each
@@ -933,8 +936,11 @@ authority; that is an *opportunity interval*, **not a 4,096-entry proof
 deadline**. At 27,080,192 entries a complete proof still traverses the
 full map. Native CPU and monotonic wall observations, including medians
 and maxima, characterize only the host fixture, **not loaded-kernel latency
-or actual memory pressure**. `SWAPZ_GC_MAX_PROOF_WALL_NS`, if explicitly
-supplied, is an optional developer-machine-specific diagnostic gate;
+or actual memory pressure**. Any reported maximum verified transition wall
+time must include every recovery/metadata proof call that the test places
+under that maximum, rather than silently omitting newly added proof paths.
+`SWAPZ_GC_MAX_PROOF_WALL_NS`, if explicitly supplied, is an optional
+developer-machine-specific diagnostic gate;
 shared CI wall results cannot establish any universal acceptable bound.
 No native PASS qualifies loaded full-capacity metadata/target peak memory
 and allocation success, loaded scheduler and CPU/PSI/tail latency under

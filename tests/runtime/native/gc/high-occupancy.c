@@ -80,7 +80,8 @@ static void record_churn(const char *kind, swapz_u32 logical,
 		churn_trace_count++;
 }
 
-static int churn_invariant_failure(const char *invariant, int line)
+static int churn_invariant_failure(const char *invariant, int line,
+				    int failure_error)
 {
 	const struct churn_operation *last =
 		churn_operation_index ?
@@ -96,7 +97,7 @@ static int churn_invariant_failure(const char *invariant, int line)
 		" errno=%d\n", __FILE__, line, (uint32_t)CHURN_SEED,
 		churn_operation_index, invariant,
 		last ? last->expected_generation : 0U,
-		last ? last->actual_generation : 0U, last ? last->error : 0);
+		last ? last->actual_generation : 0U, failure_error);
 	for (offset = 0; offset < churn_trace_count; ++offset) {
 		const struct churn_operation *entry =
 			&churn_trace[(first + offset - 1U) % CHURN_TRACE_LENGTH];
@@ -112,7 +113,10 @@ static int churn_invariant_failure(const char *invariant, int line)
 }
 
 #define CHURN_CHECK(invariant) do { if (!(invariant)) \
-	return churn_invariant_failure(#invariant, __LINE__); \
+	return churn_invariant_failure(#invariant, __LINE__, 0); \
+} while (0)
+#define CHURN_CHECK_ERROR(invariant, failure_error) do { if (!(invariant)) \
+	return churn_invariant_failure(#invariant, __LINE__, (failure_error)); \
 } while (0)
 
 static void make_raw_page(swapz_u32 logical, swapz_u32 version, swapz_u8 *out)
@@ -436,21 +440,26 @@ static int test_sustained_all_raw_gc_rotations(void)
 	struct timespec wall_start, wall_end;
 	clock_t cpu_start, cpu_end;
 	unsigned int rotation;
+	int error;
 
-	CHURN_CHECK(setup() == 0);
+	error = setup();
+	CHURN_CHECK_ERROR(error == 0, error);
 	/* Native host CPU and wall observations are synthetic only: they are
 	 * NOT the physical ten-second stall or hour-long qualification gate. */
-	CHURN_CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_start) == 0);
+	CHURN_CHECK_ERROR(clock_gettime(CLOCK_MONOTONIC, &wall_start) == 0,
+			  errno);
 	cpu_start = clock();
-	CHURN_CHECK(cpu_start != (clock_t)-1);
+	CHURN_CHECK_ERROR(cpu_start != (clock_t)-1, errno);
 	churn_active = 1;
 	churn_operation_index = 0;
 	churn_trace_count = 0;
-	CHURN_CHECK(fill_all_pages(1) == 0);
+	error = fill_all_pages(1);
+	CHURN_CHECK_ERROR(error == 0, error);
 	for (rotation = 0; rotation < rotations; ++rotation) {
 		swapz_u32 victim, block;
 		unsigned int attempts;
-		int error = -EUCLEAN;
+
+		error = -EUCLEAN;
 
 		/* A bounded sweep must exhaust all ordinary foreground allocation
 		 * even though the target remains 100% logically populated. */
@@ -459,7 +468,7 @@ static int test_sustained_all_raw_gc_rotations(void)
 			if (error)
 				break;
 		}
-		CHURN_CHECK(error == -ENOSPC);
+		CHURN_CHECK_ERROR(error == -ENOSPC, error);
 		/*
 		 * Every successful rotation must buy real foreground progress, and
 		 * worst-case RAW occupancy can consume at most one segment before
@@ -467,7 +476,8 @@ static int test_sustained_all_raw_gc_rotations(void)
 		 */
 		CHURN_CHECK(attempts > 0 && attempts <= SWAPZ_SEGMENT_BLOCKS);
 		CHURN_CHECK(!a.in_flight && !a.batch_pending);
-		CHURN_CHECK(choose_partial_victim(&victim) == 0);
+		error = choose_partial_victim(&victim);
+		CHURN_CHECK_ERROR(error == 0, error);
 		CHURN_CHECK(segment_maps[victim] < SWAPZ_SEGMENT_BLOCKS);
 		/* A trace generation must come from the authoritative map, never
 		 * from a segment's mapped-page occupancy sidecar. */
@@ -484,13 +494,15 @@ static int test_sustained_all_raw_gc_rotations(void)
 				     expected_generation,
 				     maps[tracked_logical].generation, error);
 		}
-		CHURN_CHECK(error == 0);
+		CHURN_CHECK_ERROR(error == 0, error);
 		CHURN_CHECK(!roles[victim] && !segment_maps[victim]);
 		for (block = victim * SWAPZ_SEGMENT_BLOCKS;
 		     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
 			CHURN_CHECK(!live[block]);
-		CHURN_CHECK(reserve_segments() == PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
-		CHURN_CHECK(verify_all_pages() == 0);
+		CHURN_CHECK(reserve_segments() ==
+			    PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
+		error = verify_all_pages();
+		CHURN_CHECK_ERROR(error == 0, error);
 	}
 	/* A tiny one-live-page victim would make the same rotation counter
 	 * pass without exercising nearly full destination relocation. */
@@ -500,8 +512,9 @@ static int test_sustained_all_raw_gc_rotations(void)
 	CHURN_CHECK(gc_bytes_relocated == gc_writes * (unsigned long long)SWAPZ_BLOCK_BYTES);
 	churn_active = 0;
 	cpu_end = clock();
-	CHURN_CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_end) == 0);
-	CHURN_CHECK(cpu_end != (clock_t)-1);
+	CHURN_CHECK_ERROR(clock_gettime(CLOCK_MONOTONIC, &wall_end) == 0,
+			  errno);
+	CHURN_CHECK_ERROR(cpu_end != (clock_t)-1, errno);
 	printf("SWAPZ_GC_SYNTHETIC_NATIVE_HOST_CPU_WALL=rotations:%u "
 	       "cpu_ms:%.3f wall_ms:%.3f map_scan_count:%llu "
 	       "physical_qualification:NOT_RUN\n",
