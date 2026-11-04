@@ -5734,22 +5734,37 @@ int main(void)
                 capture_output=True, text=True, timeout=5)
             self.assertNotEqual(unavailable.returncode, 0)
 
+        cgroup_root_start = pressure.index("cgroup_root_exemption_proven() {")
+        cgroup_root_end = pressure.index("\n}\n", cgroup_root_start) + 2
+        cgroup_root_helper = pressure[cgroup_root_start:cgroup_root_end]
         cgroup_start = pressure.index("read_cgroup_root_memory_inventory() {")
         cgroup_end = pressure.index("\n}\n", cgroup_start) + 2
         cgroup_helper = pressure[cgroup_start:cgroup_end]
         cgroup_command = (
-            "set -euo pipefail\nCGROUP_ROOT=$1\n"
+            "set -euo pipefail\nCGROUP_ROOT=$1\nCGROUP_MOUNTINFO=$2\n"
             "MIN_AVAILABLE_BYTES=$((1024 * 1024 * 1024))\n" +
-            cgroup_helper + "\nread_cgroup_root_memory_inventory\n")
+            cgroup_root_helper + "\n" + cgroup_helper +
+            "\nread_cgroup_root_memory_inventory\n")
         with tempfile.TemporaryDirectory(
                 prefix="swapz-id36-cgroup-root-") as folder:
             root = Path(folder)
+            mountinfo = root / "mountinfo"
 
             def cgroup_inventory():
                 return subprocess.run(
-                    ["bash", "-c", cgroup_command, "_", str(root)],
+                    ["bash", "-c", cgroup_command, "_", str(root),
+                     str(mountinfo)],
                     capture_output=True, text=True, timeout=5)
 
+            mountinfo.write_text(
+                f"29 23 0:26 /delegated {root} rw,nosuid - cgroup2 cgroup rw\n")
+            result = cgroup_inventory()
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("without verified cgroup v2 mount-root exemption",
+                          result.stderr)
+
+            mountinfo.write_text(
+                f"29 23 0:26 / {root} rw,nosuid - cgroup2 cgroup rw\n")
             result = cgroup_inventory()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
@@ -5828,11 +5843,11 @@ int main(void)
         import tempfile
 
         pressure = (ROOT / "tests/tools/qualify-resource-pressure.sh").read_text()
-        start = pressure.index("event_value() {")
+        start = pressure.index("read_memory_event_inventory() {")
         end = pressure.index("\n}\n", pressure.index("cpu_some_total() {")) + 2
         reader = pressure[start:end]
         command = ("set -euo pipefail\nCGROUP=$1\n" + reader +
-                   "\nif [[ $2 == event ]]; then event_value \"$3\"; "
+                   "\nif [[ $2 == event ]]; then read_memory_event_inventory; "
                    "else cpu_some_total; fi\n")
         with tempfile.TemporaryDirectory(prefix="swapz-id36-events-") as folder:
             cgroup = Path(folder)
@@ -5847,19 +5862,20 @@ int main(void)
                 "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
             )
 
-            def read(kind, key="oom"):
+            def read(kind):
                 return subprocess.run(
-                    ["bash", "-c", command, "_", str(cgroup), kind, key],
+                    ["bash", "-c", command, "_", str(cgroup), kind],
                     capture_output=True, text=True, timeout=5)
 
             events.write_text(healthy)
             psi.write_text(cpu_healthy)
-            self.assertEqual(read("event", "high").stdout.strip(), "7")
-            self.assertEqual(read("event", "oom").stdout.strip(), "0")
+            self.assertEqual(read("event").stdout.strip(), "7 0 0")
             self.assertEqual(read("psi").stdout.strip(), "25")
             for invalid in (
                 healthy.replace("oom 0\n", ""),
                 healthy + "oom 0\n",
+                healthy.replace("high 7\n", ""),
+                healthy.replace("oom_kill 0\n", ""),
                 healthy.replace("oom 0", "oom -1"),
                 healthy.replace("oom 0", "oom 00"),
                 healthy.replace("oom 0", "oom 0 bytes"),
@@ -5867,7 +5883,7 @@ int main(void)
             ):
                 with self.subTest(events=invalid[-32:]):
                     events.write_text(invalid)
-                    result = read("event", "oom")
+                    result = read("event")
                     self.assertEqual(result.returncode, 2)
                     self.assertIn("BLOCKED:", result.stderr)
             events.write_text(healthy)
@@ -5944,7 +5960,16 @@ int main(void)
         self.assertLess(benchmark.index("PASS_ID36_NULLBLK_PREWARM"),
                         benchmark.index('> "$ID36_CGROUP/cgroup.procs"'))
         self.assertIn("pair_cgroup_pid=", pressure)
-        self.assertIn('grep -Fxq "$pair_cgroup_pid" "$CGROUP/cgroup.procs"', pressure)
+        membership = pressure.split(
+            "verify_pair_cgroup_membership() {", 1)[1].split(
+                "# Preserve a real child failure", 1)[0]
+        self.assertIn(
+            'verify_pair_cgroup_membership "$pair_cgroup_pid" || exit $?',
+            pressure)
+        self.assertIn('awk -v expected_pid="$expected_pid"', membership)
+        self.assertIn('NR > 128 { malformed = 1; exit }', membership)
+        self.assertIn('$1 == expected_pid { ++matches }', membership)
+        self.assertIn('if (matches != 1)', membership)
         self.assertIn("for _ in {1..800}", pressure)
         self.assertIn("for _ in {1..1200}", benchmark)
         self.assertIn('"${PAIR_OUTER_SECONDS}s"', pressure)
@@ -5993,8 +6018,12 @@ int main(void)
         self.assertIn("--activate-file", helper)
         self.assertIn("--active-file", helper)
         self.assertIn("multiprocessing.get_context(\"fork\")", helper)
-        self.assertLess(helper.index("for worker in workers:\n        worker.start()"),
+        self.assertLess(helper.index("for worker in workers:"),
                         helper.index("pressure = mmap.mmap("))
+        self.assertIn("started_workers.append(worker)", helper)
+        self.assertIn("join_started_workers(started_workers, 2.0)", helper)
+        self.assertIn("worker.terminate()", helper)
+        self.assertIn("worker.kill()", helper)
         self.assertIn("os.nice(10)", helper)
         self.assertIn("worker.is_alive()", helper)
         self.assertIn("resource-pressure.py --help", rootless)
