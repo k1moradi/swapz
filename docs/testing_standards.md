@@ -4294,6 +4294,23 @@ The C11 shim remains a race-test model, not a Linux memory-model proof or a
 substitute for loaded target, suspend/drain, completion-work and lower-I/O
 fault qualification.
 
+The cancellation/lifetime continuation runs 384 three-party handoffs with
+bounded synchronization barriers. It forces worker-first READY_COMPRESSED,
+READY_RAW and exact ERROR (ordered completion is final-put), plus ordered
+RAW_SELECTED cancellation before delayed compressed, no-fit and negative codec
+results (worker is final-put). Every epoch asserts one winning terminal claim,
+one worker result attempt, one final reference release, no pre-drain slot claim,
+and slot-63 reuse only after both ordered and preparation completions. The
+ordered owner checks payload only while it owns its reference: READY/ERROR
+bytes follow the production state acquire, whereas cancellation reads only
+atomic audit fields after its put. Reclaim poisons the old prepared bytes and
+checks there is no late publisher before the next generation. On failure,
+report the phase, reference transition, slot state/mask, expected terminal and
+final owner, and actual CAS transition; never print page payload bytes.
+These finite C11 schedules remain supporting evidence, not loaded KCSAN,
+lockdep, or proof of kernel execution under suspend/drain.
+
+
 The submitter-path continuation adds 256 deterministic handoffs that model its
 release/acquire active-descriptor gate, one-reference prepared page, separately
 leased scratch lane, exact error and a closed admission gate. Its scheduling
