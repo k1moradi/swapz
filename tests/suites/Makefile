@@ -154,6 +154,7 @@ test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT
 
 test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-format $(OUT)/swapzctl-removable-media $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
 	@set -e; "$(OUT)/swapzctl-status"; "$(OUT)/swapzctl-format"; "$(OUT)/swapzctl-removable-media"; "$(OUT)/swapz-primary-policy"; "$(OUT)/swapz-primary-mount-namespace"
+	@python3 -B "$(NATIVE)/userspace/swapz-primary-late-race-test.py"
 
 test-replay-helper: $(OUT)/io-replay-native
 	@test -x "$(OUT)/io-replay-native"
