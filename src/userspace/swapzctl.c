@@ -386,6 +386,13 @@ struct status_ready_report {
 	size_t capacity;
 };
 
+struct dm_list_record {
+	const char *name;
+	uint64_t device_id;
+	uint32_t event_number;
+	size_t record_size;
+};
+
 static void status_set_problem(struct status_problem *problem,
 			       const char *field, const char *expected,
 			       const char *observed)
@@ -818,6 +825,75 @@ static int status_align_target_offset(size_t value, size_t *aligned)
 	return 0;
 }
 
+static int status_parse_name_list_record(
+	const unsigned char *record, size_t remaining,
+	struct dm_list_record *parsed, struct status_problem *problem)
+{
+	const size_t name_offset = offsetof(struct dm_name_list, name);
+	const char *name;
+	const char *name_end;
+	size_t metadata_offset;
+	uint32_t flags;
+	uint32_t next;
+
+	memset(parsed, 0, sizeof(*parsed));
+	memset(problem, 0, sizeof(*problem));
+	if (remaining < name_offset + 1U) {
+		status_set_problem(problem, "dm_name_list",
+				   "complete record header and NUL-terminated name",
+				   "truncated Device Mapper device-list record");
+		return -1;
+	}
+	memcpy(&parsed->device_id, record + offsetof(struct dm_name_list, dev),
+	       sizeof(parsed->device_id));
+	memcpy(&next, record + offsetof(struct dm_name_list, next), sizeof(next));
+	if (next && (next % SWAPZ_DM_WIRE_ALIGNMENT ||
+		     next < name_offset + 1U || (size_t)next > remaining)) {
+		status_set_problem(problem, "dm_name_list.next",
+				   "8-byte-aligned forward record offset within data_size",
+				   "unaligned, overlapping or truncated next record");
+		return -1;
+	}
+	parsed->record_size = next ? (size_t)next : remaining;
+	if (parsed->record_size % SWAPZ_DM_WIRE_ALIGNMENT) {
+		status_set_problem(problem, "dm_name_list.next",
+				   "8-byte-aligned record end",
+				   "terminal Device Mapper record is not wire-aligned");
+		return -1;
+	}
+	name = (const char *)record + name_offset;
+	name_end = memchr(name, '\0', parsed->record_size - name_offset);
+	if (!name_end || name == name_end ||
+	    (size_t)(name_end - name) >= DM_NAME_LEN) {
+		status_set_problem(problem, "dm_name_list.name",
+				   "bounded nonempty NUL-terminated mapping name",
+				   "empty, unterminated or too-long mapping name");
+		return -1;
+	}
+	metadata_offset = (size_t)(name_end - (const char *)record) + 1U;
+	if (status_align_target_offset(metadata_offset, &metadata_offset) < 0 ||
+	    metadata_offset > parsed->record_size ||
+	    parsed->record_size - metadata_offset < 2U * sizeof(uint32_t)) {
+		status_set_problem(problem, "dm_name_list.event_nr/flags",
+				   "8-byte-aligned event number and flags inside record",
+				   "truncated post-name Device Mapper metadata");
+		return -1;
+	}
+	memcpy(&parsed->event_number, record + metadata_offset,
+	       sizeof(parsed->event_number));
+	memcpy(&flags, record + metadata_offset + sizeof(parsed->event_number),
+	       sizeof(flags));
+	(void)flags;
+	if (!parsed->device_id) {
+		status_set_problem(problem, "dm_name_list.dev",
+				   "nonzero LIST_DEVICES identity",
+				   "zero device number");
+		return -1;
+	}
+	parsed->name = name;
+	return 0;
+}
+
 static void status_free_observation(struct dm_status_observation *observation)
 {
 	free(observation->reply);
@@ -843,7 +919,7 @@ static int parse_dm_status_observation(
 	size_t current_offset = 0;
 	uint32_t target;
 
-	*problem_target = 0;
+	*problem_target = UINT_MAX;
 	memset(problem, 0, sizeof(*problem));
 	if (buffer_size < sizeof(header)) {
 		status_set_problem(problem, "dm_ioctl.data_size",
@@ -987,6 +1063,26 @@ static int parse_dm_status_observation(
 					   "missing terminator or truncated INFO reply");
 			return -1;
 		}
+		if (final_target) {
+			if (terminator + 1 != record_end) {
+				status_set_problem(problem, "dm_target_spec.params",
+						   "final status NUL exactly at data_size",
+						   "bytes follow the final status terminator");
+				return -1;
+			}
+		} else {
+			size_t expected_next =
+				(size_t)(terminator + 1 - record_base);
+
+			if (status_align_target_offset(expected_next,
+						       &expected_next) < 0 ||
+			    expected_next != (size_t)specification.next) {
+				status_set_problem(problem, "dm_target_spec.next",
+						   "exact 8-byte alignment after status NUL",
+						   "record offset skips or overlaps wire bytes");
+				return -1;
+			}
+		}
 		entry->sector_start = specification.sector_start;
 		entry->length = specification.length;
 		entry->device_id = header.dev;
@@ -1036,7 +1132,7 @@ static int read_dm_status_observation(
 
 	memset(observation, 0, sizeof(*observation));
 	memset(problem, 0, sizeof(*problem));
-	*problem_target = 0;
+	*problem_target = UINT_MAX;
 	if (dm_query(fd, DM_TABLE_STATUS, name, &buffer, &buffer_size) < 0) {
 		if (errno == EPROTO)
 			status_set_problem(problem, "dm_ioctl.data_start/data_size",
@@ -1134,11 +1230,18 @@ static int status_report_problem(const char *state, const char *name,
 	char safe_name[DM_NAME_LEN + 1U];
 
 	status_safe_mapping_name(name, safe_name);
-	fprintf(stderr,
-		"swapzctl status: %s: mapping '%s' device %u:%u target %u snapshot %u: field '%s'; expected %s; observed %s",
-		state, safe_name, major((dev_t)device_id),
-		minor((dev_t)device_id), target_index + 1U, generation,
-		problem->field, problem->expected, problem->observed);
+	if (target_index == UINT_MAX)
+		fprintf(stderr,
+			"swapzctl status: %s: mapping '%s' device %u:%u snapshot %u: field '%s'; expected %s; observed %s",
+			state, safe_name, major((dev_t)device_id),
+			minor((dev_t)device_id), generation, problem->field,
+			problem->expected, problem->observed);
+	else
+		fprintf(stderr,
+			"swapzctl status: %s: mapping '%s' device %u:%u target %u snapshot %u: field '%s'; expected %s; observed %s",
+			state, safe_name, major((dev_t)device_id),
+			minor((dev_t)device_id), target_index + 1U, generation,
+			problem->field, problem->expected, problem->observed);
 	if (problem->kernel_errno)
 		fprintf(stderr, "; kernel errno=%d", problem->kernel_errno);
 	fputc('\n', stderr);
@@ -1169,6 +1272,7 @@ static int status_observations_equal(
 {
 	uint32_t target;
 
+	*problem_target = UINT_MAX;
 	if (first->device_id != second->device_id) {
 		status_set_problem(problem, "dm_ioctl.dev",
 				   "identical device numbers in snapshots 1 and 2",
@@ -1268,14 +1372,42 @@ typedef int (*status_observation_reader)(
 	struct dm_status_observation *observation,
 	struct status_problem *problem, unsigned int *problem_target);
 
+struct status_fd_reader_context {
+	int fd;
+	uint32_t list_event_number;
+};
+
+static int status_validate_list_generation(
+	const struct dm_status_observation *observation,
+	uint32_t list_event_number, struct status_problem *problem,
+	unsigned int *problem_target)
+{
+	if (!observation->device_id ||
+	    observation->event_number == list_event_number)
+		return 0;
+	*problem_target = UINT_MAX;
+	status_set_problem(problem, "dm_ioctl.event_nr",
+			   "same event generation as DM_LIST_DEVICES",
+			   "mapping generation changed after device enumeration");
+	errno = EAGAIN;
+	return -1;
+}
+
 static int status_read_observation_with_fd(
 	void *context, const char *name, uint64_t expected_device,
 	struct dm_status_observation *observation,
 	struct status_problem *problem, unsigned int *problem_target)
 {
-	return read_dm_status_observation(*(const int *)context, name,
-					  expected_device, observation,
-					  problem, problem_target);
+	const struct status_fd_reader_context *reader = context;
+	int result = read_dm_status_observation(reader->fd, name, expected_device,
+						 observation, problem,
+						 problem_target);
+
+	if (status_validate_list_generation(observation,
+					    reader->list_event_number,
+					    problem, problem_target) < 0)
+		return -1;
+	return result;
 }
 
 static int report_device_status_with_reader(
@@ -1288,7 +1420,7 @@ static int report_device_status_with_reader(
 		.expected = "two identical full target inventories within 8 retries",
 		.observed = "inventory, identity or counters changed between generations 1 and 2"
 	};
-	unsigned int last_target = 0;
+	unsigned int last_target = UINT_MAX;
 	unsigned int attempt;
 
 	for (attempt = 0; attempt < SWAPZ_STATUS_SNAPSHOT_RETRIES; ++attempt) {
@@ -1311,7 +1443,8 @@ static int report_device_status_with_reader(
 				return status_report_problem(
 					target_state == STATUS_FAILED ? "FAILED" :
 					target_state == STATUS_UNAVAILABLE ||
-					saved_errno == EOVERFLOW || saved_errno == ENOMEM ?
+					saved_errno == EOVERFLOW || saved_errno == ENOMEM ||
+					saved_errno == EAGAIN ?
 					"UNAVAILABLE" : "BLOCKED",
 					name, expected_device, problem_target, 1, &problem);
 			return status_report_ioctl_failure(name, expected_device,
@@ -1333,7 +1466,8 @@ static int report_device_status_with_reader(
 				return status_report_problem(
 					target_state == STATUS_FAILED ? "FAILED" :
 					target_state == STATUS_UNAVAILABLE ||
-					saved_errno == EOVERFLOW || saved_errno == ENOMEM ?
+					saved_errno == EOVERFLOW || saved_errno == ENOMEM ||
+					saved_errno == EAGAIN ?
 					"UNAVAILABLE" : "BLOCKED",
 					name, expected_device, problem_target, 2, &problem);
 			return status_report_ioctl_failure(name, expected_device,
@@ -1383,9 +1517,16 @@ retry:
 }
 
 static int report_device_status(int fd, const char *name, uint64_t expected_device,
+				uint32_t list_event_number,
 				struct status_ready_report *report)
 {
-	return report_device_status_with_reader(&fd, status_read_observation_with_fd,
+	struct status_fd_reader_context reader = {
+		.fd = fd,
+		.list_event_number = list_event_number
+	};
+
+	return report_device_status_with_reader(&reader,
+						status_read_observation_with_fd,
 						name, expected_device, report);
 }
 
@@ -1437,45 +1578,21 @@ static int status_targets(void)
 	current_offset = header.data_start;
 	payload_size = header.data_size;
 	while (current_offset < payload_size) {
-		const unsigned char *record = buffer + current_offset;
+		struct dm_list_record record;
+		struct status_problem problem;
 		const size_t remaining = payload_size - current_offset;
-		const size_t name_offset = offsetof(struct dm_name_list, name);
-		const char *name;
-		const char *name_end;
-		size_t record_size;
-		uint64_t device_id;
-		uint32_t next;
 
-		if (remaining < name_offset + 1U) {
-			fputs("swapzctl status: BLOCKED: field 'dm_name_list'; expected complete name header and terminator; observed truncated record\n", stderr);
+		if (status_parse_name_list_record(buffer + current_offset, remaining,
+						  &record, &problem) < 0) {
+			fprintf(stderr,
+				"swapzctl status: BLOCKED: field '%s'; expected %s; observed %s\n",
+				problem.field, problem.expected, problem.observed);
 			goto out;
 		}
-		memcpy(&device_id, record + offsetof(struct dm_name_list, dev),
-		       sizeof(device_id));
-		memcpy(&next, record + offsetof(struct dm_name_list, next),
-		       sizeof(next));
-		if (next && (next % SWAPZ_DM_WIRE_ALIGNMENT ||
-			     next < name_offset + 1U || (size_t)next > remaining)) {
-			fputs("swapzctl status: BLOCKED: field 'dm_name_list.next'; expected 8-byte-aligned forward offset within reply; observed overlapping, unaligned or truncated record\n", stderr);
+		if (report_device_status(fd, record.name, record.device_id,
+					 record.event_number, &report) < 0)
 			goto out;
-		}
-		record_size = next ? (size_t)next : remaining;
-		name = (const char *)record + name_offset;
-		name_end = memchr(name, '\0', record_size - name_offset);
-		if (!name_end || name == name_end ||
-		    (size_t)(name_end - name) >= DM_NAME_LEN) {
-			fputs("swapzctl status: BLOCKED: field 'dm_name_list.name'; expected bounded NUL-terminated mapping name; observed empty, unterminated or too-long name\n", stderr);
-			goto out;
-		}
-		if (!device_id) {
-			fputs("swapzctl status: BLOCKED: field 'dm_name_list.dev'; expected nonzero LIST_DEVICES identity; observed zero device number\n", stderr);
-			goto out;
-		}
-		if (report_device_status(fd, name, device_id, &report) < 0)
-			goto out;
-		if (!next)
-			break;
-		current_offset += next;
+		current_offset += record.record_size;
 	}
 	result = 0;
 out:

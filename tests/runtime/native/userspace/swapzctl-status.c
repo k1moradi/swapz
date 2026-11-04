@@ -356,6 +356,32 @@ static size_t make_dm_empty_status_fixture(unsigned char *buffer, size_t capacit
 	return capacity;
 }
 
+static size_t make_dm_name_list_fixture(
+	unsigned char *buffer, size_t capacity, const char *name,
+	uint64_t device_id, uint32_t event_number)
+{
+	const size_t name_offset = offsetof(struct dm_name_list, name);
+	size_t metadata_offset;
+	size_t record_size;
+	uint32_t next = 0;
+	uint32_t flags = 0;
+
+	assert(strlen(name) < DM_NAME_LEN);
+	metadata_offset = fixture_align_target_offset(
+		name_offset + strlen(name) + 1U);
+	record_size = metadata_offset + 2U * sizeof(uint32_t);
+	assert(record_size <= capacity);
+	memset(buffer, 0, capacity);
+	memcpy(buffer + offsetof(struct dm_name_list, dev), &device_id,
+	       sizeof(device_id));
+	memcpy(buffer + offsetof(struct dm_name_list, next), &next, sizeof(next));
+	memcpy(buffer + name_offset, name, strlen(name) + 1U);
+	memcpy(buffer + metadata_offset, &event_number, sizeof(event_number));
+	memcpy(buffer + metadata_offset + sizeof(event_number), &flags,
+	       sizeof(flags));
+	return record_size;
+}
+
 static int parse_fixture(const unsigned char *buffer, size_t size,
 			 uint64_t expected_device,
 			 struct dm_status_observation *observation,
@@ -389,6 +415,62 @@ static void test_empty_dm_target_inventory(void)
 					 &problem_target));
 	status_free_observation(&first);
 	status_free_observation(&second);
+}
+
+static void test_dm_name_list_wire_records(void)
+{
+	unsigned char buffer[128];
+	struct dm_list_record record;
+	struct status_problem problem;
+	uint32_t next;
+	size_t size = make_dm_name_list_fixture(
+		buffer, sizeof(buffer), "a", 7, 11);
+
+	assert(size == 24U);
+	assert(status_parse_name_list_record(buffer, size, &record, &problem) == 0);
+	assert(record.device_id == 7U);
+	assert(record.event_number == 11U);
+	assert(record.record_size == size);
+	assert(!strcmp(record.name, "a"));
+
+	next = 16U;
+	memcpy(buffer + offsetof(struct dm_name_list, next), &next, sizeof(next));
+	assert(status_parse_name_list_record(buffer, size, &record, &problem) < 0);
+	assert(!strcmp(problem.field, "dm_name_list.event_nr/flags"));
+
+	size = make_dm_name_list_fixture(buffer, sizeof(buffer), "a", 7, 11);
+	next = 23U;
+	memcpy(buffer + offsetof(struct dm_name_list, next), &next, sizeof(next));
+	assert(status_parse_name_list_record(buffer, size, &record, &problem) < 0);
+	assert(!strcmp(problem.field, "dm_name_list.next"));
+
+	size = make_dm_name_list_fixture(buffer, sizeof(buffer), "a", 7, 11);
+	assert(status_parse_name_list_record(buffer, 16U, &record, &problem) < 0);
+	assert(!strcmp(problem.field, "dm_name_list.event_nr/flags"));
+
+	size = make_dm_name_list_fixture(buffer, sizeof(buffer), "a", 7, 11);
+	memset(buffer + offsetof(struct dm_name_list, name) + 1U, 'x',
+	       size - offsetof(struct dm_name_list, name) - 1U);
+	assert(status_parse_name_list_record(buffer, size, &record, &problem) < 0);
+	assert(!strcmp(problem.field, "dm_name_list.name"));
+}
+
+static void test_list_generation_binding(void)
+{
+	struct dm_status_observation observation = {
+		.device_id = 7,
+		.event_number = 12
+	};
+	struct status_problem problem;
+	unsigned int problem_target = 0;
+
+	assert(status_validate_list_generation(&observation, 12, &problem,
+					       &problem_target) == 0);
+	assert(status_validate_list_generation(&observation, 11, &problem,
+					       &problem_target) < 0);
+	assert(errno == EAGAIN);
+	assert(problem_target == UINT_MAX);
+	assert(!strcmp(problem.field, "dm_ioctl.event_nr"));
 }
 
 static void test_dm_reply_boundaries_and_identity(void)
@@ -516,6 +598,20 @@ static void test_absolute_offsets_for_multiple_dm_targets(void)
 	memcpy(&header, buffer, sizeof(header));
 	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
 	second_offset = specification.next;
+
+	/* An aligned gap after the first NUL is not a valid next target offset. */
+	specification.next += SWAPZ_DM_WIRE_ALIGNMENT;
+	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
+	assert(parse_fixture(buffer, size, 1, &observation,
+			     &problem, &failed_target) < 0);
+	assert(!strcmp(problem.field, "dm_target_spec.next"));
+	status_free_observation(&observation);
+
+	size = make_dm_multi_fixture(buffer, sizeof(buffer), types,
+				     texts, NULL, 3, 1);
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	second_offset = specification.next;
 	/* Overlap the next record even though the next offset is aligned. */
 	memcpy(&specification, buffer + sizeof(header) + second_offset,
 	       sizeof(specification));
@@ -538,6 +634,22 @@ static void test_absolute_offsets_for_multiple_dm_targets(void)
 	assert(!strcmp(problem.field, "dm_target_spec.params") ||
 	       !strcmp(problem.field, "dm_target_spec.next"));
 	status_free_observation(&observation);
+
+	{
+		const char *const one_type[] = { "linear" };
+		const char *const one_text[] = { "x" };
+
+		size = make_dm_multi_fixture(buffer, sizeof(buffer), one_type,
+					     one_text, NULL, 1, 1);
+		memcpy(&header, buffer, sizeof(header));
+		assert((size_t)header.data_size < size);
+		header.data_size += 1U;
+		memcpy(buffer, &header, sizeof(header));
+		assert(parse_fixture(buffer, size, 1, &observation,
+				     &problem, &failed_target) < 0);
+		assert(!strcmp(problem.field, "dm_target_spec.params"));
+		status_free_observation(&observation);
+	}
 }
 
 static void test_full_target_inventory_comparison(void)
@@ -840,6 +952,8 @@ int main(void)
 	test_checked_counter_arithmetic();
 	test_dm_wire_alignment_is_host_independent();
 	test_empty_dm_target_inventory();
+	test_dm_name_list_wire_records();
+	test_list_generation_binding();
 	test_dm_reply_boundaries_and_identity();
 	test_absolute_offsets_for_multiple_dm_targets();
 	test_full_target_inventory_comparison();

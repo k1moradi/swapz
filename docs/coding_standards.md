@@ -75,6 +75,13 @@ second-read ioctl errno cannot inherit a prior target parser failure. A
 tableless mapping legitimately reports target_count=0 while DM_TABLE_STATUS
 may leave data_size at the caller's request capacity; treat that as an empty
 target inventory and never parse request-buffer slack as returned records.
+For each LIST_DEVICES record, require the NUL-terminated name plus its
+8-byte-aligned event-number/flags trailer to fit inside the record, and bind
+that enumerated event generation to both status observations. A generation
+change after enumeration is UNAVAILABLE, not permission to report a newer
+table under an older list identity. For nonfinal DM_TABLE_STATUS records,
+require spec.next to equal the exact 8-byte alignment immediately after the
+status NUL; aligned gaps are malformed rather than ignorable padding.
 
 Kernel information-status emission may use multiple bounded `DMEMIT` calls to
 keep callback stack use bounded. The externally concatenated INFO stream is the
