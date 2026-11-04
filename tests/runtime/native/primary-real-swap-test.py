@@ -1233,10 +1233,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_partial_cgroup_configuration_reports_cleanup_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.object(qualify, "CGROUP_ROOT", Path(directory)), \
-                    mock.patch.object(qualify, "_cgroup_prerequisites"):
+                    mock.patch.object(qualify, "_cgroup_prerequisites"), \
+                    mock.patch.object(Path, "rmdir",
+                                      side_effect=OSError("synthetic rmdir failure")):
                 with self.assertRaisesRegex(
                         qualify.QualificationFailure,
-                        "dedicated cgroup lacks required control.*partial cgroup cleanup also failed"):
+                        "dedicated cgroup lacks required control.*partial cgroup cleanup "
+                        "also failed: .*synthetic rmdir failure"):
                     qualify._cgroup_create("test", 128, 384)
 
     def test_cgroup_membership_is_exact_before_and_after_oracle_fill(self):

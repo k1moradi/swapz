@@ -232,8 +232,10 @@ admission fails. Bounded protocol reads retain multiple
 records from one read without blocking on partial records. Partial cgroup
 creation, first-telemetry failures and evidence temporary-file failures must
 clean up explicitly or expose the cleanup error alongside the original
-failure. A timed-out primary start must use only normal stop/recovery; a failed
-swapoff never authorizes forced mapper removal or module unload.
+failure. Rootless regression cases inject cgroup removal failures independently
+from unreadable process-inventory recovery. A timed-out primary start must use
+only normal stop/recovery; a failed swapoff never authorizes forced mapper
+removal or module unload.
 
 At least two passing cycles require new run IDs and Linux swap UUIDs, zero
 initial mapper usage, no stale mapper/module/ownership state, durable
