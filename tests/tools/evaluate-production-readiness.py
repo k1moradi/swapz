@@ -135,7 +135,7 @@ def load_json_strict(path: Path) -> tuple[dict[str, Any], bytes]:
             raw.decode("utf-8"), object_pairs_hook=_unique_object,
             parse_float=_finite_json_float,
             parse_constant=_reject_json_constant)
-    except (UnicodeDecodeError, json.JSONDecodeError, EvidenceError) as exc:
+    except (UnicodeDecodeError, ValueError, OverflowError) as exc:
         raise EvidenceError(f"{path}: invalid JSON: {exc}") from exc
     if not isinstance(value, dict):
         raise EvidenceError(f"{path}: top level must be an object")
@@ -494,6 +494,21 @@ def validate_physical_campaign_evidence(
         reject("sealed campaign schema is invalid")
     if not raw:
         reject("sealed campaign evidence bytes are empty")
+    elif len(raw) > MAX_EVIDENCE_INPUT_BYTES:
+        reject("sealed campaign evidence bytes exceed input bound")
+    else:
+        # The digest belongs to these exact serialized bytes, not a separate
+        # mutable Python object supplied by a caller.
+        try:
+            serialized_campaign = json.loads(
+                raw.decode("utf-8"), object_pairs_hook=_unique_object,
+                parse_float=_finite_json_float,
+                parse_constant=_reject_json_constant)
+        except (UnicodeDecodeError, ValueError, OverflowError):
+            reject("sealed campaign evidence bytes are malformed")
+        else:
+            if serialized_campaign != campaign:
+                reject("sealed campaign object differs from artifact bytes")
     if campaign.get("source_sha") != source_sha:
         reject("sealed campaign source binding mismatch")
 
