@@ -569,6 +569,15 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 					   near_full_versions[page]) == 0);
 	}
 	CHECK(near_full_authority.next_block == SWAPZ_SEGMENT_BLOCKS - 1U);
+	CHECK(!near_full_gc_live_bytes[3U] && !near_full_gc_io_cost[3U] &&
+	      !near_full_gc_min_live_blocks[3U]);
+	near_full_gc_live_bytes[3U] = 1U;
+	CHECK(swapz_gc_commit_rotation(&near_full_authority, 3U) == -EUCLEAN);
+	CHECK(near_full_authority.gc_allocation &&
+	      near_full_authority.gc_forbidden_victim == 3U &&
+	      near_full_authority.gc_destination == 0U);
+	CHECK(near_full_roles[3U] == 1U && near_full_roles[0U] == 0U);
+	near_full_gc_live_bytes[3U] = 0U;
 	CHECK(swapz_gc_commit_rotation(&near_full_authority, 3U) == 0);
 	CHECK(!near_full_authority.gc_allocation);
 	CHECK(near_full_roles[0] == 1U && near_full_roles[1] == 1U &&

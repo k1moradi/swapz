@@ -21,6 +21,9 @@ static swapz_u8 classes[1280];
 static swapz_u8 roles[5];
 static swapz_u32 mapped_pages[5];
 static swapz_u32 program_counts[5];
+static swapz_u32 gc_live_bytes[5];
+static swapz_u32 gc_io_cost[5];
+static swapz_u16 gc_min_live_blocks[5];
 static swapz_u32 first_page[5];
 static swapz_u32 last_page[5];
 static swapz_u32 prev_page[32];
@@ -85,6 +88,10 @@ static int setup_indexed(swapz_u32 physical_blocks)
 	if (rc)
 		return rc;
 	rc = swapz_enable_segment_program_counts(&a, program_counts, segments);
+	if (rc)
+		return rc;
+	rc = swapz_enable_segment_gc_accounting(
+		&a, gc_live_bytes, gc_io_cost, gc_min_live_blocks, segments);
 	if (rc)
 		return rc;
 	rc = swapz_enable_segment_page_lists(&a, first_page, last_page,
@@ -200,6 +207,40 @@ static int test_corrupted_liveness_never_reclaims_live_map(void)
 	CHECK(write_page(2) == -ENOSPC); /* second scan checks maps */
 	CHECK(a.recycled_dead_segments == 0 && maps[0].start_block == 0);
 	CHECK(maps[1].start_block == 255 && maps[0].valid);
+	return 0;
+}
+
+static int test_dead_recycle_rejects_stale_gc_score(void)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	int i;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	for (i = 0; i < 256; ++i)
+		CHECK(write_page(0) == 0);
+	CHECK(a.open_segment == 0 && a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(swapz_discard_page(&a, 0) == 0);
+	CHECK(mapped_pages[0] == 0 && first_page[0] == none &&
+	      last_page[0] == none);
+	CHECK(!gc_live_bytes[0] && !gc_io_cost[0] && !gc_min_live_blocks[0]);
+
+	/*
+	 * Force the next allocation to inspect the previously written dead
+	 * segment. A stale score contradicts the zero mapping/liveness views and
+	 * must fail before the recycle hook or extent-class clearing.
+	 */
+	a.next_segment_probe = 0;
+	gc_io_cost[0] = 1U;
+	CHECK(write_page(1) == -EUCLEAN);
+	CHECK(recycle_hook_calls == 0 && a.recycled_dead_segments == 0);
+	CHECK(a.open_segment == 0 && a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(classes[0] == 1U && !maps[1].valid);
+
+	gc_io_cost[0] = 0U;
+	CHECK(write_page(1) == 0);
+	CHECK(recycle_hook_calls == 1 && recycle_hook_last_segment == 0U);
+	CHECK(a.recycled_dead_segments == 1U);
+	CHECK(maps[1].valid && maps[1].start_block == 0U);
 	return 0;
 }
 
@@ -386,6 +427,7 @@ int main(void)
 	CHECK(test_recycle_hook_failure_preserves_dead_segment() == 0); passed++;
 	CHECK(test_live_segment_is_never_overwritten() == 0); passed++;
 	CHECK(test_corrupted_liveness_never_reclaims_live_map() == 0); passed++;
+	CHECK(test_dead_recycle_rejects_stale_gc_score() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
 	CHECK(test_circular_allocator_fairness_probes_sequentially() == 0); passed++;

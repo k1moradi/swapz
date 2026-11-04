@@ -215,6 +215,34 @@ static int swapz_gc_accounting_enabled(const struct swapz_authority *a)
 	       a->segment_gc_min_live_blocks;
 }
 
+/*
+ * A segment declared dead by the allocation/recovery path must have no
+ * contradictory cached authority. These sidecars are maintained atomically
+ * with mapping publication and therefore must reach zero with the last map.
+ * Validate them before any recycle hook or GC role exchange can make reuse
+ * externally visible.
+ */
+static int swapz_dead_segment_sidecars_validate(
+	const struct swapz_authority *a, swapz_u32 segment)
+{
+	if (a->segment_mapped_pages &&
+	    (segment >= a->segment_count ||
+	     a->segment_mapped_pages[segment]))
+		return -EUCLEAN;
+	if (swapz_page_list_validate_segment(a, segment))
+		return -EUCLEAN;
+	if (!swapz_gc_accounting_enabled(a))
+		return 0;
+	if (!a->segment_mapped_pages || !a->segment_gc_live_bytes ||
+	    !a->segment_gc_io_cost || !a->segment_gc_min_live_blocks ||
+	    segment >= a->segment_count ||
+	    a->segment_gc_live_bytes[segment] ||
+	    a->segment_gc_io_cost[segment] ||
+	    a->segment_gc_min_live_blocks[segment])
+		return -EUCLEAN;
+	return 0;
+}
+
 static int swapz_gc_account_costs(const struct swapz_authority *a,
 				  const struct swapz_map *m,
 				  swapz_u32 *segment,
@@ -547,10 +575,11 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
  * The safe, strictly limited first swapz GC step: reuse only wholly-dead
  * 1MiB segments.  A live object is NEVER copied or overwritten here.
  *
- * Each candidate is checked against BOTH physical live-record counts and
- * all valid logical mappings, because a corrupt refcount must not cause
- * silent live-data overwrite.  No segment in the fixed reserve tail is used.
- * One ordered worker owns maps, segment metadata and the active write.
+ * Each candidate is checked against physical live-record counts plus every
+ * attached exact sidecar. Without the mapped-page sidecar, fall back to a full
+ * logical-map scan. Exceptional roll-forward performs its own independent full
+ * map scan before entering this common reclaim gate. No segment in the fixed
+ * reserve tail is used. One ordered worker owns all authority state.
  */
 static int swapz_claim_dead_segment(struct swapz_authority *a,
 				    swapz_u32 segment,
@@ -561,7 +590,7 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 	swapz_u8 used_mask = 0;
 	int used, blocked = 0;
 
-	if (swapz_page_list_validate_segment(a, segment))
+	if (swapz_dead_segment_sidecars_validate(a, segment))
 		return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
 	a->alloc_probe_full_scans++;
 	for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
@@ -843,20 +872,6 @@ static int swapz_verify_recovery_victim_dead(
 	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
 
 	/*
-	 * A physically dead recovery source must also have no GC scoring
-	 * authority. A stale/nonzero score or partially installed score index
-	 * contradicts the map/liveness proof; fail before any recycle hook.
-	 * This O(1) check adds no scan to ordinary foreground recycling.
-	 */
-	if (swapz_gc_accounting_enabled(a) &&
-	    (!a->segment_mapped_pages || !a->segment_gc_live_bytes ||
-	     !a->segment_gc_io_cost || !a->segment_gc_min_live_blocks ||
-	     a->segment_gc_live_bytes[segment] ||
-	     a->segment_gc_io_cost[segment] ||
-	     a->segment_gc_min_live_blocks[segment]))
-		return -EUCLEAN;
-
-	/*
 	 * Roll-forward is an exceptional recovery path, so prefer independent
 	 * authority proof over the ordinary O(1) segment sidecar fast path.
 	 * A stale/corrupt cached count must never permit reclaim, and a zero count
@@ -1061,6 +1076,8 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 		live_total += a->live_records[block];
 	if (live_total || (a->segment_mapped_pages &&
 			   live_total != a->segment_mapped_pages[victim]))
+		return -EUCLEAN;
+	if (swapz_dead_segment_sidecars_validate(a, victim))
 		return -EUCLEAN;
 	/* Commit both roles without further lower I/O or fallible work. */
 	a->segment_foreground[dest] = 1;
