@@ -7,6 +7,15 @@ umask 077
 # attributed to this admission/qualification phase, never the prior benchmark.
 printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
 
+[[ -r $cleanup_helper ]] || {
+    printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper unavailable; restore the readable checkout helper before admission' >&2
+    exit 2
+}
+if ! source "$cleanup_helper" 2>/dev/null; then
+    printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper could not be loaded safely' >&2
+    exit 2
+fi
+
 script_source="${BASH_SOURCE[0]}"
 case "$script_source" in
     */*) script_directory="${script_source%/*}" ;;
@@ -21,14 +30,6 @@ cd "$ROOT" 2>/dev/null || {
     exit 2
 }
 cleanup_helper="$ROOT/tests/tools/clear-tmp-before-memory-check.sh"
-[[ -r $cleanup_helper ]] || {
-    printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper unavailable; restore the readable checkout helper before admission' >&2
-    exit 2
-}
-if ! source "$cleanup_helper" 2>/dev/null; then
-    printf '%s\n' 'BLOCKED: ID36 owned temporary-cleanup helper could not be loaded safely' >&2
-    exit 2
-fi
 
 VALIDATED_SOURCE=""
 SHARED_PLAN=""
