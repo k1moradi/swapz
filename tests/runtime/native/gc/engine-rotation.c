@@ -378,7 +378,8 @@ static int test_delayed_gc_completion_fences_mutation(void)
 	struct swapz_tx blocked;
 	swapz_u8 committed = 0, prepared = 0;
 	swapz_u16 completed = 0;
-	swapz_u32 logical = 0, previous;
+	swapz_u32 logical = 0, previous, pending_cursor, previous_generation;
+	int commit_error, advance_error;
 
 	CHECK(setup() == 0);
 	for (unsigned int i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
@@ -401,6 +402,31 @@ static int test_delayed_gc_completion_fences_mutation(void)
 	CHECK(swapz_stage(&a, &logical, 1, 1, &blocked) == -EBUSY);
 	CHECK(swapz_discard_page(&a, logical) == -EBUSY);
 	CHECK(maps[0].start_block == previous && maps[0].valid);
+	/* A concurrent-looking GC role transition is also fenced until the
+	 * pending lower write is replayed; the other reserve stays untouched. */
+	pending_cursor = a.next_block;
+	previous_generation = maps[0].generation;
+	commit_error = swapz_gc_commit_rotation(&a, 0U);
+	advance_error = swapz_gc_advance_rotation_destination(&a, 2U);
+	if (commit_error != -EINVAL || advance_error != -EINVAL ||
+	    !a.gc_allocation || a.gc_forbidden_victim != 0U ||
+	    a.gc_destination != 2U || a.open_segment != 2U ||
+	    a.next_block != pending_cursor || !roles[0] ||
+	    roles[2] || roles[3] || maps[0].generation != previous_generation ||
+	    maps[0].start_block != previous || !a.batch_pending) {
+		fprintf(stderr, "%s:%d FAIL GC "
+			"operation=role_transition_during_pending_lower_write "
+			"commit_errno=%d advance_errno=%d expected_errno=%d "
+			"expected_generation=%u actual_generation=%u "
+			"victim=0 victim_role=%u destination=%u destination_role=%u "
+			"recovery=%d batch_pending=%u cursor=%u expected_cursor=%u\n",
+			__FILE__, __LINE__, commit_error, advance_error, -EINVAL,
+			previous_generation, maps[0].generation,
+			(unsigned int)roles[0], a.gc_destination,
+			(unsigned int)roles[2], a.gc_allocation,
+			(unsigned int)a.batch_pending, a.next_block, pending_cursor);
+		return 1;
+	}
 	CHECK(lower_write_run(NULL, run.start_block, run.blocks,
 			      run.bytes, &completed) == 0);
 	CHECK(completed == run.blocks);

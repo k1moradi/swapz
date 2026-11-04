@@ -693,6 +693,15 @@ The GC native suite must additionally sustain at least 64 all-RAW exhaustion-and
 rotation cycles over a fully populated logical mapper, verifying all surviving
 pages byte-for-byte and preserving both rotating reserve roles after every
 cycle; a successful mapper construction or two rotations are insufficient.
+The sustained RAW oracle must independently track each logical page's expected
+mapping generation, incrementing only after a successful foreground publication
+or completed GC relocation, and compare every generation alongside byte/CRC
+readback after each rotation. A generation read from the authoritative map
+cannot serve as its own expectation. Full-destination roll-forward additionally
+requires a subsequent foreground publication, not just a successful role swap;
+while a GC lower write awaits replay, commit and destination-advance attempts
+must fail without changing the retained victim, destination or allocation
+cursor.
 Every successful reserve rotation must permit at least one subsequent foreground
 overwrite before the next `-ENOSPC`; at worst-case RAW occupancy the next
 exhaustion must occur within one 256-block segment of successful foreground

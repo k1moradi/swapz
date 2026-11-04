@@ -35,6 +35,7 @@ static swapz_u8 roles[PHYSICAL_SEGMENTS];
 static swapz_u32 segment_maps[PHYSICAL_SEGMENTS];
 static swapz_u32 program_counts[PHYSICAL_SEGMENTS];
 static swapz_u32 versions[LOGICAL_PAGES];
+static swapz_u32 expected_generations[LOGICAL_PAGES];
 static swapz_u8 media[PHYSICAL_BLOCKS * SWAPZ_BLOCK_BYTES];
 static swapz_u8 page_bytes[SWAPZ_BLOCK_BYTES];
 static swapz_u8 expected_bytes[SWAPZ_BLOCK_BYTES];
@@ -109,6 +110,16 @@ static int churn_invariant_failure(const char *invariant, int line,
 			entry->expected_generation, entry->actual_generation,
 			entry->error);
 	}
+	fprintf(stderr, "  recovery victim=%" PRIu32 " victim_role=%d"
+		" destination=%" PRIu32 " destination_role=%d"
+		" open=%" PRIu32 " cursor=%" PRIu32 " active=%d\n",
+		a.gc_forbidden_victim,
+		a.gc_forbidden_victim < PHYSICAL_SEGMENTS ?
+			(int)roles[a.gc_forbidden_victim] : -1,
+		a.gc_destination,
+		a.gc_destination < PHYSICAL_SEGMENTS ?
+			(int)roles[a.gc_destination] : -1,
+		a.open_segment, a.next_block, a.gc_allocation);
 	return 1;
 }
 
@@ -158,6 +169,7 @@ static int setup(void)
 		return error;
 	memset(media, 0, sizeof(media));
 	memset(versions, 0, sizeof(versions));
+	memset(expected_generations, 0, sizeof(expected_generations));
 	foreground_writes = 0;
 	gc_reads = 0;
 	gc_writes = 0;
@@ -189,6 +201,8 @@ static int write_page(swapz_u32 logical, swapz_u32 version)
 	error = swapz_finish_raw(&a, &tx, page_bytes, 1, 0);
 	if (!error) {
 		versions[logical] = version;
+		if (churn_active)
+			expected_generations[logical]++;
 		foreground_writes++;
 	}
 	record_churn("foreground_raw", logical,
@@ -208,6 +222,13 @@ static int verify_all_pages(void)
 		if (!map->valid || !map->raw || map->extent_blocks != 1 ||
 		    map->start_block >= PHYSICAL_BLOCKS)
 			return -EUCLEAN;
+		/* A byte-exact CRC cannot detect an unexpected authority generation. */
+		if (churn_active && map->generation != expected_generations[logical]) {
+			record_churn("verify_generation", logical,
+				     expected_generations[logical], map->generation,
+				     -EUCLEAN);
+			return -EUCLEAN;
+		}
 		stored = media + (size_t)map->start_block * SWAPZ_BLOCK_BYTES;
 		make_raw_page(logical, versions[logical], expected_bytes);
 		if (memcmp(stored, expected_bytes, SWAPZ_BLOCK_BYTES) ||
@@ -249,6 +270,8 @@ static int relocate_segment_pages(swapz_u32 victim)
 			return error;
 		gc_writes++;
 		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
+		if (churn_active)
+			expected_generations[logical]++;
 	}
 	return 0;
 }
@@ -779,6 +802,32 @@ static int test_full_destination_raw_roll_forward(void)
 	CHECK(roles[victim] && !roles[exhausted_destination]);
 	CHECK(reserve_segments() == PHYSICAL_SEGMENTS - FOREGROUND_SEGMENTS);
 	CHECK(!live[failed_block] && !classes[failed_block]);
+	CHECK(verify_all_pages() == 0);
+
+	/* A successful roll-forward must buy an actual foreground publication,
+	 * not just exchange role labels with a one-block allocation tail. */
+	{
+		const swapz_u32 previous_generation = maps[0].generation;
+		const int write_error = write_page(0U, 3U);
+
+		if (write_error || maps[0].generation != previous_generation + 1U ||
+		    maps[0].start_block != SWAPZ_SEGMENT_BLOCKS - 1U) {
+			fprintf(stderr, "%s:%d FAIL GC "
+				"operation=post_roll_forward_foreground_write "
+				"original_errno=%d expected_generation=%" PRIu32
+				" actual_generation=%" PRIu32
+				" victim=%" PRIu32 " victim_role=%u"
+				" destination=%" PRIu32 " destination_role=%u"
+				" recovery=%d cursor=%" PRIu32 "\n",
+				__FILE__, __LINE__, write_error,
+				previous_generation + 1U, maps[0].generation,
+				exhausted_destination,
+				(unsigned int)roles[exhausted_destination],
+				victim, (unsigned int)roles[victim],
+				a.gc_allocation, a.next_block);
+			return 1;
+		}
+	}
 	CHECK(verify_all_pages() == 0);
 	return 0;
 }
