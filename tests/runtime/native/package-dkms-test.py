@@ -1208,6 +1208,34 @@ exec "{flock_binary}" "$@"
         self.interrupt_upgrade_with_snapshot(
             corrupt_backup=False, corrupt_journal_phase=True)
 
+    def test_unsafe_transaction_parent_permissions_refuse_before_mutation(self):
+        transaction_parent = self.home / "transactions"
+        transaction_parent.mkdir(mode=0o700)
+        transaction_parent.chmod(0o755)
+        first = self.invoke("install")
+        self.assertNotEqual(first.returncode, 0)
+        self.assertIn("unsafe package transaction directory", first.stderr)
+        self.assert_absent()
+
+        transaction_parent.chmod(0o700)
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        transaction_parent.chmod(0o777)
+        upgrade = self.invoke("install")
+        self.assertNotEqual(upgrade.returncode, 0)
+        self.assertIn("unsafe package transaction directory", upgrade.stderr)
+        self.assertTrue((self.prefix / "sbin/swapzctl").exists())
+        self.assertFalse(list(transaction_parent.glob("swapz-package.*")))
+
+    def test_preparation_journal_write_failure_does_not_touch_live_state(self):
+        first = self.invoke("install", {
+            "SWAPZ_TEST_FAIL_TRANSACTION_PHASE": "prepared"})
+        self.assertNotEqual(first.returncode, 0)
+        self.assert_absent()
+        self.assertFalse(list(
+            (self.home / "transactions").glob("swapz-package.*")))
+
     def test_stale_unjournaled_transaction_blocks_new_install(self):
         parent = self.home / "transactions"
         parent.mkdir(mode=0o700)
