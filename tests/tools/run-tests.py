@@ -2579,6 +2579,10 @@ def run_stage(title, command, result, *, parse_bench=False):
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
     kernel_debug_evidence = (
         parse_kernel_debug_evidence(output) if parse_bench else None)
+    kernel_debug_failure = (
+        parse_bench and rc == 0 and
+        kernel_debug_evidence.get("overall") not in
+        ("PASS", "NOT_ENABLED", "UNAVAILABLE"))
     parallel_read_sessions = parse_parallel_read_ab(output) if parse_bench else []
     parallel_read_diagnostic = (
         parallel_read_ab_verdict(parallel_read_sessions)
@@ -2639,6 +2643,7 @@ def run_stage(title, command, result, *, parse_bench=False):
         {"overall": "NOT_RUN", "reason": "storage-envelope sweep not executed"})
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
+                       kernel_debug_failure or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
@@ -2696,6 +2701,10 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "owned RAM lifecycle evidence"
                 record["diagnostic"] = loaded_correctness.get(
                     "reason", "Loaded correctness evidence is incomplete")
+            elif kernel_debug_failure:
+                record["failed_phase"] = "loaded kernel debug evidence"
+                record["diagnostic"] = kernel_debug_evidence.get(
+                    "reason", "Loaded kernel debug evidence is incomplete")
             elif read_coalesce_diagnostic.get("overall") != (
                     "PASS_READ_COALESCE_AB_CONFIRMATION"):
                 record["failed_phase"] = "adjacent READ coalescing A/B evidence"

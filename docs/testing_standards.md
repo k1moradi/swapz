@@ -926,7 +926,10 @@ unreadable diagnostics, ambiguous configuration, or unrelated new debug reports
 produce explicit incomplete evidence rather than PASS. Any new KASAN/KCSAN/
 lockdep report whose bounded context names swapz is a hard loaded-test failure.
 Production kernels with all three facilities disabled remain `NOT_ENABLED`,
-not falsely qualified as debug-kernel clean.
+not falsely qualified as debug-kernel clean. The ordinary owner loaded stage
+may also retain `UNAVAILABLE` when the running-kernel configuration cannot be
+read, but a missing, duplicated, malformed, ambiguous or explicit failing
+kernel-debug record is not a loaded-stage PASS.
 
 Native window tests must distinguish a successful READ serviced after a staged
 two/three-record post-PACK tail from successful READ continuity in the same

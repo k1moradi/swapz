@@ -3371,6 +3371,27 @@ class ReportContract(unittest.TestCase):
         self.assertIn("five counterbalanced matched rounds",
                       diagnostic["reason"])
 
+    def test_incomplete_kernel_debug_evidence_fails_loaded_stage(self):
+        marker = (
+            "KERNEL_DEBUG_FEATURES=kasan:1 kcsan:0 lockdep:1 config:boot\n")
+        broken = synthetic_log().replace(marker, "", 1)
+        fake_process = FakeStreamingProcess(broken)
+        original_popen = runner.subprocess.Popen
+        report = {"schema": "swapz-test-results-v1", "stages": [],
+                  "benchmarks": {"sessions": [], "verdicts": {}}}
+        try:
+            runner.subprocess.Popen = lambda *args, **kwargs: fake_process
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    runner.run_stage("Owned RAM smoke + mixed/QD pilot",
+                                     ["unused"], report, parse_bench=True), 1)
+        finally:
+            runner.subprocess.Popen = original_popen
+        stage = report["stages"][-1]
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(stage["failed_phase"], "loaded kernel debug evidence")
+        self.assertIn("missing or duplicated", stage["diagnostic"])
+
     def test_read_coalesce_diagnostic_failure_reports_its_own_reason(self):
         broken = synthetic_log().replace("PASS_READ_COALESCE_AB=1\n", "", 1)
         fake_process = FakeStreamingProcess(broken)
