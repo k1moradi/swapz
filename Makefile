@@ -76,20 +76,20 @@ uninstall:
 	@sudo bash packaging/package-dkms.sh uninstall "$(PREFIX)"
 
 # The only public test goal: all stages are run by the private,
-# bounded reporter, which replaces one XZ result on PASS/FAIL/BLOCKED.
+# bounded reporter, which replaces one JSON report on PASS/FAIL/BLOCKED.
 # The + preserves GNU Make jobserver FDs for parallel compilation;
 # the reporter completes each stage before starting the next.
 test:
 	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)"
 
 # Development-only K=1 profiling loop: build, native/replay checks and three
-# repeated owned-null_blk pairs for SATA mixed, NVMe4 mixed, fast mixed,
-# fast QD4 and fast QD8, with compact raw/swapz and critical-path tables.
+# paired owned-null_blk repeats for sata-mixed, nvme4-mixed, nvme5-mixed,
+# fast-mixed, fast-w4 and fast-w8, with raw/swapz and critical-path tables.
 # SCENARIOS=nvme5-stripes (or sata-stripes) runs the mixed N=1/2/4
 # independent-target experiment; fast-stripes-w4/fast-stripes-w8 exercise
 # sustained WRITE QD4/QD8 with the same unchanged production K=1 target.
 # All emulated-device scenarios use the production delta64 + DELTA64_SHUF8
-# byte-plane shuffle ("bitshuffle" requirement) + LZ4 stack; there is no
+# 8-byte byte-plane shuffle (not bit-level bitshuffle) + LZ4 stack; no
 # delta64-off benchmark selector. SUBMITTER_PREPARE=0 selects the existing
 # opt-out in ordinary fast_test pairs. HAND_RECORDS=8|16|64 selects the
 # null_blk-only work-conserving hand
