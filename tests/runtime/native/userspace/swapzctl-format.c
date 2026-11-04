@@ -459,13 +459,13 @@ static void test_mountinfo_device_parser(void)
 		"36 25 8:2 /root\\9xx /other rw - ext4 /dev/sdb2 rw\n",
 		&device) < 0);
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\\\000 /other rw - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 /root\\000 /other rw - ext4 /dev/sdb2 rw\n",
 		&device) < 0);
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\\\377 /other rw - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 /root\\377 /other rw - ext4 /dev/sdb2 rw\n",
 		&device) < 0);
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\\\011tab /other rw - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 /root\\011tab /other rw - ext4 /dev/sdb2 rw\n",
 		&device) == 0);
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 relative /other rw - ext4 /dev/sdb2 rw\n",
