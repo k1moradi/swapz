@@ -6750,6 +6750,15 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         "segment_roles": ("ctx->segment_count", "swapz_u8", 1),
     }
 
+    INDEX_ORDER = (
+        "gc_scores", "gc_io_scores", "gc_min_live_blocks",
+        "gc_segment_evictions", "segment_mapped_pages",
+        "segment_program_counts", "segment_first_page", "segment_last_page",
+        "page_prev_in_segment", "page_next_in_segment", "segment_trimmed",
+        "segment_roles", "maps", "live_records", "extent_classes",
+        "extent_sequence_delta", "segment_sequence_base",
+    )
+
     @staticmethod
     def allocation_inventory(constructor):
         # Require exactly the production kvcalloc count and sizeof expression.
@@ -6766,19 +6775,26 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertEqual(len(inventory), len(self.INDEXES),
                          "capacity index site added, removed or malformed")
         self.assertEqual(set(observed), set(self.INDEXES))
+        self.assertEqual(
+            tuple(name for name, _, _ in inventory), self.INDEX_ORDER,
+            "constructor capacity-index allocation order changed")
         for name, (scale, _, _) in self.INDEXES.items():
             self.assertEqual(observed[name], scale)
 
-        # Every physical/logical/segment-scaled allocation follows deterministic
-        # capacity rejection. An unsupported target may allocate only its small
-        # fixed context before this guard.
+        # Every explicit capacity-scaled allocation follows deterministic
+        # geometry rejection. Match the whole allocation expression so a
+        # wrapper/cast or a different kernel allocation API cannot evade the
+        # preflight-order contract.
         preflight = constructor.index("swapz_authority_validate_geometry(")
         self.assertLess(preflight, min(position for _, _, position in inventory))
-        for token in ("logical", "physical", "ctx->segment_count"):
+        capacity_allocator = re.compile(
+            r"\b(?:kcalloc|kmalloc_array|kvmalloc|kvmalloc_array|kvcalloc|"
+            r"kvzalloc|vmalloc|vzalloc)\s*\((?P<args>[^;]*)\);", re.S)
+        for allocation in capacity_allocator.finditer(constructor[:preflight]):
             self.assertNotRegex(
-                constructor[:preflight],
-                r"(?:kvcalloc|kcalloc|kvmalloc|vzalloc)\(\s*" +
-                re.escape(token) + r"\b")
+                allocation.group("args"),
+                r"\b(?:logical|physical|segment_count)\b",
+                "capacity-scaled allocation appeared before geometry rejection")
         self.assertIn("goto fail;", constructor[preflight:])
         self.assertLess(constructor.index("swapz_authority_validate_geometry("),
                         constructor.index("error = swapz_authority_init("))
@@ -6817,6 +6833,19 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             "ctx->maps = kvcalloc(physical, sizeof(*ctx->maps), GFP_KERNEL);")
         with self.assertRaises(AssertionError):
             self.audit_constructor(injected)
+        injected = (
+            constructor[:guard] +
+            "ctx->maps = kvmalloc_array((size_t)logical, "
+            "sizeof(*ctx->maps), GFP_KERNEL);\n" +
+            constructor[guard:])
+        with self.assertRaises(AssertionError):
+            self.audit_constructor(injected)
+        injected = (
+            constructor[:guard] +
+            "ctx->batch_bytes = vzalloc((size_t)logical * 4096U);\n" +
+            constructor[guard:])
+        with self.assertRaises(AssertionError):
+            self.audit_constructor(injected)
 
     def test_selected_card_allocation_free_bytes_and_addressability(self):
         # Independently compute the current admission result and page-rounded
@@ -6852,8 +6881,16 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             for name, (scale, _, width) in self.INDEXES.items()
         ]
         self.assertEqual(sum(length for length, _ in allocations), 776070968)
-        self.assertEqual(sum((length + page - 1) // page * page
-                             for length, _ in allocations), 776114176)
+        allocation_pages = [
+            (length + page - 1) // page for length, _ in allocations]
+        self.assertEqual(sum(allocation_pages) * page, 776114176)
+        # Conservative leaf-PTE scale if every current capacity index is
+        # vmalloc-backed and independently mapped. Upper-level vmalloc tables,
+        # allocator metadata and any kmalloc/slab rounding remain host-measured.
+        leaf_pte_pages = sum(
+            (pages + 511) // 512 for pages in allocation_pages)
+        self.assertEqual(leaf_pte_pages, 382)
+        self.assertEqual(leaf_pte_pages * page, 1564672)
         self.assertEqual(max(allocations), (433283072, "maps"))
         self.assertEqual(len(allocations), 17)
         self.assertLess(logical * 16, (1 << 32))
