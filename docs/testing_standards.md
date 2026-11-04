@@ -5368,7 +5368,16 @@ evidence; duplicate PASS claims are incomplete.
 The official rootless stage directly executes every mandatory Python contract
 owned by that stage, including the owned-null_blk lifecycle qualifier and
 `primary-real-swap-test.py`; the latter remains unit-only in GitHub Actions
-and its privileged helper must block there. The source contract keeps an
+and its privileged helper must block there.
+
+The private real-swap source-admission protocol requires exact string types
+for nonce and oracle SHA-256 fields; a JSON integer with identical rendered
+hex digits is not a digest. Decoder recursion failures on bounded requests or
+responses must become BLOCKED rather than escaping cleanup. Rootless negative
+controls must prove that malformed pre-initial admission reaps its child, and
+that source-transfer EPIPE reports the phase, errno, bounded exit/cleanup
+disposition, and no private helper bytes or paths. None of these controls
+authorize physical-swap execution. The source contract keeps an
 explicit direct-suite registry and requires each path to exist and appear
 exactly once in `test-rootless.sh`. The analyzer contract remains mandatory
 through `tests -> suites test-all -> test-predictor -> test-anon-page-analyzer`

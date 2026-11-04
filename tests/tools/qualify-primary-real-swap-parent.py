@@ -207,7 +207,7 @@ def _read_request(
         request = json.loads(
             line[:-1].decode("ascii"),
             object_pairs_hook=_unique_json_object)
-    except (UnicodeError, ValueError, TypeError) as exc:
+    except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
         raise Blocked("source admission request is malformed") from exc
     required = {
         "schema", "phase", "source_sha", "nonce",
@@ -222,17 +222,18 @@ def _read_request(
         all(isinstance(source_hashes.get(path), str) and
             re.fullmatch(r"[0-9a-f]{64}", source_hashes[path]) is not None
             for path in PHYSICAL_CONTROL_INPUT_PATHS))
+    nonce = request.get("nonce") if isinstance(request, dict) else None
+    phase = request.get("phase") if isinstance(request, dict) else None
     if (not isinstance(request, dict) or set(request) != required or
             request.get("schema") != SOURCE_ADMISSION_SCHEMA or
             request.get("source_sha") != validated_source or
             not hashes_valid or
             source_hashes != expected_physical_control_inputs_sha256 or
             request.get("executed_helper_sha256") != expected_helper_sha256 or
-            not re.fullmatch(
-                r"[0-9a-f]{32}", str(request.get("nonce", ""))) or
-            not re.fullmatch(
-                r"(?:initial|final|cycle-[1-4])",
-                str(request.get("phase", "")))):
+            not isinstance(nonce, str) or
+            re.fullmatch(r"[0-9a-f]{32}", nonce) is None or
+            not isinstance(phase, str) or
+            re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase) is None):
         raise Blocked("source admission request identity is invalid")
     return request
 
@@ -405,7 +406,8 @@ def _serve_admission(server: socket.socket,
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
             f"source_admission_runtime_error:{admission_boundary}:"
-            f"{type(exc).__name__}",
+            f"{type(exc).__name__}:"
+            f"errno={exc.errno if isinstance(exc, OSError) and exc.errno is not None else 'none'}",
             file=sys.stderr)
 
     parent_stopped_child = False
@@ -433,11 +435,18 @@ def _serve_admission(server: socket.socket,
         return 2
     if parent_rejected:
         # A parent-owned source refusal is BLOCKED even when the child exits 1.
+        print(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            f"admission_refused:phase={admission_boundary}:child_exit={result}:"
+            f"owned_cleanup={'complete' if parent_stopped_child else 'not_required'}",
+            file=sys.stderr)
         return 2
     if not passed_phases:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
-            "privileged_child_skipped_source_admission",
+            "privileged_child_skipped_source_admission:"
+            f"phase=initial:child_exit={result}:"
+            f"owned_cleanup={'complete' if parent_stopped_child else 'not_required'}",
             file=sys.stderr)
         return 2
     cycle_admitted = any(phase.startswith("cycle-") for phase in passed_phases)
@@ -538,14 +547,23 @@ def _start_privileged_child(
             offset += written
         child.stdin.close()
     except (OSError, TimeoutError) as exc:
+        # Do not disclose helper bytes, private argv or paths in a refusal.
+        child_exit = child.poll()
+        error_number = (
+            exc.errno if isinstance(exc, OSError) and exc.errno is not None
+            else "none")
+        cause = "timeout" if isinstance(exc, TimeoutError) else type(exc).__name__
         failure = Blocked(
-            "cannot stream commit-bound privileged qualifier source")
+            "cannot stream commit-bound privileged qualifier source:"
+            f"phase=helper_source_transfer:cause={cause}:"
+            f"errno={error_number}:"
+            f"child_exit={child_exit if child_exit is not None else 'running'}")
         try:
             child.stdin.close()
         except OSError:
             pass
         _stop_unadmitted_child_preserving(child, failure)
-        raise failure from exc
+        raise Blocked(f"{failure}:owned_cleanup=complete") from exc
     return child
 
 

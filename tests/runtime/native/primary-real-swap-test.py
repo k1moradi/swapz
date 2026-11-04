@@ -189,6 +189,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     self.assertRaises(qualify.Blocked):
                 qualify._load_unique_json(payload, "fixture")
 
+    def test_json_parser_recursion_is_blocked_before_provenance_use(self):
+        with mock.patch.object(
+                qualify.json, "loads", side_effect=RecursionError("nested JSON")), \
+                self.assertRaisesRegex(qualify.Blocked, "cannot parse fixture"):
+            qualify._load_unique_json('{"value":1}', "fixture")
+
     def test_selector_is_exact_single_partuuid_line(self):
         self.assertEqual(
             qualify.parse_selector("PARTUUID=f13428f6-01\n"),
@@ -1335,6 +1341,39 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             client.require("cycle-1")
 
 
+    def test_admission_client_requires_string_oracle_digest(self):
+        client = object.__new__(qualify.SourceAdmissionClient)
+        client._validated_source = "a" * 40
+        client._oracle_sha256 = None
+        client._executed_helper_sha256 = "8" * 64
+        client._physical_control_inputs_sha256 = {
+            item: "c" * 64 for item in qualify.PHYSICAL_CONTROL_INPUT_PATHS
+        }
+        response = {
+            "schema": qualify.SOURCE_ADMISSION_SCHEMA,
+            "status": "PASS",
+            "phase": "initial",
+            "source_sha": "a" * 40,
+            "nonce": "b" * 32,
+            "oracle_sha256": int("9" * 64),
+        }
+        wire = (json.dumps(response) + "\n").encode("ascii")
+        channel = mock.Mock()
+        channel.recv.side_effect = (bytes([value]) for value in wire)
+        client._channel = channel
+        with mock.patch.object(qualify.os, "urandom", return_value=b"\xbb" * 16), \
+                self.assertRaisesRegex(
+                    qualify.Blocked, "source admission response identity mismatch"):
+            client.require("initial")
+        self.assertIsNone(client._oracle_sha256)
+
+        channel.recv.side_effect = (bytes([value]) for value in b"{}\n")
+        with mock.patch.object(qualify.json, "loads",
+                               side_effect=RecursionError("nested response")), \
+                self.assertRaisesRegex(
+                    qualify.Blocked, "source admission response is malformed"):
+            client.require("initial")
+
     def test_parent_revalidates_changed_main_at_final_publication_boundary(self):
         # All four admission phases are synthetic; no privileged child is launched.
         source_sha = "a" * 40
@@ -1811,6 +1850,49 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT=source admission request is malformed",
             diagnostics.getvalue())
         stop_child.assert_called_once_with(child)
+
+    def test_parent_parser_recursion_reaps_unadmitted_child(self):
+        connection = mock.MagicMock()
+        connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+        connection.makefile.return_value = io.BytesIO(b"{}\n")
+        server = mock.Mock()
+        server.accept.return_value = (connection, None)
+        child = mock.Mock()
+        child.poll.return_value = None
+        child.wait.return_value = -15
+        diagnostics = io.StringIO()
+        with mock.patch.object(parent.json, "loads",
+                               side_effect=RecursionError("nested request")), \
+                contextlib.redirect_stderr(diagnostics):
+            result = parent._serve_admission(
+                server, child, "a" * 40, "/usr/bin/git", "b" * 64,
+                {item: "c" * 64 for item in parent.PHYSICAL_CONTROL_INPUT_PATHS},
+                "8" * 64, 2)
+        self.assertEqual(result, 2)
+        child.terminate.assert_called_once_with()
+        self.assertEqual(
+            child.wait.call_args_list,
+            [mock.call(timeout=10), mock.call(timeout=45)])
+        self.assertIn("source admission request is malformed", diagnostics.getvalue())
+        self.assertIn(
+            "admission_refused:phase=initial:child_exit=-15:owned_cleanup=complete",
+            diagnostics.getvalue())
+        self.assertNotIn("nested request", diagnostics.getvalue())
+
+    def test_parent_rejects_numeric_nonce_before_source_admission(self):
+        hashes = {item: "c" * 64
+                  for item in parent.PHYSICAL_CONTROL_INPUT_PATHS}
+        request = {
+            "schema": parent.SOURCE_ADMISSION_SCHEMA,
+            "source_sha": "a" * 40,
+            "phase": "initial",
+            "nonce": int("1" * 32),
+            "physical_control_inputs_sha256": hashes,
+            "executed_helper_sha256": "8" * 64,
+        }
+        stream = io.BytesIO((json.dumps(request) + "\n").encode("ascii"))
+        with self.assertRaisesRegex(parent.Blocked, "identity is invalid"):
+            parent._read_request(stream, "a" * 40, hashes, "8" * 64)
 
     def test_default_control_path_uses_installed_package_layout(self):
         args = qualify.build_parser().parse_args([
@@ -3681,6 +3763,31 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         stop.assert_called_once()
         os.close(read_descriptor)
 
+
+    def test_parent_source_transfer_epipe_reaps_child_and_redacts_output(self):
+        arguments = parent._build_parser().parse_args([
+            "--validated-source", "a" * 40,
+            "--qualification-report", "/tmp/report.json",
+        ])
+        read_descriptor, write_descriptor = os.pipe()
+        os.close(read_descriptor)
+        source_pipe = os.fdopen(write_descriptor, "wb", buffering=0)
+        child = mock.Mock(stdin=source_pipe)
+        child.poll.return_value = None
+        child.wait.return_value = -15
+        with mock.patch.object(parent.subprocess, "Popen", return_value=child), \
+                self.assertRaisesRegex(
+                    parent.Blocked,
+                    "phase=helper_source_transfer:cause=BrokenPipeError:"
+                    "errno=32:child_exit=running:owned_cleanup=complete") as failure:
+            parent._start_privileged_child(
+                "/usr/bin/sudo", "/usr/bin/python3", arguments,
+                Path("/tmp/admission.sock"), 1000, b"private helper bytes", "8" * 64)
+        self.assertTrue(source_pipe.closed)
+        child.terminate.assert_called_once_with()
+        child.wait.assert_called_once_with(timeout=10)
+        self.assertNotIn("report.json", str(failure.exception))
+        self.assertNotIn("private helper bytes", str(failure.exception))
 
     def test_streamed_helper_uses_parent_bound_source_root_not_mutable_file_resolution(self):
         helper_source = HELPER.read_text(encoding="utf-8")

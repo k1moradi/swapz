@@ -314,15 +314,17 @@ class SourceAdmissionClient:
                 b"\n")
             response_bytes = self._read_line()
         except OSError as exc:
+            error_number = exc.errno if exc.errno is not None else "none"
             raise Blocked(
-                f"source admission transport failed at {phase}") from exc
+                f"source admission transport failed at {phase}:"
+                f"errno={error_number}") from exc
         try:
             response = json.loads(
                 response_bytes.decode("ascii"),
                 object_pairs_hook=_unique_json_object,
                 parse_constant=_reject_nonfinite_json_constant,
                 parse_float=_finite_json_float)
-        except (UnicodeError, ValueError, TypeError) as exc:
+        except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
             raise Blocked("source admission response is malformed") from exc
         required = {
             "schema", "status", "phase", "source_sha", "nonce",
@@ -332,8 +334,7 @@ class SourceAdmissionClient:
         if status == "BLOCKED":
             required.add("reason")
         oracle_sha256 = (
-            str(response.get("oracle_sha256", ""))
-            if isinstance(response, dict) else "")
+            response.get("oracle_sha256") if isinstance(response, dict) else None)
         if (not isinstance(response, dict) or set(response) != required or
                 (not isinstance(status, str) or
                  status not in {"PASS", "BLOCKED"}) or
@@ -346,7 +347,8 @@ class SourceAdmissionClient:
                 response.get("phase") != phase or
                 response.get("source_sha") != self._validated_source or
                 response.get("nonce") != nonce or
-                not re.fullmatch(r"[0-9a-f]{64}", oracle_sha256)):
+                not isinstance(oracle_sha256, str) or
+                re.fullmatch(r"[0-9a-f]{64}", oracle_sha256) is None):
             raise Blocked("source admission response identity mismatch")
         if status != "PASS":
             raise Blocked(
@@ -1198,8 +1200,8 @@ def _load_unique_json(text: str, label: str) -> dict:
             text, object_pairs_hook=unique,
             parse_constant=_reject_nonfinite_json_constant,
             parse_float=_finite_json_float)
-    except (ValueError, TypeError) as exc:
-        raise Blocked(f"cannot parse {label}: {exc}") from exc
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise Blocked(f"cannot parse {label}: {type(exc).__name__}") from exc
     if not isinstance(value, dict):
         raise Blocked(f"{label} is not a JSON object")
     return value
