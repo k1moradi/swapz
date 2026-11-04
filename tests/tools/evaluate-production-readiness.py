@@ -280,7 +280,12 @@ def _same_json_value(left: Any, right: Any) -> bool:
 def _bound_json_object(
         value: Any, raw: Any, evidence_name: str) -> dict[str, Any]:
     serialized = _parse_json_object_bytes(raw, evidence_name)
-    if not _same_json_value(serialized, value):
+    try:
+        matches_serialized = _same_json_value(serialized, value)
+    except RecursionError as exc:
+        raise EvidenceError(
+            f"{evidence_name}: evidence nesting exceeds validation depth") from exc
+    if not matches_serialized:
         raise EvidenceError(
             f"{evidence_name}: parsed object differs from serialized bytes")
     return serialized
@@ -728,7 +733,12 @@ def validate_physical_campaign_evidence(
     if not isinstance(serialized_campaign, dict):
         reject("sealed campaign evidence bytes have invalid top level")
         return issues
-    if not _same_json_value(serialized_campaign, campaign):
+    try:
+        matches_serialized = _same_json_value(serialized_campaign, campaign)
+    except RecursionError:
+        reject("sealed campaign evidence nesting exceeds validation depth")
+        return issues
+    if not matches_serialized:
         reject("sealed campaign object differs from artifact bytes")
     campaign = serialized_campaign
     campaign_source_sha = campaign.get("source_sha")
