@@ -376,9 +376,13 @@ must finish before the worker/process baselines, the process snapshot is the
 closest CPU/RSS bracket around measured start/end, and lower-device statistics
 are taken immediately outside that process boundary so setup/warmup I/O cannot
 enter the physical-I/O delta. The corresponding after-snapshots must follow
-measured completion. The evaluator independently
-recomputes lower READ/WRITE bytes and request deltas from 512-byte sectors,
-logical READ/WRITE/total MB/s, process CPU and absolute peak RSS. It also
+measured completion. Pre/post quiet windows and the timed host-CPU
+screen retain the underlying `/proc/stat`/CPU-PSI boundary snapshots; the
+evaluator reconstructs busy, steal and PSI fractions and applies the frozen
+screening limits instead of trusting the serialized SCREENED/EXCLUDED label.
+The evaluator independently recomputes lower READ/WRITE bytes and request
+deltas from 512-byte sectors, logical READ/WRITE/total MB/s, process CPU and
+absolute peak RSS. It also
 re-derives whole-arm GC counters and GC wall fraction from the target-status
 snapshots rather than trusting the serialized aggregate, and rejects interval
 GC totals that exceed that enclosing target delta. Sustained minute histograms

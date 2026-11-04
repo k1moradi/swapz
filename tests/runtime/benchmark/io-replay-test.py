@@ -2416,6 +2416,13 @@ class PairReplayContract(unittest.TestCase):
                 ["initial", "post-fill", "post-warmup", "measured-end"])
             self.assertIn(report["performance_screening"]["status"],
                           ("SCREENED", "EXCLUDED"))
+            for phase in ("pre", "post"):
+                self.assertIn("before", report["performance_screening"][phase])
+                self.assertIn("after", report["performance_screening"][phase])
+            self.assertIn(
+                "host_cpu_before", report["measurement_snapshots"])
+            self.assertIn(
+                "host_cpu_after", report["measurement_snapshots"])
             resources = report["resources"]
             self.assertLessEqual(resources["replay_peak_rss_bytes"],
                                  128 * 1024 * 1024)
@@ -2513,6 +2520,29 @@ class PairReplayContract(unittest.TestCase):
                 **{field: 0 for field in qualification.TARGET_STATUS_FIELDS},
                 "wall_fraction": 0.0,
             } if swapz else None)
+
+            def host_cpu_pair(start_ns, end_ns):
+                before = {
+                    "ticks": [100] * 8, "pressure_us": 1000,
+                    "online_cpus": 4, "affinity_cpus": 4,
+                    "tick_hz": 100, "time_ns": start_ns}
+                after = {
+                    **before,
+                    "ticks": [101, 100, 100, 109, 100, 100, 100, 100],
+                    "time_ns": end_ns}
+                observed = qualification.host_cpu_delta_from_snapshots(
+                    before, after, "synthetic")
+                return before, after, observed
+
+            pre_host_before, pre_host_after, pre_host = host_cpu_pair(
+                arm_start_ns + 250_000_000,
+                arm_start_ns + 450_000_000)
+            timed_host_before, timed_host_after, timed_host = host_cpu_pair(
+                arm_start_ns + 650_000_000,
+                measured_end_ns + 250_000_000)
+            post_host_before, post_host_after, post_host = host_cpu_pair(
+                measured_end_ns + 500_000_000,
+                measured_end_ns + 700_000_000)
             return {
                 "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
                 "claim_boundary": qualification.CONTRACT["claim_boundary"],
@@ -2549,9 +2579,16 @@ class PairReplayContract(unittest.TestCase):
                 "read_ops": reads,
                 "write_ops": writes, "oracle": {"mismatches": 0},
                 "seconds": elapsed_seconds,
+                "host_cpu": timed_host,
                 "performance_screening": {
                     "status": "SCREENED" if screened else "EXCLUDED",
-                    "reasons": [] if screened else ["synthetic noise"]},
+                    "reasons": [] if screened else ["synthetic noise"],
+                    "pre": {
+                        "before": pre_host_before, "after": pre_host_after,
+                        "observed": pre_host, "reasons": []},
+                    "post": {
+                        "before": post_host_before, "after": post_host_after,
+                        "observed": post_host, "reasons": []}},
                 "throughput": {
                     "logical_write_mbps": write_mbps,
                     "logical_read_mbps": reads * PAGE / elapsed_seconds / 1_000_000,
@@ -2563,13 +2600,13 @@ class PairReplayContract(unittest.TestCase):
                         10, 0, 80, 0, lower_write_requests, 0,
                         lower_write_bytes // 512, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                     "target_before_monotonic_ns":
-                        arm_start_ns + 300_000_000,
-                    "worker_before_monotonic_ns":
-                        arm_start_ns + 400_000_000,
-                    "lower_before_monotonic_ns":
                         arm_start_ns + 500_000_000,
-                    "process_before_monotonic_ns":
+                    "worker_before_monotonic_ns":
                         arm_start_ns + 600_000_000,
+                    "lower_before_monotonic_ns":
+                        arm_start_ns + 700_000_000,
+                    "process_before_monotonic_ns":
+                        arm_start_ns + 800_000_000,
                     "process_after_monotonic_ns":
                         measured_end_ns + 100_000_000,
                     "lower_after_monotonic_ns":
@@ -2585,7 +2622,9 @@ class PairReplayContract(unittest.TestCase):
                         "user_seconds": cpu_per_byte * (reads + writes) * PAGE,
                         "system_seconds": 0.0,
                         "peak_rss_bytes": 32 * 1024 * 1024},
-                    "worker_cpu_ns_before": 0, "worker_cpu_ns_after": 0},
+                    "worker_cpu_ns_before": 0, "worker_cpu_ns_after": 0,
+                    "host_cpu_before": timed_host_before,
+                    "host_cpu_after": timed_host_after},
                 "lower_io": {
                     "lower_read_requests": 10,
                     "lower_read_bytes": 80 * 512,
@@ -2736,6 +2775,12 @@ class PairReplayContract(unittest.TestCase):
                     gc_wall_ns=1),
                 lambda row: row["swapz"]["gc"].update(
                     wall_fraction=.25),
+                lambda row: row["raw"]["performance_screening"]["pre"][
+                    "after"]["ticks"].__setitem__(0, 200),
+                lambda row: row["swapz"]["host_cpu"].update(
+                    steal_fraction=.5),
+                lambda row: row["raw"]["measurement_snapshots"].pop(
+                    "host_cpu_before"),
                 lambda row: row["swapz"].update(resources=["malformed"]),
                 lambda row: row["swapz"].update(
                     device_identity=["malformed"]),

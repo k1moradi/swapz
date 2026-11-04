@@ -463,7 +463,9 @@ def quiet_window():
             reasons.append("quiet-window CPU PSI exceeds 5%")
         if observed.get("steal_fraction", 1) > .01:
             reasons.append("quiet-window steal exceeds 1%")
-    return {"observed": observed, "reasons": reasons}
+    return {
+        "before": before, "after": after,
+        "observed": observed, "reasons": reasons}
 
 
 def parse_process_hwm_bytes(status_text: str) -> int:
@@ -1260,7 +1262,9 @@ def run(args):
                         "system_seconds": cpu_after[1],
                         "peak_rss_bytes": cpu_after[2]},
                     "worker_cpu_ns_before": worker_cpu_ns_before,
-                    "worker_cpu_ns_after": worker_cpu_ns_after},
+                    "worker_cpu_ns_after": worker_cpu_ns_after,
+                    "host_cpu_before": host_before,
+                    "host_cpu_after": host_after},
                 "performance_screening": {
                     "status": "SCREENED" if not screening else "EXCLUDED",
                     "reasons": screening, "pre": pre_quiet, "post": post_quiet},

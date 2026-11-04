@@ -522,6 +522,191 @@ def validate_module_provenance(arm: dict, label: str) -> list[str]:
     return []
 
 
+def host_cpu_delta_from_snapshots(before, after, label: str) -> dict:
+    """Recompute /proc/stat and CPU-PSI deltas from raw boundary snapshots."""
+    required = {
+        "ticks", "pressure_us", "online_cpus", "affinity_cpus",
+        "tick_hz", "time_ns",
+    }
+    if (not isinstance(before, dict) or not isinstance(after, dict) or
+            set(before) != required or set(after) != required):
+        raise ValueError(f"{label} host CPU snapshots are incomplete")
+    before_ticks = before["ticks"]
+    after_ticks = after["ticks"]
+    if (not isinstance(before_ticks, (list, tuple)) or
+            not isinstance(after_ticks, (list, tuple)) or
+            len(before_ticks) != 8 or len(after_ticks) != 8 or
+            any(type(value) is not int or value < 0
+                for value in (*before_ticks, *after_ticks))):
+        raise ValueError(f"{label} host CPU ticks are malformed")
+    for field in ("online_cpus", "affinity_cpus", "tick_hz", "time_ns"):
+        if (type(before[field]) is not int or type(after[field]) is not int or
+                before[field] <= 0 or after[field] <= 0):
+            raise ValueError(f"{label} host CPU {field} is malformed")
+    for field in ("online_cpus", "affinity_cpus", "tick_hz"):
+        if before[field] != after[field]:
+            raise ValueError(f"{label} host CPU topology changed")
+    for row in (before, after):
+        pressure = row["pressure_us"]
+        if pressure is not None and (
+                type(pressure) is not int or pressure < 0):
+            raise ValueError(f"{label} CPU pressure counter is malformed")
+    wall_ns = after["time_ns"] - before["time_ns"]
+    ticks = [
+        end_value - start_value
+        for start_value, end_value in zip(before_ticks, after_ticks)
+    ]
+    total = sum(ticks)
+    if wall_ns <= 0 or total <= 0 or any(value < 0 for value in ticks):
+        raise ValueError(f"{label} host CPU counters reset or did not advance")
+    pressure_fraction = None
+    if before["pressure_us"] is not None and after["pressure_us"] is not None:
+        fraction = (
+            (after["pressure_us"] - before["pressure_us"]) * 1000 / wall_ns)
+        if 0 <= fraction <= 1:
+            pressure_fraction = fraction
+    return {
+        "status": "AVAILABLE" if pressure_fraction is not None else "PARTIAL",
+        "wall_ns": wall_ns,
+        "online_cpus": after["online_cpus"],
+        "affinity_cpus": after["affinity_cpus"],
+        "tick_hz": after["tick_hz"],
+        "busy_fraction": sum(ticks[index] for index in (0, 1, 2, 5, 6)) / total,
+        "steal_fraction": ticks[7] / total,
+        "pressure_some_fraction": pressure_fraction,
+    }
+
+
+def performance_screening_reasons(
+        arm: dict, workload: str, label: str) -> list[str]:
+    """Re-derive frozen quiet/timed CPU screening instead of trusting status."""
+    reasons = []
+    screen = arm.get("performance_screening")
+    if not isinstance(screen, dict):
+        return [f"{label} performance screening is malformed"]
+    recorded_reasons = screen.get("reasons")
+    if (not isinstance(recorded_reasons, list) or
+            any(not isinstance(reason, str) or not reason
+                for reason in recorded_reasons)):
+        return [f"{label} performance screening reasons are malformed"]
+
+    required_reasons = []
+    raw_required = workload != "anonymous-swap"
+    for phase_name in ("pre", "post"):
+        phase = screen.get(phase_name)
+        if not isinstance(phase, dict):
+            reasons.append(
+                f"{label} {phase_name} quiet-window evidence is malformed")
+            continue
+        observed = phase.get("observed")
+        if raw_required:
+            try:
+                derived = host_cpu_delta_from_snapshots(
+                    phase.get("before"), phase.get("after"),
+                    f"{label} {phase_name} quiet window")
+            except ValueError as exc:
+                reasons.append(str(exc))
+                continue
+            if observed != derived:
+                reasons.append(
+                    f"{label} {phase_name} quiet-window aggregate differs "
+                    "from raw host counters")
+            observed = derived
+        if not isinstance(observed, dict) or observed.get("status") != "AVAILABLE":
+            required_reasons.append("quiet-window counters unavailable")
+            continue
+        try:
+            busy = number(
+                observed.get("busy_fraction"), "quiet busy fraction")
+            pressure = number(
+                observed.get("pressure_some_fraction"),
+                "quiet CPU PSI fraction")
+            steal = number(
+                observed.get("steal_fraction"), "quiet steal fraction")
+        except ValueError:
+            required_reasons.append("quiet-window counters unavailable")
+            continue
+        if not all(0 <= value <= 1 for value in (busy, pressure, steal)):
+            required_reasons.append("quiet-window counters unavailable")
+            continue
+        if busy > CONTRACT["screening"]["pre_post_busy_fraction_max"]:
+            required_reasons.append("quiet-window busy exceeds 25%")
+        if pressure > CONTRACT["screening"]["pre_post_cpu_psi_some_fraction_max"]:
+            required_reasons.append("quiet-window CPU PSI exceeds 5%")
+        if steal > CONTRACT["screening"]["steal_fraction_max"]:
+            required_reasons.append("quiet-window steal exceeds 1%")
+
+    timed = arm.get("host_cpu")
+    if raw_required:
+        snapshots = arm.get("measurement_snapshots")
+        if not isinstance(snapshots, dict):
+            reasons.append(f"{label} measured host CPU snapshots are missing")
+        else:
+            try:
+                derived_timed = host_cpu_delta_from_snapshots(
+                    snapshots.get("host_cpu_before"),
+                    snapshots.get("host_cpu_after"),
+                    f"{label} measured host CPU")
+            except ValueError as exc:
+                reasons.append(str(exc))
+            else:
+                if timed != derived_timed:
+                    reasons.append(
+                        f"{label} timed host CPU aggregate differs "
+                        "from raw host counters")
+                timed = derived_timed
+    try:
+        timed_steal = number(
+            (timed or {}).get("steal_fraction"), "timed steal fraction")
+    except (AttributeError, ValueError):
+        timed_steal = None
+    if timed_steal is None or not 0 <= timed_steal <= \
+            CONTRACT["screening"]["steal_fraction_max"]:
+        required_reasons.append(
+            "timed-arm steal exceeds 1% or is unavailable")
+
+    measured_start = arm.get("measured_start_monotonic_ns")
+    measured_end = arm.get("measured_end_monotonic_ns")
+    if raw_required and (
+            type(measured_start) is not int or type(measured_end) is not int):
+        reasons.append(f"{label} measured screening chronology is malformed")
+    elif raw_required:
+        pre = screen.get("pre") or {}
+        post = screen.get("post") or {}
+        snapshots = arm.get("measurement_snapshots") or {}
+        try:
+            if (pre["after"]["time_ns"] > measured_start or
+                    snapshots["host_cpu_before"]["time_ns"] > measured_start or
+                    snapshots["host_cpu_after"]["time_ns"] < measured_end or
+                    post["before"]["time_ns"] < measured_end):
+                reasons.append(
+                    f"{label} host CPU screening does not bracket measurement")
+        except (KeyError, TypeError):
+            reasons.append(
+                f"{label} host CPU screening chronology is incomplete")
+
+    status = screen.get("status")
+    if status == "SCREENED":
+        if recorded_reasons:
+            reasons.append(
+                f"{label} SCREENED status carries exclusion reasons")
+        for reason in required_reasons:
+            reasons.append(f"{label}: {reason}")
+    elif status == "EXCLUDED":
+        if not recorded_reasons:
+            reasons.append(f"{label} EXCLUDED screening has no reason")
+        for reason in recorded_reasons:
+            reasons.append(f"{label}: {reason}")
+        for reason in required_reasons:
+            if reason not in recorded_reasons:
+                reasons.append(f"{label}: {reason}")
+    else:
+        reasons.append(f"{label} performance screening status is invalid")
+        for reason in required_reasons:
+            reasons.append(f"{label}: {reason}")
+    return reasons
+
+
 def measurement_snapshot_reasons(
         arm: dict, workload_name: str, label: str) -> list[str]:
     """Verify raw lower-device, process/RSS and worker boundary evidence."""
@@ -997,7 +1182,8 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
             if not isinstance(whole_gc, dict):
                 raise ValueError("whole-arm GC evidence is missing")
             for field, total in interval_gc_totals.items():
-                if type(whole_gc.get(field)) is not int or                         whole_gc[field] < total:
+                if (type(whole_gc.get(field)) is not int or
+                        whole_gc[field] < total):
                     raise ValueError(
                         f"interval {field} exceeds whole-arm target delta")
             if not positive_gc_interval:
@@ -1295,18 +1481,8 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
         oracle_mismatches = oracle.get("mismatches")
         if type(oracle_mismatches) is not int or oracle_mismatches != 0:
             reasons.append(f"{label} byte oracle failed or is unavailable")
-        screen = arm.get("performance_screening")
-        if not isinstance(screen, dict):
-            reasons.append(f"{label} performance screening is malformed")
-            screen = {}
-        if screen.get("status") != "SCREENED":
-            screen_reasons = screen.get("reasons")
-            if (not isinstance(screen_reasons, list) or
-                    any(not isinstance(reason, str)
-                        for reason in screen_reasons)):
-                screen_reasons = ["screening not usable"]
-            for reason in screen_reasons or ["screening not usable"]:
-                reasons.append(f"{label}: {reason}")
+        reasons += performance_screening_reasons(
+            arm, workload, label)
     if raw.get("measure_operations") is not None and (
             raw.get("read_ops"), raw.get("write_ops")) != (
             swapz.get("read_ops"), swapz.get("write_ops")):
