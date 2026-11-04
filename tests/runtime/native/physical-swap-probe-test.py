@@ -350,11 +350,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe._snapshot_reviewed_artifacts(second_state, expected)
                 self.assertFalse((second_state / "dm-swapz.ko").exists())
 
-                # No-follow source validation also excludes symlink substitution.
+                # No-follow source validation also excludes symlink substitution
+                # without disclosing the synthetic/private source path.
                 sources["module_sha256"].unlink()
                 sources["module_sha256"].symlink_to(sources["formatter_sha256"])
-                with self.assertRaisesRegex(probe.ProbeError, "cannot verify"):
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "physical_artifact.module_sha256 "
+                        "expected=readable_no_follow_file observed=errno_"
+                        ) as blocked:
                     probe._artifact_digests()
+                self.assertNotIn(directory, str(blocked.exception))
 
     def test_review_rejects_the_operator_as_reviewer(self):
         evidence = {"source_sha": "b" * 40, "head": "c" * 40,

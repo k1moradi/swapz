@@ -667,7 +667,9 @@ def _artifact_digests():
             before = os.fstat(descriptor)
             if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or (
                     executable and not before.st_mode & 0o111):
-                raise ProbeError(f"physical artifact is not a usable regular file: {path.name}")
+                raise ProbeError(
+                    f"physical_artifact.{key} expected=usable_regular_file "
+                    "observed=invalid_metadata")
             digest = hashlib.sha256()
             while chunk := os.read(descriptor, 1024 * 1024):
                 digest.update(chunk)
@@ -676,10 +678,15 @@ def _artifact_digests():
                     before.st_mtime_ns, before.st_ctime_ns) != (
                     after.st_dev, after.st_ino, after.st_size,
                     after.st_mtime_ns, after.st_ctime_ns):
-                raise ProbeError(f"physical artifact changed while hashing: {path.name}")
+                raise ProbeError(
+                    f"physical_artifact.{key} expected=stable_bytes "
+                    "observed=changed_while_hashing")
             digests[key] = digest.hexdigest()
         except OSError as exc:
-            raise ProbeError(f"cannot verify physical artifact {path.name}: {exc}") from exc
+            raise ProbeError(
+                f"physical_artifact.{key} expected=readable_no_follow_file "
+                f"observed=errno_{exc.errno}"
+            ) from exc
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
@@ -734,7 +741,11 @@ def _snapshot_reviewed_artifacts(state_dir, expected_digests):
             succeeded = True
             snapshots[key] = destination
         except OSError as exc:
-            raise ProbeError(f"cannot snapshot physical artifact {source_path.name}: {exc}") from exc
+            raise ProbeError(
+                f"physical_artifact_snapshot.{key} "
+                "expected=readable_source_and_writable_snapshot "
+                f"observed=errno_{exc.errno}"
+            ) from exc
         finally:
             if destination_fd >= 0:
                 os.close(destination_fd)
