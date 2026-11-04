@@ -6787,10 +6787,21 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         # preflight-order contract.
         preflight = constructor.index("swapz_authority_validate_geometry(")
         self.assertLess(preflight, min(position for _, _, position in inventory))
-        capacity_allocator = re.compile(
-            r"\b(?:kcalloc|kmalloc_array|kvmalloc|kvmalloc_array|kvcalloc|"
-            r"kvzalloc|vmalloc|vzalloc)\s*\((?P<args>[^;]*)\);", re.S)
-        for allocation in capacity_allocator.finditer(constructor[:preflight]):
+        direct_allocator = re.compile(
+            r"\b(?:kcalloc|kzalloc|kmalloc|kmalloc_array|kvmalloc|"
+            r"kvmalloc_array|kvcalloc|kvzalloc|vmalloc|vzalloc)\s*"
+            r"\((?P<args>[^;]*)\);", re.S)
+        preflight_allocations = list(
+            direct_allocator.finditer(constructor[:preflight]))
+        self.assertEqual(
+            len(preflight_allocations), 1,
+            "new direct allocation appeared before geometry rejection")
+        self.assertRegex(
+            preflight_allocations[0].group(0),
+            r"kzalloc\(sizeof\(\*ctx\),\s*GFP_KERNEL\)",
+            "only the small target context may be directly allocated "
+            "before geometry rejection")
+        for allocation in preflight_allocations:
             self.assertNotRegex(
                 allocation.group("args"),
                 r"\b(?:logical|physical|segment_count)\b",
@@ -6843,6 +6854,12 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         injected = (
             constructor[:guard] +
             "ctx->batch_bytes = vzalloc((size_t)logical * 4096U);\n" +
+            constructor[guard:])
+        with self.assertRaises(AssertionError):
+            self.audit_constructor(injected)
+        injected = (
+            constructor[:guard] +
+            "ctx->batch_bytes = kmalloc(4096U, GFP_KERNEL);\n" +
             constructor[guard:])
         with self.assertRaises(AssertionError):
             self.audit_constructor(injected)
