@@ -119,7 +119,7 @@ sample_host_memory_admission
 
     def test_one_kib_below_host_floor_blocks_and_reports_observed_values(self):
         result = self.host_samples([meminfo(FLOOR_KIB - 1)] * 5)
-        self.assert_blocked(result, "host MemAvailable")
+        self.assert_blocked(result, "host lacks 1 GiB MemAvailable")
         self.assertIn(f"last:{FLOOR_KIB - 1}", result.stderr)
         self.assertIn(f"required:{FLOOR_KIB}", result.stderr)
         self.assertIn("samples:5", result.stderr)
@@ -127,7 +127,7 @@ sample_host_memory_admission
     def test_unstable_samples_cannot_pass_on_a_single_high_reading(self):
         result = self.host_samples([meminfo(value) for value in (
             FLOOR_KIB, FLOOR_KIB - 1, FLOOR_KIB, FLOOR_KIB - 1, FLOOR_KIB)])
-        self.assert_blocked(result, "host MemAvailable")
+        self.assert_blocked(result, "host lacks 1 GiB MemAvailable")
         self.assertIn(f"minimum:{FLOOR_KIB - 1}", result.stderr)
         self.assertIn(f"maximum:{FLOOR_KIB}", result.stderr)
 
@@ -159,12 +159,12 @@ sample_host_memory_admission
         self.assertEqual(result.stdout, "ADMITTED\n")
         inventory = self.parent_inventory(U64_MAX, current, gate=False)
         self.assertEqual(inventory.stdout.strip(),
-                         f"{U64_MAX} {current} sufficient {FLOOR_BYTES}")
+                         f"{U64_MAX} {current} sufficient")
 
     def test_finite_parent_one_byte_short_reports_exact_deficit(self):
         current = U64_MAX - FLOOR_BYTES + 1
         result = self.parent_inventory(U64_MAX, current)
-        self.assert_blocked(result, "finite parent cgroup headroom insufficient")
+        self.assert_blocked(result, "cgroup root lacks 1 GiB effective memory headroom")
         for expected in (f"memory.max:{U64_MAX}", f"memory.current:{current}",
                          f"headroom:{FLOOR_BYTES - 1}", "deficit:1", "unit:bytes"):
             self.assertIn(expected, result.stderr)
@@ -180,14 +180,14 @@ sample_host_memory_admission
         result = self.parent_inventory("max", U64_MAX)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.parent_inventory("max", U64_MAX, gate=False).stdout.strip(),
-                         f"max {U64_MAX} unbounded unbounded")
+                         f"max {U64_MAX} unbounded")
         self.assert_blocked(self.parent_inventory("max", U64_MAX + 1),
                             "parent cgroup")
 
     def test_only_true_root_exempt_pair_can_omit_memory_controls(self):
         self.assertEqual(self.parent_inventory().returncode, 0)
         self.assertEqual(self.parent_inventory(gate=False).stdout.strip(),
-                         "root-exempt root-exempt unbounded unbounded")
+                         "root-exempt root-exempt unbounded")
         self.assert_blocked(self.parent_inventory("max", None), "parent cgroup")
         self.assert_blocked(self.parent_inventory(None, 0), "parent cgroup")
 
