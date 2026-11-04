@@ -3090,7 +3090,7 @@ class PairReplayContract(unittest.TestCase):
         mapper_uuid = "SWAPZ-PRIMARY-" + "f" * 32
 
         def ram_trace(peak=8192):
-            baseline_available = 1_000_000
+            baseline_available = 16 * 1024 * 1024
             samples = []
             phases = (
                 ("baseline", [0] * 10, False),
@@ -3113,9 +3113,9 @@ class PairReplayContract(unittest.TestCase):
                             f"2026-11-03T00:00:{seconds:02d}.{tenths}Z",
                         "mem_available_bytes": baseline_available - delta,
                         "s_unreclaim_bytes":
-                            100_000 + (delta // 8 if present else 0),
+                            1024 * 1024 + (delta if present else 0),
                         "vmalloc_used_bytes":
-                            200_000 + (delta // 16 if present else 0),
+                            2 * 1024 * 1024 + (delta if present else 0),
                         "mapper_present": present,
                     })
             return {
