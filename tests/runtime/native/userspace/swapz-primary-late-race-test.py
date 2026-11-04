@@ -918,9 +918,9 @@ static int check_case(enum fixture_scenario candidate)
             recovery_marks != 0U || diagnostic_length != 0U) {
             fprintf(stderr, "FAIL: %s: post-snapshot gap result=%d "
                     "injected=%d reads=%u swap_reads=%u mutations=%u "
-                    "diagnostic=%s\n", scenario_names[candidate], result,
+                    "diagnostic_bytes=%zu\n", scenario_names[candidate], result,
                     post_snapshot_injected, admission_reads,
-                    active_inventory_reads, writes, diagnostic);
+                    active_inventory_reads, writes, diagnostic_length);
             return 1;
         }
         printf("UNPROVEN: %s: post-final-snapshot mount/swapon exclusivity "
@@ -956,7 +956,8 @@ static int check_case(enum fixture_scenario candidate)
             strchr(diagnostic, '\n') != diagnostic + strlen(diagnostic) - 1U ||
             strstr(diagnostic, "run_id") ||
             strstr(diagnostic, "0123456789abcdef") ||
-            strstr(diagnostic, "secret") || writes || module_loads ||
+            strstr(diagnostic, "secret") || strstr(diagnostic, "token") ||
+            strstr(diagnostic, "passphrase") || writes || module_loads ||
             starting_state_writes != (unsigned int)late ||
             active_state_writes != 0U ||
             recovery_marks != (unsigned int)late ||
@@ -974,7 +975,8 @@ static int check_case(enum fixture_scenario candidate)
                     scenario_names[candidate], result, result_errno, expected_error,
                     admission_reads, prewrite_reads, header_writes,
                     mapper_mutations, mkswap_calls, swapon_calls);
-            fprintf(stderr, "FAIL: diagnostic=%s\n", diagnostic);
+            fprintf(stderr, "FAIL: redacted diagnostic bytes=%zu\n",
+                    diagnostic_length);
             return 1;
         }
         printf("DENY: %s phase=%s errno=%d claim=retained "
