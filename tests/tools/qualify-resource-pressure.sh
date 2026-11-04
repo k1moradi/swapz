@@ -3,6 +3,10 @@
 set -Eeuo pipefail
 umask 077
 
+# Mark ID36 before any failure-capable bootstrap work so every refusal is
+# attributed to this admission/qualification phase, never the prior benchmark.
+printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
+
 script_source="${BASH_SOURCE[0]}"
 case "$script_source" in
     */*) script_directory="${script_source%/*}" ;;
@@ -39,10 +43,6 @@ if [[ $# != 0 || ! -d $SHARED_PLAN ]]; then
     exit 2
 fi
 
-# This marker precedes admission so an early BLOCKED result cannot inherit the
-# preceding synthetic storage envelope's last benchmark phase.
-printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
-
 for required_command in awk bash cat cut getconf grep id mkdir mktemp od python3 \
                         rm rmdir sleep tail timeout tr; do
     command -v "$required_command" >/dev/null 2>&1 || {
@@ -77,26 +77,41 @@ PRESSURE_SCRIPT="$ROOT/tests/runtime/benchmark/resource-pressure.py"
 PAIR="$ROOT/tests/tools/benchmark-owned-pair.sh"
 
 [[ -f $CGROUP_ROOT/cgroup.controllers &&
+   -e $CGROUP_ROOT/cgroup.subtree_control ]] || {
+    printf '%s\n' 'BLOCKED: ID36 requires a cgroup v2 hierarchy with controller delegation support' >&2
+    exit 2
+}
+[[ -r $CGROUP_ROOT/cgroup.controllers &&
    -r $CGROUP_ROOT/cgroup.subtree_control ]] || {
-    printf '%s\n' 'BLOCKED: ID36 requires cgroup v2' >&2
+    printf '%s\n' 'BLOCKED: ID36 cgroup v2 controller telemetry unreadable; restore readable cgroup.controllers and cgroup.subtree_control' >&2
     exit 2
 }
-grep -qw memory "$CGROUP_ROOT/cgroup.controllers" || {
-    printf '%s\n' 'BLOCKED: ID36 cgroup v2 memory controller unavailable' >&2
-    exit 2
+
+require_cgroup_word() {
+    local telemetry_path="$1" telemetry_name="$2" word="$3" absent_message="$4"
+    local grep_rc
+
+    if grep -qw "$word" "$telemetry_path" 2>/dev/null; then
+        return 0
+    fi
+    grep_rc=$?
+    if (( grep_rc == 1 )); then
+        printf 'BLOCKED: ID36 %s\n' "$absent_message" >&2
+    else
+        printf 'BLOCKED: ID36 %s telemetry unavailable while checking %s; restore readable cgroup v2 controller state\n' \
+            "$telemetry_name" "$word" >&2
+    fi
+    return 2
 }
-grep -qw cpu "$CGROUP_ROOT/cgroup.controllers" || {
-    printf '%s\n' 'BLOCKED: ID36 cgroup v2 CPU controller unavailable' >&2
-    exit 2
-}
-grep -qw memory "$CGROUP_ROOT/cgroup.subtree_control" || {
-    printf '%s\n' 'BLOCKED: ID36 parent cgroup has no delegated memory controller' >&2
-    exit 2
-}
-grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
-    printf '%s\n' 'BLOCKED: ID36 parent cgroup has no delegated CPU controller' >&2
-    exit 2
-}
+
+require_cgroup_word "$CGROUP_ROOT/cgroup.controllers" cgroup.controllers memory \
+    'cgroup v2 memory controller unavailable; enable memory controller support' || exit 2
+require_cgroup_word "$CGROUP_ROOT/cgroup.controllers" cgroup.controllers cpu \
+    'cgroup v2 CPU controller unavailable; enable CPU controller support' || exit 2
+require_cgroup_word "$CGROUP_ROOT/cgroup.subtree_control" cgroup.subtree_control memory \
+    'parent cgroup has no delegated memory controller; delegate +memory before retrying' || exit 2
+require_cgroup_word "$CGROUP_ROOT/cgroup.subtree_control" cgroup.subtree_control cpu \
+    'parent cgroup has no delegated CPU controller; delegate +cpu before retrying' || exit 2
 [[ -r $PRESSURE_SCRIPT && -r $PAIR ]] || {
     printf '%s\n' 'BLOCKED: ID36 required owned RAM pair or pressure helper unavailable; restore readable checkout helpers before qualification' >&2
     exit 2
@@ -350,6 +365,25 @@ pair_blocked_is_prerequisite() {
     esac
 }
 
+read_pair_ready_pid() {
+    local ready_path="$1"
+
+    awk -F= '
+        $1 == "pid" {
+            if (NF != 2 || $2 !~ /^[1-9][0-9]*$/ ||
+                length($2) > 18 || ++seen != 1)
+                invalid = 1
+            else
+                pid = $2
+        }
+        END {
+            if (invalid || seen != 1)
+                exit 1
+            print pid
+        }
+    ' "$ready_path" 2>/dev/null
+}
+
 cleanup() {
     local result=$?
     trap - EXIT HUP INT TERM
@@ -537,15 +571,10 @@ done
     printf '%s\n' 'FAIL: ID36 owned-RAM pair did not reach null_blk prewarm barrier' >&2
     exit 1
 }
-if ! pair_cgroup_pid="$(awk -F= '$1 == "pid" && $2 ~ /^[0-9]+$/ { print $2; exit }' \
-        "$PAIR_READY" 2>/dev/null)"; then
-    printf '%s\n' 'BLOCKED: ID36 pair readiness telemetry became unreadable; require the owned private barrier to remain readable' >&2
+if ! pair_cgroup_pid="$(read_pair_ready_pid "$PAIR_READY")"; then
+    printf '%s\n' 'BLOCKED: ID36 pair readiness PID unavailable or malformed; require one canonical positive bounded PID in the owned private barrier' >&2
     exit 2
 fi
-[[ $pair_cgroup_pid =~ ^[1-9][0-9]*$ ]] || {
-    printf '%s\n' 'FAIL: ID36 pair readiness did not report migrated PID' >&2
-    exit 1
-}
 if grep -Fxq "$pair_cgroup_pid" "$CGROUP/cgroup.procs" 2>/dev/null; then
     :
 else
