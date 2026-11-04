@@ -293,6 +293,17 @@ def sampled_metadata_ram_trace(peak_ram_bytes=900 * 1024 * 1024):
         "samples": samples,
     }
 
+def reseal_synthetic_ram_trace_artifact(campaign):
+    """Refresh only the synthetic trace digest; never impersonate host capture."""
+    trace = campaign["capacity_and_ram"]["metadata_ram_trace"]
+    canonical = (json.dumps(trace, indent=2, sort_keys=True) + "\n").encode()
+    campaign["artifacts"]["metadata_ram_trace"] = {
+        "name": "metadata-ram-trace.json",
+        "size_bytes": len(canonical),
+        "sha256": hashlib.sha256(canonical).hexdigest(),
+    }
+
+
 def physical_campaign_evidence(policy_raw):
     trace = sampled_metadata_ram_trace()
     ram_summary = EVALUATOR.RAM_TRACE_VALIDATOR[
@@ -406,10 +417,10 @@ def physical_campaign_evidence(policy_raw):
             "metadata_ram_trace": {
                 "name": "metadata-ram-trace.json",
                 "size_bytes": len((
-                    json.dumps(sampled_metadata_ram_trace(),
+                    json.dumps(trace,
                                indent=2, sort_keys=True) + "\n").encode()),
                 "sha256": hashlib.sha256((
-                    json.dumps(sampled_metadata_ram_trace(),
+                    json.dumps(trace,
                                indent=2, sort_keys=True) + "\n").encode()
                 ).hexdigest(),
             },
@@ -1199,6 +1210,207 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertTrue(any(
             "sealed campaign RAM trace artifact digest mismatch" in blocker
             for blocker in result["code_blockers"]))
+
+    def test_host_sampled_full_capacity_over_limit_is_blocked(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical_raw = encoded(real_swap_evidence(report_raw, policy_raw))
+        limit = policy["physical_qualification"]["acceptance"]["sustained"][
+            "metadata_and_target_peak_ram_bytes_max"]
+        observed_peak = limit + 1024
+        campaign = physical_campaign_evidence(policy_raw)
+        capacity = campaign["capacity_and_ram"]
+        trace = sampled_metadata_ram_trace(observed_peak)
+        capacity["metadata_ram_trace"] = trace
+        capacity["metadata_ram_summary"] = EVALUATOR.RAM_TRACE_VALIDATOR[
+            "validate_metadata_ram_trace"](
+                trace, source_sha=SOURCE, mapper_uuid=capacity["mapper_uuid"],
+                expected_peak_ram_bytes=observed_peak)
+        capacity["peak_ram_bytes"] = observed_peak
+        reseal_synthetic_ram_trace_artifact(campaign)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+        evidence["release_evidence"]["maximum_capacity_and_ram"][
+            "peak_ram_bytes"] = observed_peak
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            json.loads(physical_raw), physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "MEASURED_OVER_LIMIT")
+        self.assertEqual(
+            result["METADATA_RAM_MEASUREMENT"]["observed_peak_ram_bytes"],
+            observed_peak)
+        self.assertTrue(any(
+            f"observed={observed_peak} limit={limit}" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_resealed_adversarial_ram_samples_are_not_measured(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+
+        def persistent_teardown_leak(trace):
+            for sample in trace["samples"][-8:]:
+                sample["mem_available_kib"] -= 1
+                sample["s_unreclaim_kib"] += 1
+                sample["vmalloc_used_kib"] += 1
+
+        def duplicate_utc(trace):
+            trace["samples"][16]["timestamp_utc"] = (
+                trace["samples"][15]["timestamp_utc"])
+
+        corruptions = {
+            "missing_sample": lambda trace: trace["samples"].pop(14),
+            "interrupted_teardown": lambda trace: trace["samples"].pop(),
+            "duplicate_utc": duplicate_utc,
+            "nonfinite_counter": lambda trace: trace["samples"][15].update(
+                mem_available_kib=float("nan")),
+            "overflow_counter": lambda trace: trace["samples"][15].update(
+                vmalloc_used_kib=1 << 64),
+            "overflow_clock": lambda trace: trace["samples"][15].update(
+                monotonic_ns=1 << 65),
+            "persistent_teardown_leak": persistent_teardown_leak,
+            "source_mismatch": lambda trace: trace.update(source_sha="b" * 40),
+            "boot_mismatch": lambda trace: trace.update(
+                host_boot_id="22222222-2222-4222-8222-222222222222"),
+        }
+        for name, damage in corruptions.items():
+            with self.subTest(corruption=name):
+                campaign = physical_campaign_evidence(policy_raw)
+                damage(campaign["capacity_and_ram"]["metadata_ram_trace"])
+                reseal_synthetic_ram_trace_artifact(campaign)
+                campaign_raw = encoded(campaign)
+                evidence = current_evidence(
+                    report_raw, policy_raw, physical_raw, campaign_raw)
+                result = EVALUATOR.evaluate_release(
+                    SOURCE, report, report_raw, evidence, policy, policy_raw,
+                    physical, physical_raw, campaign, campaign_raw)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(
+                    result["METADATA_RAM_MEASUREMENT"]["status"],
+                    "NOT_MEASURED", (name, result["code_blockers"]))
+                self.assertEqual(
+                    result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
+                    "NOT_MEASURED")
+                self.assertTrue(any(
+                    "sealed campaign RAM trace is invalid" in blocker
+                    for blocker in result["code_blockers"]),
+                    (name, result["code_blockers"]))
+
+    def test_missing_or_mismatched_capacity_provenance_never_passes(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        cases = {
+            "missing_trace": lambda campaign: campaign[
+                "capacity_and_ram"].pop("metadata_ram_trace"),
+            "source_tree_identity": lambda campaign: campaign.update(
+                campaign_source_sha="b" * 40),
+            "validator_artifact": lambda campaign: campaign["policy"][
+                "metadata_ram_validator"].update(sha256="f" * 64),
+            "ram_trace_artifact": lambda campaign: campaign["artifacts"][
+                "metadata_ram_trace"].update(sha256="f" * 64),
+        }
+        for name, damage in cases.items():
+            with self.subTest(case=name):
+                campaign = physical_campaign_evidence(policy_raw)
+                damage(campaign)
+                campaign_raw = encoded(campaign)
+                evidence = current_evidence(
+                    report_raw, policy_raw, physical_raw, campaign_raw)
+                result = EVALUATOR.evaluate_release(
+                    SOURCE, report, report_raw, evidence, policy, policy_raw,
+                    physical, physical_raw, campaign, campaign_raw)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(
+                    result["METADATA_RAM_MEASUREMENT"]["status"],
+                    "NOT_MEASURED")
+                self.assertEqual(
+                    result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
+                    "NOT_MEASURED")
+                self.assertTrue(any(
+                    "maximum_capacity_and_ram:" in blocker
+                    for blocker in result["code_blockers"]))
+
+    def test_robust_ram_medians_accept_isolated_noise_without_new_gates(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        capacity = campaign["capacity_and_ram"]
+        trace = capacity["metadata_ram_trace"]
+        trace["samples"][0]["mem_available_kib"] -= 1
+        trace["samples"][-1]["mem_available_kib"] -= 1
+        trace["samples"][-1]["s_unreclaim_kib"] += 1
+        trace["samples"][-1]["vmalloc_used_kib"] += 1
+        reseal_synthetic_ram_trace_artifact(campaign)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        measured = result["METADATA_RAM_MEASUREMENT"]
+        self.assertEqual(measured["status"], "MEASURED_WITHIN_LIMIT",
+                         result["code_blockers"])
+        self.assertEqual(measured["observed_peak_ram_bytes"],
+                         900 * 1024 * 1024)
+        self.assertEqual(measured["initialization_peak_ram_bytes"],
+                         400 * 1024 * 1024)
+        self.assertEqual(measured["steady_peak_ram_bytes"],
+                         800 * 1024 * 1024)
+        self.assertEqual(measured["gc_peak_ram_bytes"],
+                         900 * 1024 * 1024)
+        self.assertEqual(result["CAPACITY_INDEX_ESTIMATE"], "PREDICTED_ONLY")
+        self.assertEqual(
+            result["ALLOCATION_FAILURE_COVERAGE"],
+            "SEPARATE_NOT_CONSTRUCTION_EVIDENCE")
+        self.assertEqual(result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
+                         "SAMPLED_LOADED_HOST")
+
+    def test_missing_host_campaign_does_not_inherit_allocation_test_success(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        evidence = current_evidence(report_raw, policy_raw, physical_raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertIsNone(
+            result["METADATA_RAM_MEASUREMENT"]["observed_peak_ram_bytes"])
+        self.assertEqual(result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
+                         "NOT_MEASURED")
+        self.assertEqual(result["ALLOCATION_FAILURE_COVERAGE"],
+                         "SEPARATE_NOT_CONSTRUCTION_EVIDENCE")
+
+    def test_strict_json_rejects_nonfinite_and_overflow_exponents(self):
+        with TemporaryDirectory(prefix="swapz-ram-json-") as directory:
+            path = Path(directory) / "evidence.json"
+            for number in ("NaN", "Infinity", "-Infinity", "1e999"):
+                with self.subTest(number=number):
+                    path.write_text('{"value":' + number + '}')
+                    with self.assertRaises(EVALUATOR.EvidenceError):
+                        EVALUATOR.load_json_strict(path)
 
     def test_unresolved_critical_issue_blocks_code_readiness(self):
         report = owner_report()
