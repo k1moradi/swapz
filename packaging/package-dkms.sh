@@ -634,7 +634,7 @@ persist_transaction_state() {
   if [[ -n "$test_root" && ${SWAPZ_TEST_FAIL_TRANSACTION_PHASE:-never} == "$phase" ]]; then
     return 1
   fi
-  python3 - "$transaction_dir" "$phase" "$version" "$kernel_release" "$action" <<'PY'
+  python3 - "$transaction_dir" "$phase" "$version" "$kernel_release" "$action" <<'PY' || return 1
 import hashlib
 import json
 import os
