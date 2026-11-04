@@ -506,21 +506,32 @@ def validate_real_swap_result(
             ("swap_limit_mib", "swap_limit_mib"),
             ("timeout_seconds", "timeout_seconds")):
         expected = primary_policy.get(policy_key)
-        if not isinstance(expected, int) or isinstance(expected, bool) or expected <= 0:
+        observed = result.get(result_key)
+        if type(expected) is not int or expected <= 0:
             reject(f"frozen primary real-swap policy {policy_key} is invalid")
-        elif result.get(result_key) != expected:
+        elif type(observed) is not int:
+            reject(f"nested result {result_key} is not an exact integer")
+        elif observed != expected:
             reject(f"nested result {result_key} differs from frozen policy")
 
     expected_cycles = primary_policy.get("cycles")
-    if isinstance(expected_cycles, int) and not isinstance(expected_cycles, bool):
-        if result.get("cycles_passed") != expected_cycles:
+    cycles_passed = result.get("cycles_passed")
+    if type(expected_cycles) is int:
+        if type(cycles_passed) is not int:
+            reject("nested result cycles_passed is not an exact integer")
+        elif cycles_passed != expected_cycles:
             reject("nested result did not pass every required real-swap cycle")
-    if result.get("concurrent_oracles") != 2:
+    if type(result.get("concurrent_oracles")) is not int or \
+            result.get("concurrent_oracles") != 2:
         reject("nested result did not use two concurrent byte oracles")
-    if result.get("reuse_rounds_per_cycle") != 2:
+    if type(result.get("reuse_rounds_per_cycle")) is not int or \
+            result.get("reuse_rounds_per_cycle") != 2:
         reject("nested result did not complete two reuse rounds per cycle")
-    if target is None or result.get("partuuid") != target[0] or \
-            result.get("target_size_bytes") != target[1]:
+    target_size_bytes = result.get("target_size_bytes")
+    if (
+            target is None or result.get("partuuid") != target[0] or
+            type(target_size_bytes) is not int or
+            target_size_bytes != target[1]):
         reject("nested result authorized target identity mismatch")
     target_device = result.get("target_device")
     if not isinstance(target_device, str) or not MAJOR_MINOR_RE.fullmatch(
@@ -615,7 +626,8 @@ def validate_real_swap_evidence(
             "cycles_requested", "workload_mib",
             "resident_limit_mib", "swap_limit_mib", "timeout_seconds",
             "concurrent_oracles", "reuse_rounds_per_cycle", "cycles"):
-        if physical_evidence.get(key) != result.get(key):
+        if not _same_json_value(
+                physical_evidence.get(key), result.get(key)):
             reject(f"persistent evidence/result mismatch for {key}")
     return issues
 
@@ -709,7 +721,7 @@ def validate_physical_campaign_evidence(
                 not isinstance(expected_lower, str) or
                 not MAJOR_MINOR_RE.fullmatch(expected_lower)):
             reject("sealed campaign qualification target binding is malformed")
-        if observed != expected:
+        if not _same_json_value(observed, expected):
             reject("sealed campaign qualification target observations disagree")
 
     capacity_and_ram = campaign.get("capacity_and_ram")
@@ -747,7 +759,9 @@ def validate_physical_campaign_evidence(
                         source_sha=source_sha,
                         mapper_uuid=capacity_and_ram.get("mapper_uuid"),
                         expected_peak_ram_bytes=peak_ram_bytes)
-                if capacity_and_ram.get("metadata_ram_summary") != ram_summary:
+                if not _same_json_value(
+                        capacity_and_ram.get("metadata_ram_summary"),
+                        ram_summary):
                     reject(
                         "sealed campaign RAM trace summary does not match "
                         "raw samples")
