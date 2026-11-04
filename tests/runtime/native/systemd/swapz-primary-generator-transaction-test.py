@@ -83,6 +83,9 @@ class GeneratorPublicationTest(unittest.TestCase):
             directory.mkdir()
         self.environment = os.environ.copy()
         self.environment["MOCK_SELECTOR"] = str(self.selector)
+        # CI uses PYTHONPYCACHEPREFIX; the generator file-size limit must not
+        # apply to the Python stub's import-cache writes.
+        self.environment["PYTHONDONTWRITEBYTECODE"] = "1"
         self.environment["PATH"] = f"{self.commands}:{os.environ['PATH']}"
 
     def set_selector(self, partuuid: str) -> None:
