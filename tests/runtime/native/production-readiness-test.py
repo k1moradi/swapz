@@ -1646,6 +1646,21 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "sealed campaign evidence bytes have invalid top level" in blocker
             for blocker in result["code_blockers"]))
 
+        nested_raw = (
+            b'{"nested":' + b"[" * 2000 + b"0" +
+            b"]" * 2000 + b"}\n")
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, nested_raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, nested_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertTrue(any(
+            "sealed campaign evidence bytes are malformed" in blocker
+            for blocker in result["code_blockers"]))
+
     def test_oversized_decimal_cold_boot_fields_block_without_exception(self):
         report = owner_report()
         policy = acceptance_policy()
@@ -1820,6 +1835,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     path.write_text('{"value":' + number + '}')
                     with self.assertRaises(EVALUATOR.EvidenceError):
                         EVALUATOR.load_json_strict(path)
+
+            path.write_bytes(
+                b'{"value":' + b"[" * 2000 + b"0" +
+                b"]" * 2000 + b"}\n")
+            with self.assertRaises(EVALUATOR.EvidenceError):
+                EVALUATOR.load_json_strict(path)
 
     def test_unresolved_critical_issue_blocks_code_readiness(self):
         report = owner_report()
