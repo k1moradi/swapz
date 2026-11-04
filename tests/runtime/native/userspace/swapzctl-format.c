@@ -453,10 +453,10 @@ static void test_mountinfo_device_parser(void)
 		"36 25 8:2 / /other rw shared:7 - ext4 /dev/sda2 rw\n",
 		&device) == 0);
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\\\040name /other rw shared:7 - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 /root\\040name /other rw shared:7 - ext4 /dev/sdb2 rw\n",
 		&device) == 0);
 	assert(format_mountinfo_line_device(
-		"36 25 8:2 /root\\\\9xx /other rw - ext4 /dev/sdb2 rw\n",
+		"36 25 8:2 /root\\9xx /other rw - ext4 /dev/sdb2 rw\n",
 		&device) < 0);
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 relative /other rw - ext4 /dev/sdb2 rw\n",
