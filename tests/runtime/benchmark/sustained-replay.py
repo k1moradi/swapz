@@ -1039,11 +1039,10 @@ def run(args):
                     REPLAY["kernel_write_profile_epoch"](target, identity)
 
                 # Warmup is complete before any qualification boundary.
-                # Start the observer first, then take target/worker/process
-                # baselines. The independent lower-device stat is deliberately
-                # last so it is the tightest pre-measurement I/O bracket.
-                status_before = status_snapshot(target, identity)
-                target_before_monotonic_ns = time.monotonic_ns()
+                # Start the observer first, then take worker/lower/target
+                # baselines. The target snapshot is deliberately adjacent to
+                # the process boundary so the GC delta cannot absorb telemetry
+                # startup/shutdown outside the measured interval.
                 measured_progress = ProgressTracker()
                 interval_sampler = (
                     SustainedIntervalSampler(
@@ -1058,6 +1057,8 @@ def run(args):
                 host_before = REPLAY["host_cpu_snapshot"]()
                 lower_before = REPLAY["lower_stat"](identity.get("owned_disk"))
                 lower_before_monotonic_ns = time.monotonic_ns()
+                status_before = status_snapshot(target, identity)
+                target_before_monotonic_ns = time.monotonic_ns()
                 cpu_before = process_cpu()
                 process_before_monotonic_ns = time.monotonic_ns()
 
@@ -1069,6 +1070,8 @@ def run(args):
                     end = time.monotonic_ns()
                     cpu_after = process_cpu()
                     process_after_monotonic_ns = time.monotonic_ns()
+                    status_after = status_snapshot(target, identity)
+                    target_after_monotonic_ns = time.monotonic_ns()
                     lower_after = REPLAY["lower_stat"](identity.get("owned_disk"))
                     lower_after_monotonic_ns = time.monotonic_ns()
                     measured_max_no_progress_seconds = (
@@ -1083,8 +1086,6 @@ def run(args):
                     primary_failure_active = sys.exc_info()[0] is not None
                     interval_rows = stop_interval_sampler(
                         interval_sampler, partial, primary_failure_active)
-            status_after = status_snapshot(target, identity)
-            target_after_monotonic_ns = time.monotonic_ns()
             post_quiet = quiet_window()
 
             seconds = (end - start) / 1e9

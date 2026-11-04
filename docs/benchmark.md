@@ -371,12 +371,13 @@ Every physical block replay retains the measured-boundary raw lower
 `/sys/block/<disk>/stat` counters, process user/system CPU and post-exec
 VmHWM, exported worker-CPU boundaries, and before/after target-status counters.
 Warmup completion and each lower/target/worker/process boundary carry monotonic
-timestamps: warmup must finish before every measured boundary, observer setup
-must finish before the worker/process baselines, the process snapshot is the
-closest CPU/RSS bracket around measured start/end, and lower-device statistics
-are taken immediately outside that process boundary so setup/warmup I/O cannot
-enter the physical-I/O delta. The corresponding after-snapshots must follow
-measured completion. Pre/post quiet windows and the timed host-CPU
+timestamps: warmup must finish before every measured boundary and observer
+setup must finish before the worker/lower/target/process baselines. The process
+snapshot is the closest CPU/RSS bracket around measured start/end; target-status
+snapshots sit immediately outside that process boundary, and lower-device
+statistics immediately outside the target boundary. Thus setup/warmup activity
+cannot enter the physical-I/O or GC deltas. The corresponding after-snapshots
+must follow measured completion. Pre/post quiet windows and the timed host-CPU
 screen retain the underlying `/proc/stat`/CPU-PSI boundary snapshots; the
 evaluator reconstructs busy, steal and PSI fractions and applies the frozen
 screening limits instead of trusting the serialized SCREENED/EXCLUDED label.
@@ -384,8 +385,10 @@ The evaluator independently recomputes lower READ/WRITE bytes and request
 deltas from 512-byte sectors, logical READ/WRITE/total MB/s, process CPU and
 absolute peak RSS. It also
 re-derives whole-arm GC counters and GC wall fraction from the target-status
-snapshots rather than trusting the serialized aggregate, and rejects interval
-GC totals that exceed that enclosing target delta. Sustained minute histograms
+snapshots rather than trusting the serialized aggregate, requires clean
+failed/error gauges at both target boundaries, and rejects fully measured
+telemetry-interval GC totals that exceed that enclosing target delta. Sustained
+minute histograms
 separately persist READ and WRITE bins and their combined projection, so an
 altered combined tail that does not conserve the original per-operation minute
 evidence is rejected. Chronology and 60 consecutive measured-minute windows

@@ -767,20 +767,20 @@ def measurement_snapshot_reasons(
         lower_after_time = metric(
             snapshots, "lower_after_monotonic_ns")
         chronology = (
-            arm_start, warmup_start, warmup_end, target_before_time,
-            worker_before_time, lower_before_time, process_before_time,
+            arm_start, warmup_start, warmup_end, worker_before_time,
+            lower_before_time, target_before_time, process_before_time,
             measured_start, measured_end, process_after_time,
-            lower_after_time, worker_after_time, target_after_time, arm_end)
+            target_after_time, lower_after_time, worker_after_time, arm_end)
         if any(type(value) is not int or value <= 0 for value in chronology):
             raise ValueError("measurement boundary timestamps are malformed")
         if not (
-                arm_start <= warmup_start < warmup_end <= target_before_time <=
-                worker_before_time <= lower_before_time <= process_before_time <=
+                arm_start <= warmup_start < warmup_end <= worker_before_time <=
+                lower_before_time <= target_before_time <= process_before_time <=
                 measured_start < measured_end <= process_after_time <=
-                lower_after_time <= worker_after_time <= target_after_time <=
+                target_after_time <= lower_after_time <= worker_after_time <=
                 arm_end):
             raise ValueError(
-                "warmup/target/worker/process/lower boundaries do not bracket measurement")
+                "warmup/worker/lower/target/process boundaries do not bracket measurement")
         if not math.isclose(
                 (warmup_end - warmup_start) / 1e9, warmup_duration,
                 rel_tol=1e-9, abs_tol=1e-6):
@@ -868,6 +868,10 @@ def target_status_snapshot_reasons(arm: dict, label: str) -> list[str]:
         if any(type(row[field]) is not int or row[field] < 0
                for row in (before, after) for field in TARGET_STATUS_FIELDS):
             raise ValueError("target status boundary counters are malformed")
+        if any(row[field] != 0
+               for row in (before, after) for field in ("failed", "error")):
+            raise ValueError(
+                "target status boundary health gauges are not clean")
         derived = {}
         for field in TARGET_STATUS_COUNTER_FIELDS:
             value = after[field] - before[field]
@@ -1160,14 +1164,17 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                         type(gc.get("gc_no_headroom_skips")) is not int or
                         gc["gc_no_headroom_skips"] != 0):
                     raise ValueError("interval target failure or GC no-headroom skip")
+                fully_measured_interval = (
+                    monotonic_start >= measured_started and
+                    monotonic_end <= measured_finished)
                 for field in interval_gc_totals:
                     if type(gc.get(field)) is not int or gc[field] < 0:
                         raise ValueError(
                             "interval GC activity counters are missing or malformed")
-                    interval_gc_totals[field] += gc[field]
+                    if fully_measured_interval:
+                        interval_gc_totals[field] += gc[field]
                 positive_gc_interval = positive_gc_interval or (
-                    monotonic_start >= measured_started and
-                    monotonic_end <= measured_finished and
+                    fully_measured_interval and
                     gc["gc_victims"] > 0 and gc["gc_pages"] > 0)
             previous_end = end
             previous_monotonic_end = monotonic_end

@@ -2363,9 +2363,9 @@ class PairReplayContract(unittest.TestCase):
             boundary_times = [
                 report["measurement_snapshots"][field]
                 for field in (
-                    "target_before_monotonic_ns",
                     "worker_before_monotonic_ns",
                     "lower_before_monotonic_ns",
+                    "target_before_monotonic_ns",
                     "process_before_monotonic_ns")]
             self.assertEqual(boundary_times, sorted(boundary_times))
             self.assertLessEqual(
@@ -2374,9 +2374,9 @@ class PairReplayContract(unittest.TestCase):
                 report["measurement_snapshots"][field]
                 for field in (
                     "process_after_monotonic_ns",
+                    "target_after_monotonic_ns",
                     "lower_after_monotonic_ns",
-                    "worker_after_monotonic_ns",
-                    "target_after_monotonic_ns")]
+                    "worker_after_monotonic_ns")]
             self.assertEqual(
                 after_boundary_times, sorted(after_boundary_times))
             self.assertGreaterEqual(
@@ -2599,22 +2599,22 @@ class PairReplayContract(unittest.TestCase):
                     "lower_after": [
                         10, 0, 80, 0, lower_write_requests, 0,
                         lower_write_bytes // 512, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    "target_before_monotonic_ns":
-                        arm_start_ns + 500_000_000,
                     "worker_before_monotonic_ns":
                         arm_start_ns + 600_000_000,
                     "lower_before_monotonic_ns":
                         arm_start_ns + 700_000_000,
+                    "target_before_monotonic_ns":
+                        arm_start_ns + 750_000_000,
                     "process_before_monotonic_ns":
                         arm_start_ns + 800_000_000,
                     "process_after_monotonic_ns":
                         measured_end_ns + 100_000_000,
+                    "target_after_monotonic_ns":
+                        measured_end_ns + 150_000_000,
                     "lower_after_monotonic_ns":
                         measured_end_ns + 200_000_000,
                     "worker_after_monotonic_ns":
                         measured_end_ns + 300_000_000,
-                    "target_after_monotonic_ns":
-                        measured_end_ns + 400_000_000,
                     "process_before": {
                         "user_seconds": 0.0, "system_seconds": 0.0,
                         "peak_rss_bytes": 31 * 1024 * 1024},
@@ -2773,6 +2773,8 @@ class PairReplayContract(unittest.TestCase):
                         row["swapz"]["measured_start_monotonic_ns"] + 1),
                 lambda row: row["swapz"]["target_status_after"].update(
                     gc_wall_ns=1),
+                lambda row: row["swapz"]["target_status_before"].update(
+                    failed=1),
                 lambda row: row["swapz"]["gc"].update(
                     wall_fraction=.25),
                 lambda row: row["raw"]["performance_screening"]["pre"][
