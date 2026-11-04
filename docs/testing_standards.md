@@ -4964,7 +4964,11 @@ calls disabled until the whole coordinator is qualified. Rootless production-C
 tests must exercise the manifest-derived maximum table, exact stable
 `swapz-primary` name, run-bound UUID, ioctl buffer alignment, one-target bounds, exact `swapz` parameters,
 and rejection of altered lengths, target counts, versions, UUIDs, padding and
-unaligned payloads. The status-table parser must distinguish the
+unaligned payloads. The mapper-node publication retry predicate is pure
+policy and must remain rootless-testable: only `ENOENT` may be retried; an
+existing wrong node, `ENODEV`, permission failure, stale identity or I/O error
+must fail immediately, and the total retry budget must remain bounded to at
+most five seconds. The status-table parser must distinguish the
 `DM_TABLE_LOAD` final-target `next=0` representation from the
 `DM_TABLE_STATUS` aligned stride to the next target slot, and accept only the
 exact one-target stride with bounded zero padding. Rootless direct-C coverage

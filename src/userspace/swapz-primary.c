@@ -6685,6 +6685,11 @@ out:
 	return result;
 }
 
+static int swapz_primary_mapper_node_retryable_errno(int error)
+{
+	return error == ENOENT;
+}
+
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_swap_device_active(dev_t expected_device)
 {
@@ -7077,11 +7082,6 @@ static int swapz_primary_dm_prove_mapper_absent(
 		return -1;
 	errno = 0;
 	return 0;
-}
-
-static int swapz_primary_mapper_node_retryable_errno(int error)
-{
-	return error == ENOENT;
 }
 
 static int swapz_primary_mapper_device_open_once(
