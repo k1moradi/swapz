@@ -7530,6 +7530,39 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                     "spin_lock_init(&ctx->queue_lock);", 1),
                 destruction)
 
+    def test_capacity_index_fault_fixture_matches_constructor_order(self):
+        """Pin the executable 17-site ENOMEM model and reverse-order unwind."""
+        fixture = (
+            ROOT / "tests/runtime/native/mapping/authority.c").read_text()
+        function = source_body(
+            "test_small_index_failure_and_repeated_lifecycle", fixture)
+
+        allocation_sizes = function.split(
+            "const size_t allocation_sizes[] = {", 1)[1].split("};", 1)[0]
+        observed_types = re.findall(
+            r"sizeof\((struct swapz_map|swapz_u(?:8|16|32))\)",
+            allocation_sizes)
+        expected_types = [
+            self.INDEXES[name][1] for name in self.INDEX_ORDER]
+        self.assertEqual(observed_types, expected_types)
+        self.assertIn("CHECK(allocation_count == 17U);", function)
+        self.assertIn(
+            "8U * (allocation_count + 1U)", function,
+            "fixture must inject every index site plus successful attach "
+            "for eight lifecycle repetitions")
+        self.assertIn(
+            "failure_site = iteration % (allocation_count + 1U)", function)
+        self.assertRegex(
+            function,
+            r"if \(site == failure_site\) \{\s*"
+            r"error = -ENOMEM;\s*continue;\s*\}")
+        self.assertIn("swapz_authority_init(", function)
+        self.assertRegex(
+            function,
+            r"for \(site = allocation_count; site > 0U; --site\)\s*"
+            r"free\(allocated_indexes\[site - 1U\]\);",
+            "fault fixture must unwind acquired indexes in reverse order")
+
     def test_checked_geometry_oracle_tracks_production_headers(self):
         """Cross-check source-defined geometry with bounded sizing, not RAM."""
         import json
