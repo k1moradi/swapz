@@ -836,19 +836,22 @@ static int test_bounded_queue_pressure_and_retry(void)
 	CHECK_PRESSURE(!swapz_retention_timer_needs_arm(0, 0),
 		"retention-disabled", 8, 0, 1, 0, reserve_error);
 
-	/* Reserve recovery is a caller fence: preserve the errno in diagnostics,
-	 * but pass only the caller's blocked predicate into the helper. */
-	CHECK_PRESSURE(!swapz_window_read_independent(
-		staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error != 0),
-		"reserve-enospc", 8, 0, SWAPZ_MAX_RECORDS, 0, reserve_error);
+	/* Foreground ENOSPC is a per-WRITE capacity result: it must not poison
+	 * committed disjoint READs while the caller runs bounded GC/retry. A
+	 * terminal lower-I/O error does set the caller's blocking failure state. */
+	CHECK_PRESSURE(swapz_window_read_independent(
+		staged, SWAPZ_MAX_RECORDS, 999U, 2, 0),
+		"reserve-enospc-readable", 8, 0, SWAPZ_MAX_RECORDS, 0,
+		reserve_error);
 	reserve_error = -EIO;
 	CHECK_PRESSURE(!swapz_window_read_independent(
-		staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error != 0),
+		staged, SWAPZ_MAX_RECORDS, 999U, 2, 1),
 		"terminal-error", 8, 0, SWAPZ_MAX_RECORDS, 0, reserve_error);
 	reserve_error = 0;
 	CHECK_PRESSURE(swapz_window_read_independent(
-		staged, SWAPZ_MAX_RECORDS, 999U, 2, reserve_error != 0),
-		"reserve-retry", 8, 0, SWAPZ_MAX_RECORDS, 0, reserve_error);
+		staged, SWAPZ_MAX_RECORDS, 999U, 2, 0),
+		"reserve-retry-readable", 8, 0, SWAPZ_MAX_RECORDS, 0,
+		reserve_error);
 
 	for (hand_index = 0;
 	     hand_index < sizeof(hand_counts) / sizeof(hand_counts[0]);
