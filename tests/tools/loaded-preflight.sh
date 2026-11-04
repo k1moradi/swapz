@@ -4,10 +4,20 @@
 # observation and may remove only an idle module or a proven stale mapping.
 set -Eeuo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$SCRIPT_DIR/clear-tmp-before-memory-check.sh"
-
 fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
+
+script_source="${BASH_SOURCE[0]}"
+case "$script_source" in
+    */*) script_directory="${script_source%/*}" ;;
+    *) script_directory=. ;;
+esac
+SCRIPT_DIR="$(cd -- "$script_directory" && pwd -P)" ||
+    fail "cannot resolve loaded-preflight helper directory"
+cleanup_helper="$SCRIPT_DIR/clear-tmp-before-memory-check.sh"
+[[ -r $cleanup_helper ]] ||
+    fail "owned temporary-cleanup helper unavailable; restore the readable checkout helper"
+source "$cleanup_helper" ||
+    fail "owned temporary-cleanup helper could not be loaded safely"
 note() { printf '%s\n' "$*"; }
 is_uint() {
     local value="$1"
