@@ -418,6 +418,355 @@ static int test_short_completion_preserves_prior_generation(void)
 	return 0;
 }
 
+
+/*
+ * One serialized mixed-run regression: a physically written prefix followed
+ * by -EIO must not publish compressed/RAW replacements, a new logical page,
+ * or a DISCARD, even near the u32 logical-generation ceiling. The exact
+ * production engine prepares, submits and replays the batch; callbacks model
+ * completed lower bytes only, never loaded-kernel behavior.
+ */
+#define PUBLICATION_MEDIA_BLOCKS 8U
+static swapz_u8 publication_media[PUBLICATION_MEDIA_BLOCKS * SWAPZ_BLOCK_BYTES];
+static swapz_u8 publication_first_block[SWAPZ_BLOCK_BYTES];
+static swapz_u8 publication_old_raw[SWAPZ_BLOCK_BYTES];
+static swapz_u8 publication_new_raw[SWAPZ_BLOCK_BYTES];
+static swapz_u8 publication_new_compressed[2][1024];
+static swapz_u8 publication_readback[SWAPZ_BLOCK_BYTES];
+static swapz_u8 publication_read_scratch[SWAPZ_MAX_EXTENT_BYTES];
+static swapz_u8 publication_bulk_bytes[SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES];
+static struct swapz_tx publication_transactions[SWAPZ_MAX_RECORDS];
+static swapz_u8 publication_roles[PHYSICAL / SWAPZ_SEGMENT_BLOCKS];
+static swapz_u8 publication_sequence_delta[PHYSICAL];
+static swapz_u32 publication_sequence_base[PHYSICAL / SWAPZ_SEGMENT_BLOCKS];
+static struct swapz_engine publication_engine;
+
+struct publication_fault_control {
+	unsigned int lower_runs;
+	unsigned int read_calls;
+	unsigned int sealed_calls;
+	unsigned int sealed_pages;
+	unsigned int published_calls;
+	unsigned int published_pages;
+	unsigned int ownership_violations;
+	swapz_u32 failed_start;
+	swapz_u16 failed_blocks;
+	int original_errno;
+};
+
+static int publication_lower_read(void *opaque, swapz_u32 start_block,
+				  swapz_u8 blocks, swapz_u8 *destination)
+{
+	struct publication_fault_control *control = opaque;
+	const size_t stride = SWAPZ_BLOCK_BYTES;
+
+	if (!blocks || start_block >= PUBLICATION_MEDIA_BLOCKS ||
+	    blocks > PUBLICATION_MEDIA_BLOCKS - start_block)
+		return -ERANGE;
+	control->read_calls++;
+	memcpy(destination, publication_media + (size_t)start_block * stride,
+	       (size_t)blocks * stride);
+	return 0;
+}
+
+static void publication_write_sealed(void *opaque, swapz_u8 count)
+{
+	struct publication_fault_control *control = opaque;
+
+	control->sealed_calls++;
+	control->sealed_pages += count;
+}
+
+static void publication_write_published(void *opaque, swapz_u8 count)
+{
+	struct publication_fault_control *control = opaque;
+
+	control->published_calls++;
+	control->published_pages += count;
+	if (!maps[0].valid || maps[0].raw || !maps[1].valid ||
+	    !maps[1].raw || !maps[2].valid || maps[2].raw)
+		control->ownership_violations++;
+}
+
+static int publication_lower_write(void *opaque, swapz_u32 start_block,
+				   swapz_u16 blocks, const swapz_u8 *image,
+				   swapz_u16 *completed_blocks)
+{
+	struct publication_fault_control *control = opaque;
+	const swapz_u32 protected_page = 0;
+	const size_t stride = SWAPZ_BLOCK_BYTES;
+	struct swapz_tx refused;
+
+	*completed_blocks = 0;
+	if (blocks < 2U || blocks > SWAPZ_BULK_BLOCKS ||
+	    start_block >= PUBLICATION_MEDIA_BLOCKS ||
+	    blocks > PUBLICATION_MEDIA_BLOCKS - start_block)
+		return -ERANGE;
+	control->lower_runs++;
+	/* This callback runs under the one serialized owner, with paused
+	 * reservations. Neither another stage nor DISCARD can steal them. */
+	if (a.batch_pending != 2U || a.in_flight ||
+	    swapz_discard_page(&a, protected_page) != -EBUSY ||
+	    swapz_stage(&a, &protected_page, 1, 1, &refused) != -EBUSY ||
+	    maps[0].generation != UINT32_MAX - 2U ||
+	    maps[1].generation != UINT32_MAX - 2U || maps[2].valid)
+		control->ownership_violations++;
+	if (control->lower_runs == 1U) {
+		control->failed_start = start_block;
+		control->failed_blocks = blocks;
+		memcpy(publication_first_block, image, stride);
+		memcpy(publication_media + (size_t)start_block * stride,
+		       image, stride);
+		*completed_blocks = 1;
+		return control->original_errno;
+	}
+	memcpy(publication_media + (size_t)start_block * stride,
+	       image, (size_t)blocks * stride);
+	*completed_blocks = blocks;
+	return 0;
+}
+
+static int publication_failure(const char *phase, int actual_errno,
+			       const struct publication_fault_control *control,
+			       const struct swapz_map *retained_raw,
+			       const struct swapz_map *retained_compressed)
+{
+	fprintf(stderr,
+		"FAIL operation=mixed_batch_replace logical_generation=%u "
+		"phase=%s original_errno=%d actual_errno=%d "
+		"retained_authority=raw(gen:%u,start:%u,valid:%u)"
+		",compressed(gen:%u,start:%u,valid:%u) "
+		"current=raw(gen:%u,start:%u),compressed(gen:%u,start:%u) "
+		"reservation=(start:%u,blocks:%u) lower_runs=%u "
+		"sealed_pages=%u published_pages=%u committed_blocks=%u "
+		"abandoned_blocks=%u\n",
+		UINT32_MAX - 1U, phase, control->original_errno, actual_errno,
+		retained_raw->generation, retained_raw->start_block,
+		(unsigned int)retained_raw->valid,
+		retained_compressed->generation,
+		retained_compressed->start_block,
+		(unsigned int)retained_compressed->valid,
+		maps[0].generation, maps[0].start_block,
+		maps[1].generation, maps[1].start_block,
+		control->failed_start, control->failed_blocks,
+		control->lower_runs, control->sealed_pages,
+		control->published_pages, a.committed_blocks, a.abandoned_blocks);
+	return 1;
+}
+
+#define REQUIRE_PUBLICATION(condition, phase, actual_errno) do { \
+	if (!(condition)) \
+		return publication_failure(phase, actual_errno, &control, \
+					   &retained_raw, &retained_compressed); \
+} while (0)
+
+static int test_torn_mixed_replacement_discard_generation_rollover(void)
+{
+	const swapz_u32 raw_logical = 0, compressed_logical = 1;
+	const size_t stride = SWAPZ_BLOCK_BYTES;
+	struct publication_fault_control control = { .original_errno = -EIO };
+	struct swapz_tx transaction;
+	struct swapz_map retained_raw, retained_compressed;
+	struct swapz_compressed_page replacement[3] = { 0 };
+	swapz_u8 committed_pages = 0;
+	swapz_u16 payload_length = 0;
+	swapz_u32 first_retry_block;
+	unsigned int read_calls_before;
+	int error;
+
+	CHECK(init() == 0);
+	CHECK(swapz_enable_extent_sequence_index(
+		&a, publication_sequence_delta, publication_sequence_base,
+		PHYSICAL / SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(swapz_enable_segment_rotation(
+		&a, publication_roles, PHYSICAL / SWAPZ_SEGMENT_BLOCKS) == 0);
+	memset(publication_media, 0, sizeof(publication_media));
+	memset(&publication_engine, 0, sizeof(publication_engine));
+	memset(publication_old_raw, 0x42, sizeof(publication_old_raw));
+	memset(publication_new_raw, 0x91, sizeof(publication_new_raw));
+	memset(publication_new_compressed[0], 0x36,
+	       sizeof(publication_new_compressed[0]));
+	memset(publication_new_compressed[1], 0x73,
+	       sizeof(publication_new_compressed[1]));
+
+	/* Seed two real surviving extents at generation UINT32_MAX - 2. */
+	maps[raw_logical].generation = UINT32_MAX - 3U;
+	maps[compressed_logical].generation = UINT32_MAX - 3U;
+	CHECK(swapz_stage(&a, &raw_logical, 1, 1, &transaction) == 0);
+	CHECK(transaction.start_block < PUBLICATION_MEDIA_BLOCKS);
+	memcpy(publication_media + (size_t)transaction.start_block * stride,
+	       publication_old_raw, stride);
+	CHECK(swapz_finish_raw(&a, &transaction, publication_old_raw, 1, 0) == 0);
+	CHECK(swapz_stage(&a, &compressed_logical, 1, 1, &transaction) == 0);
+	CHECK(transaction.start_block < PUBLICATION_MEDIA_BLOCKS);
+	CHECK(encode(&transaction) == 0);
+	memcpy(publication_media + (size_t)transaction.start_block * stride,
+	       bytes, stride);
+	CHECK(swapz_finish(&a, &transaction, bytes, SWAPZ_BLOCK_BYTES, 1, 0) == 0);
+	retained_raw = maps[raw_logical];
+	retained_compressed = maps[compressed_logical];
+	CHECK(retained_raw.valid && retained_raw.raw &&
+	      retained_raw.generation == UINT32_MAX - 2U);
+	CHECK(retained_compressed.valid && !retained_compressed.raw &&
+	      retained_compressed.generation == UINT32_MAX - 2U);
+	CHECK(a.committed_blocks == 2 && a.abandoned_blocks == 0);
+
+	replacement[0] = (struct swapz_compressed_page){
+		.logical_page = raw_logical,
+		.payload = publication_new_compressed[0],
+		.length = sizeof(publication_new_compressed[0]),
+		.encoding = SWAPZ_ENCODING_LZ4,
+	};
+	replacement[1] = (struct swapz_compressed_page){
+		.logical_page = 2,
+		.payload = publication_new_compressed[1],
+		.length = sizeof(publication_new_compressed[1]),
+		.encoding = SWAPZ_ENCODING_LZ4,
+	};
+	replacement[2] = (struct swapz_compressed_page){
+		.logical_page = compressed_logical,
+		.payload = publication_new_raw,
+		.length = SWAPZ_BLOCK_BYTES,
+		.raw = 1,
+	};
+	publication_engine.authority = &a;
+	publication_engine.io.opaque = &control;
+	publication_engine.io.write_run = publication_lower_write;
+	publication_engine.io.read_blocks = publication_lower_read;
+	publication_engine.io.write_sealed = publication_write_sealed;
+	publication_engine.io.write_published = publication_write_published;
+	publication_engine.read_scratch = publication_read_scratch;
+	publication_engine.bulk_scratch = publication_bulk_bytes;
+	publication_engine.bulk_txs = publication_transactions;
+	publication_engine.bulk_enabled = 1;
+
+	/* One 4KiB media prefix really lands before -EIO; the second block
+	 * stays untouched. No paused snapshot may become a new mapping. */
+	committed_pages = 99;
+	error = swapz_engine_write_window_batched(&publication_engine,
+						   replacement, 3, &committed_pages);
+	REQUIRE_PUBLICATION(error == -EIO && committed_pages == 0,
+			    "lower_prefix_eio", error);
+	REQUIRE_PUBLICATION(control.lower_runs == 1 &&
+			    control.sealed_calls == 1 && control.sealed_pages == 3 &&
+			    control.published_calls == 0 && control.published_pages == 0 &&
+			    !control.ownership_violations &&
+			    control.failed_start == 2 && control.failed_blocks == 2,
+			    "staged_unpublished", error);
+	REQUIRE_PUBLICATION(!a.in_flight && !a.batch_pending &&
+			    a.committed_blocks == 2 && a.abandoned_blocks == 2 &&
+			    a.next_block == 4 &&
+			    publication_engine.submitted_blocks == 2 &&
+			    publication_engine.completed_blocks == 1 &&
+			    maps[0].generation == retained_raw.generation &&
+			    maps[1].generation == retained_compressed.generation &&
+			    !memcmp(&maps[0], &retained_raw, sizeof(retained_raw)) &&
+			    !memcmp(&maps[1], &retained_compressed,
+				    sizeof(retained_compressed)) &&
+			    !maps[2].valid && maps[2].generation == 0 &&
+			    live[retained_raw.start_block] == 1 &&
+			    live[retained_compressed.start_block] == 1 &&
+			    !live[2] && !live[3] && !classes[2] && !classes[3],
+			    "reservation_quarantine", error);
+	REQUIRE_PUBLICATION(!memcmp(publication_media + 2U * stride,
+				     publication_first_block, stride),
+			    "physical_prefix", error);
+	{
+		static const swapz_u8 empty_block[SWAPZ_BLOCK_BYTES];
+
+		REQUIRE_PUBLICATION(!memcmp(publication_media + 3U * stride,
+					     empty_block, stride),
+				    "unwritten_suffix", error);
+	}
+	REQUIRE_PUBLICATION(
+		!memcmp(publication_media +
+			(size_t)retained_raw.start_block * stride,
+			publication_old_raw, stride) &&
+		swapz_verify_raw(&a, raw_logical,
+				 publication_media +
+				 (size_t)retained_raw.start_block * stride) == 0,
+		"raw_survivor", error);
+	REQUIRE_PUBLICATION(swapz_engine_read_page(
+			&publication_engine, compressed_logical, publication_readback,
+			sizeof(publication_readback), &payload_length) == 0 &&
+			payload_length == sizeof(compressed) &&
+			!memcmp(publication_readback, compressed, payload_length),
+			    "compressed_survivor", error);
+	read_calls_before = control.read_calls;
+	payload_length = 7;
+	REQUIRE_PUBLICATION(swapz_engine_read_page(
+			&publication_engine, 2, publication_readback,
+			sizeof(publication_readback), &payload_length) == -ESTALE &&
+			!payload_length && control.read_calls == read_calls_before,
+			    "unpublished_newcomer", error);
+
+	/* A retry takes a fresh physical reservation, changes both storage
+	 * representations, and publishes exactly three logical generations. */
+	committed_pages = 99;
+	error = swapz_engine_write_window_batched(&publication_engine,
+						   replacement, 3, &committed_pages);
+	REQUIRE_PUBLICATION(!error && committed_pages == 3 &&
+			    control.lower_runs == 2 && control.sealed_calls == 2 &&
+			    control.sealed_pages == 6 && control.published_calls == 1 &&
+			    control.published_pages == 3 && !control.ownership_violations &&
+			    !a.in_flight && !a.batch_pending &&
+			    a.committed_blocks == 4 && a.abandoned_blocks == 2 &&
+			    a.next_block == 6 && publication_engine.submitted_blocks == 4 &&
+			    publication_engine.completed_blocks == 3 &&
+			    !live[retained_raw.start_block] &&
+			    !live[retained_compressed.start_block] &&
+			    maps[0].valid && !maps[0].raw &&
+			    maps[0].generation == UINT32_MAX - 1U &&
+			    maps[1].valid && maps[1].raw &&
+			    maps[1].generation == UINT32_MAX - 1U &&
+			    maps[2].valid && !maps[2].raw && maps[2].generation == 1,
+			    "retry_publication", error);
+	first_retry_block = maps[0].start_block;
+	REQUIRE_PUBLICATION(first_retry_block == 4 && maps[1].start_block == 5 &&
+			    live[first_retry_block] == 2 && live[5] == 1,
+			    "retry_reservation", error);
+	REQUIRE_PUBLICATION(swapz_engine_read_page(
+			&publication_engine, 0, publication_readback,
+			sizeof(publication_readback), &payload_length) == 0 &&
+			payload_length == sizeof(publication_new_compressed[0]) &&
+			!memcmp(publication_readback, publication_new_compressed[0],
+				payload_length),
+			    "compressed_replacement_read", error);
+	REQUIRE_PUBLICATION(swapz_engine_read_page(
+			&publication_engine, 2, publication_readback,
+			sizeof(publication_readback), &payload_length) == 0 &&
+			payload_length == sizeof(publication_new_compressed[1]) &&
+			!memcmp(publication_readback, publication_new_compressed[1],
+				payload_length),
+			    "newcomer_read", error);
+	REQUIRE_PUBLICATION(
+		!memcmp(publication_media + (size_t)maps[1].start_block * stride,
+			publication_new_raw, stride) &&
+		swapz_verify_raw(&a, compressed_logical,
+				 publication_media +
+				 (size_t)maps[1].start_block * stride) == 0,
+		"raw_replacement_read", error);
+
+	/* DISCARD takes the last available generation without reviving bytes.
+	 * Neither a second DISCARD nor WRITE may wrap that logical generation. */
+	REQUIRE_PUBLICATION(swapz_discard_page(&a, compressed_logical) == 0 &&
+			    !maps[1].valid && maps[1].generation == UINT32_MAX &&
+			    !live[5], "discard_commit", error);
+	REQUIRE_PUBLICATION(swapz_discard_page(&a, compressed_logical) ==
+			    -EOVERFLOW, "discard_overflow", -EOVERFLOW);
+	REQUIRE_PUBLICATION(swapz_stage(&a, &compressed_logical, 1, 1,
+					&transaction) == -EOVERFLOW &&
+			    !a.in_flight && a.next_block == 6 &&
+			    maps[0].valid && maps[0].generation == UINT32_MAX - 1U &&
+			    maps[2].valid && maps[2].generation == 1 &&
+			    live[first_retry_block] == 2 &&
+			    a.committed_blocks == 4 && a.abandoned_blocks == 2,
+			    "generation_rollover_refusal", -EOVERFLOW);
+	return 0;
+}
+#undef REQUIRE_PUBLICATION
+
+
 int main(void)
 {
 	int passed = 0;
@@ -431,6 +780,7 @@ int main(void)
 	CHECK(test_fua_failure_preserves_prior_generation() == 0); passed++;
 	CHECK(test_zero_overwrite_fua_fences_before_zero_publication() == 0); passed++;
 	CHECK(test_short_completion_preserves_prior_generation() == 0); passed++;
+	CHECK(test_torn_mixed_replacement_discard_generation_rollover() == 0); passed++;
 	printf("SWAPZ_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=%d\n", passed);
 	return 0;
 }
