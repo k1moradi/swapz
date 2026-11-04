@@ -359,6 +359,10 @@ static int test_producer_releases_first_consumer_reclaims_last(void)
 		while (!atomic_load_explicit(&handoff.producer_finished,
 						     memory_order_relaxed))
 			sched_yield();
+		/* Producer dropped the first of two refs; the consumer still pins
+		 * the slot while it acquires and copies terminal payload metadata. */
+		CHECK(atomic_load_explicit(&handoff.references,
+						   memory_order_relaxed) == 1);
 		CHECK(swapz_preparation_read_state(&handoff.state) ==
 		      swapz_preparation_codec_result_state(handoff.codec_result));
 		/* These are the first synchronizing producer-payload observations. */
@@ -371,6 +375,8 @@ static int test_producer_releases_first_consumer_reclaims_last(void)
 		CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == -1);
 		CHECK(atomic_fetch_sub_explicit(&handoff.references, 1,
 						memory_order_acq_rel) == 1);
+		CHECK(atomic_load_explicit(&handoff.references,
+						   memory_order_relaxed) == 0);
 		atomic_store_explicit(&handoff.state.value, SWAPZ_PREPARATION_EMPTY,
 				      memory_order_relaxed);
 		swapz_preparation_release_slot(&handoff.free_mask, 63);
