@@ -1014,6 +1014,44 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "campaign evidence digest binding mismatch" in blocker
             for blocker in digest_mismatch["code_blockers"]))
 
+    def test_resealed_malformed_ram_trace_never_qualifies_release(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+
+        changes = {
+            "missing_trace": lambda capacity: capacity.pop("metadata_ram_trace"),
+            "early_teardown": lambda capacity: capacity["metadata_ram_trace"][
+                "samples"].pop(),
+            "sample_peak_disagrees": lambda capacity: capacity[
+                "metadata_ram_trace"]["samples"][6].update(ram_bytes=900000001),
+            "source_mismatch": lambda capacity: capacity[
+                "metadata_ram_trace"].update(source_sha="b" * 40),
+            "short_capacity": lambda capacity: (
+                capacity.update(logical_pages=27080191,
+                                logical_capacity_bytes=27080191 * 4096)),
+        }
+        for label, change in changes.items():
+            with self.subTest(change=label):
+                campaign = physical_campaign_evidence(policy_raw)
+                change(campaign["capacity_and_ram"])
+                campaign_raw = encoded(campaign)
+                evidence = current_evidence(
+                    report_raw, policy_raw, physical_raw, campaign_raw)
+                result = EVALUATOR.evaluate_release(
+                    SOURCE, report, report_raw, evidence, policy, policy_raw,
+                    physical, physical_raw, campaign, campaign_raw)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                expected = ("sealed campaign capacity/RAM evidence is invalid"
+                            if label == "short_capacity" else
+                            "sealed campaign RAM trace is invalid")
+                self.assertTrue(
+                    any(expected in blocker for blocker in result["code_blockers"]),
+                    (label, result["code_blockers"]))
+
     def test_unresolved_critical_issue_blocks_code_readiness(self):
         report = owner_report()
         policy = acceptance_policy()
