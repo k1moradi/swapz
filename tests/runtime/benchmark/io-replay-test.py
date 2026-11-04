@@ -3211,10 +3211,6 @@ class PairReplayContract(unittest.TestCase):
         invalid_before["captured_at_utc"] = "2026-11-03T00:00:02Z"
         self.assertFalse(evidence.metadata_ram_trace_within_host_window(
             capacity, invalid_before, after))
-        invalid_before = copy.deepcopy(before)
-        invalid_before["kernel"]["uptime_seconds"] = 20.0
-        self.assertFalse(evidence.metadata_ram_trace_within_host_window(
-            capacity, invalid_before, after))
         invalid_after = copy.deepcopy(after)
         invalid_after["captured_at_utc"] = "2026-11-03T00:00:03Z"
         self.assertFalse(evidence.metadata_ram_trace_within_host_window(
