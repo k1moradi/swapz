@@ -385,7 +385,35 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertIn("step0 = (swapz_u64x8){", avx512)
         self.assertIn("step1 = (swapz_u64x8){", avx512)
 
+    def test_static_required_sources_follow_kernel_architecture(self) -> None:
+        headers = Path(self.temporary_directory.name) / "headers"
+        headers.mkdir()
+        config = headers / ".config"
+        config.write_text("CONFIG_X86_64=y\n", encoding="utf-8")
+        self.assertEqual(
+            qualification.static_required_sources(headers),
+            {
+                "dm-target.c", "codec.c", "authority.c", "engine.c",
+                "predictor.c", "predictor-sse2.c", "predictor-avx2.c",
+                "predictor-avx512.c",
+            },
+        )
+        config.write_text(
+            "CONFIG_ARM64=y\nCONFIG_KERNEL_MODE_NEON=y\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            qualification.static_required_sources(headers),
+            {
+                "dm-target.c", "codec.c", "authority.c", "engine.c",
+                "predictor.c", "predictor-neon.c",
+            },
+        )
+
     def test_static_checker_requires_actual_check_and_zero_warnings(self) -> None:
+        headers = Path(self.temporary_directory.name) / "static-headers"
+        headers.mkdir()
+        (headers / ".config").write_text("CONFIG_X86_64=y\n", encoding="utf-8")
         with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/sparse"), \
              mock.patch.object(qualification.subprocess, "run") as runner:
             runner.return_value = subprocess.CompletedProcess(
@@ -395,7 +423,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             with contextlib.redirect_stderr(expected_failure_log):
                 self.assertEqual(
                     qualification.run_static(
-                        Path("/repo"), Path("/headers"), "sparse")[0],
+                        Path("/repo"), headers, "sparse")[0],
                     "FAIL",
                 )
             self.assertIn("FAIL_KERNEL_STATIC_SPARSE", expected_failure_log.getvalue())
@@ -406,15 +434,26 @@ class KernelDebugQualificationTests(unittest.TestCase):
                     "  CHECK /build/authority.c\n"
                     "  CHECK /build/engine.c\n"
                     "  CHECK /build/predictor.c\n"
+                    "  CHECK /build/predictor-sse2.c\n"
+                    "  CHECK /build/predictor-avx2.c\n"
+                    "  CHECK /build/predictor-avx512.c\n"
                 ),
             )
-            self.assertEqual(qualification.run_static(Path("/repo"), Path("/headers"), "sparse")[0], "PASS")
+            self.assertEqual(
+                qualification.run_static(
+                    Path("/repo"), headers, "sparse")[0],
+                "PASS",
+            )
             command = runner.call_args.args[0]
             self.assertIn("C=2", command)
             self.assertIn("W=1", command)
             self.assertIn("CHECK=sparse", command)
         with mock.patch.object(qualification.shutil, "which", return_value=None):
-            self.assertEqual(qualification.run_static(Path("/repo"), Path("/headers"), "smatch")[0], "UNAVAILABLE")
+            self.assertEqual(
+                qualification.run_static(
+                    Path("/repo"), Path("/headers"), "smatch")[0],
+                "UNAVAILABLE",
+            )
 
 
 if __name__ == "__main__":

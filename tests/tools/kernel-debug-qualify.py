@@ -241,6 +241,30 @@ def scan_static(output: str) -> tuple[int, dict[str, int]]:
     return len(CHECK_RECORD.findall(output)), counts
 
 
+def static_required_sources(kdir: Path) -> set[str]:
+    config_path = next(
+        (candidate for candidate in (
+            kdir / ".config",
+            kdir / "include/config/auto.conf",
+        ) if candidate.is_file()),
+        None,
+    )
+    if config_path is None:
+        raise ValueError("kernel build configuration unavailable for static source set")
+    config = load_config(config_path)
+    sources = {"dm-target.c", "codec.c", "authority.c", "engine.c", "predictor.c"}
+    if config.get("CONFIG_X86_64") == "y":
+        sources.update({
+            "predictor-sse2.c",
+            "predictor-avx2.c",
+            "predictor-avx512.c",
+        })
+    elif (config.get("CONFIG_ARM64") == "y" and
+          config.get("CONFIG_KERNEL_MODE_NEON") == "y"):
+        sources.add("predictor-neon.c")
+    return sources
+
+
 def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[str, int]]:
     if shutil.which(analyzer) is None:
         return "UNAVAILABLE", 0, {}
@@ -258,7 +282,11 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
         return "FAIL", 0, {}
     check_count, warnings = scan_static(result.stdout)
     checked_sources = {Path(path).name for path in CHECK_RECORD.findall(result.stdout)}
-    required_sources = {"dm-target.c", "codec.c", "authority.c", "engine.c", "predictor.c"}
+    try:
+        required_sources = static_required_sources(kdir)
+    except ValueError as error:
+        print(f"FAIL_KERNEL_STATIC_{analyzer.upper()}: {error}", file=sys.stderr)
+        return "FAIL", check_count, warnings
     diagnostics = [line for line in result.stdout.splitlines() if SOURCE_DIAGNOSTIC.search(line)]
     if diagnostics:
         # Bounded fail-only logging: emit a representative sample and exact

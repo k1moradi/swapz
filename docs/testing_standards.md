@@ -5703,9 +5703,12 @@ vector brace initializers used by the production SIMD backends. Narrow
 limitations; ordinary GCC/Clang builds retain the exact production builtins and
 initializers, whose byte semantics remain covered by native predictor tests.
 The rootless source contract requires both the checker seam and the production
-expressions to remain present. All eight module C translation units must be
-checked, and every other source-located Sparse finding still fails the gate.
-Missing CHECK units, headers, analyzer execution, or nonzero Kbuild exits must
+expressions to remain present. The static gate derives the complete expected
+translation-unit set from the selected Kbuild configuration: x86_64 requires
+the five core units plus SSE2/AVX2/AVX-512, while ARM64 with kernel-mode NEON
+also requires its NEON unit. An unreadable Kbuild configuration, any missing
+architecture-selected CHECK unit, or any other source-located Sparse finding
+fails the gate. Missing headers/analyzer execution or nonzero Kbuild exits must
 never produce static PASS.
 
 The read-only host Kconfig probe distinguishes DETECTED, UNAVAILABLE,
