@@ -3226,6 +3226,13 @@ cleanup after earlier loaded stages, without weakening the 1 GiB
 The owned pair first creates and fully faults both 64MiB memory-backed
 `null_blk` devices outside the ID36 cgroup. It then migrates its benchmark
 process into the cgroup, proves that membership, and stops at a private barrier.
+At this pre-pressure barrier, `cgroup.procs` must contain exactly the pair's
+canonical readiness PID and no other process; the pressure helper has not been
+launched yet. Any additional canonical PID is ownership contamination and
+BLOCKS admission. Cleanup may terminate only directly tracked owned children
+and must retain the contaminated child cgroup plus private scratch for read-only
+investigation; it must not use `cgroup.kill`, `rmdir`, or recursive scratch
+removal on that refusal.
 Only then does the pressure helper start niceness-10 CPU burners and fault its
 anonymous resident set in the same cgroup. The burners are forked before the
 576MiB mapping is created, so they do not inherit that mapping's COW page-table

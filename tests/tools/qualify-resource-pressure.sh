@@ -348,6 +348,9 @@ PAIR_LOG="$SESSION/pair.log"
 PRESSURE_PID=""
 PAIR_PID=""
 PASS_EVIDENCE=""
+# A foreign process in the private ID36 cgroup invalidates exclusive ownership.
+# Retain both evidence resources rather than applying group-wide cleanup.
+RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=0
 
 # Extract at most one short fail-only reason from a private helper log. Never
 # echo paths or unbounded diagnostics from privileged children.
@@ -421,10 +424,18 @@ verify_pair_cgroup_membership() {
             malformed = 1
             next
         }
-        $1 == expected_pid { ++matches }
+        {
+            ++entries
+            if ($1 == expected_pid)
+                ++matches
+            else
+                foreign = 1
+        }
         END {
             if (malformed || matches > 1)
                 exit 2
+            if (foreign || entries > 1)
+                exit 3
             if (matches != 1)
                 exit 1
         }
@@ -434,10 +445,15 @@ verify_pair_cgroup_membership() {
         inventory_status=$?
     fi
     if (( inventory_status == 1 )); then
-        printf 'FAIL: ID36 readiness PID absent from pressure cgroup: observed:absent required_pid:%s; inspect owned pair migration\n' "$expected_pid" >&2
+        printf '%s\n' 'FAIL: ID36 readiness PID absent from pressure cgroup before pressure: observed:absent required:exactly one matching readiness PID; retained cleanup: normal owned cgroup and scratch cleanup remain active; inspect owned pair migration' >&2
         return 1
     fi
-    printf '%s\n' 'BLOCKED: ID36 cgroup.procs readiness PID inventory unreadable or malformed; observed:unavailable required:exactly one canonical matching PID within 128 entries; restore process telemetry' >&2
+    if (( inventory_status == 3 )); then
+        RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+        printf '%s\n' 'BLOCKED: ID36 readiness PID inventory prerequisite failed before pressure: observed:foreign process present required:exactly one canonical matching PID; retained cleanup: private child cgroup and scratch retained for read-only investigation; restore exclusive cgroup membership before retrying' >&2
+        return 2
+    fi
+    printf '%s\n' 'BLOCKED: ID36 cgroup.procs readiness PID inventory unavailable before pressure: observed:unreadable-or-malformed required:exactly one canonical matching PID within 128 entries; retained cleanup: normal owned cgroup and scratch cleanup remain active; restore process telemetry' >&2
     return 2
 }
 
@@ -506,7 +522,7 @@ cleanup() {
         fi
         wait "$PRESSURE_PID" 2>/dev/null
     fi
-    if [[ -d $CGROUP ]]; then
+    if [[ -d $CGROUP ]] && (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
         if [[ -f $CGROUP/cgroup.kill &&
               -n $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]]; then
             (printf '%s\n' 1 > "$CGROUP/cgroup.kill") 2>/dev/null || true
@@ -524,12 +540,14 @@ cleanup() {
             fi
         fi
     fi
-    if ! rm -rf -- "$SESSION" 2>/dev/null; then
-        if (( result == 0 || result == 2 )); then
-            printf '%s\n' 'BLOCKED: ID36 private scratch cleanup did not complete; preserve the owned session for read-only investigation and retry only after safe cleanup' >&2
-            result=2
-        else
-            printf '%s\n' 'FAIL: ID36 private scratch cleanup also failed; preserve the owned session for read-only investigation' >&2
+    if (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
+        if ! rm -rf -- "$SESSION" 2>/dev/null; then
+            if (( result == 0 || result == 2 )); then
+                printf '%s\n' 'BLOCKED: ID36 private scratch cleanup did not complete; preserve the owned session for read-only investigation and retry only after safe cleanup' >&2
+                result=2
+            else
+                printf '%s\n' 'FAIL: ID36 private scratch cleanup also failed; preserve the owned session for read-only investigation' >&2
+            fi
         fi
     fi
     # Do not advertise PASS until both owned cgroup and scratch cleanup

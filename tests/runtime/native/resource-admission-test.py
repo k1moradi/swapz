@@ -445,21 +445,54 @@ sample_host_memory_admission
         script = ('CGROUP=$1\n'
                   + shell_function(QUALIFIER, "verify_pair_cgroup_membership")
                   + 'verify_pair_cgroup_membership 123\n')
-        procfile.write_text("12\n123\n456\n", encoding="ascii")
+        procfile.write_text("123\n", encoding="ascii")
         self.assertEqual(self.run_shell(script, directory).returncode, 0)
-        for content, label in (
-                ("12\n1234\n", "FAIL: ID36 readiness PID absent"),
-                ("123\n123\n", "BLOCKED: ID36 cgroup.procs"),
-                ("123\n-1\n", "BLOCKED: ID36 cgroup.procs"),
-                ("123\n" * 129, "BLOCKED: ID36 cgroup.procs")):
+        for content, expected_code, label in (
+                ("", 1, "FAIL: ID36 readiness PID absent"),
+                ("456\n", 2, "BLOCKED: ID36 readiness PID inventory prerequisite"),
+                ("123\n456\n", 2,
+                 "BLOCKED: ID36 readiness PID inventory prerequisite"),
+                ("123\n123\n", 2, "BLOCKED: ID36 cgroup.procs"),
+                ("123\n-1\n", 2, "BLOCKED: ID36 cgroup.procs"),
+                ("123\n" * 129, 2, "BLOCKED: ID36 cgroup.procs")):
             with self.subTest(content=content[:25]):
                 procfile.write_text(content, encoding="ascii")
                 result = self.run_shell(script, directory)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.returncode, expected_code, result.stderr)
                 self.assertIn(label, result.stderr)
                 self.assertNotIn(str(directory), result.stderr)
         procfile.unlink()
         self.assert_blocked(self.run_shell(script, directory), "cgroup.procs")
+
+    def test_foreign_pair_cgroup_member_retains_cleanup_resources(self):
+        cgroup_directory = self.root / "contaminated-cgroup"
+        cgroup_directory.mkdir()
+        (cgroup_directory / "cgroup.procs").write_text(
+            "123\n456\n", encoding="ascii")
+        cgroup_kill = cgroup_directory / "cgroup.kill"
+        cgroup_kill.write_text("unchanged\n", encoding="ascii")
+        session_directory = self.root / "retained-session"
+        session_directory.mkdir()
+        script = (
+            'CGROUP=$1\nSESSION=$2\nSTOP=$2/stop\n'
+            'PAIR_PID=""\nPRESSURE_PID=""\nPASS_EVIDENCE=""\n'
+            'RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=0\n'
+            + shell_function(QUALIFIER, "verify_pair_cgroup_membership")
+            + shell_function(QUALIFIER, "cleanup")
+            + 'set +e\n'
+            + 'verify_pair_cgroup_membership 123\n'
+            + 'cleanup\n')
+        result = self.run_shell(script, cgroup_directory, session_directory)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("observed:foreign process present", result.stderr)
+        self.assertIn(
+            "retained cleanup: private child cgroup and scratch retained",
+            result.stderr)
+        self.assertTrue(cgroup_directory.is_dir())
+        self.assertTrue(session_directory.is_dir())
+        self.assertEqual(cgroup_kill.read_text(encoding="ascii"), "unchanged\n")
+        self.assertNotIn(str(cgroup_directory), result.stderr)
+        self.assertNotIn(str(session_directory), result.stderr)
 
     def test_observed_pair_failure_precedes_blocked_log_and_telemetry(self):
         log_path = self.root / "pair.log"
