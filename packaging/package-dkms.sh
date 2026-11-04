@@ -1341,7 +1341,10 @@ restore_uninstall_cli_backup() {
 }
 
 restore_uninstall_backup() {
+  local expected_package_kind="${1:-current}"
   local current_status="" restored_status=""
+  [[ "$expected_package_kind" == current ||
+     "$expected_package_kind" == legacy ]] || return 1
   backup_dir="$transaction_dir/backup"
   query_dkms_status current_status -m swapz -v "$version" || return 1
   dkms_status_single_kernel_scope "$current_status" &&
@@ -1406,9 +1409,13 @@ restore_uninstall_backup() {
   if [[ -n "$test_root" && ${SWAPZ_TEST_UNINSTALL_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
     return 1
   fi
-  # Uninstall admits only a verified *current* package. The install-only
-  # existing_kind variable is not owned by this rollback or by recover.
-  verify_owned || return 1
+  # Snapshot identity is explicit: uninstall rollback always passes current,
+  # while install recovery may restore a verified legacy package snapshot.
+  if [[ "$expected_package_kind" == legacy ]]; then
+    verify_owned_legacy || return 1
+  else
+    verify_owned || return 1
+  fi
   durable_package_paths "$cli" "$installed_module" || return 1
 }
 
@@ -1427,7 +1434,7 @@ uninstall_rollback() {
     echo "BLOCKED: cannot journal uninstall rollback; rollback not attempted; recovery-required journal retained" >&2
     exit "$rc"
   fi
-  if restore_uninstall_backup && persist_transaction_state rolled-back; then
+  if restore_uninstall_backup current && persist_transaction_state rolled-back; then
     local cleanup_status=0
     remove_transaction_record || cleanup_status=$?
     if (( cleanup_status == 0 )); then
@@ -1587,7 +1594,7 @@ PY
         blocked "recovery clean rollback systemd reload failed"
     else
       existing_kind="$recovery_kind"
-      restore_uninstall_backup ||
+      restore_uninstall_backup "$recovery_kind" ||
         blocked "recovery previous package rollback failed"
     fi
     persist_transaction_state rolled-back ||
