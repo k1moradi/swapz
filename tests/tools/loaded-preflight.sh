@@ -288,10 +288,20 @@ assert_not_mounted() {
 }
 
 assert_not_active_swap() {
-    local source="$1" swap_paths swap_status source_devno=""
-    local swap_path swap_devno
+    local source="$1" swap_entries swap_status source_devno
+    local swap_path swap_type swap_devno
 
-    if swap_paths="$(awk '
+    [[ -b $source ]] ||
+        refuse BLOCKED swap_device_identity unavailable "owned swap candidate is not a readable block device"
+    if source_devno="$(stat -Lc '%t:%T' "$source" 2>/dev/null)"; then
+        [[ -n $source_devno ]] ||
+            refuse BLOCKED swap_device_identity unavailable "owned block source has empty device identity"
+    else
+        swap_status=$?
+        refuse BLOCKED swap_device_identity unavailable "stat_status=$swap_status; cannot inspect owned block source identity"
+    fi
+
+    if swap_entries="$(awk '
         NR == 1 {
             if (NF != 5 || $1 != "Filename" || $2 != "Type" ||
                 $3 != "Size" || $4 != "Used" || $5 != "Priority")
@@ -300,12 +310,13 @@ assert_not_active_swap() {
         }
         NF {
             if (NF != 5 || substr($1, 1, 1) != "/" ||
+                ($2 != "file" && $2 != "partition") ||
                 $3 !~ /^(0|[1-9][0-9]*)$/ ||
                 $4 !~ /^(0|[1-9][0-9]*)$/ ||
-                $5 !~ /^-?(0|[1-9][0-9]*)$/)
+                $5 !~ /^(0|-[1-9][0-9]*|[1-9][0-9]*)$/)
                 invalid = 1
             else
-                print $1
+                printf "%s\t%s\n", $1, $2
         }
         END {
             if (invalid || NR < 1)
@@ -318,22 +329,15 @@ assert_not_active_swap() {
         refuse BLOCKED swap_inventory unavailable "awk_status=$swap_status; cannot parse host swap inventory"
     fi
 
-    if [[ -b $source ]]; then
-        if source_devno="$(stat -Lc '%t:%T' "$source" 2>/dev/null)"; then
-            [[ -n $source_devno ]] ||
-                refuse BLOCKED swap_device_identity unavailable "owned block source has empty device identity"
-        else
-            swap_status=$?
-            refuse BLOCKED swap_device_identity unavailable "stat_status=$swap_status; cannot inspect owned block source identity"
-        fi
-    fi
-
-    [[ -n $swap_paths ]] || return 0
-    while IFS= read -r swap_path; do
-        [[ -n $swap_path ]] || continue
+    [[ -n $swap_entries ]] || return 0
+    while IFS=$'\t' read -r swap_path swap_type; do
+        [[ -n $swap_path && -n $swap_type ]] ||
+            refuse BLOCKED swap_inventory unavailable "parsed swap identity is incomplete"
         [[ $swap_path != "$source" ]] ||
             refuse BLOCKED active_owned_swap unavailable "owned source is active swap; leave host swap unchanged"
-        [[ -n $source_devno && -b $swap_path ]] || continue
+        [[ $swap_type == partition ]] || continue
+        [[ -b $swap_path ]] ||
+            refuse BLOCKED swap_inventory unavailable "block swap path is unavailable; cannot prove its identity differs"
         if swap_devno="$(stat -Lc '%t:%T' "$swap_path" 2>/dev/null)"; then
             :
         else
@@ -344,7 +348,7 @@ assert_not_active_swap() {
             refuse BLOCKED swap_inventory unavailable "block swap identity is empty"
         [[ $swap_devno != "$source_devno" ]] ||
             refuse BLOCKED active_owned_swap unavailable "owned block identity is active swap under another path"
-    done <<< "$swap_paths"
+    done <<< "$swap_entries"
 }
 
 mapper="/dev/mapper/$owned_map"

@@ -1140,11 +1140,12 @@ tri-state safety proofs: `findmnt` status 1 alone means no matching mount,
 status 0 must include a mount identity, and any other status is BLOCKED;
 `/proc/swaps` must have the canonical header/record shape and distinguish an
 owned match, proven absence, and read/parse failure. For an owned block source,
-preflight must also compare every block-device swap entry by device identity
-so a `/dev/dm-*` alias cannot hide an active `/dev/mapper/*` mapping; unrelated
-swapfiles remain untouched. A stale mapper UUID must match an exact currently
-emitted owned phase for the same run token; arbitrary suffixes are never
-ownership proof. Resolved null_blk `dev` telemetry must be one canonical
+preflight must compare every block-device swap entry by device identity so a
+`/dev/dm-*` alias cannot hide an active `/dev/mapper/*` mapping. A block-swap
+entry whose path cannot be resolved to a readable block device is BLOCKED
+because its identity cannot be proven different; unrelated swapfiles remain
+untouched. A stale mapper UUID must match an exact currently emitted owned
+phase for the same run token; arbitrary suffixes are never ownership proof. Resolved null_blk `dev` telemetry must be one canonical
 newline-terminated major:minor record, not a prefix of malformed or
 multi-record input. Unexpected Bash failure remains FAIL with its numeric
 status and source line. Rootless tests must run a private transformed

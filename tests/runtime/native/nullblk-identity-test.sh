@@ -81,6 +81,7 @@ source = source.replace(
     '[[ -n $source_devno && -b $swap_path ]]',
     '[[ -n $source_devno && -e $swap_path ]]',
 )
+source = source.replace('[[ -b $swap_path ]]', '[[ -e $swap_path ]]')
 source = source.replace(
     'trap \'rc=$?; preflight_internal_error "$rc" "$LINENO"\' ERR',
     'trap \'rc=$?; preflight_internal_error "$rc" "$LINENO"\' ERR\n'
@@ -230,10 +231,14 @@ setup_busy_module() {
     mkdir -p "$FIXTURE/sys/module/dm_swapz"
     printf '1\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
 }
+setup_mapper_node() {
+    : > "$FIXTURE/dev/mapper/swapz-demo-$TOKEN"
+}
 setup_owned_lower() {
     mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
     printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/memory_backed"
     printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/power"
+    : > "$FIXTURE/dev/nullb-swapz-$TOKEN"
 }
 run_case() {
     local case_name="$1" expected="$2" expected_result="$3" expected_errno="$4"
@@ -250,7 +255,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|stale_token|wrong_owner|owned_swap|owned_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+        busy_mapper|mapper_inventory_error|stale_token|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -266,22 +271,32 @@ run_case() {
         unrelated_swap)
             printf '/var/swapfile file 1024 0 -3\n' >> "$FIXTURE/proc/swaps" ;;
         owned_swap)
+            setup_mapper_node
             printf '%s\n' "$FIXTURE/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa partition 1024 0 -2" >> "$FIXTURE/proc/swaps" ;;
         owned_swap_alias)
-            : > "$FIXTURE/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa"
+            setup_mapper_node
             : > "$FIXTURE/dev/dm-0"
             printf '%s\n' "$FIXTURE/dev/dm-0 partition 1024 0 -2" >> "$FIXTURE/proc/swaps" ;;
-        malformed_swap_inventory)
-            printf 'malformed swap record\n' >> "$FIXTURE/proc/swaps" ;;
+        unresolved_swap_alias)
+            setup_mapper_node
+            printf '%s\n' "$FIXTURE/dev/dm-missing partition 1024 0 -2" >> "$FIXTURE/proc/swaps" ;;
+        swap_inventory_error|malformed_swap_inventory)
+            setup_mapper_node
+            if [[ "$case_name" == malformed_swap_inventory ]]; then
+                printf 'malformed swap record\n' >> "$FIXTURE/proc/swaps"
+            fi
+            ;;
         wrong_owner)
+            setup_mapper_node
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN"
             printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/memory_backed" ;;
         unreadable_identity)
             setup_owned_lower
-            : > "$FIXTURE/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa"
+            setup_mapper_node
             ;;
         recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
             setup_owned_lower
+            setup_mapper_node
             ;;
         unclaimed_nullb)
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
@@ -346,19 +361,20 @@ run_case stale_token stale_run_token BLOCKED unavailable
 run_case wrong_owner null_blk_owner BLOCKED unavailable
 run_case owned_swap active_owned_swap BLOCKED unavailable
 run_case owned_swap_alias active_owned_swap BLOCKED unavailable
+run_case unresolved_swap_alias swap_inventory BLOCKED unavailable
 run_case mounted_mapper mounted_owned_mapper BLOCKED unavailable
 run_case mount_inventory_empty mount_inventory BLOCKED unavailable
 run_case mount_inventory_error mount_inventory BLOCKED unavailable
 run_case swap_inventory_error swap_inventory BLOCKED unavailable
 run_case malformed_swap_inventory swap_inventory BLOCKED unavailable
 run_case unreadable_identity swap_device_identity BLOCKED unavailable
-run_case recognized_readfault mapper_device_identity BLOCKED unavailable
-run_case recognized_codec mapper_device_identity BLOCKED unavailable
-run_case recognized_completion mapper_device_identity BLOCKED unavailable
-run_case recognized_constructor mapper_device_identity BLOCKED unavailable
+run_case recognized_readfault owned_mapper_removal BLOCKED unavailable
+run_case recognized_codec owned_mapper_removal BLOCKED unavailable
+run_case recognized_completion owned_mapper_removal BLOCKED unavailable
+run_case recognized_constructor owned_mapper_removal BLOCKED unavailable
 run_case unclaimed_nullb unclaimed_null_blk BLOCKED unavailable
 run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity and 29 isolated preflight refusal/observation fixtures'
+printf '%s\n' 'PASS: null_blk identity and 30 isolated preflight refusal/observation fixtures'
