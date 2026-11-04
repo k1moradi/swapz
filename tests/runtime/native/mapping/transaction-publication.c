@@ -318,7 +318,8 @@ static int test_fua_failure_preserves_prior_generation(void)
 	previous = maps[7];
 	CHECK(previous.valid && previous.generation == 1);
 
-	/* Lower EIO, partial dm_io EIO, and post-WRITE flush EIO all abort. */
+	/* Lower EIO before or after media may have changed, and a post-WRITE
+	 * flush EIO, must all abort without publishing the new generation. */
 	for (attempt = 0; attempt < 3U; ++attempt) {
 		int write_error = attempt == 2U ? 0 : -EIO;
 		swapz_u8 completed_blocks = attempt == 1U ? 1 : 0;
@@ -348,7 +349,7 @@ static int test_fua_failure_preserves_prior_generation(void)
 	return 0;
 }
 
-static int test_discard_fua_fences_before_generation_change(void)
+static int test_zero_overwrite_fua_fences_before_zero_publication(void)
 {
 	const swapz_u32 pages[] = { 4 };
 	struct durability_fault fault = { .flush_error = -EIO };
@@ -360,7 +361,12 @@ static int test_discard_fua_fences_before_generation_change(void)
 	CHECK(encode(&transaction) == 0);
 	CHECK(swapz_finish(&a, &transaction, bytes, SWAPZ_BLOCK_BYTES, 1, 0) == 0);
 	previous = maps[4];
-	/* Exactly the same prepublication fence used by the target DISCARD path. */
+
+	/*
+	 * A zero overwrite remains an upper WRITE|FUA even though the target
+	 * publishes zero by invalidating its old mapping instead of writing data.
+	 * The failed durability fence must leave generation 1 authoritative.
+	 */
 	CHECK(swapz_write_flush_before_publish(0, 1, durable_flush,
 						&fault) == -EIO);
 	CHECK(maps[4].valid && maps[4].generation == previous.generation);
@@ -371,6 +377,44 @@ static int test_discard_fua_fences_before_generation_change(void)
 	CHECK(swapz_discard_page(&a, 4) == 0);
 	CHECK(!maps[4].valid && maps[4].generation == 2);
 	CHECK(live[previous.start_block] == 0 && fault.flush_calls == 2);
+	return 0;
+}
+
+static int test_short_completion_preserves_prior_generation(void)
+{
+	const swapz_u32 pages[] = { 12, 13 };
+	struct swapz_tx transaction;
+	struct swapz_map previous[2];
+	swapz_u32 replacement_start;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&a, pages, 2, 2, &transaction) == 0);
+	CHECK(transaction.count == 2 && transaction.extent_blocks == 2);
+	CHECK(encode(&transaction) == 0);
+	CHECK(swapz_finish(&a, &transaction, bytes,
+			   2U * SWAPZ_BLOCK_BYTES, 2, 0) == 0);
+	previous[0] = maps[12];
+	previous[1] = maps[13];
+	CHECK(previous[0].valid && previous[1].valid);
+	CHECK(previous[0].generation == 1 && previous[1].generation == 1);
+	CHECK(previous[0].start_block == previous[1].start_block);
+	CHECK(live[previous[0].start_block] == 2);
+
+	CHECK(swapz_stage(&a, pages, 2, 2, &transaction) == 0);
+	replacement_start = transaction.start_block;
+	CHECK(replacement_start != previous[0].start_block);
+	CHECK(encode(&transaction) == 0);
+	/* A nominally successful lower call that reports only one of two blocks
+	 * completed is not publishable. No replacement generation may escape. */
+	CHECK(swapz_finish(&a, &transaction, bytes,
+			   2U * SWAPZ_BLOCK_BYTES, 1, 0) == -EIO);
+	CHECK(!a.in_flight);
+	CHECK(maps[12].generation == previous[0].generation &&
+	      maps[12].start_block == previous[0].start_block);
+	CHECK(maps[13].generation == previous[1].generation &&
+	      maps[13].start_block == previous[1].start_block);
+	CHECK(live[previous[0].start_block] == 2);
+	CHECK(!live[replacement_start] && a.abandoned_blocks == 2);
 	return 0;
 }
 
@@ -385,7 +429,8 @@ int main(void)
 	CHECK(test_mutated_replacement_preserves_prior_authority() == 0); passed++;
 	CHECK(test_engine_extent_geometry_before_lower_read() == 0); passed++;
 	CHECK(test_fua_failure_preserves_prior_generation() == 0); passed++;
-	CHECK(test_discard_fua_fences_before_generation_change() == 0); passed++;
+	CHECK(test_zero_overwrite_fua_fences_before_zero_publication() == 0); passed++;
+	CHECK(test_short_completion_preserves_prior_generation() == 0); passed++;
 	printf("SWAPZ_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -1767,6 +1767,26 @@ static int swapz_end_io(struct dm_target *ti, struct bio *bio,
 	return DM_ENDIO_DONE;
 }
 
+static const char *swapz_failure_category(int error)
+{
+	switch (error) {
+	case -EOPNOTSUPP:
+		return "unsupported";
+	case -EIO:
+		return "lower-io";
+	case -EBADMSG:
+	case -EUCLEAN:
+	case -ESTALE:
+	case -EOVERFLOW:
+	case -ERANGE:
+		return "integrity";
+	case -ENOMEM:
+		return "resource";
+	default:
+		return "internal";
+	}
+}
+
 static void swapz_fail_at(struct swapz_dm *ctx, int error,
 			  const char *operation, const char *category,
 			  const char *stage)
@@ -1803,7 +1823,7 @@ static void swapz_fail_at(struct swapz_dm *ctx, int error,
 /* Keep unclassified worker failures fail-closed, without logging success. */
 static void swapz_fail(struct swapz_dm *ctx, int error)
 {
-	swapz_fail_at(ctx, error, "target", "integrity-or-io",
+	swapz_fail_at(ctx, error, "target", swapz_failure_category(error),
 		      "ordered-worker");
 }
 
@@ -2312,9 +2332,9 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	if (error || committed != inflight->count) {
 		error = error ? error : -EIO;
 		swapz_fail_at(ctx, error, "write",
-			      lower_error ? (lower_error == -EOPNOTSUPP ?
-				"unsupported" : "lower-io") : "publication",
-			      lower_error ? "async-completion" : "authority-finish");
+			      swapz_failure_category(error),
+			      lower_error && error == lower_error ?
+				"async-completion" : "authority-finish");
 		for (index = 0; index < inflight->count; ++index)
 			swapz_complete(inflight->bios[index], error);
 		inflight->count = 0;
@@ -2557,7 +2577,7 @@ static int swapz_issue_flush(void *opaque)
 
 	if (error)
 		swapz_fail_at(ctx, error, "flush",
-			      error == -EOPNOTSUPP ? "unsupported" : "lower-io",
+			      swapz_failure_category(error),
 			      "durability-fence");
 	return error;
 }
@@ -6741,7 +6761,9 @@ static bool swapz_try_concurrent_read_slots(struct swapz_dm *ctx,
 		ctx->parallel_read_same_extent_pairs++;
 	*processed_out = selected;
 	if (batch_error) {
-		swapz_fail(ctx, batch_error);
+		swapz_fail_at(ctx, batch_error, "read",
+			      swapz_failure_category(batch_error),
+			      "parallel-async-completion");
 		ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 		if (ctx->batch_count)
 			swapz_flush_window(ctx);
@@ -7061,7 +7083,9 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		ctx->parallel_read_same_extent_pairs++;
 	*processed_out = selected;
 	if (batch_error) {
-		swapz_fail(ctx, batch_error);
+		swapz_fail_at(ctx, batch_error, "read",
+			      swapz_failure_category(batch_error),
+			      "coalesced-read");
 		ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 		if (ctx->batch_count)
 			swapz_flush_window(ctx);
@@ -7197,7 +7221,9 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 
 		error = swapz_read(ctx, bio);
 		if (error) {
-			swapz_fail(ctx, error);
+			swapz_fail_at(ctx, error, "read",
+				      swapz_failure_category(error),
+				      "independent-read");
 			ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 			/* Abort pending owners without submitting their data. */
 			swapz_flush_window(ctx);
@@ -7312,13 +7338,6 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			swapz_refresh_accepted_followup(ctx);
 		break;
 	case REQ_OP_DISCARD:
-		/* A flagged DISCARD advances the logical generation without a lower
-		 * WRITE. Fence its predecessors before publishing that mutation. */
-		if (bio->bi_opf & REQ_FUA) {
-			error = swapz_issue_flush(ctx);
-			if (error)
-				break;
-		}
 		error = swapz_discard(ctx, bio);
 		break;
 	default:
@@ -7334,8 +7353,7 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		swapz_fail_at(ctx, error,
 			      op == REQ_OP_READ ? "read" :
 			      op == REQ_OP_DISCARD ? "discard" : "write",
-			      error == -EOPNOTSUPP ? "unsupported" :
-			      error == -EIO ? "lower-io" : "integrity",
+			      swapz_failure_category(error),
 			      "ordered-completion");
 	swapz_complete(bio, error);
 }
