@@ -54,6 +54,8 @@ def parse_meminfo_counters(text: Any) -> dict[str, int]:
     if not isinstance(text, str) or not text:
         raise ValueError("meminfo evidence is empty")
     values: dict[str, int] = {}
+    if len(text) > 32 * 1024:
+        raise ValueError("meminfo evidence exceeds 32768-byte input bound")
     maximum_kib = ((1 << 64) - 1) // MEMINFO_UNIT_BYTES
     for line in text.splitlines():
         name_match = re.match(
@@ -70,6 +72,8 @@ def parse_meminfo_counters(text: Any) -> dict[str, int]:
         destination = MEMINFO_FIELDS[source_name]
         if destination in values:
             raise ValueError(f"duplicate meminfo counter: {source_name}")
+        if len(value_text) > 20:
+            raise ValueError(f"meminfo counter overflows bytes: {source_name}")
         value = int(value_text, 10)
         if value > maximum_kib:
             raise ValueError(f"meminfo counter overflows bytes: {source_name}")
@@ -189,7 +193,9 @@ def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
     if (
             type(started) is not int or started <= 0 or
             type(finished) is not int or finished <= started or
-            not isinstance(intervals, list) or not intervals):
+            finished > MAX_UINT64 or
+            not isinstance(intervals, list) or
+            not 0 < len(intervals) <= 1_000_000):
         raise ValueError("metadata RAM arm chronology is missing")
     gc_activity_intervals = []
     for row in intervals:
@@ -201,13 +207,14 @@ def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
         if (
                 type(interval_start) is not int or
                 type(interval_end) is not int or
-                interval_start < started or interval_end <= interval_start or
+                interval_start < started or interval_end > MAX_UINT64 or
+                interval_end <= interval_start or
                 interval_end > finished or not isinstance(gc, dict)):
             raise ValueError("metadata RAM arm telemetry chronology is invalid")
         counters = {}
         for field in ("gc_wall_ns", "gc_victims", "gc_pages"):
             value = gc.get(field)
-            if type(value) is not int or value < 0:
+            if type(value) is not int or not 0 <= value <= MAX_UINT64:
                 raise ValueError(
                     "metadata RAM arm GC counters are missing or malformed")
             counters[field] = value
@@ -238,7 +245,9 @@ def validate_metadata_ram_arm_binding(trace: Any, binding: Any) -> None:
     if (
             type(started) is not int or started <= 0 or
             type(finished) is not int or finished <= started or
-            not isinstance(windows, list) or not windows):
+            finished > MAX_UINT64 or
+            not isinstance(windows, list) or
+            not 0 < len(windows) <= 1_000_000):
         raise ValueError("metadata RAM arm binding chronology is invalid")
     previous_end = None
     for window in windows:
@@ -254,8 +263,9 @@ def validate_metadata_ram_arm_binding(trace: Any, binding: Any) -> None:
                 type(window_start) is not int or
                 type(window_end) is not int or
                 window_start < started or window_end <= window_start or
-                window_end > finished or
-                any(type(value) is not int or value < 0 for value in counters) or
+                window_end > finished or window_end > MAX_UINT64 or
+                any(type(value) is not int or
+                    not 0 <= value <= MAX_UINT64 for value in counters) or
                 not any(counters) or
                 (previous_end is not None and window_start < previous_end)):
             raise ValueError("metadata RAM GC activity window is malformed")
@@ -299,8 +309,15 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
     total_bytes = binding["memory_total_bytes"]
     if (
             not isinstance(boot_id, str) or not BOOT_ID.fullmatch(boot_id) or
-            type(total_bytes) is not int or total_bytes <= 0):
+            type(total_bytes) is not int or
+            not 0 < total_bytes <= MAX_UINT64):
         raise ValueError("metadata RAM host binding identity is invalid")
+    if any(
+            not isinstance(binding[field], str) or
+            not binding[field].endswith(("+00:00", "Z"))
+            for field in ("host_before_captured_at_utc",
+                          "host_after_captured_at_utc")):
+        raise ValueError("metadata RAM host binding requires UTC timestamps")
     try:
         before = datetime.datetime.fromisoformat(
             binding["host_before_captured_at_utc"])
@@ -311,6 +328,8 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
     if (
             before.tzinfo is None or before.utcoffset() is None or
             after.tzinfo is None or after.utcoffset() is None or
+            before.utcoffset() != datetime.timedelta(0) or
+            after.utcoffset() != datetime.timedelta(0) or
             after < before):
         raise ValueError("metadata RAM host binding time envelope is invalid")
     samples = trace.get("samples") if isinstance(trace, dict) else None
@@ -400,7 +419,8 @@ def validate_metadata_ram_trace(
         utc_text = sample["timestamp_utc"]
         maximum_kib = ((1 << 64) - 1) // MEMINFO_UNIT_BYTES
         if (
-                type(monotonic_ns) is not int or monotonic_ns <= 0 or
+                type(monotonic_ns) is not int or
+                not 0 < monotonic_ns <= MAX_UINT64 or
                 type(mem_available_kib) is not int or
                 not 0 < mem_available_kib <= maximum_kib or
                 type(s_unreclaim_kib) is not int or
@@ -527,7 +547,10 @@ def validate_metadata_ram_trace(
             (type(expected_peak_ram_bytes) is not int or
              expected_peak_ram_bytes <= 0 or
              expected_peak_ram_bytes != peak_ram_bytes)):
-        raise ValueError("metadata RAM peak is not derived from raw samples")
+        raise ValueError(
+            "metadata RAM peak is not derived from raw samples: "
+            f"metric=peak_ram_bytes observed={peak_ram_bytes} "
+            f"reported={expected_peak_ram_bytes}")
 
     # Use the last second of target-absent samples to prove the whole-host
     # counters returned to the pre-create envelope. This is intentionally
@@ -559,8 +582,20 @@ def validate_metadata_ram_trace(
         raise ValueError(
             "metadata RAM teardown did not recover the pre-create envelope")
 
+    # These are observed 100 ms sample-window maxima, not a prediction of
+    # constructor allocation sizes or an unsampled instantaneous maximum.
+    phase_peaks = {}
+    for phase in ("initialization", "steady", "gc"):
+        phase_minimum_available_kib = min(
+            sample["mem_available_kib"] for sample in phase_samples[phase])
+        phase_peaks[f"{phase}_peak_ram_bytes"] = max(
+            0, baseline_median_available_twice_kib *
+            (MEMINFO_UNIT_BYTES // 2) -
+            phase_minimum_available_kib * MEMINFO_UNIT_BYTES)
+
     return {
         "peak_ram_bytes": peak_ram_bytes,
+        **phase_peaks,
         "baseline_median_mem_available_bytes":
             baseline_median_available_twice_kib *
             (MEMINFO_UNIT_BYTES // 2),
