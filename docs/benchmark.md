@@ -223,7 +223,10 @@ lower-score pages take the ordinary-LZ4 route and may try threshold 16 only at
 an exact planner packing boundary. The module disable switch is solely for
 debug/compatibility. Scalar and selected SIMD transform/inverse backends must
 remain byte-exact, and loaded end-to-end timing—not offline ns/page—decides
-promotion. Keep the corresponding [production invariants](coding_standards.md)
+promotion. Console tables label compression-only time after a transform
+`LZ4 ns`; combine delta64+LZ4 in a label only when both operations are
+timed. Do not use ordinal labels such as “LZ4-2”.
+Keep the corresponding [production invariants](coding_standards.md)
 and [qualification gates](testing_standards.md) intact.
 
 The source-bound ID67 native measurements, classifier thresholds, routing
@@ -621,15 +624,10 @@ Current benchmark work must preserve these contracts:
 - **Ordinary LZ4:** production acceleration is fixed at one. The native
   1/2/3/4 sweep remains only a byte-exact codec/geometry regression check.
 - **Delta64:** rescue + `DELTA64_SHUF8` + LZ4 is fixed on for emulated-device
-  performance qualification. The module disable switch is debug/compatibility
-  only and must not create a benchmark arm or plot series. The scalar classifier
-  runs before ordinary LZ4; high-score pages may directly adopt a sufficiently small
-  delta64+shuffle8+LZ4 result. Scalar and every compiled SIMD backend must remain
-  byte-identical, and loaded wrapper-inclusive timing remains authoritative.
-  In console tables, a timing column that measures only compression of an
-  already transformed page is labeled `LZ4 ns`; use a combined delta64+LZ4
-  label only when the measurement actually includes both operations. Do not use
-  ordinal labels such as “LZ4-2”.
+  qualification. The module disable switch is for debug/compatibility only,
+  never a benchmark arm or plot series. Classifier, SIMD and timing-label
+  rules live in [the ID67 production route](#id67-predictor-evidence-and-production-route);
+  loaded wrapper-inclusive timing remains authoritative.
 - **Preparation:** async preparation owns one unbound producer lane regardless
   of delta64 policy. Predictor scratch allocation may remain rescue-dependent;
   lane count is not. For an ID83 work-conserving candidate, preparation is
