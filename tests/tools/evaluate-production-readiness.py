@@ -306,21 +306,27 @@ def _valid_source(value: Any) -> bool:
     return isinstance(value, str) and bool(GIT_SHA_RE.fullmatch(value))
 
 
-def _parse_utc_evidence_time(value: Any) -> datetime.datetime | None:
-    """Parse a bounded UTC evidence timestamp without accepting local time."""
+def _parse_utc_evidence_time(value: Any) -> int | None:
+    """Parse canonical UTC evidence into exact integer nanoseconds."""
     if (
             not isinstance(value, str) or
             UTC_EVIDENCE_TIME_RE.fullmatch(value) is None):
         return None
+    core = value[:-1] if value.endswith("Z") else value[:-6]
+    fraction_ns = 0
+    if len(core) > 19:
+        fraction_ns = int(core[20:].ljust(9, "0"), 10)
     try:
-        observed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        observed = datetime.datetime(
+            int(core[0:4]), int(core[5:7]), int(core[8:10]),
+            int(core[11:13]), int(core[14:16]), int(core[17:19]))
     except ValueError:
         return None
-    if (
-            observed.tzinfo is None or observed.utcoffset() is None or
-            observed.utcoffset() != datetime.timedelta(0)):
-        return None
-    return observed
+    epoch_ordinal = datetime.date(1970, 1, 1).toordinal()
+    whole_seconds = (
+        (observed.toordinal() - epoch_ordinal) * 86400 +
+        observed.hour * 3600 + observed.minute * 60 + observed.second)
+    return whole_seconds * 1_000_000_000 + fraction_ns
 
 
 def _valid_observed_at_utc(value: Any) -> bool:
