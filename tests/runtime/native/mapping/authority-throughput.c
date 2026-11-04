@@ -461,6 +461,13 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		large_classes[reserve_start] = 1U;
 		sample.next_block = reserve_start + 1U;
 
+		/* The cached victim occupancy alone may not authorize reuse. */
+		large_counts[1U] = 1U;
+		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
+		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
+			      !large_roles[reserve_segment]);
+		large_counts[1U] = 0U;
+
 		/* The last valid map has a false-zero physical start. */
 		large_classes[tail] = 0U;
 		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
@@ -470,14 +477,12 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 
 		/* A false-zero victim count cannot hide a tail reference. */
 		large_maps[tail].start_block = victim_start;
-		large_live[victim_start] = 1U;
-		large_classes[victim_start] = 1U;
+		/* Physical sidecars remain zero, so only the full logical-map
+		 * proof can find this forged final-entry victim reference. */
 		REQUIRE_CLAIM(swapz_gc_commit_rotation(&sample, 1U) == -EUCLEAN);
 		REQUIRE_CLAIM(sample.gc_allocation && large_roles[1U] &&
 			      !large_roles[reserve_segment]);
 		large_maps[tail].start_block = tail;
-		large_live[victim_start] = 0U;
-		large_classes[victim_start] = 0U;
 
 		/* One clean two-block survivor, then corrupt its interior block. */
 		large_maps[tail - 1U].valid = 0U;
