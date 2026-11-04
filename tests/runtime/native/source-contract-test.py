@@ -5968,7 +5968,9 @@ int main(void)
             pressure)
         self.assertIn('awk -v expected_pid="$expected_pid"', membership)
         self.assertIn('NR > 128 { malformed = 1; exit }', membership)
-        self.assertIn('$1 == expected_pid { ++matches }', membership)
+        self.assertRegex(
+            membership,
+            r'if\s*\(\$1\s*==\s*expected_pid\)\s*\+\+matches')
         self.assertIn('if (matches != 1)', membership)
         self.assertIn("for _ in {1..800}", pressure)
         self.assertIn("for _ in {1..1200}", benchmark)
