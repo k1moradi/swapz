@@ -556,7 +556,11 @@ wait "$PAIR_PID"
 pair_rc=$?
 set -e
 PAIR_PID=""
-cat "$PAIR_LOG"
+# Preserve ordinary pair evidence only on success; a failed pair's unbounded
+# private log must not be copied into admission diagnostics.
+if (( pair_rc == 0 )); then
+    cat "$PAIR_LOG"
+fi
 
 high_after="$(event_value high)"
 oom_after="$(event_value oom)"
