@@ -593,16 +593,27 @@ static int mixed_collect_until_progress(void)
 			if (!maps[logical].valid ||
 			    maps[logical].start_block / SWAPZ_SEGMENT_BLOCKS != victim)
 				continue;
-			if (next_random() % 19U == 0U)
+			const swapz_u32 writes_before = disk.write_calls;
+
+			/* Guarantee both fault boundaries for every seed, then vary
+			 * subsequent transient read/write failures by the PRNG. */
+			if (!mixed_failed_reads) {
+				swapz_engine_invalidate_read_cache(&engine);
 				disk.fail_read_on = disk.read_calls + 1U;
-			if (next_random() % 19U == 0U)
+			} else if (!mixed_gc_write_failures) {
 				disk.fail_on = disk.write_calls + 1U;
+			} else {
+				if (next_random() % 19U == 0U)
+					disk.fail_read_on = disk.read_calls + 1U;
+				if (next_random() % 19U == 0U)
+					disk.fail_on = disk.write_calls + 1U;
+			}
 			error = mixed_relocate_one(logical);
 			disk.fail_on = 0;
 			disk.fail_read_on = 0;
 			MIXED_REQUIRE(!error || error == -EIO,
 				      "GC_RELOCATION_FAILED");
-			if (error == -EIO)
+			if (error == -EIO && disk.write_calls > writes_before)
 				mixed_gc_write_failures++;
 			MIXED_REQUIRE(mixed_verify_full_map() == 0,
 				      "GC_MAP_CORRUPTION");
