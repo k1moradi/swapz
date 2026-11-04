@@ -12,6 +12,33 @@ import re
 from typing import Any
 
 PHASES = ("baseline", "initialization", "steady", "gc", "teardown")
+
+
+def maximum_logical_pages_for_partition(partition_bytes: Any) -> int | None:
+    """Model the production reserve/header/u32 admission without allocations.
+
+    The loaded target still has to execute and measure this maximum. This is
+    not a replacement for the kernel's authoritative geometry validator.
+    """
+    if type(partition_bytes) is not int or partition_bytes <= 0:
+        return None
+    total_blocks = partition_bytes // 4096
+    physical_blocks = ((total_blocks - 1) // 256) * 256
+    if physical_blocks < 3 * 256 or physical_blocks > (1 << 32) - 1:
+        return None
+    low, high, maximum = 1, physical_blocks, 0
+    while low <= high:
+        middle = low + (high - low) // 2
+        reserve = max((middle + 7) // 8, 512)
+        foreground = ((physical_blocks - reserve) // 256) * 256
+        if middle + 256 <= foreground:
+            maximum = middle
+            low = middle + 1
+        else:
+            high = middle - 1
+    if not maximum or maximum * 16 > (1 << 64) - 1:
+        return None
+    return maximum
 BOOT_ID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 UTC_TIME = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
