@@ -888,6 +888,20 @@ static void test_swap_adversarial_inventory(void)
 	assert(errno == EPROTO);
 	assert(fclose(stream) == 0);
 	assert(unlink(alias_path) == 0);
+	/*
+	 * A pathname substituted with a symlink after swapon is not trusted:
+	 * the active kernel object was not the symlink target we would follow now.
+	 */
+	assert(symlink(file_path, alias_path) == 0);
+	length = snprintf(duplicate, sizeof(duplicate),
+			  "%s%s file 1 0 -3\n", header, alias_path);
+	assert(length > 0 && (size_t)length < sizeof(duplicate));
+	stream = test_inventory_binary_stream(duplicate, (size_t)length);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+	assert(unlink(alias_path) == 0);
 	assert(close(second_fd) == 0);
 	assert(unlink(second_path) == 0);
 	length = snprintf(duplicate, sizeof(duplicate),
@@ -926,6 +940,10 @@ static void test_swap_adversarial_inventory(void)
 		       "/tmp/swap\\012name file 1 0 -2\n", parsed_path,
 		       &block_entry) == 0);
 	assert(!strcmp(parsed_path, "/tmp/swap\nname"));
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/swap\rname file 1 0 -2\n", parsed_path,
+		       &block_entry) == 0);
+	assert(!strcmp(parsed_path, "/tmp/swap\rname"));
 
 	/* Unknown row types, invalid sizes, priorities and missing columns fail. */
 	static const char *const malformed_rows[] = {
