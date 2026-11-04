@@ -43,6 +43,7 @@ PHYSICAL_CONTROL_INPUT_PATHS = (
     "docs/handoff/production-readiness.json",
 )
 MAX_LINE_BYTES = 4096
+MAX_COMMIT_SOURCE_INPUT_BYTES = 16 * 1024 * 1024
 MAX_CYCLES = 4
 SAFE_COMMAND_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 PRIVILEGED_HELPER_BOOTSTRAP = (
@@ -138,6 +139,8 @@ def _git_file_bytes(validated_source: str, path: Path,
         raise Blocked("cannot read source admission file from validated commit") from exc
     if result.returncode != 0:
         raise Blocked("validated commit lacks required source admission file")
+    if len(result.stdout) > MAX_COMMIT_SOURCE_INPUT_BYTES:
+        raise Blocked("validated commit source admission input exceeds size boundary")
     return result.stdout
 
 
@@ -211,14 +214,14 @@ def _read_request(
             not re.fullmatch(
                 r"[0-9a-f]{32}", str(request.get("nonce", ""))) or
             not re.fullmatch(
-                r"(?:initial|final|cycle-[1-4])",
+                r"(?:initial|final|published|cycle-[1-4])",
                 str(request.get("phase", "")))):
         raise Blocked("source admission request identity is invalid")
     return request
 
 
 def _reply(stream, request: dict, status: str,
-           oracle_sha256: str) -> None:
+           oracle_sha256: str, reason: str | None = None) -> None:
     if not re.fullmatch(r"[0-9a-f]{64}", oracle_sha256):
         raise Blocked("source admission oracle digest is malformed")
     response = {
@@ -229,6 +232,11 @@ def _reply(stream, request: dict, status: str,
         "nonce": request["nonce"],
         "oracle_sha256": oracle_sha256,
     }
+    if status == "BLOCKED":
+        if not reason or not reason.isascii() or len(reason) > 256 or \
+                any(ord(character) < 0x20 for character in reason):
+            reason = "source_provenance_revalidation_failed"
+        response["reason"] = reason
     stream.write(
         json.dumps(
             response, sort_keys=True, separators=(",", ":")).encode("ascii") +
@@ -293,7 +301,7 @@ def _serve_admission(server: socket.socket,
     expected_phases = (
         ["initial"] +
         [f"cycle-{index}" for index in range(1, cycles + 1)] +
-        ["final"])
+        ["final", "published"])
     passed_phases: list[str] = []
     server.settimeout(30)
     try:
@@ -347,7 +355,8 @@ def _serve_admission(server: socket.socket,
                     expected_phases[len(passed_phases)]
                     if len(passed_phases) < len(expected_phases) else None)
                 if request["phase"] != expected_phase:
-                    _reply(stream, request, "BLOCKED", oracle_sha256)
+                    _reply(stream, request, "BLOCKED", oracle_sha256,
+                           "unexpected_source_admission_phase")
                     print(
                         "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
                         "unexpected_source_admission_phase",
@@ -356,7 +365,7 @@ def _serve_admission(server: socket.socket,
                 try:
                     _check_git_source(validated_source, git)
                 except Blocked as exc:
-                    _reply(stream, request, "BLOCKED", oracle_sha256)
+                    _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))
                     print(
                         "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
                         file=sys.stderr)
