@@ -250,6 +250,27 @@ def _bounded_observed(value: Any) -> str:
     return f"<{type(value).__name__}>"
 
 
+def _parse_utc_ns(value: Any, pattern: re.Pattern[str]) -> int | None:
+    """Parse canonical UTC text into exact integer nanoseconds."""
+    if not isinstance(value, str) or pattern.fullmatch(value) is None:
+        return None
+    core = value[:-1] if value.endswith("Z") else value[:-6]
+    fraction_ns = 0
+    if len(core) > 19:
+        fraction_ns = int(core[20:].ljust(9, "0"), 10)
+    try:
+        observed = datetime.datetime(
+            int(core[0:4]), int(core[5:7]), int(core[8:10]),
+            int(core[11:13]), int(core[14:16]), int(core[17:19]))
+    except ValueError:
+        return None
+    epoch_ordinal = datetime.date(1970, 1, 1).toordinal()
+    whole_seconds = (
+        (observed.toordinal() - epoch_ordinal) * 86400 +
+        observed.hour * 3600 + observed.minute * 60 + observed.second)
+    return whole_seconds * 1_000_000_000 + fraction_ns
+
+
 def _timedelta_ns(value: datetime.timedelta) -> int:
     """Convert a timedelta to nanoseconds without floating-point rounding."""
     return (
@@ -402,19 +423,11 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
                           "host_after_captured_at_utc")):
         raise ValueError(
             "metadata RAM host binding requires canonical UTC timestamps")
-    try:
-        before = datetime.datetime.fromisoformat(
-            binding["host_before_captured_at_utc"])
-        after = datetime.datetime.fromisoformat(
-            binding["host_after_captured_at_utc"])
-    except (TypeError, ValueError) as exc:
-        raise ValueError("metadata RAM host binding time is invalid") from exc
-    if (
-            before.tzinfo is None or before.utcoffset() is None or
-            after.tzinfo is None or after.utcoffset() is None or
-            before.utcoffset() != datetime.timedelta(0) or
-            after.utcoffset() != datetime.timedelta(0) or
-            after < before):
+    before_ns = _parse_utc_ns(
+        binding["host_before_captured_at_utc"], HOST_UTC_TIME)
+    after_ns = _parse_utc_ns(
+        binding["host_after_captured_at_utc"], HOST_UTC_TIME)
+    if before_ns is None or after_ns is None or after_ns < before_ns:
         raise ValueError("metadata RAM host binding time envelope is invalid")
     samples = trace.get("samples") if isinstance(trace, dict) else None
     if not isinstance(samples, list) or not samples:
@@ -425,13 +438,15 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
             f"metric=host_boot_id observed={_bounded_observed(trace.get('host_boot_id'))} "
             f"expected={boot_id} required=same_loaded_host_boot")
     try:
-        first = datetime.datetime.fromisoformat(
-            samples[0]["timestamp_utc"].replace("Z", "+00:00"))
-        last = datetime.datetime.fromisoformat(
-            samples[-1]["timestamp_utc"].replace("Z", "+00:00"))
-    except (KeyError, TypeError, ValueError) as exc:
+        first_text = samples[0]["timestamp_utc"]
+        last_text = samples[-1]["timestamp_utc"]
+    except (KeyError, TypeError) as exc:
         raise ValueError("metadata RAM trace time envelope is invalid") from exc
-    if not before <= first < last <= after:
+    first_ns = _parse_utc_ns(first_text, UTC_TIME)
+    last_ns = _parse_utc_ns(last_text, UTC_TIME)
+    if (
+            first_ns is None or last_ns is None or
+            not before_ns <= first_ns < last_ns <= after_ns):
         raise ValueError("metadata RAM trace falls outside host snapshot window")
     if any(
             not isinstance(sample, dict) or
@@ -499,8 +514,8 @@ def validate_metadata_ram_trace(
         phase: [] for phase in PHASES
     }
     previous_monotonic = None
-    previous_utc = None
-    first_utc = None
+    previous_utc_ns = None
+    first_utc_ns = None
     for sample in samples:
         if not isinstance(sample, dict) or set(sample) != SAMPLE_FIELDS:
             raise ValueError("metadata RAM sample fields are invalid")
@@ -546,13 +561,11 @@ def validate_metadata_ram_trace(
                 "metadata RAM sample timestamp is invalid: "
                 f"metric=timestamp_utc observed={_bounded_observed(utc_text)} "
                 "required=canonical_UTC_Z")
-        try:
-            utc_time = datetime.datetime.fromisoformat(
-                utc_text.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ValueError("metadata RAM sample UTC timestamp invalid") from exc
-        if first_utc is None:
-            first_utc = utc_time
+        utc_ns = _parse_utc_ns(utc_text, UTC_TIME)
+        if utc_ns is None:
+            raise ValueError("metadata RAM sample UTC timestamp invalid")
+        if first_utc_ns is None:
+            first_utc_ns = utc_ns
         if previous_monotonic is not None:
             elapsed_ns = monotonic_ns - previous_monotonic
             if (
@@ -564,7 +577,7 @@ def validate_metadata_ram_trace(
                     f"metric=monotonic_interval_ns observed={elapsed_ns} "
                     f"minimum={SAMPLING_INTERVAL_NS // 2} "
                     f"maximum={SAMPLING_INTERVAL_NS + SAMPLING_INTERVAL_NS // 2}")
-            wall_elapsed_ns = _timedelta_ns(utc_time - previous_utc)
+            wall_elapsed_ns = utc_ns - previous_utc_ns
             if (
                     wall_elapsed_ns <= 0 or
                     abs(wall_elapsed_ns - elapsed_ns) >
@@ -575,7 +588,7 @@ def validate_metadata_ram_trace(
                     f"observed={abs(wall_elapsed_ns - elapsed_ns)} "
                     f"limit={SAMPLING_INTERVAL_NS // 2}")
         previous_monotonic = monotonic_ns
-        previous_utc = utc_time
+        previous_utc_ns = utc_ns
         phase_samples[phase].append(sample)
 
     # Per-interval jitter is tolerated, but it must not systematically turn
@@ -584,7 +597,7 @@ def validate_metadata_ram_trace(
     observed_span_ns = (
         samples[-1]["monotonic_ns"] - samples[0]["monotonic_ns"])
     expected_span_ns = (len(samples) - 1) * SAMPLING_INTERVAL_NS
-    wall_span_ns = _timedelta_ns(previous_utc - first_utc)
+    wall_span_ns = previous_utc_ns - first_utc_ns
     if abs(wall_span_ns - observed_span_ns) > CLOCK_AGREEMENT_TOLERANCE_NS:
         raise ValueError(
             "metadata RAM UTC/monotonic trace spans disagree: "
