@@ -627,9 +627,12 @@ def validate_physical_campaign_evidence(
         except (UnicodeDecodeError, ValueError, OverflowError):
             reject("sealed campaign evidence bytes are malformed")
         else:
-            if not _same_json_value(serialized_campaign, campaign):
-                reject("sealed campaign object differs from artifact bytes")
-            campaign = serialized_campaign
+            if not isinstance(serialized_campaign, dict):
+                reject("sealed campaign evidence bytes have invalid top level")
+            else:
+                if not _same_json_value(serialized_campaign, campaign):
+                    reject("sealed campaign object differs from artifact bytes")
+                campaign = serialized_campaign
     if campaign.get("source_sha") != source_sha:
         reject("sealed campaign source binding mismatch")
 
@@ -1050,6 +1053,9 @@ def evaluate_release(
 
     if not _valid_source(source_sha):
         block_code("source SHA is not a lowercase 40-hex Git commit")
+    if not isinstance(evidence, dict):
+        block_code("release evidence object is missing or invalid")
+        evidence = {}
 
     try:
         test_results = _bound_json_object(
