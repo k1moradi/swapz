@@ -90,6 +90,15 @@ canonical_unsigned()
 	esac
 }
 
+canonical_signed()
+{
+	case "$1" in
+	0|[1-9]|[1-9][0-9]*) canonical_unsigned "$1" ;;
+	-[1-9]|-[1-9][0-9]*) canonical_unsigned "${1#-}" ;;
+	*) return 1 ;;
+	esac
+}
+
 canonical_partuuid()
 {
 	value=$1
@@ -688,17 +697,35 @@ observe_runtime()
 				window_gc_pressure) window_gc_pressure=$value ;;
 				esac
 			done
-			for token_name in failed first_error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
-				eval "value=\$$token_name"
+			for token_name in flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
+				eval "value=\$token_name"
 				[ "$value" = unavailable ] || canonical_unsigned "${value#-}" || append_reason observation_reasons dm_status_counter_invalid
 			done
-			# An omitted terminal-state field is not proof of a healthy
-			# target, even if the remaining status counters are valid.
+			# Missing or malformed terminal-state telemetry is incomplete
+			# evidence, not proof that the target entered a failure state.
+			failed_state_valid=0
+			error_state_valid=0
 			if [ "$failed" = unavailable ] || [ "$first_error" = unavailable ]; then
 				append_reason observation_reasons target_failure_state_unavailable
 			fi
-			[ "$failed" = 0 ] || [ "$failed" = unavailable ] || append_reason failure_reasons target_failed
-			[ "$first_error" = 0 ] || [ "$first_error" = unavailable ] || append_reason failure_reasons first_terminal_error
+			case "$failed" in
+			0|1) failed_state_valid=1 ;;
+			unavailable) ;;
+			*) append_reason observation_reasons target_failure_state_invalid ;;
+			esac
+			if [ "$first_error" != unavailable ]; then
+				if canonical_signed "$first_error"; then
+					error_state_valid=1
+				else
+					append_reason observation_reasons target_failure_state_invalid
+				fi
+			fi
+			if [ "$failed_state_valid" -eq 1 ] && [ "$failed" -eq 1 ]; then
+				append_reason failure_reasons target_failed
+			fi
+			if [ "$error_state_valid" -eq 1 ] && [ "$first_error" != 0 ]; then
+				append_reason failure_reasons first_terminal_error
+			fi
 			[ "$flush_err" = 0 ] || [ "$flush_err" = unavailable ] || append_reason warning_reasons flush_errors
 			[ "$segment_discards_failed" = 0 ] || [ "$segment_discards_failed" = unavailable ] || append_reason warning_reasons lower_discard_errors
 			[ "$upper_write_completed_err" = 0 ] || [ "$upper_write_completed_err" = unavailable ] || append_reason warning_reasons logical_write_errors

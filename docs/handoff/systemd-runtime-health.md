@@ -38,9 +38,10 @@ state is not a health verdict: operators must use the latest
 `SWAPZ_RUNTIME_HEALTH=` journal record. `FAIL` preserves evidence and never
 causes automatic swapoff, mapper removal, reformatting, or lifecycle restart.
 External observation commands are time-bounded and the production helper uses a
-fixed system executable path and locale. Missing `failed` or `error`
-terminal-state fields in an otherwise readable DM status yield `DEGRADED`,
-not `HEALTHY`; a confirmed nonzero terminal state remains `FAIL`.
+fixed system executable path and locale. Missing or malformed `failed` /
+`error` terminal-state fields in an otherwise readable DM status yield
+`DEGRADED`, not a fabricated terminal failure; only a valid confirmed
+nonzero terminal state yields `FAIL`.
 
 Package installation keeps all primary units disabled and does not start the
 mapper, monitor, passive swap, hibernation action, or any swap mutation. The

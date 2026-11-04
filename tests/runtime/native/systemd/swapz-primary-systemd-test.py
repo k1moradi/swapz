@@ -1413,6 +1413,24 @@ class RuntimeHealthTests(unittest.TestCase):
                 self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
                 self.assertIn("target_failure_state_unavailable", result.stderr)
 
+        for original, malformed_value in (
+            ("failed=0", "failed=2"),
+            ("failed=0", "failed=not-a-number"),
+            ("error=0", "error=-0"),
+            ("error=0", "error=not-a-number"),
+        ):
+            with self.subTest(malformed_value=malformed_value):
+                env = self.env.copy()
+                env["MOCK_DM_STATUS"] = valid_status.replace(
+                    original, malformed_value
+                )
+                malformed = self.run_helper("once", env)
+                self.assertEqual(malformed.returncode, 2, malformed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", malformed.stderr)
+                self.assertIn("target_failure_state_invalid", malformed.stderr)
+                self.assertNotIn("failures=target_failed", malformed.stderr)
+                self.assertNotIn("failures=first_terminal_error", malformed.stderr)
+
         env = self.env.copy()
         env["MOCK_DM_STATUS"] = valid_status.replace("failed=0", "failed=1")
         failed = self.run_helper("once", env)
@@ -1420,6 +1438,13 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", failed.stderr)
         self.assertIn("failures=target_failed", failed.stderr)
         self.assertIn("failed=1", failed.stderr)
+
+        env["MOCK_DM_STATUS"] = valid_status.replace("error=0", "error=-5")
+        terminal_error = self.run_helper("once", env)
+        self.assertEqual(terminal_error.returncode, 1, terminal_error.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", terminal_error.stderr)
+        self.assertIn("failures=first_terminal_error", terminal_error.stderr)
+        self.assertIn("first_error=-5", terminal_error.stderr)
 
     def test_monitoring_error_is_degraded_not_a_destructive_action(self) -> None:
         env = self.env.copy()
