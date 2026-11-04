@@ -533,12 +533,6 @@ static int test_false_final_mapping_discard_is_rejected(void)
 }
 
 /*
- * An overwrite relocates its old physical mapping, unlike logical DISCARD.
- * When a forged mapped count says the source has one survivor but a second
- * valid map remains, neither RAW nor compressed publication may zero the
- * cached count and authorize the caller's closed-segment early-TRIM.
- */
-/*
  * Full-map recovery validation must authenticate surviving maps outside the
  * segment being recycled too. Otherwise a corrupted extent-class or physical
  * liveness sidecar can coexist with an irreversible recycle/role transition,
@@ -584,6 +578,12 @@ static int test_roll_forward_rejects_unrelated_map_sidecar_corruption(void)
 	return 0;
 }
 
+/*
+ * An overwrite relocates its old physical mapping, unlike logical DISCARD.
+ * When a forged mapped count says the source has one survivor but a second
+ * valid map remains, neither RAW nor compressed publication may zero the
+ * cached count and authorize the caller's closed-segment early-TRIM.
+ */
 static int test_false_final_mapping_overwrite_is_rejected(void)
 {
 	struct swapz_builder builder;
