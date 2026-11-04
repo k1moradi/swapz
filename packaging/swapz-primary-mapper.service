@@ -54,9 +54,9 @@ LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 SystemCallArchitectures=native
-# A lifecycle transaction may inspect an incomplete package journal but must
-# not repair or remove it; the package installer owns journal completion.
-ReadOnlyPaths=-/var/lib/swapz-package-transactions
+# Do not bind-mount the package journal read-only: the native manager checks
+# its mount ID against its parent and refuses mount substitution. The journal
+# is only inspected by this service; completion belongs to the installer.
 
 [Install]
 WantedBy=swap.target
