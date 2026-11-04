@@ -7,6 +7,10 @@ umask 022
 
 transaction_active=0
 transaction_dir=""
+# Recovery preflight is read-only. Revoke activation files only after recovery
+# has crossed into rollback/final-state validation where an error can leave the
+# installed package ambiguous.
+recovery_quarantine_on_error=0
 
 staging_abort() {
   local rc="${1:-1}" reason="${2:-failure}"
@@ -26,8 +30,9 @@ blocked() {
   elif (( transaction_active == 3 )); then
     uninstall_rollback 2 failure
   elif (( transaction_active == 4 )); then
-    # A retained journal may coexist with an activation-capable CLI.
-    cleanup_activation_files || true
+    if (( recovery_quarantine_on_error == 1 )); then
+      cleanup_activation_files || true
+    fi
     printf "BLOCKED: recovery record retained at %s\n" "$transaction_dir" >&2
   fi
   exit 2
@@ -1454,6 +1459,12 @@ PY
 
   cleanup_temporary_activation_files ||
     blocked "recovery temporary CLI provenance or durability invalid"
+
+  # Everything above is admission-only. A refusal there must not destroy a
+  # complete committed installation merely because its crash journal remains.
+  # From this point onward, rollback or final verification can expose an
+  # ambiguous package, so any failure again quarantines activation entry points.
+  recovery_quarantine_on_error=1
   if [[ "$recovery_phase" != committed ]]; then
     # Do not normalize substituted live destinations during rollback.
     for recovery_path in "$src" "$cli" "$boot_verifier" "$runtime_health" \

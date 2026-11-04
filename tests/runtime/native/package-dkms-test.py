@@ -1969,6 +1969,30 @@ exec "{flock_binary}" "$@"
         self.assertEqual(self.invoke("recover").returncode, 0)
         self.assertEqual(self.invoke("install").returncode, 0)
 
+    def test_recover_committed_install_preflight_refusal_preserves_package(self):
+        transaction = self.kill_at_durable_phase("install", "committed")
+        original_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        original_module = self.installed_module.read_bytes()
+        remove_count = self.dkms_log.read_text().splitlines().count("remove")
+
+        refused = self.invoke("recover", {
+            "SWAPZ_FAKE_DKMS_OTHER_KERNEL": "6.13.0-standby"})
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("other-kernel", refused.stderr)
+        self.assertTrue(transaction.exists())
+        self.assertEqual(
+            (self.prefix / "sbin/swapzctl").read_bytes(), original_cli)
+        self.assertEqual(self.installed_module.read_bytes(), original_module)
+        self.assertEqual(
+            self.dkms_log.read_text().splitlines().count("remove"),
+            remove_count)
+        self.assert_installed_exact()
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertFalse(transaction.exists())
+        self.assert_installed_exact()
+
     def test_recover_partial_initial_install_and_compressed_module(self):
         transaction = self.kill_at_durable_phase("install", "source-created")
         blocked = self.invoke("install")
