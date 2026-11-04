@@ -80,6 +80,9 @@ static int parse_unsigned_decimal(const char *text, unsigned long long limit,
 
 	if (!text || !end || !value || *cursor < '0' || *cursor > '9')
 		return -1;
+	/* Kernel and CLI numeric fields are canonical decimal: no leading zeroes. */
+	if (*cursor == '0' && cursor[1] >= '0' && cursor[1] <= '9')
+		return -1;
 	while (*cursor >= '0' && *cursor <= '9') {
 		unsigned int digit = (unsigned int)(*cursor - '0');
 
@@ -1353,15 +1356,25 @@ static int format_mountinfo_optional_valid(const char *begin, const char *end)
 		const char *number_end;
 		unsigned long long mount_identifier;
 
-		if ((size_t)(end - begin) <= prefix_length ||
-		    memcmp(begin, prefixes[index], prefix_length))
-			continue;
-		return parse_unsigned_decimal(begin + prefix_length,
-					      ULLONG_MAX, &number_end,
-					      &mount_identifier) == 0 &&
-		       number_end == end && mount_identifier != 0;
+		if ((size_t)(end - begin) > prefix_length &&
+		    !memcmp(begin, prefixes[index], prefix_length))
+			return parse_unsigned_decimal(begin + prefix_length,
+					      (unsigned long long)INT_MAX,
+					      &number_end, &mount_identifier) == 0 &&
+			       number_end == end && mount_identifier != 0;
+		/* A known numeric tag without its required colon/value is malformed. */
+		if ((size_t)(end - begin) == prefix_length - 1U &&
+		    !memcmp(begin, prefixes[index], prefix_length - 1U))
+			return 0;
 	}
-	return 0;
+	if ((size_t)(end - begin) > sizeof("unbindable") - 1U &&
+	    !memcmp(begin, "unbindable:", sizeof("unbindable:") - 1U))
+		return 0;
+	/*
+	 * mountinfo is extensible. Linux explicitly requires parsers to ignore
+	 * unrecognized optional fields so future unrelated mounts remain readable.
+	 */
+	return 1;
 }
 
 static int format_mountinfo_line_device(const char *line, dev_t *device)
@@ -1393,8 +1406,8 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 			const char *end;
 			unsigned long long mount_identifier;
 
-			if (parse_unsigned_decimal(cursor, ULLONG_MAX, &end,
-						   &mount_identifier) < 0 ||
+			if (parse_unsigned_decimal(cursor, (unsigned long long)INT_MAX,
+						   &end, &mount_identifier) < 0 ||
 			    end != token_end || !mount_identifier)
 				return -1;
 		} else if (field == 2U) {
@@ -1408,8 +1421,13 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 			if (parse_device_identity_fields(token, &mounted_major,
 							 &mounted_minor, 0) < 0)
 				return -1;
-		} else if ((field == 3U || field == 4U) &&
+		} else if (field == 4U &&
 			   !format_mountinfo_path_valid(cursor, token_end)) {
+			/*
+			 * The root field is filesystem-specific: nsfs and other
+			 * filesystems may emit a non-path token. The mountpoint is
+			 * always the escaped absolute path that must validate here.
+			 */
 			return -1;
 		} else if (field >= 6U &&
 			   !format_mountinfo_optional_valid(cursor, token_end)) {
@@ -1508,8 +1526,7 @@ static int format_inventory_read_line(FILE *stream, char *line, size_t capacity,
 			errno = EOVERFLOW;
 			return -1;
 		}
-		if (character == '\0' ||
-		    (character < 0x20 && character != '\t' && character != '\n')) {
+		if (character == '\0') {
 			errno = EPROTO;
 			return -1;
 		}
@@ -1609,8 +1626,8 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 		const char *identifier_end;
 
 		if (format_mountinfo_line_device(line, &mounted_device) < 0 ||
-		    parse_unsigned_decimal(line, ULLONG_MAX, &identifier_end,
-					   &mount_identifier) < 0 ||
+		    parse_unsigned_decimal(line, (unsigned long long)INT_MAX,
+					   &identifier_end, &mount_identifier) < 0 ||
 		    !mount_identifier ||
 		    (*identifier_end != ' ' && *identifier_end != '\t')) {
 			errno = EPROTO;
@@ -1808,37 +1825,49 @@ static int format_mount_inventory_clear(dev_t device, dev_t parent_device)
 
 static int format_swap_inventory_header_valid(const char *line)
 {
-	static const char *const expected_fields[] = {
-		"Filename", "Type", "Size", "Used", "Priority",
-	};
-	const char *cursor = line;
-	size_t field;
+	static const char expected[] =
+		"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
 
-	if (!line)
-		return 0;
-	for (field = 0U; field < sizeof(expected_fields) / sizeof(expected_fields[0]);
-	     ++field) {
-		const char *field_end;
-		size_t field_length;
-		size_t expected_length = strlen(expected_fields[field]);
+	return line && !strcmp(line, expected);
+}
 
-		while (*cursor == ' ' || *cursor == '\t')
-			++cursor;
-		if (!*cursor || *cursor == '\n')
-			return 0;
-		field_end = cursor;
-		while (*field_end && *field_end != ' ' && *field_end != '\t' &&
-		       *field_end != '\n')
-			++field_end;
-		field_length = (size_t)(field_end - cursor);
-		if (field_length != expected_length ||
-		    memcmp(cursor, expected_fields[field], expected_length))
-			return 0;
-		cursor = field_end;
+/*
+ * seq_file_path(..., " \\t\\n\\\\") octal-escapes exactly the bytes
+ * that would otherwise break /proc/swaps tokenization. Decode only those
+ * kernel escapes and preserve every other non-NUL filename byte verbatim.
+ */
+static int format_proc_path_decode(const char *begin, const char *end,
+				   char path[PATH_MAX])
+{
+	const char *cursor = begin;
+	size_t used = 0;
+
+	if (!begin || !end || !path || begin >= end || *begin != '/')
+		return -1;
+	while (cursor < end) {
+		unsigned char value = (unsigned char)*cursor++;
+
+		if (value == '\\') {
+			if (end - cursor < 3 ||
+			    cursor[0] < '0' || cursor[0] > '7' ||
+			    cursor[1] < '0' || cursor[1] > '7' ||
+			    cursor[2] < '0' || cursor[2] > '7')
+				return -1;
+			value = (unsigned char)(
+				((unsigned int)(cursor[0] - '0') << 6) |
+				((unsigned int)(cursor[1] - '0') << 3) |
+				(unsigned int)(cursor[2] - '0'));
+			cursor += 3;
+			if (value != ' ' && value != '\t' &&
+			    value != '\n' && value != '\\')
+				return -1;
+		}
+		if (value == '\0' || used + 1U >= PATH_MAX)
+			return -1;
+		path[used++] = (char)value;
 	}
-	while (*cursor == ' ' || *cursor == '\t')
-		++cursor;
-	return *cursor == '\0' || (*cursor == '\n' && cursor[1] == '\0');
+	path[used] = '\0';
+	return 0;
 }
 
 static int format_swap_inventory_entry_parse(const char *line,
@@ -1853,8 +1882,8 @@ static int format_swap_inventory_entry_parse(const char *line,
 	unsigned long long used_kib;
 	unsigned long long priority_magnitude;
 	unsigned long long priority_limit = INT_MAX;
-	size_t path_length;
 	unsigned int field;
+	int negative_priority = 0;
 
 	if (!line || !swap_path || !block_entry)
 		return -1;
@@ -1874,9 +1903,8 @@ static int format_swap_inventory_entry_parse(const char *line,
 	if (*cursor != '\0' && (*cursor != '\n' || cursor[1] != '\0'))
 		return -1;
 
-	path_length = (size_t)(field_end[0] - field_begin[0]);
-	if (!path_length || path_length >= PATH_MAX ||
-	    field_begin[0][0] != '/')
+	if (format_proc_path_decode(field_begin[0], field_end[0],
+				    swap_path) < 0)
 		return -1;
 	if ((size_t)(field_end[1] - field_begin[1]) == sizeof("partition") - 1U &&
 	    !memcmp(field_begin[1], "partition", sizeof("partition") - 1U)) {
@@ -1888,16 +1916,17 @@ static int format_swap_inventory_entry_parse(const char *line,
 	} else {
 		return -1;
 	}
-	if (parse_unsigned_decimal(field_begin[2], ULLONG_MAX, &end,
-				   &size_kib) < 0 ||
+	if (parse_unsigned_decimal(field_begin[2], (unsigned long long)ULONG_MAX,
+				   &end, &size_kib) < 0 ||
 	    end != field_end[2] ||
-	    parse_unsigned_decimal(field_begin[3], ULLONG_MAX, &end,
-				   &used_kib) < 0 ||
+	    parse_unsigned_decimal(field_begin[3], (unsigned long long)ULONG_MAX,
+				   &end, &used_kib) < 0 ||
 	    end != field_end[3] || !size_kib || used_kib > size_kib)
 		return -1;
 
 	cursor = field_begin[4];
 	if (*cursor == '-') {
+		negative_priority = 1;
 		++cursor;
 		priority_limit = (unsigned long long)INT_MAX + 1ULL;
 		if (cursor == field_end[4])
@@ -1907,11 +1936,9 @@ static int format_swap_inventory_entry_parse(const char *line,
 	}
 	if (parse_unsigned_decimal(cursor, priority_limit, &end,
 				   &priority_magnitude) < 0 ||
-	    end != field_end[4])
+	    end != field_end[4] ||
+	    (negative_priority && priority_magnitude == 0ULL))
 		return -1;
-
-	memcpy(swap_path, field_begin[0], path_length);
-	swap_path[path_length] = '\0';
 	return 0;
 }
 
@@ -1951,7 +1978,11 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 			errno = EPROTO;
 			goto failed;
 		}
-		if (stat(swap_path, &info) < 0)
+		/*
+		 * The kernel row names the already-open swap object. Refuse a
+		 * final-component symlink instead of following a substituted path.
+		 */
+		if (lstat(swap_path, &info) < 0)
 			goto failed;
 		if ((block_entry && !S_ISBLK(info.st_mode)) ||
 		    (!block_entry && !S_ISREG(info.st_mode))) {
