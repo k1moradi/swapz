@@ -137,8 +137,12 @@ source/clean provenance, and binds
 receive `SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION=1`; the parent environment and
 ordinary installed binary remain disabled. The temporary coordinator must be removed explicitly on every path after it is
 created, including preflight/import/plan/device/evidence-construction failures;
-runtime finalizers are not cleanup authority. Its SHA-256 must be recorded in
-persistent evidence whenever admission reaches durable evidence creation.
+runtime finalizers are not cleanup authority. Terminal PASS evidence may be
+committed only after that private workspace has been removed successfully and,
+when the helper owns the source-admission channel, after that channel has been
+closed successfully. A cleanup failure must leave or write non-PASS evidence
+rather than a durable false PASS. Its SHA-256 must be recorded in persistent
+evidence whenever admission reaches durable evidence creation.
 
 The report values, private primary plan qualified/live values, embedded control
 source SHA, and observed installed bytes must all agree with the exact validated

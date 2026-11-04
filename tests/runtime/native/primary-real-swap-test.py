@@ -478,6 +478,29 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 qualify.execute(arguments)
         channel.close.assert_called_once_with()
 
+    def test_owned_source_admission_closes_before_success(self):
+        arguments = qualify.build_parser().parse_args([
+            "--validated-source", "a" * 40,
+            "--qualification-report", "/synthetic/report.json",
+            "--source-admission-socket", "/synthetic/socket",
+            "--source-admission-parent-uid", "1000",
+        ])
+        channel = mock.Mock()
+        expected = {"status": "PASS"}
+
+        def admitted(_arguments, _admission, *, terminal_cleanup):
+            terminal_cleanup()
+            return expected
+
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(os, "geteuid", return_value=0), \
+                mock.patch.object(
+                    qualify, "SourceAdmissionClient", return_value=channel), \
+                mock.patch.object(
+                    qualify, "_execute_admitted", side_effect=admitted):
+            self.assertIs(qualify.execute(arguments), expected)
+        channel.close.assert_called_once_with()
+
     def test_private_workspace_is_cleaned_when_mode_hardening_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -584,6 +607,179 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
             admission.require.assert_called_once_with("initial")
             self.assertEqual(cleanup_called, [True])
+
+    def test_terminal_pass_waits_for_owned_cleanup(self):
+        for failure_point in ("private workspace", "source admission channel"):
+            with self.subTest(failure_point=failure_point), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                qualified = root / "prefix/sbin/swapzctl"
+                report = root / "qualification.json"
+                oracle_path = root / "oracle.py"
+                for path, contents in (
+                        (qualified, b"qualified"),
+                        (report, b"{}"),
+                        (oracle_path, b"#!/usr/bin/env python3\n")):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(contents)
+                    path.chmod(0o700)
+
+                workspace_path = root / "workspace"
+                workspace_path.mkdir()
+                private_control = workspace_path / "control/swapzctl"
+                private_control.parent.mkdir()
+                private_control.write_bytes(b"private")
+                private_control.chmod(0o700)
+                workspace_cleanup_calls = []
+
+                class FakeWorkspace:
+                    name = str(workspace_path)
+
+                    def cleanup(self):
+                        workspace_cleanup_calls.append(True)
+                        if failure_point == "private workspace" and \
+                                len(workspace_cleanup_calls) == 1:
+                            raise OSError(
+                                "synthetic terminal workspace cleanup failure")
+
+                terminal_cleanup_calls = []
+
+                def terminal_cleanup():
+                    terminal_cleanup_calls.append(True)
+                    if failure_point == "source admission channel":
+                        raise qualify.QualificationFailure(
+                            "source admission channel cleanup failed before "
+                            "terminal PASS: synthetic close failure")
+
+                evidence_instances = []
+
+                class FakeEvidence:
+                    def __init__(self, *_args, **_kwargs):
+                        self.path = root / "evidence.json"
+                        self.finish_calls = []
+                        evidence_instances.append(self)
+
+                    def update(self, *_args, **_kwargs):
+                        pass
+
+                    def finish(self, status_value, reason=None, **_fields):
+                        self.finish_calls.append((status_value, reason))
+
+                args = qualify.build_parser().parse_args([
+                    "--validated-source", "a" * 40,
+                    "--qualification-report", str(report),
+                    "--swapzctl", str(qualified),
+                    "--oracle", str(oracle_path),
+                ])
+                admission = mock.Mock()
+                admission.require.side_effect = ["0" * 64, "0" * 64]
+                cycle_results = [
+                    {"run_id": "1" * 32, "linux_swap_uuid": "1" * 32},
+                    {"run_id": "2" * 32, "linux_swap_uuid": "2" * 32},
+                ]
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(
+                        mock.patch.object(
+                            os, "sysconf", return_value=qualify.PAGE_BYTES))
+                    stack.enter_context(
+                        mock.patch.object(qualify, "_ensure_commands"))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify.tempfile, "TemporaryDirectory",
+                            return_value=FakeWorkspace()))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "build_physical_execution_control",
+                            return_value=(private_control, "1" * 64)))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "pin_real_swap_oracle",
+                            return_value=(oracle_path, "2" * 64)))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "preflight_workload_environment"))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "verify_acceptance_manifest"))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "acceptance_manifest_sha256",
+                            return_value="3" * 64))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_kernel_log_snapshot", return_value=[]))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_import_qualification"))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_read_plan",
+                            return_value={
+                                "target_device_bytes":
+                                    str(1024 * qualify.MIB)}))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "verify_provenance",
+                            return_value={
+                                "formatter_sha256": "4" * 64}))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_read_installed_plan",
+                            return_value={
+                                "privileged_execution_enabled": False}))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_read_selector",
+                            return_value="f13428f6-01"))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "verify_authorized_target",
+                            return_value=(
+                                Path("/synthetic"), (8, 1), (8, 0))))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "read_swap_rows", return_value=[]))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_validate_precycle_state"))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_reject_relevant_kernel_errors"))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_sha256_file",
+                            return_value="5" * 64))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "PersistentEvidence", FakeEvidence))
+                    stack.enter_context(
+                        mock.patch.object(
+                            qualify, "run_cycle",
+                            side_effect=cycle_results))
+                    stack.enter_context(
+                        self.assertRaises(qualify.QualificationFailure))
+                    qualify._execute_admitted(
+                        args, admission, terminal_cleanup=terminal_cleanup)
+
+                self.assertEqual(len(evidence_instances), 1)
+                self.assertEqual(
+                    [status for status, _reason
+                     in evidence_instances[0].finish_calls],
+                    ["FAIL"])
+                failure_reason = evidence_instances[0].finish_calls[0][1]
+                self.assertNotIn("PASS", [
+                    status for status, _reason
+                    in evidence_instances[0].finish_calls])
+                if failure_point == "private workspace":
+                    self.assertEqual(workspace_cleanup_calls, [True, True])
+                    self.assertEqual(terminal_cleanup_calls, [])
+                    self.assertIn(
+                        "synthetic terminal workspace cleanup failure",
+                        failure_reason)
+                else:
+                    self.assertEqual(workspace_cleanup_calls, [True])
+                    self.assertEqual(terminal_cleanup_calls, [True])
+                    self.assertIn("synthetic close failure", failure_reason)
 
     def test_real_swap_oracle_is_canonical_and_pinned_before_use(self):
         with tempfile.TemporaryDirectory(prefix="swapz-real-oracle-") as directory:

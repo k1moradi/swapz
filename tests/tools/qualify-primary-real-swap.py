@@ -3072,8 +3072,9 @@ def _import_qualification(swapzctl: Path, report_path: Path) -> None:
         raise Blocked(f"cannot import exact qualification report: {detail}")
 
 
-def _execute_admitted(arguments: argparse.Namespace,
-                      admission: SourceAdmissionClient) -> dict:
+def _execute_admitted(
+        arguments: argparse.Namespace, admission: SourceAdmissionClient,
+        terminal_cleanup: Callable[[], None] | None = None) -> dict:
     expected_oracle_sha256 = admission.require("initial")
     _ensure_commands(("cc", "dmsetup", "lsblk", "dmesg"))
     if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
@@ -3187,6 +3188,7 @@ def _execute_admitted(arguments: argparse.Namespace,
     run_ids: set[str] = set()
     swap_uuids: set[str] = set()
     cycles: list[dict] = []
+    workspace_cleanup_complete = False
     try:
         for cycle_index in range(1, arguments.cycles + 1):
             evidence.update(
@@ -3225,6 +3227,17 @@ def _execute_admitted(arguments: argparse.Namespace,
         admission.require("final")
         kernel_after = _kernel_log_snapshot()
         _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
+        # A terminal PASS must never coexist with a leaked privileged control
+        # or pinned-oracle workspace. Clean it before committing PASS evidence.
+        try:
+            private_workspace.cleanup()
+        except Exception as cleanup_error:
+            raise QualificationFailure(
+                f"private workspace cleanup failed before terminal PASS: "
+                f"{cleanup_error}") from cleanup_error
+        workspace_cleanup_complete = True
+        if terminal_cleanup is not None:
+            terminal_cleanup()
         result = {
             "schema": "swapz-primary-real-swap-v1",
             "status": "PASS",
@@ -3279,12 +3292,13 @@ def _execute_admitted(arguments: argparse.Namespace,
                 f"{failure}; failure evidence persistence also failed: {write_error}") from exc
         raise failure from exc
     finally:
-        original_error = sys.exc_info()[1]
-        try:
-            private_workspace.cleanup()
-        except Exception as cleanup_error:
-            _raise_cleanup_errors(
-                original_error, [f"private workspace: {cleanup_error}"])
+        if not workspace_cleanup_complete:
+            original_error = sys.exc_info()[1]
+            try:
+                private_workspace.cleanup()
+            except Exception as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error, [f"private workspace: {cleanup_error}"])
 
 def execute(arguments: argparse.Namespace,
             admission: SourceAdmissionClient | None = None) -> dict:
@@ -3301,10 +3315,27 @@ def execute(arguments: argparse.Namespace,
             raise Blocked("unprivileged source admission channel is required")
         admission = SourceAdmissionClient(
             socket_path, parent_uid, arguments.validated_source)
+
+    admission_closed = False
+
+    def close_owned_admission_before_pass() -> None:
+        nonlocal admission_closed
+        try:
+            admission.close()
+        except Exception as cleanup_error:
+            raise QualificationFailure(
+                "source admission channel cleanup failed before terminal PASS: "
+                f"{cleanup_error}") from cleanup_error
+        admission_closed = True
+
     try:
+        if owns_admission:
+            return _execute_admitted(
+                arguments, admission,
+                terminal_cleanup=close_owned_admission_before_pass)
         return _execute_admitted(arguments, admission)
     finally:
-        if owns_admission:
+        if owns_admission and not admission_closed:
             original_error = sys.exc_info()[1]
             try:
                 admission.close()
