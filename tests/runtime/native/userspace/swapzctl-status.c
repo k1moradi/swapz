@@ -984,7 +984,9 @@ enum fake_inventory_change {
 	FAKE_INVENTORY_EVENT,
 	FAKE_INVENTORY_UUID,
 	FAKE_INVENTORY_MALFORMED,
-	FAKE_INVENTORY_IOCTL_FAILURE
+	FAKE_INVENTORY_IOCTL_FAILURE,
+	FAKE_INFO_FAILURE_AFTER_STAGE,
+	FAKE_INFO_GENERATION_AFTER_STAGE
 };
 
 struct fake_list_device {
@@ -1240,6 +1242,539 @@ static void test_final_inventory_fake_ioctl_observation_gap(void)
 	}
 }
 
+
+/*
+ * Deterministic malformed DM wire corpus. These are synthetic ioctl reply
+ * bytes consumed by the included production parsers, not a parser model.
+ * Keep capacities fixed: a corrupt count/offset must never drive allocation
+ * or traversal proportional to its untrusted value.
+ */
+static void expect_adversarial_status_failure(
+	const char *phase, size_t case_index, const unsigned char *buffer,
+	size_t reply_size, size_t expected_wire_bound, size_t observed_offset,
+	size_t observed_length, const char *expected_field,
+	unsigned int expected_target)
+{
+	struct dm_status_observation observation = { 0 };
+	struct status_problem problem = { 0 };
+	unsigned int problem_target = UINT_MAX;
+	int parser_result;
+	int original_errno;
+
+	errno = 0;
+	parser_result = parse_fixture(buffer, reply_size, 1, &observation,
+				      &problem, &problem_target);
+	original_errno = errno;
+	if (parser_result >= 0 || !problem.field ||
+	    strcmp(problem.field, expected_field) ||
+	    problem_target != expected_target) {
+		fprintf(stderr,
+			"adversarial DM_TABLE_STATUS %s case=%zu: expected wire bound=%zu "
+			"field=%s target=%u; observed offset=%zu length=%zu "
+			"result=%d field=%s target=%u; original errno=%d (%s)\n",
+			phase, case_index, expected_wire_bound, expected_field,
+			expected_target, observed_offset, observed_length,
+			parser_result, problem.field ? problem.field : "(none)",
+			problem_target, original_errno, strerror(original_errno));
+		abort();
+	}
+	status_free_observation(&observation);
+}
+
+static void expect_adversarial_list_failure(
+	const char *phase, size_t case_index, const unsigned char *record,
+	size_t record_size, size_t expected_wire_bound, size_t observed_offset,
+	size_t observed_length, const char *expected_field)
+{
+	struct dm_list_record parsed;
+	struct status_problem problem = { 0 };
+	int parser_result;
+	int original_errno;
+
+	errno = 0;
+	parser_result = status_parse_name_list_record(record, record_size,
+						      &parsed, &problem);
+	original_errno = errno;
+	if (parser_result >= 0 || !problem.field ||
+	    strcmp(problem.field, expected_field)) {
+		fprintf(stderr,
+			"adversarial DM_LIST_DEVICES %s case=%zu: expected wire bound=%zu "
+			"field=%s; observed offset=%zu length=%zu result=%d field=%s; "
+			"original errno=%d (%s)\n",
+			phase, case_index, expected_wire_bound, expected_field,
+			observed_offset, observed_length, parser_result,
+			problem.field ? problem.field : "(none)",
+			original_errno, strerror(original_errno));
+		abort();
+	}
+}
+
+static void test_bounded_adversarial_dm_status_corpus(void)
+{
+	enum { CORPUS_CASES = 256 };
+	const char *const types[] = { "swapz", "swapz" };
+	const char *const statuses[] = {
+		fixture_valid_status, fixture_valid_status
+	};
+	uint32_t generator_state = UINT32_C(0x9e3779b9);
+	size_t case_index;
+
+	/* Eight mutation classes, 32 seeded variants each; no random runtime seed. */
+	for (case_index = 0; case_index < CORPUS_CASES; ++case_index) {
+		unsigned char buffer[2048];
+		struct dm_ioctl header;
+		struct dm_target_spec specification;
+		const char *expected_field = NULL;
+		unsigned int expected_target = UINT_MAX;
+		size_t observed_offset = 0;
+		size_t observed_length = 0;
+		size_t record_offset = sizeof(header);
+		size_t reply_size = make_dm_multi_fixture(
+			buffer, sizeof(buffer), types, statuses, NULL, 2, 1);
+
+		generator_state = generator_state * UINT32_C(1664525) +
+				  UINT32_C(1013904223);
+		memcpy(&header, buffer, sizeof(header));
+		memcpy(&specification, buffer + record_offset,
+		       sizeof(specification));
+		switch (case_index % 8U) {
+		case 0:
+			header.data_start = (uint32_t)sizeof(header) +
+					    1U + generator_state % 7U;
+			observed_offset = header.data_start;
+			observed_length = header.data_size;
+			expected_field = "dm_ioctl.data_start/data_size";
+			break;
+		case 1:
+			header.data_size = UINT32_MAX - generator_state % 32U;
+			observed_offset = header.data_start;
+			observed_length = header.data_size;
+			expected_field = "dm_ioctl.data_start/data_size";
+			break;
+		case 2:
+			header.target_count = SWAPZ_STATUS_MAX_TARGETS + 1U +
+					      generator_state % 128U;
+			observed_length = header.target_count;
+			expected_field = "dm_target_spec.next";
+			break;
+		case 3:
+			specification.next = UINT32_MAX - generator_state % 64U;
+			observed_offset = specification.next;
+			observed_length = sizeof(specification);
+			expected_field = "dm_target_spec.next";
+			expected_target = 0;
+			break;
+		case 4:
+			assert((size_t)specification.next <=
+			       reply_size - sizeof(header));
+			record_offset += specification.next;
+			memcpy(&specification, buffer + record_offset,
+			       sizeof(specification));
+			specification.next = UINT32_MAX - generator_state % 64U;
+			observed_offset = specification.next;
+			observed_length = sizeof(specification);
+			expected_field = "dm_target_spec.next";
+			expected_target = 1;
+			break;
+		case 5:
+			memset(header.name, 'n', sizeof(header.name));
+			observed_length = sizeof(header.name);
+			expected_field = "dm_ioctl.name";
+			break;
+		case 6:
+			if (generator_state & UINT32_C(0x100)) {
+				specification.sector_start = UINT64_MAX;
+				specification.length = 2U;
+			} else {
+				specification.length = 0;
+			}
+			observed_offset = (size_t)specification.sector_start;
+			observed_length = (size_t)specification.length;
+			expected_field = "dm_target_spec.sector_start/length";
+			expected_target = 0;
+			break;
+		default:
+			header.flags |= DM_STATUS_TABLE_FLAG;
+			observed_length = header.flags;
+			expected_field = "dm_ioctl.flags";
+			break;
+		}
+		memcpy(buffer, &header, sizeof(header));
+		if (case_index % 8U == 3U || case_index % 8U == 4U ||
+		    case_index % 8U == 6U)
+			memcpy(buffer + record_offset, &specification,
+			       sizeof(specification));
+		expect_adversarial_status_failure(
+			"bounded-record-mutation", case_index, buffer, reply_size,
+			reply_size, observed_offset, observed_length,
+			expected_field, expected_target);
+	}
+}
+
+static void test_bounded_adversarial_dm_list_corpus(void)
+{
+	enum { CORPUS_CASES = 64 };
+	uint32_t generator_state = UINT32_C(0x6d2b79f5);
+	size_t case_index;
+
+	for (case_index = 0; case_index < CORPUS_CASES; ++case_index) {
+		unsigned char record[256];
+		const size_t name_offset = offsetof(struct dm_name_list, name);
+		const size_t metadata_offset = fixture_align_target_offset(
+			name_offset + sizeof("a"));
+		size_t record_size = make_dm_name_list_fixture(
+			record, sizeof(record), "a", 7, 11);
+		const char *expected_field;
+		size_t observed_offset = 0;
+		size_t observed_length = record_size;
+		uint32_t next;
+		uint32_t flags;
+
+		generator_state = generator_state * UINT32_C(1664525) +
+				  UINT32_C(1013904223);
+		switch (case_index % 4U) {
+		case 0:
+			next = 1U + generator_state % 7U;
+			memcpy(record + offsetof(struct dm_name_list, next),
+			       &next, sizeof(next));
+			observed_offset = next;
+			expected_field = "dm_name_list.next";
+			break;
+		case 1:
+			next = UINT32_MAX - generator_state % 7U;
+			memcpy(record + offsetof(struct dm_name_list, next),
+			       &next, sizeof(next));
+			observed_offset = next;
+			expected_field = "dm_name_list.next";
+			break;
+		case 2:
+			memset(record + name_offset, 'n', record_size - name_offset);
+			observed_offset = name_offset;
+			expected_field = "dm_name_list.name";
+			break;
+		default:
+			flags = DM_NAME_LIST_FLAG_HAS_UUID;
+			memcpy(record + metadata_offset + sizeof(uint32_t),
+			       &flags, sizeof(flags));
+			observed_offset = metadata_offset + 2U * sizeof(uint32_t);
+			expected_field = "dm_name_list.uuid";
+			break;
+		}
+		expect_adversarial_list_failure(
+			"bounded-record-mutation", case_index, record, record_size,
+			record_size, observed_offset, observed_length, expected_field);
+	}
+}
+
+static void test_adversarial_dm_list_header_bounds(void)
+{
+	enum { CORPUS_CASES = 32 };
+	unsigned char buffer[sizeof(struct dm_ioctl) + 32U] = { 0 };
+	struct dm_ioctl header = { 0 };
+	struct dm_ioctl parsed;
+	struct status_problem problem = { 0 };
+	size_t case_index;
+
+	/* A zero-entry device list is legitimate; an invalid header is not. */
+	header.data_start = sizeof(header);
+	header.data_size = sizeof(header);
+	memcpy(buffer, &header, sizeof(header));
+	assert(status_parse_list_header(buffer, sizeof(buffer),
+					&parsed, &problem) == 0);
+	for (case_index = 0; case_index < CORPUS_CASES; ++case_index) {
+		size_t observed_offset;
+		size_t observed_length;
+		int parser_result;
+		int original_errno;
+
+		header.data_start = sizeof(header);
+		header.data_size = sizeof(buffer);
+		if (case_index & 1U)
+			header.data_start += 1U + (uint32_t)(case_index % 7U);
+		else
+			header.data_size = UINT32_MAX - (uint32_t)case_index;
+		observed_offset = header.data_start;
+		observed_length = header.data_size;
+		memcpy(buffer, &header, sizeof(header));
+		errno = 0;
+		parser_result = status_parse_list_header(buffer, sizeof(buffer),
+							&parsed, &problem);
+		original_errno = errno;
+		if (parser_result >= 0 || !problem.field ||
+		    strcmp(problem.field, "dm_ioctl.data_start/data_size")) {
+			fprintf(stderr,
+				"adversarial DM_LIST_DEVICES header case=%zu: expected "
+				"wire bound=%zu field=dm_ioctl.data_start/data_size; "
+				"observed offset=%zu length=%zu result=%d field=%s; "
+				"original errno=%d (%s)\n",
+				case_index, sizeof(buffer), observed_offset,
+				observed_length, parser_result,
+				problem.field ? problem.field : "(none)",
+				original_errno, strerror(original_errno));
+			abort();
+		}
+	}
+}
+
+static void test_adversarial_wire_boundaries(void)
+{
+	const char *const types[] = { "swapz", "swapz" };
+	const char *const statuses[] = {
+		fixture_valid_status, fixture_valid_status
+	};
+	unsigned char buffer[2048];
+	unsigned char name_record[512];
+	struct dm_ioctl header;
+	struct dm_target_spec specification;
+	struct dm_list_record parsed;
+	struct status_problem problem = { 0 };
+	char maximum_name[DM_NAME_LEN];
+	size_t reply_size;
+	size_t record_offset;
+	size_t record_size;
+	size_t metadata_offset;
+	uint32_t flags;
+	uint32_t next;
+
+	assert(sizeof(struct dm_target_spec) == 40U);
+	assert(offsetof(struct dm_name_list, name) == 12U);
+	assert(sizeof(struct dm_ioctl) % SWAPZ_DM_WIRE_ALIGNMENT == 0U);
+
+	reply_size = make_dm_multi_fixture(buffer, sizeof(buffer),
+					    types, statuses, NULL, 2, 1);
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	record_offset = sizeof(header) + specification.next;
+	/* An aligned forward skip and a backwards/looping last offset must fail. */
+	specification.next += SWAPZ_DM_WIRE_ALIGNMENT;
+	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
+	expect_adversarial_status_failure(
+		"aligned-gap", 0, buffer, reply_size, header.data_size,
+		specification.next, sizeof(specification), "dm_target_spec.next", 0);
+
+	reply_size = make_dm_multi_fixture(buffer, sizeof(buffer),
+					    types, statuses, NULL, 2, 1);
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	record_offset = sizeof(header) + specification.next;
+	next = specification.next;
+	memcpy(buffer + record_offset + offsetof(struct dm_target_spec, next),
+	       &next, sizeof(next));
+	expect_adversarial_status_failure(
+		"looping-final-next", 1, buffer, reply_size, header.data_size,
+		next, sizeof(specification), "dm_target_spec.next", 1);
+
+	reply_size = make_dm_multi_fixture(buffer, sizeof(buffer),
+					    types, statuses, NULL, 2, 1);
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	record_offset = sizeof(header) + specification.next;
+	/* The final NUL is required even when the caller buffer has zero slack. */
+	buffer[header.data_size - 1U] = 'X';
+	expect_adversarial_status_failure(
+		"missing-final-status-nul", 2, buffer, reply_size, header.data_size,
+		header.data_size - 1U, 1U, "dm_target_spec.params", 1);
+
+	reply_size = make_dm_multi_fixture(buffer, sizeof(buffer),
+					    types, statuses, NULL, 2, 1);
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	memset(specification.target_type, 't', sizeof(specification.target_type));
+	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
+	expect_adversarial_status_failure(
+		"missing-type-nul", 3, buffer, reply_size, header.data_size,
+		sizeof(header), sizeof(specification.target_type),
+		"dm_target_spec.target_type", 0);
+
+	reply_size = make_dm_multi_fixture(buffer, sizeof(buffer),
+					    types, statuses, NULL, 2, 1);
+	memcpy(&header, buffer, sizeof(header));
+	memcpy(&specification, buffer + sizeof(header), sizeof(specification));
+	specification.length = 0;
+	memcpy(buffer + sizeof(header), &specification, sizeof(specification));
+	expect_adversarial_status_failure(
+		"zero-target-length", 4, buffer, reply_size, header.data_size,
+		sizeof(header), 0, "dm_target_spec.sector_start/length", 0);
+
+	reply_size = make_dm_multi_fixture(buffer, sizeof(buffer),
+					    types, statuses, NULL, 2, 1);
+	memcpy(&header, buffer, sizeof(header));
+	header.target_count = UINT32_MAX;
+	memcpy(buffer, &header, sizeof(header));
+	expect_adversarial_status_failure(
+		"impossible-target-count", 5, buffer, reply_size, header.data_size,
+		header.data_start, header.target_count, "dm_target_spec.next",
+		UINT_MAX);
+
+	/* The name terminator, metadata and optional UUID each have own bounds. */
+	record_size = make_dm_name_list_fixture(name_record, sizeof(name_record),
+						"a", 7, 11);
+	assert(record_size == 24U);
+	expect_adversarial_list_failure(
+		"truncated-metadata", 0, name_record, 16U, record_size,
+		offsetof(struct dm_name_list, name), 16U,
+		"dm_name_list.event_nr/flags");
+	expect_adversarial_list_failure(
+		"truncated-name-header", 1, name_record,
+		offsetof(struct dm_name_list, name), record_size, 0,
+		offsetof(struct dm_name_list, name), "dm_name_list");
+
+	record_size = make_dm_name_list_fixture(name_record, sizeof(name_record),
+						"a", 7, 11);
+	assert(record_size <= sizeof(name_record) - SWAPZ_DM_WIRE_ALIGNMENT);
+	metadata_offset = fixture_align_target_offset(
+		offsetof(struct dm_name_list, name) + sizeof("a"));
+	flags = DM_NAME_LIST_FLAG_HAS_UUID;
+	memcpy(name_record + metadata_offset + sizeof(uint32_t),
+	       &flags, sizeof(flags));
+	memset(name_record + record_size, 'u', SWAPZ_DM_WIRE_ALIGNMENT);
+	expect_adversarial_list_failure(
+		"unterminated-uuid", 2, name_record,
+		record_size + SWAPZ_DM_WIRE_ALIGNMENT, record_size,
+		record_size, SWAPZ_DM_WIRE_ALIGNMENT, "dm_name_list.uuid");
+
+	/* The exact maximum bounded name and a terminated UUID are legitimate. */
+	memset(maximum_name, 'm', sizeof(maximum_name) - 1U);
+	maximum_name[sizeof(maximum_name) - 1U] = '\0';
+	record_size = make_dm_name_list_fixture(name_record, sizeof(name_record),
+						maximum_name, 7, 11);
+	assert(status_parse_name_list_record(name_record, record_size,
+					      &parsed, &problem) == 0);
+	assert(strlen(parsed.name) == DM_NAME_LEN - 1U);
+	record_size = make_dm_name_list_fixture(name_record, sizeof(name_record),
+						"a", 7, 11);
+	memcpy(name_record + metadata_offset + sizeof(uint32_t),
+	       &flags, sizeof(flags));
+	memcpy(name_record + record_size, "uuid", sizeof("uuid"));
+	assert(status_parse_name_list_record(
+		name_record, record_size + SWAPZ_DM_WIRE_ALIGNMENT,
+		&parsed, &problem) == 0);
+	assert(parsed.uuid && !strcmp(parsed.uuid, "uuid"));
+}
+
+/* The first binding in the shared fake reader is intentionally self-consistent.
+ * Bind once more to the *listed* generation to inject INFO-after-LIST drift.
+ */
+static int fake_drifted_generation_observation(
+	void *context, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
+{
+	const struct fake_status_snapshot_reader *reader = context;
+	int result = fake_read_status_observation_ioctl(
+		context, name, expected_device, observation, problem,
+		problem_target);
+
+	return status_bind_list_generation(result, observation,
+					   reader->event_number - 1U,
+					   problem, problem_target);
+}
+
+static int fake_adversarial_device_status_ioctl(
+	void *context, const char *name, uint64_t device_id,
+	uint32_t event_number, struct status_ready_report *report)
+{
+	struct fake_inventory_ioctl *fixture = context;
+
+	if (!fixture->devices_observed)
+		return fake_device_status_ioctl(context, name, device_id,
+						event_number, report);
+	assert(fixture->devices_observed == 1U);
+	++fixture->devices_observed;
+	if (fixture->change == FAKE_INFO_FAILURE_AFTER_STAGE) {
+		errno = EIO;
+		return status_report_ioctl_failure(name, device_id, 1, errno);
+	}
+	{
+		struct fake_status_snapshot_reader reader = {
+			.event_number = event_number + 1U
+		};
+		int result = report_device_status_with_reader(
+			&reader, fake_drifted_generation_observation,
+			name, device_id, report);
+
+		fixture->status_reads += reader.calls;
+		return result;
+	}
+}
+
+static void test_adversarial_failed_info_after_staging(void)
+{
+	const enum fake_inventory_change changes[] = {
+		FAKE_INFO_FAILURE_AFTER_STAGE, FAKE_INFO_GENERATION_AFTER_STAGE
+	};
+	size_t case_index;
+
+	for (case_index = 0; case_index < sizeof(changes) / sizeof(changes[0]);
+	     ++case_index) {
+		struct fake_inventory_ioctl fixture = { .change = changes[case_index] };
+		struct status_ready_report report = { 0 };
+		FILE *stdout_capture = tmpfile();
+		FILE *stderr_capture = tmpfile();
+		int saved_stdout = dup(STDOUT_FILENO);
+		int saved_stderr = dup(STDERR_FILENO);
+		char output[1024] = { 0 };
+		char diagnostic[1024] = { 0 };
+		size_t output_bytes;
+		size_t diagnostic_bytes;
+		int result;
+		int original_errno;
+
+		assert(stdout_capture && stderr_capture);
+		assert(saved_stdout >= 0 && saved_stderr >= 0);
+		fflush(stdout);
+		fflush(stderr);
+		assert(dup2(fileno(stdout_capture), STDOUT_FILENO) >= 0);
+		assert(dup2(fileno(stderr_capture), STDERR_FILENO) >= 0);
+		result = status_collect_targets_with_readers(
+			&fixture, fake_list_devices_ioctl,
+			fake_adversarial_device_status_ioctl, &report);
+		original_errno = errno;
+		/* Exactly the CLI output gate: staged metrics are never printed. */
+		if (!result)
+			for (size_t target = 0; target < report.count; ++target)
+				report_swapz_target(report.targets[target].name,
+						    report.targets[target].target_index,
+						    &report.targets[target].ratio);
+		fflush(stdout);
+		fflush(stderr);
+		assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+		assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+		rewind(stdout_capture);
+		output_bytes = fread(output, 1, sizeof(output) - 1U, stdout_capture);
+		rewind(stderr_capture);
+		diagnostic_bytes = fread(diagnostic, 1,
+					 sizeof(diagnostic) - 1U, stderr_capture);
+		diagnostic[diagnostic_bytes] = '\0';
+		if (!result || output_bytes || report.count != 1U ||
+		    fixture.list_reads != 1U || fixture.devices_observed != 2U ||
+		    fixture.status_reads !=
+		    (changes[case_index] == FAKE_INFO_FAILURE_AFTER_STAGE ? 2U : 3U) ||
+		    !strstr(diagnostic, "snapshot 1") ||
+		    !strstr(diagnostic,
+			    changes[case_index] == FAKE_INFO_FAILURE_AFTER_STAGE ?
+			    "DM_TABLE_STATUS errno=5" : "dm_ioctl.event_nr") ||
+		    original_errno !=
+		    (changes[case_index] == FAKE_INFO_FAILURE_AFTER_STAGE ?
+		     EIO : EPROTO)) {
+			fprintf(stderr,
+				"adversarial staged INFO case=%zu: expected complete "
+				"first inventory and no published bytes; observed "
+				"list=%u INFO=%u staged=%zu stdout=%zu diagnostic=%zu "
+				"result=%d; original errno=%d (%s)\n",
+				case_index, fixture.list_reads, fixture.status_reads,
+				report.count, output_bytes, diagnostic_bytes, result,
+				original_errno, strerror(original_errno));
+			abort();
+		}
+		free(report.targets);
+		close(saved_stdout);
+		close(saved_stderr);
+		fclose(stdout_capture);
+		fclose(stderr_capture);
+	}
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -1285,6 +1820,11 @@ int main(void)
 	test_snapshot_retry_exhaustion_and_failures();
 	test_complete_snapshot_before_output();
 	test_final_inventory_fake_ioctl_observation_gap();
+	test_bounded_adversarial_dm_status_corpus();
+	test_bounded_adversarial_dm_list_corpus();
+	test_adversarial_dm_list_header_bounds();
+	test_adversarial_wire_boundaries();
+	test_adversarial_failed_info_after_staging();
 	test_status_is_read_only();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;

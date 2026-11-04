@@ -1089,6 +1089,18 @@ fields, and a cross-counter snapshot that must retry. Include a similarly named
 field such as `physical_write_reqs` before `physical_write` so the test proves
 exact token matching rather than prefix matching.
 
+The rootless status wire regression must also exercise the included production
+DM_TABLE_STATUS and DM_LIST_DEVICES parsers with fixed-capacity synthetic ioctl
+replies and a bounded, deterministic adversarial corpus. Cover UAPI 8-byte wire
+alignment, invalid count/offset/length arithmetic, missing name/type/INFO NULs,
+forward/overlapping/looping record links, truncated or unterminated UUID metadata,
+event-generation drift and INFO failure after an earlier mapping is staged.
+Malformed observations must terminate with bounded memory and no partial numeric
+CLI output or fabricated all-clear; diagnostic assertion failures identify the
+record/phase, expected wire bounds, observed offset/length and original errno
+without dumping payload bytes. Preserve valid zero-target and saturated-padding
+conservatism. This synthetic evidence is not an atomic live-kernel snapshot.
+
 The status implementation must require two consecutive identical relevant
 snapshots before printing a ratio. The compressed-only result is available only
 when committed counters can partition compressed SWZ extent bytes exactly; an
