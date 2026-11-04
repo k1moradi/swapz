@@ -145,14 +145,18 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 	uint64_t virgin_cpu[CLAIM_SCAN_REPEATS], claimed_cpu[CLAIM_SCAN_REPEATS];
 	uint64_t traversal_wall[CLAIM_SCAN_REPEATS];
 	uint64_t traversal_cpu[CLAIM_SCAN_REPEATS];
+	uint64_t final_publish_wall[CLAIM_SCAN_REPEATS];
+	uint64_t final_publish_cpu[CLAIM_SCAN_REPEATS];
 	uint64_t commit_wall[CLAIM_SCAN_REPEATS];
 	uint64_t commit_cpu[CLAIM_SCAN_REPEATS];
-	uint64_t commit_worst = 0, virgin_corrupt_wall = 0;
+	uint64_t final_publish_worst = 0, commit_worst = 0;
+	uint64_t virgin_corrupt_wall = 0;
 	uint64_t claimed_worst = 0, corrupt_wall;
 	uint64_t map_bytes = (uint64_t)logical_pages * sizeof(*large_maps);
 	uint64_t reserve = (uint64_t)logical_pages / 8U +
 			   (logical_pages % 8U != 0U);
 	uint64_t physical_64, clock_start, cpu_start;
+	swapz_u8 raw_page[SWAPZ_BLOCK_BYTES];
 	swapz_u32 physical_blocks, segments, reserve_segment, logical;
 	unsigned int repeat;
 	int result = 1;
@@ -192,6 +196,7 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 	REQUIRE_CLAIM(swapz_enable_segment_program_counts(
 		&authority, large_programs, segments) == 0);
 	REQUIRE_CLAIM(!large_roles[reserve_segment] && large_roles[1U]);
+	memset(raw_page, 0x5a, sizeof(raw_page));
 
 	/* Every logical map is valid, distinct, and physically within the
 	 * foreground. The last reserve is unreferenced and must scan to end. */
@@ -204,8 +209,11 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		large_live[logical] = 1U;
 		large_classes[logical] = 1U;
 		large_counts[logical / SWAPZ_SEGMENT_BLOCKS]++;
+		large_programs[logical / SWAPZ_SEGMENT_BLOCKS] = 1U;
 	}
-	authority.open_segment = 0;
+	authority.open_segment =
+		logical_pages / SWAPZ_SEGMENT_BLOCKS - 1U;
+	authority.next_block = logical_pages;
 	authority.next_segment_probe = reserve_segment;
 	for (repeat = 0; repeat < CLAIM_SCAN_REPEATS; ++repeat) {
 		/* A clean virgin witness is an intentionally reset measurement
@@ -269,6 +277,85 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		      sample.alloc_probe_full_scans == 1ULL &&
 		      large_programs[reserve_segment] == 0U);
 	large_maps[logical_pages - 1U].start_block = logical_pages - 1U;
+
+	/*
+	 * A RAW GC move that removes the apparent final mapping from a closed
+	 * victim performs another authoritative full-map proof inside
+	 * swapz_finish_raw(), before cached counts can reach zero. Keep 255 of
+	 * victim segment 1's mappings valid in the foreground headroom segment,
+	 * leave one source mapping behind, then stage that last move into the
+	 * final free headroom block. Staging itself fits the open segment and is
+	 * deliberately outside the timed publication boundary.
+	 */
+	{
+		const swapz_u32 victim = 1U;
+		const swapz_u32 victim_start = victim * SWAPZ_SEGMENT_BLOCKS;
+		const swapz_u32 spare_start = logical_pages;
+		const swapz_u32 spare_segment =
+			spare_start / SWAPZ_SEGMENT_BLOCKS;
+		const swapz_u32 moved_first = victim_start + 1U;
+		const swapz_u32 moved_end = victim_start + SWAPZ_SEGMENT_BLOCKS;
+
+		REQUIRE_CLAIM(spare_start + SWAPZ_SEGMENT_BLOCKS <=
+			      reserve_segment * SWAPZ_SEGMENT_BLOCKS);
+		for (logical = moved_first; logical < moved_end; ++logical) {
+			swapz_u32 new_start = spare_start + logical - moved_first;
+
+			large_maps[logical].start_block = new_start;
+			large_live[logical] = 0U;
+			large_classes[logical] = 0U;
+			large_live[new_start] = 1U;
+			large_classes[new_start] = 1U;
+		}
+		large_counts[victim] = 1U;
+		large_counts[spare_segment] = SWAPZ_SEGMENT_BLOCKS - 1U;
+		large_programs[spare_segment] = 1U;
+		for (repeat = 0; repeat < CLAIM_SCAN_REPEATS; ++repeat) {
+			struct swapz_map old_map = large_maps[victim_start];
+			struct swapz_tx tx;
+			swapz_u32 page = victim_start;
+			swapz_u32 destination = spare_start +
+				SWAPZ_SEGMENT_BLOCKS - 1U;
+
+			sample = authority;
+			sample.open_segment = spare_segment;
+			sample.next_block = destination;
+			REQUIRE_CLAIM(swapz_stage(
+				&sample, &page, 1U, 1U, &tx) == 0);
+			REQUIRE_CLAIM(tx.start_block == destination);
+			clock_start = now_ns();
+			cpu_start = thread_cpu_ns();
+			REQUIRE_CLAIM(swapz_finish_raw(
+				&sample, &tx, raw_page, 1U, 0) == 0);
+			final_publish_wall[repeat] = now_ns() - clock_start;
+			final_publish_cpu[repeat] =
+				thread_cpu_ns() - cpu_start;
+			if (final_publish_wall[repeat] > final_publish_worst)
+				final_publish_worst =
+					final_publish_wall[repeat];
+
+			large_maps[victim_start] = old_map;
+			large_live[victim_start] = 1U;
+			large_classes[victim_start] = 1U;
+			large_live[destination] = 0U;
+			large_classes[destination] = 0U;
+			large_counts[victim] = 1U;
+			large_counts[spare_segment] =
+				SWAPZ_SEGMENT_BLOCKS - 1U;
+		}
+		for (logical = moved_first; logical < moved_end; ++logical) {
+			swapz_u32 moved_start =
+				spare_start + logical - moved_first;
+
+			large_maps[logical].start_block = logical;
+			large_live[moved_start] = 0U;
+			large_classes[moved_start] = 0U;
+			large_live[logical] = 1U;
+			large_classes[logical] = 1U;
+		}
+		large_counts[victim] = SWAPZ_SEGMENT_BLOCKS;
+		large_counts[spare_segment] = 0U;
+	}
 
 	/*
 	 * Isolate the second authoritative proof at GC commit. Manufacture
@@ -346,6 +433,10 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		uint64_t claimed_cpu_median = scan_median(claimed_cpu);
 		uint64_t traversal_wall_median = scan_median(traversal_wall);
 		uint64_t traversal_cpu_median = scan_median(traversal_cpu);
+		uint64_t final_publish_wall_median =
+			scan_median(final_publish_wall);
+		uint64_t final_publish_cpu_median =
+			scan_median(final_publish_cpu);
 		uint64_t commit_wall_median = scan_median(commit_wall);
 		uint64_t commit_cpu_median = scan_median(commit_cpu);
 
@@ -363,6 +454,9 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 		       "\"traversal_control_cpu_median_ns\":%" PRIu64 ","
 		       "\"virgin_effective_map_gbps\":%.3f,"
 		       "\"claimed_effective_map_gbps\":%.3f,"
+		       "\"final_map_publish_wall_median_ns\":%" PRIu64 ","
+		       "\"final_map_publish_cpu_median_ns\":%" PRIu64 ","
+		       "\"final_map_publish_max_observed_ns\":%" PRIu64 ","
 		       "\"synthetic_gc_commit_wall_median_ns\":%" PRIu64 ","
 		       "\"synthetic_gc_commit_cpu_median_ns\":%" PRIu64 ","
 		       "\"synthetic_gc_commit_max_observed_ns\":%" PRIu64 ","
@@ -377,6 +471,8 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 				      (double)virgin_median : 0.0,
 		       claimed_median ? (double)map_bytes /
 				       (double)claimed_median : 0.0,
+		       final_publish_wall_median, final_publish_cpu_median,
+		       final_publish_worst,
 		       commit_wall_median, commit_cpu_median, commit_worst,
 		       corrupt_wall, virgin_corrupt_wall);
 	}
