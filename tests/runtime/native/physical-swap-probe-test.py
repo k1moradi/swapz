@@ -605,6 +605,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(
                     probe, "_partition_identity",
                     return_value=("deadbeef-03", state["size_bytes"])), \
+                mock.patch.object(probe, "_physical_parent_identity",
+                                  return_value="259:0"), \
                 mock.patch.object(probe, "_run", return_value=completed), \
                 mock.patch.object(
                     probe.Path, "resolve",
@@ -1118,6 +1120,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target, evidence, _ = self.reviewed_device_fixture()
         target.update({
             "device": "/dev/synthetic-physical-partition",
+            "parent_major_minor": "8:0",
             "swap_path": target["device_arg"], "swap_priority": -1,
             "swap_size_kib": target["size_bytes"] // 1024,
             "swap_used_kib": 0,
@@ -1266,7 +1269,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def simulate_physical_run(self, wrong_mapper=False, mapper_fault=None,
                               identity_failure_at=None,
-                              oracle_failure_at=None):
+                              oracle_failure_at=None,
+                              missing_lower_after_at=None,
+                              truncated_oracle_at=None,
+                              teardown_missing_gate=False,
+                              teardown_not_complete=False):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         token = "1234567890abcdef"
@@ -1297,6 +1304,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         events = []
         identity_verifications = 0
         oracle_invocations = 0
+        counter_reads = 0
 
         def verify_target(_target):
             nonlocal identity_verifications
@@ -1317,6 +1325,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     return subprocess.CompletedProcess(
                         command, 1, stdout="FAIL injected physical phase\n",
                         stderr="injected phase failure\n")
+                if oracle_invocations == truncated_oracle_at:
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout="TRACE" * probe.MAX_RECORDED_OUTPUT_CHARS,
+                        stderr="")
             if command[:2] == ["dmsetup", "info"]:
                 if command == ["dmsetup", "info", "-c", "--noheadings",
                                "-o", "name,uuid"]:
@@ -1341,12 +1354,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 if fault == "table":
                     table = table[:-1] + ("1" if table[-1] != "1" else "0")
                 output = table + "\n"
+            elif command[:2] == ["dmsetup", "status"]:
+                output = f"0 {probe.LOGICAL_SECTORS} swapz failed=0 error=0\n"
             else:
                 output = ""
             return subprocess.CompletedProcess(command, 0,
                                                stdout=output, stderr="")
 
         def read_text(path, *args, **kwargs):
+            nonlocal counter_reads
             value = str(path)
             if value.endswith("/parameters/allow_physical_backing"):
                 return "Y\n"
@@ -1359,6 +1375,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if value.endswith("/slaves/synthetic/dev"):
                 return f"{target['major']}:{target['minor'] + (1 if fault == 'lower' else 0)}\n"
             if value.endswith("/stat"):
+                counter_reads += 1
+                if counter_reads == missing_lower_after_at:
+                    return "0 0 0\n"  # Missing required kernel counters.
                 return "0 0 0 0 0 0 0 0 0 0 0\n"
             return REAL_PATH_READ_TEXT(path, *args, **kwargs)
 
@@ -1371,13 +1390,26 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             raise AssertionError(f"unexpected sysfs listing: {path}")
 
         def remove_test_objects(saved_state, saved_state_dir):
-            saved_state["stage"] = "COMPLETE"
+            saved_state["stage"] = (
+                "ORACLE_PASS" if teardown_not_complete else "COMPLETE")
             probe._release_partition_ownership(saved_state)
             result_path = Path(saved_state_dir) / probe.RESULTS_NAME
             saved_results = json.loads(result_path.read_text())
             inventory_after = probe._dm_inventory_snapshot(
                 saved_state["dm_name"], saved_state["dm_uuid"])
             inventory_before = saved_results["dm_inventory_before"]
+            # Synthetic normal teardown: never invent a physical measurement.
+            saved_results["block_stats_after"] = probe._block_stat_snapshot(target)
+            saved_results["lower_io_delta"] = probe._lower_io_delta(
+                saved_results["block_stats_before"],
+                saved_results["block_stats_after"])
+            saved_results["lower_io_evidence_gate"] = "AVAILABLE"
+            saved_results["kernel_swapz_messages"] = {
+                "available": True, "time_filter_applied": True,
+                "truncated": False, "matching_line_count": 0, "messages": "",
+            }
+            saved_results["kernel_diagnostics_gate"] = (
+                "BLOCKED" if teardown_missing_gate else "AVAILABLE")
             saved_results.update({
                 "final_block0_sha256": saved_results[
                     "original_header_sha256"],
@@ -1394,7 +1426,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "module_cleanup_succeeded": True,
                 "active_partition_marker_present": False,
                 "approval_consumed": True,
-                "final_recovery_state": "COMPLETE",
+                "final_recovery_state": saved_state["stage"],
                 "dm_inventory_after": inventory_after,
                 "unrelated_mapper_inventory_unchanged": (
                     inventory_before["other_mapper_count"] ==
@@ -1469,10 +1501,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 for patch in patches:
                     active_patches.enter_context(patch)
                 if fault or identity_failure_at is not None or \
-                        oracle_failure_at is not None:
+                        oracle_failure_at is not None or \
+                        missing_lower_after_at is not None or \
+                        truncated_oracle_at is not None or \
+                        teardown_missing_gate or teardown_not_complete:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
-                            "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed"):
+                            "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state"):
                         probe.run_probe(target["device_arg"], target["device_arg"],
                                         directory, "/reviewed/review.json")
                 else:
@@ -2052,6 +2087,274 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe._prepare_state(target, state_dir, evidence, review)
             self.assertFalse((state_dir / probe.STATE_NAME).exists(),
                              "unflushed backup cannot authorize swapoff")
+
+
+    def test_parent_topology_wrong_parent_and_missing_disk_are_blocked(self):
+        # The fixture contains no real /dev access or sysfs dependency.
+        with tempfile.TemporaryDirectory() as directory:
+            disk = Path(directory) / "sdb"
+            partition = disk / "sdb1"
+            partition.mkdir(parents=True)
+            (partition / "partition").write_text("1\n")
+            (disk / "dev").write_text("8:16\n")
+            (disk / "device").mkdir()
+            original_resolve = probe.Path.resolve
+
+            def resolve(path, *args, **kwargs):
+                if str(path) == "/sys/dev/block/8:17":
+                    return partition
+                if str(path) == "/sys/dev/block/8:16":
+                    return disk
+                return original_resolve(path, *args, **kwargs)
+
+            with mock.patch.object(probe.Path, "resolve", resolve):
+                self.assertEqual(
+                    probe._physical_parent_identity(8, 17), "8:16")
+                (disk / "dev").write_text("8:18\n")
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "parent_topology|parent_major_minor.*expected"):
+                    probe._physical_parent_identity(8, 17)
+                (disk / "dev").write_text("8:16\n")
+                (disk / "device").rmdir()
+                with self.assertRaisesRegex(probe.ProbeError,
+                                            "parent_topology"):
+                    probe._physical_parent_identity(8, 17)
+
+    def test_stale_swap_uuid_and_changed_device_block_preflight(self):
+        probe._require_matching_swap_uuid(
+            "/dev/disk/by-uuid/deadbeef-01", "DEADBEEF-01")
+        with self.assertRaisesRegex(
+                probe.ProbeError,
+                "swap_uuid expected='deadbeef-01' observed='other'"):
+            probe._require_matching_swap_uuid(
+                "/dev/disk/by-uuid/deadbeef-01", "other")
+
+        target = {"device": "/dev/synthetic-part", "major": 8,
+                  "minor": 17, "parent_major_minor": "8:16",
+                  "partuuid": "deadbeef-01", "size_bytes": 16 << 20}
+        with mock.patch.object(probe, "block_identity", return_value=(8, 18)):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "block identity changed"):
+                probe._verify_target_identity(target)
+        with mock.patch.object(probe, "block_identity",
+                               return_value=(8, 17)), \
+                mock.patch.object(probe, "_run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 0, stdout=str(target["size_bytes"]), stderr="")), \
+                mock.patch.object(probe, "_partition_identity",
+                    return_value=(target["partuuid"], target["size_bytes"])), \
+                mock.patch.object(probe, "_physical_parent_identity",
+                    return_value="8:32"):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "parent_major_minor expected='8:16' observed='8:32'"):
+                probe._verify_target_identity(target)
+
+    def test_selected_swap_usage_blocks_smoke_preflight(self):
+        # This smoke requires an active but *unused* original swap; the
+        # performance campaign instead requires an inactive selected card.
+        device_arg = "/dev/disk/by-uuid/deadbeef-01"
+        size_bytes = 64 << 20
+        row = {"type": "part", "fstype": "swap", "uuid": "deadbeef-01",
+               "size": size_bytes}
+        lsblk = subprocess.CompletedProcess(
+            [], 0, stdout=json.dumps({"blockdevices": [row]}), stderr="")
+        active = {"path": device_arg, "kind": "partition", "size_kib": 65532,
+                  "used_kib": 128, "priority": -1}
+        with mock.patch.object(probe.Path, "resolve",
+                               return_value=Path("/dev/synthetic-part")), \
+                mock.patch.object(probe.Path, "is_file", return_value=True), \
+                mock.patch.object(probe.Path, "iterdir", return_value=iter(())), \
+                mock.patch.object(probe, "block_identity",
+                                  return_value=(8, 17)), \
+                mock.patch.object(probe, "_physical_parent_identity",
+                                  return_value="8:16"), \
+                mock.patch.object(probe, "_mountinfo_has_device",
+                                  return_value=False), \
+                mock.patch.object(probe, "_require_root_not_on_target"), \
+                mock.patch.object(probe, "_run", return_value=lsblk), \
+                mock.patch.object(probe, "_partition_identity",
+                                  return_value=("deadbeef-01", size_bytes)), \
+                mock.patch.object(probe, "_active_swap_for",
+                                  return_value=active):
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "require zero used KiB"):
+                probe.inspect_target(device_arg, device_arg)
+
+    def test_lower_stat_parsing_is_strict_and_host_visible_only(self):
+        target = {"parent_major_minor": "8:16"}
+        good = "4 0 8 0 5 0 10 0 0 0 0\n"
+        with mock.patch.object(probe.Path, "read_text", return_value=good):
+            snapshot = probe._block_stat_snapshot(target)
+        self.assertTrue(snapshot["available"])
+        self.assertEqual(snapshot["device_major_minor"], "8:16")
+        self.assertEqual(snapshot["sector_bytes"], 512)
+        for contents, expected in (
+                ("0 1 2\n", "lower_stat_fields"),
+                ("0 0 -1 0 0 0 0 0 0 0 0\n", "lower_stat\\[2\\]"),
+                ("0 0 nan 0 0 0 0 0 0 0 0\n", "lower_stat\\[2\\]"),
+                (f"{2**64} 0 0 0 0 0 0 0 0 0 0\n", "uint64_max"),
+                (f"0 0 {2**64 // 512} 0 0 0 0 0 0 0 0\n",
+                 "uint64_max/512"),
+        ):
+            with self.subTest(contents=contents), mock.patch.object(
+                    probe.Path, "read_text", return_value=contents):
+                failed = probe._block_stat_snapshot(target)
+                self.assertFalse(failed["available"])
+                self.assertRegex(failed["error"], expected)
+        self.assertFalse(probe._block_stat_snapshot({})["available"])
+
+    def test_lower_delta_rejects_reset_wrap_substitution_and_unavailable(self):
+        def snapshot(read_requests=3, read_sectors=4, write_requests=5,
+                     write_sectors=6, parent="8:16"):
+            values = [0] * 11
+            for index, value in ((0, read_requests), (2, read_sectors),
+                                 (4, write_requests), (6, write_sectors)):
+                values[index] = value
+            return {"available": True, "values": values,
+                    "device_major_minor": parent, "sector_bytes": 512}
+        before = snapshot()
+        after = snapshot(4, 6, 8, 10)
+        self.assertEqual(probe._lower_io_delta(before, after), {
+            "lower_read_requests": 1, "lower_read_bytes": 1024,
+            "lower_write_requests": 3, "lower_write_bytes": 2048,
+        })
+        for changed, expected in (
+                (snapshot(2, 6, 8, 10), "lower_read_requests.*reset_or_wrap"),
+                (snapshot(4, 3, 8, 10), "lower_read_sectors.*reset_or_wrap"),
+                (snapshot(4, 6, 8, 5), "lower_write_sectors.*reset_or_wrap"),
+                (snapshot(4, 6, 8, 10, "8:32"), "lower_io_device"),
+                ({**after, "values": [-1] + [0] * 10}, "uint64"),
+                ({**after, "values": [2**64] + [0] * 10}, "uint64"),
+                ({**after, "values": after["values"][:10]}, "uint64"),
+                ({"available": False, "error": "missing stat"},
+                 "lower_io_after.*missing stat"),
+        ):
+            with self.subTest(expected=expected), self.assertRaisesRegex(
+                    probe.ProbeError, expected):
+                probe._lower_io_delta(before, changed)
+
+    def test_unavailable_lower_io_and_truncated_oracle_cannot_pass(self):
+        for argument in ("missing_lower_after_at", "truncated_oracle_at"):
+            with self.subTest(argument=argument):
+                injection_index = 3 if argument == "missing_lower_after_at" else 1
+                events, state, _ = self.simulate_physical_run(
+                    **{argument: injection_index})
+                self.assertEqual(state["_test_results"]["physical_oracle_phases"][
+                    0]["status"], "FAIL")
+                first_phase = state["_test_results"]["physical_oracle_phases"][0]
+                self.assertIn(
+                    "lower_io_error" if argument == "missing_lower_after_at"
+                    else "trace_error", first_phase)
+                self.assertFalse(any(
+                    event[0] == "command" and event[1][0] == "swapon" and
+                    "swapz-demo" in " ".join(event[1]) for event in events))
+
+    def test_normal_teardown_with_missing_diagnostics_cannot_report_success(self):
+        events, state, _ = self.simulate_physical_run(
+            teardown_missing_gate=True)
+        self.assertEqual(state["_test_results"]["final_recovery_state"],
+                         "COMPLETE")
+        self.assertEqual(state["_test_results"]["kernel_diagnostics_gate"],
+                         "BLOCKED")
+        self.assertIn(("recover",), events)
+
+    def test_dm_status_health_cannot_be_fabricated_from_missing_or_clipped_trace(self):
+        healthy = ("0 " + str(probe.LOGICAL_SECTORS) +
+                   " swapz some_counter=1 failed=0 error=0\n")
+        def record(contents):
+            return {"return_code": 0, "stdout": contents, "stderr": "",
+                    "timed_out": False,
+                    "stdout_truncated": False, "stderr_truncated": False}
+        self.assertTrue(probe._swapz_status_healthy(record(healthy)))
+        for contents in (
+                "", "0 " + str(probe.LOGICAL_SECTORS) + " swapz\n",
+                healthy.replace("failed=0", "failed=1"),
+                healthy.replace("error=0", "error=-5"),
+                healthy + healthy,
+                healthy.replace("swapz", "linear"),
+                healthy.replace("failed=0", "failed=0 failed=0"),
+        ):
+            with self.subTest(contents=contents):
+                self.assertFalse(probe._swapz_status_healthy(record(contents)))
+        self.assertFalse(probe._swapz_status_healthy({
+            **record(healthy), "stdout_truncated": True}))
+        with mock.patch.object(probe, "_run",
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout=healthy + "x" * probe.MAX_STATUS_OUTPUT_CHARS,
+                stderr="")):
+            truncated = probe._captured_command(["dmsetup", "status", "owned"])
+        self.assertTrue(truncated["stdout_truncated"])
+        self.assertFalse(probe._swapz_status_healthy(truncated))
+
+    def test_incomplete_normal_teardown_never_publishes_smoke_pass(self):
+        events, state, _ = self.simulate_physical_run(
+            teardown_not_complete=True)
+        self.assertEqual(state["stage"], "ORACLE_PASS")
+        self.assertEqual(state["_test_results"]["final_recovery_state"],
+                         "ORACLE_PASS")
+        self.assertIn(("recover",), events)
+
+    def test_read_only_plan_blocks_missing_lower_counters(self):
+        target, _, _ = self.reviewed_device_fixture()
+        target["parent_major_minor"] = "8:0"
+        with mock.patch.object(probe, "inspect_target", return_value=target), \
+                mock.patch.object(probe, "_block_stat_snapshot",
+                    return_value={"available": False,
+                                  "error": "lower_stat_fields expected>=11 observed=0"}), \
+                mock.patch.object(probe, "current_source_evidence",
+                                  side_effect=AssertionError(
+                                      "source evidence should not be consulted")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "preflight_lower_io expected=available.*lower_stat_fields"):
+                probe.plan(target["device_arg"], target["device_arg"])
+
+    def test_missing_lower_and_incomplete_kernel_evidence_block_final_gate(self):
+        target = {"device": "/dev/synthetic", "major": 8, "minor": 17,
+                  "size_bytes": 64 << 20, "parent_major_minor": "8:16"}
+        state = {"partuuid": "deadbeef-01", "run_id": "a" * 32,
+                 "stage": "COMPLETE", "swap_was_active": True,
+                 "swap_size_kib": 65532, "swap_priority": -1,
+                 "dm_name": "swapz-demo-physical-1234567890abcdef",
+                 "dm_uuid": "SWAPZ-TEST-PHYSICAL-1234567890abcdef"}
+        header = b"Z" * probe.PAGE_BYTES
+        result = {"original_header_sha256": hashlib.sha256(header).hexdigest(),
+                  "block_stats_before": {"available": False,
+                                         "error": "counter device unavailable"}}
+        with mock.patch.object(probe, "_read_block0", return_value=header), \
+                mock.patch.object(probe, "_active_swap_for", return_value={
+                    "kind": "partition", "size_kib": 65532,
+                    "priority": -1}), \
+                mock.patch.object(probe, "_block_stat_snapshot",
+                                  return_value={"available": False,
+                                                "error": "stat missing"}), \
+                mock.patch.object(probe, "_kernel_swapz_messages",
+                                  return_value={"available": True,
+                                                "time_filter_applied": True,
+                                                "truncated": True}), \
+                mock.patch.object(probe, "_mapper_exists", return_value=False), \
+                mock.patch.object(probe, "_dm_inventory_snapshot",
+                                  return_value={"other_mapper_count": 0,
+                                                "other_mapper_sha256": "x"}), \
+                mock.patch.object(probe, "_save_results"):
+            probe._final_observations(result, self.recovery_base, state, target)
+        self.assertEqual(result["lower_io_evidence_gate"], "BLOCKED")
+        self.assertIn("counter device unavailable",
+                      result["lower_io_evidence_error"])
+        self.assertEqual(result["kernel_diagnostics_gate"], "BLOCKED")
+        self.assertIn("complete", result["kernel_diagnostics_error"])
+
+    def test_source_sha_mismatch_never_grants_review(self):
+        target, evidence, review = self.reviewed_device_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "review.json"
+            review["source_sha"] = "f" * 40
+            path.write_text(json.dumps(review))
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "source, helper and device"):
+                probe.validate_review(path, evidence, target)
 
 
 if __name__ == "__main__":

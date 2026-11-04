@@ -46,6 +46,9 @@ VERBAL_APPROVAL_TEXT = (
     "or recovery uncertainty voids this approval and requires the run to stop."
 )
 MAX_RECORDED_OUTPUT_CHARS = 4096
+# The swapz DM status ABI contains many named counters. Preserve a bounded
+# complete status line rather than certifying a clipped prefix as healthy.
+MAX_STATUS_OUTPUT_CHARS = 32768
 POST_QUALIFICATION_PATHS = frozenset({
     "tests/tools/physical-swap-probe.py",
     "tests/runtime/native/physical-swap-probe-test.py",
@@ -285,6 +288,39 @@ def _require_physical_host():
                 f"{_bounded_text(result.stderr or detected)}")
 
 
+def _physical_parent_identity(major, minor):
+    """Prove one sysfs partition-to-physical-disk parent, never a DM fallback."""
+    try:
+        partition = Path(f"/sys/dev/block/{major}:{minor}").resolve(strict=True)
+        parent = partition.parent
+        parent_identity = (parent / "dev").read_text().strip()
+        if not re.fullmatch(r"[0-9]+:[0-9]+", parent_identity):
+            raise ProbeError(
+                f"parent_major_minor expected=number:number observed={parent_identity!r}")
+        if (not (partition / "partition").is_file()
+                or Path(f"/sys/dev/block/{parent_identity}").resolve(
+                    strict=True) != parent
+                or not (parent / "device").exists()
+                or re.fullmatch(r"(?:dm-|loop|ram|zram|nullb)[0-9]+",
+                                parent.name)):
+            raise ProbeError(
+                f"parent_topology expected=one physical disk observed={parent}")
+        return parent_identity
+    except (OSError, RuntimeError) as exc:
+        raise ProbeError(
+            f"parent_topology expected=one verifiable physical disk "
+            f"observed={_bounded_text(exc)}") from exc
+
+
+def _require_matching_swap_uuid(device_arg, observed_uuid):
+    """A stale by-uuid alias must not approve another swap signature."""
+    selected_uuid = Path(device_arg).name
+    if not isinstance(observed_uuid, str) or (
+            selected_uuid.lower() != observed_uuid.lower()):
+        raise ProbeError(
+            f"swap_uuid expected={selected_uuid!r} observed={observed_uuid!r}")
+
+
 def _verify_target_identity(target):
     if block_identity(target["device"]) != (target["major"], target["minor"]):
         raise ProbeError("selected block identity changed during the operation")
@@ -298,7 +334,14 @@ def _verify_target_identity(target):
         raise ProbeError("selected partition size changed during the operation")
     partuuid, part_size = _partition_identity(target["device"])
     if (partuuid != target["partuuid"] or part_size != target["size_bytes"]):
-        raise ProbeError("selected partition persistent identity changed")
+        raise ProbeError(
+            f"persistent_identity expected=({target['partuuid']}, "
+            f"{target['size_bytes']}) observed=({partuuid}, {part_size})")
+    parent = _physical_parent_identity(target["major"], target["minor"])
+    if parent != target.get("parent_major_minor"):
+        raise ProbeError(
+            f"parent_major_minor expected={target.get('parent_major_minor')!r} "
+            f"observed={parent!r}")
 
 
 def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
@@ -315,6 +358,7 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
     sys_entry = Path(f"/sys/dev/block/{major}:{minor}").resolve()
     if not (sys_entry / "partition").is_file():
         raise ProbeError("selected block device is not a partition")
+    parent_major_minor = _physical_parent_identity(major, minor)
     if any((sys_entry / "holders").iterdir()):
         raise ProbeError("selected partition has active block-device holders")
     if _mountinfo_has_device(major, minor):
@@ -332,8 +376,9 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
     size_bytes = row.get("size")
     if row.get("type") != "part" or row.get("fstype") != "swap":
         raise ProbeError("selected partition is not identified as Linux swap")
-    if not row.get("uuid") or not isinstance(size_bytes, int):
+    if type(size_bytes) is not int or size_bytes <= 0:
         raise ProbeError("selected swap partition lacks stable identity or size")
+    _require_matching_swap_uuid(device_arg, row.get("uuid"))
     partuuid, partition_size = _partition_identity(device)
     if partition_size != size_bytes:
         raise ProbeError("selected partition inventory has inconsistent size")
@@ -356,6 +401,7 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
         "device": device,
         "major": major,
         "minor": minor,
+        "parent_major_minor": parent_major_minor,
         "size_bytes": size_bytes,
         "uuid": row["uuid"],
         "partuuid": partuuid,
@@ -954,15 +1000,15 @@ def _utc_timestamp():
         "+00:00", "Z")
 
 
-def _bounded_text(value):
+def _bounded_text(value, limit=MAX_RECORDED_OUTPUT_CHARS):
     if isinstance(value, bytes):
         value = value.decode("utf-8", errors="replace")
     if not isinstance(value, str):
         value = str(value)
-    if len(value) <= MAX_RECORDED_OUTPUT_CHARS:
+    if len(value) <= limit:
         return value
     suffix = "\n...[truncated]"
-    return value[:MAX_RECORDED_OUTPUT_CHARS - len(suffix)] + suffix
+    return value[:limit - len(suffix)] + suffix
 
 
 def _save_results(state_dir, results):
@@ -988,28 +1034,113 @@ def _save_results(state_dir, results):
 
 
 def _captured_command(args, timeout=15):
-    """Return a small command record even when a diagnostic command fails."""
+    """Return a bounded command record; never conceal output truncation."""
+    output_limit = (MAX_STATUS_OUTPUT_CHARS if args[:2] ==
+                    ["dmsetup", "status"] else MAX_RECORDED_OUTPUT_CHARS)
     try:
         result = _run(args, timeout=timeout, check=False)
     except ProbeError as exc:
         message = _bounded_text(exc)
         return {"return_code": None, "stdout": "", "stderr": message,
-                "timed_out": "timed out" in message.lower()}
+                "timed_out": "timed out" in message.lower(),
+                "stdout_truncated": False, "stderr_truncated": False}
     return {"return_code": result.returncode,
-            "stdout": _bounded_text(result.stdout),
-            "stderr": _bounded_text(result.stderr),
-            "timed_out": False}
+            "stdout": _bounded_text(result.stdout, output_limit),
+            "stderr": _bounded_text(result.stderr, output_limit),
+            "timed_out": False,
+            "stdout_truncated": len(result.stdout) > output_limit,
+            "stderr_truncated": len(result.stderr) > output_limit}
+
+
+# Linux /sys/block/*/stat sector units are 512 bytes, independent of
+# logical/physical sector sizes. These are host-visible device I/O counters,
+# NOT direct SD NAND wear, write amplification or endurance observations.
+MAX_BLOCK_COUNTER = (1 << 64) - 1
+LOWER_COUNTER_FIELDS = (
+    ("lower_read_requests", 0),
+    ("lower_read_sectors", 2),
+    ("lower_write_requests", 4),
+    ("lower_write_sectors", 6),
+)
 
 
 def _block_stat_snapshot(target):
-    path = Path(f"/sys/dev/block/{target['major']}:{target['minor']}/stat")
+    parent = target.get("parent_major_minor")
+    if not isinstance(parent, str) or not re.fullmatch(
+            r"[0-9]+:[0-9]+", parent):
+        return {"available": False,
+                "error": f"lower_parent_major_minor expected=number:number "
+                         f"observed={parent!r}"}
+    path = Path(f"/sys/dev/block/{parent}/stat")
     try:
-        fields = [int(value) for value in path.read_text().split()]
-        if not fields:
-            raise ValueError("empty block statistics")
-        return {"available": True, "values": fields}
+        tokens = path.read_text().split()
+        if len(tokens) < 11:
+            raise ValueError(
+                f"lower_stat_fields expected>=11 observed={len(tokens)}")
+        fields = []
+        for index, token in enumerate(tokens):
+            if not token.isascii() or not token.isdecimal():
+                raise ValueError(
+                    f"lower_stat[{index}] expected=unsigned_integer "
+                    f"observed={token!r}")
+            value = int(token)
+            if value > MAX_BLOCK_COUNTER:
+                raise ValueError(
+                    f"lower_stat[{index}] expected<=uint64_max observed={value}")
+            fields.append(value)
+        for field, index in LOWER_COUNTER_FIELDS:
+            if "sectors" in field and fields[index] > MAX_BLOCK_COUNTER // 512:
+                raise ValueError(
+                    f"{field} expected<=uint64_max/512 "
+                    f"observed={fields[index]}")
+        return {"available": True, "values": fields,
+                "device_major_minor": parent, "sector_bytes": 512}
     except (OSError, ValueError) as exc:
-        return {"available": False, "error": _bounded_text(exc)}
+        return {"available": False, "error": _bounded_text(exc),
+                "device_major_minor": parent}
+
+
+def _lower_io_delta(before, after):
+    """Fail closed on missing, invalid, substituted, or reset lower counters."""
+    for label, snapshot in (("before", before), ("after", after)):
+        if not isinstance(snapshot, dict) or snapshot.get("available") is not True:
+            detail = (snapshot.get("error") if isinstance(snapshot, dict)
+                      else repr(snapshot))
+            raise ProbeError(
+                f"lower_io_{label} expected=available observed={_bounded_text(detail)}")
+        values = snapshot.get("values")
+        if not isinstance(values, list) or len(values) < 11 or any(
+                type(value) is not int or value < 0 or value > MAX_BLOCK_COUNTER
+                for value in values):
+            raise ProbeError(
+                f"lower_io_{label}.values expected>=11_uint64_counters "
+                f"observed={_bounded_text(values)}")
+        for field, index in LOWER_COUNTER_FIELDS:
+            if "sectors" in field and values[index] > MAX_BLOCK_COUNTER // 512:
+                raise ProbeError(
+                    f"{label}.{field} expected<=uint64_max/512 "
+                    f"observed={values[index]}")
+    parent = before.get("device_major_minor")
+    if (not isinstance(parent, str) or
+            not re.fullmatch(r"[0-9]+:[0-9]+", parent) or
+            after.get("device_major_minor") != parent or
+            before.get("sector_bytes") != 512 or
+            after.get("sector_bytes") != 512):
+        raise ProbeError(
+            f"lower_io_device expected=({parent},512) "
+            f"observed=({after.get('device_major_minor')},"
+            f"{after.get('sector_bytes')})")
+    delta = {}
+    for field, index in LOWER_COUNTER_FIELDS:
+        previous = before["values"][index]
+        current = after["values"][index]
+        if current < previous:
+            raise ProbeError(
+                f"{field} reset_or_wrap expected>={previous} observed={current}")
+        difference = current - previous
+        delta[field.replace("_sectors", "_bytes")] = (
+            difference * 512 if "sectors" in field else difference)
+    return delta
 
 
 def _kernel_swapz_messages(start_timestamp):
@@ -1024,10 +1155,13 @@ def _kernel_swapz_messages(start_timestamp):
             if result.returncode == 0:
                 matching = [line for line in result.stdout.splitlines()
                             if re.search(r"swapz", line, re.IGNORECASE)]
+                selected = "\n".join(matching[-32:])
                 return {"available": True, "source": "journalctl",
                         "time_filter_applied": True,
                         "matching_line_count": len(matching),
-                        "messages": _bounded_text("\n".join(matching[-32:]))}
+                        "truncated": len(matching) > 32 or
+                                     len(selected) > MAX_RECORDED_OUTPUT_CHARS,
+                        "messages": _bounded_text(selected)}
             journalctl_error = _bounded_text(result.stderr or result.stdout)
         except ProbeError as exc:
             journalctl_error = _bounded_text(exc)
@@ -1053,11 +1187,35 @@ def _kernel_swapz_messages(start_timestamp):
                 "error": _bounded_text(result.stderr or result.stdout)}
     matching = [line for line in result.stdout.splitlines()
                 if re.search(r"swapz", line, re.IGNORECASE)]
+    selected = "\n".join(matching[-32:])
     return {"available": True, "source": "dmesg",
             "time_filter_applied": False,
             "journalctl_error": journalctl_error,
             "matching_line_count": len(matching),
-            "messages": _bounded_text("\n".join(matching[-32:]))}
+            "truncated": len(matching) > 32 or
+                         len(selected) > MAX_RECORDED_OUTPUT_CHARS,
+            "messages": _bounded_text(selected)}
+
+
+def _swapz_status_healthy(captured):
+    """Require a complete, unique terminal-health pair from the exact DM status."""
+    if (not isinstance(captured, dict) or captured.get("return_code") != 0
+            or captured.get("timed_out") is not False
+            or captured.get("stdout_truncated") is not False
+            or captured.get("stderr_truncated") is not False):
+        return False
+    lines = captured.get("stdout", "").strip().splitlines()
+    if len(lines) != 1:
+        return False
+    fields = lines[0].split()
+    if fields[:3] != ["0", str(LOGICAL_SECTORS), "swapz"]:
+        return False
+    for key in ("failed", "error"):
+        matches = [field for field in fields if field.startswith(f"{key}=")]
+        if matches != [f"{key}=0"]:
+            return False
+    return not any(field.startswith("status_snapshot_error=")
+                   for field in fields)
 
 
 def _dm_info_rows(stdout, field_count):
@@ -1121,8 +1279,25 @@ def _final_observations(results, state_dir, state, target):
         results["final_swap_row"] = None
         results["final_swap_error"] = _bounded_text(exc)
     results["block_stats_after"] = _block_stat_snapshot(target)
+    try:
+        results["lower_io_delta"] = _lower_io_delta(
+            results.get("block_stats_before"), results["block_stats_after"])
+        results["lower_io_evidence_gate"] = "AVAILABLE"
+    except ProbeError as exc:
+        results["lower_io_delta"] = None
+        results["lower_io_evidence_gate"] = "BLOCKED"
+        results["lower_io_evidence_error"] = _bounded_text(exc)
     results["kernel_swapz_messages"] = _kernel_swapz_messages(
         results.get("start_timestamp", "now"))
+    diagnostics = results["kernel_swapz_messages"]
+    results["kernel_diagnostics_gate"] = (
+        "AVAILABLE" if diagnostics.get("available") is True
+        and diagnostics.get("time_filter_applied") is True
+        and diagnostics.get("truncated") is False else "BLOCKED")
+    if results["kernel_diagnostics_gate"] == "BLOCKED":
+        results["kernel_diagnostics_error"] = (
+            "kernel_trace expected=available,time_filtered,complete "
+            f"observed={_bounded_text(diagnostics)}")
     row = results.get("final_swap_row")
     # The identity-only recovery target omits original swap parameters.
     # Compare with the durable saved state, including after standalone recovery.
@@ -1313,6 +1488,7 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         "dmsetup_status_after": None,
         "block_stats_before": None,
         "block_stats_after": None,
+        "lower_io_delta": None,
     }
     results["physical_oracle_phases"].append(entry)
     _save_results(state_dir, results)
@@ -1330,12 +1506,17 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
     entry["dmsetup_status_before"] = _captured_command(
         ["dmsetup", "status", state["dm_name"]])
     entry["block_stats_before"] = _block_stat_snapshot(target)
-    if entry["dmsetup_status_before"]["return_code"] != 0:
+    before_status = entry["dmsetup_status_before"]
+    if (not _swapz_status_healthy(before_status) or
+            entry["block_stats_before"].get("available") is not True):
         entry["status"] = "BLOCKED_BEFORE_ORACLE"
-        entry["pre_oracle_status_error"] = "dmsetup status failed"
+        entry["pre_oracle_status_error"] = (
+            "pre_oracle_evidence expected=complete_status_and_lower_counters "
+            f"observed={_bounded_text(before_status)},"
+            f"{_bounded_text(entry['block_stats_before'])}")
         entry["ended_at"] = _utc_timestamp()
         _save_results(state_dir, results)
-        raise ProbeError("dmsetup status failed before physical oracle phase")
+        raise ProbeError(entry["pre_oracle_status_error"])
 
     entry["status"] = "RUNNING"
     entry["oracle_started_at"] = _utc_timestamp()
@@ -1358,11 +1539,24 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         ["dmsetup", "status", state["dm_name"]])
     entry["block_stats_after"] = _block_stat_snapshot(target)
     entry["ended_at"] = _utc_timestamp()
+    try:
+        entry["lower_io_delta"] = _lower_io_delta(
+            entry["block_stats_before"], entry["block_stats_after"])
+    except ProbeError as exc:
+        entry["lower_io_error"] = _bounded_text(exc)
+    after_status = entry["dmsetup_status_after"]
+    if (captured.get("stdout_truncated") or captured.get("stderr_truncated")
+            or after_status.get("stdout_truncated")
+            or after_status.get("stderr_truncated")):
+        entry["trace_error"] = (
+            "oracle_or_status_trace expected=complete observed=truncated")
 
     passed = (
         entry["return_code"] == 0
         and entry.get("post_oracle_identity") == "PASS"
-        and entry["dmsetup_status_after"]["return_code"] == 0
+        and _swapz_status_healthy(after_status)
+        and entry["lower_io_delta"] is not None
+        and "trace_error" not in entry
     )
     entry["status"] = "PASS" if passed else "FAIL"
     _save_results(state_dir, results)
@@ -1545,11 +1739,22 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
         raise ProbeError("recovery state lacks a persistent PARTUUID")
     partuuid, partition_size = _partition_identity(device)
     if (partuuid != expected_partuuid or partition_size != size):
-        raise ProbeError("recovery partition PARTUUID or geometry changed")
+        raise ProbeError(
+            f"recovery_partuuid_size expected=({expected_partuuid}, {size}) "
+            f"observed=({partuuid}, {partition_size})")
+    # Old durable recovery records may predate parent recording; do not
+    # prevent emergency restoration solely because the field was not saved.
+    parent = _physical_parent_identity(major, minor)
+    if state.get("parent_major_minor") is not None and (
+            parent != state["parent_major_minor"]):
+        raise ProbeError(
+            f"recovery_parent_major_minor "
+            f"expected={state['parent_major_minor']!r} observed={parent!r}")
     return {
         "device": device,
         "major": major,
         "minor": minor,
+        "parent_major_minor": parent,
         "size_bytes": size,
         "partuuid": partuuid,
     }
@@ -1587,6 +1792,7 @@ def _prepare_state(target, state_dir, evidence, review):
         "device": target["device"],
         "major": target["major"],
         "minor": target["minor"],
+        "parent_major_minor": target.get("parent_major_minor"),
         "size_bytes": target["size_bytes"],
         "partuuid": target["partuuid"],
         "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
@@ -1637,6 +1843,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
         if not shutil.which(command):
             raise ProbeError(f"required command is missing: {command}")
     dm_inventory_before = _dm_inventory_snapshot()
+    preflight_block_stats = _block_stat_snapshot(target)
+    if preflight_block_stats.get("available") is not True:
+        raise ProbeError(
+            "preflight_lower_io expected=available "
+            f"observed={preflight_block_stats.get('error')}")
 
     lock_fd = _partition_lock(target["partuuid"])
     try:
@@ -1680,7 +1891,12 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             "dm_name": state["dm_name"],
             "dm_uuid": state["dm_uuid"],
             "dm_inventory_before": dm_inventory_before,
-            "block_stats_before": _block_stat_snapshot(target),
+            "block_stats_before": preflight_block_stats,
+            "lower_io_source": (
+                f"/sys/dev/block/{target['parent_major_minor']}/stat"),
+            "lower_io_claim_boundary": (
+                "512-byte sectors and requests are host-visible parent-device "
+                "I/O; not direct NAND wear, flash write amplification or endurance"),
             "physical_oracle_phases": [],
             "final_recovery_state": "BACKED_UP",
         }
@@ -1813,7 +2029,6 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             results["oracle_suite"] = "PASS"
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
-            print("PHYSICAL_SMOKE=BOUNDED_POSITIVE_CORRECTNESS_ONLY")
         except BaseException as exc:
             failure = exc
         if partition_claim_attempted:
@@ -1877,16 +2092,33 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                     "module_cleanup_succeeded",
                     "approval_consumed",
                 )
-                if any(results.get(key) is not True for key in required_true) or \
-                        results.get("active_partition_marker_present") is not False or \
-                        results.get("final_recovery_state") != "COMPLETE" or \
-                        results.get("unrelated_mapper_inventory_unchanged") is not True:
-                    if failure is None:
-                        failure = ProbeError(
-                            "final physical restoration/evidence checks failed")
+                required = (
+                    *((key, True) for key in required_true),
+                    ("active_partition_marker_present", False),
+                    ("final_recovery_state", "COMPLETE"),
+                    ("unrelated_mapper_inventory_unchanged", True),
+                    ("lower_io_evidence_gate", "AVAILABLE"),
+                    ("kernel_diagnostics_gate", "AVAILABLE"),
+                )
+                failures = [
+                    f"{field} expected={expected!r} observed={results.get(field)!r}"
+                    for field, expected in required
+                    if results.get(field) != expected
+                ]
+                if failures and failure is None:
+                    failure = ProbeError(
+                        "final physical restoration/evidence checks failed: "
+                        + "; ".join(failures))
+        if failure is None and state.get("stage") != "COMPLETE":
+            failure = ProbeError(
+                "final_recovery_state expected='COMPLETE' "
+                f"observed={state.get('stage')!r}")
         if failure is not None:
             print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}", file=sys.stderr)
             raise ProbeError(str(failure)) from failure
+        # A successful oracle alone cannot publish success before normal
+        # mapper/module removal, swap restoration, and evidence validation.
+        print("PHYSICAL_SMOKE=BOUNDED_POSITIVE_CORRECTNESS_ONLY")
         print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")
         print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
     finally:
@@ -1896,6 +2128,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
 def plan(device_arg, confirm_arg, review_path=None):
     target = inspect_target(device_arg, confirm_arg)
     target["device_arg"] = device_arg
+    lower_preflight = _block_stat_snapshot(target)
+    if lower_preflight.get("available") is not True:
+        raise ProbeError(
+            f"preflight_lower_io expected=available "
+            f"observed={lower_preflight.get('error')}")
     try:
         _recovery_base(target)
         recovery_message = (
