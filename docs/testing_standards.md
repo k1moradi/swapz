@@ -504,6 +504,9 @@ bytes with the candidate/mixed phase. Short worker completion must fail before
 final drain; a byte-oracle mismatch after a successful drain must remain
 distinguishable from a syscall drain failure. A sampler cleanup error must fail
 an otherwise clean replay but never hide a primary worker or drain error.
+On a failed worker, all submitted sibling jobs must be joined before their
+memoryview-backed I/O buffers are released; cleanup must not replace the
+original short-I/O failure with an exported-buffer error.
 These synthetic cases must not change the frozen trace cohorts, native helper,
 source-bound hashes or loaded acceptance policy.
 Results must identify the replay mode and remain outside the existing history series.

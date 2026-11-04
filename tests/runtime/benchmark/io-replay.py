@@ -2179,6 +2179,19 @@ def replay(args):
                         kernel_read_after = kernel_read_snapshot(path, identity)
                     finally:
                         primary_failure = sys.exc_info()[1]
+                        if primary_failure is not None and pool is not None:
+                            # A failed lane can leave sibling persistent
+                            # workers inside preadv with exported views. Join
+                            # the executor before releasing those buffers, or
+                            # mmap cleanup can replace the original I/O error
+                            # with BufferError.
+                            try:
+                                pool.shutdown(wait=True)
+                            except Exception:
+                                # Preserve the first replay failure; the outer
+                                # cleanup remains responsible for shutdown.
+                                pass
+                            pool = None
                         try:
                             lower_inflight_sampler.close()
                         except Exception:

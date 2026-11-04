@@ -2277,6 +2277,7 @@ class PairReplayContract(unittest.TestCase):
                 self.assertIn("BENCH_IO_PHASE=off:mixed", errors)
                 self.assertIn("short or mismatched timed logical I/O", errors)
                 self.assertNotIn("final fsync failed", errors)
+                self.assertNotIn("BufferError", errors)
 
     def test_python_final_drain_failure_precedes_sampler_cleanup_error(self):
         for mode in ("qd-waves", "persistent-write", "persistent-mixed"):
