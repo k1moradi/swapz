@@ -53,11 +53,16 @@ def parse_meminfo_counters(text: Any) -> dict[str, int]:
     values: dict[str, int] = {}
     maximum_kib = ((1 << 64) - 1) // MEMINFO_UNIT_BYTES
     for line in text.splitlines():
+        name_match = re.match(
+            r"(MemAvailable|SUnreclaim|VmallocUsed):", line)
+        if name_match is None:
+            continue
         match = re.fullmatch(
-            r"(MemAvailable|SUnreclaim|VmallocUsed):[ 	]+([0-9]+)[ 	]+kB",
+            r"(MemAvailable|SUnreclaim|VmallocUsed):[ \t]+([0-9]+)[ \t]+kB",
             line)
         if match is None:
-            continue
+            raise ValueError(
+                f"malformed meminfo counter: {name_match.group(1)}")
         source_name, value_text = match.groups()
         destination = MEMINFO_FIELDS[source_name]
         if destination in values:
