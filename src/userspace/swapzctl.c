@@ -1976,6 +1976,7 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
 	size_t total_bytes = 0;
+	size_t swap_rows = 0;
 	int saw_header = 0;
 	int read_result;
 
@@ -2005,17 +2006,29 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 			return -1;
 		}
 		/*
-		 * Even a locally matching inode or block-device node does not
-		 * bind this row to the active kernel swap object. This includes
-		 * apparently unrelated sibling devices and hard-link aliases.
+		 * Parse every row before refusing activity: a malformed later
+		 * row or an over-budget snapshot must not disappear behind
+		 * an earlier valid active entry.
 		 */
-		errno = EOPNOTSUPP;
-		return -1;
+		if (swap_rows >= SWAPZ_FORMAT_PROC_MAX_ROWS) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+		++swap_rows;
 	}
 	if (read_result < 0)
 		return -1;
 	if (!saw_header) {
 		errno = EPROTO;
+		return -1;
+	}
+	/*
+	 * Even locally matching inodes or block nodes do not bind swap rows
+	 * to their active kernel objects, including sibling and hard-link
+	 * aliases. Only a complete zero-row table can clear this check.
+	 */
+	if (swap_rows) {
+		errno = EOPNOTSUPP;
 		return -1;
 	}
 	/*
