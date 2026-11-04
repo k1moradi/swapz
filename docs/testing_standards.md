@@ -4121,9 +4121,13 @@ partition ownership release until the saved state reaches durable COMPLETE.
 Saved physical recovery evidence must require literal JSON
 `swap_was_active: true`, a positive integer `swap_size_kib` no larger than
 the saved partition byte geometry expressed in KiB, and an integer
-`swap_priority` within Linux's signed-short priority range before
+`swap_priority` in the exactly restorable range -1..32767 before
 inspecting/removing a mapper, writing the partition, or claiming that original
-swap restoration is complete. Type-correct but impossible capacity or priority
+swap restoration is complete. Linux's default -1 is restored without an
+explicit priority; 0..32767 is the supported explicit util-linux range. The
+read-only initial device preflight must reject an active original swap outside
+the same capacity/priority bounds so the helper never starts a run it cannot
+restore exactly. Type-correct but impossible or unrestorable capacity/priority
 values are malformed evidence, not deferred post-`swapon` validation. The
 original trial always starts from an active partition; a missing, false, truthy
 non-boolean, or malformed original-swap field is not permission to skip

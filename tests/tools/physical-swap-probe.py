@@ -48,10 +48,10 @@ VERBAL_APPROVAL_TEXT = (
     "or recovery uncertainty voids this approval and requires the run to stop."
 )
 MAX_RECORDED_OUTPUT_CHARS = 4096
-# Linux stores swap_info_struct.prio as a signed short. Reject impossible
-# persisted values before recovery can touch the selected partition.
-LINUX_SWAP_PRIORITY_MIN = -(1 << 15)
-LINUX_SWAP_PRIORITY_MAX = (1 << 15) - 1
+# Recovery can reproduce Linux's default -1 priority or an explicit
+# util-linux priority in 0..32767. Reject anything else before mutation.
+LINUX_SWAP_PRIORITY_MIN = -1
+LINUX_SWAP_PRIORITY_MAX = 32767
 # The swapz DM status ABI contains many named counters. Preserve a bounded
 # complete status line rather than certifying a clipped prefix as healthy.
 MAX_STATUS_OUTPUT_CHARS = 32768
@@ -429,6 +429,13 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
     active = _active_swap_for(major, minor)
     if active is None:
         raise ProbeError("selected partition must be exactly one active system swap")
+    if active["size_kib"] > size_bytes // 1024:
+        raise ProbeError(
+            "selected swap capacity exceeds the selected partition geometry")
+    if not LINUX_SWAP_PRIORITY_MIN <= active["priority"] <= \
+            LINUX_SWAP_PRIORITY_MAX:
+        raise ProbeError(
+            "selected swap priority cannot be restored exactly by this helper")
     if not 0 <= active["used_kib"] <= active["size_kib"]:
         raise ProbeError("selected swap usage is outside its capacity")
     if active["used_kib"] != 0 and not allow_used_swap:
@@ -1806,7 +1813,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
     if not LINUX_SWAP_PRIORITY_MIN <= state["swap_priority"] <= \
             LINUX_SWAP_PRIORITY_MAX:
         raise ProbeError(
-            "recovery_original_swap_priority expected=-32768..32767 "
+            "recovery_original_swap_priority expected=-1..32767 "
             "observed=out_of_range; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
     if state.get("module_ownership") not in {

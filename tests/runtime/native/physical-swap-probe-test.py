@@ -528,11 +528,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             ("oversize_capacity", "swap_size_kib", "oversize_capacity",
              "recovery_original_swap_size_kib expected=within_saved_device "
              "observed=exceeds_saved_device"),
-            ("priority_above_kernel_range", "swap_priority", 32768,
-             "recovery_original_swap_priority expected=-32768..32767 "
+            ("priority_above_restorable_range", "swap_priority", 32768,
+             "recovery_original_swap_priority expected=-1..32767 "
              "observed=out_of_range"),
-            ("priority_below_kernel_range", "swap_priority", -32769,
-             "recovery_original_swap_priority expected=-32768..32767 "
+            ("priority_below_restorable_range", "swap_priority", -2,
+             "recovery_original_swap_priority expected=-1..32767 "
              "observed=out_of_range"),
         )
         for case, field, value, diagnostic in cases:
@@ -2333,6 +2333,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value=active):
             with self.assertRaisesRegex(
                     probe.ProbeError, "require zero used KiB"):
+                probe.inspect_target(device_arg, device_arg)
+            active["used_kib"] = 0
+            active["priority"] = -2
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "priority cannot be restored exactly"):
+                probe.inspect_target(device_arg, device_arg)
+            active["priority"] = -1
+            active["size_kib"] = size_bytes // 1024 + 1
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "capacity exceeds.*partition geometry"):
                 probe.inspect_target(device_arg, device_arg)
 
     def test_lower_stat_parsing_is_strict_and_host_visible_only(self):
