@@ -1450,21 +1450,29 @@ read -r table_start table_sectors table_target table_lower table_rest <<< "$mapp
 [[ "$table_start" == 0 && "$table_target" == swapz && "$table_lower" == "$PART_DEVNO" ]] ||
 	fail "manager-created mapper does not target the owned partition"
 
+# Independently verify the published node against Device Mapper control
+# identity, then parse every /proc/swaps path without treating missing aliases
+# as absent swap. An unrelated host swap entry must remain byte-identical.
+assert_exact_owned_mapper 1
+mapper_dev="$(dmsetup info -c --noheadings --separator ':' -o major,minor \
+	"$DMNAME" 2>/dev/null | tr -d '[:space:]')" ||
+	fail "cannot inspect manager-created mapper device number"
+[[ "$mapper_dev" =~ ^[0-9]+:[0-9]+$ ]] ||
+	fail "manager-created mapper device number is malformed"
 mapper_hex="$(stat -Lc '%t:%T' "/dev/mapper/$DMNAME")" ||
 	fail "cannot stat manager-created mapper"
 IFS=: read -r mapper_major_hex mapper_minor_hex <<< "$mapper_hex"
-printf -v mapper_dev '%d:%d' "0x$mapper_major_hex" "0x$mapper_minor_hex"
-active_mapper_entries=0
-while read -r swap_path swap_type swap_size swap_used swap_priority; do
-	[[ "$swap_path" == Filename || ! -e "$swap_path" ]] && continue
-	[[ -b "$swap_path" ]] || continue
-	swap_hex="$(stat -Lc '%t:%T' "$swap_path")" || fail "cannot stat active swap entry"
-	IFS=: read -r swap_major_hex swap_minor_hex <<< "$swap_hex"
-	printf -v swap_dev '%d:%d' "0x$swap_major_hex" "0x$swap_minor_hex"
-	[[ "$swap_dev" != "$mapper_dev" ]] ||
-		active_mapper_entries=$((active_mapper_entries + 1))
-done < /proc/swaps
+printf -v mapper_node_dev '%d:%d' "0x$mapper_major_hex" "0x$mapper_minor_hex"
+[[ "$mapper_node_dev" == "$mapper_dev" ]] ||
+	fail "published mapper node identity differs from Device Mapper control"
+active_mapper_entries="$(mapper_swap_entry_count)" ||
+	fail "cannot resolve every /proc/swaps device identity after start"
 [[ "$active_mapper_entries" == 1 ]] ||
+assert_lifecycle_state "$RUN_ID" ACTIVE null ||
+	fail "start did not persist exact durable ACTIVE transaction"
+assert_owned_transaction_records 1 ||
+	fail "start did not retain canonical run-bound consumed/active ownership"
+assert_unrelated_host_swap_identity "normal start"
 	fail "manager-created mapper is not the unique active swap identity"
 active_backing_header_sha256="$(block0_sha256 "$PARTITION")" ||
 	fail "cannot hash run-bound SWZ backing header before stop"
