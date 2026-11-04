@@ -147,7 +147,6 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 	pthread_t producer;
 	unsigned int iteration;
 	unsigned int producer_wins = 0, raw_wins = 0, negative_results = 0;
-	int first_acknowledged_status = -1;
 
 	atomic_init(&handoff.free_mask.value, (s64)(1ULL << 63));
 	atomic_init(&handoff.state.value, SWAPZ_PREPARATION_EMPTY);
@@ -167,7 +166,7 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 			(sizeof(results) / sizeof(results[0]))];
 		const int raw_wins_race = iteration % 2U == 0U;
 		unsigned int byte;
-		int state, acknowledged_status;
+		int state;
 
 		RACE_CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == 63);
 		RACE_CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == -1);
@@ -213,17 +212,10 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 			RACE_CHECK(handoff.length == codec_result);
 			RACE_CHECK(atomic_load_explicit(&handoff.terminal_error,
 							   memory_order_acquire) == codec_result);
-			acknowledged_status = codec_result;
 			negative_results++;
 		} else {
 			RACE_CHECK(handoff.length == codec_result);
-			acknowledged_status = 0;
 		}
-		/* The first successful RAW ACK predates the later codec faults. */
-		if (iteration == 0)
-			first_acknowledged_status = acknowledged_status;
-		if (codec_result < 0)
-			RACE_CHECK(first_acknowledged_status == 0);
 		/* The upper BIO can finish, but the producer still owns the page. */
 		RACE_CHECK(atomic_load(&handoff.references) == 2);
 		release_reference(&handoff);

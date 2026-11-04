@@ -1637,6 +1637,9 @@ Scheduling-only coordination may use relaxed atomics, but no pthread barrier,
 release/acquire side channel or equivalent synchronizing primitive may occur
 between the producer's payload writes and the consumer acquire under test.
 Synchronization after the consumer has observed the payload is permitted.
+A local scalar or synthetic status that is not driven by the production BIO
+completion path must not be described as evidence that an earlier ACK cannot
+be retroactively revoked.
 
 Loaded qualification may inject one synthetic codec `-EIO` through the exact
 submitter, background-preparation, or ordered-inline compression owner. The
