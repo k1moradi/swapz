@@ -8,6 +8,7 @@
 #include <string.h>
 #include <errno.h>
 #include "authority.h"
+#include "gc-cost.h"
 
 #define CHECK(x) do { if (!(x)) { \
 	fprintf(stderr, "%s:%d FAIL: %s\n", __FILE__, __LINE__, #x); \
@@ -282,6 +283,14 @@ static int test_indexed_false_empty_reclaim_preserves_live_extents(void)
 	generation = maps[0].generation;
 	start_block = maps[0].start_block;
 	forge_false_empty_indexed_segment();
+	CHECK(program_counts[0] > 0U);
+	/*
+	 * The prior fix keyed its full-map proof on extent_classes. Losing those
+	 * bytes together with the other zero sidecars must not turn a previously
+	 * claimed live segment into a "virgin" overwrite candidate.
+	 */
+	classes[0] = 0U;
+	classes[SWAPZ_SEGMENT_BLOCKS - 1U] = 0U;
 	a.next_segment_probe = 0U;
 	CHECK(write_page(2) == -EUCLEAN);
 	CHECK(!recycle_hook_calls && !a.recycled_dead_segments);
@@ -290,7 +299,7 @@ static int test_indexed_false_empty_reclaim_preserves_live_extents(void)
 	      maps[0].generation == generation);
 	CHECK(maps[1].valid && maps[1].start_block ==
 	      SWAPZ_SEGMENT_BLOCKS - 1U && !maps[2].valid);
-	CHECK(classes[0] == 1U && classes[SWAPZ_SEGMENT_BLOCKS - 1U] == 1U);
+	CHECK(!classes[0] && !classes[SWAPZ_SEGMENT_BLOCKS - 1U]);
 	return 0;
 }
 
@@ -325,6 +334,63 @@ static int test_indexed_false_empty_victim_cannot_exchange_gc_roles(void)
 	CHECK(maps[0].valid && maps[0].start_block == start_block &&
 	      maps[0].generation == generation);
 	CHECK(classes[start_block] == 1U && !maps[extra_page].valid);
+	return 0;
+}
+
+
+static void forge_segment0_single_mapping_view(swapz_u32 survivor,
+					       swapz_u32 stale)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	const struct swapz_map *survivor_map = &maps[survivor];
+	swapz_u32 stale_start = maps[stale].start_block;
+
+	mapped_pages[0] = 1U;
+	first_page[0] = survivor;
+	last_page[0] = survivor;
+	prev_page[survivor] = none;
+	next_page[survivor] = none;
+	prev_page[stale] = none;
+	next_page[stale] = none;
+	live[stale_start] = 0U;
+	classes[stale_start] = 0U;
+	gc_live_bytes[0] = swapz_gc_live_byte_cost(survivor_map);
+	gc_io_cost[0] = swapz_gc_estimated_io_cost(survivor_map);
+	gc_min_live_blocks[0] = swapz_gc_min_live_blocks(survivor_map);
+}
+
+static int test_false_final_mapping_discard_is_rejected(void)
+{
+	swapz_u32 generation, survivor_start, stale_start;
+	int index;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_page(0) == 0);
+	for (index = 1; index < (int)SWAPZ_SEGMENT_BLOCKS; ++index)
+		CHECK(write_page(1) == 0);
+	CHECK(write_page(2) == 0);
+	CHECK(a.open_segment == 1U && mapped_pages[0] == 2U);
+	generation = maps[0].generation;
+	survivor_start = maps[0].start_block;
+	stale_start = maps[1].start_block;
+	CHECK(survivor_start == 0U &&
+	      stale_start == SWAPZ_SEGMENT_BLOCKS - 1U);
+
+	/*
+	 * Forge every current-segment sidecar into the state that says page0 is
+	 * the final mapping. The stale page1 map remains authoritative. A
+	 * successful discard_page() here would make the DM early-TRIM path erase
+	 * a still-mapped extent.
+	 */
+	forge_segment0_single_mapping_view(0U, 1U);
+	CHECK(swapz_discard_page(&a, 0U) == -EUCLEAN);
+	CHECK(maps[0].valid && maps[0].generation == generation &&
+	      maps[0].start_block == survivor_start);
+	CHECK(maps[1].valid && maps[1].start_block == stale_start);
+	CHECK(mapped_pages[0] == 1U);
+	CHECK(live[survivor_start] == 1U && classes[survivor_start] == 1U);
+	CHECK(!live[stale_start] && !classes[stale_start]);
+	CHECK(first_page[0] == 0U && last_page[0] == 0U);
 	return 0;
 }
 
@@ -514,6 +580,7 @@ int main(void)
 	CHECK(test_dead_recycle_rejects_stale_gc_score() == 0); passed++;
 	CHECK(test_indexed_false_empty_reclaim_preserves_live_extents() == 0); passed++;
 	CHECK(test_indexed_false_empty_victim_cannot_exchange_gc_roles() == 0); passed++;
+	CHECK(test_false_final_mapping_discard_is_rejected() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
 	CHECK(test_circular_allocator_fairness_probes_sequentially() == 0); passed++;

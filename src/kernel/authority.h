@@ -162,12 +162,16 @@ struct swapz_authority {
 	 * NULL retains the original research allocator/test behavior.
 	 */
 	swapz_u8 *segment_foreground;
-	/* Optional exact logical-map occupancy per 1MiB segment. Production
-	 * supplies this bounded sidecar so dead-segment validation is O(256)
-	 * instead of rescanning every logical page. */
+	/* Optional exact logical-map occupancy per 1MiB segment. Nonzero counts
+	 * reject reuse in O(1); a previously claimed zero candidate still needs
+	 * an independent authoritative-map proof before irreversible reclaim. */
 	swapz_u32 *segment_mapped_pages;
-	/* Optional logical segment-open counts. These are allocator write-cycle
-	 * telemetry, not physical NAND wear measurements. */
+	/*
+	 * Optional monotonic logical segment-open counts. The exact value is
+	 * allocator telemetry, not physical NAND wear. Because claim increments
+	 * before any extent can be staged and the count never decreases, zero is
+	 * also the production allocator's "never previously claimed" witness.
+	 */
 	swapz_u32 *segment_program_counts;
 	/* Optional exact logical-page membership lists per physical segment. */
 	swapz_u32 *segment_first_page;

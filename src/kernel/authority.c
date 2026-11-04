@@ -573,18 +573,52 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
 
 /*
  * The safe, strictly limited first swapz GC step: reuse only wholly-dead
- * 1MiB segments.  A live object is NEVER copied or overwritten here.
+ * 1MiB segments. A live object is NEVER copied or overwritten here.
  *
- * Each candidate is checked against physical live-record counts plus every
- * attached exact sidecar. Without the mapped-page sidecar, fall back to a full
- * logical-map scan. Exceptional roll-forward performs its own independent full
- * map scan before entering this common reclaim gate. No segment in the fixed
- * reserve tail is used. One ordered worker owns all authority state.
+ * The primary logical map is the final ownership authority. Exact segment
+ * sidecars reject obvious live candidates cheaply, while a previously claimed
+ * zero-sidecar segment receives an independent full-map proof before reuse.
+ * A genuinely virgin segment may skip that proof because segment_program_counts
+ * is incremented before any extent can be staged and never returns to zero.
  */
-/* Reuse the independent map proof at irreversible ordinary reclaim and
- * normal role exchange, not on every open-segment allocation. */
-static int swapz_verify_recovery_victim_dead(
-	const struct swapz_authority *a, swapz_u32 segment);
+static int swapz_verify_segment_authoritative_maps(
+	const struct swapz_authority *a, swapz_u32 segment,
+	swapz_u32 expected_logical)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	swapz_u32 logical, start_block, end_block;
+	int found_expected = 0;
+
+	if (!a || !a->maps || segment >= a->segment_count ||
+	    (expected_logical != none && expected_logical >= a->logical_pages))
+		return -EINVAL;
+	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
+	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
+
+	for (logical = 0; logical < a->logical_pages; ++logical) {
+		const struct swapz_map *map = &a->maps[logical];
+		swapz_u32 map_end_block;
+
+		if (!map->valid)
+			continue;
+		if (map->start_block >= a->physical_blocks ||
+		    !swapz_legal_class(map->extent_blocks) ||
+		    map->extent_blocks > a->physical_blocks - map->start_block ||
+		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
+			return -EUCLEAN;
+		map_end_block = map->start_block + map->extent_blocks;
+		if (map->start_block >= end_block || map_end_block <= start_block)
+			continue;
+		if (expected_logical == none || logical != expected_logical ||
+		    found_expected)
+			return -EUCLEAN;
+		found_expected = 1;
+	}
+	if (expected_logical != none && !found_expected)
+		return -EUCLEAN;
+	return 0;
+}
 
 static int swapz_claim_dead_segment(struct swapz_authority *a,
 				    swapz_u32 segment,
@@ -593,7 +627,7 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 	swapz_u32 start = segment * SWAPZ_SEGMENT_BLOCKS;
 	swapz_u32 off, logical, live_total = 0;
 	swapz_u8 used_mask = 0;
-	int used, blocked = 0;
+	int used, previously_claimed, reclaim_required, blocked = 0;
 
 	if (swapz_dead_segment_sidecars_validate(a, segment))
 		return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
@@ -603,14 +637,21 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 		used_mask |= a->extent_classes[start + off];
 	}
 	used = used_mask != 0;
+	previously_claimed = a->segment_program_counts &&
+			     a->segment_program_counts[segment];
+	reclaim_required = used || previously_claimed;
 	if (a->segment_mapped_pages) {
 		if (live_total)
 			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
-		/* A false-zero cached count and live index must not authorize
-		 * DISCARD or overwrite of a previously programmed segment.
-		 * This independent full-map proof is outside the normal OPEN
-		 * segment write path and runs only for a reclaim candidate. */
-		if (used && swapz_verify_recovery_victim_dead(a, segment))
+		/*
+		 * Only a segment with both zero extent history and a never-claimed
+		 * program count is provably virgin. Every other indexed zero
+		 * candidate must be checked against the authoritative logical map,
+		 * including after lost/corrupt extent-class bytes.
+		 */
+		if ((!a->segment_program_counts || reclaim_required) &&
+		    swapz_verify_segment_authoritative_maps(
+			    a, segment, ~(swapz_u32)0))
 			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
 	} else {
 		if (live_total)
@@ -631,7 +672,7 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 		if (blocked)
 			return -EAGAIN;
 	}
-	if (used && a->dead_segment_recycle) {
+	if (reclaim_required && a->dead_segment_recycle) {
 		int error = a->dead_segment_recycle(
 			a->dead_segment_recycle_opaque, segment);
 
@@ -639,11 +680,12 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 			return swapz_finish_alloc_probe(a, probe_start, error);
 	}
 	/*
-	 * live_total == 0 above has already proven every u16 in
-	 * live_records[start .. start + 255] is zero. Only clear
-	 * extent_classes when used_mask observed a non-zero class byte.
+	 * A prior claim can contain abandoned/uncertain lower writes even when
+	 * current extent-class bytes are all zero. Clear every per-segment
+	 * physical descriptor before reuse; the recycle hook above is likewise
+	 * conservative for that case.
 	 */
-	if (used) {
+	if (reclaim_required) {
 		memset(a->extent_classes + start, 0,
 		       SWAPZ_SEGMENT_BLOCKS * sizeof(*a->extent_classes));
 		if (a->extent_sequence_delta)
@@ -653,7 +695,8 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 		if (a->segment_sequence_base &&
 		    segment < a->sequence_segment_count)
 			a->segment_sequence_base[segment] = 0;
-		a->recycled_dead_segments++;
+		if (used)
+			a->recycled_dead_segments++;
 	}
 	if (a->segment_program_counts &&
 	    a->segment_program_counts[segment] != ~(swapz_u32)0)
@@ -874,42 +917,19 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
 static int swapz_verify_recovery_victim_dead(
 	const struct swapz_authority *a, swapz_u32 segment)
 {
-	swapz_u32 logical, start_block, end_block, block;
+	swapz_u32 start_block, block;
+	int error;
 
-	if (!a || !a->maps || !a->live_records || !a->extent_classes ||
-	    segment >= a->segment_count)
+	if (!a || !a->live_records || segment >= a->segment_count)
 		return -EINVAL;
-	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
-	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
-
-	/*
-	 * Roll-forward is an exceptional recovery path, so prefer independent
-	 * authority proof over the ordinary O(1) segment sidecar fast path.
-	 * A stale/corrupt cached count must never permit reclaim, and a zero count
-	 * must not hide a surviving authoritative mapping. Cache the victim range
-	 * once: a full production map can contain tens of millions of entries.
-	 */
-	for (logical = 0; logical < a->logical_pages; ++logical) {
-		const struct swapz_map *map = &a->maps[logical];
-		swapz_u32 map_end_block;
-
-		if (!map->valid)
-			continue;
-		if (map->start_block >= a->physical_blocks ||
-		    !swapz_legal_class(map->extent_blocks) ||
-		    map->extent_blocks > a->physical_blocks - map->start_block ||
-		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
-			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
-		    a->extent_classes[map->start_block] != map->extent_blocks ||
-		    !a->live_records[map->start_block])
-			return -EUCLEAN;
-		map_end_block = map->start_block + map->extent_blocks;
-		if (map->start_block < end_block && map_end_block > start_block)
-			return -EUCLEAN;
-	}
+	error = swapz_verify_segment_authoritative_maps(
+		a, segment, ~(swapz_u32)0);
+	if (error)
+		return error;
 	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
 		return -EUCLEAN;
 
+	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
 	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
 		if (a->live_records[start_block + block])
 			return -EUCLEAN;
@@ -1682,6 +1702,17 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 		old_segment = old->start_block / SWAPZ_SEGMENT_BLOCKS;
 		if (old_segment >= a->segment_count ||
 		    !a->segment_mapped_pages[old_segment])
+			return -EUCLEAN;
+		/*
+		 * The DM worker may issue immediate whole-segment DISCARD when this
+		 * appears to be the last mapping in a CLOSED segment. Prove from the
+		 * primary map that this logical page really is the sole reference
+		 * before mutating the sidecars that make that reclaim admissible.
+		 */
+		if (old_segment != a->open_segment &&
+		    a->segment_mapped_pages[old_segment] == 1U &&
+		    swapz_verify_segment_authoritative_maps(
+			    a, old_segment, logical_page))
 			return -EUCLEAN;
 	}
 	if (swapz_page_list_validate_entry(a, logical_page))

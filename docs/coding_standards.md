@@ -2040,17 +2040,24 @@ Production rotating-GC authority maintains one preallocated exact logical-map
 count per physical segment. Every successful compressed/raw publication and
 logical discard updates it in the same serialized authority phase as
 `live_records`. Dead-segment selection and victim-role commit cross-check the
-segment count against the sum of the segment's 256 physical live-record
-refcounts; disagreement is corruption and fails closed. The sidecar keeps nonzero candidates on the O(1) rejection path and still
-requires an O(256) physical-liveness check for zero candidates. Before
-irreversibly recycling a previously programmed segment or exchanging the
-role of an evacuated victim, independently scan the authoritative logical
-map: falsely zeroed counts, reverse links and GC costs must not permit a
-live extent to be discarded or declared free. This O(logical_pages) safety
-proof occurs only at the reclaim/role-exchange boundary, never on a normal
-write into the open segment. Portable callers without the sidecar retain
-the conservative full-map fallback. Victim discovery/evacuation may still scan
-the logical map until a separately qualified reverse index exists.
+segment count against physical liveness; disagreement is corruption and fails
+closed. Nonzero counts remain an O(1) rejection path. A zero candidate that was
+previously claimed must be checked against the authoritative logical map before
+irreversible recycle or victim-role exchange, even when extent-class bytes,
+reverse links, liveness and GC-cost sidecars all appear empty. Production uses
+the monotonic segment-open counter as the independent virgin witness: claim
+increments it before any extent can be staged and it never decreases, so only
+a zero-open-count segment with no extent history may skip the O(logical_pages)
+reclaim proof. The exact counter value remains telemetry.
+
+When logical DISCARD or zero-elision appears to remove the final mapping from a
+closed segment, authority must independently prove that this page is the sole
+logical-map reference before mutating the zero sidecars that permit immediate
+whole-segment TRIM. The proof runs only at reclaim/final-map boundaries, never
+on ordinary writes into the open segment. Portable callers without claim
+history retain the conservative full-map fallback. Victim discovery/evacuation
+may still scan the logical map until a separately qualified reverse index
+exists.
 
 
 ### Timed benchmark telemetry ownership
@@ -2191,12 +2198,17 @@ allocator reuse must then hit the existing duplicate-suppression state.
 Asynchronous early DISCARD remains a separate concurrency experiment and may
 not race allocation or an upper BIO.
 
-Per-segment program/open counters describe logical allocator write cycles only.
-A default-off allocator experiment may use them to compare logical-open spread
-or choose the least-opened eligible destination without additional I/O. They
-are not NAND wear measurements; neither that experiment nor a GC score tie
-break may be described as wear leveling or authorize cold-data relocation
-without separately approved physical-media evidence.
+Per-segment program/open counters describe logical allocator claim cycles.
+Their exact values remain telemetry and are not NAND wear measurements. The
+zero/nonzero state also has one correctness role: because the counter is
+incremented before staging and never decremented, zero proves the segment is
+virgin in the current authority lifetime, while nonzero forces authoritative
+map verification before reuse even if current extent-class metadata is lost.
+A default-off allocator experiment may still use the exact values to compare
+logical-open spread or choose the least-opened eligible destination without
+additional I/O; neither that experiment nor a GC score tie break may be
+described as wear leveling or authorize cold-data relocation without separately
+approved physical-media evidence.
 
 ### Delta64 SIMD backends
 
