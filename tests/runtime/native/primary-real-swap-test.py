@@ -744,7 +744,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify, "_read_plan",
                             return_value={
                                 "target_device_bytes":
-                                    str(1024 * qualify.MIB)}))
+                                    str(1024 * qualify.MIB),
+                                "qualification_report_sha256": "6" * 64}))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "verify_provenance",
