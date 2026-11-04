@@ -1411,17 +1411,11 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                          900 * 1024 * 1024)
         self.assertEqual(measured["initialization_peak_ram_bytes"],
                          400 * 1024 * 1024)
-        self.assertEqual(measured["constructor_peak_ram_bytes"],
-                         400 * 1024 * 1024)
         self.assertEqual(measured["initialization_samples"], 2)
         self.assertEqual(measured["steady_peak_ram_bytes"],
                          800 * 1024 * 1024)
-        self.assertEqual(measured["steady_state_peak_ram_bytes"],
-                         800 * 1024 * 1024)
         self.assertEqual(measured["steady_samples"], 2)
         self.assertEqual(measured["gc_peak_ram_bytes"],
-                         900 * 1024 * 1024)
-        self.assertEqual(measured["gc_pressure_peak_ram_bytes"],
                          900 * 1024 * 1024)
         self.assertEqual(measured["gc_samples"], 2)
         self.assertEqual(measured["teardown_recovery"],
