@@ -28,67 +28,82 @@ note() {
 verify_prepare_failure_diagnostic() {
 	local output="$1"
 	local line phase number description expected_error
-	local count=0
+	local diagnostic_count=0
+	local wrapper_count=0
 	local diagnostic=""
+	local wrapper=""
 
 	while IFS= read -r line; do
-		[[ "$line" == PRIMARY_PREPARE=FAILED* ]] || continue
-		count=$((count + 1))
-		if [[ ! "$line" =~ ^PRIMARY_PREPARE=FAILED[[:space:]]phase=([a-z][a-z0-9-]*)[[:space:]]errno=([1-9][0-9]{0,3})[[:space:]]error=(.*)$ ]]; then
-			fail "prepare refusal has a malformed phase/errno diagnostic"
+		[[ -n "$line" ]] ||
+			fail "prepare refusal emitted an unexpected blank diagnostic line"
+		if [[ "$line" == PRIMARY_PREPARE=FAILED* ]]; then
+			diagnostic_count=$((diagnostic_count + 1))
+			if [[ ! "$line" =~ ^PRIMARY_PREPARE=FAILED[[:space:]]phase=([a-z][a-z0-9-]*)[[:space:]]errno=([1-9][0-9]{0,3})[[:space:]]error=(.*)$ ]]; then
+				fail "prepare refusal has a malformed phase/errno diagnostic"
+			fi
+			phase="${BASH_REMATCH[1]}"
+			number="${BASH_REMATCH[2]}"
+			description="${BASH_REMATCH[3]}"
+			expected_error="$(LC_ALL=C python3 -c 'import errno, os, sys; n = int(sys.argv[1]); sys.exit(2) if n not in errno.errorcode else None; print(os.strerror(n))' "$number")" ||
+				fail "prepare refusal has an unknown errno"
+			case "$phase" in
+			global-mutation-lock|package-transaction-preflight)
+				[[ "$description" == "$expected_error" ]] ||
+					fail "prepare refusal exposed a noncanonical diagnostic"
+				;;
+			identity-admission|configured-target-identity|recovery-directory-open|\
+			partition-lock-and-prior-claim|prior-claim-reconciliation|\
+			recovery-storage-inspection|recovery-directory-safety|\
+			recovery-filesystem-persistence|recovery-target-device-separation|\
+			recovery-physical-parent-identity|prior-active-marker|\
+			qualification-report-read|qualification-source-identity|\
+			qualified-artifact-hash-readback|qualified-artifact-identity|\
+			target-header-inspection|target-geometry-identity|\
+			original-header-rollback-proof|original-header-digest|\
+			raw-target-swap-inventory|target-physical-parent-identity|\
+			target-recovery-parent-separation|cross-namespace-mount-inventory|\
+			target-mounted-in-visible-namespace|root-device-parent-identity|\
+			target-root-device-parent-separation|\
+			repeated-raw-target-swap-inventory|\
+			repeated-target-physical-parent-identity|\
+			repeated-target-recovery-parent-separation|\
+			repeated-cross-namespace-mount-inventory|\
+			repeated-target-mounted-in-visible-namespace|\
+			repeated-root-device-parent-identity|\
+			repeated-target-root-parent-separation|physical-parent-swap-inventory|\
+			module-mapper-inventory|unexpected-module-or-mapper-present|\
+			final-raw-target-swap-inventory|final-preclaim-identity-revalidation|\
+			final-physical-parent-swap-inventory|run-id-and-header-construction|\
+			partition-owner-claim)
+				[[ "$description" == "$expected_error claim=none" ]] ||
+					fail "preclaim refusal exposed private state or wrong disposition"
+				;;
+			original-header-backup-write|manifest-write|\
+			original-header-backup-readback|manifest-readback|\
+			partition-lock-close|recovery-directory-close)
+				[[ "$description" == "$expected_error claim=retained target_unchanged=true" ]] ||
+					fail "postclaim refusal lacks retained ownership disposition"
+				;;
+			*)
+				fail "prepare refusal has an unknown phase"
+				;;
+			esac
+			diagnostic="$line"
+			continue
 		fi
-		phase="${BASH_REMATCH[1]}"
-		number="${BASH_REMATCH[2]}"
-		description="${BASH_REMATCH[3]}"
-		(( number <= 4095 )) ||
-			fail "prepare refusal has an invalid errno"
-		expected_error="$(python3 -c 'import os, sys; print(os.strerror(int(sys.argv[1])))' "$number")" ||
-			fail "prepare refusal errno cannot be decoded"
-		case "$phase" in
-		global-mutation-lock|package-transaction-preflight)
-			[[ "$description" == "$expected_error" ]] ||
-				fail "prepare refusal exposed a noncanonical diagnostic"
-			;;
-		identity-admission|configured-target-identity|recovery-directory-open|\
-		partition-lock-and-prior-claim|prior-claim-reconciliation|\
-		recovery-storage-inspection|recovery-directory-safety|\
-		recovery-filesystem-persistence|recovery-target-device-separation|\
-		recovery-physical-parent-identity|prior-active-marker|\
-		qualification-report-read|qualification-source-identity|\
-		qualified-artifact-hash-readback|qualified-artifact-identity|\
-		target-header-inspection|target-geometry-identity|\
-		original-header-rollback-proof|original-header-digest|\
-		raw-target-swap-inventory|target-physical-parent-identity|\
-		target-recovery-parent-separation|cross-namespace-mount-inventory|\
-		target-mounted-in-visible-namespace|root-device-parent-identity|\
-		target-root-device-parent-separation|\
-		repeated-raw-target-swap-inventory|\
-		repeated-target-physical-parent-identity|\
-		repeated-target-recovery-parent-separation|\
-		repeated-cross-namespace-mount-inventory|\
-		repeated-target-mounted-in-visible-namespace|\
-		repeated-root-device-parent-identity|\
-		repeated-target-root-parent-separation|physical-parent-swap-inventory|\
-		module-mapper-inventory|unexpected-module-or-mapper-present|\
-		final-raw-target-swap-inventory|final-preclaim-identity-revalidation|\
-		final-physical-parent-swap-inventory|run-id-and-header-construction|\
-		partition-owner-claim)
-			[[ "$description" == "$expected_error claim=none" ]] ||
-				fail "preclaim refusal exposed private state or wrong disposition"
-			;;
-		original-header-backup-write|manifest-write|\
-		original-header-backup-readback|manifest-readback|\
-		partition-lock-close|recovery-directory-close)
-			[[ "$description" == "$expected_error claim=retained target_unchanged=true" ]] ||
-				fail "postclaim refusal lacks retained ownership disposition"
-			;;
-		*)
-			fail "prepare refusal has an unknown phase"
-			;;
-		esac
-		diagnostic="$line"
+		if [[ "$line" == "BLOCKED: primary-swap preparation failed: "* ]]; then
+			wrapper_count=$((wrapper_count + 1))
+			wrapper="$line"
+			continue
+		fi
+		fail "prepare refusal emitted unexpected sideband diagnostics"
 	done <<< "$output"
-	(( count == 1 )) || fail "prepare refusal did not emit exactly one phase/errno diagnostic"
+	(( diagnostic_count == 1 )) ||
+		fail "prepare refusal did not emit exactly one phase/errno diagnostic"
+	(( wrapper_count == 1 )) ||
+		fail "prepare refusal did not emit exactly one coordinator wrapper"
+	[[ "$wrapper" == "BLOCKED: primary-swap preparation failed: $expected_error" ]] ||
+		fail "prepare refusal wrapper disagrees with errno"
 	printf '%s\n' "$diagnostic" >&2
 }
 

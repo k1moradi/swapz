@@ -350,15 +350,23 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "if (swapz_primary_target_preflight(")]
         self.assertIn('failure_phase = "final-preclaim-identity-revalidation";',
                       identity_check)
+        identity_phase = final_check.index(
+            'failure_phase = "final-preclaim-identity-revalidation";')
+        identity_gate = final_check[
+            identity_phase:final_check.index("goto out;", identity_phase)]
+        self.assertIn("errno = ESTALE;", identity_gate)
+
         # The parent-swap phase must be selected before invoking the reader,
         # so an unreadable inventory keeps its own errno and diagnostic.
-        parent_check = final_check[
-            final_check.index("errno = ESTALE;"):
-            final_check.index("int verified_parent_swap_active =")]
-        self.assertIn('failure_phase = "final-physical-parent-swap-inventory";',
-                      parent_check)
-        self.assertIn("errno = ESTALE;", final_check)
-        self.assertIn("errno = EBUSY;", final_check)
+        parent_phase = final_check.index(
+            'failure_phase = "final-physical-parent-swap-inventory";')
+        parent_call = final_check.index(
+            "int verified_parent_swap_active =", parent_phase)
+        parent_gate = final_check[
+            parent_phase:final_check.index("goto out;", parent_call)]
+        self.assertLess(parent_phase, parent_call)
+        self.assertIn("if (verified_parent_swap_active > 0)", parent_gate)
+        self.assertIn("errno = EBUSY;", parent_gate)
 
     def test_preparation_failure_formats_do_not_expose_transaction_ids(self):
         preparation = self.primary[
@@ -381,56 +389,99 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         program = ("fail() { printf '%s\\n' FAIL >&2; exit 1; }\n" +
                    verifier + '\nverify_prepare_failure_diagnostic "$1"\n')
 
-        def check(diagnostic, should_pass):
+        def command_output(diagnostic, error_text):
+            return (
+                diagnostic + "\n"
+                "BLOCKED: primary-swap preparation failed: " + error_text
+            )
+
+        def check(output, should_pass):
             result = subprocess.run(
-                ["bash", "-c", program, "synthetic-prepare", diagnostic],
+                ["bash", "-c", program, "synthetic-prepare", output],
                 capture_output=True, text=True, timeout=5, check=False,
                 cwd=ROOT)
             self.assertEqual(result.returncode == 0, should_pass,
                              result.stdout + result.stderr)
             if should_pass:
-                self.assertEqual(result.stderr.strip(), diagnostic.splitlines()[-1])
+                expected = next(
+                    line for line in output.splitlines()
+                    if line.startswith("PRIMARY_PREPARE=FAILED "))
+                self.assertEqual(result.stderr.strip(), expected)
             else:
                 self.assertEqual(result.stderr.strip(), "FAIL")
             self.assertEqual(result.stdout, "")
 
         permitted = "Operation not permitted"
-        check(f"PRIMARY_PREPARE=FAILED phase=qualification-source-identity "
-              f"errno=1 error={permitted} claim=none", True)
-        check(f"PRIMARY_PREPARE=FAILED phase=manifest-write "
-              f"errno=1 error={permitted} claim=retained target_unchanged=true",
-              True)
-        check("PRIMARY_PREPARE=FAILED phase=package-transaction-preflight "
-              "errno=16 error=Device or resource busy", True)
-        for diagnostic in (
+        busy = "Device or resource busy"
+        source_mismatch = (
+            "PRIMARY_PREPARE=FAILED phase=qualification-source-identity "
+            f"errno=1 error={permitted} claim=none"
+        )
+        retained_manifest = (
+            "PRIMARY_PREPARE=FAILED phase=manifest-write "
+            f"errno=1 error={permitted} claim=retained target_unchanged=true"
+        )
+        package_busy = (
+            "PRIMARY_PREPARE=FAILED phase=package-transaction-preflight "
+            f"errno=16 error={busy}"
+        )
+        check(command_output(source_mismatch, permitted), True)
+        check(command_output(retained_manifest, permitted), True)
+        check(command_output(package_busy, busy), True)
+
+        for output in (
             "",
             "PRIMARY_PREPARE=FAILED",
-            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=0 "
-            "error=Success claim=none",
-            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
-            "error=Device or resource busy claim=none",
-            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
-            "error=Operation not permitted claim=none path=/private/secret",
-            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
-            "error=Operation not permitted claim=retained target_unchanged=true",
-            "PRIMARY_PREPARE=FAILED phase=manifest-write errno=1 "
-            "error=Operation not permitted claim=none",
-            "PRIMARY_PREPARE=FAILED phase=invented-unsafe-phase errno=1 "
-            "error=Operation not permitted claim=none",
-            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
-            "error=Operation not permitted run_id=" + "a" * 32 +
-            " claim=retained target_unchanged=true",
-            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
-            "error=Operation not permitted claim=none swap=/unrelated",
-            "PRIMARY_PREPARE=FAILED phase=package-transaction-preflight errno=16 "
-            "error=Device or resource busy transaction_id=private",
-            "PRIMARY_PREPARE=FAILED phase=qualification-source-identity "
-            "errno=1 error=Operation not permitted claim=none\n"
-            "PRIMARY_PREPARE=FAILED phase=qualified-artifact-identity "
-            "errno=1 error=Operation not permitted claim=none",
+            source_mismatch,
+            command_output(source_mismatch, busy),
+            command_output(source_mismatch, permitted) + "\n/private/secret",
+            command_output(source_mismatch, permitted) + "\nsecret=private",
+            command_output(source_mismatch, permitted) + "\ntransaction_id=private",
+            command_output(source_mismatch, permitted) + "\nswap=/unrelated",
+            command_output(source_mismatch, permitted) + "\n"
+            "BLOCKED: primary-swap preparation failed: " + permitted,
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory "
+                "errno=0 error=Success claim=none", "Success"),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory "
+                f"errno=1 error={busy} claim=none", busy),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory "
+                f"errno=1 error={permitted} claim=none path=/private/secret",
+                permitted),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory "
+                f"errno=1 error={permitted} "
+                "claim=retained target_unchanged=true", permitted),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=manifest-write "
+                f"errno=1 error={permitted} claim=none", permitted),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=invented-unsafe-phase "
+                f"errno=1 error={permitted} claim=none", permitted),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory "
+                f"errno=1 error={permitted} run_id=" + "a" * 32 +
+                " claim=retained target_unchanged=true", permitted),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory "
+                f"errno=1 error={permitted} claim=none swap=/unrelated",
+                permitted),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=package-transaction-preflight "
+                f"errno=16 error={busy} transaction_id=private", busy),
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=qualification-source-identity "
+                "errno=4095 error=Unknown error 4095 claim=none",
+                "Unknown error 4095"),
+            command_output(source_mismatch, permitted) + "\n" +
+            command_output(
+                "PRIMARY_PREPARE=FAILED phase=qualified-artifact-identity "
+                f"errno=1 error={permitted} claim=none", permitted),
         ):
-            with self.subTest(diagnostic=diagnostic):
-                check(diagnostic, False)
+            with self.subTest(output=output):
+                check(output, False)
         failure_path = self.script[
             self.script.index('note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"'):
             self.script.index('RUN_ID="$(printf', self.script.index(
