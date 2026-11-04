@@ -225,14 +225,16 @@ history for transcripts. Documentation changes are part of the implementation:
 if behavior, target scope, acceptance criteria or evidence changes, update the
 governing text in the same work cycle.
 
-Files under `docs/handoff/` are temporary: work orders and round results for
-one optimization round. When the round closes (owner results recorded in the
-ROADMAP and the decision taken), an implementing agent, not the lead reviewer,
-merges anything still essential into `context.md`, VISION, the coding/testing
-standards or the ROADMAP row, repoints or removes links to the file, and
-deletes it; immutable Git history keeps the original. Machine-read data that
-code opens (currently `docs/handoff/host-history.json`) is not a handoff
-document and moves only together with its reader.
+Files under `docs/handoff/` have two distinct purposes. Temporary work
+orders and optimization-round results should be retired once their decisions
+and essential invariants are captured in ROADMAP or the governing standards;
+repoint stale links and let immutable Git history retain disposable transcripts.
+Explicitly labeled historical evidence archives may remain when active documents
+link to them to preserve source-bound failures, results, and implementation
+chronology verbatim. Those archives never become current operator instructions
+or qualification PASS. Machine-read data that code opens (currently
+`docs/handoff/host-history.json`) is not a handoff document and moves only
+together with its reader.
 
 At the end of every optimization round, refresh the active host's historical
 performance plots from committed `test_results.json` reports and display every
