@@ -586,6 +586,7 @@ static int test_lower_rejection_retry_rebuilds_scratch(void)
 #define PROOF_RUN_BYTES (SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES)
 static swapz_u8 proof_run_storage[PROOF_RUN_BYTES + 2U * SWAPZ_BLOCK_BYTES];
 static struct swapz_tx proof_transactions[SWAPZ_MAX_RECORDS];
+static swapz_u8 proof_segment_roles[NPHYS / SWAPZ_SEGMENT_BLOCKS];
 static swapz_u8 proof_independent[3][SWAPZ_BLOCK_BYTES];
 static swapz_u32 proof_lower_writes;
 static swapz_u32 proof_publications;
@@ -634,8 +635,10 @@ static int proof_write_run(void *opaque, swapz_u32 start_block,
 	return 0;
 }
 
-static void proof_initialize_run(struct swapz_io_run *run)
+static int proof_initialize_run(struct swapz_io_run *run)
 {
+	int error;
+
 	memset(proof_run_storage, 0x73, sizeof(proof_run_storage));
 	memset(proof_transactions, 0, sizeof(proof_transactions));
 	memset(proof_independent, 0x4b, sizeof(proof_independent));
@@ -647,8 +650,17 @@ static void proof_initialize_run(struct swapz_io_run *run)
 	engine.bulk_scratch = run->bytes;
 	engine.bulk_txs = run->txs;
 	engine.io.write_run = proof_write_run;
+	/* Batched snapshots are a production segment-rotation feature. Enable the
+	 * same authority mode before the first reservation in each proof case. */
+	auth.reuse_dead_segments = 1;
+	error = swapz_enable_segment_rotation(
+		&auth, proof_segment_roles,
+		NPHYS / SWAPZ_SEGMENT_BLOCKS);
+	if (error)
+		return error;
 	proof_lower_writes = 0;
 	proof_publications = 0;
+	return 0;
 }
 
 /* The production prepare/complete pair, with an explicit lower-I/O owner. */
@@ -722,7 +734,7 @@ static int test_engine_prepare_alias_validation_before_crc(void)
 		int error;
 
 		PROOF_CHECK(&diagnostic, setup() == 0);
-		proof_initialize_run(&run);
+		PROOF_CHECK(&diagnostic, proof_initialize_run(&run) == 0);
 		input.logical_page = 5;
 		input.payload = proof_independent[0];
 		input.length = 96;
@@ -827,7 +839,7 @@ static int test_engine_prepare_boundary_contact_and_packed_siblings(void)
 	int error;
 
 	PROOF_CHECK(&diagnostic, setup() == 0);
-	proof_initialize_run(&run);
+	PROOF_CHECK(&diagnostic, proof_initialize_run(&run) == 0);
 	for (index = 0; index < 3; ++index) {
 		memset(proof_independent[index], 0x31 + index, 128);
 		input[index].logical_page = 10U + index;
@@ -1007,7 +1019,7 @@ static int test_engine_prepare_preflight_never_submits(void)
 	int error;
 
 	PROOF_CHECK(&diagnostic, setup() == 0);
-	proof_initialize_run(&run);
+	PROOF_CHECK(&diagnostic, proof_initialize_run(&run) == 0);
 	input.logical_page = 33;
 	input.payload = proof_independent[0];
 	input.payload_crc32c_valid = 1;
@@ -1046,7 +1058,9 @@ static int test_engine_prepare_preflight_never_submits(void)
 		    map[33].generation == ~(swapz_u32)0);
 	map[33].generation = 0;
 
-	/* Exhaust the finite, append-only fixture; no reservation may escape. */
+	/* Exhaust the finite append-only placement boundary before a snapshot can
+	 * pause. This isolates capacity admission from dead-segment recycling. */
+	auth.reuse_dead_segments = 0;
 	diagnostic.category = "physical-capacity";
 	diagnostic.expected_errno = -ENOSPC;
 	auth.next_block = NPHYS;
