@@ -1010,7 +1010,8 @@ static int swapz_verify_recovery_victim_dead(
 	int error;
 
 	if (!a || !a->live_records || segment >= a->segment_count)
-		return -EINVAL;
+		return swapz_map_proof_refuse(
+			transition, "invalid_request", -EINVAL);
 	error = swapz_verify_segment_authoritative_maps(
 		a, segment, ~(swapz_u32)0, 0U,
 		verify_global_map_physical_metadata, transition);
@@ -1203,7 +1204,8 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 	    a->open_segment != dest ||
 	    a->next_block <= dest * SWAPZ_SEGMENT_BLOCKS ||
 	    a->next_block > (dest + 1U) * SWAPZ_SEGMENT_BLOCKS)
-		return -EUCLEAN;
+		return swapz_map_proof_refuse(
+			"gc_commit", "role_or_cursor_state", -EUCLEAN);
 	/*
 	 * GC is invoked because foreground allocation needs capacity.
 	 * If survivor relocation consumes all 256 destination blocks, the
@@ -1215,7 +1217,8 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 		return -ENOSPC;
 	if (a->segment_mapped_pages) {
 		if (a->segment_mapped_pages[victim])
-			return -EUCLEAN;
+			return swapz_map_proof_refuse(
+				"gc_commit", "victim_mapped_sidecar", -EUCLEAN);
 	} else {
 		for (logical = 0; logical < a->logical_pages; ++logical) {
 			const struct swapz_map *m = &a->maps[logical];
@@ -1223,7 +1226,8 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 			swapz_map_proof_resched(logical);
 			if (m->valid && (m->start_block >= a->physical_blocks ||
 			    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim))
-				return -EUCLEAN;
+				return swapz_map_proof_refuse(
+					"gc_commit", "victim_reference", -EUCLEAN);
 		}
 	}
 	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
@@ -1231,9 +1235,11 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 		live_total += a->live_records[block];
 	if (live_total || (a->segment_mapped_pages &&
 			   live_total != a->segment_mapped_pages[victim]))
-		return -EUCLEAN;
+		return swapz_map_proof_refuse(
+			"gc_commit", "victim_physical_live", -EUCLEAN);
 	if (swapz_dead_segment_sidecars_validate(a, victim))
-		return -EUCLEAN;
+		return swapz_map_proof_refuse(
+			"gc_commit", "dead_segment_sidecars", -EUCLEAN);
 	/* Cached zero sidecars are not proof of zero authoritative maps.
 	 * Verify the primary mapping table before publishing a new GC role. */
 	/*
