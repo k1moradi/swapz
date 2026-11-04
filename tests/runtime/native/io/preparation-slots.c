@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define _POSIX_C_SOURCE 200809L
 /* Run the production slot algorithm with C11 atomic operations. This is not
  * a Linux memory-model proof or a substitute for loaded BIO/drain coverage. */
 #include <errno.h>
