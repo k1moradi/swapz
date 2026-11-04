@@ -443,8 +443,14 @@ def validate_metadata_ram_trace(
             not isinstance(trace["host_boot_id"], str) or
             not BOOT_ID.fullmatch(trace["host_boot_id"])):
         raise ValueError("metadata RAM trace provenance is invalid")
-    if trace["sampling_interval_ns"] != SAMPLING_INTERVAL_NS:
-        raise ValueError("metadata RAM trace must declare 100 ms sampling")
+    if (
+            type(trace["sampling_interval_ns"]) is not int or
+            trace["sampling_interval_ns"] != SAMPLING_INTERVAL_NS):
+        raise ValueError(
+            "metadata RAM trace sampling declaration is invalid: "
+            f"metric=sampling_interval_ns "
+            f"observed={trace['sampling_interval_ns']!r} "
+            f"required={SAMPLING_INTERVAL_NS}")
 
     samples = trace["samples"]
     minimum_samples = sum(MINIMUM_PHASE_SAMPLES.values())
