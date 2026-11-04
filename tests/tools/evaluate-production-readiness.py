@@ -207,6 +207,7 @@ def maximum_logical_sectors(device_bytes: Any) -> int | None:
     """Mirror the production boot/manager admission rule without device I/O."""
     if (
             type(device_bytes) is not int or device_bytes <= 4096 or
+            device_bytes > RAM_TRACE_VALIDATOR["MAX_UINT64"] or
             device_bytes % 4096):
         return None
     blocks = device_bytes // 4096
@@ -302,6 +303,21 @@ def _valid_run_id(value: Any) -> bool:
             int(value) <= (1 << 63) - 1)
 
 
+def _bounded_decimal_text(
+        value: Any, *, maximum: int | None = None) -> int | None:
+    """Parse an unsigned decimal evidence field without giant-int coercion."""
+    if maximum is None:
+        maximum = RAM_TRACE_VALIDATOR["MAX_UINT64"]
+    maximum_digits = len(str(maximum))
+    if (
+            not isinstance(value, str) or
+            not 1 <= len(value) <= maximum_digits or
+            not value.isascii() or not value.isdecimal()):
+        return None
+    parsed = int(value, 10)
+    return parsed if parsed <= maximum else None
+
+
 def _normalize_target(value: Any) -> tuple[str, int] | None:
     if not isinstance(value, dict):
         return None
@@ -316,7 +332,9 @@ def _normalize_target(value: Any) -> tuple[str, int] | None:
         return None
     if not isinstance(size_bytes, int) or isinstance(size_bytes, bool):
         return None
-    if size_bytes <= 0:
+    if (
+            size_bytes <= 0 or
+            size_bytes > RAM_TRACE_VALIDATOR["MAX_UINT64"]):
         return None
     return partuuid, size_bytes
 
@@ -381,7 +399,7 @@ def _valid_campaign_artifact(value: Any) -> bool:
         isinstance(value.get("name"), str) and bool(value["name"]) and
         isinstance(value.get("size_bytes"), int) and
         not isinstance(value.get("size_bytes"), bool) and
-        value["size_bytes"] > 0 and
+        0 < value["size_bytes"] <= RAM_TRACE_VALIDATOR["MAX_UINT64"] and
         isinstance(value.get("sha256"), str) and
         bool(SHA256_RE.fullmatch(value["sha256"]))
     )
@@ -854,11 +872,13 @@ def validate_cold_boot_arm_evidence(
         reject("cold-boot arm boot identity is invalid")
     if arm["arm_kernel_release"] != owner_kernel_release:
         reject("cold-boot arm kernel differs from owner qualification")
-    if not re.fullmatch(r"[1-9][0-9]*", arm["armed_epoch"]):
+    armed_epoch = _bounded_decimal_text(arm["armed_epoch"])
+    if armed_epoch is None or armed_epoch <= 0:
         reject("cold-boot arm epoch is invalid")
 
-    size_text = arm["expected_target_size_bytes"]
-    size = int(size_text, 10) if re.fullmatch(r"[1-9][0-9]*", size_text) else -1
+    size = _bounded_decimal_text(arm["expected_target_size_bytes"])
+    if size is None:
+        size = -1
     if (
             target is None or arm["expected_partuuid"] != target[0] or
             size != target[1]):
@@ -933,9 +953,9 @@ def validate_cold_boot_evidence(
     if target is None:
         reject("persistent cold-boot authorized target is unavailable")
     else:
-        try:
-            selected_size = int(cold_boot["selected_target_size_bytes"], 10)
-        except ValueError:
+        selected_size = _bounded_decimal_text(
+            cold_boot["selected_target_size_bytes"])
+        if selected_size is None:
             selected_size = -1
         if (
                 cold_boot["selected_partuuid"] != target[0] or
@@ -973,12 +993,13 @@ def validate_cold_boot_evidence(
             cold_boot["dm_uuid"] != expected_uuid):
         reject("persistent cold-boot mapper transaction identity is invalid")
 
-    try:
-        logical_sectors = int(cold_boot["dm_logical_sectors"], 10)
-        expected_sectors = int(cold_boot["expected_dm_logical_sectors"], 10)
-        logical_bytes = int(cold_boot["dm_logical_bytes"], 10)
-        swap_size_kib = int(cold_boot["swap_size_kib"], 10)
-    except ValueError:
+    logical_sectors = _bounded_decimal_text(cold_boot["dm_logical_sectors"])
+    expected_sectors = _bounded_decimal_text(
+        cold_boot["expected_dm_logical_sectors"])
+    logical_bytes = _bounded_decimal_text(cold_boot["dm_logical_bytes"])
+    swap_size_kib = _bounded_decimal_text(cold_boot["swap_size_kib"])
+    if any(value is None for value in (
+            logical_sectors, expected_sectors, logical_bytes, swap_size_kib)):
         logical_sectors = expected_sectors = logical_bytes = swap_size_kib = -1
     authorized_sectors = (
         maximum_logical_sectors(target[1]) if target is not None else None)
@@ -1327,8 +1348,11 @@ def evaluate_release(
         "observed_peak_ram_bytes": None,
         "limit_bytes": peak_ram_limit,
         "initialization_peak_ram_bytes": None,
+        "constructor_peak_ram_bytes": None,
         "steady_peak_ram_bytes": None,
+        "steady_state_peak_ram_bytes": None,
         "gc_peak_ram_bytes": None,
+        "gc_pressure_peak_ram_bytes": None,
         "teardown_recovery": "NOT_MEASURED",
         "teardown_recovery_samples": None,
         "teardown_recovery_span_ns": None,
@@ -1366,8 +1390,9 @@ def evaluate_release(
                     physical_campaign_evidence_raw):
                 block_code(
                     "maximum_capacity_and_ram: campaign evidence digest binding mismatch")
-            sealed_capacity = physical_campaign_evidence.get(
-                "capacity_and_ram")
+            sealed_capacity = (
+                physical_campaign_evidence.get("capacity_and_ram")
+                if isinstance(physical_campaign_evidence, dict) else None)
             matches_campaign = (
                 isinstance(sealed_capacity, dict) and
                 valid_logical and valid_peak and
@@ -1395,8 +1420,14 @@ def evaluate_release(
                     "observed_peak_ram_bytes": peak,
                     "initialization_peak_ram_bytes":
                         summary["initialization_peak_ram_bytes"],
+                    "constructor_peak_ram_bytes":
+                        summary["initialization_peak_ram_bytes"],
                     "steady_peak_ram_bytes": summary["steady_peak_ram_bytes"],
+                    "steady_state_peak_ram_bytes":
+                        summary["steady_peak_ram_bytes"],
                     "gc_peak_ram_bytes": summary["gc_peak_ram_bytes"],
+                    "gc_pressure_peak_ram_bytes":
+                        summary["gc_peak_ram_bytes"],
                     "teardown_recovery": "MEASURED_RECOVERED",
                     "teardown_recovery_samples": summary["recovery_samples"],
                     "teardown_recovery_span_ns": summary["recovery_span_ns"],
@@ -1625,7 +1656,11 @@ def main() -> int:
             "METADATA_RAM_MEASUREMENT": {
                 "status": "NOT_MEASURED", "observed_peak_ram_bytes": None,
                 "limit_bytes": None, "initialization_peak_ram_bytes": None,
-                "steady_peak_ram_bytes": None, "gc_peak_ram_bytes": None,
+                "constructor_peak_ram_bytes": None,
+                "steady_peak_ram_bytes": None,
+                "steady_state_peak_ram_bytes": None,
+                "gc_peak_ram_bytes": None,
+                "gc_pressure_peak_ram_bytes": None,
                 "teardown_recovery": "NOT_MEASURED",
                 "teardown_recovery_samples": None,
                 "teardown_recovery_span_ns": None,
