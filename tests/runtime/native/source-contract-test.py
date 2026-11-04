@@ -7394,11 +7394,32 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertLess(
             constructor.index("hrtimer_init(&ctx->retention_timer"),
             constructor.index("dm_get_device("))
+        first_failure = constructor.index("goto fail;")
+        for initialized_before_failure in (
+                "INIT_DELAYED_WORK(&ctx->worker",
+                "INIT_WORK(&ctx->completion_work",
+                "hrtimer_setup(&ctx->retention_timer",
+                "hrtimer_init(&ctx->retention_timer"):
+            self.assertLess(
+                constructor.index(initialized_before_failure), first_failure,
+                f"{initialized_before_failure} must precede cleanup")
+        for count_assignment in (
+                "ctx->preparation_worker_count =",
+                "ctx->submitter_lane_count ="):
+            self.assertLess(
+                constructor.index(count_assignment), first_failure,
+                f"{count_assignment} must precede partial-lane cleanup")
         self.assertLess(
-            preparation.index("INIT_WORK(&lane->work"),
-            preparation.index("ctx->preparation_workqueue")
-            if "ctx->preparation_workqueue" in preparation
-            else len(preparation))
+            constructor.index("INIT_WORK(&lane->work", preparation_start),
+            constructor.index(
+                "ctx->preparation_workqueue = alloc_workqueue(",
+                preparation_start))
+        self.assertRegex(
+            preparation,
+            r"ctx->preparation_lanes\s*=\s*kcalloc\(")
+        self.assertRegex(
+            preparation,
+            r"ctx->submitter_lanes\s*=\s*\n?\s*kvcalloc\(")
         self.assertLess(
             constructor.index("ctx->preparation_lanes = kcalloc("),
             constructor.index("for (prep_lane = 0; prep_lane < "
@@ -7423,14 +7444,24 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 constructor[marker:marker + 180],
                 r"\)\)\s*\{\s*error = -ENOMEM;\s*goto fail;\s*\}")
 
-        self.assertEqual(constructor.count("ti->private = ctx;"), 1)
-        self.assertEqual(constructor.count("WRITE_ONCE(ctx->accepting, true)"),
-                         1)
-        success = constructor.index("WRITE_ONCE(ctx->accepting, true)")
+        private_assignments = re.findall(
+            r"ti->private\s*=\s*([^;]+);", constructor)
+        self.assertEqual(private_assignments, ["ctx", "NULL"])
+        publications = list(re.finditer(
+            r"(?:WRITE_ONCE\(\s*ctx->accepting\s*,\s*true\s*\)|"
+            r"ctx->accepting\s*=\s*true\s*;)",
+            constructor))
+        self.assertEqual(
+            len(publications), 1,
+            "constructor must publish acceptance exactly once")
+        success = publications[0].start()
         self.assertLess(constructor.index("dm_set_target_max_io_len("),
                         success)
-        self.assertLess(constructor.index(
-            "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE"), success)
+        self.assertLess(
+            constructor.rindex(
+                "SWAPZ_CONSTRUCTOR_FAIL_AFTER_PREPARATION_WORKQUEUE"),
+            success)
+        self.assertLess(success, constructor.rindex("return 0;"))
         self.assertRegex(
             constructor[constructor.rindex("fail:"):],
             r"fail:\s*swapz_free\(ctx\);\s*ti->private = NULL;\s*return error;")
@@ -7485,14 +7516,30 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 constructor, destruction.replace(
                     "destroy_workqueue(ctx->preparation_workqueue);",
                     "/* missing worker teardown */", 1))
+        with self.assertRaises(AssertionError):
+            self.audit_partial_constructor_ownership(
+                constructor.replace(
+                    "error = dm_get_device(",
+                    "ctx->accepting = true;\n\terror = dm_get_device(", 1),
+                destruction)
+        with self.assertRaises(AssertionError):
+            self.audit_partial_constructor_ownership(
+                constructor.replace(
+                    "spin_lock_init(&ctx->queue_lock);",
+                    "error = -EINVAL;\n\tgoto fail;\n\t"
+                    "spin_lock_init(&ctx->queue_lock);", 1),
+                destruction)
 
     def test_checked_geometry_oracle_tracks_production_headers(self):
         """Cross-check source-defined geometry with bounded sizing, not RAM."""
+        import json
         import runpy
 
         codec = (ROOT / "src/kernel/codec.h").read_text()
         authority = (ROOT / "src/kernel/authority.h").read_text()
         context = (ROOT / "docs/AGENT_CONTEXT.md").read_text()
+        acceptance = json.loads(
+            (ROOT / "docs/production-acceptance.json").read_text())
 
         def definition(header, name):
             values = re.findall(
@@ -7506,9 +7553,25 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertEqual(
             definition(authority, "SWAPZ_LINUX_SWAP_HEADER_BLOCKS"), 1)
         self.assertEqual((page_bytes, segment_blocks), (4096, 256))
-        for type_name, bits in (("swapz_u8", 8), ("swapz_u16", 16),
-                                ("swapz_u32", 32), ("swapz_u64", 64)):
+        type_widths = {}
+        for type_name, kernel_type, bits in (
+                ("swapz_u8", "u8", 8), ("swapz_u16", "u16", 16),
+                ("swapz_u32", "u32", 32), ("swapz_u64", "u64", 64)):
+            self.assertIn(f"typedef {kernel_type} {type_name};", codec)
             self.assertIn(f"typedef uint{bits}_t {type_name};", codec)
+            type_widths[type_name] = bits // 8
+        map_width_match = re.search(
+            r"_Static_assert\(sizeof\(struct swapz_map\) == ([0-9]+)",
+            authority)
+        self.assertIsNotNone(map_width_match)
+        source_widths = {
+            **type_widths,
+            "struct swapz_map": int(map_width_match.group(1)),
+        }
+        for name, (_, element_type, expected_width) in self.INDEXES.items():
+            self.assertEqual(
+                expected_width, source_widths[element_type],
+                f"{name} byte width drifted from its source definition")
         self.assertIn("(swapz_u64)logical_pages +", authority)
         self.assertIn("logical_pages / 8U", authority)
         self.assertIn("logical_pages % 8U", authority)
@@ -7518,6 +7581,16 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertEqual(model["BLOCK_BYTES"], page_bytes)
         self.assertEqual(model["SEGMENT_BLOCKS"], segment_blocks)
         self.assertEqual(model["FOREGROUND_HEADROOM_BLOCKS"], segment_blocks)
+        self.assertEqual(
+            model["MAP_RECORD_BYTES"], source_widths["struct swapz_map"])
+        self.assertEqual(
+            model["PHYSICAL_LIVENESS_RECORD_BYTES"],
+            source_widths["swapz_u16"])
+        self.assertEqual(acceptance["status"], "FROZEN")
+        frozen_ram_ceiling = acceptance["physical_qualification"][
+            "acceptance"]["sustained"][
+                "metadata_and_target_peak_ram_bytes_max"]
+        self.assertEqual(frozen_ram_ceiling, 1342177280)
         current_card = re.search(
             r"^- size:\s*\x60([0-9]+)\x60 bytes\s*$", context, flags=re.M)
         self.assertIsNotNone(current_card)
@@ -7554,26 +7627,38 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             "ctx->segment_count": segments,
         }
         lengths = [
-            (name, checked_length(dimensions[scale], width, (1 << 64) - 1))
-            for name, (scale, _, width) in self.INDEXES.items()
+            (name, checked_length(
+                dimensions[scale], source_widths[element_type],
+                (1 << 64) - 1))
+            for name, (scale, element_type, _) in self.INDEXES.items()
         ]
         self.assertEqual(len(lengths), 17)
         self.assertEqual(sum(length for _, length in lengths), 776070968)
-        self.assertEqual(
-            sum((length + page_bytes - 1) // page_bytes * page_bytes
-                for _, length in lengths), 776114176)
+        rounded_index_bytes = sum(
+            (length + page_bytes - 1) // page_bytes * page_bytes
+            for _, length in lengths)
+        self.assertEqual(rounded_index_bytes, 776114176)
+        self.assertLess(rounded_index_bytes, frozen_ram_ceiling)
         self.assertEqual(dict(lengths)["maps"], 433283072)
         self.assertEqual(
             sum(((length + page_bytes - 1) // page_bytes + 511) // 512
                 for _, length in lengths) * page_bytes, 1564672)
         self.assertIsNone(maximum(partition_bytes + 1))
-        self.assertIsNone(maximum(3 * segment_blocks * page_bytes))
+        exactly_three_data_segments = (
+            (3 * segment_blocks + 1) * page_bytes)
+        self.assertEqual(
+            ((exactly_three_data_segments // page_bytes - 1) //
+             segment_blocks) * segment_blocks,
+            3 * segment_blocks)
+        self.assertIsNone(maximum(exactly_three_data_segments))
         self.assertIsNone(maximum(
             ((1 << 32) + segment_blocks + 1) * page_bytes))
         self.assertIsNone(maximum(
             (0xffffff00 + 1) * page_bytes, size_t_max=(1 << 32) - 1))
         self.assertIsNone(
             model["_checked_product"](1 << 63, 2, (1 << 64) - 1))
+        self.assertIsNone(
+            model["_checked_sum"]((1 << 64) - 1, 1, (1 << 64) - 1))
         with self.assertRaises(OverflowError):
             checked_length(1 << 32, 16, (1 << 32) - 1)
 
@@ -7626,10 +7711,31 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             "samples": samples,
         }
         validate = evidence["validate_metadata_ram_trace"]
+        expected_peak = 10_000 * 1024
+        summary = validate(
+            trace, source_sha=source_sha, mapper_uuid=mapper_uuid)
+        self.assertEqual(summary["peak_ram_bytes"], expected_peak)
+
+        # Robust medians are part of the frozen method. Isolated baseline or
+        # final-recovery noise must not become a hidden stricter gate.
+        isolated_outlier = copy.deepcopy(trace)
+        isolated_outlier["samples"][0]["mem_available_kib"] -= 10_000
         self.assertEqual(
-            validate(trace, source_sha=source_sha, mapper_uuid=mapper_uuid)[
-                "peak_ram_bytes"],
-            10_000 * 1024)
+            validate(
+                isolated_outlier, source_sha=source_sha,
+                mapper_uuid=mapper_uuid)["peak_ram_bytes"],
+            expected_peak)
+        for field, delta in (
+                ("mem_available_kib", -1),
+                ("s_unreclaim_kib", 1),
+                ("vmalloc_used_kib", 1)):
+            isolated_final = copy.deepcopy(trace)
+            isolated_final["samples"][-1][field] += delta
+            self.assertEqual(
+                validate(
+                    isolated_final, source_sha=source_sha,
+                    mapper_uuid=mapper_uuid)["peak_ram_bytes"],
+                expected_peak)
 
         def forged_middle_timestamp(damaged):
             sample = damaged["samples"][15]
@@ -7639,24 +7745,42 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 timestamp + datetime.timedelta(milliseconds=80)
             ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
-        def baseline_outlier(damaged):
+        def duplicate_utc_at_tolerance_boundary(damaged):
+            # Old validation accepted 0/200 ms UTC gaps paired with 50/150 ms
+            # monotonic gaps because both cross-clock differences were exactly
+            # the allowed 50 ms and the first/last spans were unchanged.
+            previous = damaged["samples"][14]
+            sample = damaged["samples"][15]
+            sample["monotonic_ns"] = (
+                previous["monotonic_ns"] + 50_000_000)
+            sample["timestamp_utc"] = previous["timestamp_utc"]
+
+        def persistent_memory_leak(damaged):
+            for sample in damaged["samples"][-6:]:
+                sample["mem_available_kib"] -= 1
+
+        def baseline_outlier_cannot_hide_leak(damaged):
             damaged["samples"][0]["mem_available_kib"] -= 10_000
+            persistent_memory_leak(damaged)
 
-        def final_memory_leak(damaged):
-            damaged["samples"][-1]["mem_available_kib"] -= 1
+        def persistent_slab_leak(damaged):
+            for sample in damaged["samples"][-6:]:
+                sample["s_unreclaim_kib"] += 1
 
-        def final_slab_leak(damaged):
-            damaged["samples"][-1]["s_unreclaim_kib"] += 1
-
-        def final_vmalloc_leak(damaged):
-            damaged["samples"][-1]["vmalloc_used_kib"] += 1
+        def persistent_vmalloc_leak(damaged):
+            for sample in damaged["samples"][-6:]:
+                sample["vmalloc_used_kib"] += 1
 
         def missing_teardown(damaged):
             damaged["samples"].pop()
 
         for corrupt in (
-                forged_middle_timestamp, baseline_outlier,
-                final_memory_leak, final_slab_leak, final_vmalloc_leak,
+                forged_middle_timestamp,
+                duplicate_utc_at_tolerance_boundary,
+                persistent_memory_leak,
+                baseline_outlier_cannot_hide_leak,
+                persistent_slab_leak,
+                persistent_vmalloc_leak,
                 missing_teardown):
             with self.subTest(corruption=corrupt.__name__):
                 invalid = copy.deepcopy(trace)
