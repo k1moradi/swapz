@@ -646,6 +646,35 @@ and out-of-extent payload offsets, and verify the 64-record capacity boundary.
 Writer inputs must not overlap the exclusively owned builder extent. These
 checks are native/sanitizer evidence; they do not replace live mapper testing.
 
+The native production-engine prepare/complete boundary must use the actual
+`swapz_engine_prepare_batched_run()` implementation with caller-owned,
+bounded run bytes and transactions, not an independent simulation of the
+codec gate. It must reject compressed payloads aliasing any part of the
+builder-owned extent before their first CRC read, for ordinary and supplied-
+prehash inputs alike. The source must be poisoned under native ASan where
+possible without poisoning the initial header write. Left/right boundary
+contact and disjoint sources are valid only when the full readable payload
+stays outside that extent; a failed packed sibling must not cause even a
+partial lower WRITE or authoritative publication. The test must inspect
+errno, lower callbacks, map generations, abandoned/committed reservations,
+paused transaction ownership, record identities and payload CRCs, and then
+retry with independent bytes through the same scratch allocation. Cover
+all compressed encodings, a prehashed success path, RAW publication and
+DISCARD generation transitions, finite capacity, unsupported encoding,
+invalid lengths and generation overflow. A dedicated failure diagnostic
+must name engine phase and input category, relative offset/length,
+expected/actual errno, and whether lower-write/publication counters changed;
+never print payload bytes.
+
+Only the compressed builder path has a validate-before-payload-hash contract.
+RAW uses a separate direct-copy path; do not claim that a compressed codec
+overlap check guards RAW memcpy. Zero-page elision and DISCARD are mapper or
+authority transitions rather than encoded append records. An explicitly
+compiled ASan-only broken-prehash control may intentionally hash a poisoned
+overlapping input before engine validation, solely as an unsafe native
+negative control, never against storage or in the default native suite.
+This native evidence does not substitute for the loaded-kernel gate.
+
 
 Native tests compile the real `src/kernel/{codec,authority,engine}.c` where applicable. They cover codec integrity, authority publication, torn/short failure, overwrite generations, discard, zero-write representation, online packing, randomized authority, lower-run aggregation, flush/FUA accounting, retention/window policy and GC rotation/cost invariants. The Device Mapper source-contract regression for corrupted DISCARD mappings must compile the actual `swapz_discard` body together with its actual mapper-local extent-bounds helper, so physical-end and segment-crossing failures are executable production-body evidence rather than string-only checks. The preparation codec-result regression executes the production `preparation-slots.h` classifier/publication helper and distinguishes negative errno to ERROR, zero to READY_RAW, and positive length to READY_COMPRESSED; zero/positive outcomes must also be exercised through actual state publication. It must exercise both deterministic publication interleavings, including ERROR winning before RAW selection and RAW_SELECTED winning before a late negative result; the latter proves the target caller still owns fail-closed handling rather than mutating the selected state. It must additionally race one producer and one RAW selector for thousands of iterations and require any observed READY/ERROR state to expose the producer's payload/error side data through the acquire publication edge. The exact engine tests must inject both a successful short lower WRITE and a lower WRITE that physically completes a nonzero prefix before returning `-EIO`; neither may publish a new mapping, trigger verify-after-write readback, or discard a previous authoritative generation. The native fault fixture must verify the acknowledged lower-media prefix against the encoded bytes and the unwritten suffix against zero-filled media; a fabricated partial completion without actual bytes is insufficient. The experimental exact-production-C GitHub workflow must execute the complete native suite with AddressSanitizer plus UndefinedBehaviorSanitizer on both x86_64 and arm64; do not duplicate that expensive pass in the project-goal workflow. On x86_64 it must then clean the native build and rerun the pthread preparation publication/slot-reuse probes with ThreadSanitizer, halting on the first race report. Native ASan/UBSan/TSan coverage is supporting evidence only and must not be reported as KASAN, KCSAN, lockdep or loaded-kernel race qualification. GC engine coverage must also force a fully completed batched lower write whose authority replay fails after at least one earlier extent has published; the wrapper must return the exact committed prefix while leaving the unpublished tail unreachable, so callers never retry already-authoritative pages as though the prefix were zero. A delayed GC lower completion must keep both overwrite staging and DISCARD fenced until replay, and failed GC lower I/O must leave the uncertain physical reservation unavailable for immediate reuse. A combined lower WRITE that reports a short physical prefix and -EIO must publish none of its staged extents, leave previous mappings byte-exact, quarantine all reserved blocks (including unwritten tail blocks), and retry from a fresh range.
 
