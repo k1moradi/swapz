@@ -259,6 +259,12 @@ static uint64_t authoritative_negative_scan(const struct swapz_map *maps,
 		    extent_classes[map->start_block] != map->extent_blocks ||
 		    !live_records[map->start_block])
 			return now_ns() - start;
+		/* Mirror production's recovery-only interior-block rejection. */
+		for (swapz_u8 block_offset = 1U;
+		     block_offset < map->extent_blocks; ++block_offset)
+			if (extent_classes[map->start_block + block_offset] ||
+			    live_records[map->start_block + block_offset])
+				return now_ns() - start;
 		end_block = map->start_block + map->extent_blocks;
 		if (map->start_block < physical_blocks &&
 		    end_block > candidate_start)
@@ -418,6 +424,32 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 			physical_blocks);
 	}
 	if (records != SWAPZ_SEGMENT_BLOCKS)
+		goto out;
+	/*
+	 * Last-entry extent: a clean two-block map reaches the end of the
+	 * complete logical traversal, while a nonzero physical interior must
+	 * be refused even though the candidate's cached count is zero.
+	 */
+	maps[logical_pages - 2U].valid = 0;
+	maps[logical_pages - 1U].start_block = logical_pages - 2U;
+	maps[logical_pages - 1U].extent_blocks = 2U;
+	extent_classes[logical_pages - 2U] = 2U;
+	extent_classes[logical_pages - 1U] = 0U;
+	live_records[logical_pages - 1U] = 0U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (!safe)
+		goto out;
+	extent_classes[logical_pages - 1U] = 1U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (safe)
+		goto out;
+	extent_classes[logical_pages - 1U] = 0U;
+	live_records[logical_pages - 2U] = 0U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (safe)
 		goto out;
 	*row = (struct scale_row){
 		.logical_pages = logical_pages,

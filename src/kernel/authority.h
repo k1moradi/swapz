@@ -143,6 +143,13 @@ typedef int (*swapz_dead_segment_recycle_fn)(void *opaque,
 					      swapz_u32 segment);
 
 struct swapz_authority {
+	/*
+	 * The ordered DM owner exclusively mutates this array and its sidecars;
+	 * full-map proof calls may cond_resched() under its sleepable mutex.
+	 * Never call proof-bearing authority operations with IRQs disabled, in
+	 * RCU read-side sections or under a spinlock. No separate reader may
+	 * mutate this memory while a proof is suspended.
+	 */
 	struct swapz_map *maps;		/* [logical_pages] */
 	swapz_u16 *live_records;		/* [physical_blocks]; extent START */
 	swapz_u8 *extent_classes;		/* [physical_blocks]; extent START */

@@ -6,6 +6,7 @@
 #include <linux/errno.h>
 #include <linux/ktime.h>
 #include <linux/printk.h>
+#include <linux/sched.h>
 #include <linux/stddef.h>
 #include <linux/string.h>
 #else
@@ -573,6 +574,45 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
 }
 
 /*
+ * All production full-map authority callers own dm-target.c's ordered_owner
+ * mutex on its sleepable WQ_MEM_RECLAIM worker. queue_lock is released before
+ * reaching authority; no spinlock, RCU read section, IRQ-disabled region or
+ * kmap_local mapping spans the proof. Submitter ->map can stage but cannot
+ * claim/recycle a segment or publish mappings. Only the ordered owner mutates
+ * maps, physical sidecars and GC roles, including throughout a voluntary yield.
+ * A caller holding an atomic lock must never invoke a full-map proof.
+ *
+ * 4096 map entries per reschedule opportunity bounds uninterrupted scan work;
+ * the full proof still covers every logical entry. cond_resched() may return
+ * without scheduling and does not impose a wall-clock completion bound.
+ */
+#define SWAPZ_MAP_PROOF_RESCHED_PAGES 4096U
+
+static inline void swapz_map_proof_resched(swapz_u32 logical)
+{
+#ifdef __KERNEL__
+	if (logical && !(logical & (SWAPZ_MAP_PROOF_RESCHED_PAGES - 1U)))
+		cond_resched();
+#else
+	(void)logical;
+#endif
+}
+
+static int swapz_map_proof_refuse(const char *transition,
+				  const char *category, int error)
+{
+#ifdef __KERNEL__
+	pr_err_ratelimited(
+		"swapz: GC transition=%s corruption=%s errno=%d disposition=refused\n",
+		transition, category, error);
+#else
+	(void)transition;
+	(void)category;
+#endif
+	return error;
+}
+
+/*
  * The safe, strictly limited first swapz GC step: reuse only wholly-dead
  * 1MiB segments. A live object is NEVER copied or overwritten here.
  *
@@ -586,7 +626,7 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
 static int swapz_verify_segment_authoritative_maps(
 	const struct swapz_authority *a, swapz_u32 segment,
 	swapz_u32 expected_logical, swapz_u32 expected_count,
-	int verify_physical_metadata)
+	int verify_physical_metadata, const char *transition)
 {
 	const swapz_u32 none = ~(swapz_u32)0;
 	swapz_u32 logical, start_block, end_block, found_count = 0;
@@ -597,7 +637,7 @@ static int swapz_verify_segment_authoritative_maps(
 	     (!a->live_records || !a->extent_classes)) ||
 	    (expected_logical != none &&
 	     (expected_logical >= a->logical_pages || expected_count != 1U)))
-		return -EINVAL;
+		return swapz_map_proof_refuse(transition, "invalid_request", -EINVAL);
 	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
 	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
 
@@ -605,6 +645,7 @@ static int swapz_verify_segment_authoritative_maps(
 		const struct swapz_map *map = &a->maps[logical];
 		swapz_u32 map_end_block;
 
+		swapz_map_proof_resched(logical);
 		if (!map->valid)
 			continue;
 		if (map->start_block >= a->physical_blocks ||
@@ -612,14 +653,16 @@ static int swapz_verify_segment_authoritative_maps(
 		    map->extent_blocks > a->physical_blocks - map->start_block ||
 		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
 			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
-			return -EUCLEAN;
+			return swapz_map_proof_refuse(
+				transition, "extent_geometry", -EUCLEAN);
 		if (verify_physical_metadata) {
 			swapz_u8 block_offset;
 
 			if (a->extent_classes[map->start_block] !=
 				    map->extent_blocks ||
 			    !a->live_records[map->start_block])
-				return -EUCLEAN;
+				return swapz_map_proof_refuse(
+					transition, "physical_start", -EUCLEAN);
 			/*
 			 * Physical descriptors and liveness exist only at an
 			 * extent START. Any nonzero interior entry contradicts
@@ -634,17 +677,25 @@ static int swapz_verify_segment_authoritative_maps(
 						     block_offset] ||
 				    a->live_records[map->start_block +
 						    block_offset])
-					return -EUCLEAN;
+					return swapz_map_proof_refuse(
+						transition, "physical_interior",
+						-EUCLEAN);
 		}
 		map_end_block = map->start_block + map->extent_blocks;
 		if (map->start_block >= end_block || map_end_block <= start_block)
 			continue;
-		if ((expected_logical != none && logical != expected_logical) ||
-		    found_count >= expected_count)
-			return -EUCLEAN;
+		if (expected_logical != none && logical != expected_logical)
+			return swapz_map_proof_refuse(
+				transition, "unexpected_logical", -EUCLEAN);
+		if (found_count >= expected_count)
+			return swapz_map_proof_refuse(
+				transition, "unexpected_reference", -EUCLEAN);
 		found_count++;
 	}
-	return found_count == expected_count ? 0 : -EUCLEAN;
+	if (found_count != expected_count)
+		return swapz_map_proof_refuse(
+			transition, "reference_count", -EUCLEAN);
+	return 0;
 }
 
 static int swapz_claim_dead_segment(struct swapz_authority *a,
@@ -654,10 +705,15 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 	swapz_u32 start = segment * SWAPZ_SEGMENT_BLOCKS;
 	swapz_u32 off, logical, live_total = 0;
 	swapz_u8 used_mask = 0;
+	const char *transition = a->gc_allocation ?
+		"gc_reserve_claim" : "foreground_segment_claim";
 	int used, previously_claimed, reclaim_required, blocked = 0;
+	int proof_error;
 
 	if (swapz_dead_segment_sidecars_validate(a, segment))
-		return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
+		return swapz_finish_alloc_probe(a, probe_start,
+			swapz_map_proof_refuse(
+				transition, "dead_segment_sidecars", -EUCLEAN));
 	a->alloc_probe_full_scans++;
 	for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
 		live_total += a->live_records[start + off];
@@ -669,14 +725,17 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 	reclaim_required = used || previously_claimed;
 	if (a->segment_mapped_pages) {
 		if (live_total)
-			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
+			return swapz_finish_alloc_probe(a, probe_start,
+				swapz_map_proof_refuse(
+					transition, "physical_live", -EUCLEAN));
 		/*
 		 * Program counts and extent classes are cached witnesses, not map
 		 * authority. Even a seemingly virgin segment needs the primary-map
 		 * proof: both cached witnesses may be falsely zero after corruption.
 		 */
-		if (swapz_verify_segment_authoritative_maps(
-			    a, segment, ~(swapz_u32)0, 0U, 0))
+		proof_error = swapz_verify_segment_authoritative_maps(
+			a, segment, ~(swapz_u32)0, 0U, 0, transition);
+		if (proof_error)
 			return swapz_finish_alloc_probe(a, probe_start, -EUCLEAN);
 	} else {
 		if (live_total)
@@ -684,11 +743,14 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 		for (logical = 0; logical < a->logical_pages; ++logical) {
 			const struct swapz_map *map = &a->maps[logical];
 
+			swapz_map_proof_resched(logical);
 			if (!map->valid)
 				continue;
 			if (map->start_block >= a->physical_blocks)
 				return swapz_finish_alloc_probe(a, probe_start,
-								-EUCLEAN);
+					swapz_map_proof_refuse(
+						transition, "extent_geometry",
+						-EUCLEAN));
 			if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment) {
 				blocked = 1;
 				break;
@@ -942,7 +1004,7 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
  */
 static int swapz_verify_recovery_victim_dead(
 	const struct swapz_authority *a, swapz_u32 segment,
-	int verify_global_map_physical_metadata)
+	int verify_global_map_physical_metadata, const char *transition)
 {
 	swapz_u32 start_block, block;
 	int error;
@@ -951,16 +1013,18 @@ static int swapz_verify_recovery_victim_dead(
 		return -EINVAL;
 	error = swapz_verify_segment_authoritative_maps(
 		a, segment, ~(swapz_u32)0, 0U,
-		verify_global_map_physical_metadata);
+		verify_global_map_physical_metadata, transition);
 	if (error)
 		return error;
 	if (a->segment_mapped_pages && a->segment_mapped_pages[segment])
-		return -EUCLEAN;
+		return swapz_map_proof_refuse(
+			transition, "dead_segment_mapped_sidecar", -EUCLEAN);
 
 	start_block = segment * SWAPZ_SEGMENT_BLOCKS;
 	for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
 		if (a->live_records[start_block + block])
-			return -EUCLEAN;
+			return swapz_map_proof_refuse(
+				transition, "dead_segment_physical_live", -EUCLEAN);
 	return 0;
 }
 
@@ -1020,7 +1084,8 @@ int swapz_gc_advance_rotation_destination(struct swapz_authority *a,
 		 * A destination-role change must not conceal a corrupted physical
 		 * descriptor on any surviving logical map, including other segments.
 		 */
-		error = swapz_verify_recovery_victim_dead(a, segment, 1);
+		error = swapz_verify_recovery_victim_dead(
+			a, segment, 1, "gc_advance");
 		if (error) {
 #ifdef __KERNEL__
 			pr_err_ratelimited(
@@ -1088,7 +1153,7 @@ int swapz_gc_roll_forward_rotation(struct swapz_authority *a,
 	 * Roles remain unchanged until every check and the hook have succeeded.
 	 */
 	error = swapz_verify_recovery_victim_dead(
-		a, evacuated_victim, 1);
+		a, evacuated_victim, 1, "gc_roll_forward");
 	if (error) {
 #ifdef __KERNEL__
 		pr_err_ratelimited(
@@ -1155,6 +1220,7 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 		for (logical = 0; logical < a->logical_pages; ++logical) {
 			const struct swapz_map *m = &a->maps[logical];
 
+			swapz_map_proof_resched(logical);
 			if (m->valid && (m->start_block >= a->physical_blocks ||
 			    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim))
 				return -EUCLEAN;
@@ -1175,7 +1241,8 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 	 * foreground reads. Authenticate class/liveness for EVERY surviving map
 	 * before exchanging roles, not just the old victim's deadness.
 	 */
-	error = swapz_verify_recovery_victim_dead(a, victim, 1);
+	error = swapz_verify_recovery_victim_dead(
+		a, victim, 1, "gc_commit");
 	if (error) {
 #ifdef __KERNEL__
 		pr_err_ratelimited(
@@ -1707,7 +1774,8 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	    old_segment != new_segment &&
 	    a->segment_mapped_pages[old_segment] == 1U &&
 	    swapz_verify_segment_authoritative_maps(
-		    a, old_segment, page, 1U, 0)) {
+		    a, old_segment, page, 1U, 0,
+		    a->gc_allocation ? "gc_raw_final_map" : "raw_final_map")) {
 		error = -EUCLEAN;
 		goto fail;
 	}
@@ -1795,7 +1863,9 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 		if (old_segment != a->open_segment &&
 		    a->segment_mapped_pages[old_segment] == 1U &&
 		    swapz_verify_segment_authoritative_maps(
-			    a, old_segment, logical_page, 1U, 0))
+			    a, old_segment, logical_page, 1U, 0,
+			    a->gc_allocation ? "gc_discard_final_map" :
+			    "discard_final_map"))
 			return -EUCLEAN;
 	}
 	if (swapz_page_list_validate_entry(a, logical_page))
@@ -2121,7 +2191,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 				    delta->mapped_pages &&
 			    swapz_verify_segment_authoritative_maps(
 				    a, delta->segment, ~(swapz_u32)0,
-				    delta->mapped_pages, 0)) {
+				    delta->mapped_pages, 0,
+				    a->gc_allocation ? "gc_batch_final_map" :
+				    "batch_final_map")) {
 				error = -EUCLEAN;
 				goto fail;
 			}
