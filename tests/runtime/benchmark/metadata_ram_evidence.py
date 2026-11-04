@@ -507,7 +507,6 @@ def validate_metadata_ram_trace(
             not SOURCE_SHA.fullmatch(source_sha) or
             not isinstance(mapper_uuid, str) or
             not MAPPER_UUID.fullmatch(mapper_uuid) or
-            trace["mapper_uuid"] != mapper_uuid or
             not isinstance(trace["host_boot_id"], str) or
             not BOOT_ID.fullmatch(trace["host_boot_id"])):
         raise ValueError("metadata RAM trace provenance is invalid")

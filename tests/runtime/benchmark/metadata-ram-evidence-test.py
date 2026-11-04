@@ -107,6 +107,12 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SUnreclaim"):
             ram.parse_meminfo_counters(counters)
 
+    def test_mapper_mismatch_diagnostic_names_field(self) -> None:
+        trace, _ = synthetic_trace()
+        trace["mapper_uuid"] = "SWAPZ-foreign-mapper"
+        with self.assertRaisesRegex(ValueError, "metric=mapper_uuid"):
+            self.validate_trace(trace)
+
     def test_rejects_peak_steady_contradiction(self) -> None:
         trace, _ = synthetic_trace()
         peak = self.validate_trace(trace)["steady_peak_ram_bytes"]

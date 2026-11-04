@@ -5788,7 +5788,8 @@ virtual address space and must not be subject to that physical bound. Reject
 a malformed or indented second required meminfo counter instead of silently
 ignoring contradictory values. Report a malformed sample's index, precise
 field and expected/observed numeric bounds without echoing arbitrary evidence
-strings. Such contradictions are unavailable/BLOCKED evidence, not a measured
+strings. An exact-mapper mismatch must identify the `mapper_uuid` field
+without printing the supplied identity. Such contradictions are unavailable/BLOCKED evidence, not a measured
 target failure; only a properly validated over-ceiling loaded-host peak is
 a genuine measured RAM FAIL. Neither a synthetic control nor the 740 MiB
 index-only capacity estimate can become physical RAM acceptance. The serialized
