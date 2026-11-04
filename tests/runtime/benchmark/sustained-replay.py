@@ -641,6 +641,8 @@ def merge_phase(results, wall_ns: int, hot_pages: int | None = None,
             "p95_ns": combined.percentile(.95),
             "p99_ns": combined.percentile(.99),
             "latency_histogram": combined.evidence(),
+            "read_latency_histogram": row["read"].evidence(),
+            "write_latency_histogram": row["write"].evidence(),
             "read_p95_ns": row["read"].percentile(.95),
             "read_p99_ns": row["read"].percentile(.99),
             "write_p95_ns": row["write"].percentile(.95),
@@ -1092,10 +1094,17 @@ def run(args):
                     if logical_read_bytes else None)
             kernel_write = REPLAY["kernel_write_delta"](write_before, write_after)
             kernel_read = REPLAY["kernel_read_delta"](read_before, read_after)
-            worker_cpu_ns = (
-                sum((kernel_write or {}).get(key, 0)
+            worker_cpu_ns_before = (
+                sum((write_before or {}).get(key, 0)
                     for key in ("ordered_worker_cpu_ns", "prep_worker_cpu_ns")) +
-                (kernel_read or {}).get("read_worker_cpu_ns", 0))
+                (read_before or {}).get("read_worker_cpu_ns", 0))
+            worker_cpu_ns_after = (
+                sum((write_after or {}).get(key, 0)
+                    for key in ("ordered_worker_cpu_ns", "prep_worker_cpu_ns")) +
+                (read_after or {}).get("read_worker_cpu_ns", 0))
+            worker_cpu_ns = worker_cpu_ns_after - worker_cpu_ns_before
+            if worker_cpu_ns < 0:
+                raise ValueError("kernel worker CPU counters reset during measurement")
             replay_cpu = (
                 max(0., cpu_after[0] - cpu_before[0]) +
                 max(0., cpu_after[1] - cpu_before[1]))
@@ -1196,6 +1205,22 @@ def run(args):
                         "100ms host trace"
                         if identity.get("dm_uuid") else "not applicable")},
                 "host_cpu": host_cpu,
+                # Persist the actual measured-boundary counters. The offline
+                # qualification evaluator must not trust normalized metrics
+                # detached from independent lower-device or process evidence.
+                "measurement_snapshots": {
+                    "lower_before": lower_before,
+                    "lower_after": lower_after,
+                    "process_before": {
+                        "user_seconds": cpu_before[0],
+                        "system_seconds": cpu_before[1],
+                        "peak_rss_bytes": cpu_before[2]},
+                    "process_after": {
+                        "user_seconds": cpu_after[0],
+                        "system_seconds": cpu_after[1],
+                        "peak_rss_bytes": cpu_after[2]},
+                    "worker_cpu_ns_before": worker_cpu_ns_before,
+                    "worker_cpu_ns_after": worker_cpu_ns_after},
                 "performance_screening": {
                     "status": "SCREENED" if not screening else "EXCLUDED",
                     "reasons": screening, "pre": pre_quiet, "post": post_quiet},

@@ -495,6 +495,85 @@ def validate_module_provenance(arm: dict, label: str) -> list[str]:
     return []
 
 
+def measurement_snapshot_reasons(arm: dict, label: str) -> list[str]:
+    """Verify independent sector, process, VmHWM and worker CPU boundaries.
+
+    The parent's /sys/block/<disk>/stat sectors are 512-byte units regardless
+    of the card's advertised physical sector and our logical 4096-byte pages.
+    """
+    try:
+        snapshots = metric(arm, "measurement_snapshots")
+        if not isinstance(snapshots, dict):
+            raise ValueError("measured counter snapshots are missing")
+        before = metric(snapshots, "lower_before")
+        after = metric(snapshots, "lower_after")
+        if (not isinstance(before, list) or not isinstance(after, list) or
+                len(before) < 16 or len(before) != len(after) or
+                any(type(value) is not int or value < 0
+                    for value in before + after)):
+            raise ValueError("lower-device counter snapshots are malformed")
+        deltas = [end - start for start, end in zip(before, after)]
+        if any(deltas[index] < 0 for index in (0, 2, 4, 6, 15)):
+            raise ValueError("lower-device counters reset during measurement")
+        lower = metric(arm, "lower_io")
+        if not isinstance(lower, dict):
+            raise ValueError("measured lower I/O is missing")
+        for field, calculated in (
+                ("lower_read_requests", deltas[0]),
+                ("lower_read_bytes", deltas[2] * 512),
+                ("lower_write_requests", deltas[4]),
+                ("lower_write_bytes", deltas[6] * 512),
+                ("lower_flush_requests", deltas[15])):
+            if type(lower.get(field)) is not int or lower[field] != calculated:
+                raise ValueError(f"{field} differs from raw lower-device counters")
+
+        process_before = metric(snapshots, "process_before")
+        process_after = metric(snapshots, "process_after")
+        if not isinstance(process_before, dict) or not isinstance(process_after, dict):
+            raise ValueError("process boundary snapshots are missing")
+        for field, output in (
+                ("user_seconds", "replay_user_seconds"),
+                ("system_seconds", "replay_system_seconds")):
+            start = number(metric(process_before, field), f"process_before.{field}")
+            end = number(metric(process_after, field), f"process_after.{field}")
+            if start < 0 or end < start:
+                raise ValueError("process CPU counters reset")
+            if not math.isclose(
+                    number(metric(arm, "cpu." + output), output), end - start,
+                    rel_tol=1e-9, abs_tol=1e-12):
+                raise ValueError(f"cpu.{output} differs from process snapshots")
+        before_rss = metric(process_before, "peak_rss_bytes")
+        after_rss = metric(process_after, "peak_rss_bytes")
+        if (type(before_rss) is not int or type(after_rss) is not int or
+                not 0 <= before_rss <= after_rss):
+            raise ValueError("process VmHWM boundary snapshots are invalid")
+        for field, calculated in (
+                ("replay_peak_rss_bytes", after_rss),
+                ("replay_process_maxrss_bytes", after_rss),
+                ("replay_measurement_start_maxrss_bytes", before_rss),
+                ("replay_measurement_peak_rss_growth_bytes",
+                 after_rss - before_rss)):
+            observed = metric(arm, "resources." + field)
+            if type(observed) is not int or observed != calculated:
+                raise ValueError(f"resources.{field} differs from VmHWM snapshots")
+
+        worker_before = metric(snapshots, "worker_cpu_ns_before")
+        worker_after = metric(snapshots, "worker_cpu_ns_after")
+        if (type(worker_before) is not int or type(worker_after) is not int or
+                not 0 <= worker_before <= worker_after or
+                (label == "raw" and (worker_before != 0 or worker_after != 0))):
+            raise ValueError("kernel worker CPU snapshots are malformed")
+        if not math.isclose(
+                number(metric(arm, "cpu.exported_swapz_worker_cpu_seconds"),
+                       "exported worker CPU"),
+                (worker_after - worker_before) / 1e9,
+                rel_tol=1e-9, abs_tol=1e-12):
+            raise ValueError("kernel worker CPU differs from boundary snapshots")
+    except (ValueError, TypeError) as exc:
+        return [f"{label} measured snapshots: {exc}"]
+    return []
+
+
 def measured_block_accounting_reasons(arm: dict, workload: str,
                                       label: str) -> list[str]:
     """Do not trust normalized columns detached from completed I/O counters."""
@@ -511,15 +590,34 @@ def measured_block_accounting_reasons(arm: dict, workload: str,
         requested = workload_spec(workload).get("measure_operations")
         if requested is not None and reads + writes != requested:
             raise ValueError("measured operation count differs from fixed work")
+        measured_start = metric(arm, "measured_start_monotonic_ns")
+        measured_end = metric(arm, "measured_end_monotonic_ns")
+        arm_start = metric(arm, "arm_started_monotonic_ns")
+        arm_end = metric(arm, "arm_finished_monotonic_ns")
+        if (any(type(value) is not int for value in
+                (measured_start, measured_end, arm_start, arm_end)) or
+                not arm_start <= measured_start < measured_end <= arm_end or
+                not math.isclose((measured_end - measured_start) / 1e9,
+                                 seconds, rel_tol=1e-9, abs_tol=1e-6)):
+            raise ValueError("measured monotonic boundaries differ from elapsed time")
         useful_bytes = (reads + writes) * 4096
         useful_write_bytes = writes * 4096
+        useful_read_bytes = reads * 4096
         lower_bytes = metric(arm, "lower_io.lower_write_bytes")
         lower_requests = metric(arm, "lower_io.lower_write_requests")
         if (type(lower_bytes) is not int or type(lower_requests) is not int or
                 lower_bytes <= 0 or lower_requests <= 0):
             raise ValueError("independent lower WRITE counters are missing or nonpositive")
+        reasons += measurement_snapshot_reasons(arm, label)
+        lower_read_bytes = metric(arm, "lower_io.lower_read_bytes")
+        if type(lower_read_bytes) is not int or lower_read_bytes < 0:
+            raise ValueError("independent lower READ counters are malformed")
         expected = {
             "throughput.logical_write_mbps": useful_write_bytes / seconds / 1_000_000,
+            "throughput.logical_read_mbps": useful_read_bytes / seconds / 1_000_000,
+            "throughput.logical_total_mbps": useful_bytes / seconds / 1_000_000,
+            "lower_io.lower_read_bytes_per_logical_read_byte":
+                lower_read_bytes / useful_read_bytes,
             "lower_io.lower_write_bytes_per_logical_write_byte":
                 lower_bytes / useful_write_bytes,
             "lower_io.lower_write_requests_per_1000_logical_writes":
@@ -591,6 +689,26 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
             histogram = latency_histogram_summary(
                 metric(row, "latency_histogram"), "minute combined",
                 expected_count=row["operations"])
+            # Independently counted READ and WRITE tails must reconstruct the
+            # combined distribution; a compensated combined-bin edit alone
+            # cannot rewrite p99 drift without leaving conflicting evidence.
+            operation_bins = [0] * LATENCY_BIN_COUNT
+            for operation in ("read", "write"):
+                derived = latency_histogram_summary(
+                    metric(row, f"{operation}_latency_histogram"),
+                    f"minute {operation}", expected_count=row[f"{operation}_operations"])
+                for percentile in ("p95_ns", "p99_ns"):
+                    if metric(row, f"{operation}_{percentile}") != derived[percentile]:
+                        raise ValueError(
+                            f"minute {operation} {percentile} differs from histogram")
+                for index, count in row[f"{operation}_latency_histogram"]["bins"]:
+                    operation_bins[index] += count
+            combined_bins = [0] * LATENCY_BIN_COUNT
+            for index, count in row["latency_histogram"]["bins"]:
+                combined_bins[index] += count
+            if operation_bins != combined_bins:
+                raise ValueError(
+                    "minute combined histogram differs from READ/WRITE distributions")
             if (not math.isclose(duration, 60.0, abs_tol=1e-6) or
                     not math.isclose(
                         throughput,
@@ -606,9 +724,15 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
         # bucket distributions; the absolute bucket chronology below separately
         # binds the 60 rows to the measured one-hour window.
         minute_bin_totals = [0] * LATENCY_BIN_COUNT
+        minute_operation_bins = {
+            "read": [0] * LATENCY_BIN_COUNT,
+            "write": [0] * LATENCY_BIN_COUNT}
         for row in minutes:
             for bin_index, bin_count in row["latency_histogram"]["bins"]:
                 minute_bin_totals[bin_index] += bin_count
+            for operation, totals in minute_operation_bins.items():
+                for bin_index, bin_count in row[f"{operation}_latency_histogram"]["bins"]:
+                    totals[bin_index] += bin_count
         arm_latency = metric(arm, "latency")
         arm_bin_totals = [0] * LATENCY_BIN_COUNT
         for operation in ("read", "write"):
@@ -616,8 +740,13 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
             latency_histogram_summary(
                 histogram, f"whole-arm {operation}",
                 expected_count=metric(arm, f"{operation}_ops"))
+            whole_operation_bins = [0] * LATENCY_BIN_COUNT
             for bin_index, bin_count in histogram["bins"]:
                 arm_bin_totals[bin_index] += bin_count
+                whole_operation_bins[bin_index] += bin_count
+            if minute_operation_bins[operation] != whole_operation_bins:
+                raise ValueError(
+                    f"minute {operation} bins differ from whole-arm evidence")
         if minute_bin_totals != arm_bin_totals:
             raise ValueError(
                 "minute latency histogram bins differ from whole-arm evidence")

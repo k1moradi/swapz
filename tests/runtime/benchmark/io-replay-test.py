@@ -2467,14 +2467,24 @@ class PairReplayContract(unittest.TestCase):
             swapz = candidate == "swapz"
             writes, reads = 838860, 209716
             write_mbps = raw_write * 1.06 if swapz else raw_write
-            lower_write_bytes = int(writes * PAGE * (.8 if swapz else 1.0))
+            lower_write_bytes = (
+                int(writes * PAGE * (.8 if swapz else 1.0)) // 512 * 512)
             lower_write_requests = int(83886 * (.8 if swapz else 1.0))
             cpu_per_byte = 1.1e-9 if swapz else 1.0e-9
+            elapsed_seconds = writes * PAGE / write_mbps / 1_000_000
             first = (candidate == "raw") == (order == "raw-first")
             return {
                 "candidate": candidate, "verdict": "PASS", "source_sha": "a" * 40,
-                "arm_started_monotonic_ns": 10 if first else 30,
-                "arm_finished_monotonic_ns": 20 if first else 40,
+                "arm_started_monotonic_ns": (
+                    1_000_000_000_000 if first else 2_000_000_000_000),
+                "measured_start_monotonic_ns": (
+                    1_001_000_000_000 if first else 2_001_000_000_000),
+                "measured_end_monotonic_ns": (
+                    (1_001_000_000_000 if first else 2_001_000_000_000) +
+                    round(elapsed_seconds * 1e9)),
+                "arm_finished_monotonic_ns": (
+                    (1_002_000_000_000 if first else 2_002_000_000_000) +
+                    round(elapsed_seconds * 1e9)),
                 "arm_boot_id": "11111111-2222-3333-4444-555555555555",
                 "loaded_module_provenance": ({
                     "status": "LOADED",
@@ -2497,12 +2507,34 @@ class PairReplayContract(unittest.TestCase):
                 "measure_operations": 1048576, "measure_seconds_requested": None,
                 "read_ops": reads,
                 "write_ops": writes, "oracle": {"mismatches": 0},
-                "seconds": writes * PAGE / write_mbps / 1_000_000,
+                "seconds": elapsed_seconds,
                 "performance_screening": {
                     "status": "SCREENED" if screened else "EXCLUDED",
                     "reasons": [] if screened else ["synthetic noise"]},
-                "throughput": {"logical_write_mbps": write_mbps},
+                "throughput": {
+                    "logical_write_mbps": write_mbps,
+                    "logical_read_mbps": reads * PAGE / elapsed_seconds / 1_000_000,
+                    "logical_total_mbps": (reads + writes) * PAGE /
+                        elapsed_seconds / 1_000_000},
+                "measurement_snapshots": {
+                    "lower_before": [0] * 16,
+                    "lower_after": [
+                        10, 0, 80, 0, lower_write_requests, 0,
+                        lower_write_bytes // 512, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    "process_before": {
+                        "user_seconds": 0.0, "system_seconds": 0.0,
+                        "peak_rss_bytes": 31 * 1024 * 1024},
+                    "process_after": {
+                        "user_seconds": cpu_per_byte * (reads + writes) * PAGE,
+                        "system_seconds": 0.0,
+                        "peak_rss_bytes": 32 * 1024 * 1024},
+                    "worker_cpu_ns_before": 0, "worker_cpu_ns_after": 0},
                 "lower_io": {
+                    "lower_read_requests": 10,
+                    "lower_read_bytes": 80 * 512,
+                    "lower_flush_requests": 0,
+                    "lower_read_bytes_per_logical_read_byte":
+                        (80 * 512) / (reads * PAGE),
                     "lower_write_bytes": lower_write_bytes,
                     "lower_write_requests": lower_write_requests,
                     "lower_write_bytes_per_logical_write_byte":
@@ -2619,6 +2651,21 @@ class PairReplayContract(unittest.TestCase):
                     row["raw"].update(operation_recipe_sha256="0" * 64),
                     row["swapz"].update(operation_recipe_sha256="0" * 64)),
                 lambda row: row["raw"]["latency"].update(read_p50_ns=101),
+                lambda row: row["raw"]["measurement_snapshots"][
+                    "lower_after"].__setitem__(6, 1),
+                lambda row: row["swapz"]["measurement_snapshots"][
+                    "lower_after"].__setitem__(4, 0),
+                lambda row: row["raw"]["measurement_snapshots"][
+                    "process_after"].update(user_seconds=0.0),
+                lambda row: row["swapz"]["measurement_snapshots"][
+                    "process_after"].update(peak_rss_bytes=0),
+                lambda row: row["raw"]["throughput"].update(
+                    logical_read_mbps=0.0),
+                lambda row: row["swapz"]["throughput"].update(
+                    logical_total_mbps=0.0),
+                lambda row: row["raw"]["measurement_snapshots"].pop(
+                    "lower_before"),
+                lambda row: row["swapz"].pop("measured_end_monotonic_ns"),
                 lambda row: row["swapz"].update(resources=["malformed"]),
                 lambda row: row["swapz"].update(
                     device_identity=["malformed"]),
@@ -2907,6 +2954,16 @@ class PairReplayContract(unittest.TestCase):
                     "count": 2, "max_ns": 1,
                     "bins": [[minute_latency_index, 2]],
                 },
+                "read_latency_histogram": {
+                    "count": 1, "max_ns": 1,
+                    "bins": [[minute_latency_index, 1]],
+                },
+                "write_latency_histogram": {
+                    "count": 1, "max_ns": 1,
+                    "bins": [[minute_latency_index, 1]],
+                },
+                "read_p95_ns": minute_latency, "read_p99_ns": minute_latency,
+                "write_p95_ns": minute_latency, "write_p99_ns": minute_latency,
             }
             for index in range(60)]
         arm_started_ns = 1_000_000_000
@@ -2984,6 +3041,9 @@ class PairReplayContract(unittest.TestCase):
             lambda arm: arm["minute_buckets"][1].update(
                 end_monotonic_ns=
                     arm["minute_buckets"][1]["end_monotonic_ns"] + 1),
+            lambda arm: [
+                row.update(start_monotonic_ns=row["start_monotonic_ns"] + 1)
+                for row in arm["minute_buckets"]],
             lambda arm: arm["minute_buckets"][0][
                 "latency_histogram"]["bins"][0].__setitem__(1, 1),
             lambda arm: arm["sustained_intervals"].pop(),
@@ -3035,6 +3095,45 @@ class PairReplayContract(unittest.TestCase):
             "minute latency histogram bins differ from whole-arm evidence"
             in reason for reason in qualification.sustained_coverage_reasons(
                 altered_whole_arm, "swapz")))
+
+        # Exchange high-tail bins between two minutes without changing
+        # whole-arm histograms, operation totals or per-minute counts.
+        compensated = copy.deepcopy(raw)
+        late = compensated["minute_buckets"][-1]
+        early = compensated["minute_buckets"][0]
+        high_index = qualification.latency_bin_index(2)
+        high_p99 = qualification.latency_bin_upper(high_index)
+        late["latency_histogram"] = {
+            "count": 2, "max_ns": 2, "bins": [[high_index, 2]]}
+        for operation in ("read", "write"):
+            late[f"{operation}_latency_histogram"] = {
+                "count": 1, "max_ns": 2, "bins": [[high_index, 1]]}
+            compensated["latency"][f"{operation}_histogram"] = {
+                "count": 60, "max_ns": 2,
+                "bins": [[minute_latency_index, 59], [high_index, 1]]}
+        for field in ("p95_ns", "p99_ns", "read_p95_ns", "read_p99_ns",
+                      "write_p95_ns", "write_p99_ns"):
+            late[field] = high_p99
+        self.assertEqual(
+            qualification.sustained_coverage_reasons(compensated, "swapz"), [])
+        redistributed = copy.deepcopy(compensated)
+        first_minute = redistributed["minute_buckets"][0]
+        last_minute = redistributed["minute_buckets"][-1]
+        first_minute["latency_histogram"] = {
+            "count": 2, "max_ns": 2, "bins": [[high_index, 2]]}
+        last_minute["latency_histogram"] = {
+            "count": 2, "max_ns": 1,
+            "bins": [[minute_latency_index, 2]]}
+        for field in ("p95_ns", "p99_ns"):
+            first_minute[field] = high_p99
+            last_minute[field] = minute_latency
+        self.assertNotEqual(
+            qualification.quartile_ratio(compensated["minute_buckets"], "p99_ns"),
+            qualification.quartile_ratio(redistributed["minute_buckets"], "p99_ns"))
+        self.assertTrue(any(
+            "minute combined histogram differs from READ/WRITE" in reason
+            for reason in qualification.sustained_coverage_reasons(
+                redistributed, "swapz")))
 
         outside_window_gc = copy.deepcopy(raw)
         outside_window_gc["sustained_intervals"][20]["gc"].update(
