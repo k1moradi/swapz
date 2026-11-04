@@ -47,6 +47,9 @@ ENV_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 UTC_TIMESTAMP_RE = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
     r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z$")
+UTC_EVIDENCE_TIME_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?(?:Z|\+00:00)$")
 
 REQUIRED_STAGES = (
     "Build module and helpers",
@@ -300,7 +303,9 @@ def _valid_source(value: Any) -> bool:
 
 def _parse_utc_evidence_time(value: Any) -> datetime.datetime | None:
     """Parse a bounded UTC evidence timestamp without accepting local time."""
-    if not isinstance(value, str) or not value.endswith(("Z", "+00:00")):
+    if (
+            not isinstance(value, str) or
+            UTC_EVIDENCE_TIME_RE.fullmatch(value) is None):
         return None
     try:
         observed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
