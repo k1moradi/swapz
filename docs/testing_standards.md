@@ -3606,7 +3606,11 @@ failure, and device disappearance before and after the write. The swap-inventory
 regular-file and block-device entries nonconflicting; unknown entry types must
 fail closed. Rootless stream fixtures must also reject an empty or headerless
 `/proc/swaps` inventory, malformed headers/rows and a row whose reported
-file/partition type disagrees with the stat identity. A rootless proc-directory fixture must prove that a selected partition or
+file/partition type disagrees with the stat identity. Native fixtures also cover embedded NULs,
+control bytes, missing final newlines, overlong rows, bounded table/row budgets,
+duplicate mount IDs and duplicate swap backing identities, malformed mount
+optional fields and octal escapes, and deterministic byte mutations under
+the ASan/UBSan rootless test build. A rootless proc-directory fixture must prove that a selected partition or
 parent mounted only in another visible PID's namespace blocks formatting,
 while unrelated sibling mounts remain nonconflicting. Missing or malformed
 mountinfo for a PID whose ns/mnt marker is still present must fail closed;
@@ -3618,7 +3622,8 @@ namespace. The mountinfo parser must accept normal major-zero pseudo-filesystem
 entries (including `0:0`) while still rejecting malformed/overflowed rows;
 major zero must remain forbidden for a configured physical partition or parent.
 For every ownership/identity uncertainty before publication, the test
-must count zero destructive header writes. Rootless mocks must cover protected
+must count zero destructive header writes. Final symlinks, node ownership or mode drift,
+and a same-`st_rdev` inode replacement must refuse before any media write. Rootless mocks must cover protected
 root-owned selector absence, mismatched PARTUUID, permission denial, and selector
 revocation at the last prewrite gate; these checks must precede any read-write
 device open or write. It must also prove exact valid-header repeat formatting
