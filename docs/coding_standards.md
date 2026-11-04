@@ -670,7 +670,19 @@ major:minor, capacity, UUID or PARTUUID into a unit. The mapper service needs
 matching by-PARTUUID swap unit, with a bounded device-job timeout. Do not use
 `BindsTo` for removable media: unplugging a device must not automatically stop
 a mapper that could still own live pages. Invalid selector data must not
-produce a target-specific drop-in. This dependency only names the PARTUUID
+produce a target-specific drop-in. On every generator invocation, publish
+an early-priority mapper-unit mask before consulting the protected selector or
+publishing target-specific units. The mask must remain effective throughout
+staging and cleanup so an enabled mapper cannot acquire an incomplete or stale
+dependency graph. Validate bounded manager output, refuse duplicate generated
+unit identities and symlink-substituted output paths, and remove only
+generator-owned stale drop-ins from a previously selected PARTUUID. Publish the
+complete selected graph before releasing the mask; any validation, command,
+publication or rollback failure must leave the mapper blocked rather than
+fall back to a device path or reveal a partially active job. Diagnostics must
+identify phase, selected-source category, check, original status and withheld
+output, without printing protected configuration. Preserve independent
+pre-hibernation refusal on failed selector admission. This dependency only names the PARTUUID
 alias; the deployment gate must also prevent the same partition from being
 started as raw swap through a by-UUID or other alias. Static units stay
 disabled and manual start/stop remains refused until lifecycle and boot

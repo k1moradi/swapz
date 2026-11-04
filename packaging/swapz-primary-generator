@@ -1,73 +1,193 @@
 #!/bin/sh
 # Emit selected-target ordering for the disabled primary-swap systemd units.
 set -eu
-umask 022
+umask 077
+
+fail()
+{
+	failure_status=$1
+	failure_phase=$2
+	failure_source=$3
+	failure_validation=$4
+	failure_withheld=$5
+	printf 'swapz-primary-generator: phase=%s source=%s validation=%s status=%s withheld=%s\n' \
+		"$failure_phase" "$failure_source" "$failure_validation" \
+		"$failure_status" "$failure_withheld" >&2
+	exit "$failure_status"
+}
 
 if [ "$#" -ne 3 ]; then
-	echo "swapz-primary-generator: expected normal/early/late output directories" >&2
-	exit 2
+	fail 2 arguments generator-output count mapper-active-job
 fi
 
 normal_dir=$1
-case "$normal_dir" in
-/*) ;;
-*)
-	echo "swapz-primary-generator: invalid normal output directory" >&2
-	exit 2
-	;;
-esac
-if [ ! -d "$normal_dir" ] || [ -L "$normal_dir" ]; then
-	echo "swapz-primary-generator: normal output directory is unavailable or unsafe" >&2
-	exit 2
+early_dir=$2
+late_dir=$3
+for output_dir in "$normal_dir" "$early_dir" "$late_dir"; do
+	case "$output_dir" in
+	/*) ;;
+	*) fail 2 arguments generator-output absolute-path mapper-active-job ;;
+	esac
+	if [ ! -d "$output_dir" ] || [ -L "$output_dir" ]; then
+		fail 2 arguments generator-output unsafe-output-directory mapper-active-job
+	fi
+done
+if [ "$normal_dir" = "$early_dir" ] || [ "$normal_dir" = "$late_dir" ] ||
+	[ "$early_dir" = "$late_dir" ]; then
+	fail 2 arguments generator-output duplicate-output-directory mapper-active-job
 fi
+
+# The mask is the publication barrier: enabled swap.target wants may already
+# exist, but a failed regeneration must never expose an executable mapper job.
+# generator.early outranks even administrator /etc units; a normal-dir mask
+# cannot reliably block an enabled mapper on selector/admission failure.
+mapper_unit=$early_dir/swapz-primary-mapper.service
+mask_temporary=$early_dir/.swapz-primary-mask.$$
+preexisting_unit=none
+if [ -L "$mapper_unit" ]; then
+	if mask_destination=$(readlink -- "$mapper_unit"); then
+		[ "$mask_destination" = /dev/null ] || preexisting_unit=unexpected-unit
+	else
+		fail "$?" mask generator-output read-existing-mask mapper-active-job
+	fi
+elif [ -e "$mapper_unit" ]; then
+	preexisting_unit=unexpected-unit
+fi
+if ln -s /dev/null "$mask_temporary"; then :; else
+	fail "$?" mask generator-output create-mask mapper-active-job
+fi
+if mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
+	mask_status=$?
+	rm -f -- "$mask_temporary"
+	fail "$mask_status" mask generator-output publish-mask mapper-active-job
+fi
+
+stage_dir=
+mapper_dropin=
+device_dropin=
+published_mapper=0
+published_device=0
+transaction_committed=0
+cleanup()
+{
+	# Remove a partial graph while the mapper mask is still in force. Never
+	# follow a substituted symlink to an external destination.
+	if [ "$transaction_committed" -eq 0 ]; then
+		if [ "$published_mapper" -eq 1 ]; then
+			rm -f -- "$mapper_dropin" || :
+		fi
+		if [ "$published_device" -eq 1 ]; then
+			rm -f -- "$device_dropin" || :
+		fi
+	fi
+	[ -z "$stage_dir" ] || rm -rf -- "$stage_dir" || :
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+[ "$preexisting_unit" = none ] ||
+	fail 1 mask generator-output unexpected-existing-unit mapper-active-job
+for other_output_dir in "$normal_dir" "$late_dir"; do
+	if [ -e "$other_output_dir/swapz-primary-mapper.service" ] ||
+		[ -L "$other_output_dir/swapz-primary-mapper.service" ]; then
+		fail 1 mask generator-output duplicate-mapper-unit mapper-active-job
+	fi
+done
+
+if stage_dir=$(mktemp -d "$normal_dir/.swapz-primary-generator.XXXXXXXX"); then :; else
+	fail "$?" staging generator-output create-private-directory mapper-active-job
+fi
+# The scratch directory remains private; published unit directories retain
+# their original systemd-readable 0755 mode.
+umask 022
+
+# Clear only the generator's own prior target drop-ins, including a previous
+# PARTUUID after a selector change. Other units and drop-ins are not ours.
+mapper_dropin_dir=$normal_dir/swapz-primary-mapper.service.d
+if [ -L "$mapper_dropin_dir" ]; then
+	fail 1 cleanup generator-output symlinked-mapper-directory mapper-active-job
+fi
+if [ -d "$mapper_dropin_dir" ]; then
+	old_mapper_dropin=$mapper_dropin_dir/50-selected-target.conf
+	if [ -L "$old_mapper_dropin" ]; then
+		fail 1 cleanup generator-output symlinked-mapper-dropin mapper-active-job
+	fi
+	if [ -e "$old_mapper_dropin" ]; then
+		[ -f "$old_mapper_dropin" ] || fail 1 cleanup generator-output invalid-mapper-dropin mapper-active-job
+		if rm -f -- "$old_mapper_dropin"; then :; else
+			fail "$?" cleanup generator-output remove-old-mapper-dropin mapper-active-job
+		fi
+	fi
+elif [ -e "$mapper_dropin_dir" ]; then
+	fail 1 cleanup generator-output invalid-mapper-directory mapper-active-job
+fi
+
+for old_device_dir in "$normal_dir"/dev-disk-by\\x2dpartuuid-*.device.d; do
+	[ -e "$old_device_dir" ] || [ -L "$old_device_dir" ] || continue
+	if [ -L "$old_device_dir" ] || [ ! -d "$old_device_dir" ]; then
+		fail 1 cleanup generator-output unsafe-stale-device-directory mapper-active-job
+	fi
+	old_device_dropin=$old_device_dir/50-swapz-timeout.conf
+	if [ -L "$old_device_dropin" ]; then
+		fail 1 cleanup generator-output symlinked-device-dropin mapper-active-job
+	fi
+	if [ -e "$old_device_dropin" ]; then
+		[ -f "$old_device_dropin" ] || fail 1 cleanup generator-output invalid-device-dropin mapper-active-job
+		if rm -f -- "$old_device_dropin"; then :; else
+			fail "$?" cleanup generator-output remove-stale-device-dropin mapper-active-job
+		fi
+	fi
+	# Keep a directory containing someone else's drop-ins.
+	rmdir -- "$old_device_dir" 2>/dev/null || :
+done
 
 # Hibernation cannot preserve swapz's volatile mapping authority. Install a
 # narrow pre-hibernation guard on every systemd sleep path that can write a
 # hibernation image. The helper is observation-only and blocks rather than
 # deactivating or recreating a mapping. Generators rerun on daemon-reload, so
 # these transient drop-ins follow the installed helper path automatically.
-hibernate_temporary=
-cleanup_hibernate()
-{
-	[ -z "$hibernate_temporary" ] || rm -f -- "$hibernate_temporary"
-}
-trap cleanup_hibernate EXIT HUP INT TERM
 for sleep_service in systemd-hibernate.service systemd-hybrid-sleep.service systemd-suspend-then-hibernate.service; do
 	hibernate_dropin_dir=$normal_dir/$sleep_service.d
 	if [ -L "$hibernate_dropin_dir" ]; then
-		echo "swapz-primary-generator: refusing symlinked hibernation drop-in directory" >&2
-		exit 1
+		fail 1 hibernation generator-output symlinked-hibernation-directory 'hibernate-guard,mapper-active-job'
 	fi
-	mkdir -p -- "$hibernate_dropin_dir"
+	if mkdir -p -- "$hibernate_dropin_dir"; then :; else
+		fail "$?" hibernation generator-output create-hibernation-directory 'hibernate-guard,mapper-active-job'
+	fi
 	if [ ! -d "$hibernate_dropin_dir" ] || [ -L "$hibernate_dropin_dir" ]; then
-		echo "swapz-primary-generator: cannot create safe hibernation drop-in directory" >&2
-		exit 1
+		fail 1 hibernation generator-output unsafe-hibernation-directory 'hibernate-guard,mapper-active-job'
 	fi
 	hibernate_dropin=$hibernate_dropin_dir/50-swapz-no-hibernate.conf
-	hibernate_temporary=$hibernate_dropin.tmp.$$
-	( set -C; : > "$hibernate_temporary" ) 2>/dev/null || {
-		echo "swapz-primary-generator: cannot create hibernation drop-in" >&2
-		exit 1
-	}
-	printf '[Service]\nExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-runtime-health hibernate-guard\n' > "$hibernate_temporary"
-	chmod 0644 "$hibernate_temporary"
-	mv -fT -- "$hibernate_temporary" "$hibernate_dropin"
-	hibernate_temporary=
+	if [ -L "$hibernate_dropin" ]; then
+		fail 1 hibernation generator-output symlinked-hibernation-dropin 'hibernate-guard,mapper-active-job'
+	fi
+	hibernate_temporary=$stage_dir/$sleep_service.conf
+	if printf '[Service]\nExecStartPre=@SWAPZ_SBINDIR@/swapz-primary-runtime-health hibernate-guard\n' > "$hibernate_temporary"; then :; else
+		fail "$?" hibernation generator-output write-hibernation-guard 'hibernate-guard,mapper-active-job'
+	fi
+	if chmod 0644 "$hibernate_temporary" && mv -fT -- "$hibernate_temporary" "$hibernate_dropin"; then :; else
+		fail "$?" hibernation generator-output publish-hibernation-guard 'hibernate-guard,mapper-active-job'
+	fi
 done
-trap - EXIT HUP INT TERM
 
 # swapzctl owns selector parsing, root-ownership checks, PARTUUID normalization,
 # and escaping. The generator must never infer or substitute a target itself.
-units=$("@SWAPZ_SBINDIR@/swapzctl" primary systemd-units) || {
-	echo "swapz-primary-generator: selected target is unavailable or invalid" >&2
-	exit 1
-}
+# Bound manager stdout on disk before shell expansion, retaining its exit status.
+response_file=$stage_dir/units
+if (ulimit -f 2; "@SWAPZ_SBINDIR@/swapzctl" primary systemd-units) > "$response_file" 2>/dev/null; then :; else
+	fail "$?" selection protected-selector manager-status mapper-active-job
+fi
+if response_size=$(wc -c < "$response_file"); then :; else
+	fail "$?" selection manager-output measure-response mapper-active-job
+fi
+if [ "$response_size" -gt 512 ]; then
+	fail 1 selection manager-output oversized-response mapper-active-job
+fi
+if units=$(cat -- "$response_file"); then :; else
+	fail "$?" selection manager-output read-response mapper-active-job
+fi
 case "$units" in
 *'
-'*)
-	echo "swapz-primary-generator: malformed unit response" >&2
-	exit 1
-	;;
+'*) fail 1 selection manager-output multiline-response mapper-active-job ;;
 esac
 set -f
 old_ifs=$IFS
@@ -75,35 +195,27 @@ IFS=' '
 # shellcheck disable=SC2086 # Intentional strict split; exact reconstruction follows.
 set -- $units
 IFS=$old_ifs
+set +f
 if [ "$#" -ne 2 ] || [ "$1 $2" != "$units" ]; then
-	echo "swapz-primary-generator: malformed unit response" >&2
-	exit 1
+	fail 1 selection manager-output malformed-response mapper-active-job
 fi
 device_unit=$1
 swap_unit=$2
 
 case "$device_unit" in
 'dev-disk-by\x2dpartuuid-'*.device) ;;
-*)
-	echo "swapz-primary-generator: invalid selected device unit" >&2
-	exit 1
-	;;
+*) fail 1 selection manager-output invalid-device-unit mapper-active-job ;;
 esac
 case "$swap_unit" in
 'dev-disk-by\x2dpartuuid-'*.swap) ;;
-*)
-	echo "swapz-primary-generator: invalid selected raw-swap unit" >&2
-	exit 1
-	;;
+*) fail 1 selection manager-output invalid-raw-swap-unit mapper-active-job ;;
 esac
 encoded_device=${device_unit#'dev-disk-by\x2dpartuuid-'}
 encoded_device=${encoded_device%.device}
 encoded_swap=${swap_unit#'dev-disk-by\x2dpartuuid-'}
 encoded_swap=${encoded_swap%.swap}
-[ "$encoded_device" = "$encoded_swap" ] || {
-	echo "swapz-primary-generator: selected unit identities disagree" >&2
-	exit 1
-}
+[ "$encoded_device" = "$encoded_swap" ] ||
+	fail 1 selection manager-output identity-mismatch mapper-active-job
 
 valid_encoded_partuuid()
 {
@@ -125,9 +237,7 @@ valid_encoded_partuuid()
 			hex_digit_count=$((hex_digit_count + 1))
 			previous_was_hyphen=0
 			;;
-		*)
-			return 1
-			;;
+		*) return 1 ;;
 		esac
 		[ "$decoded_length" -le 64 ] || return 1
 	done
@@ -135,47 +245,76 @@ valid_encoded_partuuid()
 	[ "$decoded_length" -ge 8 ] && [ "$hex_digit_count" -ge 8 ] &&
 		[ "$previous_was_hyphen" -eq 0 ]
 }
-valid_encoded_partuuid "$encoded_device" || {
-	echo "swapz-primary-generator: invalid escaped PARTUUID" >&2
-	exit 1
-}
+valid_encoded_partuuid "$encoded_device" ||
+	fail 1 selection manager-output invalid-escaped-partuuid mapper-active-job
 
 # The mapper job spans bounded mapper start and, on shutdown, can include
 # swapoff followed by mapper teardown. Allow both 120s phases plus slack.
 # A mapper job timeout alone cannot bound the separate .device job queued by
 # Requires=, so cap that exact udev device job independently at 30s.
-mapper_dropin_dir=$normal_dir/swapz-primary-mapper.service.d
 device_dropin_dir=$normal_dir/$device_unit.d
 for dropin_dir in "$mapper_dropin_dir" "$device_dropin_dir"; do
 	if [ -L "$dropin_dir" ]; then
-		echo "swapz-primary-generator: refusing symlinked drop-in directory" >&2
-		exit 1
+		fail 1 publication generator-output symlinked-dropin-directory mapper-active-job
 	fi
-	mkdir -p -- "$dropin_dir"
+	if mkdir -p -- "$dropin_dir"; then :; else
+		fail "$?" publication generator-output create-dropin-directory mapper-active-job
+	fi
 	if [ ! -d "$dropin_dir" ] || [ -L "$dropin_dir" ]; then
-		echo "swapz-primary-generator: cannot create safe drop-in directory" >&2
-		exit 1
+		fail 1 publication generator-output unsafe-dropin-directory mapper-active-job
 	fi
 done
 
+# A second generator's same-named unit is an unresolved activation identity.
+# Never overwrite it or release our mask on a collision.
+for duplicate_output_dir in "$normal_dir" "$early_dir" "$late_dir"; do
+	for duplicate_unit in "$duplicate_output_dir/$device_unit" \
+		"$duplicate_output_dir/$swap_unit" \
+		"$duplicate_output_dir/swap.target.wants/$swap_unit"; do
+		if [ -e "$duplicate_unit" ] || [ -L "$duplicate_unit" ]; then
+			fail 1 publication generator-output duplicate-selected-unit mapper-active-job
+		fi
+	done
+done
 mapper_dropin=$mapper_dropin_dir/50-selected-target.conf
 device_dropin=$device_dropin_dir/50-swapz-timeout.conf
-mapper_temporary=$mapper_dropin.tmp.$$
-device_temporary=$device_dropin.tmp.$$
-cleanup()
-{
-	rm -f -- "$mapper_temporary" "$device_temporary"
-}
-trap cleanup EXIT HUP INT TERM
-( set -C; : > "$mapper_temporary" && : > "$device_temporary" ) 2>/dev/null || {
-	echo "swapz-primary-generator: cannot create drop-in" >&2
-	exit 1
-}
-printf '[Unit]\nRequires=%s\nAfter=%s\nConflicts=%s\nBefore=%s\nJobTimeoutSec=300s\nJobTimeoutAction=none\n' \
-	"$device_unit" "$device_unit" "$swap_unit" "$swap_unit" > "$mapper_temporary"
-printf '[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n' > "$device_temporary"
-chmod 0644 "$mapper_temporary" "$device_temporary"
-mv -fT -- "$device_temporary" "$device_dropin"
-mv -fT -- "$mapper_temporary" "$mapper_dropin"
-trap - EXIT HUP INT TERM
+for dropin in "$mapper_dropin" "$device_dropin"; do
+	if [ -e "$dropin" ] || [ -L "$dropin" ]; then
+		fail 1 publication generator-output duplicate-generated-dropin mapper-active-job
+	fi
+done
+mapper_temporary=$stage_dir/mapper.conf
+device_temporary=$stage_dir/device.conf
+if printf '[Unit]\nRequires=%s\nAfter=%s\nConflicts=%s\nBefore=%s\nJobTimeoutSec=300s\nJobTimeoutAction=none\n' \
+	"$device_unit" "$device_unit" "$swap_unit" "$swap_unit" > "$mapper_temporary"; then :; else
+	fail "$?" publication generator-output write-mapper-dropin mapper-active-job
+fi
+if printf '[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n' > "$device_temporary"; then :; else
+	fail "$?" publication generator-output write-device-dropin mapper-active-job
+fi
+if chmod 0644 "$mapper_temporary" "$device_temporary"; then :; else
+	fail "$?" publication generator-output chmod-dropins mapper-active-job
+fi
+published_device=1
+if mv -fT -- "$device_temporary" "$device_dropin"; then :; else
+	fail "$?" publication generator-output publish-device-dropin mapper-active-job
+fi
+published_mapper=1
+if mv -fT -- "$mapper_temporary" "$mapper_dropin"; then :; else
+	fail "$?" publication generator-output publish-mapper-dropin mapper-active-job
+fi
+# Publish the activation barrier last; any earlier error leaves the mask.
+transaction_committed=1
+if rm -f -- "$mapper_unit"; then :; else
+	mask_status=$?
+	# An unlink may have succeeded despite a failing wrapper/status. Restore
+	# the fail-closed barrier before reporting that publication failed.
+	if [ ! -L "$mapper_unit" ]; then
+		if ln -s /dev/null "$mask_temporary" &&
+			mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
+			fail "$?" publication generator-output restore-mask mapper-active-job
+		fi
+	fi
+	fail "$mask_status" publication generator-output release-mask mapper-active-job
+fi
 exit 0

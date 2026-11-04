@@ -2,6 +2,8 @@
 """Rootless, dependency-free contract for exact-run systemd/package CI."""
 
 import re
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -124,6 +126,22 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
         self.assertIn("SYSTEMD_PACKAGE_ROOTLESS_FAILED", self.jobs)
         self.assertIn('"$GITHUB_SHA"', self.jobs)
         self.assertIn('"$GITHUB_RUN_ID"', self.jobs)
+
+    def test_generator_transaction_fixture_runs_in_rootless_stage(self) -> None:
+        # Keep this separate from the concurrent primary-systemd fixture owner.
+        # The official systemd package workflow already executes this contract.
+        fixture = (
+            WORKFLOW.parents[2]
+            / "tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-B", str(fixture), "-v"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=240,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
 
 if __name__ == "__main__":
