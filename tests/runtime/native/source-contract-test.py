@@ -7587,10 +7587,10 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             model["PHYSICAL_LIVENESS_RECORD_BYTES"],
             source_widths["swapz_u16"])
         self.assertEqual(acceptance["status"], "FROZEN")
-        frozen_ram_ceiling = acceptance["physical_qualification"][
+        measured_peak_ram_ceiling = acceptance["physical_qualification"][
             "acceptance"]["sustained"][
                 "metadata_and_target_peak_ram_bytes_max"]
-        self.assertEqual(frozen_ram_ceiling, 1342177280)
+        self.assertEqual(measured_peak_ram_ceiling, 1342177280)
         current_card = re.search(
             r"^- size:\s*\x60([0-9]+)\x60 bytes\s*$", context, flags=re.M)
         self.assertIsNotNone(current_card)
@@ -7638,7 +7638,8 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
             (length + page_bytes - 1) // page_bytes * page_bytes
             for _, length in lengths)
         self.assertEqual(rounded_index_bytes, 776114176)
-        self.assertLess(rounded_index_bytes, frozen_ram_ceiling)
+        # Predicted index bytes are source accounting only. Do not compare
+        # them with the measured-host peak-RAM acceptance ceiling.
         self.assertEqual(dict(lengths)["maps"], 433283072)
         self.assertEqual(
             sum(((length + page_bytes - 1) // page_bytes + 511) // 512
