@@ -1426,7 +1426,8 @@ static int format_inventory_read_line(FILE *stream, char *line, size_t capacity,
 		return -1;
 	}
 	for (;;) {
-		int character = fgetc(stream);
+		/* This parser alone owns the stream; no per-byte stdio lock. */
+		int character = getc_unlocked(stream);
 
 		if (character == EOF) {
 			if (ferror(stream)) {
@@ -1527,7 +1528,7 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 					 dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
-	unsigned long long *mount_identifiers = NULL;
+	void *mount_identifiers = NULL;
 	size_t mount_count = 0;
 	size_t mount_capacity = 0;
 	size_t total_bytes = 0;
@@ -1547,7 +1548,8 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 		if (format_mountinfo_line_device(line, &mounted_device) < 0 ||
 		    parse_unsigned_decimal(line, ULLONG_MAX, &identifier_end,
 					   &mount_identifier) < 0 ||
-		    !mount_identifier || *identifier_end != ' ') {
+		    !mount_identifier ||
+		    (*identifier_end != ' ' && *identifier_end != '\t')) {
 			errno = EPROTO;
 			goto failed;
 		}
@@ -1556,7 +1558,7 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 			errno = EBUSY;
 			goto failed;
 		}
-		if (format_inventory_append((void **)&mount_identifiers,
+		if (format_inventory_append(&mount_identifiers,
 					    &mount_count, &mount_capacity,
 					    &mount_identifier,
 					    sizeof(mount_identifier)) < 0)
@@ -1571,7 +1573,9 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 	qsort(mount_identifiers, mount_count, sizeof(*mount_identifiers),
 	      format_mount_identifier_compare);
 	for (size_t index = 1; index < mount_count; ++index) {
-		if (mount_identifiers[index] == mount_identifiers[index - 1U]) {
+		const unsigned long long *sorted = mount_identifiers;
+
+		if (sorted[index] == sorted[index - 1U]) {
 			errno = EPROTO;
 			goto failed;
 		}
@@ -1852,7 +1856,7 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 					      dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
-	struct format_swap_inventory_identity *swap_identities = NULL;
+	void *swap_identities = NULL;
 	size_t swap_count = 0;
 	size_t swap_capacity = 0;
 	size_t total_bytes = 0;
@@ -1899,7 +1903,7 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 		identity.device = block_entry ? info.st_rdev : info.st_dev;
 		identity.inode = block_entry ? 0 : info.st_ino;
 		identity.block_entry = block_entry;
-		if (format_inventory_append((void **)&swap_identities,
+		if (format_inventory_append(&swap_identities,
 					    &swap_count, &swap_capacity,
 					    &identity, sizeof(identity)) < 0)
 			goto failed;
@@ -1910,12 +1914,16 @@ static int format_swap_inventory_stream_clear(FILE *stream, dev_t device,
 		errno = EPROTO;
 		goto failed;
 	}
-	qsort(swap_identities, swap_count, sizeof(*swap_identities),
-	      format_swap_inventory_identity_compare);
+	if (swap_count > 1U)
+		qsort(swap_identities, swap_count,
+		      sizeof(struct format_swap_inventory_identity),
+		      format_swap_inventory_identity_compare);
 	for (size_t index = 1; index < swap_count; ++index) {
+		const struct format_swap_inventory_identity *sorted =
+			swap_identities;
+
 		if (!format_swap_inventory_identity_compare(
-				&swap_identities[index - 1U],
-				&swap_identities[index])) {
+				&sorted[index - 1U], &sorted[index])) {
 			errno = EPROTO;
 			goto failed;
 		}
