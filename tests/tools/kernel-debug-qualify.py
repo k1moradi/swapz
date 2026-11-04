@@ -21,11 +21,11 @@ FEATURE_SYMBOLS = {
     "kcsan": ("CONFIG_KCSAN",),
     "lockdep": ("CONFIG_PROVE_LOCKING", "CONFIG_LOCKDEP", "CONFIG_DEBUG_LOCK_ALLOC"),
 }
-BOOT_DISABLE = {
-    "kasan": ("kasan=off",),
-    "kcsan": ("kcsan.enabled=0",),
-    "lockdep": ("lockdep=off",),
-}
+KASAN_BOOT_DISABLE = ("kasan=off",)
+RUNTIME_SCHEMA = "swapz-kernel-debug-runtime-v1"
+DEFAULT_KCSAN_STATUS = Path("/sys/kernel/debug/kcsan")
+DEFAULT_LOCKDEP_STATS = Path("/proc/lockdep_stats")
+DEFAULT_PROVE_LOCKING = Path("/proc/sys/kernel/prove_locking")
 # These are exact observed records from the existing, privately owned RAM
 # lower-device oracle. Each must occur exactly once, not merely as a substring.
 REQUIRED_RECORDS = (
@@ -50,7 +50,7 @@ KERNEL_DIAGNOSTIC = re.compile(
     r"possible (?:circular locking dependency|recursive locking) detected|"
     r"inconsistent lock state|held lock freed|"
     r"sleeping function called from invalid context|"
-    r"refcount_t: (?:underflow|overflow)|"
+    r"refcount_t:|"
     r"WARNING:|kernel BUG at|general protection fault|"
     r"workqueue:.*(?:swapz|dm_swapz)|"
     r"BUG: workqueue|INFO: task .* blocked for more than",
@@ -115,9 +115,15 @@ def probe(config_path: Path | None, cmdline_path: Path) -> dict[str, str]:
         states = [config.get(symbol, "unknown") for symbol in symbols]
         if "n" in states or "m" in states:
             result[feature] = "UNAVAILABLE"
-        elif "unknown" in states or cmdline is None:
+        elif "unknown" in states:
             result[feature] = "UNKNOWN"
-        elif any(option in cmdline for option in BOOT_DISABLE[feature]):
+        elif feature == "kasan" and cmdline is None:
+            # Only KASAN has a supported boot-time global disable in the
+            # configurations this lane can observe. KCSAN/lockdep activity is
+            # proved from their live runtime interfaces before and after I/O.
+            result[feature] = "UNKNOWN"
+        elif feature == "kasan" and any(
+                option in cmdline for option in KASAN_BOOT_DISABLE):
             result[feature] = "DISABLED_AT_BOOT"
         else:
             result[feature] = "DETECTED"
@@ -126,6 +132,87 @@ def probe(config_path: Path | None, cmdline_path: Path) -> dict[str, str]:
 
 def check_features(features: dict[str, str], required: tuple[str, ...]) -> bool:
     return all(features[name] == "DETECTED" for name in required)
+
+
+def _read_runtime_text(path: Path, description: str) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"{description} unreadable: {error}") from error
+
+
+def capture_runtime_snapshot(
+    required: tuple[str, ...],
+    kcsan_status_path: Path = DEFAULT_KCSAN_STATUS,
+    lockdep_stats_path: Path = DEFAULT_LOCKDEP_STATS,
+    prove_locking_path: Path = DEFAULT_PROVE_LOCKING,
+) -> dict[str, object]:
+    if not required:
+        raise ValueError("runtime snapshot requires at least one debug feature")
+    snapshot: dict[str, object] = {
+        "schema": RUNTIME_SCHEMA,
+        "required": list(required),
+    }
+    if "kcsan" in required:
+        status = _read_runtime_text(kcsan_status_path, "KCSAN debugfs status")
+        enabled = re.findall(r"(?m)^enabled:[ \t]*([01])[ \t]*$", status)
+        if len(enabled) != 1:
+            raise ValueError("KCSAN debugfs status has no unique enabled state")
+        filter_default = re.findall(
+            r"(?m)^blacklisted functions:[ \t]*none[ \t]*$", status)
+        snapshot["kcsan_enabled"] = enabled[0] == "1"
+        snapshot["kcsan_filter_default"] = len(filter_default) == 1
+    if "lockdep" in required:
+        stats = _read_runtime_text(lockdep_stats_path, "lockdep statistics")
+        debug_locks = re.findall(
+            r"(?m)^[ \t]*debug_locks:[ \t]*([01])[ \t]*$", stats)
+        if len(debug_locks) != 1:
+            raise ValueError("lockdep statistics have no unique debug_locks state")
+        prove_locking = _read_runtime_text(
+            prove_locking_path, "lockdep prove_locking sysctl").strip()
+        if prove_locking not in {"0", "1"}:
+            raise ValueError("lockdep prove_locking sysctl is not boolean")
+        snapshot["lockdep_debug_locks"] = debug_locks[0] == "1"
+        snapshot["lockdep_prove_locking"] = prove_locking == "1"
+    return snapshot
+
+
+def parse_runtime_snapshot(
+    contents: str, required: tuple[str, ...],
+) -> dict[str, object]:
+    try:
+        snapshot = json.loads(contents)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"runtime snapshot is invalid JSON: {error}") from error
+    if not isinstance(snapshot, dict) or snapshot.get("schema") != RUNTIME_SCHEMA:
+        raise ValueError("runtime snapshot schema mismatch")
+    if snapshot.get("required") != list(required):
+        raise ValueError("runtime snapshot feature set mismatch")
+    if "kcsan" in required:
+        if not isinstance(snapshot.get("kcsan_enabled"), bool):
+            raise ValueError("runtime snapshot lacks KCSAN enabled state")
+        if not isinstance(snapshot.get("kcsan_filter_default"), bool):
+            raise ValueError("runtime snapshot lacks KCSAN report-filter state")
+    if "lockdep" in required:
+        if not isinstance(snapshot.get("lockdep_debug_locks"), bool):
+            raise ValueError("runtime snapshot lacks lockdep debug_locks state")
+        if not isinstance(snapshot.get("lockdep_prove_locking"), bool):
+            raise ValueError("runtime snapshot lacks lockdep prove_locking state")
+    return snapshot
+
+
+def runtime_features_active(
+    snapshot: dict[str, object], required: tuple[str, ...],
+) -> bool:
+    if "kcsan" in required and (
+            snapshot["kcsan_enabled"] is not True or
+            snapshot["kcsan_filter_default"] is not True):
+        return False
+    if "lockdep" in required and (
+            snapshot["lockdep_debug_locks"] is not True or
+            snapshot["lockdep_prove_locking"] is not True):
+        return False
+    return True
 
 
 def classify_warning(line: str) -> str:
@@ -198,9 +285,21 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
 def verify_owned_run(
     required: tuple[str, ...], features: dict[str, str],
     baseline: str, final: str, execution: str,
+    runtime_before: str, runtime_after: str, source_sha: str,
 ) -> tuple[str, str]:
     if not required or not check_features(features, required):
         return "BLOCKED", "required running-kernel debug features unavailable"
+    if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        return "BLOCKED", "validated source SHA is malformed"
+    try:
+        before_state = parse_runtime_snapshot(runtime_before, required)
+        after_state = parse_runtime_snapshot(runtime_after, required)
+    except ValueError as error:
+        return "BLOCKED", str(error)
+    if not runtime_features_active(before_state, required):
+        return "BLOCKED", "required debug feature was inactive before owned I/O"
+    if not runtime_features_active(after_state, required):
+        return "FAIL", "required debug feature became inactive during owned I/O"
     if not baseline or not final or not final.startswith(baseline):
         return "BLOCKED", "dmesg baseline missing, overwritten or unreadable"
     delta = final[len(baseline):]
@@ -209,6 +308,8 @@ def verify_owned_run(
     if re.search(r"(?m)^(?:FAIL|BLOCKED|QUARANTINED)(?::|_)", execution):
         return "FAIL", "owned lower reported a failure or quarantine"
     lines = execution.splitlines()
+    if lines.count(f"SOURCE_HEAD={source_sha}") != 1:
+        return "FAIL", "owned lower source marker is missing or mismatched"
     for record in REQUIRED_RECORDS:
         expression = re.compile(r"^" + record + r"$")
         if sum(bool(expression.fullmatch(line)) for line in lines) != 1:
@@ -225,13 +326,18 @@ def main() -> int:
     features_parser.add_argument("--require", default="")
     static_parser = subcommands.add_parser("static")
     static_parser.add_argument("--kdir", type=Path, required=True)
+    runtime_parser = subcommands.add_parser("runtime-snapshot")
+    runtime_parser.add_argument("--require", required=True)
     verify_parser = subcommands.add_parser("verify")
     verify_parser.add_argument("--config", type=Path)
     verify_parser.add_argument("--cmdline", type=Path, default=Path("/proc/cmdline"))
     verify_parser.add_argument("--require", required=True)
+    verify_parser.add_argument("--source-sha", required=True)
     verify_parser.add_argument("--baseline", type=Path, required=True)
     verify_parser.add_argument("--final", type=Path, required=True)
     verify_parser.add_argument("--execution", type=Path, required=True)
+    verify_parser.add_argument("--runtime-before", type=Path, required=True)
+    verify_parser.add_argument("--runtime-after", type=Path, required=True)
     arguments = parser.parse_args()
     try:
         if arguments.action == "static":
@@ -246,6 +352,10 @@ def main() -> int:
             print("KERNEL_STATIC=" + json.dumps(statuses, sort_keys=True))
             return 0 if statuses["sparse"]["status"] == "PASS" and statuses["smatch"]["status"] != "FAIL" else 2
         required = required_features(arguments.require)
+        if arguments.action == "runtime-snapshot":
+            snapshot = capture_runtime_snapshot(required)
+            print(json.dumps(snapshot, sort_keys=True, separators=(",", ":")))
+            return 0
         features = probe(arguments.config or host_config_path(), arguments.cmdline)
         print("KERNEL_DEBUG_PROBE=" + json.dumps(features, sort_keys=True))
         if arguments.action == "probe":
@@ -253,9 +363,14 @@ def main() -> int:
         baseline = arguments.baseline.read_text(encoding="utf-8")
         final = arguments.final.read_text(encoding="utf-8")
         execution = arguments.execution.read_text(encoding="utf-8")
-        status, reason = verify_owned_run(required, features, baseline, final, execution)
+        runtime_before = arguments.runtime_before.read_text(encoding="utf-8")
+        runtime_after = arguments.runtime_after.read_text(encoding="utf-8")
+        status, reason = verify_owned_run(
+            required, features, baseline, final, execution,
+            runtime_before, runtime_after, arguments.source_sha,
+        )
         print(f"{status}_KERNEL_DEBUG_OWNED=features:{','.join(required)} reason:{reason}")
-        return 0 if status == "PASS" else 2
+        return {"PASS": 0, "FAIL": 1, "BLOCKED": 2}[status]
     except (ValueError, OSError, UnicodeError) as error:
         print(f"BLOCKED_KERNEL_DEBUG: {error}", file=sys.stderr)
         return 2

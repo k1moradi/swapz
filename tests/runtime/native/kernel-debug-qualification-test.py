@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import gzip
 import importlib.util
+import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "tools/kernel-debug-qualify.py"
+WRAPPER = Path(__file__).resolve().parents[2] / "tools/qualify-kernel-debug-owned.sh"
 SPEC = importlib.util.spec_from_file_location("swapz_kernel_debug_qualification", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 qualification = importlib.util.module_from_spec(SPEC)
@@ -24,7 +27,9 @@ CONFIG_PROVE_LOCKING=y
 CONFIG_LOCKDEP=y
 CONFIG_DEBUG_LOCK_ALLOC=y
 """
-GOOD_LOG = """
+SOURCE_SHA = "a" * 40
+GOOD_LOG = f"""
+SOURCE_HEAD={SOURCE_SHA}
 PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0
 PASS_LOADED_COMPOUND_BIO=written_pages:384 verified_pages:384 segs_gt1:2 failed:0
 PASS_LOADED_LIVE_GC=victims:2 rotations:2 verified_pages:4096
@@ -52,11 +57,34 @@ class KernelDebugQualificationTests(unittest.TestCase):
     def features(self) -> dict[str, str]:
         return qualification.probe(self.configuration, self.cmdline)
 
+    @staticmethod
+    def runtime_snapshot(
+            required: tuple[str, ...], *,
+            kcsan_enabled: bool = True,
+            kcsan_filter_default: bool = True,
+            lockdep_debug_locks: bool = True,
+            lockdep_prove_locking: bool = True) -> str:
+        snapshot: dict[str, object] = {
+            "schema": qualification.RUNTIME_SCHEMA,
+            "required": list(required),
+        }
+        if "kcsan" in required:
+            snapshot["kcsan_enabled"] = kcsan_enabled
+            snapshot["kcsan_filter_default"] = kcsan_filter_default
+        if "lockdep" in required:
+            snapshot["lockdep_debug_locks"] = lockdep_debug_locks
+            snapshot["lockdep_prove_locking"] = lockdep_prove_locking
+        return json.dumps(snapshot)
+
     def verify(self, execution: str = GOOD_LOG, final: str = "old\nnew\n",
                required: tuple[str, ...] = ("kasan", "lockdep"),
-               baseline: str = "old\n") -> tuple[str, str]:
+               baseline: str = "old\n", runtime_before: str | None = None,
+               runtime_after: str | None = None) -> tuple[str, str]:
         return qualification.verify_owned_run(
             required, self.features(), baseline, final, execution,
+            runtime_before or self.runtime_snapshot(required),
+            runtime_after or self.runtime_snapshot(required),
+            SOURCE_SHA,
         )
 
     def test_detected_is_not_executed(self) -> None:
@@ -71,17 +99,21 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertEqual(self.features()["lockdep"], "UNAVAILABLE")
         self.configuration.write_text(CONFIG)
         self.cmdline.write_text("kasan=off kcsan.enabled=0 lockdep=off\n")
-        self.assertEqual(set(self.features().values()), {"DISABLED_AT_BOOT"})
+        features = self.features()
+        self.assertEqual(features["kasan"], "DISABLED_AT_BOOT")
+        self.assertEqual(features["kcsan"], "DETECTED")
+        self.assertEqual(features["lockdep"], "DETECTED")
 
     def test_gzipped_config_and_unreadable_cmdline(self) -> None:
         compressed = self.configuration.with_suffix(".gz")
         with gzip.open(compressed, "wt", encoding="utf-8") as stream:
             stream.write(CONFIG)
         self.assertEqual(qualification.probe(compressed, self.cmdline)["kcsan"], "DETECTED")
-        self.assertEqual(
-            qualification.probe(compressed, self.cmdline.parent / "not-present")["kcsan"],
-            "UNKNOWN",
-        )
+        unreadable_cmdline = qualification.probe(
+            compressed, self.cmdline.parent / "not-present")
+        self.assertEqual(unreadable_cmdline["kasan"], "UNKNOWN")
+        self.assertEqual(unreadable_cmdline["kcsan"], "DETECTED")
+        self.assertEqual(unreadable_cmdline["lockdep"], "DETECTED")
 
     def test_separate_kcsan_lane(self) -> None:
         self.assertEqual(qualification.required_features("kcsan"), ("kcsan",))
@@ -92,6 +124,84 @@ class KernelDebugQualificationTests(unittest.TestCase):
     def test_valid_owned_evidence(self) -> None:
         self.assertEqual(self.verify()[0], "PASS")
         self.assertEqual(self.verify(required=("kcsan",))[0], "PASS")
+
+    def test_runtime_state_must_be_active_before_and_after(self) -> None:
+        required = ("kcsan",)
+        self.assertEqual(
+            self.verify(
+                required=required,
+                runtime_before=self.runtime_snapshot(required, kcsan_enabled=False),
+            )[0],
+            "BLOCKED",
+        )
+        self.assertEqual(
+            self.verify(
+                required=required,
+                runtime_after=self.runtime_snapshot(required, kcsan_enabled=False),
+            )[0],
+            "FAIL",
+        )
+        self.assertEqual(
+            self.verify(
+                required=required,
+                runtime_before=self.runtime_snapshot(
+                    required, kcsan_filter_default=False),
+            )[0],
+            "BLOCKED",
+        )
+        required = ("kasan", "lockdep")
+        self.assertEqual(
+            self.verify(
+                required=required,
+                runtime_before=self.runtime_snapshot(
+                    required, lockdep_debug_locks=False),
+            )[0],
+            "BLOCKED",
+        )
+        self.assertEqual(
+            self.verify(
+                required=required,
+                runtime_after=self.runtime_snapshot(
+                    required, lockdep_prove_locking=False),
+            )[0],
+            "FAIL",
+        )
+
+    def test_runtime_snapshot_parser_and_capture(self) -> None:
+        directory = Path(self.temporary_directory.name)
+        kcsan = directory / "kcsan"
+        lockdep = directory / "lockdep_stats"
+        prove = directory / "prove_locking"
+        kcsan.write_text(
+            "enabled: 1\nwatchpoints: 0\n\nblacklisted functions: none\n",
+            encoding="utf-8")
+        lockdep.write_text(" lock-classes: 4\n debug_locks: 1\n", encoding="utf-8")
+        prove.write_text("1\n", encoding="utf-8")
+        required = ("kasan", "lockdep")
+        snapshot = qualification.capture_runtime_snapshot(
+            required, kcsan, lockdep, prove)
+        self.assertTrue(qualification.runtime_features_active(snapshot, required))
+        parsed = qualification.parse_runtime_snapshot(
+            json.dumps(snapshot), required)
+        self.assertEqual(parsed, snapshot)
+        kcsan_snapshot = qualification.capture_runtime_snapshot(
+            ("kcsan",), kcsan, lockdep, prove)
+        self.assertTrue(
+            qualification.runtime_features_active(kcsan_snapshot, ("kcsan",)))
+        prove.write_text("0\n", encoding="utf-8")
+        disabled = qualification.capture_runtime_snapshot(
+            required, kcsan, lockdep, prove)
+        self.assertFalse(
+            qualification.runtime_features_active(disabled, required))
+        with self.assertRaises(ValueError):
+            qualification.parse_runtime_snapshot("{}", required)
+
+    def test_owned_source_marker_is_bound_to_validated_source(self) -> None:
+        self.assertEqual(
+            self.verify(execution=GOOD_LOG.replace(
+                f"SOURCE_HEAD={SOURCE_SHA}", "SOURCE_HEAD=" + "b" * 40))[0],
+            "FAIL",
+        )
 
     def test_no_pass_without_required_debug_feature(self) -> None:
         self.configuration.write_text(CONFIG.replace("CONFIG_KASAN=y", "# CONFIG_KASAN is not set"))
@@ -107,6 +217,47 @@ class KernelDebugQualificationTests(unittest.TestCase):
     def test_log_truncation_and_unavailable_dmesg_block(self) -> None:
         self.assertEqual(self.verify(baseline="", final="new\n")[0], "BLOCKED")
         self.assertEqual(self.verify(final="different\n")[0], "BLOCKED")
+
+    def test_verify_cli_preserves_fail_vs_blocked_exit_status(self) -> None:
+        directory = Path(self.temporary_directory.name)
+        baseline = directory / "baseline"
+        final = directory / "final"
+        execution = directory / "execution"
+        runtime_before = directory / "runtime-before"
+        runtime_after = directory / "runtime-after"
+        baseline.write_text("old\n", encoding="utf-8")
+        execution.write_text(GOOD_LOG + "\n", encoding="utf-8")
+        required = ("kasan", "lockdep")
+        runtime_before.write_text(
+            self.runtime_snapshot(required), encoding="utf-8")
+        runtime_after.write_text(
+            self.runtime_snapshot(required), encoding="utf-8")
+        common = [
+            sys.executable, "-B", str(SCRIPT), "verify",
+            "--config", str(self.configuration),
+            "--cmdline", str(self.cmdline),
+            "--require", "kasan,lockdep",
+            "--source-sha", SOURCE_SHA,
+            "--baseline", str(baseline),
+            "--final", str(final),
+            "--execution", str(execution),
+            "--runtime-before", str(runtime_before),
+            "--runtime-after", str(runtime_after),
+        ]
+        final.write_text("old\nWARNING: synthetic kernel warning\n", encoding="utf-8")
+        failed = subprocess.run(
+            common, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=False)
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        final.write_text("old\n", encoding="utf-8")
+        runtime_before.write_text(
+            self.runtime_snapshot(
+                required, lockdep_debug_locks=False),
+            encoding="utf-8")
+        blocked = subprocess.run(
+            common, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=False)
+        self.assertEqual(blocked.returncode, 2, blocked.stdout + blocked.stderr)
 
     def test_kernel_fault_categories_fail(self) -> None:
         diagnostics = (
@@ -151,6 +302,21 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ),
             "other",
         )
+
+    def test_owned_wrapper_binds_runtime_state_and_artifact_provenance(self) -> None:
+        source = WRAPPER.read_text(encoding="utf-8")
+        self.assertIn("SWAPZ_SIGN_NONINTERACTIVE=1 make", source)
+        self.assertIn("modinfo -F swapz_build_source_sha", source)
+        self.assertIn("modinfo -F swapz_build_source_clean", source)
+        self.assertIn('nm -u "$module"', source)
+        self.assertIn("module lacks observable KASAN instrumentation references", source)
+        self.assertIn("module lacks observable KCSAN instrumentation references", source)
+        self.assertGreaterEqual(source.count("runtime-snapshot"), 1)
+        self.assertIn('--runtime-before "$session/runtime-before.json"', source)
+        self.assertIn('--runtime-after "$session/runtime-after.json"', source)
+        self.assertIn("verify_rc=$?", source)
+        self.assertNotIn("kcsan.enabled=0", source)
+        self.assertNotIn("lockdep=off", source)
 
     def test_static_checker_requires_actual_check_and_zero_warnings(self) -> None:
         with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/sparse"), \

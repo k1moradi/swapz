@@ -5679,52 +5679,77 @@ The isolated `make test` loaded-evidence fixture and report-contract assertions 
 A separate, optional `tests/tools/kernel-debug-qualify.py` lane and rootless
 `tests/runtime/native/kernel-debug-qualification-test.py` fixture remain
 outside the official `make test` reporter pending runner-owner coordination.
-Their CI workflow performs rootless negative controls and kernel-header-only
-`W=1 C=2 CHECK=sparse` checks of the real module. At least dm-target, codec,
-authority, engine and predictor translation units must have observed CHECK
-records. Every sparse warning/error is classified (locking/type,
-address-space, endian/bitwise, uninitialized, other) and makes the gate fail.
-Smatch is run only when already installed; an unavailable Smatch is reported
-UNAVAILABLE, never passed. Missing sparse, incomplete Kbuild execution,
-missing headers or build errors must not produce static PASS. CI does not
-install or boot a debug kernel, insert a module or provision `null_blk`.
+The dedicated workflow runs the rootless negative controls and a compile-only
+kernel static-analysis contract; it never installs or boots a debug kernel,
+inserts a module, provisions `null_blk`, or substitutes native sanitizers for
+kernel instrumentation.
 
-The read-only host probe distinguishes DETECTED, UNAVAILABLE,
-DISABLED_AT_BOOT and UNKNOWN from an actual executed qualification. The
-KASAN+lockdep lane requires running-kernel `CONFIG_KASAN`,
-`CONFIG_PROVE_LOCKING`, `CONFIG_LOCKDEP` and `CONFIG_DEBUG_LOCK_ALLOC`;
-KCSAN uses `CONFIG_KCSAN` as an independent lane. Missing config visibility
-or explicit disabling boot parameters block a required lane. A probe result
-is configuration evidence only and must not be presented as runtime PASS.
+Static analysis uses the current HWE kernel headers required by the module and
+builds the pinned Debian Sparse 0.6.5~rc1 source archive only under
+`build/tests`; distro Sparse 0.6.4 is rejected by newer Kbuild before CHECK
+because it lacks the required `typeof_unqual` support. At minimum
+`dm-target.c`, `codec.c`, `authority.c`, `engine.c`, and
+`predictor.c` must have observed CHECK records. Source-located Sparse/Smatch
+warnings and errors are classified and fail the static gate; compiler/pahole
+compatibility banners without a source location are not findings. Smatch is
+used only when already installed and otherwise reports UNAVAILABLE. The current
+Sparse version checks all eight module C translation units but cannot analyze
+the GCC vector `__builtin_shuffle` paths and emits dependent SIMD initializer
+errors; those diagnostics remain explicitly classified
+`unsupported_simd_builtin`/`simd_initializer` and the all-module Sparse
+result remains FAIL until that analyzer limitation is resolved. Missing CHECK
+units, headers, analyzer execution, or nonzero Kbuild exits must never produce
+static PASS.
 
-The private opt-in owned-device wrapper
-`tests/tools/qualify-kernel-debug-owned.sh` requires a current, clean
-`main` checkout, exact HEAD source, an explicit Codex-coordination token,
-noninteractive privilege and an absent pre-existing `dm_swapz` module. It
-runs only the existing bounded `deploy-nullblk.sh` helper: a freshly owned,
-identity-verified, RAM-backed `null_blk` lower with 14,000 ns configured
-completion delay, the eight constructor-stage `-ENOMEM` injections,
-read/write/codec faults, byte-exact GC and DISCARD, suspend/drain, FUA/flush,
-completion-handoff accounting and normal teardown. It never selects physical
-swap, changes kernel fault injection globally or force-removes a mapper.
-If the existing helper quarantines an uncertain mapping, follow its
-fail-closed recovery policy; do not relax cleanup to make this lane pass.
+The read-only host Kconfig probe distinguishes DETECTED, UNAVAILABLE,
+DISABLED_AT_BOOT, and UNKNOWN from executed qualification. KASAN+lockdep
+requires `CONFIG_KASAN`, `CONFIG_PROVE_LOCKING`, `CONFIG_LOCKDEP`, and
+`CONFIG_DEBUG_LOCK_ALLOC`; KCSAN is a separate lane requiring
+`CONFIG_KCSAN`. `kasan=off` blocks KASAN. Kconfig detection alone is never
+runtime evidence: immediately before module insertion and again after the
+owned-I/O session, a privileged read-only runtime snapshot must observe
+`enabled: 1` plus the default empty blacklist report filter from
+`/sys/kernel/debug/kcsan` for KCSAN, and both
+`debug_locks: 1` in `/proc/lockdep_stats` plus
+`/proc/sys/kernel/prove_locking == 1` for lockdep. Missing/unreadable runtime
+interfaces or an inactive required feature before I/O block the lane; a
+required feature that becomes inactive during I/O is a qualification FAIL.
+This prevents a compiled-but-disabled KCSAN kernel or lockdep that already
+turned itself off after a locking defect from yielding a false PASS.
 
-Runtime evidence requires each exact expected loaded PASS record once, the
-clean-teardown record, matching required running-kernel feature detection,
-and readable pre/post kernel ring buffers with an unchanged baseline prefix.
-Any KASAN/KCSAN report, lockdep report, kernel warning, refcount diagnostic,
-workqueue-after-free indication, shortened log, missing marker or uncertain
-teardown fails or blocks the lane. The rootless fixture deliberately tests
-negative cases. Delayed lower completion plus end_io/status counters provide
-bounded exactly-once evidence, not a proof against every concurrent interleaving.
-In particular, full simultaneous READ/WRITE/DISCARD/FUA **while** GC is active,
-general allocator-failure injection beyond the eight constructor stages, and
-debug-instrumented runtime qualification on an actually suitable host remain
-open until executed and recorded. Native ASan/UBSan/TSan, source contracts,
-configuration detection and sparse compile checks are never KASAN/KCSAN
+The private opt-in wrapper
+`tests/tools/qualify-kernel-debug-owned.sh` requires a clean `main`
+checkout at the explicit validated source SHA, an explicit Codex coordination
+token, noninteractive privilege, and no pre-existing `dm_swapz` module. It
+runs the rootless contract first, then performs a noninteractive ordinary
+project build and requires the module's embedded
+`swapz_build_source_sha`/`swapz_build_source_clean` metadata to match the
+validated clean source before any load. The built module must also expose
+undefined KASAN/HWASAN or KCSAN/TSAN instrumentation references appropriate to
+the selected lane, preventing a debug-kernel config from qualifying an
+uninstrumented external module. It delegates device work only to the
+existing bounded `deploy-nullblk.sh` helper: a fresh identity-verified
+RAM-backed `null_blk` lower with configured completion delay, eight
+deterministic constructor-stage synthetic `-ENOMEM` failures,
+read/write/codec fault paths, byte-exact GC and DISCARD, flush/barrier
+coverage, suspend/drain, completion-handoff accounting, and normal teardown.
+It never selects physical swap, enables global kernel fault injection, or
+force-removes a mapper. Any quarantine remains authoritative.
+
+Runtime verification binds the helper's exact `SOURCE_HEAD` marker to the
+validated SHA, requires each selected loaded PASS marker exactly once, requires
+the clean-teardown record, requires active pre/post runtime snapshots, and
+compares readable pre/post kernel ring buffers with an unchanged baseline
+prefix. Any KASAN/KCSAN report, lockdep report, kernel warning, refcount
+diagnostic, workqueue-after-free indication, shortened log, missing/repeated
+marker, helper failure, or uncertain teardown fails or blocks the lane.
+Executed defects return FAIL rather than being relabeled BLOCKED merely because
+the wrapper is private.
+
+This lane still does not establish every requested kernel-debug claim.
+Full simultaneous READ/WRITE/DISCARD/FUA while GC is active, actual bounded
+allocator-failure injection beyond the eight synthetic constructor checkpoints,
+and execution on suitable KASAN+lockdep and KCSAN owner kernels remain open
+until separately run and recorded. Native ASan/UBSan/TSan, source contracts,
+Kconfig detection, and Sparse/Smatch compile checks are never KASAN/KCSAN
 runtime evidence.
-Kernel compiler/pahole compatibility banners without a source-file diagnostic location are not counted as sparse findings; nonzero Kbuild exits and missing CHECK units still fail with a bounded build-log tail.
-The independent Sparse CI selects Ubuntu 24.04 GA 6.8 headers explicitly, rather than the moving HWE headers, because the currently packaged sparse may be rejected by newer Kbuild before any source CHECK. This is header compile-only coverage, not an assertion about the running owner kernel.
-On 7.0 HWE headers, Kbuild explicitly refuses distro Sparse 0.6.4 because its checker lacks the required C23 typeof_unqual operator. The private CI therefore builds only the pinned Debian sparse 0.6.5~rc1 source archive into build/tests after verifying the published fixed MD5 and source-manifest SHA256, then uses the real C=2 Kbuild checker. Ubuntu 6.8 GA headers are not a compatible static target because production predictor.c requires linux/fpu.h. Neither tool construction nor header inspection establishes loaded-kernel evidence.
-The bundled Sparse 0.6.5~rc1 qualifies all eight module C units on 7.0 HWE headers but reports unsupported __builtin_shuffle SIMD expressions and dependent SIMD initializer diagnostics. These are classified explicitly as unsupported_simd_builtin and simd_initializer, retained as a FAIL (never silently ignored or labeled a source logic defect), and counted with a bounded representative failure log. The core translation units were checked; an all-module sparse PASS still requires resolution of those analyzer limitations.
