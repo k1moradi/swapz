@@ -648,6 +648,161 @@ static int test_metadata_only_validated_descriptor_lookup(void)
 	return 0;
 }
 
+
+/*
+ * Construct a complete on-card extent without using the production writer.
+ * All fields, CRCs, and the payload are independently byte-encoded, then
+ * compare against the writer including its zeroed padding. This pins the
+ * unversioned wire image across endianness and alignment changes.
+ */
+static int test_independent_wire_image(void)
+{
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+	const swapz_u8 *readable = NULL;
+	swapz_u8 oracle[SWAPZ_BLOCK_BYTES] = { 0 };
+	const swapz_u16 payload_offset = SWAPZ_BLOCK_BYTES - 21U;
+	const swapz_u32 metadata_end = sizeof(struct swapz_header) +
+		sizeof(struct swapz_record);
+	unsigned int index;
+
+	oracle[0] = 'S';
+	oracle[1] = 'W';
+	oracle[2] = 'Z';
+	oracle[6] = 1U; /* 4 KiB extent. */
+	oracle[7] = 1U; /* One record. */
+	reference_store_le32(oracle + 8U, 0x12345678U);
+	reference_store_le32(oracle + 16U, 0xfedcba98U);
+	reference_store_le32(oracle + 20U, 0x01020304U);
+	reference_store_le16(oracle + 24U, payload_offset);
+	reference_store_le16(oracle + 26U, 21U | SWAPZ_RECORD_DELTA64_FLAG |
+			     SWAPZ_RECORD_SHUF8_FLAG);
+	for (index = 0; index < 21U; ++index)
+		oracle[payload_offset + index] = (swapz_u8)(index * 37U + 11U);
+	reference_store_le32(oracle + 28U,
+			     reference_crc32c(oracle + payload_offset, 21U));
+	reference_store_le32(oracle + 12U,
+			     reference_crc32c(oracle, metadata_end));
+
+	CHECK(swapz_validate_metadata_crc(oracle, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_validate(oracle, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_lookup(oracle, SWAPZ_BLOCK_BYTES, 0, &decoded, &readable) == 0);
+	CHECK(decoded.logical_page == 0xfedcba98U);
+	CHECK(decoded.generation == 0x01020304U);
+	CHECK(decoded.encoding == SWAPZ_ENCODING_DELTA64_SHUF8);
+	CHECK(decoded.payload_length == 21U && readable == oracle + payload_offset);
+
+	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 0x12345678U) == 0);
+	CHECK(swapz_append_prehashed_encoded(
+		      &builder, 0xfedcba98U, 0x01020304U, oracle + payload_offset,
+		      21U, reference_crc32c(oracle + payload_offset, 21U),
+		      SWAPZ_ENCODING_DELTA64_SHUF8) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(memcmp(extent, oracle, sizeof(oracle)) == 0);
+
+	/* The first block alone is sufficient for metadata-only inspection. */
+	memcpy(metadata_only, oracle, sizeof(metadata_only));
+	CHECK(swapz_peek(metadata_only, SWAPZ_BLOCK_BYTES, 0, &decoded) == 0);
+	CHECK(swapz_lookup_validated_descriptor(metadata_only, SWAPZ_BLOCK_BYTES,
+					       0, &decoded, NULL) == 0);
+	CHECK(swapz_lookup_validated_descriptor(metadata_only, SWAPZ_BLOCK_BYTES,
+					       1, &decoded, NULL) == -ERANGE);
+	CHECK(decoded.payload_length == 0);
+
+	/* Distinguish an authenticated payload from authenticated metadata. */
+	oracle[payload_offset] ^= 1U;
+	CHECK(swapz_validate(oracle, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_lookup(oracle, SWAPZ_BLOCK_BYTES, 0, &decoded, &readable) ==
+	      -EBADMSG);
+	CHECK(readable == NULL && decoded.payload_length == 0);
+	oracle[payload_offset] ^= 1U;
+	oracle[20] ^= 1U;
+	CHECK(swapz_validate_metadata_crc(oracle, SWAPZ_BLOCK_BYTES) == -EBADMSG);
+	oracle[20] ^= 1U;
+	CHECK(swapz_validate(oracle, SWAPZ_BLOCK_BYTES) == 0);
+	return 0;
+}
+
+/*
+ * The cache owns only block zero, even when the on-media extent is 16 KiB.
+ * Authenticate each forged descriptor before exercising metadata-only
+ * lookup: the semantic offset checks, not CRC failure, must reject it.
+ */
+static int test_partial_metadata_and_extent_bounds(void)
+{
+	static const swapz_u16 bad_offsets[] = {
+		sizeof(struct swapz_header) + sizeof(struct swapz_record) - 1U,
+		SWAPZ_MAX_EXTENT_BYTES - 20U,
+		SWAPZ_MAX_EXTENT_BYTES,
+	};
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+	struct swapz_record original;
+	swapz_u8 *record_bytes = metadata_only + sizeof(struct swapz_header);
+	unsigned int index;
+
+	set_payload(128, 61);
+	CHECK(swapz_begin(&builder, extent, SWAPZ_MAX_EXTENT_BYTES, 0x11223344U) ==
+	      0);
+	CHECK(swapz_append_encoded(&builder, 81, 9, payload, 128,
+				   SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	memcpy(metadata_only, extent, sizeof(metadata_only));
+	CHECK(swapz_validate_metadata_crc(metadata_only,
+					 SWAPZ_MAX_EXTENT_BYTES) == 0);
+	CHECK(swapz_peek(metadata_only, SWAPZ_MAX_EXTENT_BYTES, 0, &decoded) == 0);
+	CHECK(decoded.payload_offset > SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_lookup_validated_descriptor(
+		      metadata_only, SWAPZ_MAX_EXTENT_BYTES, 0, &decoded, NULL) == 0);
+	memcpy(&original, record_bytes, sizeof(original));
+	for (index = 0; index < sizeof(bad_offsets) / sizeof(bad_offsets[0]);
+	     ++index) {
+		struct swapz_record forged = original;
+
+		reference_store_le16(&forged.payload_offset_le, bad_offsets[index]);
+		memcpy(record_bytes, &forged, sizeof(forged));
+		reseal_metadata(metadata_only, 1);
+		CHECK(swapz_validate_metadata_crc(metadata_only,
+						 SWAPZ_MAX_EXTENT_BYTES) == 0);
+		CHECK(swapz_validate(metadata_only, SWAPZ_MAX_EXTENT_BYTES) ==
+		      -EUCLEAN);
+		CHECK(swapz_lookup_validated_descriptor(
+			      metadata_only, SWAPZ_MAX_EXTENT_BYTES, 0,
+			      &decoded, NULL) == -EUCLEAN);
+		CHECK(decoded.payload_length == 0 && decoded.generation == 0);
+	}
+	return 0;
+}
+
+static int test_maximum_record_count(void)
+{
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+	const swapz_u8 *readable;
+	swapz_u8 value;
+	unsigned int index;
+
+	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 0x55667788U) == 0);
+	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index) {
+		value = (swapz_u8)index;
+		CHECK(swapz_append(&builder, index, index + 1U, &value, 1U) == 0);
+	}
+	value = 0xffU;
+	CHECK(swapz_append(&builder, SWAPZ_MAX_RECORDS, 1U, &value, 1U) ==
+	      -ENOSPC);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(swapz_validate(extent, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(extent[offsetof(struct swapz_header, record_count)] ==
+	      SWAPZ_MAX_RECORDS);
+	CHECK(swapz_lookup(extent, SWAPZ_BLOCK_BYTES, SWAPZ_MAX_RECORDS - 1U,
+			   &decoded, &readable) == 0);
+	CHECK(decoded.logical_page == SWAPZ_MAX_RECORDS - 1U);
+	CHECK(decoded.generation == SWAPZ_MAX_RECORDS);
+	CHECK(decoded.payload_offset == SWAPZ_BLOCK_BYTES - SWAPZ_MAX_RECORDS);
+	CHECK(decoded.payload_length == 1U && readable[0] == SWAPZ_MAX_RECORDS - 1U);
+	return 0;
+}
+
 int main(void)
 {
 	int tests = 0;
@@ -671,6 +826,9 @@ int main(void)
 	CHECK(test_metadata_and_format_guards() == 0); tests++;
 	CHECK(test_authenticated_descriptor_semantic_guards() == 0); tests++;
 	CHECK(test_metadata_only_validated_descriptor_lookup() == 0); tests++;
+	CHECK(test_independent_wire_image() == 0); tests++;
+	CHECK(test_partial_metadata_and_extent_bounds() == 0); tests++;
+	CHECK(test_maximum_record_count() == 0); tests++;
 	printf("SWAPZ_EXACT_PRODUCTION_C_TESTS_PASS=%d\n", tests);
 	return 0;
 }

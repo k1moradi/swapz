@@ -84,6 +84,12 @@ struct swapz_decoded {
 	swapz_u8 encoding;
 };
 
+/*
+ * Builder owns an exclusive, writable bytes_total-byte extent until seal.
+ * Append inputs own at least length readable bytes and must not overlap that
+ * extent (memcpy is not memmove); unaligned buffers are supported. No builder
+ * operation is safe concurrently with mutation or consumption of that extent.
+ */
 int swapz_begin(struct swapz_builder *builder, void *bytes,
 	      swapz_u32 bytes_total, swapz_u32 sequence);
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
