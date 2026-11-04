@@ -28,6 +28,7 @@ DEFAULT_KCSAN_STATUS = Path("/sys/kernel/debug/kcsan")
 DEFAULT_LOCKDEP_STATS = Path("/proc/lockdep_stats")
 DEFAULT_PROVE_LOCKING = Path("/proc/sys/kernel/prove_locking")
 DEFAULT_BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
+DEFAULT_MODULE = Path("build/kernel/experimental/dm-swapz.ko")
 MAX_RUNTIME_AGE_NS = 20 * 60 * 1_000_000_000
 # These are exact observed records from the existing, privately owned RAM
 # lower-device oracle. Each must occur exactly once, not merely as a substring.
@@ -535,10 +536,92 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
         return "BLOCKED", check_count, warnings
     return "PASS", check_count, warnings
 
+def missing_debug_feature_reason(
+    required: tuple[str, ...], features: dict[str, str],
+    configuration: dict[str, str] | None = None,
+) -> str:
+    """Name the missing lane, Kconfig symbols and observable boot disable."""
+    if not required:
+        return "no running-kernel debug instrumentation lane selected"
+    missing = []
+    for feature in required:
+        state = features.get(feature, "UNKNOWN")
+        if state == "DETECTED":
+            continue
+        if state == "DISABLED_AT_BOOT":
+            missing.append(f"{feature}: disabled by kasan=off on kernel command line")
+            continue
+        symbols = FEATURE_SYMBOLS[feature]
+        unverified = [
+            f"{symbol}={configuration.get(symbol, 'unknown') if configuration is not None else 'unknown'}"
+            for symbol in symbols
+            if configuration is None or configuration.get(symbol) != "y"
+        ]
+        if unverified:
+            missing.append(
+                f"{feature}: {state} (need "
+                + ", ".join(f"{symbol}=y" for symbol in symbols)
+                + "; observed " + ", ".join(unverified) + ")")
+        else:
+            missing.append(
+                f"{feature}: {state} despite configured support; "
+                "check readable boot command line and live instrumentation")
+    return "; ".join(missing)
+
+
+def inactive_runtime_reason(
+    snapshot: dict[str, object], required: tuple[str, ...],
+) -> str | None:
+    """Describe each runtime switch required to make a loaded run meaningful."""
+    inactive = []
+    if "kcsan" in required:
+        if snapshot["kcsan_enabled"] is not True:
+            inactive.append("KCSAN debugfs enabled=0")
+        if snapshot["kcsan_filter_default"] is not True:
+            inactive.append("KCSAN blacklisted functions is not none")
+    if "lockdep" in required:
+        if snapshot["lockdep_debug_locks"] is not True:
+            inactive.append("lockdep debug_locks=0")
+        if snapshot["lockdep_prove_locking"] is not True:
+            inactive.append("lockdep prove_locking=0")
+    return ", ".join(inactive) if inactive else None
+
+
+def inspect_module_provenance(module: Path) -> dict[str, str]:
+    """Read the actual built module, without loading it or claiming host evidence."""
+    if not module.is_file():
+        return {"error": f"module artifact missing: {module}"}
+    evidence: dict[str, str] = {}
+    commands = (
+        ("source_sha", ("modinfo", "-F", "swapz_build_source_sha", str(module))),
+        ("source_clean", ("modinfo", "-F", "swapz_build_source_clean", str(module))),
+        ("symbols", ("nm", "-u", str(module))),
+    )
+    for field, command in commands:
+        if shutil.which(command[0]) is None:
+            return {"error": f"module provenance tool unavailable: {command[0]}"}
+        try:
+            result = subprocess.run(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                encoding="utf-8", errors="replace", timeout=10, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return {"error": f"module provenance {field} unreadable: {error}"}
+        if result.returncode != 0:
+            return {
+                "error": f"module provenance {field} query failed "
+                         f"(exit={result.returncode})"
+            }
+        evidence[field] = result.stdout.strip()
+    return evidence
+
+
 def verify_owned_run(
     required: tuple[str, ...], features: dict[str, str],
     baseline: str, final: str, execution: str | None,
     runtime_before: str, runtime_after: str, source_sha: str,
+    module_evidence: dict[str, str] | None = None,
+    configuration: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     # Defect evidence is monotonic only when its observation is attributable
     # to this bounded run. A missing/truncated dmesg baseline is incomplete
@@ -546,59 +629,110 @@ def verify_owned_run(
     dmesg_contiguous = bool(baseline and final and final.startswith(baseline))
     if dmesg_contiguous:
         delta = final[len(baseline):]
-        if KERNEL_DIAGNOSTIC.search(delta):
-            return "FAIL", "kernel diagnostic appeared during owned run"
-    if execution is not None and re.search(
-            r"(?m)^[ \t]*(?:FAIL|BLOCKED|QUARANTINED)(?::|_)", execution):
-        return "FAIL", "owned lower reported a failure or quarantine"
+        for line in delta.splitlines():
+            diagnostic = KERNEL_DIAGNOSTIC.search(line)
+            if diagnostic:
+                # Attribute the actual bounded splat without dumping dmesg.
+                excerpt = line[max(0, diagnostic.start() - 30):].strip()[:180]
+                return "FAIL", f"kernel diagnostic in bounded dmesg: {excerpt}"
+    if execution is not None:
+        for line in execution.splitlines():
+            if re.match(r"^[ \t]*(?:FAIL|BLOCKED|QUARANTINED)(?::|_)", line):
+                return "FAIL", f"owned lower reported: {line.strip()[:180]}"
     if not required or not check_features(features, required):
-        return "BLOCKED", "required running-kernel debug features unavailable"
+        return "BLOCKED", missing_debug_feature_reason(
+            required, features, configuration)
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
-        return "BLOCKED", "validated source SHA is malformed"
+        return "BLOCKED", "validated source SHA is malformed (expected 40 hex digits)"
     if execution is None:
-        return "BLOCKED", "owned execution log unreadable"
+        return "BLOCKED", "owned execution log missing or unreadable"
 
     lines = execution.splitlines()
     source_markers = [
         line for line in lines if line.lstrip().startswith("SOURCE_HEAD")
     ]
-    if source_markers != [f"SOURCE_HEAD={source_sha}"]:
-        return "FAIL", "owned lower source marker is missing, duplicated or mismatched"
+    if not source_markers:
+        return "FAIL", f"missing source run marker: SOURCE_HEAD={source_sha}"
+    if len(source_markers) != 1:
+        return "FAIL", "duplicated SOURCE_HEAD run marker"
+    if source_markers[0] != f"SOURCE_HEAD={source_sha}":
+        return "FAIL", (
+            f"source run marker mismatch: expected SOURCE_HEAD={source_sha}, "
+            f"observed {source_markers[0].strip()[:90]}")
     for record in REQUIRED_RECORDS:
         marker = record.split("=", 1)[0]
         candidates = [line for line in lines if line.lstrip().startswith(marker)]
-        if (len(candidates) != 1 or
-                re.fullmatch(record, candidates[0]) is None or
+        if not candidates:
+            return "FAIL", f"missing loaded run marker: {marker}"
+        if len(candidates) != 1:
+            return "FAIL", f"duplicated loaded run marker: {marker}"
+        if (re.fullmatch(record, candidates[0]) is None or
                 not _record_shape_matches(candidates[0], marker)):
-            return "FAIL", (
-                f"missing, repeated or malformed loaded evidence: {marker}")
+            return "FAIL", f"malformed loaded run marker: {marker}"
 
     try:
         before_state = parse_runtime_snapshot(runtime_before, required)
+    except ValueError as error:
+        return "BLOCKED", f"runtime-before: {error}"
+    try:
         after_state = parse_runtime_snapshot(runtime_after, required)
     except ValueError as error:
-        return "BLOCKED", str(error)
+        return "BLOCKED", f"runtime-after: {error}"
     try:
         current_boot_id = _read_runtime_text(
             DEFAULT_BOOT_ID, "kernel boot identity").strip()
     except ValueError as error:
         return "BLOCKED", str(error)
+    if before_state["boot_id"] != current_boot_id:
+        return "BLOCKED", (
+            f"runtime-before boot mismatch: observed {before_state['boot_id']}, "
+            f"current {current_boot_id}")
+    if after_state["boot_id"] != current_boot_id:
+        return "BLOCKED", (
+            f"runtime-after boot mismatch: observed {after_state['boot_id']}, "
+            f"current {current_boot_id}")
     now = time.monotonic_ns()
     before_time = before_state["observed_monotonic_ns"]
     after_time = after_state["observed_monotonic_ns"]
-    if (before_state["boot_id"] != current_boot_id or
-            after_state["boot_id"] != current_boot_id or
-            not 0 < before_time < after_time <= now or
-            now - before_time > MAX_RUNTIME_AGE_NS):
-        return "BLOCKED", (
-            "runtime snapshots have stale or inconsistent identity/order")
-    if not runtime_features_active(before_state, required):
-        return "BLOCKED", "required debug feature was inactive before owned I/O"
-    if not runtime_features_active(after_state, required):
-        return "FAIL", "required debug feature became inactive during owned I/O"
+    if not 0 < before_time < after_time <= now:
+        return "BLOCKED", "runtime snapshot times are reversed, equal or in the future"
+    if now - before_time > MAX_RUNTIME_AGE_NS:
+        return "BLOCKED", "runtime-before snapshot is stale (>20 minutes)"
+    if inactive := inactive_runtime_reason(before_state, required):
+        return "BLOCKED", f"debug instrumentation inactive before I/O: {inactive}"
+    if inactive := inactive_runtime_reason(after_state, required):
+        return "FAIL", f"debug instrumentation disabled during I/O: {inactive}"
     if not dmesg_contiguous:
-        return "BLOCKED", "dmesg baseline missing, overwritten or unreadable"
-    return "PASS", "private RAM lower completed and kernel diagnostics were clean"
+        if not baseline:
+            return "BLOCKED", "dmesg baseline missing or unreadable"
+        if not final:
+            return "BLOCKED", "dmesg final snapshot missing or unreadable"
+        return "BLOCKED", "dmesg truncated or overwritten: final lacks baseline prefix"
+
+    # The caller's validated source marker is not a substitute for modinfo or
+    # observable sanitizer references in the actual exact-source .ko artifact.
+    if module_evidence is None:
+        return "BLOCKED", "module provenance missing: modinfo and nm evidence required"
+    if "error" in module_evidence:
+        return "BLOCKED", module_evidence["error"]
+    observed_sha = module_evidence.get("source_sha", "<missing>")
+    if observed_sha != source_sha:
+        return "BLOCKED", (
+            f"module source SHA mismatch: expected {source_sha}, "
+            f"observed {observed_sha}")
+    if module_evidence.get("source_clean") != "1":
+        return "BLOCKED", "module provenance lacks clean validated source (modinfo source_clean != 1)"
+    symbols = module_evidence.get("symbols", "")
+    if "kasan" in required and re.search(
+            r"(__asan_|__hwasan_|kasan_report)", symbols) is None:
+        return "BLOCKED", "module lacks observable KASAN instrumentation references"
+    if "kcsan" in required and re.search(
+            r"(__tsan_|__kcsan_)", symbols) is None:
+        return "BLOCKED", "module lacks observable KCSAN instrumentation references"
+    return "PASS", (
+        "owned RAM lower executed; runtime instrumentation remained active, "
+        "module source verified and bounded dmesg clean")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -616,6 +750,7 @@ def main() -> int:
     verify_parser.add_argument("--cmdline", type=Path, default=Path("/proc/cmdline"))
     verify_parser.add_argument("--require", required=True)
     verify_parser.add_argument("--source-sha", required=True)
+    verify_parser.add_argument("--module", type=Path, default=DEFAULT_MODULE)
     verify_parser.add_argument("--baseline", type=Path, required=True)
     verify_parser.add_argument("--final", type=Path, required=True)
     verify_parser.add_argument("--execution", type=Path, required=True)
@@ -661,9 +796,13 @@ def main() -> int:
         execution = read_optional(arguments.execution)
         runtime_before = read_optional(arguments.runtime_before) or ""
         runtime_after = read_optional(arguments.runtime_after) or ""
+        config_path = arguments.config or host_config_path()
+        configuration = load_config(config_path) if config_path is not None else None
         status, reason = verify_owned_run(
             required, features, baseline, final, execution,
             runtime_before, runtime_after, arguments.source_sha,
+            module_evidence=inspect_module_provenance(arguments.module),
+            configuration=configuration,
         )
         print(f"{status}_KERNEL_DEBUG_OWNED=features:{','.join(required)} reason:{reason}")
         return {"PASS": 0, "FAIL": 1, "BLOCKED": 2}[status]

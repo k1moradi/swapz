@@ -37,6 +37,9 @@ jobs:
           bash -n tests/tools/qualify-kernel-debug-owned.sh
           python3 -B tests/runtime/native/kernel-debug-qualification-test.py -v
           python3 -B tests/tools/kernel-debug-qualify.py probe
+          # Static and synthetic evidence is NOT a loaded instrumented-kernel PASS.
+          echo "KERNEL_DEBUG_LOADED_KASAN_LOCKDEP=NOT_RUN (requires owned KASAN+lockdep host evidence)"
+          echo "KERNEL_DEBUG_LOADED_KCSAN=NOT_RUN (requires separate owned KCSAN host evidence)"
           git diff --check
 
   sparse-compile-only:

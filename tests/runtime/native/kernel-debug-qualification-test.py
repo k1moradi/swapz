@@ -87,7 +87,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
     def verify(self, execution: str = GOOD_LOG, final: str = "old\nnew\n",
                required: tuple[str, ...] = ("kasan", "lockdep"),
                baseline: str = "old\n", runtime_before: str | None = None,
-               runtime_after: str | None = None) -> tuple[str, str]:
+               runtime_after: str | None = None,
+               module_evidence: dict[str, str] | None = None) -> tuple[str, str]:
         if runtime_before is None and runtime_after is not None:
             # Callers construct an explicit after-snapshot before entering this
             # helper. Give the synthetic before-snapshot an earlier timestamp
@@ -103,9 +104,18 @@ class KernelDebugQualificationTests(unittest.TestCase):
             runtime_before = self.runtime_snapshot(required)
         if runtime_after is None:
             runtime_after = self.runtime_snapshot(required)
+        if module_evidence is None:
+            # Synthetic evidence exercises only the pure verifier. The CLI
+            # inspects real module metadata and never accepts this shortcut.
+            module_evidence = {
+                "source_sha": SOURCE_SHA, "source_clean": "1",
+                "symbols": "__asan_load8 __tsan_read8",
+            }
         return qualification.verify_owned_run(
             required, self.features(), baseline, final, execution,
             runtime_before, runtime_after, SOURCE_SHA,
+            module_evidence=module_evidence,
+            configuration=qualification.load_config(self.configuration),
         )
 
     def test_detected_is_not_executed(self) -> None:
@@ -297,6 +307,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             "--cmdline", str(self.cmdline),
             "--require", "kasan,lockdep",
             "--source-sha", SOURCE_SHA,
+            "--module", str(directory / "unbuilt.ko"),
             "--baseline", str(baseline),
             "--final", str(final),
             "--execution", str(execution),
@@ -317,6 +328,15 @@ class KernelDebugQualificationTests(unittest.TestCase):
             common, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, check=False)
         self.assertEqual(blocked.returncode, 2, blocked.stdout + blocked.stderr)
+        runtime_before.write_text(
+            self.runtime_snapshot(required), encoding="utf-8")
+        missing_module = subprocess.run(
+            common, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=False)
+        self.assertEqual(
+            missing_module.returncode, 2,
+            missing_module.stdout + missing_module.stderr)
+        self.assertIn("module artifact missing", missing_module.stdout)
 
     def test_kernel_fault_categories_fail(self) -> None:
         diagnostics = (
@@ -339,6 +359,163 @@ class KernelDebugQualificationTests(unittest.TestCase):
         for diagnostic in diagnostics:
             with self.subTest(diagnostic=diagnostic):
                 self.assertEqual(self.verify(final="old\n" + diagnostic)[0], "FAIL")
+
+    def test_error_reasons_name_configuration_and_boot_disables(self) -> None:
+        self.configuration.write_text(
+            CONFIG.replace("CONFIG_KCSAN=y", "# CONFIG_KCSAN is not set"),
+            encoding="utf-8")
+        status, reason = self.verify(required=("kcsan",))
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("CONFIG_KCSAN=n", reason)
+        self.configuration.write_text(
+            CONFIG.replace("CONFIG_LOCKDEP=y", "# CONFIG_LOCKDEP is not set"),
+            encoding="utf-8")
+        status, reason = self.verify()
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("CONFIG_LOCKDEP=n", reason)
+        self.configuration.write_text(CONFIG, encoding="utf-8")
+        self.cmdline.write_text("kasan=off\n", encoding="utf-8")
+        self.assertIn("kasan=off", self.verify()[1])
+
+    def test_missing_duplicate_and_mismatched_run_markers_identified(self) -> None:
+        cases = (
+            (GOOD_LOG.replace("PASS_LOADED_LIVE_GC=", "SKIPPED="),
+             "missing loaded run marker: PASS_LOADED_LIVE_GC"),
+            (GOOD_LOG + "\n" + GOOD_LOG.splitlines()[2],
+             "duplicated loaded run marker: PASS_LOADED_COMPOUND_BIO"),
+            (GOOD_LOG.replace("segs_gt1:2", "segs_gt1:2 invalid:1"),
+             "malformed loaded run marker: PASS_LOADED_COMPOUND_BIO"),
+            (GOOD_LOG.replace("SOURCE_HEAD=", "OLD_SOURCE="),
+             "missing source run marker: SOURCE_HEAD="),
+            (GOOD_LOG.replace(f"SOURCE_HEAD={SOURCE_SHA}",
+                              "SOURCE_HEAD=" + "b" * 40),
+             "source run marker mismatch:"),
+            (GOOD_LOG + "\nSOURCE_HEAD=" + SOURCE_SHA,
+             "duplicated SOURCE_HEAD run marker"),
+        )
+        for execution, explanation in cases:
+            with self.subTest(explanation=explanation):
+                status, reason = self.verify(execution=execution)
+                self.assertEqual(status, "FAIL")
+                self.assertIn(explanation, reason)
+
+    def test_bounded_fault_diagnostics_and_historical_warning(self) -> None:
+        baseline = "WARNING: historical boot warning\nold\n"
+        self.assertEqual(self.verify(
+            baseline=baseline, final=baseline + "clean\n")[0], "PASS")
+        for fault in ("BUG: KCSAN: data-race in swapz",
+                      "possible circular locking dependency detected",
+                      "BUG: KASAN: use-after-free"):
+            with self.subTest(fault=fault):
+                status, reason = self.verify(
+                    baseline=baseline, final=baseline + fault + "\n")
+                self.assertEqual(status, "FAIL")
+                self.assertIn(fault, reason)
+        status, reason = self.verify(baseline=baseline, final="old\n")
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("dmesg truncated or overwritten", reason)
+        self.assertEqual(self.verify(
+            baseline="", final="WARNING: old warning\n")[0], "BLOCKED")
+
+    def test_precise_runtime_identity_and_instrumentation_reasons(self) -> None:
+        required = ("kcsan",)
+        status, reason = self.verify(
+            required=required, runtime_before=self.runtime_snapshot(
+                required, kcsan_enabled=False))
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("KCSAN debugfs enabled=0", reason)
+        status, reason = self.verify(
+            required=required, runtime_after=self.runtime_snapshot(
+                required, kcsan_enabled=False))
+        self.assertEqual(status, "FAIL")
+        self.assertIn("KCSAN debugfs enabled=0", reason)
+        state = json.loads(self.runtime_snapshot(required))
+        state["boot_id"] = "00000000-0000-0000-0000-000000000000"
+        for key, label in (("runtime_before", "runtime-before"),
+                           ("runtime_after", "runtime-after")):
+            with self.subTest(key=key):
+                status, reason = self.verify(
+                    required=required, **{key: json.dumps(state)})
+                self.assertEqual(status, "BLOCKED")
+                self.assertIn(label + " boot mismatch", reason)
+        self.assertIn(
+            "lockdep prove_locking=0",
+            self.verify(runtime_after=self.runtime_snapshot(
+                ("kasan", "lockdep"), lockdep_prove_locking=False))[1])
+
+    def test_bad_or_missing_module_provenance_blocks_clean_claim(self) -> None:
+        clean = {
+            "source_sha": SOURCE_SHA, "source_clean": "1",
+            "symbols": "__asan_load8 __tsan_read8",
+        }
+        cases = (
+            ({"error": "module artifact missing: dm-swapz.ko"},
+             "module artifact missing"),
+            ({}, "module source SHA mismatch"),
+            ({**clean, "source_sha": "b" * 40}, "module source SHA mismatch"),
+            ({**clean, "source_clean": "0"}, "clean validated source"),
+            ({**clean, "symbols": "__tsan_read8"}, "KASAN instrumentation"),
+        )
+        for evidence, explanation in cases:
+            with self.subTest(explanation=explanation):
+                status, reason = self.verify(module_evidence=evidence)
+                self.assertEqual(status, "BLOCKED")
+                self.assertIn(explanation, reason)
+        status, reason = self.verify(
+            required=("kcsan",),
+            module_evidence={**clean, "symbols": "__asan_load8"})
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("KCSAN instrumentation", reason)
+        status, reason = self.verify(
+            module_evidence={"error": "module artifact missing"},
+            final="old\nBUG: KASAN: use-after-free\n")
+        self.assertEqual(status, "FAIL")
+        self.assertIn("KASAN", reason)
+
+    def test_rootless_module_inspection_and_tool_unavailability(self) -> None:
+        module = Path(self.temporary_directory.name) / "dm-swapz.ko"
+        self.assertIn("module artifact missing",
+                      qualification.inspect_module_provenance(module)["error"])
+        module.write_bytes(b"synthetic module, never loaded")
+        with mock.patch.object(qualification.shutil, "which", return_value=None):
+            self.assertIn("modinfo unavailable",
+                          qualification.inspect_module_provenance(module)["error"])
+        with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/tool"), \
+             mock.patch.object(qualification.subprocess, "run") as runner:
+            runner.side_effect = [
+                subprocess.CompletedProcess([], 0, SOURCE_SHA + "\n", ""),
+                subprocess.CompletedProcess([], 0, "1\n", ""),
+                subprocess.CompletedProcess([], 0, "U __asan_load8\nU __tsan_read8\n", ""),
+            ]
+            observed = qualification.inspect_module_provenance(module)
+            self.assertEqual(observed["source_sha"], SOURCE_SHA)
+            self.assertEqual(observed["source_clean"], "1")
+            self.assertIn("__tsan_read8", observed["symbols"])
+            self.assertEqual(runner.call_count, 3)
+            runner.side_effect = None
+            runner.return_value = subprocess.CompletedProcess([], 1, "", "bad")
+            self.assertIn("query failed",
+                          qualification.inspect_module_provenance(module)["error"])
+
+    def test_sparse_source_warnings_vs_infrastructure_absence(self) -> None:
+        headers = Path(self.temporary_directory.name) / "sparse-headers"
+        headers.mkdir()
+        (headers / ".config").write_text("CONFIG_X86_64=y\n", encoding="utf-8")
+        with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/sparse"), \
+             mock.patch.object(qualification.subprocess, "run") as runner, \
+             contextlib.redirect_stderr(io.StringIO()):
+            runner.return_value = subprocess.CompletedProcess(
+                [], 1, "sparse: unsupported compiler flags\n")
+            status, checks, warnings = qualification.run_static(
+                Path("/repo"), headers, "sparse")
+            self.assertEqual((status, checks, warnings), ("BLOCKED", 0, {}))
+            runner.return_value = subprocess.CompletedProcess(
+                [], 1, "  CHECK /repo/build/kernel/w1/dm-target.c\n"
+                "dm-target.c:20:3: warning: incorrect type in argument\n")
+            status, checks, warnings = qualification.run_static(
+                Path("/repo"), headers, "sparse")
+            self.assertEqual(status, "FAIL")
+            self.assertEqual(warnings["locking_or_type"], 1)
 
     def test_static_warning_classes_and_no_false_clean_pass(self) -> None:
         output = ("  CHECK /repo/build/kernel/w1/dm-target.c\n"
@@ -610,6 +787,14 @@ class KernelDebugQualificationTests(unittest.TestCase):
                                    side_effect=statuses), \
                  contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(qualification.main(), expected_exit)
+
+    def test_hosted_static_workflow_does_not_run_loaded_debug_lanes(self) -> None:
+        workflow = (Path(__file__).resolve().parents[3] /
+                    ".github/workflows/kernel-debug.yml").read_text(encoding="utf-8")
+        self.assertIn("KERNEL_DEBUG_LOADED_KASAN_LOCKDEP=NOT_RUN", workflow)
+        self.assertIn("KERNEL_DEBUG_LOADED_KCSAN=NOT_RUN", workflow)
+        self.assertIn("KERNEL_DEBUG_STATIC_COMPILE_ONLY_NO_MODULE_LOADING", workflow)
+        self.assertNotIn("modprobe ", workflow)
 
     def test_owned_wrapper_binds_runtime_state_and_artifact_provenance(self) -> None:
         source = WRAPPER.read_text(encoding="utf-8")
