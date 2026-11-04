@@ -87,6 +87,11 @@ def parse_meminfo_counters(text: Any) -> dict[str, int]:
 
 MAX_UINT32 = (1 << 32) - 1
 MAX_UINT64 = (1 << 64) - 1
+CAPACITY_INDEX_ELEMENT_BYTES = {
+    "logical_pages": (MAP_RECORD_BYTES, 4, 4),
+    "physical_blocks": (PHYSICAL_LIVENESS_RECORD_BYTES, 1, 1),
+    "segments": (4, 4, 2, 4, 4, 4, 4, 4, 4, 1, 1),
+}
 
 
 def _checked_product(first: int, second: int, limit: int) -> int | None:
@@ -105,6 +110,60 @@ def _checked_sum(first: int, second: int, limit: int) -> int | None:
             second > limit or first > limit - second):
         return None
     return first + second
+
+
+def capacity_index_estimate(
+        logical_pages: Any, physical_blocks: Any, *,
+        size_t_max: int = SIZE_T_MAX) -> dict[str, int] | None:
+    """Predict current capacity-index payload/page-rounded bytes only.
+
+    This mirrors the 17 source-derived capacity-scaled arrays. It is an
+    allocation-length model, not constructor-success or host-RAM evidence.
+    """
+    if (
+            type(logical_pages) is not int or
+            not 0 < logical_pages <= MAX_UINT32 or
+            type(physical_blocks) is not int or
+            not 0 < physical_blocks <= MAX_UINT32 or
+            physical_blocks % SEGMENT_BLOCKS or
+            type(size_t_max) is not int or
+            not 0 < size_t_max <= MAX_UINT64):
+        return None
+    dimensions = {
+        "logical_pages": logical_pages,
+        "physical_blocks": physical_blocks,
+        "segments": physical_blocks // SEGMENT_BLOCKS,
+    }
+    payload_bytes = 0
+    page_rounded_bytes = 0
+    array_count = 0
+    for dimension, widths in CAPACITY_INDEX_ELEMENT_BYTES.items():
+        count = dimensions[dimension]
+        for element_bytes in widths:
+            allocation_bytes = _checked_product(
+                count, element_bytes, size_t_max)
+            if allocation_bytes is None:
+                return None
+            payload_bytes = _checked_sum(
+                payload_bytes, allocation_bytes, MAX_UINT64)
+            rounding_input = _checked_sum(
+                allocation_bytes, BLOCK_BYTES - 1, MAX_UINT64)
+            if payload_bytes is None or rounding_input is None:
+                return None
+            rounded_bytes = _checked_product(
+                rounding_input // BLOCK_BYTES, BLOCK_BYTES, MAX_UINT64)
+            if rounded_bytes is None:
+                return None
+            page_rounded_bytes = _checked_sum(
+                page_rounded_bytes, rounded_bytes, MAX_UINT64)
+            if page_rounded_bytes is None:
+                return None
+            array_count += 1
+    return {
+        "array_count": array_count,
+        "payload_bytes": payload_bytes,
+        "page_rounded_bytes": page_rounded_bytes,
+    }
 
 
 def maximum_logical_pages_for_partition(
@@ -444,14 +503,21 @@ def validate_metadata_ram_trace(
                     elapsed_ns < SAMPLING_INTERVAL_NS // 2 or
                     elapsed_ns > SAMPLING_INTERVAL_NS +
                                  SAMPLING_INTERVAL_NS // 2):
-                raise ValueError("metadata RAM sample cadence is invalid")
+                raise ValueError(
+                    "metadata RAM sample cadence is invalid: "
+                    f"metric=monotonic_interval_ns observed={elapsed_ns} "
+                    f"minimum={SAMPLING_INTERVAL_NS // 2} "
+                    f"maximum={SAMPLING_INTERVAL_NS + SAMPLING_INTERVAL_NS // 2}")
             wall_elapsed_ns = _timedelta_ns(utc_time - previous_utc)
             if (
                     wall_elapsed_ns <= 0 or
                     abs(wall_elapsed_ns - elapsed_ns) >
                     SAMPLING_INTERVAL_NS // 2):
                 raise ValueError(
-                    "metadata RAM sample UTC/monotonic clocks disagree")
+                    "metadata RAM sample UTC/monotonic clocks disagree: "
+                    f"metric=interval_clock_delta_ns "
+                    f"observed={abs(wall_elapsed_ns - elapsed_ns)} "
+                    f"limit={SAMPLING_INTERVAL_NS // 2}")
         previous_monotonic = monotonic_ns
         previous_utc = utc_time
         phase_samples[phase].append(sample)
@@ -465,17 +531,23 @@ def validate_metadata_ram_trace(
     wall_span_ns = _timedelta_ns(previous_utc - first_utc)
     if abs(wall_span_ns - observed_span_ns) > CLOCK_AGREEMENT_TOLERANCE_NS:
         raise ValueError(
-            "metadata RAM UTC/monotonic trace spans disagree")
+            "metadata RAM UTC/monotonic trace spans disagree: "
+            f"metric=trace_clock_delta_ns "
+            f"observed={abs(wall_span_ns - observed_span_ns)} "
+            f"limit={CLOCK_AGREEMENT_TOLERANCE_NS}")
     if not (9 * expected_span_ns <= 10 * observed_span_ns <=
             11 * expected_span_ns):
         raise ValueError(
-            "metadata RAM observed sampling cadence differs from 100 ms")
+            "metadata RAM observed sampling cadence differs from 100 ms: "
+            f"metric=monotonic_trace_span_ns observed={observed_span_ns} "
+            f"expected={expected_span_ns} tolerance_percent=10")
 
     for phase, minimum in MINIMUM_PHASE_SAMPLES.items():
         if len(phase_samples[phase]) < minimum:
             raise ValueError(
-                "metadata RAM trace lacks baseline/init/steady/GC/teardown "
-                "observations")
+                "metadata RAM trace lacks required phase observations: "
+                f"metric={phase}_sample_count "
+                f"observed={len(phase_samples[phase])} minimum={minimum}")
 
     baseline = phase_samples["baseline"]
     if any(sample["mapper_present"] for sample in baseline):
@@ -574,15 +646,21 @@ def validate_metadata_ram_trace(
             "metadata RAM teardown recovery evidence gap: "
             f"metric=recovery_span_ns observed={recovery_span_ns} "
             "required=1000000000")
+    recovery_median_available_twice_kib = _median_twice([
+        sample["mem_available_kib"] for sample in recovery])
+    recovery_median_s_unreclaim_twice_kib = _median_twice([
+        sample["s_unreclaim_kib"] for sample in recovery])
+    recovery_median_vmalloc_used_twice_kib = _median_twice([
+        sample["vmalloc_used_kib"] for sample in recovery])
     for metric, observed_twice_kib, baseline_twice_kib, recovered in (
-            ("MemAvailable_median_twice_kib", _median_twice([
-                sample["mem_available_kib"] for sample in recovery]),
+            ("MemAvailable_median_twice_kib",
+             recovery_median_available_twice_kib,
              baseline_median_available_twice_kib, "minimum"),
-            ("SUnreclaim_median_twice_kib", _median_twice([
-                sample["s_unreclaim_kib"] for sample in recovery]),
+            ("SUnreclaim_median_twice_kib",
+             recovery_median_s_unreclaim_twice_kib,
              baseline_s_unreclaim_twice_kib, "maximum"),
-            ("VmallocUsed_median_twice_kib", _median_twice([
-                sample["vmalloc_used_kib"] for sample in recovery]),
+            ("VmallocUsed_median_twice_kib",
+             recovery_median_vmalloc_used_twice_kib,
              baseline_vmalloc_used_twice_kib, "maximum")):
         if ((recovered == "minimum" and observed_twice_kib <
              baseline_twice_kib) or
@@ -614,5 +692,16 @@ def validate_metadata_ram_trace(
             minimum_sample["mem_available_kib"] * MEMINFO_UNIT_BYTES,
         "baseline_samples": len(baseline),
         "teardown_samples": len(teardown),
+        "recovery_samples": len(recovery),
+        "recovery_span_ns": recovery_span_ns,
+        "recovery_median_mem_available_bytes":
+            recovery_median_available_twice_kib *
+            (MEMINFO_UNIT_BYTES // 2),
+        "recovery_median_s_unreclaim_bytes":
+            recovery_median_s_unreclaim_twice_kib *
+            (MEMINFO_UNIT_BYTES // 2),
+        "recovery_median_vmalloc_used_bytes":
+            recovery_median_vmalloc_used_twice_kib *
+            (MEMINFO_UNIT_BYTES // 2),
         "sample_count": len(samples),
     }
