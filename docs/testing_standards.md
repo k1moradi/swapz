@@ -142,9 +142,14 @@ committed only after that private workspace has been removed successfully and,
 when the helper owns the source-admission channel, after that channel has been
 closed successfully. A reported channel-close failure must retain ownership so
 outer cleanup can retry it; it cannot be marked closed before the close succeeds.
-A cleanup failure must leave or write non-PASS evidence rather than a durable
-false PASS. Its SHA-256 must be recorded in persistent evidence whenever
-admission reaches durable evidence creation.
+The persistent envelope and nested result bind the plan-verified digest of the
+exact qualification report imported before the run; they must not re-hash a
+mutable report pathname after the workload. Workspace cleanup and result-input
+preparation precede the final source-admission request so the last Git/remote
+proof is as close as possible to the terminal evidence commit. A cleanup failure
+must leave or write non-PASS evidence rather than a durable false PASS. Its
+SHA-256 must be recorded in persistent evidence whenever admission reaches
+durable evidence creation.
 
 The report values, private primary plan qualified/live values, embedded control
 source SHA, and observed installed bytes must all agree with the exact validated

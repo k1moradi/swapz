@@ -796,6 +796,33 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     self.assertEqual(terminal_cleanup_calls, [True])
                     self.assertIn("synthetic close failure", failure_reason)
 
+    def test_terminal_pass_orders_cleanup_and_pins_verified_report_digest(self):
+        source = HELPER.read_text(encoding="utf-8")
+        execute_start = source.index("def _execute_admitted(")
+        execute_end = source.index("\ndef execute(", execute_start)
+        execute_source = source[execute_start:execute_end]
+
+        cleanup_index = execute_source.rindex("private_workspace.cleanup()")
+        result_index = execute_source.index('result = {', cleanup_index)
+        final_admission_index = execute_source.index(
+            'admission.require("final")', result_index)
+        pass_index = execute_source.index(
+            'evidence.finish("PASS"', final_admission_index)
+        self.assertLess(cleanup_index, result_index)
+        self.assertLess(result_index, final_admission_index)
+        self.assertLess(final_admission_index, pass_index)
+
+        self.assertIn(
+            'qualification_report_sha256 = '
+            'plan["qualification_report_sha256"]',
+            execute_source)
+        self.assertIn(
+            '"qualification_report_sha256": qualification_report_sha256',
+            execute_source)
+        self.assertNotIn(
+            '"qualification_report_sha256": _sha256_file(report_path)',
+            execute_source)
+
     def test_real_swap_oracle_is_canonical_and_pinned_before_use(self):
         with tempfile.TemporaryDirectory(prefix="swapz-real-oracle-") as directory:
             private = Path(directory)

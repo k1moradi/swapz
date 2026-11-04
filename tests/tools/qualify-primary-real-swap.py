@@ -3135,6 +3135,10 @@ def _execute_admitted(
         plan = _read_plan(swapzctl)
         artifact_hashes = verify_provenance(
             plan, arguments.validated_source, report_path, qualified_swapzctl)
+        # Bind evidence to the exact report digest imported and independently
+        # verified above. Do not re-hash a mutable pathname after the workload.
+        qualification_report_sha256 = plan["qualification_report_sha256"]
+        helper_sha256 = _sha256_file(Path(__file__))
         installed_plan = _read_installed_plan(qualified_swapzctl)
         if installed_plan.get("privileged_execution_enabled") is not False:
             raise Blocked(
@@ -3162,8 +3166,8 @@ def _execute_admitted(
             {
                 "source_sha": arguments.validated_source,
                 "acceptance_manifest_sha256": acceptance_policy_sha256,
-                "qualification_report_sha256": _sha256_file(report_path),
-                "helper_sha256": _sha256_file(Path(__file__)),
+                "qualification_report_sha256": qualification_report_sha256,
+                "helper_sha256": helper_sha256,
                 "oracle_sha256": oracle_sha256,
                 "qualified_installed_artifacts": artifact_hashes,
                 "physical_execution_control_sha256": execution_control_sha256,
@@ -3228,13 +3232,11 @@ def _execute_admitted(
                 cycle=cycle_index,
                 run_id=result["run_id"],
             )
-        # A long physical run must not qualify a source superseded on main.
-        # The final source proof is again performed by the unprivileged parent.
-        admission.require("final")
         kernel_after = _kernel_log_snapshot()
         _reject_relevant_kernel_errors(_kernel_log_delta(kernel_before, kernel_after))
         # A terminal PASS must never coexist with a leaked privileged control
-        # or pinned-oracle workspace. Clean it before committing PASS evidence.
+        # or pinned-oracle workspace. Clean it before the final source proof so
+        # that proof remains as close as possible to the PASS evidence commit.
         try:
             private_workspace.cleanup()
         except Exception as cleanup_error:
@@ -3242,16 +3244,14 @@ def _execute_admitted(
                 f"private workspace cleanup failed before terminal PASS: "
                 f"{cleanup_error}") from cleanup_error
         workspace_cleanup_complete = True
-        if terminal_cleanup is not None:
-            terminal_cleanup()
         result = {
             "schema": "swapz-primary-real-swap-v1",
             "status": "PASS",
             "source_sha": arguments.validated_source,
             "acceptance_manifest_sha256": acceptance_policy_sha256,
-            "helper_sha256": _sha256_file(Path(__file__)),
+            "helper_sha256": helper_sha256,
             "oracle_sha256": oracle_sha256,
-            "qualification_report_sha256": _sha256_file(report_path),
+            "qualification_report_sha256": qualification_report_sha256,
             "qualified_installed_artifacts": artifact_hashes,
             "physical_execution_control_sha256": execution_control_sha256,
             "installed_control_privileged_execution_enabled": False,
@@ -3269,6 +3269,13 @@ def _execute_admitted(
             "evidence_path": str(evidence.path),
             "cycles": cycles,
         }
+        # A long physical run must not qualify a source superseded on main.
+        # Perform the final Git/source proof after all result inputs and owned
+        # workspace cleanup have stabilized. Only channel close and the
+        # fail-closed evidence commit follow this approval.
+        admission.require("final")
+        if terminal_cleanup is not None:
+            terminal_cleanup()
         evidence.finish("PASS", cycles=cycles, result=result)
         return result
     except Blocked as exc:
