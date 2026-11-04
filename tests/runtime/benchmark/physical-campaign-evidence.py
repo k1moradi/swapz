@@ -33,6 +33,8 @@ CAMPAIGN_SCHEMA = "swapz-performance-campaign-evidence-v1"
 PAIR_SCHEMA = "swapz-performance-pair-v1"
 SUMMARY_SCHEMA = "swapz-performance-summary-v1"
 QUALIFICATION = runpy.run_path(str(QUALIFICATION_PATH))
+RAM_VALIDATOR_PATH = EVIDENCE_PATH.with_name("metadata_ram_evidence.py")
+RAM_VALIDATOR = runpy.run_path(str(RAM_VALIDATOR_PATH))
 
 
 def unique_object(pairs):
@@ -665,7 +667,8 @@ def artifact(path: Path, data: bytes) -> dict:
 
 
 def campaign_capacity_and_ram(
-        pair_records: list[dict], target_device_bytes: int) -> dict | None:
+        pair_records: list[dict], target_device_bytes: int,
+        source_sha: str) -> dict | None:
     """Seal maximum logical capacity and measured target RAM from sustained I/O."""
     accepted = [
         pair for pair in pair_records
@@ -692,11 +695,22 @@ def campaign_capacity_and_ram(
     logical_capacity_bytes = logical_pages * 4096
     if logical_capacity_bytes > target_device_bytes:
         return None
+    identity = swapz.get("device_identity")
+    mapper_uuid = identity.get("dm_uuid") if isinstance(identity, dict) else None
+    trace = resources.get("metadata_ram_trace")
+    try:
+        RAM_VALIDATOR["validate_metadata_ram_trace"](
+            trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
+            expected_peak_ram_bytes=peak_ram_bytes)
+    except ValueError:
+        return None
     return {
         "page_bytes": 4096,
         "logical_pages": logical_pages,
         "logical_capacity_bytes": logical_capacity_bytes,
         "peak_ram_bytes": peak_ram_bytes,
+        "mapper_uuid": mapper_uuid,
+        "metadata_ram_trace": trace,
     }
 
 
@@ -745,6 +759,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
     amendment_data = read_regular_bytes(AMENDMENT_MANIFEST)
     evaluator_data = read_regular_bytes(QUALIFICATION_PATH)
     sealer_data = read_regular_bytes(EVIDENCE_PATH)
+    validator_data = read_regular_bytes(RAM_VALIDATOR_PATH)
     if summary.get("acceptance_manifest_sha256") != sha256_bytes(acceptance_data):
         raise ValueError("qualification summary references a different acceptance manifest")
     acceptance = json.loads(
@@ -839,7 +854,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
     target_identity = physical_target_identity(before)
     target_binding = qualification_target_binding(summary, before)
     capacity_and_ram = campaign_capacity_and_ram(
-        pair_records, target_identity["device_bytes"])
+        pair_records, target_identity["device_bytes"], source_sha)
     summary_status = summary.get("status")
     sealed_status = campaign_status(
         summary_status, source_consistent, protocol_v2, stability["status"],
@@ -888,6 +903,11 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
                 "name": EVIDENCE_PATH.name,
                 "sha256": sha256_bytes(sealer_data),
                 "git_blob_sha": git_blob_sha(sealer_data),
+            },
+            "metadata_ram_validator": {
+                "name": RAM_VALIDATOR_PATH.name,
+                "sha256": sha256_bytes(validator_data),
+                "git_blob_sha": git_blob_sha(validator_data),
             },
         },
         "artifacts": {
