@@ -1113,7 +1113,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_linux_swap_header_requires_exact_manifest_geometry_and_nonzero_uuid(self):
         parsed = qualify.linux_swap_header(self.make_swap_header(), 1024)
         self.assertEqual(parsed["last_page"], 1023)
-        self.assertEqual(parsed["uuid"], "01" * 16)
+        self.assertEqual(
+            parsed["uuid"], "01010101-0101-0101-0101-010101010101")
         for mutate in ("version", "last", "bad", "uuid", "magic"):
             header = bytearray(self.make_swap_header())
             if mutate == "version":

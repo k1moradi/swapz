@@ -948,7 +948,11 @@ def linux_swap_header(header: bytes, logical_pages: int) -> dict:
     if version != 1 or last_page != logical_pages - 1 or bad_pages != 0 or \
             header[-len(SWAP_MAGIC):] != SWAP_MAGIC or not any(swap_uuid):
         raise QualificationFailure("mapper Linux swap header is not canonical for manifest geometry")
-    return {"uuid": swap_uuid.hex(), "last_page": last_page, "version": version}
+    swap_uuid_text = (
+        f"{swap_uuid[0:4].hex()}-{swap_uuid[4:6].hex()}-"
+        f"{swap_uuid[6:8].hex()}-{swap_uuid[8:10].hex()}-"
+        f"{swap_uuid[10:16].hex()}")
+    return {"uuid": swap_uuid_text, "last_page": last_page, "version": version}
 
 
 def _read_mapper_header(path: Path, logical_pages: int) -> dict:

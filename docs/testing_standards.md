@@ -227,7 +227,8 @@ runner integration must persist those runner-level dispositions.
 A `PRIMARY_START=ACTIVE` message is insufficient. The helper independently
 proves the run-bound mapper name/DM UUID/device number, exact one-line `swapz`
 table and backing dependency, sysfs identity, valid Linux swap header with a
-fresh nonzero UUID, raw backing absent from `/proc/swaps`, exact mapper
+fresh nonzero UUID recorded in canonical lowercase 8-4-4-4-12 text, raw backing
+absent from `/proc/swaps`, exact mapper
 present with zero initial use, unchanged unrelated swap identity, and unique
 highest swap priority for attributable cgroup traffic. Ambiguous attribution
 is BLOCKED.
