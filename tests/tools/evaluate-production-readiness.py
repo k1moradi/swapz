@@ -444,14 +444,15 @@ def validate_acceptance_policy(
     # acceptance manifest. Compare exact JSON types/values, retaining the
     # supplied bytes for cross-artifact SHA binding.
     try:
-        frozen_policy, _ = load_json_strict(FROZEN_ACCEPTANCE_MANIFEST)
+        frozen_policy, frozen_raw = load_json_strict(
+            FROZEN_ACCEPTANCE_MANIFEST)
     except (OSError, EvidenceError) as exc:
         raise EvidenceError(
             "tracked frozen production acceptance manifest is unavailable") from exc
-    if not _same_json_value(policy, frozen_policy):
+    if not _same_json_value(policy, frozen_policy) or raw != frozen_raw:
         raise EvidenceError(
             "production acceptance policy differs from tracked frozen manifest: "
-            "metric=acceptance_manifest required=exact_typed_frozen_values")
+            "metric=acceptance_manifest required=exact_typed_frozen_bytes")
     return sha256_bytes(raw), memory_limit
 
 
