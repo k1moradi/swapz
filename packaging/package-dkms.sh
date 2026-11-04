@@ -1593,7 +1593,6 @@ PY
       "$systemctl_bin" daemon-reload ||
         blocked "recovery clean rollback systemd reload failed"
     else
-      existing_kind="$recovery_kind"
       restore_uninstall_backup "$recovery_kind" ||
         blocked "recovery previous package rollback failed"
     fi
