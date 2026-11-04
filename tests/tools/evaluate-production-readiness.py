@@ -1205,7 +1205,7 @@ def evaluate_release(
             block_code("maximum_capacity_and_ram: peak RAM is invalid")
         elif peak_ram_limit is not None and peak > peak_ram_limit:
             block_code(
-                "maximum_capacity_and_ram: measured peak exceeds frozen limit "
+                "maximum_capacity_and_ram: claimed peak exceeds frozen limit "
                 f"(metric=metadata_and_target_peak_ram_bytes "
                 f"observed={peak} limit={peak_ram_limit})")
         if campaign_issues is None:
