@@ -1885,6 +1885,58 @@ exec "{flock_binary}" "$@"
         blocked = self.invoke("install")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
 
+    def test_sigkill_after_source_creation_retains_recovery_gate(self):
+        transaction = self.kill_at_durable_phase("install", "source-created")
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue((transaction / "state.json").exists())
+        blocked = self.invoke("uninstall")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_after_upgrade_package_files_retains_recovery_gate(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        transaction = self.kill_at_durable_phase(
+            "install", "package-files-published")
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue((transaction / "state.json").exists())
+        blocked = self.invoke("uninstall")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_after_uninstall_systemd_reload_retains_recovery_gate(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase(
+            "uninstall", "systemd-reload-complete")
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue((transaction / "state.json").exists())
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_during_uninstall_rollback_files_restored_blocks_activation(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase(
+            "uninstall", "rollback-files-restored",
+            {"SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed"})
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue((transaction / "state.json").exists())
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_during_upgrade_rollback_cli_restored_is_exact_and_journaled(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        old_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        old_module = self.installed_module.read_bytes()
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        transaction = self.kill_at_durable_phase(
+            "install", "rollback-cli-restored",
+            {"SWAPZ_TEST_INSTALL_FAIL_AFTER": "dkms-removed"})
+        self.assertEqual((self.prefix / "sbin/swapzctl").read_bytes(), old_cli)
+        self.assertEqual(self.installed_module.read_bytes(), old_module)
+        self.assertTrue((transaction / "state.json").exists())
+        blocked = self.invoke("uninstall")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
     def test_dkms_config_tracks_changed_canonical_version(self):
         other = self.home / "synthetic-release"
         (other / "src/kernel").mkdir(parents=True)
