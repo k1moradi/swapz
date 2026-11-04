@@ -38,6 +38,10 @@ UTC_TIME = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
     r"(?:\.[0-9]{1,9})?Z"
 )
+HOST_UTC_TIME = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]{1,9})?(?:Z|\+00:00)"
+)
 SAMPLE_FIELDS = {
     "phase", "monotonic_ns", "timestamp_utc", "mem_available_kib",
     "s_unreclaim_kib", "vmalloc_used_kib", "mapper_present",
@@ -393,10 +397,11 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
         raise ValueError("metadata RAM host binding identity is invalid")
     if any(
             not isinstance(binding[field], str) or
-            not binding[field].endswith(("+00:00", "Z"))
+            HOST_UTC_TIME.fullmatch(binding[field]) is None
             for field in ("host_before_captured_at_utc",
                           "host_after_captured_at_utc")):
-        raise ValueError("metadata RAM host binding requires UTC timestamps")
+        raise ValueError(
+            "metadata RAM host binding requires canonical UTC timestamps")
     try:
         before = datetime.datetime.fromisoformat(
             binding["host_before_captured_at_utc"])
