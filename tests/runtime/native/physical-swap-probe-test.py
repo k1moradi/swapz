@@ -2460,6 +2460,40 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "campaign_active_swap expected=absent.*used_kib=0"):
                 probe._require_campaign_target_quiescent(target)
 
+    def test_campaign_quiescence_rejects_holder_and_mount(self):
+        target = {
+            "device": "/dev/synthetic", "major": 8, "minor": 17,
+            "parent_major_minor": "8:16", "partuuid": "deadbeef-01",
+            "card_identity_sha256": "a" * 64,
+            "size_bytes": 64 << 20,
+        }
+        card_identity = {
+            "sha256": "a" * 64,
+            "model": "synthetic-card",
+            "transport": "usb",
+        }
+        cases = (
+            (["dm-7"], False, "campaign_holders expected=\\[\\]"),
+            ([], True, "campaign_mount expected=absent observed=8:17"),
+        )
+        for holders, mounted, expected in cases:
+            with self.subTest(holders=holders, mounted=mounted), \
+                    mock.patch.object(probe, "_verify_target_identity"), \
+                    mock.patch.object(
+                        probe, "_campaign_card_identity",
+                        return_value=card_identity), \
+                    mock.patch.object(
+                        probe, "_holder_names", return_value=holders), \
+                    mock.patch.object(
+                        probe, "_mountinfo_has_device",
+                        return_value=mounted), \
+                    mock.patch.object(
+                        probe, "_active_swap_for",
+                        side_effect=AssertionError(
+                            "holder/mount blocker must stop before swap claim")):
+                with self.assertRaisesRegex(probe.ProbeError, expected):
+                    probe._require_campaign_target_quiescent(target)
+
     def test_campaign_exact_partuuid_path_rejects_stale_card_identity(self):
         with self.assertRaisesRegex(
                 probe.ProbeError,
