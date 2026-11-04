@@ -779,14 +779,18 @@ static void test_swap_adversarial_inventory(void)
 {
 	static const char header[] = "Filename Type Size Used Priority\n";
 	char file_path[] = "/tmp/swapzctl-unrelated-XXXXXX";
+	char second_path[] = "/tmp/swapzctl-second-XXXXXX";
+	char alias_path[] = "/tmp/swapzctl-same-inode-XXXXXX";
 	char inventory[PATH_MAX + 256U];
 	char duplicate[2U * PATH_MAX + 256U];
 	struct stat info;
+	struct stat other_info;
 	dev_t device = makedev(8U, 1U);
 	dev_t parent = makedev(8U, 0U);
 	unsigned int state = 0x9e3779b9U;
 	FILE *stream;
 	int fd;
+	int second_fd;
 	int length;
 	char parsed_path[PATH_MAX];
 	int block_entry;
@@ -804,6 +808,35 @@ static void test_swap_adversarial_inventory(void)
 	stream = test_inventory_binary_stream(inventory, (size_t)length);
 	assert(format_swap_inventory_stream_clear(stream, device, parent) == 0);
 	assert(fclose(stream) == 0);
+	/* Distinct unrelated files on the same filesystem are both permitted. */
+	second_fd = mkstemp(second_path);
+	assert(second_fd >= 0);
+	assert(fstat(second_fd, &other_info) == 0);
+	assert(other_info.st_dev == info.st_dev);
+	assert(other_info.st_ino != info.st_ino);
+	length = snprintf(duplicate, sizeof(duplicate),
+			  "%s%s file 1 0 -2\n%s file 1 0 -3\n",
+			  header, file_path, second_path);
+	assert(length > 0 && (size_t)length < sizeof(duplicate));
+	stream = test_inventory_binary_stream(duplicate, (size_t)length);
+	assert(format_swap_inventory_stream_clear(stream, device, parent) == 0);
+	assert(fclose(stream) == 0);
+
+	/* A hard-link alias of the SAME inode must not become a second swap. */
+	assert(unlink(alias_path) < 0 && errno == ENOENT);
+	assert(link(file_path, alias_path) == 0);
+	length = snprintf(duplicate, sizeof(duplicate),
+			  "%s%s file 1 0 -2\n%s file 1 0 -3\n",
+			  header, file_path, alias_path);
+	assert(length > 0 && (size_t)length < sizeof(duplicate));
+	stream = test_inventory_binary_stream(duplicate, (size_t)length);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+	assert(unlink(alias_path) == 0);
+	assert(close(second_fd) == 0);
+	assert(unlink(second_path) == 0);
 	length = snprintf(duplicate, sizeof(duplicate),
 			  "%s%s file 1 0 -2\n%s file 1 0 -2\n",
 			  header, file_path, file_path);
