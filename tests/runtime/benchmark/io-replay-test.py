@@ -2906,8 +2906,8 @@ class PairReplayContract(unittest.TestCase):
 
         # Internally matched pairs from a different physical lower cannot be
         # pooled into one campaign even when their source SHA is identical.
-        other_raw = arm("raw")
-        other_swapz = arm("swapz")
+        other_raw = arm("raw", order=orders[1])
+        other_swapz = arm("swapz", order=orders[1])
         for other_arm in (other_raw, other_swapz):
             other_arm["device_identity"] = {
                 **other_arm["device_identity"],
@@ -2916,10 +2916,7 @@ class PairReplayContract(unittest.TestCase):
             }
         mixed_target_pairs = list(stable_pairs)
         mixed_target_pairs[1] = qualification.compare_pair(
-            {**other_raw, "arm_started_monotonic_ns": 30,
-             "arm_finished_monotonic_ns": 40},
-            {**other_swapz, "arm_started_monotonic_ns": 10,
-             "arm_finished_monotonic_ns": 20},
+            other_raw, other_swapz,
             "sd-service-balanced", "other-target", 2, orders[1])
         mixed_target = qualification.evaluate(mixed_target_pairs)
         self.assertFalse(mixed_target["campaign_target_consistent"])
@@ -3213,7 +3210,7 @@ class PairReplayContract(unittest.TestCase):
         changed_minute["p95_ns"] = changed_tail_ns
         changed_minute["p99_ns"] = changed_tail_ns
         self.assertTrue(any(
-            "minute latency histogram bins differ from whole-arm evidence"
+            "minute combined histogram differs from READ/WRITE distributions"
             in reason for reason in qualification.sustained_coverage_reasons(
                 redistributed_latency, "swapz")))
 
@@ -3224,7 +3221,7 @@ class PairReplayContract(unittest.TestCase):
             "count": 60, "max_ns": 2, "bins": [[changed_index, 60]],
         }
         self.assertTrue(any(
-            "minute latency histogram bins differ from whole-arm evidence"
+            "minute read bins differ from whole-arm evidence"
             in reason for reason in qualification.sustained_coverage_reasons(
                 altered_whole_arm, "swapz")))
 

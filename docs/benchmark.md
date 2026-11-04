@@ -391,8 +391,11 @@ altered combined tail that does not conserve the original per-operation minute
 evidence is rejected. Chronology and 60 consecutive measured-minute windows
 are also validated. These checks do not cryptographically authenticate a
 wholly rewritten report; the campaign sealer's external artifact hashes and
-source/mapper identity evidence remain necessary. Host-visible lower-device
-bytes and requests are not direct physical NAND wear measurements.
+source/mapper identity evidence remain necessary. Adversarial regression
+fixtures mutate one evidence dimension at a time while retaining unrelated
+bound chronology and identity fields, so rejection demonstrates the intended
+invariant rather than an incidental malformed-arm failure. Host-visible
+lower-device bytes and requests are not direct physical NAND wear measurements.
 The block arm records the exact frozen claim boundary, and the evaluator
 rejects a strengthened NAND-wear claim. JSON numeric parsing also rejects
 NaN, Infinity and overflow exponents (for example, `1e999`) before the
