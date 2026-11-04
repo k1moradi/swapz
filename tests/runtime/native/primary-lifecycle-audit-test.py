@@ -1388,19 +1388,17 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                                       extra=extra)
         self.assertEqual(result.returncode, 2, result)
         self.assertEqual(set(calls.values()), {0}, result)
+        if action not in ("prepare", "start"):
+            self.fail("only prepare/start are package-gated")
+        self.assertIn("phase=package-transaction-preflight", result.stderr)
         if action == "prepare":
-            self.assertIn("PRIMARY_PREPARE=FAILED "
-                          "phase=package-transaction-preflight", result.stderr)
+            self.assertIn("PRIMARY_PREPARE=FAILED", result.stderr)
             if expected_errno is not None:
                 self.assertIn(f"errno={expected_errno}", result.stderr)
-        elif action == "start":
-            # Production start currently emits no phase (reported separately);
-            # the actual guard must nevertheless return EBUSY at this boundary.
+        else:
             self.assertIn("BLOCKED: primary-swap start failed:", result.stderr)
             if expected_errno is not None:
                 self.assertIn(os.strerror(expected_errno), result.stderr)
-        else:
-            self.fail("only prepare/start are package-gated")
 
     def _assert_cleanup_allowed(self, package, *, executable=None):
         for action in ("stop", "recover"):
@@ -1509,9 +1507,8 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                     transactions.stat().st_ino, displaced.stat().st_ino)
                 self.assertEqual(result.returncode, 2, result)
                 self.assertEqual(set(calls.values()), {0}, result)
-                if action == "prepare":
-                    self.assertIn(
-                        "phase=package-transaction-preflight", result.stderr)
+                self.assertIn(
+                    "phase=package-transaction-preflight", result.stderr)
 
     def test_malformed_and_substituted_package_journals_fail_closed(self):
         package = self._package_fixture()
@@ -1552,10 +1549,12 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                 extra={"SWAPZ_TEST_WRONG_TRANSACTION_OWNER": "1"})
             self.assertEqual(result.returncode, 2, result)
             self.assertEqual(set(calls.values()), {0}, result)
+            self.assertIn("phase=package-transaction-preflight",
+                          result.stderr)
             if action == "prepare":
-                self.assertIn("phase=package-transaction-preflight",
-                              result.stderr)
                 self.assertIn(f"errno={errno.EPERM}", result.stderr)
+            else:
+                self.assertIn(os.strerror(errno.EPERM), result.stderr)
         self._assert_cleanup_allowed(package)
 
         # A nonempty directory rejects at readdir(EBUSY) first. An empty
@@ -1569,10 +1568,12 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                 extra={"SWAPZ_TEST_CHANGED_MOUNT_ID": "1"})
             self.assertEqual(result.returncode, 2, result)
             self.assertEqual(set(calls.values()), {0}, result)
+            self.assertIn("phase=package-transaction-preflight",
+                          result.stderr)
             if action == "prepare":
-                self.assertIn("phase=package-transaction-preflight",
-                              result.stderr)
                 self.assertIn(f"errno={errno.ESTALE}", result.stderr)
+            else:
+                self.assertIn(os.strerror(errno.ESTALE), result.stderr)
         self._assert_cleanup_allowed(clean_package)
 
     def test_committed_journal_then_verified_package_recovery_allows_reentry(self):
