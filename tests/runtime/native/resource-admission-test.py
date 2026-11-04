@@ -289,6 +289,12 @@ sample_host_memory_admission
             "BLOCKED: ID36 owned-RAM pair prerequisite before prewarm:",
             source)
         self.assertIn(
+            "BLOCKED: ID36 owned-RAM pair prerequisite after prewarm:",
+            source)
+        self.assertIn(
+            "FAIL: ID36 owned-RAM pair failed: %s",
+            source)
+        self.assertIn(
             "BLOCKED: ID36 pressure helper could not enter isolated cgroup",
             source)
 
