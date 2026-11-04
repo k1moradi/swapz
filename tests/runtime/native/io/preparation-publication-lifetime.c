@@ -284,9 +284,9 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 
 /*
  * A background preparer may finish first and drop its own reference while the
- * ordered owner still needs the prepared bytes. A relaxed completion flag only
- * fixes scheduling; the consumer's payload visibility comes from READY acquire.
- * The final consumer release, not producer completion, returns slot 63.
+ * ordered owner still needs the prepared bytes. Observing the producer's relaxed
+ * refcount drop proves ownership order only; payload visibility comes from the
+ * terminal state acquire. The final consumer release returns slot 63.
  */
 #define EARLY_RELEASE_ROUNDS 512U
 struct early_producer_release {
@@ -356,8 +356,19 @@ static int test_producer_releases_first_consumer_reclaims_last(void)
 		while (atomic_load_explicit(&handoff.references,
 						    memory_order_relaxed) != 1)
 			sched_yield();
-		CHECK(swapz_preparation_read_state(&handoff.state) ==
-		      swapz_preparation_codec_result_state(handoff.codec_result));
+		/* The refcount observation does not order a different atomic. Poll the
+		 * production acquire until the producer's terminal publication is seen. */
+		for (;;) {
+			int final_state = swapz_preparation_read_state(&handoff.state);
+
+			if (final_state == SWAPZ_PREPARATION_PREPARING) {
+				sched_yield();
+				continue;
+			}
+			CHECK(final_state ==
+			      swapz_preparation_codec_result_state(handoff.codec_result));
+			break;
+		}
 		/* These are the first synchronizing producer-payload observations. */
 		CHECK(handoff.length == handoff.codec_result);
 		if (handoff.codec_result > 0)
