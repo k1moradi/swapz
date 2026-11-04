@@ -24,6 +24,19 @@ This procedure is separate from the completed physical-backed byte-correctness
 smoke. It does not authorize repeated trials, boot integration, production use,
 endurance measurement or performance claims.
 
+## Current deployment boundary
+
+This retained one-use protocol is not a current operator procedure. The SD
+card's [standing authorization](AGENT_CONTEXT.md#standing-owner-authorization),
+[exact-source evidence taxonomy](README.md#evidence-boundaries-and-failure-triage),
+[physical benchmark protocol](benchmark.md#physical-media-and-workload-validity)
+and [transactional package recovery](compile.md#packaging) are separate
+requirements. Neither this old-host PASS nor its rootless mock coverage proves
+the current card, retained package state, cold boot, or recovery of pages after
+volatile mapper loss. Current use is **non-hibernation** swap only; the
+[runtime/hibernation boundary](handoff/systemd-runtime-health.md#hibernation-and-resume-boundary)
+remains in force. Codex must not reboot the host.
+
 ## Trial boundary
 
 - Only `/dev/sda4` (8:4, PARTUUID `7fb9401d-04`, UUID

@@ -344,6 +344,14 @@ def prepare_plan(content="medium", need_stripes=False, striped_write_qds=(),
 
 
 
+def hash_fixture_page_map(fixture_pages, page_indices):
+    """Hash page contents in map order without another full logical buffer."""
+    digest = hashlib.sha256()
+    for page_index in page_indices:
+        digest.update(fixture_pages[page_index])
+    return digest.hexdigest()
+
+
 def prepare_striped_plans(plan, stripe_counts, workload="mixed"):
     """Split a lane-owned immutable trace, conserving every original I/O."""
     if workload == "mixed":
@@ -389,8 +397,6 @@ def prepare_striped_plans(plan, stripe_counts, workload="mixed"):
         for stripe_index in range(stripe_count):
             output = stripe_root / f"stripe-{stripe_index}"
             output.mkdir()
-            selected = [row for row in rows
-                        if row["lane"] % stripe_count == stripe_index]
             transformed = []
             initial = [
                 (page * stripe_count + stripe_index) % len(fixture_pages)
@@ -398,7 +404,8 @@ def prepare_striped_plans(plan, stripe_counts, workload="mixed"):
             ]
             latest = list(initial)
             write_hash = hashlib.sha256()
-            for local_seq, original in enumerate(selected):
+            for local_seq, original in enumerate(
+                    row for row in rows if row["lane"] % stripe_count == stripe_index):
                 if original["page"] % stripe_count != stripe_index:
                     raise ValueError("stripeable base event escaped page partition")
                 row = dict(original)
@@ -418,10 +425,8 @@ def prepare_striped_plans(plan, stripe_counts, workload="mixed"):
                 json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
                 for row in transformed).encode()
             (output / "trace.jsonl").write_bytes(trace_bytes)
-            prefill_hash = HOST_CPU["sha"](
-                b"".join(fixture_pages[index] for index in initial))
-            post_hash = HOST_CPU["sha"](
-                b"".join(fixture_pages[index] for index in latest))
+            prefill_hash = hash_fixture_page_map(fixture_pages, initial)
+            post_hash = hash_fixture_page_map(fixture_pages, latest)
             child = dict(manifest)
             child.update({
                 "logical_pages": logical_pages,

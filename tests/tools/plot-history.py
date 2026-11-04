@@ -386,10 +386,23 @@ def render(data):
                                  ("lower_write_requests_gain_pct", "Requests saved", "#177d60", "--")]),
     }
     total = len(data["reports"])
+    # Cache each reported row once: panels reuse the same ordered history.
+    mixed_rows_by_target = {}
+    persistent_rows_by_target_and_qd = {}
+    for point in data["points"]:
+        if point["workload"] == MIXED:
+            mixed_rows_by_target.setdefault(point["target"], []).append(point)
+        elif point["workload"] == PERSISTENT:
+            persistent_rows_by_target_and_qd.setdefault(
+                (point["target"], point["qd"]), []).append(point)
+    report_span_label = (
+        f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
+        f"{data['reports'][-1]['date'][:10]} · latest source "
+        f"{data['reports'][-1]['source_sha'][:7]}")
     for filename, (title, metrics) in charts.items():
         fig, axes = plt.subplots(2, 3, figsize=(17, 9), sharex=True)
         for ax, (target, name) in zip(axes.flat, TARGETS.items()):
-            rows = [r for r in data["points"] if r["target"] == target and r["workload"] == MIXED]
+            rows = mixed_rows_by_target.get(target, [])
             for metric, label, color, style in metrics:
                 draw_line(ax, rows, metric, label, color, style)
             ax.axhline(0, color="#888888", linewidth=.8)
@@ -415,8 +428,7 @@ def render(data):
                     ax.set_xlabel(caption, color=metrics[0][2],
                                   fontweight="bold", fontsize=9)
         fig.suptitle(data["title"] + " · " + title, fontsize=17, fontweight="bold")
-        fig.text(.5, .935, f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
-                 f"{data['reports'][-1]['date'][:10]} · latest source {data['reports'][-1]['source_sha'][:7]}",
+        fig.text(.5, .935, report_span_label,
                  ha="center", fontsize=10, color="#555555")
         fig.supxlabel("Qualified report sequence · oldest to newest · source/report SHA mapping in CSV", y=.075)
         scale_note = ("Absolute decimal MB/s; higher is better for both raw and swapz"
@@ -435,8 +447,7 @@ def render(data):
     for row_index, target in enumerate(("sd_emulated", "ssd_emulated")):
         for column, qd in enumerate((1, 4, 8, 32)):
             ax = axes[row_index, column]
-            rows = [r for r in data["points"] if r["target"] == target and
-                    r["workload"] == PERSISTENT and r["qd"] == qd]
+            rows = persistent_rows_by_target_and_qd.get((target, qd), [])
             draw_line(ax, rows, "write_mbps_gain_pct", "WRITE", "#1764ad")
             ax.axhline(0, color="#888888", linewidth=.8)
             goal = goal_for(target, PERSISTENT, qd)
@@ -447,8 +458,7 @@ def render(data):
             if ax.get_legend_handles_labels()[0]:  # empty panels stay quiet
                 ax.legend(loc="best", fontsize=8)
     fig.suptitle(data["title"] + " · sustained WRITE gain versus raw (%)", fontsize=17, fontweight="bold")
-    fig.text(.5, .935, f"{total} passing reports · {data['reports'][0]['date'][:10]} to "
-             f"{data['reports'][-1]['date'][:10]} · latest source {data['reports'][-1]['source_sha'][:7]}",
+    fig.text(.5, .935, report_span_label,
              ha="center", fontsize=10, color="#555555")
     fig.supxlabel("Qualified report sequence · persistent lane-owned workers only; wave drivers excluded", y=.06)
     fig.text(.5, .015, "0% = raw parity · dotted red = latency/host-bound guard floor · kernel changes "

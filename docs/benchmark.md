@@ -560,7 +560,8 @@ raw, measured attributed CPU/useful-byte <=1.50x raw, the 128 MiB swap-occupancy
 floor, positive per-round \`pswpin\`/cgroup-major-fault/exact-target-READ/backing-
 READ evidence and zero byte-oracle mismatches.
 
-**Agent 12 runner handoff:** shared physical orchestration should enumerate the
+**Physical campaign orchestration contract (not a current-host PASS):** shared
+physical orchestration must enumerate the
 frozen v1 contract plus the v2 amendment, preserve the prescribed pair order,
 pass the exact DM UUID into the swapz anonymous arm, use a worker-only private
 cgroup, explicitly request `--protocol v2` for v2 qualification, serialize on
