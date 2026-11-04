@@ -10,7 +10,7 @@ There is one product. The active product source is under `src/`; test-only code 
 
 ## Product identity and version
 
-Public identities are immutable: `swapz`, `dm-swapz.ko`, `dm_swapz`, target `swapz`, alias `dm-swapz`, and the administrative utility `swapzctl`. SWZ describes the current on-disk format only and is intentionally unversioned while no incompatible deployed format exists.
+The immutable product identities and unversioned SWZ format are specified above.
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the single source of truth for release metadata. Do not duplicate the release number in source names, reports, workflow names, binaries, or documentation headings.
 
@@ -55,21 +55,16 @@ plus a valid exact-size SWZ authorization header. A full `make test` must
 report BLOCKED (nonzero) when safe noninteractive loaded qualification is
 unavailable.
 
-Every completed `make test` run replaces exactly one generated evidence file,
-root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
-and benchmark result and automatically publishes that file directly to
-`main`. The artifact is UTF-8 JSON with newlines and no indentation, directly readable by GitHub and
-connected readers without decompression. Historical reports remain in Git
-history. Generated report-only commits are not new source revisions: the next
-run records the nearest non-report code ancestor as `tested_commit_sha` even
-when a report commit is at `HEAD`. Publication retries bounded transient
-push/fetch failures with backoff. A concurrent main advance is accepted only
-when it still descends from the exact tested source; report commits are always
-normal nonforce fast-forwards and never revert newer source bytes.
+Completed `make test` runs replace root `test_results.json` with one sanitized,
+plain UTF-8 PASS/FAIL/BLOCKED report and publish ordinary non-force fast-forward
+report commits on `main`. Prior evidence remains in Git history. A report-only
+commit is not new production source: `tested_commit_sha` identifies the nearest
+non-report code ancestor. Publication accepts concurrent advances only when
+they descend from the exact tested source; it never reverts newer source bytes.
+See [the test/report contract](compile.md#build).
 
-Loaded reports include host CPU activity and waiting pressure alongside replay
-CPU use. These counters include Codex and other background work; they do not
-establish an idle host or make an idle historical run directly comparable.
+Loaded host CPU/PSI samples include background activity; see the
+[benchmark context](benchmark.md#cpu-and-host-load-context) before comparison.
 
 ## Current evidence
 
@@ -77,11 +72,8 @@ Use the generated evidence artifacts directly instead of copying volatile
 commit IDs, stage timings, host counters, or readiness flags into this compact
 navigation document.
 
-- [`test_results.json`](../test_results.json) is the canonical latest published
-  owner `make test` report. Read its `overall`, `tested_commit_sha`,
-  qualification scope, stage results, and qualified-artifact hashes together.
-  A PASS for an older source does not qualify a newer `main`, and a report-only
-  commit is evidence publication rather than a new production source revision.
+- [`test_results.json`](../test_results.json): latest published owner `make test`
+  evidence; interpret `overall`, source, stages and exact artifact hashes together.
 - [`production-status.json`](production-status.json) is a timestamped,
   source-bound snapshot of read-only host observations, current CI observations,
   and open production gates. It is not a live monitor or a qualification result;
@@ -96,12 +88,6 @@ navigation document.
   Candidate geometry or capacity in a snapshot is not a production PASS until
   the required full-capacity, incompressible-data, lifecycle, churn, and
   physical evidence actually passes.
-
-Current target identity, standing authorization, lifecycle execution policy,
-and production-readiness definitions live in
-[AGENT_CONTEXT.md](AGENT_CONTEXT.md). Historical `/dev/sda4` physical and
-live-swap evidence is preserved separately and must not be read as instructions
-for the current dedicated SD card.
 
 ## Evidence boundaries and failure triage
 
@@ -193,13 +179,9 @@ never authority for the current dedicated card.
   interpretation; source-pinned experiment narratives are archived under
   [historical benchmark experiments](handoff/historical-benchmark-experiment-memory.md).
 
-A settled idea should have one compact record in the ROADMAP evidence table:
-**decision, evidence anchor when useful, and the condition that would justify
-reopening it**. Do not duplicate the full experiment story across documents.
-Detailed trial narratives and superseded procedures remain in clearly labeled
-historical handoff records, Git history, and report commits—not active policy.
+For settled ideas, keep the decision, evidence anchor and reopen condition in
+[ROADMAP](ROADMAP.md#optimization-evidence-table); detailed narratives remain
+in historical handoff records and Git history.
 
-Agents must keep documentation at or below 25% of the 256K context window
-(64K tokens). Keep AGENT_CONTEXT, VISION and README resident; retrieve only
-relevant sections of the long ROADMAP/coding/testing/context references. Reload
-the compact set after every sync that changes documentation.
+Follow the [64K-token documentation working-set contract](AGENT_CONTEXT.md#documentation-working-set-contract)
+and reread the active compact references after documentation changes.
