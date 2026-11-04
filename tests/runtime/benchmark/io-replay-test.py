@@ -3155,6 +3155,8 @@ class PairReplayContract(unittest.TestCase):
             "excluded": False,
             "swapz": {
                 "logical_pages": 256,
+                "arm_started_monotonic_ns": 1_200_000_000,
+                "arm_finished_monotonic_ns": 1_600_000_000,
                 "device_identity": {"dm_uuid": mapper_uuid},
                 "resources": {
                     # A pre-teardown replay scalar has no qualifying authority.
@@ -3183,6 +3185,13 @@ class PairReplayContract(unittest.TestCase):
             "metadata_and_target_peak_ram_bytes"] = 8193
         self.assertIsNone(evidence.campaign_capacity_and_ram(
             [contradictory], target_bytes, source_sha, trace))
+
+        wrong_arm = copy.deepcopy(capacity_pair)
+        wrong_arm["swapz"]["arm_started_monotonic_ns"] = 1_400_000_000
+        self.assertIsNone(evidence.campaign_capacity_and_ram(
+            [wrong_arm], target_bytes, source_sha, trace))
+        self.assertTrue(evidence.metadata_ram_trace_matches_swapz_arm(
+            trace, capacity_pair["swapz"]))
 
         capacity = evidence.campaign_capacity_and_ram(
             [capacity_pair], target_bytes, source_sha, trace)
