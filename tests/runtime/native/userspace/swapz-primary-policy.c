@@ -2749,6 +2749,10 @@ static void test_package_transaction_process_death_guard(void)
 	assert(swapz_primary_package_transactions_clear_at(
 		       transactions, geteuid()) < 0 && errno == EBUSY);
 	assert(unlink(journal) == 0);
+	write_package_test_artifact(journal, "{corrupt-json\\n");
+	assert(swapz_primary_package_transactions_clear_at(
+		       transactions, geteuid()) < 0);
+	assert(unlink(journal) == 0);
 	assert(symlink("../../published-swapzctl", journal) == 0);
 	assert(swapz_primary_package_transactions_clear_at(
 		       transactions, geteuid()) < 0);
