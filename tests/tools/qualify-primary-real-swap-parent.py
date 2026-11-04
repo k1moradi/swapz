@@ -130,17 +130,34 @@ def _git_file_bytes(validated_source: str, path: Path,
         raise Blocked("source admission file path is not canonical")
     relative = relative_path.as_posix()
     git = _trusted_executable("git") if git is None else git
+    object_spec = f"{validated_source}:{relative}"
+    try:
+        size_result = subprocess.run(
+            [git, "cat-file", "-s", object_spec],
+            cwd=ROOT, capture_output=True, check=False, timeout=10,
+            env=_source_command_environment())
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Blocked(
+            "cannot inspect source admission file in validated commit") from exc
+    if size_result.returncode != 0:
+        raise Blocked("validated commit lacks required source admission file")
+    try:
+        size_text = size_result.stdout.decode("ascii").strip()
+        expected_size = int(size_text, 10)
+    except (UnicodeError, ValueError) as exc:
+        raise Blocked("validated commit source admission size is malformed") from exc
+    if expected_size < 0 or expected_size > MAX_COMMIT_SOURCE_INPUT_BYTES:
+        raise Blocked("validated commit source admission input exceeds size boundary")
     try:
         result = subprocess.run(
-            [git, "show", f"{validated_source}:{relative}"],
+            [git, "show", object_spec],
             cwd=ROOT, capture_output=True, check=False, timeout=10,
             env=_source_command_environment())
     except (OSError, subprocess.SubprocessError) as exc:
         raise Blocked("cannot read source admission file from validated commit") from exc
-    if result.returncode != 0:
-        raise Blocked("validated commit lacks required source admission file")
-    if len(result.stdout) > MAX_COMMIT_SOURCE_INPUT_BYTES:
-        raise Blocked("validated commit source admission input exceeds size boundary")
+    if result.returncode != 0 or len(result.stdout) != expected_size:
+        raise Blocked(
+            "validated commit source admission file changed or read was incomplete")
     return result.stdout
 
 
@@ -214,7 +231,7 @@ def _read_request(
             not re.fullmatch(
                 r"[0-9a-f]{32}", str(request.get("nonce", ""))) or
             not re.fullmatch(
-                r"(?:initial|final|published|cycle-[1-4])",
+                r"(?:initial|final|cycle-[1-4])",
                 str(request.get("phase", "")))):
         raise Blocked("source admission request identity is invalid")
     return request
@@ -301,7 +318,7 @@ def _serve_admission(server: socket.socket,
     expected_phases = (
         ["initial"] +
         [f"cycle-{index}" for index in range(1, cycles + 1)] +
-        ["final", "published"])
+        ["final"])
     passed_phases: list[str] = []
     server.settimeout(30)
     try:
