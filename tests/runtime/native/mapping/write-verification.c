@@ -33,6 +33,8 @@ static swapz_u32 last_lower_write_block;
 static swapz_u8 last_lower_write_blocks;
 static int corrupt_after_write, fail_read, lie_about_completion;
 static int partial_write_error, short_success;
+/* One-shot lower rejection before a single physical block is written. */
+static int injected_write_error;
 
 static int write_lower(void *unused, swapz_u32 block, swapz_u8 blocks,
 		       const swapz_u8 *bytes, swapz_u8 *completed)
@@ -49,6 +51,12 @@ static int write_lower(void *unused, swapz_u32 block, swapz_u8 blocks,
 	writes++;
 	last_lower_write_block = block;
 	last_lower_write_blocks = blocks;
+	if (injected_write_error) {
+		const int error = injected_write_error;
+
+		injected_write_error = 0;
+		return error;
+	}
 	if (lie_about_completion) {
 		*completed = blocks + 1U;
 		return 0;
@@ -96,7 +104,7 @@ static int setup(void)
 	last_lower_write_block = 0;
 	last_lower_write_blocks = 0;
 	corrupt_after_write = fail_read = lie_about_completion = 0;
-	partial_write_error = short_success = 0;
+	partial_write_error = short_success = injected_write_error = 0;
 	if (swapz_authority_init(&auth, map, live, klass, 64, NPHYS) ||
 	    swapz_enable_extent_sequence_index(
 		    &auth, extent_sequence_delta, segment_sequence_base,
@@ -458,6 +466,65 @@ static int test_two_block_payload_offset_skips_unneeded_second_block(void)
 	return 0;
 }
 
+
+/*
+ * Rejected lower writes must retain the last acknowledged generation, even
+ * when the next attempt reuses the SAME scratch buffer for different bytes.
+ * The abandoned physical reservation is never a retry destination.
+ */
+static int test_lower_rejection_retry_rebuilds_scratch(void)
+{
+	static const int errors[] = { -EIO, -ENOSPC };
+	unsigned int fault;
+
+	for (fault = 0; fault < sizeof(errors) / sizeof(errors[0]); ++fault) {
+		struct swapz_map prior_map;
+		swapz_u8 committed = 99, result[2072];
+		swapz_u16 length = 0;
+		swapz_u32 rejected_start;
+		unsigned int index;
+
+		CHECK(setup() == 0);
+		engine.verify_after_write = 1;
+		CHECK(swapz_engine_write_window_batched(
+			      &engine, pages, 3, &committed) == 0);
+		CHECK(committed == 3);
+		prior_map = map[0];
+		rejected_start = auth.next_block;
+		memset(payloads[0], 0x71 + (int)fault, sizeof(payloads[0]));
+		injected_write_error = errors[fault];
+		CHECK(swapz_engine_write_window_batched(
+			      &engine, pages, 3, &committed) == errors[fault]);
+		CHECK(committed == 0 && !auth.in_flight);
+		CHECK(map[0].valid && map[0].start_block == prior_map.start_block &&
+		      map[0].generation == prior_map.generation);
+		CHECK(live[prior_map.start_block] && !live[rejected_start]);
+		CHECK(auth.next_block == rejected_start + 2U &&
+		      auth.abandoned_blocks == 2U && auth.committed_blocks == 2U);
+		CHECK(swapz_engine_read_page(&engine, 0, result,
+					     sizeof(result), &length) == 0);
+		CHECK(length == sizeof(result));
+		for (index = 0; index < sizeof(result); ++index)
+			CHECK(result[index] == 1U);
+
+		/* Deliberately poison the now-free scratch before preparing a retry:
+		 * the new extent must be rebuilt from the caller-owned payload. */
+		memset(scratch_w, 0xa5, sizeof(scratch_w));
+		CHECK(swapz_engine_write_window_batched(
+			      &engine, pages, 3, &committed) == 0);
+		CHECK(committed == 3 && !auth.in_flight);
+		CHECK(map[0].generation == prior_map.generation + 1U &&
+		      map[0].start_block >= rejected_start + 2U);
+		CHECK(!live[rejected_start] && live[map[0].start_block]);
+		CHECK(swapz_engine_read_page(&engine, 0, result,
+					     sizeof(result), &length) == 0);
+		CHECK(length == sizeof(result) &&
+		      !memcmp(result, payloads[0], length));
+		CHECK(engine.completed_blocks == 4U);
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -471,6 +538,7 @@ int main(void)
 	CHECK(test_partial_or_short_write_never_publishes() == 0); passed++;
 	CHECK(test_preflight_requires_distinct_readback_buffers() == 0); passed++;
 	CHECK(test_failed_overwrite_keeps_prior_generation() == 0); passed++;
+	CHECK(test_lower_rejection_retry_rebuilds_scratch() == 0); passed++;
 	CHECK(test_same_extent_read_cache_reuse_and_fail_closed() == 0); passed++;
 	CHECK(test_one_block_read_budget_remains_selective() == 0); passed++;
 	CHECK(test_two_block_payload_offset_skips_unneeded_second_block() == 0); passed++;

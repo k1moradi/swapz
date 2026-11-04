@@ -140,6 +140,8 @@ struct swapz_engine {
 	swapz_u8 max_read_blocks_per_record;
 	swapz_u32 write_verify_read_blocks;
 	swapz_u32 submitted_blocks;
+	/* Credible lower-completed blocks, even on a failed/short WRITE run;
+	 * NOT a published-map count. Impossible lower reports count as zero. */
 	swapz_u32 completed_blocks;
 	swapz_u32 physical_read_blocks;
 	/* Successful targeted compressed reads: header block zero and additional

@@ -1727,13 +1727,17 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 	}
 	if (!error && completed_blocks != run->blocks)
 		error = -EIO;
+	/* Count only credible lower completions, including a torn failed run.
+	 * Physical completion is not authority publication: the failure path
+	 * still quarantines the entire reserved run before any map changes.
+	 */
+	e->completed_blocks += completed_blocks;
 	if (error) {
 		int cleanup = swapz_bulk_abort(e, run, 0);
 
 		return cleanup ? cleanup : error;
 	}
 
-	e->completed_blocks += completed_blocks;
 	e->bulk_writes++;
 	e->bulk_extents += run->extent_count;
 	publish_start = swapz_engine_now_ns();

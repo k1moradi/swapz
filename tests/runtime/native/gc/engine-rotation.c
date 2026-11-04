@@ -28,11 +28,15 @@ static swapz_u8 read_scratch[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 contents[8][2072];
 static swapz_u8 late_payloads[5][SWAPZ_MAX_COMPRESSED];
 static swapz_u8 late_readback[SWAPZ_MAX_COMPRESSED];
+static swapz_u8 raw_contents[SWAPZ_BLOCK_BYTES];
+static swapz_u8 raw_readback[SWAPZ_BLOCK_BYTES];
 static swapz_u8 bulk_scratch[SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES];
 static struct swapz_tx bulk_txs[SWAPZ_MAX_RECORDS];
 static unsigned int lower_reads, lower_writes;
 static int fail_read, fail_write, corrupt_replay_tail;
 static swapz_u16 partial_run_blocks;
+static int injected_run_error, short_run_success, impossible_run_completion;
+static unsigned int reclaim_proofs;
 
 static int lower_write(void *opaque, swapz_u32 start, swapz_u8 blocks,
 		       const swapz_u8 *bytes, swapz_u8 *completed)
@@ -77,10 +81,18 @@ static int lower_write_run(void *opaque, swapz_u32 start, swapz_u16 blocks,
 	    start / SWAPZ_SEGMENT_BLOCKS !=
 		(start + blocks - 1U) / SWAPZ_SEGMENT_BLOCKS)
 		return -ERANGE;
+	if (impossible_run_completion) {
+		impossible_run_completion = 0;
+		*completed = blocks + 1U;
+		return 0;
+	}
 	if (partial_run_blocks) {
 		const swapz_u16 written_blocks = partial_run_blocks;
+		const int error = injected_run_error ? injected_run_error : -EIO;
+		const int report_success = short_run_success;
 
 		partial_run_blocks = 0;
+		injected_run_error = short_run_success = 0;
 		if (written_blocks >= blocks)
 			return -EUCLEAN;
 		/*
@@ -91,7 +103,7 @@ static int lower_write_run(void *opaque, swapz_u32 start, swapz_u16 blocks,
 		       (size_t)written_blocks * SWAPZ_BLOCK_BYTES);
 		lower_writes += written_blocks;
 		*completed = written_blocks;
-		return -EIO;
+		return report_success ? 0 : error;
 	}
 	memcpy(lower + (size_t)start * SWAPZ_BLOCK_BYTES, bytes,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
@@ -138,6 +150,9 @@ static int setup(void)
 	lower_reads = lower_writes = 0;
 	fail_read = fail_write = corrupt_replay_tail = 0;
 	partial_run_blocks = 0;
+	injected_run_error = short_run_success = impossible_run_completion = 0;
+	reclaim_proofs = 0;
+	memset(raw_contents, 0x93, sizeof(raw_contents));
 	for (i = 0; i < 8; ++i)
 		memset(contents[i], (int)i + 1, sizeof(contents[i]));
 	return 0;
@@ -168,6 +183,27 @@ static int verify_page(swapz_u32 logical)
 		return error;
 	return len == sizeof(out) &&
 	       !memcmp(out, contents[logical], sizeof(out)) ? 0 : -EUCLEAN;
+}
+
+
+/* RAW relocation never guesses a compressed descriptor from the data page.
+ * Its authoritative volatile CRC must match the exact physical 4KiB read. */
+static int verify_raw_page(swapz_u32 logical)
+{
+	const struct swapz_map *mapping = &maps[logical];
+	int error;
+
+	if (!mapping->valid || !mapping->raw ||
+	    mapping->extent_blocks != 1U || mapping->start_block >= PBLKS)
+		return -EUCLEAN;
+	error = lower_read(NULL, mapping->start_block, 1, raw_readback);
+	if (error)
+		return error;
+	if (swapz_crc32c_bytes(raw_readback, sizeof(raw_readback)) !=
+	    mapping->raw_crc32c)
+		return -EBADMSG;
+	return memcmp(raw_readback, raw_contents, sizeof(raw_contents)) ?
+		-EUCLEAN : 0;
 }
 
 static int evacuate(swapz_u32 victim)
@@ -216,11 +252,34 @@ static int evacuate(swapz_u32 victim)
 	return swapz_gc_commit_rotation(&a, victim);
 }
 
+
+/* Reclaim must prove deadness from live refs and authoritative maps, not
+ * from cached extent-class bytes left behind by earlier publications. */
+static int prove_reclaim_dead(void *opaque, swapz_u32 segment)
+{
+	swapz_u32 block, logical;
+
+	(void)opaque;
+	if (segment >= 4U)
+		return -ERANGE;
+	for (block = segment * SWAPZ_SEGMENT_BLOCKS;
+	     block < (segment + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
+		if (live[block])
+			return -EUCLEAN;
+	for (logical = 0; logical < 32U; ++logical)
+		if (maps[logical].valid &&
+		    maps[logical].start_block / SWAPZ_SEGMENT_BLOCKS == segment)
+			return -EUCLEAN;
+	reclaim_proofs++;
+	return 0;
+}
+
 static int test_compressed_gc_handoff(void)
 {
 	swapz_u32 i;
 
 	CHECK(setup() == 0);
+	a.dead_segment_recycle = prove_reclaim_dead;
 	for (i = 0; i < 256; ++i)
 		CHECK(write_one(0) == 0);
 	for (i = 0; i < 256; ++i)
@@ -234,7 +293,11 @@ static int test_compressed_gc_handoff(void)
 	CHECK(evacuate(1) == 0);
 	CHECK(roles[1] == 0 && roles[3] == 1 && maps[1].start_block == 768);
 	CHECK(write_one(3) == 0);
+	/* Extent classes describe prior allocation until an actual reclaim.
+	 * Zero live refs, not erased class bytes, authorize the dead victim. */
+	CHECK(!live[0] && classes[0]);
 	CHECK(evacuate(2) == 0); /* two survivor pages0 and2 */
+	CHECK(reclaim_proofs > 0);
 	CHECK(roles[2] == 0 && roles[0] == 1);
 	for (i = 0; i < 4; ++i)
 		CHECK(verify_page(i) == 0);
@@ -755,6 +818,161 @@ static int test_last_compressed_page_boundary_retry(void)
 	return 0;
 }
 
+
+/*
+ * One physical run contains both a compressed survivor and a RAW survivor.
+ * Test genuinely written short prefixes, lower -EIO/-ENOSPC, a short success
+ * and an impossible completion count. No case may publish either candidate,
+ * recycle the uncertain prefix, or hand off a partially evacuated victim.
+ * A later retry must repack the poisoned scratch and relocate each survivor
+ * exactly once; historical class bytes are not a liveness oracle.
+ */
+static int test_mixed_raw_gc_uncertain_completion_recovery(void)
+{
+	static const struct {
+		int lower_error;
+		swapz_u8 short_success;
+		swapz_u8 impossible_completion;
+	} faults[] = {
+		{ -EIO, 0, 0 },
+		{ -ENOSPC, 0, 0 },
+		{ 0, 1, 0 },
+		{ 0, 0, 1 },
+	};
+	unsigned int fault;
+
+	for (fault = 0; fault < sizeof(faults) / sizeof(faults[0]); ++fault) {
+		struct swapz_compressed_page pages[2];
+		struct swapz_map prior_compressed, prior_raw;
+		swapz_u32 failed_start, prior_completed, block;
+		swapz_u8 committed = 99;
+		int expected_error;
+
+		CHECK(setup() == 0);
+		e.bulk_enabled = 1;
+		e.bulk_scratch = bulk_scratch;
+		e.bulk_txs = bulk_txs;
+		e.io.write_run = lower_write_run;
+		CHECK(write_one(0) == 0);
+		pages[1] = (struct swapz_compressed_page) {
+			.logical_page = 8, .payload = raw_contents,
+			.length = SWAPZ_BLOCK_BYTES, .raw = 1,
+		};
+		CHECK(swapz_engine_write_window_batched(
+			      &e, &pages[1], 1, &committed) == 0);
+		CHECK(committed == 1 && verify_raw_page(8) == 0);
+		while (a.next_block < SWAPZ_SEGMENT_BLOCKS)
+			CHECK(write_one(0) == 0);
+		CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+		CHECK(write_one(6) == 0);
+		prior_compressed = maps[0];
+		prior_raw = maps[8];
+		CHECK(prior_compressed.start_block / SWAPZ_SEGMENT_BLOCKS == 0);
+		CHECK(prior_raw.start_block / SWAPZ_SEGMENT_BLOCKS == 0);
+		CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
+		CHECK(a.gc_destination == 2U && a.gc_allocation);
+		pages[0] = (struct swapz_compressed_page) {
+			.logical_page = 0, .payload = contents[0], .length = 2072,
+		};
+		failed_start = a.next_block;
+		prior_completed = e.completed_blocks;
+		partial_run_blocks = faults[fault].impossible_completion ? 0U : 1U;
+		injected_run_error = faults[fault].lower_error;
+		short_run_success = faults[fault].short_success;
+		impossible_run_completion = faults[fault].impossible_completion;
+		expected_error = faults[fault].impossible_completion ? -EUCLEAN :
+			faults[fault].short_success ? -EIO :
+			faults[fault].lower_error;
+		CHECK(swapz_engine_write_window_batched(
+			      &e, pages, 2, &committed) == expected_error);
+		CHECK(committed == 0 && !a.in_flight && !a.batch_pending);
+		CHECK(a.next_block == failed_start + 2U &&
+		      a.abandoned_blocks == 2U && a.gc_allocation);
+		CHECK(e.completed_blocks == prior_completed +
+		      (faults[fault].impossible_completion ? 0U : 1U));
+		CHECK(maps[0].valid && maps[0].start_block ==
+		      prior_compressed.start_block &&
+		      maps[0].generation == prior_compressed.generation);
+		CHECK(maps[8].valid && maps[8].raw &&
+		      maps[8].start_block == prior_raw.start_block &&
+		      maps[8].generation == prior_raw.generation);
+		CHECK(!live[failed_start] && !live[failed_start + 1U]);
+		CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
+		CHECK(a.gc_allocation && a.gc_destination == 2U &&
+		      roles[0] == 1U && roles[2] == 0U);
+		CHECK(verify_page(0) == 0 && verify_raw_page(8) == 0);
+
+		/* The failed run is no longer an owner of scratch. A new staged run
+		 * must reproduce both source records, not replay stale lower bytes. */
+		memset(bulk_scratch, 0x57, sizeof(bulk_scratch));
+		CHECK(swapz_engine_write_window_batched(
+			      &e, pages, 2, &committed) == 0);
+		CHECK(committed == 2 && !a.in_flight && !a.batch_pending);
+		CHECK(maps[0].generation == prior_compressed.generation + 1U &&
+		      maps[8].generation == prior_raw.generation + 1U);
+		CHECK(maps[0].start_block >= failed_start + 2U &&
+		      maps[8].start_block >= failed_start + 2U);
+		CHECK(!live[failed_start] && !live[failed_start + 1U]);
+		CHECK(e.completed_blocks == prior_completed + 2U +
+		      (faults[fault].impossible_completion ? 0U : 1U));
+		CHECK(verify_page(0) == 0 && verify_raw_page(8) == 0);
+		CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+		CHECK(!a.gc_allocation && !roles[0] && roles[2]);
+		for (block = 0; block < SWAPZ_SEGMENT_BLOCKS; ++block)
+			CHECK(!live[block]);
+	}
+	return 0;
+}
+
+/* A canceled, never-submitted reservation is abandoned, not published.
+ * The same preallocated run storage can be reused only after the cancellation
+ * returns and the next prepare has built a new immutable image. */
+static int test_aborted_prepare_preserves_generation_and_cursor(void)
+{
+	struct swapz_compressed_page page = {
+		.logical_page = 0, .payload = contents[0], .length = 2072,
+	};
+	struct swapz_io_run run = {
+		.bytes = bulk_scratch, .txs = bulk_txs,
+	};
+	struct swapz_map prior;
+	swapz_u32 canceled_end;
+	swapz_u8 prepared = 99, committed = 99;
+	swapz_u16 completed = 0;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	CHECK(write_one(0) == 0);
+	prior = maps[0];
+	CHECK(swapz_engine_prepare_batched_run(
+		      &e, &page, 1, &run, &prepared, 0) == 0);
+	CHECK(prepared == 1 && run.blocks == 1 && a.batch_pending == 1);
+	canceled_end = run.start_block + run.blocks;
+	CHECK(maps[0].start_block == prior.start_block &&
+	      maps[0].generation == prior.generation);
+	CHECK(swapz_engine_abort_batched_run_tail(&e, &run) == 0);
+	CHECK(!a.batch_pending && !a.in_flight && !live[canceled_end - 1U]);
+	CHECK(a.abandoned_blocks == 1U && a.next_block == canceled_end);
+	CHECK(verify_page(0) == 0);
+
+	memset(bulk_scratch, 0x5b, sizeof(bulk_scratch));
+	CHECK(swapz_engine_prepare_batched_run(
+		      &e, &page, 1, &run, &prepared, 0) == 0);
+	CHECK(prepared == 1 && run.start_block >= canceled_end);
+	CHECK(lower_write_run(NULL, run.start_block, run.blocks,
+			      run.bytes, &completed) == 0);
+	CHECK(completed == run.blocks);
+	CHECK(swapz_engine_complete_batched_run(
+		      &e, &run, completed, 0, &committed) == 0);
+	CHECK(committed == 1 && !a.batch_pending && !a.in_flight);
+	CHECK(maps[0].generation == prior.generation + 1U &&
+	      maps[0].start_block >= canceled_end);
+	CHECK(verify_page(0) == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -769,6 +987,8 @@ int main(void)
 	CHECK(test_gc_publication_prefix_is_not_republished() == 0); passed++;
 	CHECK(test_partial_gc_failures_resume_same_reserve() == 0); passed++;
 	CHECK(test_last_compressed_page_boundary_retry() == 0); passed++;
+	CHECK(test_mixed_raw_gc_uncertain_completion_recovery() == 0); passed++;
+	CHECK(test_aborted_prepare_preserves_generation_and_cursor() == 0); passed++;
 	printf("SWAPZ_GC_ENGINE_ROTATION_TESTS_PASS=%d\n", passed);
 	return 0;
 }
