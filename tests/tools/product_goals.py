@@ -268,6 +268,9 @@ def _ci_safe_line(line):
         r"\1<redacted>", line)
     line = re.sub(r"\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}",
                   "<redacted>", line)
+    # Keep the missing token, not a megabyte-long source literal.
+    line = re.sub(r"(AssertionError: .*? not found in ).*",
+                  r"\1<source excerpt omitted>", line)
     line = re.sub(r"(?<!\w)/(?:tmp|var/tmp)/[^\s\x27\x22:]+",
                   "<temporary-path>", line)
     return re.sub(r"[\x00-\x1f\x7f]", " ", line).strip()[:320]
@@ -298,9 +301,17 @@ def diagnose_ci_failure(lines, exit_code, suite):
             fallback = safe_line
         if first_error is not None:
             continue
-        if re.search(r"(?i)operation not permitted|permission denied|"
-                     r"insufficient permissions|BLOCKED_LOADED_QUALIFICATION|"
-                     r"sudo: .*password", safe_line):
+        # Negative fixture tests deliberately print REFUSED/permission errors.
+        # Attribute a permission blocker only when the failing context says
+        # so, never from an unrelated earlier expected-denial transcript.
+        if re.search(r"AssertionError:|^E\s+AssertionError", safe_line):
+            category = ("SOURCE_CONTRACT" if contract_suite
+                        else "RUNTIME_ASSERTION")
+        elif re.search(
+                r"(?i)^(?:FAIL:|ERROR:|BLOCKED:|PermissionError:|sudo:|bash:)"
+                r".*(?:operation not permitted|permission denied|"
+                r"insufficient permissions|BLOCKED_LOADED_QUALIFICATION|"
+                r"password)|^BLOCKED_LOADED_QUALIFICATION", safe_line):
             category = "HOST_PERMISSION"
         elif re.search(
                 r"(?i)(?:\.[ch](?::\d+){1,2}|\.cpp(?::\d+){1,2}|"
@@ -318,8 +329,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
                 r"contract violation|standards.cochange|"
                 r"SOURCE_CONTRACT_MISMATCH", safe_line):
             category = "SOURCE_CONTRACT"
-        elif re.search(r"AssertionError:|^E\s+AssertionError|"
-                       r"^FAIL:(?!\s+test_)\s+|^BLOCKED:\s+", safe_line):
+        elif re.search(r"^FAIL:(?!\s+test_)\s+|^BLOCKED:\s+", safe_line):
             category = ("SOURCE_CONTRACT" if contract_suite
                         else "RUNTIME_ASSERTION")
         if category:
