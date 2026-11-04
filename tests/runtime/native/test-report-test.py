@@ -4293,7 +4293,8 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 **common,
                 "runs": [
                     {"workflow": workflow, "head_sha": self.SOURCE_SHA,
-                     "result": "PASS", "run_id": str(index + 1)}
+                     "result": "PASS", "status": "completed",
+                     "conclusion": "success", "run_id": str(index + 1)}
                     for index, workflow in enumerate(
                         runner.PRODUCTION_READINESS_REQUIRED_CI)
                 ],
@@ -4453,6 +4454,31 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         verdict = runner.evaluate_production_readiness(
             missing_package_ci, self.SOURCE_SHA)
         self.assertEqual(verdict["evidence_statuses"]["required_ci"], "BLOCKED")
+
+    def test_required_ci_requires_completed_success_and_concrete_run_id(self):
+        for field, value in (
+                ("status", "queued"),
+                ("status", "in_progress"),
+                ("status", "cancelled"),
+                ("status", None),
+                ("conclusion", "cancelled"),
+                ("conclusion", "failure"),
+                ("conclusion", None),
+                ("run_id", False),
+                ("run_id", 0),
+                ("run_id", -1),
+                ("run_id", "0"),
+                ("run_id", "not-a-run-id")):
+            with self.subTest(field=field, value=value):
+                snapshot = self.passing_snapshot()
+                snapshot["release_evidence"]["required_ci"]["runs"][0][
+                    field] = value
+                verdict = runner.evaluate_production_readiness(
+                    snapshot, self.SOURCE_SHA)
+                self.assertEqual(
+                    verdict["evidence_statuses"]["required_ci"], "BLOCKED")
+                self.assertEqual(
+                    verdict["CODE_PRODUCTION_READY"], "BLOCKED")
 
     def test_release_hashes_are_cross_bound(self):
         owner_mismatch = self.passing_snapshot()

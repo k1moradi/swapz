@@ -157,6 +157,15 @@ def _readiness_artifact_hashes_valid(hashes):
         for name in ("formatter_sha256", "module_sha256", "oracle_sha256"))
 
 
+def _readiness_run_id_valid(value):
+    """Match GitHub's concrete positive workflow-run ID contract."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    return isinstance(value, str) and value.isdigit() and int(value) > 0
+
+
 def owner_qualification_artifacts_available(artifacts):
     """An owner PASS requires all three final artifact digests."""
     return (isinstance(artifacts, dict) and
@@ -240,7 +249,10 @@ def _readiness_pass_payload_valid(
                 return False
             run = matching[0]
             if (run.get("head_sha") != current_source_sha or
-                    run.get("result") != "PASS" or not run.get("run_id")):
+                    run.get("result") != "PASS" or
+                    run.get("status") != "completed" or
+                    run.get("conclusion") != "success" or
+                    not _readiness_run_id_valid(run.get("run_id"))):
                 return False
         return True
     if name == "exact_source_owner_make_test":

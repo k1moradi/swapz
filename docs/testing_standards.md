@@ -5237,7 +5237,9 @@ release record must carry a strict UTC `observed_at_utc` timestamp, and each
 required CI workflow PASS must carry one concrete positive run ID for the exact
 release source. Required CI evidence must also bind a completed workflow run
 with conclusion success; pending, failed or cancelled GitHub runs remain BLOCKED
-even when the summary claims PASS. A rootless mismatch regression must assert
+even when the summary claims PASS. The official runner's embedded readiness
+summary and the canonical standalone release evaluator must enforce this same
+exact-source, completed-success and concrete-positive-run-ID contract. A rootless mismatch regression must assert
 that the blocker names the affected workflow and the exact-source condition;
 it must not depend on stale abbreviated diagnostic wording. The
 `unresolved_critical_issues` release record must carry a real JSON integer
