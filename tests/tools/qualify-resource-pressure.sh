@@ -618,7 +618,13 @@ fi
 for _ in {1..800}; do
     [[ -s $PRESSURE_ACTIVE ]] && break
     kill -0 "$PRESSURE_PID" 2>/dev/null || {
-        printf '%s\n' 'FAIL: ID36 pressure helper exited during staged activation' >&2
+        pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ' 2>/dev/null || true)"
+        if [[ -n $pressure_fail_reason ]]; then
+            printf 'FAIL: ID36 pressure helper exited during staged activation: %s\n' \
+                "$pressure_fail_reason" >&2
+        else
+            printf '%s\n' 'FAIL: ID36 pressure helper exited during staged activation without a bounded diagnostic' >&2
+        fi
         exit 1
     }
     sleep 0.05
@@ -709,8 +715,19 @@ if (( pair_rc != 0 )); then
     elif grep -q 'swapz replay exceeded bounded timeout' "$PAIR_LOG"; then
         printf '%s\n' 'FAIL: ID36 swapz replay exceeded its bounded timeout under pressure' >&2
     else
-        printf 'FAIL: ID36 owned-RAM pair failed rc:%s high:%s cpu_psi_usec:%s oom:%s oom_kill:%s\n' \
-            "$pair_rc" "$high_delta" "$cpu_some_delta" "$oom_delta" "$oom_kill_delta" >&2
+        pair_fail_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'FAIL: ' 2>/dev/null || true)"
+        if [[ -n $pair_fail_reason ]]; then
+            printf 'FAIL: ID36 owned-RAM pair failed: %s\n' "$pair_fail_reason" >&2
+        else
+            pair_blocked_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'BLOCKED: ' 2>/dev/null || true)"
+            if [[ -n $pair_blocked_reason ]]; then
+                printf 'BLOCKED: ID36 owned-RAM pair prerequisite after prewarm: %s\n' \
+                    "$pair_blocked_reason" >&2
+                exit 2
+            fi
+            printf 'FAIL: ID36 owned-RAM pair failed rc:%s high:%s cpu_psi_usec:%s oom:%s oom_kill:%s without a bounded diagnostic\n' \
+                "$pair_rc" "$high_delta" "$cpu_some_delta" "$oom_delta" "$oom_kill_delta" >&2
+        fi
     fi
     exit 1
 fi
@@ -728,7 +745,13 @@ fi
     exit 1
 }
 kill -0 "$PRESSURE_PID" 2>/dev/null || {
-    printf '%s\n' 'FAIL: ID36 pressure helper died during qualification' >&2
+    pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ' 2>/dev/null || true)"
+    if [[ -n $pressure_fail_reason ]]; then
+        printf 'FAIL: ID36 pressure helper died during qualification: %s\n' \
+            "$pressure_fail_reason" >&2
+    else
+        printf '%s\n' 'FAIL: ID36 pressure helper died during qualification without a bounded diagnostic' >&2
+    fi
     exit 1
 }
 
