@@ -697,7 +697,10 @@ fi
 for _ in {1..800}; do
     [[ -s $PRESSURE_ACTIVE ]] && break
     kill -0 "$PRESSURE_PID" 2>/dev/null || {
-        pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ' 2>/dev/null || true)"
+        if ! pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ')"; then
+            printf '%s\n' 'BLOCKED: ID36 pressure-helper diagnostic telemetry unreadable during staged activation; require the private scratch log to remain readable' >&2
+            exit 2
+        fi
         if [[ -n $pressure_fail_reason ]]; then
             printf 'FAIL: ID36 pressure helper exited during staged activation: %s\n' \
                 "$pressure_fail_reason" >&2
@@ -743,10 +746,17 @@ wait "$PAIR_PID"
 pair_rc=$?
 set -e
 PAIR_PID=""
+[[ -f $PAIR_LOG && -r $PAIR_LOG && ! -L $PAIR_LOG ]] || {
+    printf '%s\n' 'BLOCKED: ID36 owned-RAM pair diagnostic telemetry unavailable after execution; preserve the private session and restore scratch readability' >&2
+    exit 2
+}
 # Preserve ordinary pair evidence only on success; a failed pair's unbounded
 # private log must not be copied into admission diagnostics.
 if (( pair_rc == 0 )); then
-    cat "$PAIR_LOG"
+    cat "$PAIR_LOG" || {
+        printf '%s\n' 'BLOCKED: ID36 owned-RAM pair diagnostic telemetry became unreadable while collecting successful evidence' >&2
+        exit 2
+    }
 fi
 
 high_after="$(event_value high)"
@@ -794,11 +804,17 @@ if (( pair_rc != 0 )); then
     elif grep -q 'swapz replay exceeded bounded timeout' "$PAIR_LOG"; then
         printf '%s\n' 'FAIL: ID36 swapz replay exceeded its bounded timeout under pressure' >&2
     else
-        pair_fail_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'FAIL: ' 2>/dev/null || true)"
+        if ! pair_fail_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'FAIL: ')"; then
+            printf '%s\n' 'BLOCKED: ID36 owned-RAM pair diagnostic telemetry unreadable while classifying failure' >&2
+            exit 2
+        fi
         if [[ -n $pair_fail_reason ]]; then
             printf 'FAIL: ID36 owned-RAM pair failed: %s\n' "$pair_fail_reason" >&2
         else
-            pair_blocked_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'BLOCKED: ' 2>/dev/null || true)"
+            if ! pair_blocked_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'BLOCKED: ')"; then
+                printf '%s\n' 'BLOCKED: ID36 owned-RAM pair diagnostic telemetry unreadable while classifying prerequisite' >&2
+                exit 2
+            fi
             if [[ -n $pair_blocked_reason ]]; then
                 if pair_blocked_is_prerequisite "$pair_blocked_reason"; then
                     printf 'BLOCKED: ID36 owned-RAM pair prerequisite after prewarm: %s\n' \
@@ -829,7 +845,10 @@ fi
     exit 1
 }
 kill -0 "$PRESSURE_PID" 2>/dev/null || {
-    pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ' 2>/dev/null || true)"
+    if ! pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ')"; then
+        printf '%s\n' 'BLOCKED: ID36 pressure-helper diagnostic telemetry unreadable after qualification; require the private scratch log to remain readable' >&2
+        exit 2
+    fi
     if [[ -n $pressure_fail_reason ]]; then
         printf 'FAIL: ID36 pressure helper died during qualification: %s\n' \
             "$pressure_fail_reason" >&2
