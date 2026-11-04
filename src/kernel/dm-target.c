@@ -5633,6 +5633,24 @@ static void swapz_observe_prepared_lz4_cost(
 		ctx->ordered_lz4_page_ewma_ns, prepared->lz4_wall_ns);
 }
 
+/*
+ * Mapper-local mapping bounds guard. Authority owns publication/liveness, but
+ * callers that inspect segment sidecars before authority validation must first
+ * prove that the complete extent is addressable and segment-contained.
+ */
+static bool swapz_map_extent_bounds_valid(const struct swapz_dm *ctx,
+					 const struct swapz_map *map)
+{
+	swapz_u32 start = map->start_block;
+	swapz_u8 blocks = map->extent_blocks;
+
+	if (start >= ctx->physical_blocks ||
+	    (blocks != 1 && blocks != 2 && blocks != 4))
+		return false;
+	return blocks <= ctx->physical_blocks - start &&
+	       start % SWAPZ_SEGMENT_BLOCKS + blocks <= SWAPZ_SEGMENT_BLOCKS;
+}
+
 static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
@@ -5845,18 +5863,17 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			 * closed segment. The advisory TRIM occurs only after authority
 			 * has removed the final live mapping.
 			 */
-			if (old->valid && ctx->segment_mapped_pages) {
-				/* Validate the physical index before probing segment liveness.
-				 * The authority's later discard validation cannot protect
-				 * this earlier array access from a corrupt map. */
-				if (old->start_block >= ctx->physical_blocks) {
-					error = -EUCLEAN;
-				} else {
-					old_segment =
-						old->start_block / SWAPZ_SEGMENT_BLOCKS;
-					became_dead =
-						ctx->segment_mapped_pages[old_segment] == 1U;
-				}
+			/* Validate the physical index and full extent before probing
+			 * segment liveness. The authority's later discard validation
+			 * cannot protect this earlier array access from a corrupt map. */
+			if (old->valid &&
+			    !swapz_map_extent_bounds_valid(ctx, old))
+				error = -EUCLEAN;
+			if (!error && old->valid && ctx->segment_mapped_pages) {
+				old_segment =
+					old->start_block / SWAPZ_SEGMENT_BLOCKS;
+				became_dead =
+					ctx->segment_mapped_pages[old_segment] == 1U;
 			}
 			if (!error)
 				error = swapz_discard_page(&ctx->authority, logical);
@@ -6219,14 +6236,8 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 			if (m->valid) {
 				swapz_u32 start = m->start_block;
 
-				if (start >= ctx->physical_blocks ||
-				    (m->extent_blocks != 1 &&
-				     m->extent_blocks != 2 &&
-				     m->extent_blocks != 4) ||
-				    /* An extent must fit both media and its segment. */
-				    m->extent_blocks > ctx->physical_blocks - start ||
-				    start % SWAPZ_SEGMENT_BLOCKS + m->extent_blocks >
-					SWAPZ_SEGMENT_BLOCKS ||
+				/* An extent must fit both media and its segment. */
+				if (!swapz_map_extent_bounds_valid(ctx, m) ||
 				    ctx->extent_classes[start] != m->extent_blocks ||
 				    !ctx->live_records[start]) {
 					check_error = -EUCLEAN;

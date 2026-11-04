@@ -1501,15 +1501,17 @@ static swapz_u16 swapz_probe_set(
 
     def test_zero_elision_bounds_checks_old_map_before_segment_probe(self):
         accept = body("swapz_accept_write")
+        bounds = body("swapz_map_extent_bounds_valid")
         start = accept.index("if (length > 0 && length <= 64 &&")
         end = accept.index("if (length <= 0 && bulk_raw_eligible)", start)
         zero = accept[start:end]
-        self.assertRegex(
-            zero,
-            r"if \(old->start_block >= ctx->physical_blocks\) \{"
-            r"\s+error = -EUCLEAN;\s+\} else \{")
+        self.assertIn("blocks <= ctx->physical_blocks - start", bounds)
+        self.assertIn(
+            "start % SWAPZ_SEGMENT_BLOCKS + blocks <= SWAPZ_SEGMENT_BLOCKS",
+            bounds)
+        self.assertIn("!swapz_map_extent_bounds_valid(ctx, old)", zero)
         self.assertLess(
-            zero.index("old->start_block >= ctx->physical_blocks"),
+            zero.index("!swapz_map_extent_bounds_valid(ctx, old)"),
             zero.index("ctx->segment_mapped_pages[old_segment]"))
         self.assertRegex(
             zero,
@@ -1842,6 +1844,7 @@ static swapz_u16 swapz_probe_set(
                         discard.index("while (remaining)"))
         self.assertLess(discard.index("if (m->generation =="),
                         discard.index("swapz_discard_page(&ctx->authority"))
+        self.assertIn("swapz_map_extent_bounds_valid(ctx, m)", discard)
         self.assertIn("ctx->live_records[start]--", discard)
         self.assertIn("ctx->live_records[m->start_block]++", discard)
         self.assertIn("for (restore_sector = sector;", discard)
@@ -1903,6 +1906,12 @@ static int swapz_discard_dead_segment(struct swapz_dm *ctx, swapz_u32 segment) {
     (void)ctx; (void)segment;
     assert(!"unexpected dead-segment TRIM");
     return 0;
+}
+static bool swapz_map_extent_bounds_valid(const struct swapz_dm *ctx,
+                                          const struct swapz_map *map) {
+'''
+        source += body("swapz_map_extent_bounds_valid")
+        source += r'''
 }
 static int swapz_discard(struct swapz_dm *ctx, struct bio *bio) {
 '''
