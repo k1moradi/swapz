@@ -356,9 +356,12 @@ with the kernel's octal escaping; and all three post-separator fields are
 required. The root field is filesystem-specific and may be a non-path token
 (for example nsfs), so it is required but not assumed absolute. Known optional
 propagation tags must validate, while unknown optional fields are ignored as
-required by the extensible Linux mountinfo grammar. Duplicate mount IDs within
-one table are malformed. An empty table or a structurally incomplete unrelated
-sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
+required by the extensible Linux mountinfo grammar. Known propagation tags may appear at most once and the mount/superblock option
+fields must carry the kernel's ro/rw prefix. Duplicate mount IDs within one
+table are malformed. The visible-PID scan is finite at Linux's 64-bit
+PID_MAX_LIMIT ceiling (4,194,304 tables), avoiding a lower arbitrary process
+cap that could reject a valid large host. An empty table or a structurally
+incomplete unrelated sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
 unverified target identities still fail closed.
 Missing evidence for an existing mount namespace, malformed, unreadable,
 permission-denied, changing or ambiguous evidence fails closed.
