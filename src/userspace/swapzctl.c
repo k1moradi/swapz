@@ -1320,6 +1320,17 @@ static int format_mountinfo_path_valid(const char *begin, const char *end)
 		    cursor[2] < '0' || cursor[2] > '7' ||
 		    cursor[3] < '0' || cursor[3] > '7')
 			return 0;
+		{
+			const unsigned int escaped_byte =
+				((unsigned int)(cursor[1] - '0') << 6) |
+				((unsigned int)(cursor[2] - '0') << 3) |
+				(unsigned int)(cursor[3] - '0');
+
+			/* Linux only escapes these four otherwise ambiguous bytes. */
+			if (escaped_byte != ' ' && escaped_byte != '\t' &&
+			    escaped_byte != '\n' && escaped_byte != '\\')
+				return 0;
+		}
 		cursor += 4;
 	}
 	return 1;
