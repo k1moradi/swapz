@@ -1503,9 +1503,6 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 					error = -EUCLEAN;
 			}
 		}
-		/* Model constructor unwind and normal teardown alike. */
-		for (site = allocation_count; site > 0U; --site)
-			free(allocated_indexes[site - 1U]);
 		if (failure_site < allocation_count) {
 			CHECK(!allocated_indexes[failure_site]);
 			for (site = 0; site < allocation_count; ++site)
@@ -1515,6 +1512,9 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 		CHECK(failure_site == allocation_count ?
 		      allocated_all && !error :
 		      !allocated_all && error == -ENOMEM);
+		/* Model constructor unwind and normal teardown alike. */
+		for (site = allocation_count; site > 0U; --site)
+			free(allocated_indexes[site - 1U]);
 	}
 	return 0;
 }
