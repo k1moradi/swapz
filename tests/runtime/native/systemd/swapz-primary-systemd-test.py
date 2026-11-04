@@ -1281,6 +1281,20 @@ class BootVerifierTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.report.stat().st_mode & 0o777, 0o755)
 
+    def test_empty_systemd_properties_are_incomplete_observations(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_MAPPER_ACTIVE"] = ""
+        env["MOCK_MAPPER_RESULT"] = ""
+        env["MOCK_SWAP_ACTIVE"] = ""
+        env["MOCK_SWAP_RESULT"] = ""
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        report = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("status=INCOMPLETE", report)
+        self.assertIn("mapper_service_state_unavailable", report)
+        self.assertIn("primary_swap_unit_state_unavailable", report)
+
     def test_duplicate_and_missing_kernel_status_fields_are_incomplete(self) -> None:
         self.arm_then_reboot()
         valid = (
