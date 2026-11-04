@@ -787,6 +787,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             return_value="f13428f6-01"))
                     stack.enter_context(
                         mock.patch.object(
+                            qualify, "_read_readiness_snapshot",
+                            return_value=(
+                                {"authorized_target": {}}, "9" * 64)))
+                    stack.enter_context(
+                        mock.patch.object(
                             qualify, "verify_authorized_target",
                             return_value=(
                                 Path("/synthetic"), (8, 1), (8, 0))))
@@ -2913,6 +2918,50 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             observed = qualify._validate_precycle_state(
                 "f13428f6-01", (8, 1), (8, 0), [])
         self.assertIs(observed, prior)
+
+
+    def test_policy_and_target_authorization_are_commit_bound_inputs(self):
+        self.assertIn(
+            "docs/production-acceptance.json",
+            qualify.PHYSICAL_CONTROL_INPUT_PATHS)
+        self.assertIn(
+            "docs/handoff/production-readiness.json",
+            qualify.PHYSICAL_CONTROL_INPUT_PATHS)
+        self.assertEqual(
+            qualify.PHYSICAL_CONTROL_INPUT_PATHS,
+            parent.PHYSICAL_CONTROL_INPUT_PATHS)
+        source = HELPER.read_text(encoding="utf-8")
+        execute_start = source.index("def _execute_admitted(")
+        execute_end = source.index("\ndef execute(", execute_start)
+        execute_source = source[execute_start:execute_end]
+        self.assertIn(
+            'pinned_source_root / "docs/production-acceptance.json"',
+            execute_source)
+        self.assertIn(
+            'pinned_source_root / "docs/handoff/production-readiness.json"',
+            execute_source)
+        self.assertIn(
+            "verify_authorized_target(\n"
+            "            plan, selector_partuuid, authorization_snapshot)",
+            execute_source)
+        self.assertNotIn("acceptance_manifest_sha256()", execute_source)
+
+    def test_authorization_snapshot_digest_is_of_exact_parsed_bytes(self):
+        snapshot = {
+            "authorized_target": {
+                "partuuid": "f13428f6-01",
+                "size_bytes": 124787884032,
+            }
+        }
+        payload = (
+            json.dumps(snapshot, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
+        with mock.patch.object(
+                qualify, "_read_stable_file_bytes", return_value=payload):
+            observed, digest = qualify._read_readiness_snapshot(
+                Path("/synthetic/commit-bound-readiness.json"))
+        self.assertEqual(observed, snapshot)
+        self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
 
 
 if __name__ == "__main__":

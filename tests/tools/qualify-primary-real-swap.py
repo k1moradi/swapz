@@ -59,6 +59,8 @@ PHYSICAL_CONTROL_INPUT_PATHS = (
     "src/userspace/swapz-primary.h",
     "src/userspace/swapz-primary.c",
     "src/userspace/swapzctl.c",
+    "docs/production-acceptance.json",
+    "docs/handoff/production-readiness.json",
 )
 MAPPER_NAME = "swapz-primary"
 PAGE_BYTES = 4096
@@ -1551,13 +1553,18 @@ def require_sole_partition_topology(target_row: dict, parent_row: dict,
         raise Blocked("authorized parent must contain exactly the selected partition")
 
 
-def _read_readiness_snapshot() -> dict:
+def _read_readiness_snapshot(
+        path: Path = AUTHORIZATION_SNAPSHOT) -> tuple[dict, str]:
+    payload = _read_stable_file_bytes(
+        path, "production readiness snapshot")
     try:
-        return _load_unique_json(
-            AUTHORIZATION_SNAPSHOT.read_text(encoding="utf-8"),
-            "production readiness snapshot")
-    except OSError as exc:
-        raise Blocked(f"cannot read committed production readiness snapshot: {exc}") from exc
+        text_payload = payload.decode("utf-8")
+    except UnicodeError as exc:
+        raise Blocked(
+            "production readiness snapshot is not valid UTF-8") from exc
+    snapshot = _load_unique_json(
+        text_payload, "production readiness snapshot")
+    return snapshot, hashlib.sha256(payload).hexdigest()
 
 
 def validate_acceptance_manifest(
@@ -1606,9 +1613,10 @@ def validate_acceptance_manifest(
 
 def _verify_acceptance_manifest_snapshot(
         *, cycles: int, workload_mib: int, resident_mib: int,
-        swap_limit_mib: int, timeout_seconds: int) -> tuple[dict, str]:
+        swap_limit_mib: int, timeout_seconds: int,
+        path: Path = ACCEPTANCE_MANIFEST) -> tuple[dict, str]:
     payload = _read_stable_file_bytes(
-        ACCEPTANCE_MANIFEST, "production acceptance manifest")
+        path, "production acceptance manifest")
     try:
         text_payload = payload.decode("utf-8")
     except UnicodeError as exc:
@@ -1639,6 +1647,7 @@ def acceptance_manifest_sha256() -> str:
 
 def verify_authorized_target(
         plan: dict, selector_partuuid: str,
+        authorization_snapshot: dict | None = None,
 ) -> tuple[Path, tuple[int, int], tuple[int, int]]:
     required_true = (
         "target_config_read", "target_device_preflight", "target_not_mounted",
@@ -1707,8 +1716,10 @@ def verify_authorized_target(
     require_sole_partition_topology(target_row, parent_row, f"{major}:{minor}")
 
     try:
-        snapshot = _read_readiness_snapshot()
-        authorized = snapshot["authorized_target"]
+        if authorization_snapshot is None:
+            authorization_snapshot, _snapshot_digest = \
+                _read_readiness_snapshot()
+        authorized = authorization_snapshot["authorized_target"]
         expected_parent = f"{parent_major}:{parent_minor}"
         if str(authorized.get("partuuid", "")).lower() != selector_partuuid or \
                 int(authorized.get("size_bytes", -1)) != size_bytes or \
@@ -3465,6 +3476,10 @@ def _execute_admitted(
                 f"cannot secure private physical workspace: {exc}") from exc
         pinned_source_root, physical_control_inputs_sha256 = \
             pin_physical_control_inputs(private_parent)
+        pinned_acceptance_manifest = (
+            pinned_source_root / "docs/production-acceptance.json")
+        pinned_authorization_snapshot = (
+            pinned_source_root / "docs/handoff/production-readiness.json")
         admission.bind_physical_control_inputs(
             physical_control_inputs_sha256)
         admission.bind_executed_helper_sha256(helper_sha256)
@@ -3493,7 +3508,10 @@ def _execute_admitted(
                 workload_mib=arguments.workload_mib,
                 resident_mib=arguments.resident_mib,
                 swap_limit_mib=arguments.swap_limit_mib,
-                timeout_seconds=arguments.timeout_seconds)
+                timeout_seconds=arguments.timeout_seconds,
+                path=pinned_acceptance_manifest)
+        authorization_snapshot, authorization_snapshot_sha256 = \
+            _read_readiness_snapshot(pinned_authorization_snapshot)
         _kernel_log_snapshot()
         _import_qualification(swapzctl, report_path)
         plan = _read_plan(swapzctl)
@@ -3513,7 +3531,7 @@ def _execute_admitted(
                 "the installed qualified control")
         selector_partuuid = _read_selector()
         _target_path, target_device, target_parent_device = verify_authorized_target(
-            plan, selector_partuuid)
+            plan, selector_partuuid, authorization_snapshot)
         # The verifier has already matched this value against live block
         # geometry, lsblk and the authorized target snapshot.
         target_size_bytes = int(plan["target_device_bytes"])
@@ -3529,6 +3547,8 @@ def _execute_admitted(
             {
                 "source_sha": arguments.validated_source,
                 "acceptance_manifest_sha256": acceptance_policy_sha256,
+                "authorization_snapshot_sha256":
+                    authorization_snapshot_sha256,
                 "qualification_report_sha256": qualification_report_sha256,
                 "helper_sha256": helper_sha256,
                 "oracle_sha256": oracle_sha256,
@@ -3622,6 +3642,8 @@ def _execute_admitted(
             "status": "PASS",
             "source_sha": arguments.validated_source,
             "acceptance_manifest_sha256": acceptance_policy_sha256,
+            "authorization_snapshot_sha256":
+                authorization_snapshot_sha256,
             "helper_sha256": helper_sha256,
             "oracle_sha256": oracle_sha256,
             "qualification_report_sha256": qualification_report_sha256,
@@ -3650,9 +3672,9 @@ def _execute_admitted(
         # fail-closed evidence commit follow this approval.
         require_final_installed_artifact_identity(
             qualified_swapzctl, artifact_hashes)
-        if acceptance_manifest_sha256() != acceptance_policy_sha256:
-            raise QualificationFailure(
-                "real-swap acceptance policy changed during campaign")
+        # Policy and target authorization were consumed from commit-bound
+        # private snapshots. The final admission re-proves that exact source
+        # commit is still canonical after the private workspace is removed.
         admission.require("final")
         if terminal_cleanup is not None:
             terminal_cleanup()

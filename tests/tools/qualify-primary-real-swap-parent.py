@@ -39,6 +39,8 @@ PHYSICAL_CONTROL_INPUT_PATHS = (
     "src/userspace/swapz-primary.h",
     "src/userspace/swapz-primary.c",
     "src/userspace/swapzctl.c",
+    "docs/production-acceptance.json",
+    "docs/handoff/production-readiness.json",
 )
 MAX_LINE_BYTES = 4096
 MAX_CYCLES = 4
