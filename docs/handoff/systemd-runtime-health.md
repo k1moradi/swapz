@@ -54,8 +54,10 @@ distinctions do not relax the hibernation guards or authorize swap mutation.
 
 Package installation keeps all primary units disabled and does not start the
 mapper, monitor, passive swap, hibernation action, or any swap mutation. The
-production userspace lifecycle compile gate remains disabled until a frozen
-release candidate completes the physical lifecycle/capacity qualification.
+primary lifecycle is compiled into production userspace, but prepare/start
+remain runtime-locked without source-, boot- and target-bound authorization;
+stop/recover require cleanup authority. Neither package installation nor the
+systemd service unlocks these gates before exact-source and card qualification.
 
 ## Release evidence still required
 
