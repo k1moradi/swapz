@@ -689,9 +689,17 @@ The terminal prints the local index path under
 `build/history/<architecture>-<host-digest>/index.md`. Each report records a
 hashed OS machine identity; history is recovered from committed report revisions
 so uploads by other computers do not mix their measurements or erase prior runs.
-Only complete PASS reports with the same identity and architecture are plotted.
-Legacy reports without this identity remain separate. An OS reinstall changes
-the history identity; cloned systems need distinct `/etc/machine-id` values.
+Exact-machine and audited x86 plots require complete five-stage PASS
+reports tied to that machine identity or an explicitly owner-approved immutable
+legacy report SHA. The default historical ARM64/NEON VM cohort uses overall
+PASS, seven observed online CPUs and an executed NEON backend; some older
+reports may lack a complete stage list or immutable host identity. This
+legacy cohort is descriptive only, not an exact-host qualification or evidence
+that its old reports qualify current `main`. A shared ISA/CPU count never
+automatically merges legacy reports into an exact-computer history; see
+[host-history.json](handoff/host-history.json) for explicit old-report
+assignments. An OS reinstall changes the history identity; cloned systems
+need distinct `/etc/machine-id` values.
 Install Python Matplotlib on each test computer. Rendering failures are reported
 as `NOT UPDATED` with a local diagnostic log, independently of qualification.
 Plots are local generated artifacts; report publication keeps them reproducible.
