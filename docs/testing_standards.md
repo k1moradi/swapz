@@ -1234,7 +1234,11 @@ baseline through mapper initialization, steady operation, measured GC and
 ordinary mapper teardown, followed by at least two seconds with the mapper
 observed absent. Each sample records \`MemAvailable\`, \`SUnreclaim\`,
 \`VmallocUsed\`, UTC time, a monotonic timestamp and mapper-presence state.
-The qualifying peak is derived from the raw samples as baseline-median
+The three \`/proc/meminfo\` counters are converted from kernel-reported KiB
+to bytes and must remain 1024-byte multiples; treating raw KiB integers as
+bytes is invalid evidence. Mapper-present means the exact source-bound mapper
+UUID named by the trace, not merely some Device Mapper node. The qualifying
+peak is derived from the raw samples as baseline-median
 \`MemAvailable\` minus the minimum \`MemAvailable\` while the mapper is
 present; an asserted replay scalar is diagnostic only. The final target-absent
 second must return the median \`MemAvailable\` to the baseline envelope
@@ -5339,7 +5343,10 @@ above: exact 100 ms cadence declaration, boot identity, UTC and monotonic
 timestamps, raw \`MemAvailable\`/\`SUnreclaim\`/\`VmallocUsed\` counters,
 mapper-presence state, one second of target-absent baseline, initialization,
 steady and GC observations, ordinary teardown, and at least two seconds of
-target-absent recovery. The sealer derives the peak from those raw counters and
+target-absent recovery. Initialization must precede the exact sustained swapz
+arm, steady/GC samples must fall inside that arm's monotonic interval, and
+teardown must follow its completion; a correctly shaped trace from elsewhere
+in the same boot cannot qualify. The sealer derives the peak from those raw counters and
 stores the derived summary; the release evaluator independently recomputes the
 summary and rejects any mismatch. It must not trust an asserted per-sample
 "target RAM" byte count or a replay-time peak scalar, because this whole-host
