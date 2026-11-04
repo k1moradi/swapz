@@ -19,6 +19,11 @@ if [[ $# != 0 || ! -d $SHARED_PLAN ]]; then
     printf '%s\n' 'BLOCKED: ID36 requires validated source and owned shared plan' >&2
     exit 2
 fi
+
+# This marker precedes admission so an early BLOCKED result cannot inherit the
+# preceding synthetic storage envelope's last benchmark phase.
+printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
+
 for required_command in awk bash cat cut getconf grep id mkdir mktemp od python3 \
                         rm rmdir sleep tail timeout tr; do
     command -v "$required_command" >/dev/null 2>&1 || {
@@ -77,10 +82,6 @@ grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
     printf '%s\n' 'BLOCKED: ID36 required owned RAM pair or pressure helper unavailable; restore readable checkout helpers before qualification' >&2
     exit 2
 }
-
-# This marker precedes admission so an early BLOCKED result cannot inherit the
-# preceding synthetic storage envelope's last benchmark phase.
-printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
 
 swapz_clear_tmp_before_memory_check || {
     printf '%s\n' \
@@ -265,8 +266,11 @@ fi
     exit 2
 }
 CGROUP="$CGROUP_ROOT/swapz-id36-$token"
-if ! SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-id36.XXXXXXXX" 2>/dev/null)"; then
-    printf '%s\n' 'BLOCKED: ID36 cannot create private scratch session; require a writable temporary directory with safe mktemp semantics' >&2
+# The completed-owned cleanup immediately above positively validated /tmp as
+# root-owned mode 1777. Do not inherit an untrusted TMPDIR into privileged
+# recursive cleanup; keep this small control session under the verified root.
+if ! SESSION="$(mktemp -d "/tmp/swapz-id36.XXXXXXXX" 2>/dev/null)"; then
+    printf '%s\n' 'BLOCKED: ID36 cannot create private scratch session; require the verified root-owned /tmp to remain writable' >&2
     exit 2
 fi
 [[ -d $SESSION && ! -L $SESSION ]] || {
@@ -318,7 +322,7 @@ cleanup() {
     local result=$?
     trap - EXIT HUP INT TERM
     set +e
-    : > "$STOP"
+    (: > "$STOP") 2>/dev/null || true
     if [[ -n $PAIR_PID ]]; then
         kill -TERM "$PAIR_PID" 2>/dev/null
         wait "$PAIR_PID" 2>/dev/null
@@ -336,7 +340,7 @@ cleanup() {
     if [[ -d $CGROUP ]]; then
         if [[ -f $CGROUP/cgroup.kill &&
               -n $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]]; then
-            echo 1 > "$CGROUP/cgroup.kill" 2>/dev/null
+            (printf '%s\n' 1 > "$CGROUP/cgroup.kill") 2>/dev/null || true
         fi
         for _ in {1..40}; do
             [[ -z $(cat "$CGROUP/cgroup.procs" 2>/dev/null) ]] && break
@@ -344,14 +348,21 @@ cleanup() {
         done
         rmdir "$CGROUP" 2>/dev/null || result=1
     fi
-    rm -rf "$SESSION"
+    if ! rm -rf -- "$SESSION" 2>/dev/null; then
+        if (( result == 0 || result == 2 )); then
+            printf '%s\n' 'BLOCKED: ID36 private scratch cleanup did not complete; preserve the owned session for read-only investigation and retry only after safe cleanup' >&2
+            result=2
+        else
+            printf '%s\n' 'FAIL: ID36 private scratch cleanup also failed; preserve the owned session for read-only investigation' >&2
+        fi
+    fi
     exit "$result"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-mkdir "$CGROUP" || {
+mkdir "$CGROUP" 2>/dev/null || {
     printf '%s\n' 'BLOCKED: ID36 cannot create isolated cgroup; require delegated writable cgroup v2 memory/CPU subtree without changing existing host groups' >&2
     exit 2
 }
