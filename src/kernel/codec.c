@@ -243,19 +243,15 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 }
 
 /*
- * This is the only rejection gate for append: it does not inspect payload
- * bytes. The caller's source must remain readable and the builder exclusively
- * owned through the subsequent CRC and write.
+ * Shared append preflight. It checks builder state, payload bounds/overlap,
+ * encoding and available extent space without reading payload bytes.
  */
 static int swapz_append_validate(struct swapz_builder *builder,
-				 swapz_u32 logical_page, swapz_u32 generation,
+				 swapz_u32 generation,
 				 const void *payload, swapz_u16 length,
-				 swapz_u8 encoding, int logical_page_unique,
-				 swapz_u16 *payload_offset)
+				 swapz_u8 encoding, swapz_u16 *payload_offset)
 {
-	swapz_u32 logical_page_le;
 	swapz_u32 metadata_end;
-	swapz_u8 index;
 
 	if (!builder || !builder->bytes || builder->sealed ||
 	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
@@ -270,21 +266,27 @@ static int swapz_append_validate(struct swapz_builder *builder,
 	    (swapz_u32)builder->payload_start - length < metadata_end)
 		return -ENOSPC;
 
-	logical_page_le = swapz_le32(logical_page);
-	/* Generic callers remain defensive. The production batched engine may
-	 * skip only this quadratic scan after proving window-wide uniqueness. */
-	if (!logical_page_unique)
-		for (index = 0; index < builder->count; ++index)
-			if (swapz_record_logical_le(builder->bytes, index) ==
-			    logical_page_le)
-				return -EEXIST;
-
 	*payload_offset = builder->payload_start - length;
 	return 0;
 }
 
-/* Commit is infallible only after swapz_append_validate() succeeds; callers
- * hold the builder exclusively until both descriptor and payload are stored. */
+/* Generic append paths retain duplicate protection. The production unique
+ * paths may skip only this bounded quadratic scan after proving uniqueness. */
+static int swapz_append_validate_logical_page(
+	const struct swapz_builder *builder, swapz_u32 logical_page)
+{
+	const swapz_u32 logical_page_le = swapz_le32(logical_page);
+	swapz_u8 index;
+
+	for (index = 0; index < builder->count; ++index)
+		if (swapz_record_logical_le(builder->bytes, index) ==
+		    logical_page_le)
+			return -EEXIST;
+	return 0;
+}
+
+/* Commit is infallible only after append preflight succeeds; callers hold the
+ * builder exclusively until both descriptor and payload are stored. */
 static void swapz_append_record(struct swapz_builder *builder,
 				swapz_u32 logical_page, swapz_u32 generation,
 				const void *payload, swapz_u16 length,
@@ -315,11 +317,15 @@ static int swapz_append_crc(struct swapz_builder *builder,
 	swapz_u16 payload_offset;
 	int error;
 
-	error = swapz_append_validate(builder, logical_page, generation,
-				      payload, length, encoding,
-				      logical_page_unique, &payload_offset);
+	error = swapz_append_validate(builder, generation, payload, length,
+				      encoding, &payload_offset);
 	if (error)
 		return error;
+	if (!logical_page_unique) {
+		error = swapz_append_validate_logical_page(builder, logical_page);
+		if (error)
+			return error;
+	}
 	swapz_append_record(builder, logical_page, generation, payload, length,
 			    payload_crc32c, encoding, payload_offset);
 	return 0;
@@ -361,11 +367,15 @@ static int swapz_append_encoded_checked(struct swapz_builder *builder,
 	swapz_u16 payload_offset;
 	int error;
 
-	error = swapz_append_validate(builder, logical_page, generation,
-				      payload, length, encoding,
-				      logical_page_unique, &payload_offset);
+	error = swapz_append_validate(builder, generation, payload, length,
+				      encoding, &payload_offset);
 	if (error)
 		return error;
+	if (!logical_page_unique) {
+		error = swapz_append_validate_logical_page(builder, logical_page);
+		if (error)
+			return error;
+	}
 	/* Hash once, after every possible rejection, before writing bytes. */
 	swapz_append_record(builder, logical_page, generation, payload, length,
 			    swapz_crc32c_bytes(payload, length), encoding,
@@ -404,9 +414,11 @@ int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 	 */
 	if (!payload || !length || length > SWAPZ_MAX_COMPRESSED)
 		return -EINVAL;
-	error = swapz_append_validate(builder, logical_page, generation,
-				      payload, length, SWAPZ_ENCODING_LZ4,
-				      0, &payload_offset);
+	error = swapz_append_validate(builder, generation, payload, length,
+				      SWAPZ_ENCODING_LZ4, &payload_offset);
+	if (error)
+		return error;
+	error = swapz_append_validate_logical_page(builder, logical_page);
 	if (error)
 		return error;
 	swapz_append_record(builder, logical_page, generation, payload, length,
@@ -566,8 +578,11 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 	if (payload)
 		*payload = NULL;
 	record_count = swapz_get_record_count(bytes);
-	if (!record_count || record_count > SWAPZ_MAX_RECORDS ||
-	    index >= record_count) {
+	if (!record_count || record_count > SWAPZ_MAX_RECORDS) {
+		*out = (struct swapz_decoded){ 0 };
+		return -EUCLEAN;
+	}
+	if (index >= record_count) {
 		*out = (struct swapz_decoded){ 0 };
 		return -ERANGE;
 	}
