@@ -338,8 +338,8 @@ def _ci_failure_category(line, contract_suite):
         return "HOST_PERMISSION"
     if re.search(
             r"(?i)AssertionError:|^E\s+AssertionError|"
-            r"(?:RuntimeError|ValueError|TypeError|FileNotFoundError|"
-            r"(?:subprocess\.)?CalledProcessError):|"
+            r"(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)|"
+            r"SystemExit|(?:subprocess\.)?TimeoutExpired):|"
             r"AddressSanitizer|UndefinedBehaviorSanitizer|runtime error:|"
             r"Assertion .* failed|Aborted(?: \(core dumped\))?|SIGABRT|"
             r"terminate called after throwing|"
@@ -373,7 +373,9 @@ def diagnose_ci_failure(lines, exit_code, suite):
             continue
 
         unittest_match = re.search(
-            r"(?:FAIL|ERROR):\s+(test_[A-Za-z0-9_]+)\s+\(([^)]+)\)",
+            r"(?:FAIL|ERROR):\s+"
+            r"(test_[A-Za-z0-9_]+|setUp(?:Class|Module)?|"
+            r"tearDown(?:Class|Module)?)\s+\(([^)]+)\)",
             safe_line)
         if unittest_match:
             if failing_test is None:
