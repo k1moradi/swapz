@@ -20,7 +20,7 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-concurrency test-predictor test-anon-page-analyzer test-userspace test-replay-helper clean
-PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapzctl-format swapzctl-removable-media swapz-primary-policy
+PROGRAMS := io-replay-native codec-roundtrip extent-geometry anon-page-analyzer zero-write-elision mapping-authority authority-throughput transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation gc-high-occupancy flush-ordering lower-write-aggregation window-policy preparation-slots preparation-codec-result preparation-publication-lifetime lane-gap superblock swapzctl-status swapzctl-format swapzctl-removable-media swapz-primary-policy swapz-primary-mount-namespace
 
 io-replay-native_SRC := $(BENCHMARK)/io-replay-native.c
 io-replay-native_LDLIBS := -pthread
@@ -79,6 +79,8 @@ swapzctl-removable-media_SRC := $(NATIVE)/userspace/swapzctl-removable-media.c
 swapzctl-removable-media_HDR := $(USERSPACE)/swapzctl.c $(USERSPACE)/swapz-primary.h $(KERNEL)/superblock.h
 swapz-primary-policy_SRC := $(NATIVE)/userspace/swapz-primary-policy.c
 swapz-primary-policy_HDR := $(USERSPACE)/swapz-primary.c $(USERSPACE)/swapz-primary.h
+swapz-primary-mount-namespace_SRC := $(NATIVE)/userspace/swapz-primary-mount-namespace.c
+swapz-primary-mount-namespace_HDR := $(USERSPACE)/swapz-primary.c $(USERSPACE)/swapz-primary.h
 anon-page-analyzer_SRC := $(NATIVE)/codec/anon-page-analyzer.c $(ENGINE) $(AUTH) $(CODEC) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS)
 anon-page-analyzer_HDR := $(KERNEL)/engine.h $(KERNEL)/predictor-route.h $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h $(KERNEL)/codec.h
 anon-page-analyzer_LDLIBS := -llz4
@@ -151,7 +153,7 @@ test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT
 	@set -e; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/preparation-publication-lifetime"
 
 test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-format $(OUT)/swapzctl-removable-media $(OUT)/swapz-primary-policy
-	@set -e; "$(OUT)/swapzctl-status"; "$(OUT)/swapzctl-format"; "$(OUT)/swapzctl-removable-media"; "$(OUT)/swapz-primary-policy"
+	@set -e; "$(OUT)/swapzctl-status"; "$(OUT)/swapzctl-format"; "$(OUT)/swapzctl-removable-media"; "$(OUT)/swapz-primary-policy"; "$(OUT)/swapz-primary-mount-namespace"
 
 test-replay-helper: $(OUT)/io-replay-native
 	@test -x "$(OUT)/io-replay-native"
