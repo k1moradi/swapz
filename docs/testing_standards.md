@@ -5372,7 +5372,12 @@ steady and GC observations, ordinary teardown, and at least two seconds of
 target-absent recovery. Initialization must precede the exact sustained swapz
 arm, steady/GC samples must fall inside that arm's monotonic interval, and
 teardown must follow its completion; a correctly shaped trace from elsewhere
-in the same boot cannot qualify. The sealer derives the peak from those raw counters and
+in the same boot cannot qualify. Sustained telemetry preserves absolute
+monotonic interval bounds. Every RAM sample labeled `gc` must overlap an
+interval where at least one exported target counter among `gc_wall_ns`,
+`gc_victims` or `gc_pages` actually advanced; a caller-supplied GC phase
+label without measured target GC activity is invalid. The sealer derives the
+peak from those raw counters and
 stores the derived summary; the release evaluator independently recomputes the
 summary and rejects any mismatch. It must not trust an asserted per-sample
 "target RAM" byte count or a replay-time peak scalar, because this whole-host
