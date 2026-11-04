@@ -866,7 +866,17 @@ swapz_clear_tmp_before_memory_check
         self.assertIn('if (( result == 0 )) && [[ -n $PASS_EVIDENCE ]]; then', source)
         self.assertNotIn('rmdir "$CGROUP" 2>/dev/null || result=1', source)
         self.assertIn(
-            "BLOCKED: ID36 isolated cgroup cleanup did not complete;",
+            'local phase="$1" observed="$2" original_exit="$3" '
+            "severity=BLOCKED",
+            source)
+        self.assertIn(
+            "(( original_exit == 0 || original_exit == 2 )) || severity=FAIL",
+            source)
+        self.assertIn(
+            "ID36 isolated cgroup cleanup did not complete; phase:%s "
+            "required:exclusive empty canonical membership and removable "
+            "cgroup observed:%s original_exit:%s "
+            "retained_cleanup:child-cgroup-and-private-session",
             source)
         self.assertNotIn("rm -rf /tmp", source)
         self.assertNotIn("drop_caches", source)
