@@ -700,11 +700,42 @@ def metadata_ram_trace_matches_swapz_arm(
     }
     if any(not values for values in phases.values()):
         return False
+    intervals = swapz_arm.get("sustained_intervals")
+    if not isinstance(intervals, list) or not intervals:
+        return False
+    measured_gc_windows = []
+    for row in intervals:
+        if not isinstance(row, dict):
+            return False
+        interval_start = row.get("start_monotonic_ns")
+        interval_end = row.get("end_monotonic_ns")
+        gc = row.get("gc")
+        if (
+                type(interval_start) is not int or
+                type(interval_end) is not int or
+                interval_end <= interval_start or
+                not isinstance(gc, dict)):
+            return False
+        activity = []
+        for field in ("gc_wall_ns", "gc_victims", "gc_pages"):
+            value = gc.get(field)
+            if type(value) is not int or value < 0:
+                return False
+            activity.append(value)
+        if any(activity):
+            measured_gc_windows.append((interval_start, interval_end))
+    if not measured_gc_windows:
+        return False
+    gc_samples_bound = all(
+        any(window_start <= sample_time <= window_end
+            for window_start, window_end in measured_gc_windows)
+        for sample_time in phases["gc"])
     return (
         max(phases["baseline"]) < min(phases["initialization"]) and
         max(phases["initialization"]) <= started and
         all(started <= value <= finished
             for phase in ("steady", "gc") for value in phases[phase]) and
+        gc_samples_bound and
         min(phases["teardown"]) >= finished
     )
 
