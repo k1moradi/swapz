@@ -34,15 +34,24 @@ def _disable_dumps() -> None:
         raise RuntimeError(f"cannot disable process dumps: {exc}") from exc
 
 
-def page_pattern(seed_hex: str, page_index: int) -> bytes:
-    if len(seed_hex) != 32 or any(character not in "0123456789abcdef" for character in seed_hex):
+def _parse_seed(seed_hex: str) -> bytes:
+    if not isinstance(seed_hex, str) or len(seed_hex) != 32 or any(
+            character not in "0123456789abcdef" for character in seed_hex):
         raise ValueError("seed must be exactly 32 lowercase hexadecimal characters")
-    if page_index < 0:
-        raise ValueError("page index must be nonnegative")
-    seed = bytes.fromhex(seed_hex)
+    return bytes.fromhex(seed_hex)
+
+
+def _page_pattern_from_seed(seed: bytes, page_index: int) -> bytes:
     # Expand the run/page seed into position-distinct bytes across all 4 KiB.
     # Repeating one 32-byte digest would miss within-page block transpositions.
-    return hashlib.shake_256(seed + page_index.to_bytes(8, "little")).digest(PAGE_BYTES)
+    return hashlib.shake_256(
+        seed + page_index.to_bytes(8, "little")).digest(PAGE_BYTES)
+
+
+def page_pattern(seed_hex: str, page_index: int) -> bytes:
+    if page_index < 0:
+        raise ValueError("page index must be nonnegative")
+    return _page_pattern_from_seed(_parse_seed(seed_hex), page_index)
 
 
 def _read_command() -> str:
@@ -62,6 +71,11 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         return 2
     if memory_mib * MIB % PAGE_BYTES:
         print("FAIL: oracle memory is not page aligned", file=sys.stderr)
+        return 2
+    try:
+        seed = _parse_seed(seed_hex)
+    except ValueError as exc:
+        print(f"FAIL: oracle seed is invalid: {exc}", file=sys.stderr)
         return 2
     try:
         _disable_dumps()
@@ -94,7 +108,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
     result = 1
     try:
         for page_index in range(pages):
-            expected = page_pattern(seed_hex, page_index)
+            expected = _page_pattern_from_seed(seed, page_index)
             offset = page_index * PAGE_BYTES
             allocation[offset:offset + PAGE_BYTES] = expected
             expected_digest.update(expected)
@@ -112,7 +126,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         mismatches = []
         byte_mismatches = 0
         for page_index in range(pages):
-            expected = page_pattern(seed_hex, page_index)
+            expected = _page_pattern_from_seed(seed, page_index)
             offset = page_index * PAGE_BYTES
             observed = allocation[offset:offset + PAGE_BYTES]
             if len(observed) != PAGE_BYTES:

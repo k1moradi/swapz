@@ -122,7 +122,12 @@ the current oracle bytes into its root-only temporary workspace, require their
 SHA-256 to match that commit-derived digest, record it, and execute only that
 pinned copy for every cycle. An alter-pin-restore worktree race or a mid-run
 pathname replacement must therefore be unable to fabricate byte-exact PASS
-evidence.
+evidence. Before emitting `ORACLE_WAITING` or allocating anonymous memory, the
+oracle must reject any seed that is not exactly 32 lowercase hexadecimal
+characters with a bounded exit-2 diagnostic and no traceback or echoed invalid
+seed. Validated seed bytes are immutable for the worker lifetime and should be
+parsed once, then reused by the fill and verification loops without changing
+the deterministic page-pattern bytes.
 
 The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
 artifact identity, derive the same
