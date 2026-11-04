@@ -2,10 +2,15 @@
 """Rootless, isolated resource-admission regressions; no real cgroup or /tmp mutation."""
 
 from pathlib import Path
+import contextlib
+import importlib.util
+import io
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 QUALIFIER = ROOT / "tests/tools/qualify-resource-pressure.sh"
@@ -97,9 +102,16 @@ sample_host_memory_admission
                 path.rmdir()
             if value is not None:
                 path.write_text(str(value) + "\n", encoding="ascii")
+        # A synthetic mountinfo record is required for the two-absent-files
+        # root exemption. Fixture paths never inspect host mount provenance.
+        (directory / "mountinfo").write_text(
+            f"7 1 0:7 / {directory} rw - cgroup2 cgroup rw\n",
+            encoding="ascii",
+        )
         script = (
-            "CGROUP_ROOT=$1\n"
+            "CGROUP_ROOT=$1\nCGROUP_MOUNTINFO=$1/mountinfo\n"
             f"MIN_AVAILABLE_BYTES={FLOOR_BYTES}\n"
+            + shell_function(QUALIFIER, "cgroup_root_exemption_proven")
             + shell_function(QUALIFIER, "read_cgroup_root_memory_inventory")
             + (parent_gate() + "\nprintf 'ADMITTED\\n'\n" if gate else
                "read_cgroup_root_memory_inventory\n")
@@ -191,6 +203,25 @@ sample_host_memory_admission
         self.assert_blocked(self.parent_inventory("max", None), "parent cgroup")
         self.assert_blocked(self.parent_inventory(None, 0), "parent cgroup")
 
+    def test_absent_parent_controls_need_verified_mount_root(self):
+        directory = self.root / "parent-cgroup"
+        self.assertEqual(self.parent_inventory().returncode, 0)
+        mountinfo = directory / "mountinfo"
+        mountinfo.write_text(
+            f"7 1 0:7 /other {directory} rw - cgroup2 cgroup rw\n",
+            encoding="ascii",
+        )
+        # Use the same readonly helper, but do not regenerate the mount fixture.
+        script = ("CGROUP_ROOT=$1\nCGROUP_MOUNTINFO=$1/mountinfo\n"
+                  f"MIN_AVAILABLE_BYTES={FLOOR_BYTES}\n"
+                  + shell_function(QUALIFIER, "cgroup_root_exemption_proven")
+                  + shell_function(QUALIFIER, "read_cgroup_root_memory_inventory")
+                  + parent_gate())
+        result = self.run_shell(script, directory)
+        self.assert_blocked(result, "parent cgroup memory.max and memory.current absent")
+        self.assertIn("observed:absent", result.stderr)
+        self.assertIn("required:finite parent controls or true cgroup v2 root", result.stderr)
+
     def test_unreadable_parent_file_blocks(self):
         directory = self.root / "parent-cgroup"
         directory.mkdir()
@@ -218,6 +249,18 @@ sample_host_memory_admission
         (directory / "cpu.pressure").write_text("some avg10=0.00 total=oops\n")
         result = self.run_shell(script + 'cpu_some_total\n', directory)
         self.assert_blocked(result, "cpu.pressure some total")
+        for invalid in (
+                "avg10=-0.01 avg60=0.00 avg300=0.00 total=0",
+                "avg10=0.00 avg60=-1.00 avg300=0.00 total=0",
+                "avg10=0.00 avg60=0.00 avg300=100.01 total=0",
+                "avg10=0.00 avg60=0.00 avg300=0.00 total=-1",
+                "avg10=0.00 avg60=0.00 avg300=0.00 total=0 total=0"):
+            with self.subTest(invalid=invalid):
+                (directory / "cpu.pressure").write_text(
+                    "some " + invalid + "\n", encoding="ascii")
+                self.assert_blocked(
+                    self.run_shell(script + 'cpu_some_total\n', directory),
+                    "cpu.pressure some total")
 
     def test_bounded_child_diagnostics_preserve_reason_without_private_paths(self):
         directory = self.root / "logs"
@@ -306,6 +349,7 @@ sample_host_memory_admission
                 "pid=-1\n",
                 "pid=123\npid=124\n",
                 "pid=1000000000000000000\n",
+                "pid=4194305\n",
                 "other=123\n"):
             with self.subTest(contents=contents):
                 ready.write_text(contents, encoding="ascii")
@@ -329,6 +373,169 @@ sample_host_memory_admission
             "BLOCKED: ID36 cannot set cgroup control memory.max",
             result.stderr)
         self.assertNotIn(str(directory), result.stderr)
+
+    def test_oom_and_psi_counter_regression_refuses_named_bound(self):
+        helper = shell_function(QUALIFIER, "require_monotonic_counter")
+        script = helper + 'require_monotonic_counter "$1" "$2" "$3" "$4"\n'
+        for name, unit in (("memory.events oom", "events"),
+                           ("memory.events oom_kill", "events"),
+                           ("cpu.pressure some total", "usec")):
+            with self.subTest(name=name):
+                result = self.run_shell(script, name, 100, 99, unit)
+                self.assert_blocked(result, name)
+                self.assertIn("observed:99 expected_min:100", result.stderr)
+                self.assertEqual(
+                    self.run_shell(script, name, 100, 100, unit).returncode, 0)
+
+    def test_pair_cgroup_membership_is_exact_and_bounded(self):
+        directory = self.root / "membership"
+        directory.mkdir()
+        procfile = directory / "cgroup.procs"
+        script = ('CGROUP=$1\n'
+                  + shell_function(QUALIFIER, "verify_pair_cgroup_membership")
+                  + 'verify_pair_cgroup_membership 123\n')
+        procfile.write_text("12\n123\n456\n", encoding="ascii")
+        self.assertEqual(self.run_shell(script, directory).returncode, 0)
+        for content, label in (
+                ("12\n1234\n", "FAIL: ID36 readiness PID absent"),
+                ("123\n123\n", "BLOCKED: ID36 cgroup.procs"),
+                ("123\n-1\n", "BLOCKED: ID36 cgroup.procs"),
+                ("123\n" * 129, "BLOCKED: ID36 cgroup.procs")):
+            with self.subTest(content=content[:25]):
+                procfile.write_text(content, encoding="ascii")
+                result = self.run_shell(script, directory)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(label, result.stderr)
+                self.assertNotIn(str(directory), result.stderr)
+        procfile.unlink()
+        self.assert_blocked(self.run_shell(script, directory), "cgroup.procs")
+
+    def test_observed_pair_failure_precedes_blocked_log_and_telemetry(self):
+        log_path = self.root / "pair.log"
+        script = (shell_function(QUALIFIER, "bounded_safe_log_reason")
+                  + shell_function(QUALIFIER, "pair_blocked_is_prerequisite")
+                  + shell_function(QUALIFIER, "preserve_pair_failure_before_telemetry")
+                  + 'preserve_pair_failure_before_telemetry "$1" "$2"\n')
+        log_path.write_text(
+            "BLOCKED: kernel LZ4 compressor unavailable\n"
+            "FAIL: byte-exact replay mismatch\n", encoding="ascii")
+        result = self.run_shell(script, 1, log_path)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("FAIL: ID36 owned-RAM pair failed: byte-exact replay mismatch",
+                      result.stderr)
+        self.assertNotIn(str(log_path), result.stderr)
+        log_path.write_text("BLOCKED: kernel LZ4 compressor unavailable\n",
+                            encoding="ascii")
+        self.assertEqual(self.run_shell(script, 1, log_path).returncode, 0)
+        result = self.run_shell(script, 143, log_path)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("FAIL: ID36 owned-RAM pair exited rc:143", result.stderr)
+        log_path.unlink()
+        result = self.run_shell(script, 1, log_path)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("private failure log unavailable", result.stderr)
+
+    def test_cleanup_failure_preserves_fail_and_suppresses_pass(self):
+        helper = shell_function(QUALIFIER, "cleanup")
+        environment = ('SESSION=$1\nSTOP=$1/stop\nCGROUP=$1/absent\n'
+                       'PAIR_PID=""\nPRESSURE_PID=""\n'
+                       'PASS_EVIDENCE="PASS_ID36_RESOURCE_PRESSURE=synthetic"\n'
+                       'rm() { return 1; }\n'
+                       + helper)
+        for earlier_failure, expected_code, label in (
+                (False, 2, "BLOCKED: ID36 private scratch cleanup"),
+                (True, 1, "FAIL: ID36 private scratch cleanup")):
+            with self.subTest(earlier_failure=earlier_failure):
+                script = (environment + "\nset +e\n"
+                          + ("false\n" if earlier_failure else "true\n")
+                          + "cleanup\n")
+                result = self.run_shell(script, self.root)
+                self.assertEqual(result.returncode, expected_code, result.stderr)
+                self.assertIn(label, result.stderr)
+                self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_pressure_helper_reaps_partial_startup_and_dead_worker(self):
+        pressure_path = ROOT / "tests/runtime/benchmark/resource-pressure.py"
+        spec = importlib.util.spec_from_file_location(
+            "swapz_id36_pressure_test", pressure_path)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class FakeEvent:
+            stopped = False
+            def set(self):
+                self.stopped = True
+
+        class FakeWorker:
+            def __init__(self, fail_start=False, die_after_start=False):
+                self.fail_start = fail_start
+                self.die_after_start = die_after_start
+                self.started = False
+                self.alive = False
+                self.join_count = 0
+                self.terminated = False
+            def start(self):
+                if self.fail_start:
+                    raise OSError("injected fork failure")
+                self.started = True
+                self.alive = not self.die_after_start
+            def is_alive(self):
+                return self.alive
+            def join(self, timeout):
+                self.join_count += 1
+            def terminate(self):
+                self.terminated = True
+                self.alive = False
+            def kill(self):
+                self.alive = False
+
+        class FakeMapping:
+            def __len__(self):
+                return 64 * 1024 * 1024
+            def __setitem__(self, offset, value):
+                pass
+            def close(self):
+                pass
+
+        class FakeContext:
+            def __init__(self, workers):
+                self.workers = iter(workers)
+                self.event = FakeEvent()
+            def Event(self):
+                return self.event
+            def Process(self, **kwargs):
+                return next(self.workers)
+
+        for workers, diagnostic in (
+                ([FakeWorker(), FakeWorker(fail_start=True)],
+                 "worker startup failed"),
+                ([FakeWorker(die_after_start=True), FakeWorker()],
+                 "worker exited before readiness")):
+            with self.subTest(diagnostic=diagnostic):
+                context = FakeContext(workers)
+                stderr = io.StringIO()
+                argv = ["pressure", "--memory-mib", "64",
+                        "--cpu-workers", "2",
+                        "--ready-file", str(self.root / "helper.ready"),
+                        "--stop-file", str(self.root / "helper.stop")]
+                with mock.patch.object(module.multiprocessing, "get_context",
+                                       return_value=context), \
+                     mock.patch.object(module.mmap, "mmap",
+                                       return_value=FakeMapping()), \
+                     mock.patch.object(sys, "argv", argv), \
+                     contextlib.redirect_stderr(stderr):
+                    result = module.main()
+                self.assertEqual(result, 1, stderr.getvalue())
+                self.assertIn("FAIL: ID36", stderr.getvalue())
+                self.assertIn(diagnostic, stderr.getvalue())
+                self.assertTrue(context.event.stopped)
+                self.assertTrue(workers[0].started)
+                self.assertGreater(workers[0].join_count, 0)
+                self.assertFalse(workers[0].is_alive())
+                if workers[1].fail_start:
+                    self.assertEqual(workers[1].join_count, 0)
+                self.assertFalse((self.root / "helper.ready").exists())
 
     def test_prerequisite_command_failures_are_explicitly_guarded(self):
         source = QUALIFIER.read_text(encoding="utf-8")
@@ -459,6 +666,7 @@ swapz_clear_tmp_before_memory_check
     def test_no_fixture_bypasses_privileged_admission_entrypoint(self):
         source = QUALIFIER.read_text(encoding="utf-8")
         self.assertIn("CGROUP_ROOT=/sys/fs/cgroup", source)
+        self.assertIn("CGROUP_MOUNTINFO=/proc/self/mountinfo", source)
         self.assertIn("MIN_AVAILABLE_KIB=$((1024 * 1024))", source)
         self.assertIn("sample_host_memory_admission || exit 2", source)
         self.assertIn("headroom:%s required:%s deficit:%s unit:bytes", source)
@@ -469,6 +677,8 @@ swapz_clear_tmp_before_memory_check
             'write_cgroup_control memory.high "$MEMORY_HIGH_BYTES" || exit 2',
             source)
         self.assertIn('rm -rf -- "$SESSION" 2>/dev/null', source)
+        self.assertIn('printf -v PASS_EVIDENCE', source)
+        self.assertIn('if (( result == 0 )) && [[ -n $PASS_EVIDENCE ]]; then', source)
         self.assertNotIn('rmdir "$CGROUP" 2>/dev/null || result=1', source)
         self.assertIn(
             "BLOCKED: ID36 isolated cgroup cleanup did not complete;",

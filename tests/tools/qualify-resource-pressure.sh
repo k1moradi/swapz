@@ -57,6 +57,7 @@ done
 }
 
 CGROUP_ROOT=/sys/fs/cgroup
+CGROUP_MOUNTINFO=/proc/self/mountinfo
 PRESSURE_MIB=576
 PRESSURE_RAMP_MIB=80
 READY_PRESSURE_MIB=$((PRESSURE_MIB - PRESSURE_RAMP_MIB))
@@ -199,6 +200,19 @@ sample_host_memory_admission() {
 }
 sample_host_memory_admission || exit 2
 
+# A missing pair of root memory controls is exempt only with actual cgroup2
+# mount-root provenance; a missing controller is not unbounded authority.
+cgroup_root_exemption_proven() {
+    awk -v mountpoint="$CGROUP_ROOT" '
+        $4 == "/" && $5 == mountpoint {
+            for (field = 6; field < NF; ++field)
+                if ($field == "-" && $(field + 1) == "cgroup2")
+                    verified = 1
+        }
+        END { exit !verified }
+    ' "$CGROUP_MOUNTINFO" 2>/dev/null
+}
+
 # Report the mounted cgroup hierarchy root separately from whole-host
 # MemAvailable. Linux cgroup v2 deliberately omits memory.max/current on the
 # true root cgroup because the root is exempt from resource control. A
@@ -211,16 +225,27 @@ read_cgroup_root_memory_inventory() {
     local memory_max memory_current headroom_status
 
     if [[ ! -e $memory_max_path && ! -e $memory_current_path ]]; then
+        if ! cgroup_root_exemption_proven; then
+            printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max and memory.current absent without verified cgroup v2 mount-root exemption; observed:absent required:finite parent controls or true cgroup v2 root; restore controller authority before retrying' >&2
+            return 2
+        fi
         printf '%s\n' 'root-exempt root-exempt unbounded'
         return 0
     fi
-    if [[ ! -e $memory_max_path || ! -e $memory_current_path ]]; then
-        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max/current telemetry incomplete; restore both controls or a verified root-exempt hierarchy' >&2
+    if [[ ! -e $memory_max_path ]]; then
+        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max missing; observed:absent required:finite u64 limit or max with memory.current; restore parent limit telemetry' >&2
         return 2
     fi
-    if ! memory_max="$(cat "$memory_max_path" 2>/dev/null)" ||
-       ! memory_current="$(cat "$memory_current_path" 2>/dev/null)"; then
-        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max/current unreadable; restore readable cgroup v2 memory controls' >&2
+    if [[ ! -e $memory_current_path ]]; then
+        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.current missing; observed:absent required:one canonical u64 byte counter; restore current-charge telemetry' >&2
+        return 2
+    fi
+    if ! memory_max="$(cat "$memory_max_path" 2>/dev/null)"; then
+        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max unreadable; observed:unavailable required:finite u64 limit or max; restore parent limit telemetry' >&2
+        return 2
+    fi
+    if ! memory_current="$(cat "$memory_current_path" 2>/dev/null)"; then
+        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.current unreadable; observed:unavailable required:one canonical u64 byte counter; restore current-charge telemetry' >&2
         return 2
     fi
     if (( ${#memory_max} > 20 || ${#memory_current} > 20 )); then
@@ -322,6 +347,7 @@ PRESSURE_LOG="$SESSION/pressure.log"
 PAIR_LOG="$SESSION/pair.log"
 PRESSURE_PID=""
 PAIR_PID=""
+PASS_EVIDENCE=""
 
 # Extract at most one short fail-only reason from a private helper log. Never
 # echo paths or unbounded diagnostics from privileged children.
@@ -372,7 +398,7 @@ read_pair_ready_pid() {
     awk -F= '
         $1 == "pid" {
             if (NF != 2 || $2 !~ /^[1-9][0-9]*$/ ||
-                length($2) > 18 || ++seen != 1)
+                length($2) > 7 || $2 + 0 > 4194304 || ++seen != 1)
                 invalid = 1
             else
                 pid = $2
@@ -385,6 +411,62 @@ read_pair_ready_pid() {
     ' "$ready_path" 2>/dev/null
 }
 
+# Validate one bounded exact membership snapshot, never substring PID matches.
+verify_pair_cgroup_membership() {
+    local expected_pid="$1" inventory_status
+    if awk -v expected_pid="$expected_pid" '
+        NR > 128 { malformed = 1; exit }
+        NF != 1 || $1 !~ /^[1-9][0-9]*$/ ||
+            length($1) > 7 || $1 + 0 > 4194304 {
+            malformed = 1
+            next
+        }
+        $1 == expected_pid { ++matches }
+        END {
+            if (malformed || matches > 1)
+                exit 2
+            if (matches != 1)
+                exit 1
+        }
+    ' "$CGROUP/cgroup.procs" 2>/dev/null; then
+        return 0
+    else
+        inventory_status=$?
+    fi
+    if (( inventory_status == 1 )); then
+        printf 'FAIL: ID36 readiness PID absent from pressure cgroup: observed:absent required_pid:%s; inspect owned pair migration\n' "$expected_pid" >&2
+        return 1
+    fi
+    printf '%s\n' 'BLOCKED: ID36 cgroup.procs readiness PID inventory unreadable or malformed; observed:unavailable required:exactly one canonical matching PID within 128 entries; restore process telemetry' >&2
+    return 2
+}
+
+# Preserve a real child failure before later telemetry can become BLOCKED.
+preserve_pair_failure_before_telemetry() {
+    local pair_exit_code="$1" private_log="$2" failure_reason
+    (( pair_exit_code != 0 )) || return 0
+    if ! failure_reason="$(bounded_safe_log_reason "$private_log" 'FAIL: ')"; then
+        printf 'FAIL: ID36 owned-RAM pair exited rc:%s; private failure log unavailable, restore scratch access\n' "$pair_exit_code" >&2
+        return 1
+    fi
+    if [[ -n $failure_reason ]]; then
+        printf 'FAIL: ID36 owned-RAM pair failed: %s\n' "$failure_reason" >&2
+        return 1
+    fi
+    if (( pair_exit_code == 1 )); then
+        local prerequisite_reason
+        if prerequisite_reason="$(bounded_safe_log_reason "$private_log" 'BLOCKED: ')" &&
+           [[ -n $prerequisite_reason ]] &&
+           pair_blocked_is_prerequisite "$prerequisite_reason"; then
+            return 0
+        fi
+    fi
+    if (( pair_exit_code != 2 )); then
+        printf 'FAIL: ID36 owned-RAM pair exited rc:%s without a verified prerequisite; investigate replay, signal or timeout\n' "$pair_exit_code" >&2
+        return 1
+    fi
+}
+
 cleanup() {
     local result=$?
     trap - EXIT HUP INT TERM
@@ -392,6 +474,13 @@ cleanup() {
     (: > "$STOP") 2>/dev/null || true
     if [[ -n $PAIR_PID ]]; then
         kill -TERM "$PAIR_PID" 2>/dev/null
+        for _ in {1..40}; do
+            kill -0 "$PAIR_PID" 2>/dev/null || break
+            sleep 0.05
+        done
+        if kill -0 "$PAIR_PID" 2>/dev/null; then
+            kill -KILL "$PAIR_PID" 2>/dev/null
+        fi
         wait "$PAIR_PID" 2>/dev/null
     fi
     if [[ -n $PRESSURE_PID ]]; then
@@ -401,6 +490,13 @@ cleanup() {
         done
         if kill -0 "$PRESSURE_PID" 2>/dev/null; then
             kill -TERM "$PRESSURE_PID" 2>/dev/null
+            for _ in {1..40}; do
+                kill -0 "$PRESSURE_PID" 2>/dev/null || break
+                sleep 0.05
+            done
+            if kill -0 "$PRESSURE_PID" 2>/dev/null; then
+                kill -KILL "$PRESSURE_PID" 2>/dev/null
+            fi
         fi
         wait "$PRESSURE_PID" 2>/dev/null
     fi
@@ -429,6 +525,11 @@ cleanup() {
         else
             printf '%s\n' 'FAIL: ID36 private scratch cleanup also failed; preserve the owned session for read-only investigation' >&2
         fi
+    fi
+    # Do not advertise PASS until both owned cgroup and scratch cleanup
+    # succeeded. A cleanup refusal must not leave a misleading PASS record.
+    if (( result == 0 )) && [[ -n $PASS_EVIDENCE ]]; then
+        printf '%s\n' "$PASS_EVIDENCE"
     fi
     exit "$result"
 }
@@ -471,6 +572,17 @@ else
     (( cpu_workers < 2 )) && cpu_workers=2
 fi
 
+# Counter regressions are telemetry authority failures, not fabricated zeroes.
+# Use only the cached pair of scalar observations for each decision.
+require_monotonic_counter() {
+    local counter_name="$1" previous="$2" observed="$3" unit="$4"
+    if (( observed < previous )); then
+        printf 'BLOCKED: ID36 %s counter regressed: observed:%s expected_min:%s unit:%s; restore stable monotonic cgroup telemetry before retrying\n' \
+            "$counter_name" "$observed" "$previous" "$unit" >&2
+        return 2
+    fi
+}
+
 # Missing, duplicate, or malformed counters are not zero OOM/PSI evidence.
 # The caller inherits status 2 (BLOCKED) rather than silently passing.
 event_value() {
@@ -490,7 +602,7 @@ event_value() {
             print counter
         }
     ' "$CGROUP/memory.events" 2>/dev/null)"; then
-        printf 'BLOCKED: ID36 memory.events counter %s missing or malformed; require one canonical nonnegative decimal counter before ID36\n' "$name" >&2
+        printf 'BLOCKED: ID36 memory.events counter %s missing or malformed: observed:unavailable required:one canonical nonnegative counter up to 18 digits unit:events; restore readable OOM telemetry\n' "$name" >&2
         return 2
     fi
     printf '%s\n' "$value"
@@ -501,26 +613,40 @@ cpu_some_total() {
         $1 == "some" {
             if (++seen != 1)
                 invalid = 1
-            for (i = 2; i <= NF; ++i) {
-                if ($i ~ /^total=/) {
-                    if (++totals != 1)
-                        invalid = 1
-                    candidate = substr($i, 7)
-                    if (candidate !~ /^(0|[1-9][0-9]*)$/ ||
+            for (field = 2; field <= NF; ++field) {
+                count = split($field, parts, "=")
+                if (count != 2) {
+                    invalid = 1
+                    continue
+                }
+                key = parts[1]
+                candidate = parts[2]
+                if (key == "total") {
+                    if (++totals != 1 || candidate !~ /^(0|[1-9][0-9]*)$/ ||
                         length(candidate) > 18)
                         invalid = 1
                     else
                         total = candidate
+                } else if (key == "avg10" || key == "avg60" ||
+                           key == "avg300") {
+                    if (++averages[key] != 1 ||
+                        candidate !~ /^([0-9]|[1-9][0-9]|100)(\.[0-9]+)?$/ ||
+                        candidate + 0 > 100)
+                        invalid = 1
+                } else {
+                    invalid = 1
                 }
             }
         }
         END {
-            if (invalid || seen != 1 || totals != 1)
+            if (invalid || seen != 1 || totals != 1 ||
+                averages["avg10"] != 1 || averages["avg60"] != 1 ||
+                averages["avg300"] != 1)
                 exit 1
             print total
         }
     ' "$CGROUP/cpu.pressure" 2>/dev/null)"; then
-        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some total missing or malformed; require one canonical nonnegative decimal some total counter before ID36' >&2
+        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some total or averages missing or malformed: observed:unavailable required:nonnegative canonical total (usec) and avg10,avg60,avg300 in 0..100%; restore readable CPU PSI telemetry' >&2
         return 2
     fi
     printf '%s\n' "$value"
@@ -548,6 +674,14 @@ PAIR_PID=$!
 for _ in {1..600}; do
     [[ -s $PAIR_READY ]] && break
     kill -0 "$PAIR_PID" 2>/dev/null || {
+        if ! pair_fail_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'FAIL: ')"; then
+            printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before prewarm and private failure log is unavailable' >&2
+            exit 1
+        fi
+        if [[ -n $pair_fail_reason ]]; then
+            printf 'FAIL: ID36 owned-RAM pair exited before prewarm: %s\n' "$pair_fail_reason" >&2
+            exit 1
+        fi
         if ! pair_blocked_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'BLOCKED: ')"; then
             printf '%s\n' 'BLOCKED: ID36 owned-RAM pair prerequisite telemetry is unreadable; preserve the private session and retry after restoring scratch access' >&2
             exit 2
@@ -557,13 +691,7 @@ for _ in {1..600}; do
                 "$pair_blocked_reason" >&2
             exit 2
         fi
-        pair_fail_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'FAIL: ' 2>/dev/null || true)"
-        if [[ -n $pair_fail_reason ]]; then
-            printf 'FAIL: ID36 owned-RAM pair exited before prewarm: %s\n' \
-                "$pair_fail_reason" >&2
-        else
-            printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before null_blk prewarm barrier without a bounded diagnostic' >&2
-        fi
+        printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before null_blk prewarm barrier without a bounded diagnostic' >&2
         exit 1
     }
     sleep 0.05
@@ -573,20 +701,10 @@ done
     exit 1
 }
 if ! pair_cgroup_pid="$(read_pair_ready_pid "$PAIR_READY")"; then
-    printf '%s\n' 'BLOCKED: ID36 pair readiness PID unavailable or malformed; require one canonical positive bounded PID in the owned private barrier' >&2
+    printf '%s\n' 'BLOCKED: ID36 pair readiness PID unavailable or malformed: observed:unavailable required:one canonical PID in 1..4194304; restore the owned private readiness barrier' >&2
     exit 2
 fi
-if grep -Fxq "$pair_cgroup_pid" "$CGROUP/cgroup.procs" 2>/dev/null; then
-    :
-else
-    cgroup_procs_rc=$?
-    if (( cgroup_procs_rc > 1 )); then
-        printf '%s\n' 'BLOCKED: ID36 cgroup.procs telemetry unreadable after pair migration; restore readable cgroup v2 process membership' >&2
-        exit 2
-    fi
-    printf '%s\n' 'FAIL: ID36 pair did not enter pressure cgroup after prewarm' >&2
-    exit 1
-fi
+verify_pair_cgroup_membership "$pair_cgroup_pid" || exit $?
 
 bash -c '
     set -e
@@ -648,10 +766,8 @@ pressure_current="$(cat "$CGROUP/memory.current" 2>/dev/null)" || {
 }
 oom_ready="$(event_value oom)"
 oom_kill_ready="$(event_value oom_kill)"
-if (( oom_ready < oom_start || oom_kill_ready < oom_kill_start )); then
-    printf '%s\n' 'BLOCKED: ID36 memory.events OOM counters decreased across startup samples; require stable canonical cgroup telemetry' >&2
-    exit 2
-fi
+require_monotonic_counter 'memory.events oom' "$oom_start" "$oom_ready" events || exit 2
+require_monotonic_counter 'memory.events oom_kill' "$oom_kill_start" "$oom_kill_ready" events || exit 2
 (( oom_ready == oom_start && oom_kill_ready == oom_kill_start )) || {
     printf 'FAIL: ID36 pressure startup encountered OOM events oom:%s oom_kill:%s\n' \
         "$((oom_ready - oom_start))" "$((oom_kill_ready - oom_kill_start))" >&2
@@ -720,13 +836,11 @@ done
 high_active="$(event_value high)"
 oom_active="$(event_value oom)"
 oom_kill_active="$(event_value oom_kill)"
-if (( high_active < high_before || oom_active < oom_before ||
-      oom_kill_active < oom_kill_before )); then
-    printf '%s\n' 'BLOCKED: ID36 memory.events counters decreased during the staged ramp; require stable canonical cgroup telemetry' >&2
-    exit 2
-fi
+require_monotonic_counter 'memory.events high' "$high_before" "$high_active" events || exit 2
+require_monotonic_counter 'memory.events oom' "$oom_before" "$oom_active" events || exit 2
+require_monotonic_counter 'memory.events oom_kill' "$oom_kill_before" "$oom_kill_active" events || exit 2
 (( high_active > high_before )) || {
-    printf '%s\n' 'FAIL: ID36 controlled pressure ramp did not trigger memory.high' >&2
+    printf 'FAIL: ID36 controlled pressure ramp did not trigger memory.high: observed:%s expected_greater_than:%s unit:events; inspect pressure helper residency\n' "$high_active" "$high_before" >&2
     exit 1
 }
 (( oom_active == oom_before && oom_kill_active == oom_kill_before )) || {
@@ -747,6 +861,7 @@ wait "$PAIR_PID"
 pair_rc=$?
 set -e
 PAIR_PID=""
+preserve_pair_failure_before_telemetry "$pair_rc" "$PAIR_LOG" || exit 1
 [[ -f $PAIR_LOG && -r $PAIR_LOG && ! -L $PAIR_LOG ]] || {
     printf '%s\n' 'BLOCKED: ID36 owned-RAM pair diagnostic telemetry unavailable after execution; preserve the private session and restore scratch readability' >&2
     exit 2
@@ -754,6 +869,11 @@ PAIR_PID=""
 # Preserve ordinary pair evidence only on success; a failed pair's unbounded
 # private log must not be copied into admission diagnostics.
 if (( pair_rc == 0 )); then
+    if ! grep -Fxq 'REPLAY_ENGINE=native-c' "$PAIR_LOG" ||
+       ! grep -Fxq 'PASS: bounded owned-RAM same-work pilot; not physical SD, full-card, real-swap or sustained qualification' "$PAIR_LOG"; then
+        printf '%s\n' 'FAIL: ID36 successful pair omitted native replay or byte-exact same-work completion evidence; verify both owned-RAM read/write candidates' >&2
+        exit 1
+    fi
     cat "$PAIR_LOG" || {
         printf '%s\n' 'BLOCKED: ID36 owned-RAM pair diagnostic telemetry became unreadable while collecting successful evidence' >&2
         exit 2
@@ -782,11 +902,10 @@ last_phase="$(grep -E '^BENCH_IO_PHASE=(off|swapz):(prefill|mixed|packed_read)$'
     tail -n 1 | cut -d= -f2- || true)"
 [[ -n $last_phase ]] || last_phase=none
 
-if (( high_after < high_before || oom_after < oom_before ||
-      oom_kill_after < oom_kill_before || cpu_some_after < cpu_some_before )); then
-    printf '%s\n' 'BLOCKED: ID36 memory.events or cpu.pressure counters decreased across replay samples; require stable canonical OOM/PSI telemetry' >&2
-    exit 2
-fi
+require_monotonic_counter 'memory.events high' "$high_before" "$high_after" events || exit 2
+require_monotonic_counter 'memory.events oom' "$oom_before" "$oom_after" events || exit 2
+require_monotonic_counter 'memory.events oom_kill' "$oom_kill_before" "$oom_kill_after" events || exit 2
+require_monotonic_counter 'cpu.pressure some total' "$cpu_some_before" "$cpu_some_after" usec || exit 2
 high_delta=$((high_after - high_before))
 oom_delta=$((oom_after - oom_before))
 oom_kill_delta=$((oom_kill_after - oom_kill_before))
@@ -842,7 +961,7 @@ fi
     exit 1
 }
 (( cpu_some_delta > 0 )) || {
-    printf '%s\n' 'FAIL: ID36 CPU oversubscription produced no CPU PSI stall evidence' >&2
+    printf 'FAIL: ID36 CPU oversubscription produced no CPU PSI stall evidence: observed:%s required_min:1 unit:usec; inspect delegated CPU pressure controller\n' "$cpu_some_delta" >&2
     exit 1
 }
 kill -0 "$PRESSURE_PID" 2>/dev/null || {
@@ -859,4 +978,5 @@ kill -0 "$PRESSURE_PID" 2>/dev/null || {
     exit 1
 }
 
-printf 'PASS_ID36_RESOURCE_PRESSURE=memory_high_events:%s memory_peak_bytes:%s cpu_some_usec:%s cpu_workers:%s pressure_mib:%s oom:0 oom_kill:0\n'     "$high_delta" "$peak_bytes" "$cpu_some_delta" "$cpu_workers" "$PRESSURE_MIB"
+printf -v PASS_EVIDENCE 'PASS_ID36_RESOURCE_PRESSURE=memory_high_events:%s memory_peak_bytes:%s cpu_some_usec:%s cpu_workers:%s pressure_mib:%s oom:0 oom_kill:0' \
+    "$high_delta" "$peak_bytes" "$cpu_some_delta" "$cpu_workers" "$PRESSURE_MIB"

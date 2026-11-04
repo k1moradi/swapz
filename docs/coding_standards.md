@@ -1393,6 +1393,25 @@ item/list per 4KiB I/O or construct a temporary 4MiB joined oracle. Ordinary
 non-pressure benchmark submission remains unchanged so the ID36 harness
 fix cannot masquerade as a production performance change.
 
+ID36 resource admission is evidence, not a bypass. Require two
+consecutive canonical `MemAvailable` observations at the frozen 1 GiB floor.
+A finite parent needs at least 1 GiB of checked unsigned-byte headroom;
+`memory.max=max` still requires a readable current charge, and two absent
+memory files are exempt only at a verified cgroup v2 mount root. Missing
+controllers, parent limit/current charge, OOM counters, PSI or exact readiness
+PID inventory are named BLOCKED prerequisites with safe observed values,
+bounds and required actions, never fabricated PASS. CPU PSI requires one
+monotonic total and valid nonnegative avg10/avg60/avg300 percentages.
+
+An observed native replay/byte-exact read-write failure, OOM, signal death
+or unreaped owned child remains FAIL even if later evidence is unavailable.
+Success requires both native and completed same-work pair markers. Print
+ID36 PASS only after bounded cgroup/scratch cleanup, and reap only started
+CPU burners against shared deadlines with owned-child TERM/KILL escalation.
+Private logs are bounded; memory samples and private paths are not exposed.
+Regression coverage must use synthetic proc/cgroup fixtures and fake workers,
+never actual host memory pressure or privileged cgroup mutation.
+
 ### Foreground GC pressure and scaling telemetry
 
 ID61 evidence must observe the existing serialized collector without changing

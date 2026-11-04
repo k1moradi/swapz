@@ -26,6 +26,13 @@ def cpu_burn(stop_event):
             value ^= value >> 17
 
 
+def join_started_workers(workers, seconds):
+    """Join only started children against one shared deadline, not per PID."""
+    deadline = time.monotonic() + seconds
+    for worker in workers:
+        worker.join(timeout=max(0.0, deadline - time.monotonic()))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--memory-mib", type=int, required=True)
@@ -75,11 +82,20 @@ def main():
         context.Process(target=cpu_burn, args=(stop_event,), daemon=True)
         for _ in range(args.cpu_workers)
     ]
-    for worker in workers:
-        worker.start()
-
+    started_workers = []
     pressure = None
     try:
+        # A failed later fork must not orphan already-running CPU burners.
+        # Join only Processes that started successfully.
+        try:
+            for worker in workers:
+                worker.start()
+                started_workers.append(worker)
+        except (OSError, RuntimeError, AssertionError):
+            print("FAIL: ID36 CPU pressure worker startup failed; stop started workers",
+                  file=sys.stderr)
+            return 1
+
         try:
             # Keep the unfaulted tail genuinely uncharged so the controller can
             # install memory.high between the ready baseline and the final
@@ -103,12 +119,17 @@ def main():
                   file=sys.stderr)
             return 1
 
-        args.ready_file.write_text(
-            f"memory_mib={args.memory_mib} "
-            f"ready_memory_mib={ready_memory_mib} "
-            f"cpu_workers={args.cpu_workers}\n",
-            encoding="ascii",
-        )
+        try:
+            args.ready_file.write_text(
+                f"memory_mib={args.memory_mib} "
+                f"ready_memory_mib={ready_memory_mib} "
+                f"cpu_workers={args.cpu_workers}\n",
+                encoding="ascii",
+            )
+        except OSError:
+            print("FAIL: ID36 pressure readiness record cannot be written",
+                  file=sys.stderr)
+            return 1
 
         if staged:
             while (not stopping and not args.stop_file.exists() and
@@ -127,11 +148,16 @@ def main():
             for offset in range(ready_bytes, len(pressure), PAGE_BYTES):
                 pressure[offset] = (offset // PAGE_BYTES) & 0xFF
 
-            args.active_file.write_text(
-                f"memory_mib={args.memory_mib} "
-                f"ready_memory_mib={ready_memory_mib}\n",
-                encoding="ascii",
-            )
+            try:
+                args.active_file.write_text(
+                    f"memory_mib={args.memory_mib} "
+                    f"ready_memory_mib={ready_memory_mib}\n",
+                    encoding="ascii",
+                )
+            except OSError:
+                print("FAIL: ID36 staged pressure activation record cannot be written",
+                      file=sys.stderr)
+                return 1
 
         sweep = 0
         while not stopping and not args.stop_file.exists():
@@ -147,15 +173,21 @@ def main():
             time.sleep(0.05)
     finally:
         stop_event.set()
-        for worker in workers:
-            worker.join(timeout=2.0)
-        for worker in workers:
+        join_started_workers(started_workers, 2.0)
+        for worker in started_workers:
             if worker.is_alive():
                 worker.terminate()
-        for worker in workers:
-            worker.join(timeout=2.0)
+        join_started_workers(started_workers, 2.0)
+        for worker in started_workers:
+            if worker.is_alive():
+                worker.kill()
+        join_started_workers(started_workers, 2.0)
         if pressure is not None:
             pressure.close()
+        if any(worker.is_alive() for worker in started_workers):
+            print("FAIL: ID36 CPU pressure child could not be reaped after "
+                  "bounded TERM/KILL cleanup", file=sys.stderr)
+            raise SystemExit(1)
 
     return 0
 
