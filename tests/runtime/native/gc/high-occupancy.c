@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define _POSIX_C_SOURCE 200809L
 /*
  * Worst-case RAW allocator/GC occupancy on exact production authority C.
  *
@@ -356,7 +357,7 @@ static int test_sustained_all_raw_gc_rotations(void)
 	CHECK(setup() == 0);
 	/* Native host CPU and wall observations are synthetic only: they are
 	 * NOT the physical ten-second stall or hour-long qualification gate. */
-	CHECK(timespec_get(&wall_start, TIME_UTC) == TIME_UTC);
+	CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_start) == 0);
 	cpu_start = clock();
 	CHECK(cpu_start != (clock_t)-1);
 	CHECK(fill_all_pages(1) == 0);
@@ -397,7 +398,7 @@ static int test_sustained_all_raw_gc_rotations(void)
 	CHECK(gc_reads == gc_writes);
 	CHECK(gc_bytes_relocated == gc_writes * (unsigned long long)SWAPZ_BLOCK_BYTES);
 	cpu_end = clock();
-	CHECK(timespec_get(&wall_end, TIME_UTC) == TIME_UTC);
+	CHECK(clock_gettime(CLOCK_MONOTONIC, &wall_end) == 0);
 	CHECK(cpu_end != (clock_t)-1);
 	printf("SWAPZ_GC_SYNTHETIC_NATIVE_HOST_CPU_WALL=rotations:%u "
 	       "cpu_ms:%.3f wall_ms:%.3f map_scan_count:%llu "
