@@ -260,8 +260,10 @@ Workers are tracked before cgroup migration. `cgroup.procs` must show
 exactly those workers before pressure, must contain no foreign PID while
 workers are active, may shrink only after a worker has entered its verified
 exit phase and actually exited (a live worker escaping its cgroup is not
-acceptable), and must be empty after every worker is reaped. If the process
-inventory of an empty preflight or final workload cgroup
+acceptable), and must be empty after every worker is reaped. Rootless fixtures
+must inject live-worker cgroup escape and post-release OOM events independently
+of normal guard observations. If the process inventory
+of an empty preflight or final workload cgroup
 is unreadable, an ordinary rmdir is still attempted; the kernel refuses that
 operation for a non-empty cgroup, so an empty group is removed without treating
 missing process-inventory evidence as PASS. Failure cannot silently leave that
