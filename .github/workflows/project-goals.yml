@@ -227,6 +227,12 @@ jobs:
           if [[ "$(git symbolic-ref --quiet --short HEAD)" != main ]]; then
             fail "commit=$head_sha checkout must be on main"
           fi
+          if ! commit_message="$(git log -1 --format=%B "$head_sha" 2>/dev/null)"; then
+            fail "commit=$head_sha unable to read commit message"
+          fi
+          if grep -Fqi '[skip ci]' <<<"$commit_message"; then
+            fail "commit=$head_sha reason=[skip ci] commits cannot receive fresh exact-SHA CI qualification; corrective_procedure=do not amend or force-push published history; use already-valid CI for the original code-bearing source if available, otherwise qualify a future code-bearing release-candidate commit through a normal non-force main push"
+          fi
           changeset_file="$(mktemp)"
           commit_list_file="$(mktemp)"
           trap 'rm -f "$changeset_file" "$commit_list_file"' EXIT
@@ -299,6 +305,8 @@ jobs:
               for implementation_path in "${implementation_paths[@]}"; do
                 printf 'SOURCE_CONTRACT_MISMATCH: implementation_path=%q\n' "$implementation_path" >&2
               done
+              printf 'SOURCE_CONTRACT_MISMATCH: commit=%s corrective_procedure=published history cannot be repaired retroactively; do not amend or force-push and do not add a documentation-only repair; make future release-candidate implementation/test/CI changes together with a meaningful canonical standards update in the same new commit, then non-force fast-forward main and require exact-SHA CI\n' \
+                "$commit_sha" >&2
               exit 1
             fi
           done < "$commit_list_file"

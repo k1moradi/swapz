@@ -83,15 +83,24 @@ command, with `make fast_test` only the nonqualifying development loop.
 
 Documentation-only changes and generated `test_results.json`-only evidence
 commits require no extra standards edit. The test reporter labels its
-report-only evidence commits `[skip ci]`; that prevents a new Actions run,
-not a policy exemption for implementation work and not a fresh exact-SHA CI
-PASS. An implementation commit labeled `[skip ci]` remains noncompliant
-without a same-commit standard update; because GitHub suppresses push-triggered
-Actions for that marker, such a commit also has no exact-SHA project-goal CI
-result and must never be used to bypass the direct-main policy. Rootless CI is
-partial evidence:
-the exact-SHA conclusion rejects failed, skipped, and cancelled dependencies
-and never substitutes for owner-run `make test` qualification.
+report-only evidence commits `[skip ci]`; that prevents the push-triggered
+Actions run. The repository-policy job also refuses any run whose tested HEAD
+commit message contains `[skip ci]`, including an explicit workflow dispatch,
+so a report-only or intentionally skipped commit cannot manufacture a fresh
+exact-SHA CI PASS. The marker is not a policy exemption for implementation
+work. An implementation commit labeled `[skip ci]` remains noncompliant
+without a same-commit standard update and must never be used to bypass the
+direct-main policy. Rootless CI is partial evidence: the exact-SHA conclusion
+rejects failed, skipped, and cancelled dependencies and never substitutes for
+owner-run `make test` qualification.
+
+A same-commit policy failure on published history cannot be repaired
+retroactively. Its diagnostic must name the offending SHA and path, explain the
+reason, and give the safe corrective procedure: do not amend or force-push the
+published commit and do not add a documentation-only repair. Future
+release-candidate implementation, test, or CI changes must carry a meaningful
+canonical standards update in the same new commit, then be published by a
+non-force fast-forward to `main` and obtain their own exact-SHA CI result.
 
 CI patch-hygiene checks must inspect each pushed commit against its first
 parent. A bare `git diff --check` on a clean checkout only examines uncommitted
