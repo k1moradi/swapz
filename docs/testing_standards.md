@@ -3869,11 +3869,15 @@ production preparation-slot helpers in both deterministic state-publication
 orders. Its 2,048 handoffs per run cover compressed success, no-fit RAW, exact
 negative errno, RAW_SELECTED racing a late negative result, result-ready ACK
 gating, the last producer/consumer reference, slot-63 reclamation and reuse,
-and closed-admission wake suppression. The RAW-selected consumer must read the
-producer result through the modeled release/acquire `result_ready` edge before
-any post-publication pthread barrier; a barrier must not accidentally make the
-memory-order assertion vacuous. Historical BIO acknowledgements are target-side
-completion state and are not modeled by this preparation helper regression.
+and closed-admission wake suppression. For producer-won READY_COMPRESSED, READY_RAW and ERROR, the consumer
+must acquire the actual preparation state and validate length, exact errno
+and compressed bytes before any `result_ready` acquire or post-publication
+pthread barrier. A relaxed scheduling gate pauses producer completion until
+those checks finish, so an unrelated completion cannot hide a broken state
+publication. RAW_SELECTED leaves the state unchanged: that consumer must instead
+acquire the modeled `result_ready` completion before reading its late result.
+Historical BIO acknowledgements are target-side completion state and are not
+modeled by this preparation helper regression.
 The C11 shim remains a race-test model, not a Linux memory-model proof or a
 substitute for loaded target, suspend/drain, completion-work and lower-I/O
 fault qualification.
