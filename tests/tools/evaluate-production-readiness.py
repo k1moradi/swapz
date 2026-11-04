@@ -624,6 +624,7 @@ def validate_physical_campaign_evidence(
         else:
             if not _same_json_value(serialized_campaign, campaign):
                 reject("sealed campaign object differs from artifact bytes")
+            campaign = serialized_campaign
     if campaign.get("source_sha") != source_sha:
         reject("sealed campaign source binding mismatch")
 
@@ -1050,7 +1051,11 @@ def evaluate_release(
             test_results, test_results_raw, "owner qualification report")
     except EvidenceError as exc:
         block_code(str(exc))
-        test_results = {}
+        try:
+            test_results = _parse_json_object_bytes(
+                test_results_raw, "owner qualification report")
+        except EvidenceError:
+            test_results = {}
 
     try:
         policy = _bound_json_object(
@@ -1061,6 +1066,11 @@ def evaluate_release(
         policy_sha256 = None
         peak_ram_limit = None
         block_code(str(exc))
+        try:
+            policy = _parse_json_object_bytes(
+                policy_raw, "production acceptance policy")
+        except EvidenceError:
+            policy = {}
 
     report_hashes = test_results.get("qualified_artifacts")
     owner_host = test_results.get("host_identity")
