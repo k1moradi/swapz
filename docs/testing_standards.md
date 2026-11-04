@@ -4670,12 +4670,14 @@ owned resources if restoration or normal recovery cannot be proved. Every
 negative refusal must independently inspect mapper/module/swap facts and
 unrelated host swap identity, then restore the controlled fixture and converge
 through ordinary fresh-process recovery or retain explicit quarantine evidence.
-The loaded-stage wrapper must bound the complete success, eleven native-process
-interruptions and negative rehearsal without weakening per-operation timeouts or
-quarantine-on-uncertain-cleanup policy. In addition to the four STARTING and two
-STOPPING death points, owned-null_blk qualification must kill a fresh recovery
-process immediately after durable RECOVERING, swapoff, mapper removal, module
-unload and durable RESTORED. Each recovery interruption must preserve the first
+The loaded-stage wrapper must bound the complete success, all 18 native-process
+interruptions and the negative rehearsal without weakening per-operation
+timeouts or quarantine-on-uncertain-cleanup policy. The 18 interruption points
+are eight start-path milestones, five stop-path milestones, and five recovery-
+path milestones, matching the production hooks and official report parser.
+Owned-null_blk qualification must kill a fresh recovery process immediately
+after durable RECOVERING, swapoff, mapper removal, module unload and durable
+RESTORED. Each recovery interruption must preserve the first
 STARTING origin, exact transaction ownership and unrelated host swap identity,
 then converge in a new process with only the side effects still present at that
 boundary. Production builds keep these interruption hooks compiled to no-ops. Rootless direct-C coverage must
