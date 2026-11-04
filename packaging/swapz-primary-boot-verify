@@ -416,10 +416,10 @@ qualified_installed_package()
 			NR == 2 && $0 !~ /^version=3[.]0[.]0-alpha[.][0-9]+$/ { invalid=1 }
 			NR == 3 && $0 != "kernel_release=" kernel { invalid=1 }
 			NR == 4 && $0 != "source_sha=" source { invalid=1 }
-			NR == 5 && $0 !~ /^qualification_report_sha256=[0-9a-f]{64}$/ { invalid=1 }
-			NR == 6 && $0 !~ /^swapzctl_sha256=[0-9a-f]{64}$/ { invalid=1 }
+			NR == 5 && ($0 !~ /^qualification_report_sha256=[0-9a-f]+$/ || length($0) != 92) { invalid=1 }
+			NR == 6 && ($0 !~ /^swapzctl_sha256=[0-9a-f]+$/ || length($0) != 80) { invalid=1 }
 			NR == 7 && $0 != "module_sha256=" digest { invalid=1 }
-			NR == 8 && $0 !~ /^oracle_sha256=[0-9a-f]{64}$/ { invalid=1 }
+			NR == 8 && ($0 !~ /^oracle_sha256=[0-9a-f]+$/ || length($0) != 78) { invalid=1 }
 			END { if (invalid || NR != 8) exit 1 }
 		' "$marker"; then
 			qualified_count=$((qualified_count + 1))
