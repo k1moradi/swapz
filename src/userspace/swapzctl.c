@@ -962,8 +962,22 @@ static int read_swapz_target_snapshot(int fd, const char *name,
 	int result;
 
 	memset(snapshot, 0, sizeof(*snapshot));
-	if (dm_query(fd, DM_TABLE_STATUS, name, &buffer, &buffer_size) < 0)
+	if (dm_query(fd, DM_TABLE_STATUS, name, &buffer, &buffer_size) < 0) {
+		if (errno == EPROTO) {
+			status_set_problem(
+				&snapshot->problem, "dm_ioctl.data_start/data_size",
+				"sizeof(dm_ioctl) <= data_start <= data_size <= reply capacity",
+				"kernel returned an out-of-bounds DM INFO header");
+			snapshot->ratio_state = STATUS_BLOCKED;
+		} else if (errno == EOVERFLOW) {
+			status_set_problem(
+				&snapshot->problem, "DM_BUFFER_FULL_FLAG",
+				"clear after a complete INFO reply <= 1048576 bytes",
+				"reply remained buffer-full at the bounded maximum");
+			snapshot->ratio_state = STATUS_UNAVAILABLE;
+		}
 		return -1;
+	}
 	result = parse_dm_target_snapshot(buffer, buffer_size, name,
 					  wanted_target, snapshot);
 	free(buffer);
@@ -1096,8 +1110,10 @@ static int report_device_status_with_reader(
 				context, name, target_index, &first);
 			if (first_result < 0) {
 				if (first.problem.field)
-					return status_report_problem("BLOCKED", name, target_index,
-								     &first.problem);
+					return status_report_problem(
+						first.ratio_state == STATUS_UNAVAILABLE ?
+							"UNAVAILABLE" : "BLOCKED",
+						name, target_index, &first.problem);
 				return -1;
 			}
 			if (!first_result) {
@@ -1117,8 +1133,10 @@ static int report_device_status_with_reader(
 				context, name, target_index, &second);
 			if (second_result < 0) {
 				if (second.problem.field)
-					return status_report_problem("BLOCKED", name, target_index,
-								     &second.problem);
+					return status_report_problem(
+						second.ratio_state == STATUS_UNAVAILABLE ?
+							"UNAVAILABLE" : "BLOCKED",
+						name, target_index, &second.problem);
 				return -1;
 			}
 			if (second_result &&
@@ -1182,7 +1200,18 @@ static int status_targets(void)
 		return 1;
 	}
 	if (dm_query(fd, DM_LIST_DEVICES, NULL, &buffer, &buffer_size) < 0) {
-		perror("swapzctl status: list Device Mapper devices");
+		if (errno == EPROTO)
+			fputs("swapzctl status: BLOCKED: field 'dm_ioctl.data_start/data_size'; "
+			      "expected sizeof(dm_ioctl) <= data_start <= data_size <= reply "
+			      "capacity; observed out-of-bounds Device Mapper device-list header\n",
+			      stderr);
+		else if (errno == EOVERFLOW)
+			fputs("swapzctl status: UNAVAILABLE: field 'DM_BUFFER_FULL_FLAG'; "
+			      "expected clear after a complete device list <= 1048576 bytes; "
+			      "observed list remained buffer-full at the bounded maximum\n",
+			      stderr);
+		else
+			perror("swapzctl status: list Device Mapper devices");
 		goto out;
 	}
 	(void)buffer_size;
@@ -1190,34 +1219,41 @@ static int status_targets(void)
 	cursor = (char *)buffer + io->data_start;
 	data_end = (char *)buffer + io->data_size;
 	while (cursor < data_end) {
-		struct dm_name_list *entry;
 		char *record_end;
 		char *name;
 		const char *name_end;
+		uint32_t next;
 
 		if ((size_t)(data_end - cursor) <
 		    offsetof(struct dm_name_list, name) + 1U) {
-			errno = EPROTO;
-			perror("swapzctl status: malformed Device Mapper device list");
+			fputs("swapzctl status: BLOCKED: field 'dm_name_list'; "
+			      "expected complete record header plus NUL-terminated name; "
+			      "observed truncated Device Mapper device-list record\n",
+			      stderr);
 			goto out;
 		}
-		entry = (struct dm_name_list *)cursor;
-		if (entry->next) {
-			if (entry->next < offsetof(struct dm_name_list, name) + 1U ||
-			    (size_t)(data_end - cursor) < entry->next) {
-				errno = EPROTO;
-				perror("swapzctl status: malformed Device Mapper device list");
+		memcpy(&next, cursor + offsetof(struct dm_name_list, next), sizeof(next));
+		if (next) {
+			if (next % _Alignof(struct dm_name_list) ||
+			    next < offsetof(struct dm_name_list, name) + 1U ||
+			    (size_t)(data_end - cursor) < next) {
+				fputs("swapzctl status: BLOCKED: field 'dm_name_list.next'; "
+				      "expected aligned forward offset within data_size; "
+				      "observed zero-width, unaligned or truncated next record\n",
+				      stderr);
 				goto out;
 			}
-			record_end = cursor + entry->next;
+			record_end = cursor + next;
 		} else {
 			record_end = data_end;
 		}
-		name = entry->name;
+		name = cursor + offsetof(struct dm_name_list, name);
 		name_end = memchr(name, '\0', (size_t)(record_end - name));
 		if (!name_end) {
-			errno = EPROTO;
-			perror("swapzctl status: malformed Device Mapper device name");
+			fputs("swapzctl status: BLOCKED: field 'dm_name_list.name'; "
+			      "expected NUL-terminated mapping name within its record; "
+			      "observed missing terminator or truncated reply\n",
+			      stderr);
 			goto out;
 		}
 		if (*name) {
@@ -1231,7 +1267,7 @@ static int status_targets(void)
 				goto out;
 			}
 		}
-		if (!entry->next)
+		if (!next)
 			break;
 		cursor = record_end;
 	}

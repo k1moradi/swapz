@@ -162,6 +162,16 @@ static void assert_status_problem(const char *status, int expected_result,
 
 static void test_required_tokens_duplicates_and_canonical_numbers(void)
 {
+	const char *reordered =
+		"error=0 raw=1 bulk_padding=0 logical_write=12288 "
+		"zero_elided=1 failed=0 physical_write=8192 compressed=1 "
+		"bulk_mode=1 gc_write=0 ignored_future_counter=7";
+	struct swapz_ratio_status ratio;
+
+	assert(parse_swapz_ratio_status(reordered, &ratio) == STATUS_READY);
+	assert(ratio.logical_write_bytes == 12288ULL);
+	assert(ratio.overall_physical_bytes == 8192ULL);
+	assert(ratio.compressed_extent_bytes == 4096ULL);
 	assert_status_problem("failed=0 error=0 logical_write=0", STATUS_BLOCKED,
 			      "physical_write", "missing");
 	assert_status_problem(
