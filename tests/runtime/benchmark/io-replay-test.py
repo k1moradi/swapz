@@ -3188,7 +3188,7 @@ class PairReplayContract(unittest.TestCase):
             baseline_available_kib = 16 * 1024
             samples = []
             phases = (
-                ("baseline", [0] * 10, False),
+                ("baseline", [0] * 11, False),
                 ("initialization", [2, 4], True),
                 ("steady", [6, peak // 1024], True),
                 ("gc", [peak // 1024, 6], True),
@@ -3274,8 +3274,8 @@ class PairReplayContract(unittest.TestCase):
             "excluded": False,
             "swapz": {
                 "logical_pages": 256,
-                "arm_started_monotonic_ns": 1_200_000_000,
-                "arm_finished_monotonic_ns": 1_600_000_000,
+                "arm_started_monotonic_ns": 1_300_000_000,
+                "arm_finished_monotonic_ns": 1_700_000_000,
                 "device_identity": {"dm_uuid": mapper_uuid},
                 "resources": {
                     # A pre-teardown replay scalar has no qualifying authority.
@@ -3306,7 +3306,7 @@ class PairReplayContract(unittest.TestCase):
             [contradictory], target_bytes, source_sha, trace))
 
         wrong_arm = copy.deepcopy(capacity_pair)
-        wrong_arm["swapz"]["arm_started_monotonic_ns"] = 1_400_000_000
+        wrong_arm["swapz"]["arm_started_monotonic_ns"] = 1_500_000_000
         self.assertIsNone(evidence.campaign_capacity_and_ram(
             [wrong_arm], target_bytes, source_sha, trace))
         self.assertTrue(evidence.metadata_ram_trace_matches_swapz_arm(
@@ -3353,11 +3353,11 @@ class PairReplayContract(unittest.TestCase):
         corruptions = (
             lambda item: item["samples"].pop(),
             lambda item: item["samples"][10].update(phase="baseline"),
-            lambda item: item["samples"][12].update(monotonic_ns=1),
-            lambda item: item["samples"][12].update(
+            lambda item: item["samples"][13].update(monotonic_ns=1),
+            lambda item: item["samples"][13].update(
                 timestamp_utc="2026-11-03T00:00:00Z"),
             lambda item: item.update(source_sha="b" * 40),
-            lambda item: item["samples"][12].update(mapper_present=False),
+            lambda item: item["samples"][13].update(mapper_present=False),
             lambda item: item.update(scope="target-owned-estimate"),
             lambda item: item.update(meminfo_unit="bytes"),
             lambda item: item.update(sampling_interval_ns=1_000_000_000),
