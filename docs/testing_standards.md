@@ -5776,7 +5776,18 @@ artifact; zero or absent is acceptable diagnostic state, while a nonzero scalar
 that contradicts the derived host trace is invalid. Missing phases, inconsistent
 timestamps, raw-counter/summary mismatch, malformed provenance, mapper lifecycle
 ambiguity or unrecovered teardown block the campaign and the release evaluator,
-even if the supplied campaign digest was recomputed. The serialized
+even if the supplied campaign digest was recomputed. The sealed host-memory
+binding must also reject any `SUnreclaim` sample greater than independently
+observed host `memory_total_bytes`, converting the raw `kB` integer with
+checked bounds. Unreclaimable slab is physical RAM; `VmallocUsed` measures
+virtual address space and must not be subject to that physical bound. Reject
+a malformed or indented second required meminfo counter instead of silently
+ignoring contradictory values. Report a malformed sample's index, precise
+field and expected/observed numeric bounds without echoing arbitrary evidence
+strings. Such contradictions are unavailable/BLOCKED evidence, not a measured
+target failure; only a properly validated over-ceiling loaded-host peak is
+a genuine measured RAM FAIL. Neither a synthetic control nor the 740 MiB
+index-only capacity estimate can become physical RAM acceptance. The serialized
 Codex loaded-host collector remains a separate required qualification; an
 unbound scalar from `--metadata-and-target-peak-ram-bytes` alone is not a
 resource PASS.

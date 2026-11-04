@@ -63,8 +63,10 @@ def parse_meminfo_counters(text: Any) -> dict[str, int]:
         raise ValueError("meminfo evidence exceeds 32768-byte input bound")
     maximum_kib = ((1 << 64) - 1) // MEMINFO_UNIT_BYTES
     for line in text.splitlines():
+        # Even an indented counter is a malformed required field, not an
+        # ignorable extra line that could conceal a conflicting value.
         name_match = re.match(
-            r"(MemAvailable|SUnreclaim|VmallocUsed):", line)
+            r"[ \t]*(MemAvailable|SUnreclaim|VmallocUsed):", line)
         if name_match is None:
             continue
         match = re.fullmatch(
@@ -247,7 +249,9 @@ def _bounded_observed(value: Any) -> str:
     if type(value) in (bool, float) or value is None:
         return repr(value)
     if isinstance(value, str):
-        return repr(value[:80]) + (" (truncated)" if len(value) > 80 else "")
+        # Untrusted evidence can contain private trace content. Report only
+        # its size, never even a short prefix of the supplied string.
+        return f"<string_length={len(value)}>"
     return f"<{type(value).__name__}>"
 
 
@@ -430,13 +434,16 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
     if before_ns is None or after_ns is None or after_ns < before_ns:
         raise ValueError("metadata RAM host binding time envelope is invalid")
     samples = trace.get("samples") if isinstance(trace, dict) else None
-    if not isinstance(samples, list) or not samples:
-        raise ValueError("metadata RAM trace host samples are missing")
+    if not isinstance(samples, list) or not 0 < len(samples) <= 1_000_000:
+        raise ValueError(
+            "metadata RAM trace host samples are missing or excessive: "
+            f"metric=sample_count expected=1..1000000 "
+            f"observed={len(samples) if isinstance(samples, list) else '<not_list>'}")
     if trace.get("host_boot_id") != boot_id:
         raise ValueError(
             "metadata RAM trace host boot binding mismatch: "
             f"metric=host_boot_id observed={_bounded_observed(trace.get('host_boot_id'))} "
-            f"expected={boot_id} required=same_loaded_host_boot")
+            "expected=host_binding.host_boot_id required=same_loaded_host_boot")
     try:
         first_text = samples[0]["timestamp_utc"]
         last_text = samples[-1]["timestamp_utc"]
@@ -448,13 +455,27 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
             first_ns is None or last_ns is None or
             not before_ns <= first_ns < last_ns <= after_ns):
         raise ValueError("metadata RAM trace falls outside host snapshot window")
-    if any(
-            not isinstance(sample, dict) or
-            type(sample.get("mem_available_kib")) is not int or
-            not 0 < sample["mem_available_kib"] * MEMINFO_UNIT_BYTES <=
-                total_bytes
-            for sample in samples):
-        raise ValueError("metadata RAM trace exceeds observed host memory")
+    maximum_host_kib = total_bytes // MEMINFO_UNIT_BYTES
+    for sample_index, sample in enumerate(samples):
+        if not isinstance(sample, dict):
+            raise ValueError(
+                "metadata RAM host sample is malformed: "
+                f"metric=samples[{sample_index}] expected=object "
+                f"observed={_bounded_observed(sample)}")
+        # Both MemAvailable and unreclaimable slab represent physical RAM.
+        # Unlike VmallocUsed (virtual address space), neither may exceed the
+        # independently sealed total physical host memory.
+        for field, minimum in (("mem_available_kib", 1),
+                               ("s_unreclaim_kib", 0)):
+            value = sample.get(field)
+            if (type(value) is not int or
+                    not minimum <= value <= maximum_host_kib):
+                raise ValueError(
+                    "metadata RAM sample contradicts host physical memory: "
+                    f"metric=samples[{sample_index}].{field} "
+                    f"observed={_bounded_observed(value)} minimum={minimum} "
+                    f"maximum={maximum_host_kib} "
+                    f"memory_total_bytes={total_bytes}")
 
 
 def validate_metadata_ram_trace(
@@ -471,6 +492,11 @@ def validate_metadata_ram_trace(
             "schema", "capture", "scope", "source_sha", "mapper_uuid",
             "host_boot_id", "sampling_interval_ns", "meminfo_unit", "samples"}:
         raise ValueError("metadata RAM trace fields are incomplete")
+    if trace["meminfo_unit"] != "kB":
+        raise ValueError(
+            "metadata RAM sample unit declaration is invalid: "
+            f"metric=meminfo_unit observed={_bounded_observed(trace['meminfo_unit'])} "
+            "expected=kB")
     if (
             trace["schema"] != "swapz-metadata-ram-samples-v1" or
             trace["capture"] != "serialized-loaded-host" or
@@ -485,6 +511,11 @@ def validate_metadata_ram_trace(
             not isinstance(trace["host_boot_id"], str) or
             not BOOT_ID.fullmatch(trace["host_boot_id"])):
         raise ValueError("metadata RAM trace provenance is invalid")
+    if trace["mapper_uuid"] != mapper_uuid:
+        raise ValueError(
+            "metadata RAM trace mapper binding mismatch: "
+            f"metric=mapper_uuid observed={_bounded_observed(trace['mapper_uuid'])} "
+            "expected=exact_mapper_uuid")
     if trace["source_sha"] != source_sha:
         raise ValueError(
             "metadata RAM trace source binding mismatch: "
@@ -516,12 +547,25 @@ def validate_metadata_ram_trace(
     previous_monotonic = None
     previous_utc_ns = None
     first_utc_ns = None
-    for sample in samples:
-        if not isinstance(sample, dict) or set(sample) != SAMPLE_FIELDS:
-            raise ValueError("metadata RAM sample fields are invalid")
+    for sample_index, sample in enumerate(samples):
+        if not isinstance(sample, dict):
+            raise ValueError(
+                "metadata RAM sample fields are invalid: "
+                f"metric=samples[{sample_index}] expected=object "
+                f"observed={_bounded_observed(sample)}")
+        if set(sample) != SAMPLE_FIELDS:
+            missing = ",".join(sorted(SAMPLE_FIELDS - set(sample)))
+            unexpected_count = len(set(sample) - SAMPLE_FIELDS)
+            raise ValueError(
+                "metadata RAM sample fields are invalid: "
+                f"metric=samples[{sample_index}].fields "
+                f"missing={missing or 'none'} unexpected_count={unexpected_count}")
         phase = sample["phase"]
         if not isinstance(phase, str) or phase not in PHASES:
-            raise ValueError("metadata RAM sample phase is invalid")
+            raise ValueError(
+                "metadata RAM sample phase is invalid: "
+                f"metric=samples[{sample_index}].phase "
+                f"observed={_bounded_observed(phase)} expected=known_phase")
         next_index = PHASES.index(phase)
         if next_index < phase_index or next_index > phase_index + 1:
             raise ValueError("metadata RAM trace phase order is invalid")
@@ -563,7 +607,10 @@ def validate_metadata_ram_trace(
                 "required=canonical_UTC_Z")
         utc_ns = _parse_utc_ns(utc_text, UTC_TIME)
         if utc_ns is None:
-            raise ValueError("metadata RAM sample UTC timestamp invalid")
+            raise ValueError(
+                "metadata RAM sample UTC timestamp invalid: "
+                f"metric=samples[{sample_index}].timestamp_utc "
+                "expected=valid_calendar_UTC_Z")
         if first_utc_ns is None:
             first_utc_ns = utc_ns
         if previous_monotonic is not None:
