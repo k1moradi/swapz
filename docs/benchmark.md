@@ -463,9 +463,10 @@ counter, require its presence as a nonnegative integer, and enforce the frozen
 as zero skips; this is fail-closed evidence validation, not a new threshold.
 It also verifies that each arm actually measured at least 3,600 seconds,
 preserved exactly 60 consecutive one-minute operation buckets with matching
-whole-arm READ/WRITE counts, and independently recomputes each bucket's useful
-WRITE throughput from its write count and 60-second duration before evaluating
-first/last-quartile drift. Each report records the measured phase's absolute
+whole-arm READ/WRITE counts. Each bucket carries an absolute monotonic start/end
+inside the measured arm, adjacent buckets must join exactly, and the evaluator
+independently recomputes each bucket's useful WRITE throughput from its write
+count and 60-second duration before evaluating first/last-quartile drift. Each report records the measured phase's absolute
 monotonic start/end; continuous telemetry must cover those exact bounds, not
 merely another hour elsewhere in the broader arm. At least one fully contained
 swapz telemetry interval must show positive GC victim and relocated-page

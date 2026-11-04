@@ -597,10 +597,14 @@ def phase_workers(fd, data_offset: int, args, hot_pages: int, fill_chunks, churn
 
     results = list(pool.map(worker, range(qd)))
     os.fsync(fd)
-    return results, progress, (time.monotonic_ns() - phase_start)
+    return results, progress, (time.monotonic_ns() - phase_start), phase_start
 
 
-def merge_phase(results, wall_ns: int, hot_pages: int | None = None):
+def merge_phase(results, wall_ns: int, hot_pages: int | None = None,
+                phase_start_ns: int | None = None):
+    if phase_start_ns is not None and (type(phase_start_ns) is not int or
+                                       phase_start_ns <= 0):
+        raise ValueError("measured phase start must be a positive monotonic timestamp")
     read_hist, write_hist = LatencyHistogram(), LatencyHistogram()
     minutes = {}
     lane_count = len(results)
@@ -645,6 +649,11 @@ def merge_phase(results, wall_ns: int, hot_pages: int | None = None):
             "write_operations": row["write"].count,
             "operations": combined.count,
         }
+        if phase_start_ns is not None:
+            output["start_monotonic_ns"] = (
+                phase_start_ns + minute * 60_000_000_000)
+            output["end_monotonic_ns"] = (
+                output["start_monotonic_ns"] + 60_000_000_000)
         if hot_pages is not None:
             output["cumulative_overwrite"] = overwrite_coverage(
                 hot_pages, lane_count, cumulative_lane_writes)
@@ -1011,7 +1020,7 @@ def run(args):
                     fd, data_offset, occupied, args.qd, fill_chunks, args.seed,
                     pool)
                 partial["fill"] = fill
-                warm_results, _, _ = phase_workers(
+                warm_results, _, _, _ = phase_workers(
                     fd, data_offset, args, hot, fill_chunks, churn_chunks, True,
                     pool)
                 initial_writes = [row["writes"] for row in warm_results]
@@ -1035,7 +1044,7 @@ def run(args):
                     interval_sampler.start()
                 start = time.monotonic_ns()
                 try:
-                    measured, measured_progress, wall_ns = phase_workers(
+                    measured, measured_progress, wall_ns, measured_phase_start_ns = phase_workers(
                         fd, data_offset, args, hot, fill_chunks, churn_chunks, False,
                         pool, initial_writes, measured_progress)
                     end = time.monotonic_ns()
@@ -1057,7 +1066,7 @@ def run(args):
 
             seconds = (end - start) / 1e9
             read_hist, write_hist, minute_rows = merge_phase(
-                measured, wall_ns, hot)
+                measured, wall_ns, hot, phase_start_ns=measured_phase_start_ns)
             read_ops, write_ops = read_hist.count, write_hist.count
             measured_writes_per_lane = [
                 row["writes"] - initial_writes[index]

@@ -602,8 +602,9 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                 raise ValueError(
                     "minute throughput/duration or tail latency is inconsistent")
         # A combined per-minute histogram must conserve every bin from the
-        # independent whole-arm READ and WRITE histograms. Comparing only
-        # bucket counts and p99 lets rewritten bins alter the drift verdict.
+        # whole-arm READ and WRITE histograms. This catches unbalanced edits to
+        # bucket distributions; the absolute bucket chronology below separately
+        # binds the 60 rows to the measured one-hour window.
         minute_bin_totals = [0] * LATENCY_BIN_COUNT
         for row in minutes:
             for bin_index, bin_count in row["latency_histogram"]["bins"]:
@@ -638,6 +639,28 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                     rel_tol=1e-9, abs_tol=1e-6)):
             raise ValueError(
                 "one-hour telemetry intervals or measured-arm chronology are absent")
+        first_minute_start = minutes[0].get("start_monotonic_ns")
+        previous_minute_end = None
+        for index, row in enumerate(minutes):
+            minute_start = row.get("start_monotonic_ns")
+            minute_end = row.get("end_monotonic_ns")
+            if (type(minute_start) is not int or type(minute_end) is not int or
+                    minute_end - minute_start != 60_000_000_000 or
+                    (previous_minute_end is not None and
+                     minute_start != previous_minute_end) or
+                    (type(first_minute_start) is int and
+                     minute_start != first_minute_start +
+                     index * 60_000_000_000)):
+                raise ValueError(
+                    "minute buckets lack consecutive absolute one-minute chronology")
+            previous_minute_end = minute_end
+        if (type(first_minute_start) is not int or
+                first_minute_start < measured_started or
+                first_minute_start - measured_started > 1_000_000_000 or
+                previous_minute_end is None or
+                previous_minute_end > measured_finished):
+            raise ValueError(
+                "minute buckets are outside the measured monotonic window")
         previous_end = 0.0
         previous_monotonic_end = None
         positive_gc_interval = False

@@ -2921,6 +2921,11 @@ class PairReplayContract(unittest.TestCase):
                 },
             }
             for index in range(60)]
+        for index, row in enumerate(minute_buckets):
+            row["start_monotonic_ns"] = (
+                measured_started_ns + index * 60_000_000_000)
+            row["end_monotonic_ns"] = (
+                measured_started_ns + (index + 1) * 60_000_000_000)
         raw = {
             "arm_started_monotonic_ns": arm_started_ns,
             "measured_start_monotonic_ns": measured_started_ns,
@@ -2963,6 +2968,12 @@ class PairReplayContract(unittest.TestCase):
             lambda arm: arm["minute_buckets"][0].update(
                 logical_write_mbps=999.0),
             lambda arm: arm["minute_buckets"][0].update(duration_seconds=59.0),
+            lambda arm: arm["minute_buckets"][1].update(
+                start_monotonic_ns=
+                    arm["minute_buckets"][1]["start_monotonic_ns"] + 1),
+            lambda arm: arm["minute_buckets"][1].update(
+                end_monotonic_ns=
+                    arm["minute_buckets"][1]["end_monotonic_ns"] + 1),
             lambda arm: arm["minute_buckets"][0][
                 "latency_histogram"]["bins"][0].__setitem__(1, 1),
             lambda arm: arm["sustained_intervals"].pop(),
