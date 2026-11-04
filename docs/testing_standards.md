@@ -6150,7 +6150,8 @@ Kernel diagnostics, helper failure reasons and contradictory source/module/
 kernel markers use fixed safe categories rather than echoing private dmesg
 records, arbitrary marker values or privileged evidence paths. Runtime JSON,
 kernel configuration, bounded session logs and execution records have finite
-parser limits; oversized evidence cannot produce PASS. A clean synthetic
+parser limits; oversized evidence cannot produce PASS. The private rootless wrapper replay must assert the redacted lockdep
+category rather than matching raw diagnostic text. A clean synthetic
 verifier result remains rootless-only, not proof of loaded instrumentation.
 The replay guard
 still rejects EUID 0; replay variables never bypass the wrapper's unprivileged

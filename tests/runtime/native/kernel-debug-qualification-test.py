@@ -1479,7 +1479,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ("missing_kconfig_option", "kasan-lockdep", 2, "kasan"),
             ("kcsan_unavailable_config", "kcsan", 2, "kcsan"),
             ("kcsan_disabled_runtime", "kcsan", 2, "KCSAN"),
-            ("lockdep_splat", "kasan-lockdep", 1, "circular locking dependency"),
+            ("lockdep_splat", "kasan-lockdep", 1, "kernel diagnostic in bounded dmesg: lockdep"),
             ("kasan_report", "kasan-lockdep", 1, "KASAN"),
             ("helper_failure", "kasan-lockdep", 1, "helper exit=17"),
             ("runtime_snapshot_failure", "kasan-lockdep", 2, "exit=19"),
@@ -1494,7 +1494,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ("missing_run_marker", "kasan-lockdep", 2, "missing loaded run marker"),
             ("timeout", "kasan-lockdep", 1, "helper exit=124"),
             ("abnormal_child_exit", "kasan-lockdep", 1, "helper exit=137"),
-            ("lockdep_with_preflight_gap", "kasan-lockdep", 1, "circular locking dependency"),
+            ("lockdep_with_preflight_gap", "kasan-lockdep", 1, "kernel diagnostic in bounded dmesg: lockdep"),
             ("clean", "kasan-lockdep", 0, "ROOTLESS_VALIDATOR_ONLY=PASS"),
             ("clean_kcsan", "kcsan", 0, "ROOTLESS_VALIDATOR_ONLY=PASS"),
         )
