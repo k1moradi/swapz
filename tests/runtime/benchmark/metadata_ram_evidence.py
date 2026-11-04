@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import datetime
 import re
-import statistics
 import struct
 from typing import Any
 
@@ -91,10 +90,16 @@ def maximum_logical_pages_for_partition(
 
 
 def _median(values: list[int]) -> int:
-    value = statistics.median(values)
-    if not isinstance(value, (int, float)) or int(value) != value:
+    if not values or any(type(value) is not int for value in values):
+        raise ValueError("metadata RAM median input is invalid")
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    total = ordered[middle - 1] + ordered[middle]
+    if total % 2:
         raise ValueError("metadata RAM median is not integral")
-    return int(value)
+    return total // 2
 
 
 def validate_metadata_ram_trace(
