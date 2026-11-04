@@ -1352,6 +1352,89 @@ static int test_maximum_capacity_raw_cow_and_gc_progress(void)
 }
 
 
+/*
+ * Model the exact 17 constructor capacity-index sites with tiny geometry.
+ * Injection skips one calloc and destroys every earlier allocation; success
+ * attaches the real production authority. This never allocates max-capacity
+ * memory or claims to exercise the loaded DM constructor.
+ */
+static int test_small_index_failure_and_repeated_lifecycle(void)
+{
+	const swapz_u32 physical_blocks = 4U * SWAPZ_SEGMENT_BLOCKS;
+	const swapz_u32 segment_count =
+		physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	struct swapz_authority_geometry geometry;
+	struct swapz_authority temporary_authority;
+	const size_t allocation_sizes[] = {
+		sizeof(struct swapz_map),
+		sizeof(swapz_u32), sizeof(swapz_u32),
+		sizeof(swapz_u16), sizeof(swapz_u8), sizeof(swapz_u8),
+		sizeof(swapz_u32), sizeof(swapz_u32), sizeof(swapz_u16),
+		sizeof(swapz_u32), sizeof(swapz_u32), sizeof(swapz_u32),
+		sizeof(swapz_u32), sizeof(swapz_u32), sizeof(swapz_u32),
+		sizeof(swapz_u8), sizeof(swapz_u8),
+	};
+	const size_t allocation_count = sizeof(allocation_sizes) /
+					sizeof(allocation_sizes[0]);
+	size_t allocation_lengths[17];
+	size_t iteration;
+
+	CHECK(allocation_count == 17U);
+	CHECK(swapz_authority_capacity(physical_blocks, &geometry) == 0);
+	CHECK(geometry.maximum_logical_pages == SWAPZ_SEGMENT_BLOCKS);
+	allocation_lengths[0] = geometry.maximum_logical_pages;
+	allocation_lengths[1] = geometry.maximum_logical_pages;
+	allocation_lengths[2] = geometry.maximum_logical_pages;
+	allocation_lengths[3] = physical_blocks;
+	allocation_lengths[4] = physical_blocks;
+	allocation_lengths[5] = physical_blocks;
+	for (iteration = 6U; iteration < allocation_count; ++iteration)
+		allocation_lengths[iteration] = segment_count;
+
+	/* 17 injected site failures plus success, repeated 8 times each. */
+	for (iteration = 0; iteration < 8U * (allocation_count + 1U);
+	     ++iteration) {
+		void *allocated_indexes[17] = {0};
+		size_t site, failure_site = iteration % (allocation_count + 1U);
+		int error = 0;
+		bool allocated_all = false;
+
+		for (site = 0; site < allocation_count; ++site) {
+			if (site == failure_site) {
+				error = -ENOMEM;
+				break;
+			}
+			allocated_indexes[site] =
+				calloc(allocation_lengths[site],
+				       allocation_sizes[site]);
+			if (!allocated_indexes[site]) {
+				error = -ENOMEM;
+				break;
+			}
+		}
+		if (!error) {
+			allocated_all = true;
+			error = swapz_authority_init(
+				&temporary_authority,
+				(struct swapz_map *)allocated_indexes[0],
+				(swapz_u16 *)allocated_indexes[3],
+				(swapz_u8 *)allocated_indexes[4],
+				geometry.maximum_logical_pages, physical_blocks);
+			if (!error &&
+			    temporary_authority.reserve_blocks !=
+					geometry.gc_reserve_blocks)
+				error = -EUCLEAN;
+		}
+		/* Model constructor unwind and normal teardown alike. */
+		for (site = allocation_count; site > 0U; --site)
+			free(allocated_indexes[site - 1U]);
+		CHECK(failure_site == allocation_count ?
+		      allocated_all && !error :
+		      !allocated_all && error == -ENOMEM);
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -1359,6 +1442,7 @@ int main(void)
 	CHECK(test_initial_rejects_unsafe_capacity() == 0); passed++;
 	CHECK(test_capacity_preflight_segment_sweep() == 0); passed++;
 	CHECK(test_selected_card_geometry_and_memory_scaling() == 0); passed++;
+	CHECK(test_small_index_failure_and_repeated_lifecycle() == 0); passed++;
 	CHECK(test_16gib_fixture_maximum_capacity() == 0); passed++;
 	CHECK(test_maximum_capacity_single_block_gc_reclaim() == 0); passed++;
 	CHECK(test_maximum_capacity_raw_cow_and_gc_progress() == 0); passed++;
