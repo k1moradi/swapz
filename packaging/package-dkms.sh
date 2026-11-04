@@ -1765,11 +1765,11 @@ if [[ "$action" == uninstall ]]; then
   assert_single_kernel_dkms_scope
   if [[ -z "$test_root" && "$action" == uninstall ]] &&
      [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
-    echo "BLOCKED: uninstall preflight: loaded module; refusing DKMS removal; rollback not attempted" >&2
+    echo "BLOCKED: loaded module; refusing DKMS removal; phase=uninstall preflight; rollback not attempted" >&2
     exit 1
   fi
   if [[ -n "$test_root" ]] && swapz_module_loaded; then
-    echo "BLOCKED: uninstall preflight: loaded module; refusing DKMS removal; rollback not attempted" >&2
+    echo "BLOCKED: loaded module; refusing DKMS removal; phase=uninstall preflight; rollback not attempted" >&2
     exit 1
   fi
   swapz_mapper_present && blocked "active swapz mapping; refusing package removal"

@@ -1645,6 +1645,12 @@ exec "{flock_binary}" "$@"
         for flag in ("SWAPZ_TEST_MAPPING_ACTIVE", "SWAPZ_TEST_MODULE_ACTIVE"):
             result = self.invoke("uninstall", {flag: "1"})
             self.assertNotEqual(result.returncode, 0)
+            if flag == "SWAPZ_TEST_MODULE_ACTIVE":
+                self.assertIn(
+                    "BLOCKED: loaded module; refusing DKMS removal",
+                    result.stderr)
+                self.assertIn("phase=uninstall preflight", result.stderr)
+                self.assertIn("rollback not attempted", result.stderr)
             self.assertTrue((self.prefix / "sbin/swapzctl").exists())
             self.assertTrue(self.installed_module.exists())
 
