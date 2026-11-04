@@ -5379,9 +5379,11 @@ monotonic interval bounds. Every RAM sample labeled `gc` must overlap an
 interval where at least one exported target counter among `gc_wall_ns`,
 `gc_victims` or `gc_pages` actually advanced; a caller-supplied GC phase
 label without measured target GC activity is invalid. The sealer derives the
-peak from those raw counters and
-stores the derived summary; the release evaluator independently recomputes the
-summary and rejects any mismatch. It must not trust an asserted per-sample
+peak from those raw counters, stores the derived summary, and also seals the
+sustained arm's absolute start/end plus only the positive-GC telemetry windows.
+The release evaluator independently recomputes the RAM summary and revalidates
+the phase/GC chronology against that compact arm binding; a campaign cannot
+drop the pair files and thereby lose the RAM-to-workload chronology check. It must not trust an asserted per-sample
 "target RAM" byte count or a replay-time peak scalar, because this whole-host
 method is conservative rather than exact target allocation attribution. Since
 mapper teardown happens after the replay arm is written, the serialized
