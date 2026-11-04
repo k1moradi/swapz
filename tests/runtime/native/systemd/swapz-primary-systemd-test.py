@@ -165,6 +165,12 @@ class GeneratorTests(unittest.TestCase):
             "dev-disk-by\\x2dpartuuid-01234567.device dev-disk-by\\x2dpartuuid-76543210.swap\n",
             "dev-disk-by\\x2dpartuuid-0123\\xZZ67.device dev-disk-by\\x2dpartuuid-0123\\xZZ67.swap\n",
             "dev-disk-by\\x2dpartuuid-ABCDEF12.device dev-disk-by\\x2dpartuuid-ABCDEF12.swap\n",
+            # Eight decoded characters do not imply eight hexadecimal digits.
+            "dev-disk-by\\x2dpartuuid-1234\\x2d567.device dev-disk-by\\x2dpartuuid-1234\\x2d567.swap\n",
+            # A manager response with duplicated or edge hyphens is invalid.
+            "dev-disk-by\\x2dpartuuid-12345678\\x2d\\x2d90.device dev-disk-by\\x2dpartuuid-12345678\\x2d\\x2d90.swap\n",
+            "dev-disk-by\\x2dpartuuid-\\x2d12345678.device dev-disk-by\\x2dpartuuid-\\x2d12345678.swap\n",
+            "dev-disk-by\\x2dpartuuid-12345678\\x2d.device dev-disk-by\\x2dpartuuid-12345678\\x2d.swap\n",
         )
         for response in malformed:
             with self.subTest(response=response):

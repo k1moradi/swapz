@@ -109,15 +109,21 @@ valid_encoded_partuuid()
 {
 	value=$1
 	decoded_length=0
+	hex_digit_count=0
+	previous_was_hyphen=1
 	while [ -n "$value" ]; do
 		case "$value" in
 		'\x2d'*)
+			[ "$previous_was_hyphen" -eq 0 ] || return 1
 			value=${value#'\x2d'}
 			decoded_length=$((decoded_length + 1))
+			previous_was_hyphen=1
 			;;
 		[0-9a-f]*)
 			value=${value#?}
 			decoded_length=$((decoded_length + 1))
+			hex_digit_count=$((hex_digit_count + 1))
+			previous_was_hyphen=0
 			;;
 		*)
 			return 1
@@ -125,7 +131,9 @@ valid_encoded_partuuid()
 		esac
 		[ "$decoded_length" -le 64 ] || return 1
 	done
-	[ "$decoded_length" -ge 8 ]
+	# Match the protected selector grammar, not merely the decoded length.
+	[ "$decoded_length" -ge 8 ] && [ "$hex_digit_count" -ge 8 ] &&
+		[ "$previous_was_hyphen" -eq 0 ]
 }
 valid_encoded_partuuid "$encoded_device" || {
 	echo "swapz-primary-generator: invalid escaped PARTUUID" >&2
