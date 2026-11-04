@@ -10,6 +10,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -70,6 +71,9 @@ class KernelDebugQualificationTests(unittest.TestCase):
         snapshot: dict[str, object] = {
             "schema": qualification.RUNTIME_SCHEMA,
             "required": list(required),
+            "boot_id": qualification.DEFAULT_BOOT_ID.read_text(
+                encoding="utf-8").strip(),
+            "observed_monotonic_ns": time.monotonic_ns(),
         }
         if "kcsan" in required:
             snapshot["kcsan_enabled"] = kcsan_enabled
@@ -85,8 +89,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
                runtime_after: str | None = None) -> tuple[str, str]:
         return qualification.verify_owned_run(
             required, self.features(), baseline, final, execution,
-            runtime_before or self.runtime_snapshot(required),
-            runtime_after or self.runtime_snapshot(required),
+            runtime_before if runtime_before is not None else self.runtime_snapshot(required),
+            runtime_after if runtime_after is not None else self.runtime_snapshot(required),
             SOURCE_SHA,
         )
 
@@ -286,13 +290,20 @@ class KernelDebugQualificationTests(unittest.TestCase):
             "refcount_t: underflow",
             "WARNING: CPU: 0 at dm_swapz",
             "workqueue: swapz invoked after free",
+            "KASAN: slab-out-of-bounds Read",
+            "KCSAN: data-race in dm_swapz",
+            "refcount_warn_saturate: saturated",
+            "INFO: task kworker blocked for more than 120 seconds",
+            "rcu: INFO: rcu_preempt detected stalls on CPUs/tasks",
+            "kernel panic - not syncing: unrecoverable",
+            "use-after-free detected in dm_swapz",
         )
         for diagnostic in diagnostics:
             with self.subTest(diagnostic=diagnostic):
                 self.assertEqual(self.verify(final="old\n" + diagnostic)[0], "FAIL")
 
     def test_static_warning_classes_and_no_false_clean_pass(self) -> None:
-        output = ("  CHECK /build/dm-target.c\n"
+        output = ("  CHECK /repo/build/kernel/w1/dm-target.c\n"
                   "dm-target.c:20:3: warning: incorrect type in argument\n"
                   "dm-target.c:30:4: warning: incorrect address space __user\n"
                   "dm-target.c:40:4: warning: restricted __le32 degrades\n")
@@ -321,6 +332,220 @@ class KernelDebugQualificationTests(unittest.TestCase):
             ),
             "other",
         )
+        self.assertEqual(
+            qualification.classify_warning(
+                "dm-target.c:99:4: error: undefined identifier '__builtin_shuffle'"
+            ),
+            "other",
+        )
+
+    def test_static_inventory_tracks_module_kbuild_and_rejects_arch_drift(self) -> None:
+        directory = Path(self.temporary_directory.name)
+        headers = directory / "configured-headers"
+        (headers / "include/config").mkdir(parents=True)
+        configuration = headers / ".config"
+        auto_config = headers / "include/config/auto.conf"
+        configuration.write_text("CONFIG_X86_64=y\n", encoding="utf-8")
+        auto_config.write_text("CONFIG_ARM64=y\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "contradict"):
+            qualification.static_required_sources(headers)
+        auto_config.write_text("CONFIG_X86_64=y\n", encoding="utf-8")
+
+        original = (Path(__file__).resolve().parents[3] /
+                    "src/kernel/Makefile").read_text(encoding="utf-8")
+        modified = directory / "Makefile"
+        suffix = "predictor-sse2.o predictor-avx2.o predictor-avx512.o"
+        self.assertIn(suffix, original)
+        modified.write_text(original.replace(
+            suffix, suffix + " predictor-future.o"), encoding="utf-8")
+        self.assertIn(
+            "predictor-future.c",
+            qualification.static_required_sources(headers, modified),
+        )
+        modified.write_text(original.replace(
+            suffix, suffix + "\nifeq ($(UNMODELLED),y)\n"
+            "dm-swapz-y += predictor-future.o\nendif"),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            qualification.static_required_sources(headers, modified)
+
+        configuration.write_text("CONFIG_X86_64=y\nCONFIG_ARM64=y\n",
+                                 encoding="utf-8")
+        auto_config.write_text(configuration.read_text(encoding="utf-8"),
+                               encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "contradictory"):
+            qualification.static_required_sources(headers)
+        configuration.write_text("CONFIG_SMP=y\n", encoding="utf-8")
+        auto_config.write_text("CONFIG_SMP=y\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "not identifiable"):
+            qualification.static_required_sources(headers)
+
+    def test_static_rejects_partial_stale_and_duplicate_check_records(self) -> None:
+        headers = Path(self.temporary_directory.name) / "checked-headers"
+        headers.mkdir()
+        (headers / ".config").write_text("CONFIG_X86_64=y\n",
+                                         encoding="utf-8")
+        sources = (
+            "dm-target", "codec", "authority", "engine", "predictor",
+            "predictor-sse2", "predictor-avx2", "predictor-avx512",
+        )
+        complete = "".join(
+            f"  CHECK /repo/build/kernel/w1/{name}.c\n" for name in sources)
+        with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/sparse"), \
+             mock.patch.object(qualification.subprocess, "run") as runner, \
+             contextlib.redirect_stderr(io.StringIO()):
+            def verdict(output: str, status: int = 0) -> str:
+                runner.return_value = subprocess.CompletedProcess(
+                    args=[], returncode=status, stdout=output)
+                return qualification.run_static(Path("/repo"), headers, "sparse")[0]
+
+            self.assertEqual(verdict(complete), "PASS")
+            self.assertEqual(verdict(complete.replace(
+                "  CHECK /repo/build/kernel/w1/predictor-avx512.c\n", "")), "FAIL")
+            self.assertEqual(verdict(complete + (
+                "  CHECK /repo/build/kernel/w1/predictor-sse2.c\n")), "FAIL")
+            self.assertEqual(verdict(complete.replace(
+                "/repo/build/kernel/w1/predictor-avx2.c",
+                "/other/build/kernel/w1/predictor-avx2.c")), "FAIL")
+            self.assertEqual(verdict(complete + (
+                "predictor-avx512.c:17:4: error: invalid initializer\n")), "FAIL")
+            self.assertEqual(verdict(complete + (
+                "predictor-shuffle.h:61:12: error: "
+                "undefined identifier '__builtin_shuffle'\n")), "FAIL")
+            self.assertEqual(verdict(complete, 2), "FAIL")
+
+    def test_runtime_capture_rejects_contradictory_live_status(self) -> None:
+        directory = Path(self.temporary_directory.name)
+        kcsan = directory / "kcsan-status"
+        lockdep = directory / "lockdep-status"
+        prove = directory / "prove-locking"
+        prove.write_text("1\n", encoding="utf-8")
+        kcsan.write_text(
+            "enabled: 1\nblacklisted functions: none\n"
+            "blacklisted functions: swapz\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "blacklist"):
+            qualification.capture_runtime_snapshot(
+                ("kcsan",), kcsan, lockdep, prove)
+        kcsan.write_text(
+            "enabled: 1\nenabled: disabled\n"
+            "blacklisted functions: none\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "enabled"):
+            qualification.capture_runtime_snapshot(
+                ("kcsan",), kcsan, lockdep, prove)
+        lockdep.write_text("debug_locks: 1\ndebug_locks: invalid\n",
+                           encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "debug_locks"):
+            qualification.capture_runtime_snapshot(
+                ("lockdep",), kcsan, lockdep, prove)
+
+    def test_runtime_json_must_have_unique_current_ordered_observations(self) -> None:
+        required = ("kcsan",)
+        good = self.runtime_snapshot(required)
+        state = json.loads(good)
+        for malformed in (
+            good.replace('"kcsan_enabled": true',
+                         '"kcsan_enabled": false, "kcsan_enabled": true'),
+            good.replace('"observed_monotonic_ns":',
+                         '"unexpected": 1, "observed_monotonic_ns":'),
+            good.replace('"observed_monotonic_ns":',
+                         '"observed_monotonic_ns": NaN, "observed_monotonic_ns":'),
+            "{}",
+        ):
+            with self.subTest(malformed=malformed[:64]), self.assertRaises(ValueError):
+                qualification.parse_runtime_snapshot(malformed, required)
+        self.assertEqual(
+            self.verify(required=required, runtime_before=good,
+                        runtime_after=good)[0], "BLOCKED")
+        stale = dict(state)
+        stale["observed_monotonic_ns"] -= qualification.MAX_RUNTIME_AGE_NS + 1_000_000_000
+        self.assertEqual(
+            self.verify(required=required,
+                        runtime_before=json.dumps(stale))[0], "BLOCKED")
+        other_boot = dict(state)
+        other_boot["boot_id"] = "00000000-0000-0000-0000-000000000000"
+        self.assertEqual(
+            self.verify(required=required,
+                        runtime_before=json.dumps(other_boot))[0], "BLOCKED")
+        future = dict(state)
+        future["observed_monotonic_ns"] += qualification.MAX_RUNTIME_AGE_NS
+        self.assertEqual(
+            self.verify(required=required,
+                        runtime_after=json.dumps(future))[0], "BLOCKED")
+
+    def test_contradictory_and_malformed_success_claims_fail(self) -> None:
+        for execution in (
+            GOOD_LOG + "\nSOURCE_HEAD=" + "b" * 40,
+            GOOD_LOG + "\nSOURCE_HEAD=broken",
+            GOOD_LOG + "\nPASS_LOADED_LIVE_GC=victims:0 verified_pages:0",
+            GOOD_LOG + "\nPASS_LOADED_LIVE_GC invalid",
+            GOOD_LOG + "\nPASS_LOADED_LIVE_GC_EXTRA=stale",
+            GOOD_LOG + "\nPASS: loaded isolated swapz byte-exact I/O, clean teardown",
+        ):
+            with self.subTest(execution=execution.splitlines()[-1]):
+                self.assertEqual(self.verify(execution=execution)[0], "FAIL")
+        self.assertEqual(
+            self.verify(execution=GOOD_LOG + "\nFAIL: lower device damaged",
+                        baseline="", final="", runtime_after="{}")[0], "FAIL")
+        self.assertEqual(
+            self.verify(final="WARNING: late ring-buffer warning",
+                        baseline="", runtime_after="{}")[0], "FAIL")
+        self.configuration.write_text(
+            CONFIG.replace("CONFIG_LOCKDEP=y", "# CONFIG_LOCKDEP is not set"),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            self.verify(execution=GOOD_LOG + "\nQUARANTINED: teardown uncertain",
+                        baseline="", final="")[0], "FAIL")
+
+    def test_missing_late_cli_files_cannot_hide_prior_failure(self) -> None:
+        directory = Path(self.temporary_directory.name)
+        baseline = directory / "baseline"
+        final = directory / "final"
+        execution = directory / "execution"
+        before = directory / "before"
+        after = directory / "after"
+        baseline.write_text("old\n", encoding="utf-8")
+        execution.write_text(GOOD_LOG + "\nFAIL: helper failed\n",
+                             encoding="utf-8")
+        command = [
+            sys.executable, "-B", str(SCRIPT), "verify",
+            "--config", str(self.configuration), "--cmdline", str(self.cmdline),
+            "--require", "kasan,lockdep", "--source-sha", SOURCE_SHA,
+            "--baseline", str(baseline), "--final", str(final),
+            "--execution", str(execution),
+            "--runtime-before", str(before), "--runtime-after", str(after),
+        ]
+        failed = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        execution.unlink()
+        final.write_text("old\nBUG: kernel memory corruption\n",
+                         encoding="utf-8")
+        failed = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        final.unlink()
+        blocked = subprocess.run(command, capture_output=True, text=True, check=False)
+        self.assertEqual(blocked.returncode, 2, blocked.stdout + blocked.stderr)
+
+    def test_static_cli_distinguishes_defects_from_missing_tools(self) -> None:
+        headers = Path(self.temporary_directory.name) / "cli-headers"
+        headers.mkdir()
+        (headers / "Makefile").write_text("all:\n\t@true\n",
+                                          encoding="utf-8")
+        argv = [str(SCRIPT), "static", "--kdir", str(headers)]
+        for statuses, expected_exit in (
+            ((("FAIL", 8, {"locking_or_type": 1}),
+              ("UNAVAILABLE", 0, {})), 1),
+            ((("PASS", 8, {}), ("FAIL", 8, {"other": 1})), 1),
+            ((("UNAVAILABLE", 0, {}), ("UNAVAILABLE", 0, {})), 2),
+            ((("PASS", 8, {}), ("UNAVAILABLE", 0, {})), 0),
+        ):
+            with self.subTest(statuses=statuses), \
+                 mock.patch.object(sys, "argv", argv), \
+                 mock.patch.object(qualification, "run_static",
+                                   side_effect=statuses), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(qualification.main(), expected_exit)
 
     def test_owned_wrapper_binds_runtime_state_and_artifact_provenance(self) -> None:
         source = WRAPPER.read_text(encoding="utf-8")
@@ -429,14 +654,14 @@ class KernelDebugQualificationTests(unittest.TestCase):
             self.assertIn("FAIL_KERNEL_STATIC_SPARSE", expected_failure_log.getvalue())
             runner.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout=(
-                    "  CHECK /build/dm-target.c\n"
-                    "  CHECK /build/codec.c\n"
-                    "  CHECK /build/authority.c\n"
-                    "  CHECK /build/engine.c\n"
-                    "  CHECK /build/predictor.c\n"
-                    "  CHECK /build/predictor-sse2.c\n"
-                    "  CHECK /build/predictor-avx2.c\n"
-                    "  CHECK /build/predictor-avx512.c\n"
+                    "  CHECK /repo/build/kernel/w1/dm-target.c\n"
+                    "  CHECK /repo/build/kernel/w1/codec.c\n"
+                    "  CHECK /repo/build/kernel/w1/authority.c\n"
+                    "  CHECK /repo/build/kernel/w1/engine.c\n"
+                    "  CHECK /repo/build/kernel/w1/predictor.c\n"
+                    "  CHECK /repo/build/kernel/w1/predictor-sse2.c\n"
+                    "  CHECK /repo/build/kernel/w1/predictor-avx2.c\n"
+                    "  CHECK /repo/build/kernel/w1/predictor-avx512.c\n"
                 ),
             )
             self.assertEqual(

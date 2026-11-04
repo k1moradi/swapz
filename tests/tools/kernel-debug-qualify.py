@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import time
 import re
 import shutil
 import subprocess
@@ -22,10 +23,12 @@ FEATURE_SYMBOLS = {
     "lockdep": ("CONFIG_PROVE_LOCKING", "CONFIG_LOCKDEP", "CONFIG_DEBUG_LOCK_ALLOC"),
 }
 KASAN_BOOT_DISABLE = ("kasan=off",)
-RUNTIME_SCHEMA = "swapz-kernel-debug-runtime-v1"
+RUNTIME_SCHEMA = "swapz-kernel-debug-runtime-v2"
 DEFAULT_KCSAN_STATUS = Path("/sys/kernel/debug/kcsan")
 DEFAULT_LOCKDEP_STATS = Path("/proc/lockdep_stats")
 DEFAULT_PROVE_LOCKING = Path("/proc/sys/kernel/prove_locking")
+DEFAULT_BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
+MAX_RUNTIME_AGE_NS = 20 * 60 * 1_000_000_000
 # These are exact observed records from the existing, privately owned RAM
 # lower-device oracle. Each must occur exactly once, not merely as a substring.
 REQUIRED_RECORDS = (
@@ -44,23 +47,24 @@ REQUIRED_RECORDS = (
 # All kernel diagnostics in the bounded session fail the gate, not just those
 # attributed to swapz: an unrelated issue makes the evidence ambiguous.
 KERNEL_DIAGNOSTIC = re.compile(
-    r"\bBUG:|Oops:|"
-    r"KASAN:.*(?:use-after-free|out-of-bounds)|"
-    r"KCSAN:.*data-race|"
+    r"\bBUG:|\bOops:|\bWARNING:|\bKASAN:|\bKCSAN:|"
+    r"\b(?:UBSAN|KFENCE|KMSAN):|"
+    r"kernel BUG at|general protection fault|kernel panic|"
     r"possible (?:circular locking dependency|recursive locking) detected|"
     r"inconsistent lock state|held lock freed|"
     r"sleeping function called from invalid context|"
-    r"refcount_t:|"
-    r"WARNING:|kernel BUG at|general protection fault|"
-    r"workqueue:.*(?:swapz|dm_swapz)|"
-    r"BUG: workqueue|INFO: task .* blocked for more than",
+    r"\brefcount(?:_t|_warn_saturate)?:|"
+    r"use-after-free|double.free|"
+    r"workqueue:.*(?:swapz|dm_swapz)|BUG: workqueue|"
+    r"(?:INFO: )?task .* blocked for more than|hung.task|"
+    r"rcu: .*detected stalls",
     re.IGNORECASE,
 )
 SOURCE_DIAGNOSTIC = re.compile(
     r"^.*\.(?:c|h):[0-9]+(?::[0-9]+)?:\s*(?:warn|warning|error):",
     re.IGNORECASE,
 )
-CHECK_RECORD = re.compile(r"\bCHECK\s+(\S+\.c)\b")
+CHECK_RECORD = re.compile(r"(?m)^[ \t]*CHECK[ \t]+(\S+\.c)[ \t]*$")
 
 
 def load_config(path: Path) -> dict[str, str]:
@@ -155,49 +159,89 @@ def capture_runtime_snapshot(
     }
     if "kcsan" in required:
         status = _read_runtime_text(kcsan_status_path, "KCSAN debugfs status")
-        enabled = re.findall(r"(?m)^enabled:[ \t]*([01])[ \t]*$", status)
-        if len(enabled) != 1:
+        enabled = re.findall(r"(?m)^[ \t]*enabled:[^\n]*$", status)
+        blacklist = re.findall(r"(?m)^[ \t]*blacklisted functions:[^\n]*$", status)
+        if len(enabled) != 1 or not re.fullmatch(
+                r"[ \t]*enabled:[ \t]*[01][ \t]*", enabled[0]):
             raise ValueError("KCSAN debugfs status has no unique enabled state")
-        filter_default = re.findall(
-            r"(?m)^blacklisted functions:[ \t]*none[ \t]*$", status)
-        snapshot["kcsan_enabled"] = enabled[0] == "1"
-        snapshot["kcsan_filter_default"] = len(filter_default) == 1
+        if len(blacklist) != 1:
+            raise ValueError("KCSAN debugfs status has no unique blacklist state")
+        snapshot["kcsan_enabled"] = enabled[0].split(":", 1)[1].strip() == "1"
+        snapshot["kcsan_filter_default"] = (
+            blacklist[0].split(":", 1)[1].strip() == "none")
     if "lockdep" in required:
         stats = _read_runtime_text(lockdep_stats_path, "lockdep statistics")
         debug_locks = re.findall(
-            r"(?m)^[ \t]*debug_locks:[ \t]*([01])[ \t]*$", stats)
-        if len(debug_locks) != 1:
+            r"(?m)^[ \t]*debug_locks:[^\n]*$", stats)
+        if len(debug_locks) != 1 or not re.fullmatch(
+                r"[ \t]*debug_locks:[ \t]*[01][ \t]*", debug_locks[0]):
             raise ValueError("lockdep statistics have no unique debug_locks state")
         prove_locking = _read_runtime_text(
             prove_locking_path, "lockdep prove_locking sysctl").strip()
         if prove_locking not in {"0", "1"}:
             raise ValueError("lockdep prove_locking sysctl is not boolean")
-        snapshot["lockdep_debug_locks"] = debug_locks[0] == "1"
+        snapshot["lockdep_debug_locks"] = debug_locks[0].split(":", 1)[1].strip() == "1"
         snapshot["lockdep_prove_locking"] = prove_locking == "1"
+    boot_id = _read_runtime_text(DEFAULT_BOOT_ID, "kernel boot identity").strip()
+    if not re.fullmatch(
+            r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", boot_id):
+        raise ValueError("kernel boot identity is malformed")
+    snapshot["boot_id"] = boot_id
+    snapshot["observed_monotonic_ns"] = time.monotonic_ns()
     return snapshot
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"runtime snapshot has duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"runtime snapshot contains invalid JSON constant: {value}")
 
 
 def parse_runtime_snapshot(
     contents: str, required: tuple[str, ...],
 ) -> dict[str, object]:
     try:
-        snapshot = json.loads(contents)
+        snapshot = json.loads(
+            contents, object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
     except json.JSONDecodeError as error:
         raise ValueError(f"runtime snapshot is invalid JSON: {error}") from error
     if not isinstance(snapshot, dict) or snapshot.get("schema") != RUNTIME_SCHEMA:
         raise ValueError("runtime snapshot schema mismatch")
     if snapshot.get("required") != list(required):
         raise ValueError("runtime snapshot feature set mismatch")
+    expected_keys = {
+        "schema", "required", "boot_id", "observed_monotonic_ns",
+    }
     if "kcsan" in required:
+        expected_keys.update(("kcsan_enabled", "kcsan_filter_default"))
         if not isinstance(snapshot.get("kcsan_enabled"), bool):
             raise ValueError("runtime snapshot lacks KCSAN enabled state")
         if not isinstance(snapshot.get("kcsan_filter_default"), bool):
             raise ValueError("runtime snapshot lacks KCSAN report-filter state")
     if "lockdep" in required:
+        expected_keys.update(("lockdep_debug_locks", "lockdep_prove_locking"))
         if not isinstance(snapshot.get("lockdep_debug_locks"), bool):
             raise ValueError("runtime snapshot lacks lockdep debug_locks state")
         if not isinstance(snapshot.get("lockdep_prove_locking"), bool):
             raise ValueError("runtime snapshot lacks lockdep prove_locking state")
+    if set(snapshot) != expected_keys:
+        raise ValueError("runtime snapshot has missing or unexpected fields")
+    if not isinstance(snapshot["boot_id"], str) or not re.fullmatch(
+            r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}",
+            snapshot["boot_id"]):
+        raise ValueError("runtime snapshot boot identity is malformed")
+    monotonic = snapshot["observed_monotonic_ns"]
+    if type(monotonic) is not int or monotonic <= 0:
+        raise ValueError("runtime snapshot observation time is invalid")
     return snapshot
 
 
@@ -217,7 +261,9 @@ def runtime_features_active(
 
 def classify_warning(line: str) -> str:
     lower = line.lower()
-    if "undefined identifier '__builtin_shuffle'" in lower:
+    if (re.search(r"predictor-shuffle\.h:[0-9]+:[0-9]+: error:",
+                  lower) and
+            "undefined identifier '__builtin_shuffle'" in lower):
         return "unsupported_simd_builtin"
     if re.search(r"predictor-(?:sse2|avx2|avx512)\.c:[0-9]+:[0-9]+: error: invalid initializer", lower):
         return "simd_initializer"
@@ -241,27 +287,94 @@ def scan_static(output: str) -> tuple[int, dict[str, int]]:
     return len(CHECK_RECORD.findall(output)), counts
 
 
-def static_required_sources(kdir: Path) -> set[str]:
-    config_path = next(
-        (candidate for candidate in (
-            kdir / ".config",
-            kdir / "include/config/auto.conf",
-        ) if candidate.is_file()),
-        None,
-    )
-    if config_path is None:
+def static_required_sources(
+    kdir: Path, module_makefile: Path | None = None,
+) -> set[str]:
+    # Kbuild consumes auto.conf, not necessarily the (possibly stale) .config.
+    # Reject contradictory architecture state rather than silently omitting SIMD.
+    configurations = [
+        candidate for candidate in (
+            kdir / "include/config/auto.conf", kdir / ".config",
+        ) if candidate.is_file()
+    ]
+    if not configurations:
         raise ValueError("kernel build configuration unavailable for static source set")
-    config = load_config(config_path)
-    sources = {"dm-target.c", "codec.c", "authority.c", "engine.c", "predictor.c"}
-    if config.get("CONFIG_X86_64") == "y":
-        sources.update({
-            "predictor-sse2.c",
-            "predictor-avx2.c",
-            "predictor-avx512.c",
-        })
-    elif (config.get("CONFIG_ARM64") == "y" and
-          config.get("CONFIG_KERNEL_MODE_NEON") == "y"):
-        sources.add("predictor-neon.c")
+    config = load_config(configurations[0])
+    architecture_symbols = (
+        "CONFIG_X86_64", "CONFIG_ARM64", "CONFIG_KERNEL_MODE_NEON",
+    )
+    for secondary in configurations[1:]:
+        other_config = load_config(secondary)
+        if any(config.get(symbol, "n") != other_config.get(symbol, "n")
+               for symbol in architecture_symbols):
+            raise ValueError("kernel build configurations contradict Kbuild architecture")
+    known_architectures = (
+        "CONFIG_X86_64", "CONFIG_ARM64", "CONFIG_X86_32", "CONFIG_ARM",
+        "CONFIG_RISCV", "CONFIG_PPC", "CONFIG_PPC64", "CONFIG_S390",
+        "CONFIG_MIPS", "CONFIG_LOONGARCH",
+    )
+    if sum(config.get(symbol) == "y" for symbol in known_architectures) == 0:
+        raise ValueError("kernel architecture is not identifiable")
+    if config.get("CONFIG_X86_64") == "y" and config.get("CONFIG_ARM64") == "y":
+        raise ValueError("kernel build selects contradictory SIMD architectures")
+
+    makefile = module_makefile or (
+        Path(__file__).resolve().parents[2] / "src/kernel/Makefile")
+    try:
+        lines = makefile.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"module Kbuild unreadable: {error}") from error
+    # Evaluate only the external-module branch, and only its CONFIG_*
+    # conditions. A new unrecognized source-selection expression blocks the
+    # inventory until the analyzer knows how to evaluate it.
+    if len(lines) < 2 or lines[1].strip() != "ifneq ($(KERNELRELEASE),)":
+        raise ValueError("module Kbuild selection has changed")
+    active_conditions: list[bool | None] = [True]
+    sources: set[str] = set()
+    assignments = 0
+    for raw_line in lines[2:]:
+        line = raw_line.strip()
+        if line == "else" and len(active_conditions) == 1:
+            break
+        if line.startswith(("ifeq ", "ifneq ")):
+            match = re.fullmatch(
+                r"ifeq \(\$\(CONFIG_([A-Z0-9_]+)\),y\)", line)
+            active_conditions.append(
+                active_conditions[-1] and
+                config.get(f"CONFIG_{match.group(1)}") == "y"
+                if match and active_conditions[-1] is not None else None
+            )
+        elif line == "endif":
+            if len(active_conditions) <= 1:
+                raise ValueError("module Kbuild has unbalanced conditionals")
+            active_conditions.pop()
+        elif line == "else":
+            if len(active_conditions) <= 1:
+                raise ValueError("module Kbuild has unexpected else")
+            parent = active_conditions[-2]
+            current = active_conditions[-1]
+            active_conditions[-1] = parent and not current if (
+                parent is not None and current is not None) else None
+        elif line.startswith("dm-swapz-y"):
+            match = re.fullmatch(r"dm-swapz-y[ \t]*(:=|\+=)[ \t]*(.*)", line)
+            if match is None or active_conditions[-1] is None:
+                raise ValueError("module Kbuild source selection is unsupported")
+            if active_conditions[-1]:
+                assignments += 1
+                for object_name in match.group(2).split():
+                    if not re.fullmatch(r"[a-z0-9-]+\.o", object_name):
+                        raise ValueError("module Kbuild has an invalid object")
+                    source_name = object_name[:-2] + ".c"
+                    if source_name in sources:
+                        raise ValueError("module Kbuild selects a duplicate source")
+                    sources.add(source_name)
+    else:
+        raise ValueError("module Kbuild external-module section is unterminated")
+    if len(active_conditions) != 1 or assignments == 0:
+        raise ValueError("module Kbuild source selection is incomplete")
+    if not {"dm-target.c", "codec.c", "authority.c", "engine.c",
+            "predictor.c"}.issubset(sources):
+        raise ValueError("module Kbuild core source selection is incomplete")
     return sources
 
 
@@ -281,7 +394,18 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
         print(f"FAIL_KERNEL_STATIC_{analyzer.upper()}: {error}", file=sys.stderr)
         return "FAIL", 0, {}
     check_count, warnings = scan_static(result.stdout)
-    checked_sources = {Path(path).name for path in CHECK_RECORD.findall(result.stdout)}
+    stage_directory = (root / "build/kernel/w1").resolve()
+    # A CHECK for another directory or a different copy of the same basename
+    # does not prove that Kbuild scanned the translation unit being linked.
+    checked_names = [
+        Path(path).name for path in CHECK_RECORD.findall(result.stdout)
+        if (Path(path) if Path(path).is_absolute()
+            else root / path).resolve().parent == stage_directory
+    ]
+    checked_sources = set(checked_names)
+    duplicated_sources = {
+        name for name in checked_sources if checked_names.count(name) != 1
+    }
     try:
         required_sources = static_required_sources(kdir)
     except ValueError as error:
@@ -295,11 +419,13 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
             print(line, file=sys.stderr)
         if len(diagnostics) > 16:
             print(f"KERNEL_STATIC_DIAGNOSTICS_SUPPRESSED={len(diagnostics) - 16}", file=sys.stderr)
-    if result.returncode != 0 or not required_sources.issubset(checked_sources) or warnings:
+    if (result.returncode != 0 or not required_sources.issubset(checked_sources)
+            or duplicated_sources or warnings):
         print(
             f"FAIL_KERNEL_STATIC_{analyzer.upper()}: exit={result.returncode} "
             f"checked={sorted(checked_sources)} "
-            f"missing={sorted(required_sources - checked_sources)}",
+            f"missing={sorted(required_sources - checked_sources)} "
+            f"duplicate={sorted(duplicated_sources)}",
             file=sys.stderr,
         )
         if result.returncode != 0 or not check_count:
@@ -312,30 +438,37 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
 
 def verify_owned_run(
     required: tuple[str, ...], features: dict[str, str],
-    baseline: str, final: str, execution: str,
+    baseline: str, final: str, execution: str | None,
     runtime_before: str, runtime_after: str, source_sha: str,
 ) -> tuple[str, str]:
+    # Defect evidence is monotonic: read what is available before any feature,
+    # provenance or log-continuity condition can return BLOCKED.
+    delta = final[len(baseline):] if baseline and final.startswith(baseline) else final
+    if KERNEL_DIAGNOSTIC.search(delta):
+        return "FAIL", "kernel diagnostic appeared in bounded evidence"
+    if execution is not None and re.search(
+            r"(?m)^[ \t]*(?:FAIL|BLOCKED|QUARANTINED)(?::|_)", execution):
+        return "FAIL", "owned lower reported a failure or quarantine"
     if not required or not check_features(features, required):
         return "BLOCKED", "required running-kernel debug features unavailable"
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
         return "BLOCKED", "validated source SHA is malformed"
     if not baseline or not final or not final.startswith(baseline):
         return "BLOCKED", "dmesg baseline missing, overwritten or unreadable"
+    if execution is None:
+        return "BLOCKED", "owned execution log unreadable"
 
-    # Evidence is monotonic: a later observation failure must not downgrade an
-    # already observed kernel/helper defect from FAIL to BLOCKED.
-    delta = final[len(baseline):]
-    if KERNEL_DIAGNOSTIC.search(delta):
-        return "FAIL", "kernel diagnostic appeared during owned run"
-    if re.search(r"(?m)^(?:FAIL|BLOCKED|QUARANTINED)(?::|_)", execution):
-        return "FAIL", "owned lower reported a failure or quarantine"
     lines = execution.splitlines()
-    if lines.count(f"SOURCE_HEAD={source_sha}") != 1:
-        return "FAIL", "owned lower source marker is missing or mismatched"
+    source_markers = [
+        line for line in lines if line.lstrip().startswith("SOURCE_HEAD")
+    ]
+    if source_markers != [f"SOURCE_HEAD={source_sha}"]:
+        return "FAIL", "owned lower source marker is missing, duplicated or mismatched"
     for record in REQUIRED_RECORDS:
-        expression = re.compile(r"^" + record + r"$")
-        if sum(bool(expression.fullmatch(line)) for line in lines) != 1:
-            return "FAIL", f"missing, repeated or malformed loaded evidence: {record.split('=')[0]}"
+        marker = record.split("=", 1)[0]
+        candidates = [line for line in lines if line.lstrip().startswith(marker)]
+        if len(candidates) != 1 or re.fullmatch(record, candidates[0]) is None:
+            return "FAIL", f"missing, repeated or malformed loaded evidence: {marker}"
 
     try:
         before_state = parse_runtime_snapshot(runtime_before, required)
@@ -346,7 +479,21 @@ def verify_owned_run(
         return "BLOCKED", "required debug feature was inactive before owned I/O"
     if not runtime_features_active(after_state, required):
         return "FAIL", "required debug feature became inactive during owned I/O"
+    try:
+        current_boot_id = _read_runtime_text(
+            DEFAULT_BOOT_ID, "kernel boot identity").strip()
+    except ValueError as error:
+        return "BLOCKED", str(error)
+    now = time.monotonic_ns()
+    before_time = before_state["observed_monotonic_ns"]
+    after_time = after_state["observed_monotonic_ns"]
+    if (before_state["boot_id"] != current_boot_id or
+            after_state["boot_id"] != current_boot_id or
+            not 0 < before_time < after_time <= now or
+            now - before_time > MAX_RUNTIME_AGE_NS):
+        return "BLOCKED", "runtime snapshots have stale or inconsistent identity/order"
     return "PASS", "private RAM lower completed and kernel diagnostics were clean"
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -381,7 +528,9 @@ def main() -> int:
                 status, checks, warnings = run_static(root, arguments.kdir.resolve(), analyzer)
                 statuses[analyzer] = {"status": status, "checks": checks, "warnings": warnings}
             print("KERNEL_STATIC=" + json.dumps(statuses, sort_keys=True))
-            return 0 if statuses["sparse"]["status"] == "PASS" and statuses["smatch"]["status"] != "FAIL" else 2
+            if "FAIL" in (statuses["sparse"]["status"], statuses["smatch"]["status"]):
+                return 1
+            return 0 if statuses["sparse"]["status"] == "PASS" else 2
         required = required_features(arguments.require)
         if arguments.action == "runtime-snapshot":
             snapshot = capture_runtime_snapshot(required)
@@ -391,11 +540,19 @@ def main() -> int:
         print("KERNEL_DEBUG_PROBE=" + json.dumps(features, sort_keys=True))
         if arguments.action == "probe":
             return 0 if check_features(features, required) else 2
-        baseline = arguments.baseline.read_text(encoding="utf-8")
-        final = arguments.final.read_text(encoding="utf-8")
-        execution = arguments.execution.read_text(encoding="utf-8")
-        runtime_before = arguments.runtime_before.read_text(encoding="utf-8")
-        runtime_after = arguments.runtime_after.read_text(encoding="utf-8")
+        # Read independently: missing late observations cannot hide a failure
+        # already recorded in another evidence file.
+        def read_optional(path: Path) -> str | None:
+            try:
+                return path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                return None
+
+        baseline = read_optional(arguments.baseline) or ""
+        final = read_optional(arguments.final) or ""
+        execution = read_optional(arguments.execution)
+        runtime_before = read_optional(arguments.runtime_before) or ""
+        runtime_after = read_optional(arguments.runtime_after) or ""
         status, reason = verify_owned_run(
             required, features, baseline, final, execution,
             runtime_before, runtime_after, arguments.source_sha,
