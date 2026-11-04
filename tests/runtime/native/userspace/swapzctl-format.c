@@ -452,6 +452,24 @@ static void test_mountinfo_device_parser(void)
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw shared:7 - ext4 /dev/sda2 rw\n",
 		&device) == 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 /root\\\\040name /other rw shared:7 - ext4 /dev/sdb2 rw\n",
+		&device) == 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 /root\\\\9xx /other rw - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 relative /other rw - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw shared:garbage - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw shared:0 - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw mysterious:123 - ext4 /dev/sdb2 rw\n",
+		&device) < 0);
 
 }
 
@@ -839,6 +857,29 @@ static void test_swap_adversarial_inventory(void)
 		assert(format_swap_inventory_stream_clear(stream, device,
 								     parent) < 0);
 		assert(fclose(stream) == 0);
+	}
+
+	/* Byte and row budgets are checked without allocating enormous fixtures. */
+	{
+		char bounded_line[4];
+		size_t bytes_read = SWAPZ_FORMAT_PROC_MAX_BYTES - 1U;
+		size_t count = SWAPZ_FORMAT_PROC_MAX_ROWS;
+		size_t capacity = 0;
+		void *entries = NULL;
+		unsigned long long identifier = 7ULL;
+
+		stream = test_inventory_binary_stream("a\n", 2U);
+		errno = 0;
+		assert(format_inventory_read_line(stream, bounded_line,
+						   sizeof(bounded_line),
+						   &bytes_read) < 0);
+		assert(errno == EOVERFLOW);
+		assert(fclose(stream) == 0);
+		errno = 0;
+		assert(format_inventory_append(&entries, &count, &capacity,
+						 &identifier, sizeof(identifier)) < 0);
+		assert(errno == EOVERFLOW);
+		assert(entries == NULL);
 	}
 	/* A sysfs attribute with an embedded NUL cannot pass text validation. */
 	assert(lseek(fd, 0, SEEK_SET) == 0);
