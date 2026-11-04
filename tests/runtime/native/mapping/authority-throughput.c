@@ -70,9 +70,10 @@ static int init_authority(void)
 /*
  * Measure GC's actual production authority dead-reserve claim, separating
  * a never-claimed segment from the identical, previously-claimed segment.
- * The only semantic difference is the monotonic claim witness, so the
- * excess is attributable to the corruption-resistant logical-map proof
- * plus its small reuse cleanup. Runs offline in one thread with no lower I/O.
+ * Current production C always scans both: a virgin-count witness can
+ * itself be corrupt. The difference between these two paths is therefore
+ * NOT scan cost. A matched traversal control is reported separately.
+ * Runs offline in one thread, without lower I/O or shared state.
  */
 #define CLAIM_SCAN_REPEATS 5U
 
@@ -100,6 +101,27 @@ static uint64_t thread_cpu_ns(void)
 	       (uint64_t)ts.tv_nsec;
 }
 
+
+/*
+ * Reference CPU traversal of precisely the same logical-map allocation.
+ * This is a baseline for touching memory, not an unprotected GC algorithm.
+ * Unlike the production verifier, it deliberately does not validate bounds,
+ * extent containment or candidate ownership; never use it for reclaim.
+ */
+static volatile uint64_t scan_touch_sink;
+
+static swapz_u32 touch_map_control(const struct swapz_map *maps,
+				   swapz_u32 logical_pages)
+{
+	swapz_u32 logical, touched = 0;
+
+	for (logical = 0; logical < logical_pages; ++logical)
+		touched += maps[logical].valid &&
+			   maps[logical].start_block != ~(swapz_u32)0;
+	scan_touch_sink += touched;
+	return touched;
+}
+
 static int measure_production_claim_proof(swapz_u32 logical_pages)
 {
 	struct swapz_authority authority, sample;
@@ -109,6 +131,11 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 	swapz_u32 *large_counts = NULL, *large_programs = NULL;
 	uint64_t virgin_wall[CLAIM_SCAN_REPEATS], claimed_wall[CLAIM_SCAN_REPEATS];
 	uint64_t virgin_cpu[CLAIM_SCAN_REPEATS], claimed_cpu[CLAIM_SCAN_REPEATS];
+	uint64_t traversal_wall[CLAIM_SCAN_REPEATS];
+	uint64_t traversal_cpu[CLAIM_SCAN_REPEATS];
+	uint64_t commit_wall[CLAIM_SCAN_REPEATS];
+	uint64_t commit_cpu[CLAIM_SCAN_REPEATS];
+	uint64_t commit_worst = 0, virgin_corrupt_wall = 0;
 	uint64_t claimed_worst = 0, corrupt_wall;
 	uint64_t map_bytes = (uint64_t)logical_pages * sizeof(*large_maps);
 	uint64_t reserve = (uint64_t)logical_pages / 8U +
@@ -194,6 +221,15 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			      large_programs[reserve_segment] == 2U);
 		if (claimed_wall[repeat] > claimed_worst)
 			claimed_worst = claimed_wall[repeat];
+
+		/* Memory-only comparator over the same valid entries. Timing
+		 * includes its reduction and volatile sink publication. */
+		clock_start = now_ns();
+		cpu_start = thread_cpu_ns();
+		REQUIRE_CLAIM(touch_map_control(large_maps, logical_pages) ==
+			      logical_pages);
+		traversal_wall[repeat] = now_ns() - clock_start;
+		traversal_cpu[repeat] = thread_cpu_ns() - cpu_start;
 	}
 
 	/* A forged zero sidecar cannot hide even a final-entry reference. */
@@ -207,34 +243,116 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 	REQUIRE_CLAIM(!sample.gc_allocation &&
 		      sample.alloc_probe_full_scans == 1ULL &&
 		      large_programs[reserve_segment] == 1U);
+	/* The zero program-count witness is also untrusted: even a
+	 * nominally virgin reserve cannot reuse a forged live map. */
+	large_programs[reserve_segment] = 0;
+	sample = authority;
+	clock_start = now_ns();
+	REQUIRE_CLAIM(swapz_gc_begin_rotation(&sample, 1U) == -EUCLEAN);
+	virgin_corrupt_wall = now_ns() - clock_start;
+	REQUIRE_CLAIM(!sample.gc_allocation &&
+		      sample.alloc_probe_full_scans == 1ULL &&
+		      large_programs[reserve_segment] == 0U);
 	large_maps[logical_pages - 1U].start_block = logical_pages - 1U;
+
+	/*
+	 * Isolate the second authoritative proof at GC commit. Manufacture
+	 * already-evacuated, mutually consistent metadata only; live relocation
+	 * and its byte oracle are tested separately by gc/high-occupancy.c.
+	 * No lower device I/O is timed or simulated as a physical write.
+	 */
+	{
+		const swapz_u32 spare_start = logical_pages;
+		const swapz_u32 reserve_start =
+			reserve_segment * SWAPZ_SEGMENT_BLOCKS;
+
+		for (logical = SWAPZ_SEGMENT_BLOCKS;
+		     logical < 2U * SWAPZ_SEGMENT_BLOCKS; ++logical)
+			large_maps[logical].start_block =
+				spare_start + logical - SWAPZ_SEGMENT_BLOCKS;
+		large_counts[1U] = 0;
+		large_counts[spare_start / SWAPZ_SEGMENT_BLOCKS] =
+			SWAPZ_SEGMENT_BLOCKS;
+		REQUIRE_CLAIM(spare_start + SWAPZ_SEGMENT_BLOCKS <=
+			      reserve_start);
+		for (repeat = 0; repeat < CLAIM_SCAN_REPEATS; ++repeat) {
+			large_roles[1U] = 1;
+			large_roles[reserve_segment] = 0;
+			large_programs[reserve_segment] = 1;
+			sample = authority;
+			REQUIRE_CLAIM(swapz_gc_begin_rotation(
+				&sample, 1U) == 0);
+			REQUIRE_CLAIM(sample.gc_destination ==
+				      reserve_segment);
+			/* A single successfully relocated record creates
+			 * foreground progress and a consistent destination. */
+			large_maps[SWAPZ_SEGMENT_BLOCKS].start_block =
+				reserve_start;
+			large_counts[spare_start / SWAPZ_SEGMENT_BLOCKS]--;
+			large_counts[reserve_segment]++;
+			large_live[reserve_start] = 1;
+			large_classes[reserve_start] = 1;
+			sample.next_block = reserve_start + 1U;
+			clock_start = now_ns();
+			cpu_start = thread_cpu_ns();
+			REQUIRE_CLAIM(swapz_gc_commit_rotation(
+				&sample, 1U) == 0);
+			commit_wall[repeat] = now_ns() - clock_start;
+			commit_cpu[repeat] = thread_cpu_ns() - cpu_start;
+			REQUIRE_CLAIM(!large_roles[1U] &&
+				      large_roles[reserve_segment] &&
+				      !sample.gc_allocation);
+			if (commit_wall[repeat] > commit_worst)
+				commit_worst = commit_wall[repeat];
+			large_maps[SWAPZ_SEGMENT_BLOCKS].start_block =
+				spare_start;
+			large_counts[spare_start / SWAPZ_SEGMENT_BLOCKS]++;
+			large_counts[reserve_segment]--;
+			large_live[reserve_start] = 0;
+			large_classes[reserve_start] = 0;
+		}
+	}
 
 	{
 		uint64_t virgin_median = scan_median(virgin_wall);
 		uint64_t claimed_median = scan_median(claimed_wall);
 		uint64_t virgin_cpu_median = scan_median(virgin_cpu);
 		uint64_t claimed_cpu_median = scan_median(claimed_cpu);
-		uint64_t excess = claimed_median > virgin_median ?
-			claimed_median - virgin_median : 0;
+		uint64_t traversal_wall_median = scan_median(traversal_wall);
+		uint64_t traversal_cpu_median = scan_median(traversal_cpu);
+		uint64_t commit_wall_median = scan_median(commit_wall);
+		uint64_t commit_cpu_median = scan_median(commit_cpu);
 
 		printf("SWAPZ_GC_PRODUCTION_CLAIM_SCAN_EVIDENCE={"
 		       "\"scope\":\"OFFLINE_NATIVE_PRODUCTION_AUTHORITY\","
 		       "\"logical_pages\":%u,\"map_bytes\":%" PRIu64 ","
-		       "\"repeats\":%u,\"virgin_full_map_scans\":0,"
+		       "\"repeats\":%u,\"virgin_full_map_scans\":%u,"
 		       "\"claimed_full_map_scans\":%u,"
 		       "\"virgin_claim_wall_median_ns\":%" PRIu64 ","
 		       "\"claimed_claim_wall_median_ns\":%" PRIu64 ","
 		       "\"claimed_claim_wall_max_observed_ns\":%" PRIu64 ","
 		       "\"virgin_claim_cpu_median_ns\":%" PRIu64 ","
 		       "\"claimed_claim_cpu_median_ns\":%" PRIu64 ","
-		       "\"paired_path_excess_wall_ns\":%" PRIu64 ","
-		       "\"effective_map_scan_gbps\":%.3f,"
-		       "\"last_entry_corruption_rejected_wall_ns\":%" PRIu64 "}\n",
+		       "\"traversal_control_wall_median_ns\":%" PRIu64 ","
+		       "\"traversal_control_cpu_median_ns\":%" PRIu64 ","
+		       "\"virgin_effective_map_gbps\":%.3f,"
+		       "\"claimed_effective_map_gbps\":%.3f,"
+		       "\"synthetic_gc_commit_wall_median_ns\":%" PRIu64 ","
+		       "\"synthetic_gc_commit_cpu_median_ns\":%" PRIu64 ","
+		       "\"synthetic_gc_commit_max_observed_ns\":%" PRIu64 ","
+		       "\"claimed_last_entry_corruption_rejected_wall_ns\":%" PRIu64 ","
+		       "\"virgin_last_entry_corruption_rejected_wall_ns\":%" PRIu64 "}\n",
 		       logical_pages, map_bytes, CLAIM_SCAN_REPEATS,
-		       CLAIM_SCAN_REPEATS, virgin_median, claimed_median,
-		       claimed_worst, virgin_cpu_median, claimed_cpu_median,
-		       excess, excess ? (double)map_bytes / (double)excess : 0.0,
-		       corrupt_wall);
+		       CLAIM_SCAN_REPEATS, CLAIM_SCAN_REPEATS,
+		       virgin_median, claimed_median, claimed_worst,
+		       virgin_cpu_median, claimed_cpu_median,
+		       traversal_wall_median, traversal_cpu_median,
+		       virgin_median ? (double)map_bytes /
+				      (double)virgin_median : 0.0,
+		       claimed_median ? (double)map_bytes /
+				       (double)claimed_median : 0.0,
+		       commit_wall_median, commit_cpu_median, commit_worst,
+		       corrupt_wall, virgin_corrupt_wall);
 	}
 	result = 0;
 cleanup:
