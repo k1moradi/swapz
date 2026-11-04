@@ -562,7 +562,7 @@ bash -c '
     set -e
     cgroup=$1
     shift
-    if ! (printf "%s\\n" "$BASHPID" > "$cgroup/cgroup.procs") 2>/dev/null; then
+    if ! (printf "%s\\n" "$" > "$cgroup/cgroup.procs") 2>/dev/null; then
         printf "%s\\n" "BLOCKED: ID36 pressure helper could not enter isolated cgroup" >&2
         exit 2
     fi
