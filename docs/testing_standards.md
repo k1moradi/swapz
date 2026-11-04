@@ -3780,15 +3780,22 @@ production preparation-slot helpers in both deterministic state-publication
 orders. Its 2,048 handoffs per run cover compressed success, no-fit RAW, exact
 negative errno, RAW_SELECTED racing a late negative result, result-ready ACK
 gating, the last producer/consumer reference, slot-63 reclamation and reuse,
-and a preexisting acknowledged success that a later terminal error cannot
-retroactively revoke. The C11 acquire/release shim and staged thread barriers
-are a race-test model, not a Linux memory-model proof or a substitute for
-loaded target, suspend/drain, completion-work and lower-I/O fault qualification.
+and closed-admission wake suppression. The RAW-selected consumer must read the
+producer result through the modeled release/acquire `result_ready` edge before
+any post-publication pthread barrier; a barrier must not accidentally make the
+memory-order assertion vacuous. Historical BIO acknowledgements are target-side
+completion state and are not modeled by this preparation helper regression.
+The C11 shim remains a race-test model, not a Linux memory-model proof or a
+substitute for loaded target, suspend/drain, completion-work and lower-I/O
+fault qualification.
 
 The submitter-path continuation adds 256 deterministic handoffs that model its
 release/acquire active-descriptor gate, one-reference prepared page, separately
-leased scratch lane, bounded active/peak accounting, exact error and a closed
-admission gate. Even when the BIO has completed and its page slot is free,
+leased scratch lane, exact error and a closed admission gate. Its scheduling
+flag is deliberately relaxed: the ordered owner reads ordinary payload after
+acquiring `preparation_submitter_active == 0` and before any synchronizing
+pthread barrier, so the test actually depends on the production release/acquire
+ownership edge. Even when the BIO has completed and its page slot is free,
 drain cannot finish until the submitter has released its scratch lane. This
 is a C11 lifetime model, not proof of the kernel target's real wake/drain or
 completion-work interleavings.
