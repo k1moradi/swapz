@@ -6943,6 +6943,20 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
         self.assertEqual(observed_frees, Counter(self.DIRECT_FREES))
         self.assertEqual(sum(observed_frees.values()), 47)
 
+        # Allocation families outside the inventoried direct heap/vmalloc set
+        # must not appear silently; each would need explicit accounting first.
+        self.assertNotRegex(
+            constructor,
+            r"\b(?:alloc_page|alloc_pages|__get_free_pages|"
+            r"kmem_cache_alloc|mempool_alloc|krealloc|kvrealloc|"
+            r"vmalloc_user)\s*\(")
+        self.assertEqual(constructor.count("alloc_workqueue("), 2)
+        self.assertEqual(destruction.count("destroy_workqueue("), 2)
+        self.assertEqual(constructor.count("dm_io_client_create()"), 1)
+        self.assertEqual(destruction.count("dm_io_client_destroy("), 1)
+        self.assertEqual(constructor.count("dm_get_device("), 1)
+        self.assertEqual(destruction.count("dm_put_device("), 1)
+
     def test_new_or_early_index_allocation_fails_source_audit(self):
         constructor = body("swapz_ctr")
         guard = constructor.index("swapz_authority_validate_geometry(")
