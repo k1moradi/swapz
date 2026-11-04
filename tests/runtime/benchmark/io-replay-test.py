@@ -559,14 +559,22 @@ class PairReplayContract(unittest.TestCase):
             build = subprocess.run(
                 ["make", "-s", "--no-print-directory", "-C",
                  str(ROOT / "tests/suites"), str(executable)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            self.fail(f"{context} invariant=build-timeout seconds=60 "
+                      "reason=native leaf build did not finish")
         except OSError as error:
-            self.fail(f"{context} invariant=build-launch "
-                      f"reason={type(error).__name__}")
+            reason = " ".join(str(error).split())[:256] or type(error).__name__
+            self.fail(f"{context} invariant=build-launch errno={error.errno} "
+                      f"reason={reason}")
+        build_reason = " ".join((build.stderr or "").split())
+        build_reason = build_reason.replace(str(ROOT), "<repo>")
+        build_reason = build_reason[:512] or "make exited without diagnostic stderr"
         self.assertEqual(
             build.returncode, 0,
             f"{context} invariant=build-exit-status exit_status={build.returncode} "
-            "reason=unprivileged native build failed")
+            f"reason={build_reason}")
         self.assertTrue(
             executable.is_file() and os.access(executable, os.X_OK),
             f"{context} invariant=executable-native-tool "

@@ -4444,7 +4444,10 @@ status, and a bounded reason without publishing representative samples or
 private paths. Negative `MIXED_OPS=65536` CLI probes must still assert
 `SystemExit(2)` and the exact ordinary-mixed-only restriction, while capturing
 their expected usage stderr locally so the retained source-contract summary
-points to the real failed replay invariant instead.
+points to the real failed replay invariant instead. Native leaf compilation
+must have an internal timeout below the parent source-contract watchdog and
+must retain only bounded, repository-root-sanitized build stderr on failure so
+the first error still identifies both the build phase and its cause.
 
 Prepared compression-cost coverage must execute the actual production wrapper
 and ordered observer against the existing EWMA helper. Check a nonzero lane
