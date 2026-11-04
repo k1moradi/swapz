@@ -1622,7 +1622,7 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 		errno = EPROTO;
 		goto failed;
 	}
-	qsort(mount_identifiers, mount_count, sizeof(*mount_identifiers),
+	qsort(mount_identifiers, mount_count, sizeof(unsigned long long),
 	      format_mount_identifier_compare);
 	for (size_t index = 1; index < mount_count; ++index) {
 		const unsigned long long *sorted = mount_identifiers;
