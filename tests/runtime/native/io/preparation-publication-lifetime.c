@@ -293,7 +293,6 @@ struct early_producer_release {
 	atomic_t state;
 	atomic64_t free_mask;
 	_Atomic unsigned int references;
-	_Atomic int producer_finished;
 	_Atomic unsigned int failures;
 	pthread_barrier_t start;
 	pthread_barrier_t end;
@@ -320,8 +319,6 @@ static void *finish_preparation_before_consumer(void *opaque)
 		if (atomic_fetch_sub_explicit(&handoff->references, 1,
 					      memory_order_acq_rel) != 2)
 			atomic_fetch_add(&handoff->failures, 1);
-		atomic_store_explicit(&handoff->producer_finished, 1,
-				      memory_order_relaxed);
 		(void)pthread_barrier_wait(&handoff->end);
 	}
 	return NULL;
@@ -337,7 +334,6 @@ static int test_producer_releases_first_consumer_reclaims_last(void)
 	atomic_init(&handoff.state.value, SWAPZ_PREPARATION_EMPTY);
 	atomic_init(&handoff.free_mask.value, (s64)(1ULL << 63));
 	atomic_init(&handoff.references, 0);
-	atomic_init(&handoff.producer_finished, 0);
 	atomic_init(&handoff.failures, 0);
 	CHECK(pthread_barrier_init(&handoff.start, NULL, 2) == 0);
 	CHECK(pthread_barrier_init(&handoff.end, NULL, 2) == 0);
@@ -347,8 +343,6 @@ static int test_producer_releases_first_consumer_reclaims_last(void)
 	for (iteration = 0; iteration < EARLY_RELEASE_ROUNDS; ++iteration) {
 		CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == 63);
 		atomic_store_explicit(&handoff.references, 2, memory_order_relaxed);
-		atomic_store_explicit(&handoff.producer_finished, 0,
-				      memory_order_relaxed);
 		atomic_store_explicit(&handoff.state.value,
 				      SWAPZ_PREPARATION_PREPARING,
 				      memory_order_relaxed);
@@ -356,13 +350,12 @@ static int test_producer_releases_first_consumer_reclaims_last(void)
 			results[iteration % (sizeof(results) / sizeof(results[0]))];
 		handoff.length = 0;
 		(void)pthread_barrier_wait(&handoff.start);
-		while (!atomic_load_explicit(&handoff.producer_finished,
-						     memory_order_relaxed))
+		/* Observe the producer's actual reference drop. A separate relaxed
+		 * scheduling flag cannot establish the value of this atomic or publish
+		 * payload bytes; the state acquire below remains the publication edge. */
+		while (atomic_load_explicit(&handoff.references,
+						    memory_order_relaxed) != 1)
 			sched_yield();
-		/* Producer dropped the first of two refs; the consumer still pins
-		 * the slot while it acquires and copies terminal payload metadata. */
-		CHECK(atomic_load_explicit(&handoff.references,
-						   memory_order_relaxed) == 1);
 		CHECK(swapz_preparation_read_state(&handoff.state) ==
 		      swapz_preparation_codec_result_state(handoff.codec_result));
 		/* These are the first synchronizing producer-payload observations. */
