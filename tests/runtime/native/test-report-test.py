@@ -2087,6 +2087,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn(
             "foreground_writes != GC_RECOVERY_FOREGROUND_WRITES", oracle)
         self.assertIn("errno == ENOSPC", oracle)
+        self.assertIn("FAIL: GC recovery retry=", oracle)
         self.assertIn(
             "PASS_LOADED_GC_ROLL_FORWARD_RECOVERY=foreground_writes:"
             "$GC_FOREGROUND_WRITES", deploy)

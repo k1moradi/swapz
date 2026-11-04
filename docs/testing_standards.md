@@ -845,6 +845,12 @@ error boundary must still reject an integrity/authority failure (-EBADMSG or
 -EUCLEAN) as terminal even with a live recovery token, while preserving
 retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.
 
+The native GC retry-policy regression must execute the exact small predicate
+included by the production DM target and accept only active authenticated
+recovery plus a lower WRITE `-EIO`; no token, a READ, or another error remains
+non-retryable. The loaded path then verifies the complete target transition
+rather than relying on that predicate test alone.
+
 The exact-authority regression must construct 255 distinct surviving RAW pages
 in one victim, publish one relocation, abort one uncertain one-block lower
 WRITE and relocate all remaining pages. The first destination must become full

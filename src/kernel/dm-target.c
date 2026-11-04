@@ -38,6 +38,7 @@
 #include <linux/string.h>
 #include "engine.h"
 #include "gc-cost.h"
+#include "gc-recovery-policy.h"
 #include "flush-qual.h"
 #include "window-policy.h"
 #include "lane-gap.h"
@@ -2474,8 +2475,12 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	if (op == REQ_OP_WRITE && ctx->write_fault_nth &&
 	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
 		ctx->write_fault_injected++;
-		swapz_fail_at(ctx, -EIO, "write", "lower-io",
-			      "sync-lower-injected");
+		/* This is a pre-submission EIO. An active authenticated GC token
+		 * owns the reservation and can safely retry after quarantine. */
+		if (!swapz_gc_recovery_retryable_lower_write_error(
+			    ctx->gc_recovery.active, true, true))
+			swapz_fail_at(ctx, -EIO, "write", "lower-io",
+				      "sync-lower-injected");
 		return -EIO;
 	}
 	if (op == REQ_OP_READ) {
@@ -2572,11 +2577,18 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	if (error || bitmap) {
 		int lower_error = error ? error : -EIO;
 
-		/* Record lower service errors before an abort can mask them. */
-		swapz_fail_at(ctx, lower_error,
-			      op == REQ_OP_READ ? "read" : "write",
-			      swapz_failure_category(lower_error),
-			      "sync-lower-completion");
+		/* Record lower service errors before an abort can mask them. A
+		 * synchronous GC destination WRITE -EIO leaves an authenticated,
+		 * resumable token; the reservation is quarantined and the next
+		 * foreground attempt resumes it. Every other lower error remains
+		 * terminal, including reads and writes outside GC recovery. */
+		if (!swapz_gc_recovery_retryable_lower_write_error(
+			    ctx->gc_recovery.active, op == REQ_OP_WRITE,
+			    lower_error == -EIO))
+			swapz_fail_at(ctx, lower_error,
+				      op == REQ_OP_READ ? "read" : "write",
+				      swapz_failure_category(lower_error),
+				      "sync-lower-completion");
 		return lower_error;
 	}
 	/* Count SUCCESSFUL dm_io callbacks, not attempted or error-injected

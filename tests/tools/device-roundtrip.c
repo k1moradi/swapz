@@ -685,7 +685,7 @@ static int gc_roll_forward_fault_recovery(int fd, unsigned char *buf,
 	}
 	if (foreground_writes != GC_RECOVERY_FOREGROUND_WRITES) {
 		fprintf(stderr,
-			"FAIL GC recovery setup writes=%u expected=%u\n",
+			"FAIL: GC recovery setup writes=%u expected=%u\n",
 			foreground_writes, GC_RECOVERY_FOREGROUND_WRITES);
 		return -1;
 	}
@@ -697,7 +697,7 @@ static int gc_roll_forward_fault_recovery(int fd, unsigned char *buf,
 	} while (count == -1 && errno == EINTR);
 	if (count != -1 || errno != EIO) {
 		fprintf(stderr,
-			"FAIL GC recovery trigger expected EIO n=%zd errno=%d\n",
+			"FAIL: GC recovery trigger expected EIO n=%zd errno=%d\n",
 			count, errno);
 		return -1;
 	}
@@ -712,16 +712,16 @@ static int gc_roll_forward_fault_recovery(int fd, unsigned char *buf,
 		if (count == -1 && errno == ENOSPC)
 			continue;
 		fprintf(stderr,
-			"FAIL GC recovery retry=%u n=%zd errno=%d\n",
+			"FAIL: GC recovery retry=%u n=%zd errno=%d\n",
 			retry_attempts, count, errno);
 		return -1;
 	}
 	if (count != PAGE) {
-		fprintf(stderr, "FAIL GC recovery did not regain foreground progress\n");
+		fprintf(stderr, "FAIL: GC recovery did not regain foreground progress\n");
 		return -1;
 	}
 	if (fsync(fd)) {
-		perror("FAIL GC recovery fsync");
+		fprintf(stderr, "FAIL: GC recovery fsync errno=%d\n", errno);
 		return -1;
 	}
 
@@ -729,13 +729,13 @@ static int gc_roll_forward_fault_recovery(int fd, unsigned char *buf,
 		raw_pattern(expected, page, 0U);
 		if (transfer(fd, buf, page, 0) || memcmp(buf, expected, PAGE)) {
 			fprintf(stderr,
-				"FAIL GC recovery byte-exact cold page=%u\n", page);
+				"FAIL: GC recovery byte-exact cold page=%u\n", page);
 			return -1;
 		}
 	}
 	raw_pattern(expected, hot_page, trigger_round);
 	if (transfer(fd, buf, hot_page, 0) || memcmp(buf, expected, PAGE)) {
-		fprintf(stderr, "FAIL GC recovery byte-exact hot page\n");
+		fprintf(stderr, "FAIL: GC recovery byte-exact hot page\n");
 		return -1;
 	}
 

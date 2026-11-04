@@ -2516,6 +2516,33 @@ int main(void) {
         self.assertIn("ctx->authority.batch_pending", drain)
         self.assertIn("ctx->authority.in_flight", drain)
 
+    def test_gc_lower_write_eio_retry_is_limited_to_owned_recovery(self):
+        policy = (ROOT / "src/kernel/gc-recovery-policy.h").read_text()
+        lower = body("swapz_lower")
+        compact = body("swapz_gc_compact_one")
+
+        self.assertIn(
+            "return recovery_active && is_write && is_eio;", policy)
+        injected = lower[lower.index(
+            "if (op == REQ_OP_WRITE && ctx->write_fault_nth"):lower.index(
+                "if (op == REQ_OP_READ)")]
+        self.assertIn(
+            "swapz_gc_recovery_retryable_lower_write_error( "
+            "ctx->gc_recovery.active, true, true)",
+            re.sub(r"\s+", " ", injected))
+        self.assertIn("swapz_fail_at(ctx, -EIO", injected)
+
+        completion_start = lower.index("if (error || bitmap)")
+        completion = lower[completion_start:]
+        normalized_completion = re.sub(r"\s+", " ", completion)
+        self.assertIn("lower_error == -EIO", normalized_completion)
+        self.assertIn(
+            "if (!swapz_gc_recovery_retryable_lower_write_error(",
+            normalized_completion)
+        self.assertIn("swapz_fail_at(ctx, lower_error", completion)
+        self.assertIn("error != -EIO && error != -ENOSPC", compact)
+        self.assertIn("ctx->gc_recovery.active)", compact)
+
     def test_gc_production_uses_exact_segment_mapping_counts(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
         finish = source_body("swapz_finish", authority)
