@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Run the production slot algorithm with C11 atomic operations. This is not
  * a Linux memory-model proof or a substitute for loaded BIO/drain coverage. */
+#include <errno.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -18,12 +19,19 @@ struct forced_terminal_publication {
 	atomic_t state;
 	_Atomic int publisher_requested;
 	_Atomic int publication_done;
+	_Atomic int producer_failed;
+	int codec_result;
 	int terminal_state;
 	uint64_t expected_metadata;
 	uint64_t metadata;
 };
 
-static struct forced_terminal_publication *forced_publication;
+/*
+ * Only the consumer thread intercepts its RAW-selection cmpxchg. A publisher
+ * thread starts with a null thread-local hook and therefore executes the shared
+ * production publication helper normally.
+ */
+static _Thread_local struct forced_terminal_publication *forced_publication;
 
 /* A deterministic producer publication between the first read and raw CAS.
  * Counts API-level acquire observations; it is not a hardware reordering or
@@ -259,13 +267,17 @@ static int test_ready_publication_wins_raw_cas(void)
 static void *publish_terminal_between_read_and_cas(void *opaque)
 {
 	struct forced_terminal_publication *handoff = opaque;
+	int previous_state;
 
 	while (!atomic_load_explicit(&handoff->publisher_requested,
 				     memory_order_relaxed))
 		sched_yield();
 	handoff->metadata = handoff->expected_metadata;
-	atomic_store_explicit(&handoff->state.value, handoff->terminal_state,
-			      memory_order_release);
+	previous_state = swapz_preparation_publish_codec_result(
+		&handoff->state, handoff->codec_result);
+	if (previous_state != SWAPZ_PREPARATION_PREPARING)
+		atomic_store_explicit(&handoff->producer_failed, 1,
+				      memory_order_relaxed);
 	atomic_store_explicit(&handoff->publication_done, 1,
 			      memory_order_relaxed);
 	return NULL;
@@ -273,13 +285,18 @@ static void *publish_terminal_between_read_and_cas(void *opaque)
 
 static int test_thread_published_terminal_metadata_after_failed_cas(void)
 {
-	const int states[] = { SWAPZ_PREPARATION_READY_COMPRESSED,
-			       SWAPZ_PREPARATION_READY_RAW,
-			       SWAPZ_PREPARATION_ERROR };
-	unsigned int iteration, state_index;
+	static const struct {
+		int codec_result;
+		int terminal_state;
+	} cases[] = {
+		{ 2048, SWAPZ_PREPARATION_READY_COMPRESSED },
+		{ 0, SWAPZ_PREPARATION_READY_RAW },
+		{ -EIO, SWAPZ_PREPARATION_ERROR },
+	};
+	unsigned int case_index, iteration;
 
-	for (state_index = 0; state_index < sizeof(states) / sizeof(states[0]);
-	     ++state_index) {
+	for (case_index = 0; case_index < sizeof(cases) / sizeof(cases[0]);
+	     ++case_index) {
 		for (iteration = 0; iteration < 64U; ++iteration) {
 			struct forced_terminal_publication handoff;
 			pthread_t producer;
@@ -287,9 +304,11 @@ static int test_thread_published_terminal_metadata_after_failed_cas(void)
 			atomic_init(&handoff.state.value, SWAPZ_PREPARATION_PREPARING);
 			atomic_init(&handoff.publisher_requested, 0);
 			atomic_init(&handoff.publication_done, 0);
-			handoff.terminal_state = states[state_index];
+			atomic_init(&handoff.producer_failed, 0);
+			handoff.codec_result = cases[case_index].codec_result;
+			handoff.terminal_state = cases[case_index].terminal_state;
 			handoff.expected_metadata =
-				((uint64_t)states[state_index] << 48) ^
+				((uint64_t)handoff.terminal_state << 48) ^
 				((uint64_t)iteration * UINT64_C(0x9e3779b97f4a7c15));
 			handoff.metadata = 0;
 			publication.state = &handoff.state;
@@ -310,6 +329,8 @@ static int test_thread_published_terminal_metadata_after_failed_cas(void)
 			 * CAS path's second acquire, not by thread join or a barrier.
 			 */
 			CHECK(handoff.metadata == handoff.expected_metadata);
+			CHECK(!atomic_load_explicit(&handoff.producer_failed,
+						    memory_order_relaxed));
 			CHECK(publication.failed_cas == 1);
 			CHECK(publication.acquire_reads == 2);
 			CHECK(publication.ready_acquires == 1);

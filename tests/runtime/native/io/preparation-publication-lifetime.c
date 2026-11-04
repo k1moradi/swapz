@@ -297,6 +297,8 @@ struct early_producer_release {
 	_Atomic unsigned int failures;
 	pthread_barrier_t start;
 	pthread_barrier_t end;
+	int codec_result;
+	int length;
 	unsigned char payload[RAW_SNAPSHOT_BYTES];
 };
 
@@ -307,10 +309,13 @@ static void *finish_preparation_before_consumer(void *opaque)
 
 	for (iteration = 0; iteration < EARLY_RELEASE_ROUNDS; ++iteration) {
 		(void)pthread_barrier_wait(&handoff->start);
-		for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
-			handoff->payload[byte] = (unsigned char)(iteration ^ byte);
+		handoff->length = handoff->codec_result;
+		if (handoff->length > 0)
+			for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
+				handoff->payload[byte] = (unsigned char)(iteration ^ byte);
 		if (swapz_preparation_publish_codec_result(
-			    &handoff->state, 0) != SWAPZ_PREPARATION_PREPARING)
+			    &handoff->state, handoff->length) !=
+		    SWAPZ_PREPARATION_PREPARING)
 			atomic_fetch_add(&handoff->failures, 1);
 		if (atomic_fetch_sub_explicit(&handoff->references, 1,
 					      memory_order_acq_rel) != 2)
@@ -324,6 +329,7 @@ static void *finish_preparation_before_consumer(void *opaque)
 
 static int test_producer_releases_first_consumer_reclaims_last(void)
 {
+	static const int results[] = { 1024, 0, -EIO };
 	struct early_producer_release handoff = { 0 };
 	pthread_t producer;
 	unsigned int iteration, byte;
@@ -346,15 +352,21 @@ static int test_producer_releases_first_consumer_reclaims_last(void)
 		atomic_store_explicit(&handoff.state.value,
 				      SWAPZ_PREPARATION_PREPARING,
 				      memory_order_relaxed);
+		handoff.codec_result =
+			results[iteration % (sizeof(results) / sizeof(results[0]))];
+		handoff.length = 0;
 		(void)pthread_barrier_wait(&handoff.start);
 		while (!atomic_load_explicit(&handoff.producer_finished,
 						     memory_order_relaxed))
 			sched_yield();
 		CHECK(swapz_preparation_read_state(&handoff.state) ==
-		      SWAPZ_PREPARATION_READY_RAW);
-		/* This is the first synchronizing payload observation. */
-		for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
-			CHECK(handoff.payload[byte] == (unsigned char)(iteration ^ byte));
+		      swapz_preparation_codec_result_state(handoff.codec_result));
+		/* These are the first synchronizing producer-payload observations. */
+		CHECK(handoff.length == handoff.codec_result);
+		if (handoff.codec_result > 0)
+			for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
+				CHECK(handoff.payload[byte] ==
+				      (unsigned char)(iteration ^ byte));
 		CHECK(atomic64_read(&handoff.free_mask) == 0);
 		CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == -1);
 		CHECK(atomic_fetch_sub_explicit(&handoff.references, 1,
