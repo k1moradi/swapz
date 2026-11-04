@@ -3752,6 +3752,9 @@ class PairReplayContract(unittest.TestCase):
             "bytes": spec["bytes"], "round_count": spec["rounds"],
             "required_swap_bytes": spec["minimum_observed_swap_bytes"],
             "content": spec["content"],
+            "arm_started_monotonic_ns": 100,
+            "arm_finished_monotonic_ns": 200,
+            "arm_boot_id": "11111111-2222-3333-4444-555555555555",
             "loaded_module_provenance": {"status": "NOT_LOADED"},
             "swap_device_identity": {
                 "device": "8:1", "dm_uuid": None, "dm_target": None,
@@ -3760,6 +3763,12 @@ class PairReplayContract(unittest.TestCase):
         }
         self.assertEqual(
             qualification.validate_arm(arm, "anonymous-swap", "raw"), [])
+        # A synthetic arm cannot bypass the physical chronology contract.
+        missing_boot = {**arm, "arm_boot_id": None}
+        self.assertTrue(any(
+            "chronology/boot identity" in reason
+            for reason in qualification.validate_arm(
+                missing_boot, "anonymous-swap", "raw")))
         arm["cgroup_before"]["memory_max"] += PAGE
         self.assertTrue(any(
             "memory.max" in reason

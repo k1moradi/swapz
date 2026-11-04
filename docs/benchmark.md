@@ -672,7 +672,10 @@ non-overlapping actual intervals and requires matching boot IDs, not merely
 the user-supplied order label. The campaign sealer also compares each arm's
 boot ID with its host-boundary snapshots. Missing or malformed chronology and
 parent identity exclude the pair. Anonymous arms retain the same chronology
-and boot binding; they cannot borrow an earlier boot's measurements. The
+and boot binding; they cannot borrow an earlier boot's measurements.
+Rootless evaluator fixtures provide synthetic arm timestamps and a boot ID
+so that otherwise valid anonymous acceptance examples exercise the same
+fail-closed chronology requirement rather than bypassing it. The
 physical replay, evaluator and campaign snapshot use the same production
 PARTUUID grammar: 8..64 characters, hexadecimal groups separated only by
 single internal hyphens, at least eight hexadecimal digits, normalized to
