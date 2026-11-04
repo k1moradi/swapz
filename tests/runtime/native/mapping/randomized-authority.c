@@ -69,6 +69,9 @@ static struct swapz_tx mixed_bulk_transactions[SWAPZ_MAX_RECORDS];
 static unsigned int mixed_active;
 static unsigned int mixed_failed_writes;
 static unsigned int mixed_failed_reads;
+static unsigned int mixed_completed_rotations;
+static unsigned int mixed_gc_write_failures;
+static int mixed_failure_reported;
 static uint32_t mixed_seed;
 
 struct mixed_trace_entry {
@@ -103,6 +106,9 @@ static int mixed_failure(const char *reason, unsigned int line)
 	unsigned int first = mixed_trace_count > 12U ?
 		mixed_trace_count - 12U : 0U;
 
+	if (mixed_failure_reported)
+		return -EUCLEAN;
+	mixed_failure_reported = 1;
 	fprintf(stderr, "MIXED_FAIL reason=%s line=%u seed=0x%08x step=%u "
 		"open=%u next=%u victim=%u destination=%u\n",
 		reason, line, mixed_seed, mixed_step_number,
@@ -324,6 +330,9 @@ static int mixed_setup(uint32_t seed)
 	mixed_trace_count = 0;
 	mixed_failed_reads = 0;
 	mixed_failed_writes = 0;
+	mixed_completed_rotations = 0;
+	mixed_gc_write_failures = 0;
+	mixed_failure_reported = 0;
 	mixed_active = 0;
 	memset(mixed_quarantine, 0, sizeof(mixed_quarantine));
 	memset(mixed_mode, 0, sizeof(mixed_mode));
@@ -593,6 +602,8 @@ static int mixed_collect_until_progress(void)
 			disk.fail_read_on = 0;
 			MIXED_REQUIRE(!error || error == -EIO,
 				      "GC_RELOCATION_FAILED");
+			if (error == -EIO)
+				mixed_gc_write_failures++;
 			MIXED_REQUIRE(mixed_verify_full_map() == 0,
 				      "GC_MAP_CORRUPTION");
 			break; /* Deliberately partial: rescan authoritative victim. */
@@ -604,6 +615,7 @@ static int mixed_collect_until_progress(void)
 			trace->result = error;
 			MIXED_REQUIRE(!error && !authority.gc_allocation &&
 				      !mixed_roles[victim], "GC_COMMIT_DEADLOCK");
+			mixed_completed_rotations++;
 			MIXED_REQUIRE(mixed_verify_full_map() == 0,
 				      "GC_COMMIT_CORRUPTION");
 			return 0;
@@ -734,12 +746,18 @@ static int run_mixed_seed(uint32_t seed)
 	for (swapz_u32 segment = 0; segment < MIXED_SEGMENTS; ++segment)
 		if (mixed_program_counts[segment] > 1U)
 			rotation_count++;
-	MIXED_REQUIRE(rotation_count > 0U, "NO_RECYCLED_RESERVE_COVERAGE");
+	MIXED_REQUIRE(rotation_count > 0U &&
+		      mixed_completed_rotations >= 2U,
+		      "NO_REPEATED_RESERVE_COVERAGE");
 	MIXED_REQUIRE(mixed_failed_writes > 0U, "NO_WRITE_EIO_COVERAGE");
+	MIXED_REQUIRE(mixed_failed_reads > 0U, "NO_READ_EIO_COVERAGE");
+	MIXED_REQUIRE(mixed_gc_write_failures > 0U, "NO_GC_FAULT_COVERAGE");
 	printf("MIXED_PRODUCTION_C_PASS seed=0x%08x steps=%u "
-	       "failed_writes=%u failed_reads=%u recycled_segments=%u "
+	       "failed_writes=%u failed_reads=%u rotations=%u "
+	       "gc_faults=%u recycled_segments=%u "
 	       "synthetic_native_host_only=1\n",
 	       seed, MIXED_STEPS, mixed_failed_writes, mixed_failed_reads,
+	       mixed_completed_rotations, mixed_gc_write_failures,
 	       rotation_count);
 	mixed_active = 0;
 	return 0;
