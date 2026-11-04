@@ -1723,8 +1723,41 @@ persist_transaction_state systemd-reload-pending
 persist_transaction_state systemd-reload-complete
 install_test_checkpoint systemd-reload-complete
 
+# Re-admit the exact installed bytes and running-kernel DKMS registration
+# immediately before creating any activation-capable CLI entry point.
+pre_activation_status=""
+query_dkms_status pre_activation_status -m swapz -v "$version" -k "$kernel_release" ||
+  blocked "cannot recheck current-kernel DKMS state before CLI publication"
+dkms_status_exact_installed "$pre_activation_status" ||
+  blocked "current-kernel DKMS state changed before CLI publication"
+verify_installed_module_set && verify_module_resolution &&
+  verify_source_metadata && verify_source_manifest ||
+  blocked "installed module or source provenance changed before CLI publication"
+pre_activation_files=(
+  "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot"
+  "$primary_generator" "$mapper_service" "$boot_verifier_service"
+  "$runtime_health_service" "$primary_swap"
+)
+pre_activation_staged=(
+  "$stage_dir/swapz-primary-boot-verify" "$stage_dir/swapz-primary-runtime-health"
+  "$stage_dir/device-roundtrip" "$stage_dir/dm-swapz.ko"
+  "$stage_dir/swapz-primary-generator" "$stage_dir/swapz-primary-mapper.service"
+  "$stage_dir/swapz-primary-boot-verify.service"
+  "$stage_dir/swapz-primary-runtime-health.service" "$stage_dir/$swap_unit_name"
+)
+pre_activation_modes=(755 755 755 644 755 644 644 644 644)
+for ((file_index=0; file_index<${#pre_activation_files[@]}; ++file_index)); do
+  installed_file_metadata "${pre_activation_files[file_index]}" \
+    "${pre_activation_modes[file_index]}" &&
+    cmp -s "${pre_activation_staged[file_index]}" \
+      "${pre_activation_files[file_index]}" ||
+    blocked "installed userspace or unit bytes changed before CLI publication"
+done
+[[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
+  blocked "installed module digest changed before CLI publication"
+
 persist_transaction_state publishing-cli
-temporary_cli="$cli_dir/.swapzctl.publish.$$"
+temporary_cli="$cli_dir/.swapzctl.publish.$"
 [[ ! -e "$temporary_cli" && ! -L "$temporary_cli" ]] ||
   blocked "temporary CLI destination became occupied"
 install -m0755 "$stage_dir/swapzctl" "$temporary_cli"
