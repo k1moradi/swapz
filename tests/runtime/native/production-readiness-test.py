@@ -336,6 +336,17 @@ def physical_campaign_evidence(policy_raw):
             "mapper_uuid": "SWAPZ-PRIMARY-" + "f" * 32,
             "metadata_ram_trace": trace,
             "metadata_ram_summary": ram_summary,
+            "metadata_ram_arm_binding": {
+                "arm_started_monotonic_ns": 1_300_000_000,
+                "arm_finished_monotonic_ns": 1_700_000_000,
+                "gc_activity_intervals": [{
+                    "start_monotonic_ns": 1_500_000_000,
+                    "end_monotonic_ns": 1_700_000_000,
+                    "gc_wall_ns": 1,
+                    "gc_victims": 1,
+                    "gc_pages": 1,
+                }],
+            },
         },
         "host_stability": {
             "status": "STABLE",
@@ -1098,6 +1109,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 "metadata_ram_trace"].update(source_sha="b" * 40),
             "summary_tamper": lambda capacity: capacity[
                 "metadata_ram_summary"].update(sample_count=1),
+            "arm_binding_tamper": lambda capacity: capacity[
+                "metadata_ram_arm_binding"]["gc_activity_intervals"][0].update(
+                    start_monotonic_ns=1_700_000_001),
             "short_capacity": lambda capacity: (
                 capacity.update(logical_pages=27080191,
                                 logical_capacity_bytes=27080191 * 4096)),
