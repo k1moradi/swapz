@@ -149,6 +149,12 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn('mkswap "$PARTITION" >/dev/null', self.script)
         self.assertNotIn('mkswap --no-discard', self.script)
 
+    def test_qualifier_shell_syntax_is_valid(self):
+        subprocess.run(
+            ["bash", "-n", str(SCRIPT)],
+            cwd=ROOT,
+            check=True,
+        )
 
     def test_normal_start_proves_swap_and_durable_identity_fail_closed(self):
         start = self.script.index(
@@ -156,20 +162,30 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         stop = self.script.index(
             'note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=stop"', start)
         positive_path = self.script[start:stop]
-        self.assertIn('assert_exact_owned_mapper 1', positive_path)
-        self.assertIn('[[ "$mapper_node_dev" == "$mapper_dev" ]]', positive_path)
-        self.assertIn('active_mapper_entries="$(mapper_swap_entry_count)"',
-                      positive_path)
+        unique_active_guard = (
+            '[[ "$active_mapper_entries" == 1 ]] ||\n'
+            '\tfail "manager-created mapper is not the unique active swap identity"'
+        )
+        proof_steps = (
+            'assert_exact_owned_mapper 1',
+            '[[ "$mapper_node_dev" == "$mapper_dev" ]] ||\n'
+            '\tfail "published mapper node identity differs from Device Mapper control"',
+            'active_mapper_entries="$(mapper_swap_entry_count)" ||\n'
+            '\tfail "cannot resolve every /proc/swaps device identity after start"',
+            unique_active_guard,
+            'assert_lifecycle_state "$RUN_ID" ACTIVE null ||\n'
+            '\tfail "start did not persist exact durable ACTIVE transaction"',
+            'assert_owned_transaction_records 1 ||\n'
+            '\tfail "start did not retain canonical run-bound consumed/active ownership"',
+            'assert_unrelated_host_swap_identity "normal start"',
+            'active_backing_header_sha256=',
+        )
+        for proof_step in proof_steps:
+            self.assertIn(proof_step, positive_path)
+        for earlier, later in zip(proof_steps, proof_steps[1:]):
+            self.assertLess(positive_path.index(earlier),
+                            positive_path.index(later))
         self.assertNotIn('|| ! -e "$swap_path"', positive_path)
-        self.assertIn('[[ "$active_mapper_entries" == 1 ]]', positive_path)
-        self.assertIn('assert_lifecycle_state "$RUN_ID" ACTIVE null',
-                      positive_path)
-        self.assertIn('assert_owned_transaction_records 1', positive_path)
-        self.assertIn('assert_unrelated_host_swap_identity "normal start"',
-                      positive_path)
-        self.assertLess(
-            positive_path.index('assert_unrelated_host_swap_identity "normal start"'),
-            positive_path.index('active_backing_header_sha256='))
         # The shared swap oracle must abort on a missing inventory path,
         # rather than interpreting it as proof of inactivity.
         self.assertIn('[[ -e "$swap_path" ]] || return 1', self.script)
