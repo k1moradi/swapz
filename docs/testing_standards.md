@@ -455,8 +455,14 @@ lanes; `-mixed-lanes-waves` is their matched wave-barrier control. The ordinary
 wave trace. The two new plans must have identical operation, payload and final-
 image hashes, with per-lane WRITE stripes and an immutable disjoint READ region.
 Only start/end phase barriers are allowed in the persistent mode. Both modes
-retain byte-exact timed READs and complete final-image verification. Results
-must identify the replay mode and remain outside the existing history series.
+retain byte-exact timed READs and complete final-image verification. For both
+Python-threaded wave and persistent lanes, all measured worker completions must
+precede a checked final fsync of the opened target, within the timed interval
+and before the final lower-I/O/CPU snapshots or a PASS result. A failed drain
+must identify the candidate/mixed phase, errno reason and expected versus
+observed measured operation count; final byte readback cannot replace it.
+The native-C engine retains its independently checked final fsync.
+Results must identify the replay mode and remain outside the existing history series.
 This is workload sensitivity, not a production-source performance A/B; actual
 reclaim can be bursty too. Keep new traces out of the qualification matrix until
 separately justified.

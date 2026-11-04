@@ -2140,9 +2140,18 @@ def replay(args):
                                         elapsed = future.result()
                                         if item["phase"] == "measure":
                                             samples[item["op"]].append(elapsed)
-                                # Acknowledged write completion requires final drain.
-                                # Buffer and executor teardown are not part of the clock.
+                            # Acknowledged write completion requires final drain.
+                            # Buffer and executor teardown are not part of the clock.
+                            try:
                                 os.fsync(fd)
+                            except OSError as exc:
+                                observed_measured_ops = len(samples["W"]) + len(samples["R"])
+                                raise OSError(
+                                    f"{args.candidate}:mixed final fsync failed "
+                                    f"(expected {mf['measure_ops']} measured operations, "
+                                    f"observed {observed_measured_ops}): "
+                                    f"{exc.strerror or 'I/O error'}"
+                                ) from exc
                         finally:
                             if gc_was_enabled:
                                 gc.enable()
