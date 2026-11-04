@@ -141,7 +141,8 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
  * deliberately does not hash the payload. payload may be NULL for metadata-only
  * storage; when non-NULL, bytes must span bytes_total so the returned pointer
  * names resident payload bytes. A metadata-CRC-only caller must still enforce
- * descriptor ordering/identity itself. */
+ * descriptor ordering/identity itself. A malformed record count is -EUCLEAN;
+ * -ERANGE is reserved for an index outside an otherwise valid count. */
 int swapz_lookup_validated_descriptor(const void *bytes, swapz_u32 bytes_total,
 				    swapz_u8 index, struct swapz_decoded *out,
 				    const swapz_u8 **payload);
