@@ -533,11 +533,16 @@ def validate_physical_campaign_evidence(
             reject("sealed campaign capacity/RAM evidence is invalid")
         else:
             try:
-                RAM_TRACE_VALIDATOR["validate_metadata_ram_trace"](
-                    capacity_and_ram.get("metadata_ram_trace"),
-                    source_sha=source_sha,
-                    mapper_uuid=capacity_and_ram.get("mapper_uuid"),
-                    expected_peak_ram_bytes=peak_ram_bytes)
+                ram_summary = RAM_TRACE_VALIDATOR[
+                    "validate_metadata_ram_trace"](
+                        capacity_and_ram.get("metadata_ram_trace"),
+                        source_sha=source_sha,
+                        mapper_uuid=capacity_and_ram.get("mapper_uuid"),
+                        expected_peak_ram_bytes=peak_ram_bytes)
+                if capacity_and_ram.get("metadata_ram_summary") != ram_summary:
+                    reject(
+                        "sealed campaign RAM trace summary does not match "
+                        "raw samples")
             except ValueError as exc:
                 reject(f"sealed campaign RAM trace is invalid: {exc}")
 
