@@ -157,7 +157,8 @@ read_cgroup_root_memory_inventory() {
           ! $memory_max =~ ^(0|[1-9][0-9]*)$ ]]; then
         return 1
     fi
-    [[ $memory_current =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+    [[ $memory_current =~ ^(0|[1-9][0-9]*)$ &&
+       ${#memory_current} -le 20 ]] || return 1
     if [[ $memory_max == max ]]; then
         headroom_status=unbounded
     else

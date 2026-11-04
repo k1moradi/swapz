@@ -5681,6 +5681,10 @@ int main(void)
                     (root / "memory.current").write_text(current)
                     self.assertNotEqual(cgroup_inventory().returncode, 0)
 
+            (root / "memory.max").write_text("max\n")
+            (root / "memory.current").write_text("1" * 21 + "\n")
+            self.assertNotEqual(cgroup_inventory().returncode, 0)
+
             (root / "memory.current").unlink()
             self.assertNotEqual(cgroup_inventory().returncode, 0)
 
