@@ -421,6 +421,15 @@ static void test_topology_flags_fail_closed(void)
 static void test_mountinfo_device_parser(void)
 {
 	dev_t device = 0;
+	unsigned int optional_fields = 0U;
+	const char token[] = "rw";
+
+	/* Invalid spans fail without undefined pointer arithmetic under UBSan. */
+	assert(!format_mountinfo_optional_valid(NULL, token + 2U,
+						 &optional_fields));
+	assert(!format_mountinfo_optional_valid(token, NULL, &optional_fields));
+	assert(!format_mountinfo_rw_options_valid(NULL, token + 2U));
+	assert(!format_mountinfo_rw_options_valid(token, NULL));
 
 	assert(format_mountinfo_line_device(
 		"36 25 8:1 / /mnt rw,relatime - ext4 /dev/sda1 rw\n",
