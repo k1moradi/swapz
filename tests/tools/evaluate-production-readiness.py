@@ -604,9 +604,14 @@ def validate_physical_campaign_evidence(
         if message not in issues:
             issues.append(message)
 
+    if not isinstance(campaign, dict):
+        reject("sealed campaign evidence object is invalid")
+        return issues
     if campaign.get("schema") != "swapz-performance-campaign-evidence-v1":
         reject("sealed campaign schema is invalid")
-    if not raw:
+    if not isinstance(raw, bytes):
+        reject("sealed campaign evidence bytes are invalid")
+    elif not raw:
         reject("sealed campaign evidence bytes are empty")
     elif len(raw) > MAX_EVIDENCE_INPUT_BYTES:
         reject("sealed campaign evidence bytes exceed input bound")
