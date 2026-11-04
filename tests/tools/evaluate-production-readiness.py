@@ -603,6 +603,21 @@ def validate_physical_campaign_evidence(
         for name in ("host_before", "host_after", "qualification_summary"):
             if not _valid_campaign_artifact(artifacts.get(name)):
                 reject(f"sealed campaign {name} artifact is invalid")
+        # The separately captured post-teardown trace is an immutable evidence
+        # input, not a scalar reconstructed by the replay process. Its bytes
+        # must match the embedded sealed trace under the canonical writer.
+        if isinstance(capacity_and_ram, dict):
+            trace = capacity_and_ram.get("metadata_ram_trace")
+            trace_artifact = artifacts.get("metadata_ram_trace")
+            if not isinstance(trace, dict) or not _valid_campaign_artifact(
+                    trace_artifact):
+                reject("sealed campaign RAM trace artifact is missing")
+            else:
+                canonical = (
+                    json.dumps(trace, indent=2, sort_keys=True) + "\n").encode()
+                if (trace_artifact["size_bytes"] != len(canonical) or
+                        trace_artifact["sha256"] != sha256_bytes(canonical)):
+                    reject("sealed campaign RAM trace artifact digest mismatch")
         pairs = artifacts.get("pairs")
         record_count = campaign.get("record_count")
         if not isinstance(pairs, list) or not pairs:
