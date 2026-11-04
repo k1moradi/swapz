@@ -102,7 +102,7 @@ static int mixed_failure(const char *reason, unsigned int line)
 		mixed_trace_count - 12U : 0U;
 
 	fprintf(stderr, "MIXED_FAIL reason=%s line=%u seed=0x%08x step=%u "
-		"open=%u next=%u victim=%u destination=%u\\n",
+		"open=%u next=%u victim=%u destination=%u\n",
 		reason, line, mixed_seed, mixed_step_number,
 		authority.open_segment, authority.next_block,
 		authority.gc_forbidden_victim, authority.gc_destination);
@@ -111,7 +111,7 @@ static int mixed_failure(const char *reason, unsigned int line)
 			&mixed_trace[index % MIXED_TRACE_LENGTH];
 
 		fprintf(stderr, "TRACE step=%u op=%c logical=%u count=%u "
-			"block=%u result=%d\\n", entry->step,
+			"block=%u result=%d\n", entry->step,
 			entry->operation, entry->logical, entry->count,
 			entry->block, entry->result);
 	}
@@ -729,7 +729,7 @@ static int run_mixed_seed(uint32_t seed)
 	MIXED_REQUIRE(mixed_failed_writes > 0U, "NO_WRITE_EIO_COVERAGE");
 	printf("MIXED_PRODUCTION_C_PASS seed=0x%08x steps=%u "
 	       "failed_writes=%u failed_reads=%u recycled_segments=%u "
-	       "synthetic_native_host_only=1\\n",
+	       "synthetic_native_host_only=1\n",
 	       seed, MIXED_STEPS, mixed_failed_writes, mixed_failed_reads,
 	       rotation_count);
 	mixed_active = 0;
@@ -910,7 +910,7 @@ int main(void)
 			parsed = strtoul(selected_seed, &end, 0);
 			if (errno || end == selected_seed || *end ||
 			    !parsed || parsed > UINT32_MAX) {
-				fprintf(stderr, "INVALID_SWZ_RANDOM_SEED=%s\\n",
+				fprintf(stderr, "INVALID_SWZ_RANDOM_SEED=%s\n",
 					selected_seed);
 				free(disk.bytes);
 				return 1;
