@@ -2267,6 +2267,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 ({**after, "values": [-1] + [0] * 15}, "uint64"),
                 ({**after, "values": [2**64] + [0] * 15}, "uint64"),
                 ({**after, "values": after["values"][:15]}, "uint64"),
+                ({**after, "values": after["values"] + [0]},
+                 "lower_io_field_count"),
                 ({"available": False, "error": "missing stat"},
                  "lower_io_after.*missing stat"),
         ):

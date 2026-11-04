@@ -1133,6 +1133,10 @@ def _lower_io_delta(before, after):
                 raise ProbeError(
                     f"{label}.{field} expected<=uint64_max/512 "
                     f"observed={values[index]}")
+    if len(before["values"]) != len(after["values"]):
+        raise ProbeError(
+            f"lower_io_field_count expected={len(before['values'])} "
+            f"observed={len(after['values'])}")
     parent = before.get("device_major_minor")
     if (not isinstance(parent, str) or
             not re.fullmatch(r"[0-9]+:[0-9]+", parent) or
