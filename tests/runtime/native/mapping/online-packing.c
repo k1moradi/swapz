@@ -35,6 +35,12 @@ static swapz_u8 scratch_metadata_cache[
 static swapz_u8 scratch_extent_cache[
 	SWAPZ_READ_EXTENT_CACHE_ENTRIES * SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 originals[64][2072];
+/* Fixed preallocated storage for real batch prepare/complete regression. */
+static swapz_u8 padding_run_bytes[SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES];
+static struct swapz_tx padding_run_transactions[SWAPZ_MAX_RECORDS];
+static swapz_u8 padding_segment_roles[
+	PHYSICAL_BLOCKS / SWAPZ_SEGMENT_BLOCKS];
+static swapz_u8 padding_raw_page[SWAPZ_BLOCK_BYTES];
 
 struct memory_disk {
 	swapz_u8 *storage;
@@ -1194,6 +1200,136 @@ static int test_mapping_length_mismatch_stops_before_payload_io(void)
 	return 0;
 }
 
+
+static int test_staged_padding_counter_saturates(void)
+{
+	const swapz_u32 maximum = ~(swapz_u32)0;
+	const struct {
+		swapz_u32 initial_blocks;
+		swapz_u16 additional_blocks;
+		swapz_u32 expected_blocks;
+	} cases[] = {
+		{ 0, 0, 0 },
+		{ 0, 1, 1 },
+		{ 1, 0, 1 },
+		{ 1, 1, 2 },
+		{ maximum - 1U, 1, maximum },
+		{ maximum - 1U, 2, maximum }, /* would overflow */
+		{ maximum, 0, maximum },
+		{ maximum, 1, maximum },
+		{ maximum, SWAPZ_BULK_BLOCKS, maximum },
+	};
+	struct swapz_engine telemetry = { 0 };
+	size_t index;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		telemetry.bulk_padding_blocks = cases[index].initial_blocks;
+		swapz_engine_account_staged_padding(
+			&telemetry, cases[index].additional_blocks);
+		CHECK(telemetry.bulk_padding_blocks ==
+		      cases[index].expected_blocks);
+		/* A status consumer may claim exactness only at zero. */
+		if (cases[index].initial_blocks || cases[index].additional_blocks)
+			CHECK(telemetry.bulk_padding_blocks != 0);
+	}
+
+	telemetry.bulk_padding_blocks = maximum - 1U;
+	for (index = 0; index < 1024; ++index)
+		swapz_engine_account_staged_padding(&telemetry, SWAPZ_BULK_BLOCKS);
+	CHECK(telemetry.bulk_padding_blocks == maximum);
+	return 0;
+}
+
+static int test_staged_padding_survives_mixed_run_failures(void)
+{
+	struct swapz_compressed_page pages[3];
+	struct swapz_io_run run = {
+		.bytes = padding_run_bytes,
+		.txs = padding_run_transactions,
+	};
+	const swapz_u32 maximum = ~(swapz_u32)0;
+	swapz_u8 prepared, committed, iteration;
+	swapz_u8 group;
+	swapz_u16 extent_blocks;
+
+	CHECK(setup() == 0);
+	authority.reuse_dead_segments = 1;
+	CHECK(swapz_enable_segment_rotation(
+	      &authority, padding_segment_roles,
+	      PHYSICAL_BLOCKS / SWAPZ_SEGMENT_BLOCKS) == 0);
+	engine.bulk_enabled = 2;
+
+	for (iteration = 0; iteration < 5; ++iteration) {
+		prepare(pages, 2, 0, 7 * iteration);
+		/* Two small compressed records share one block before the RAW tail. */
+		pages[0].length = 1000;
+		pages[1].length = 1000;
+		memset(padding_raw_page, 0x30 + iteration,
+		       sizeof(padding_raw_page));
+		pages[2] = (struct swapz_compressed_page) {
+			.logical_page = 2,
+			.payload = padding_raw_page,
+			.length = SWAPZ_BLOCK_BYTES,
+			.raw = 1,
+		};
+		prepared = 0;
+		CHECK(swapz_engine_prepare_batched_run(
+		      &engine, pages, 3, &run, &prepared, 0) == 0);
+		CHECK(prepared == 3 && run.extent_count == 2);
+		CHECK(run.raw[0] == 0 && run.raw[1] == 1);
+		CHECK(!authority.in_flight && authority.batch_pending == 2);
+		extent_blocks = 0;
+		for (group = 0; group < run.extent_count; ++group) {
+			CHECK(run.offsets[group] == extent_blocks);
+			extent_blocks += run.txs[group].extent_blocks;
+		}
+		/* Packed compressed+RAW staging adds no intra-run padding. */
+		CHECK(run.blocks == extent_blocks);
+		committed = 99;
+		if (iteration == 0 || iteration == 4) {
+			/* A deterministic completed RAM lower write, then real replay. */
+			memcpy(disk.storage +
+			       (size_t)run.start_block * SWAPZ_BLOCK_BYTES,
+			       run.bytes, (size_t)run.blocks * SWAPZ_BLOCK_BYTES);
+			CHECK(swapz_engine_complete_batched_run(
+			      &engine, &run, run.blocks, 0, &committed) == 0);
+			CHECK(committed == 3);
+			CHECK(maps[0].valid && maps[1].valid && maps[2].valid);
+			CHECK(maps[0].generation == (iteration == 0 ? 1U : 2U));
+		} else if (iteration == 1) {
+			/*
+			 * The source-derived counter helper models a positive gap.
+			 * Packed placement currently does not naturally create one.
+			 * Tail cancellation may not erase prior staging evidence.
+			 */
+			swapz_engine_account_staged_padding(&engine, 1);
+			CHECK(engine.bulk_padding_blocks == 1);
+			CHECK(maps[0].generation == 1);
+			CHECK(swapz_engine_abort_batched_run_tail(&engine,
+								&run) == 0);
+			CHECK(committed == 99);
+		} else {
+			/* Inject near-overflow history before the terminal lower error. */
+			if (iteration == 2)
+				engine.bulk_padding_blocks = maximum - 1U;
+			swapz_engine_account_staged_padding(&engine, 2);
+			CHECK(engine.bulk_padding_blocks == maximum);
+			CHECK(swapz_engine_complete_batched_run(
+			      &engine, &run, 0,
+			      iteration == 2 ? -EIO : -EBADMSG,
+			      &committed) ==
+			      (iteration == 2 ? -EIO : -EBADMSG));
+			CHECK(committed == 0);
+			CHECK(maps[0].generation == 1);
+		}
+		CHECK(!authority.in_flight && !authority.batch_pending);
+		CHECK(engine.bulk_padding_blocks ==
+		      (iteration == 0 ? 0U : iteration == 1 ? 1U : maximum));
+	}
+	/* Once nonzero, even future successful mixed runs cannot suggest exactness. */
+	CHECK(engine.bulk_padding_blocks == maximum);
+	return 0;
+}
 int main(void)
 {
 	int completed = 0;
@@ -1218,6 +1354,8 @@ int main(void)
 	CHECK(test_adjacent_distinct_extent_coalescing() == 0); completed++;
 	CHECK(test_mapping_length_mismatch_stops_before_payload_io() == 0); completed++;
 	CHECK(test_private_read_telemetry_merge_preserves_cache_state() == 0); completed++;
+	CHECK(test_staged_padding_counter_saturates() == 0); completed++;
+	CHECK(test_staged_padding_survives_mixed_run_failures() == 0); completed++;
 	free(disk.storage);
 	printf("SWAPZ_EXACT_ENGINE_TESTS_PASS=%d\n", completed);
 	return 0;

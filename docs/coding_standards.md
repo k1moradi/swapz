@@ -34,9 +34,16 @@ The compressed-SWZ ratio uses `compressed * 4096` logical bytes divided by
 successful foreground lower-WRITE bytes attributable to compressed SWZ extents.
 Foreground bytes are `physical_write - gc_write`; subtract exactly one 4KiB
 block for each committed RAW page. This denominator intentionally includes SWZ
-headers, extent rounding and packing cost. If a nonzero lower-bulk padding mode
-makes compressed bytes inseparable from padding using committed counters,
-report the compressed-only ratio as unavailable rather than estimating it.
+headers, extent rounding and packing cost. The INFO `bulk_padding` field is a
+saturating unsigned-32 count of 4KiB padding blocks **staged** by the serialized
+write engine, including stages later aborted or failed; it is not committed
+foreground/GC accounting. Zero means no padding was ever staged, never a
+wrapped counter. UINT32_MAX is saturation, not an exact lifetime block total.
+For bulk mode 2, any nonzero `bulk_padding` therefore requires the
+compressed-only ratio to be UNAVAILABLE because committed compressed extent
+bytes cannot be separated from possible padding. This may be conservative
+after an aborted stage. The existing INFO field and overall committed ratio
+remain unchanged; do not subtract staged padding or estimate it.
 
 The overall ratio uses `logical_write / (physical_write - gc_write)`. RAW
 pages therefore contribute 4KiB logical and 4KiB lower bytes, while zero-elided

@@ -1610,14 +1610,15 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 		{
 			swapz_u16 offset = tx->start_block - run_start;
 			swapz_u16 end = offset + blocks;
+			swapz_u16 padding_blocks = offset > run_blocks ?
+				offset - run_blocks : 0;
 			swapz_u8 *image = run->bytes +
 					 (size_t)offset * SWAPZ_BLOCK_BYTES;
 
-			if (offset > run_blocks)
+			if (padding_blocks)
 				memset(run->bytes +
 				       (size_t)run_blocks * SWAPZ_BLOCK_BYTES, 0,
-				       (size_t)(offset - run_blocks) *
-				       SWAPZ_BLOCK_BYTES);
+				       (size_t)padding_blocks * SWAPZ_BLOCK_BYTES);
 
 			phase_start = swapz_engine_now_ns();
 			if (raw) {
@@ -1661,8 +1662,9 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 			run->offsets[staged] = offset;
 			run->takes[staged] = take;
 			run->raw[staged] = raw;
-			e->bulk_padding_blocks += offset > run_blocks ?
-						      offset - run_blocks : 0;
+			/* Record successful staging, not later I/O/publication. */
+			if (padding_blocks)
+				swapz_engine_account_staged_padding(e, padding_blocks);
 			run_blocks = end;
 			staged++;
 			entry += take;

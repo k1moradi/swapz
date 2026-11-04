@@ -104,6 +104,12 @@ struct swapz_engine {
 	swapz_u8 bulk_enabled;
 	swapz_u32 bulk_writes;
 	swapz_u32 bulk_extents;
+	/*
+	 * Lifetime 4KiB blocks of padding STAGED by the serialized write owner,
+	 * including prepared runs later aborted or failed. This is not committed
+	 * foreground/GC accounting. Saturates at UINT32_MAX: zero means padding
+	 * has never been staged; a saturated nonzero value never wraps to zero.
+	 */
 	swapz_u32 bulk_padding_blocks;
 	/* Adjacent-only runs closed because extent alignment inserted a gap. */
 	swapz_u32 run_splits_by_hole;
@@ -212,6 +218,19 @@ struct swapz_engine {
 	 * avoiding a speculative second block does not skip CRC validation. */
 	swapz_u32 read_two_block_skips;
 };
+
+/* Owner-serialized, allocation-free saturation of staged 4KiB padding blocks.
+ * The INFO consumer uses the zero/nonzero distinction, not the exact count. */
+static inline void swapz_engine_account_staged_padding(
+				       struct swapz_engine *engine,
+				       swapz_u16 padding_blocks)
+{
+	swapz_u32 remaining_blocks = ~(swapz_u32)0 -
+		engine->bulk_padding_blocks;
+
+	engine->bulk_padding_blocks += padding_blocks < remaining_blocks ?
+		padding_blocks : remaining_blocks;
+}
 
 /* CPU-only finite-window selection, 4/8/16KiB; output classes 1/2/4. */
 int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
