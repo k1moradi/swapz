@@ -5991,3 +5991,22 @@ and execution on suitable KASAN+lockdep and KCSAN owner kernels remain open
 until separately run and recorded. Native ASan/UBSan/TSan, source contracts,
 Kconfig detection, and Sparse/Smatch compile checks are never KASAN/KCSAN
 runtime evidence.
+
+### Physical evidence analyzer integrity (rootless contract)
+
+Physical campaign snapshots include CLOCK_MONOTONIC capture nanoseconds
+from the clock shared by the arms. A PASS requires strict same-boot
+before/after coverage, globally nonoverlapping arm windows, ascending pair
+indices within each cohort, distinct physical run identifiers, exact source,
+module and parent-device bindings, immutable fixture hashes, and complete
+unscreened attempts. Synthetic file replay and stale/cached samples are not
+physical measurements. Diskstats index 8 is an in-flight gauge; every other
+cumulative counter must not reverse, and 512-byte sector multiplication is
+checked against unsigned 64-bit bytes. The evaluator remains authoritative
+for useful read/write I/O, READ p95/p99 histogram tails, CPU per useful
+byte, observed GC wall time, 3600-second duration, 90% occupancy and paired
+t-95% intervals. The sealer's public failure diagnostics cap at 96
+bounded numeric observations and include frozen bound, metric, workload,
+pair index and arm without copying private representative payload hashes.
+Lower-device bytes/requests are host-visible I/O, **not NAND wear**.
+No pending prospective-v2 amendment is applied as a retroactive replacement.

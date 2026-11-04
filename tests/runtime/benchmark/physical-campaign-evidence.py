@@ -17,6 +17,7 @@ import re
 import runpy
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 from evidence_io import write_new_json
@@ -32,6 +33,8 @@ HOST_SCHEMA = "swapz-performance-host-snapshot-v1"
 CAMPAIGN_SCHEMA = "swapz-performance-campaign-evidence-v1"
 PAIR_SCHEMA = "swapz-performance-pair-v1"
 SUMMARY_SCHEMA = "swapz-performance-summary-v1"
+MAX_EVIDENCE_FILE_BYTES = 64 * 1024 * 1024
+MAX_EVIDENCE_DIAGNOSTICS = 96
 QUALIFICATION = runpy.run_path(str(QUALIFICATION_PATH))
 RAM_VALIDATOR_PATH = EVIDENCE_PATH.with_name("metadata_ram_evidence.py")
 RAM_VALIDATOR = runpy.run_path(str(RAM_VALIDATOR_PATH))
@@ -70,13 +73,18 @@ def read_regular_bytes(path: Path) -> bytes:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise ValueError(f"evidence path is not a regular file: {path}")
-        chunks = []
+        if info.st_size > MAX_EVIDENCE_FILE_BYTES:
+            raise ValueError("evidence exceeds 64 MiB")
+        data = bytearray()
         while True:
-            chunk = os.read(fd, 1024 * 1024)
+            chunk = os.read(
+                fd, min(1024 * 1024, MAX_EVIDENCE_FILE_BYTES - len(data) + 1))
             if not chunk:
                 break
-            chunks.append(chunk)
-        return b"".join(chunks)
+            data.extend(chunk)
+            if len(data) > MAX_EVIDENCE_FILE_BYTES:
+                raise ValueError("evidence exceeds 64 MiB")
+        return bytes(data)
     finally:
         os.close(fd)
 
@@ -356,6 +364,8 @@ def host_snapshot(source_sha: str, device: Path) -> dict:
             datetime.timezone.utc).isoformat(),
         "source_sha": source_sha,
         "source_tree_sha": source_tree_sha(source_sha),
+        # Same CLOCK_MONOTONIC clock used by physical benchmark arms.
+        "captured_monotonic_ns": time.monotonic_ns(),
         "virtualization": physical_virtualization(),
         "kernel": {
             "node": run_text(["uname", "-n"]),
@@ -401,6 +411,11 @@ def validate_host_snapshot(snapshot: dict, source_sha: str) -> None:
     if snapshot.get("virtualization") != "none":
         raise ValueError("campaign host snapshot is not a physical host")
     snapshot_time(snapshot)
+    captured_monotonic = snapshot.get("captured_monotonic_ns")
+    # Historical evidence without a clock stays readable but cannot PASS.
+    if captured_monotonic is not None and (
+            type(captured_monotonic) is not int or captured_monotonic <= 0):
+        raise ValueError("malformed host monotonic timestamp")
 
     kernel = snapshot.get("kernel")
     cpu = snapshot.get("cpu")
@@ -588,6 +603,10 @@ def host_stability(before: dict, after: dict) -> dict:
         "kernel_boot_id":
             (before.get("kernel") or {}).get("boot_id") ==
             (after.get("kernel") or {}).get("boot_id"),
+        "capture_monotonic_increasing":
+            (before.get("captured_monotonic_ns") is None or
+             after.get("captured_monotonic_ns") is None or
+             after["captured_monotonic_ns"] > before["captured_monotonic_ns"]),
         "kernel_uptime_non_decreasing":
             (after.get("kernel") or {}).get("uptime_seconds", -1) >=
             (before.get("kernel") or {}).get("uptime_seconds", 0),
@@ -794,10 +813,268 @@ def metadata_ram_trace_within_host_window(
         return False
 
 
+def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
+    """Fail closed on stale or counterfeit arm chronology and evidence.
+
+    Numeric diagnostics are bounded; do not publish fixture fingerprints,
+    arbitrary exclusion strings, or replay payload contents.
+    """
+    diagnostics = []
+    omitted = 0
+
+    def diagnose(status, metric_name, expected, observed=None,
+                 workload=None, pair_index=None, arm=None,
+                 reason="physical evidence missing or inconsistent"):
+        nonlocal omitted
+        if len(diagnostics) == MAX_EVIDENCE_DIAGNOSTICS:
+            omitted += 1
+            return
+        # Avoid unbounded integers, non-finite floats and private strings.
+        if type(observed) is int:
+            value = observed if 0 <= abs(observed) <= (1 << 64) - 1 else None
+        elif type(observed) is float:
+            value = observed if math.isfinite(observed) else None
+        else:
+            value = None
+        diagnostics.append({
+            "status": status, "metric": metric_name, "expected": expected,
+            "observed": value, "workload": workload, "pair_index": pair_index,
+            "arm": arm, "reason": reason,
+        })
+
+    records = summary.get("records")
+    if not isinstance(records, list):
+        records = []
+    workloads = QUALIFICATION["WORKLOADS"]
+    boot_id = (before.get("kernel") or {}).get("boot_id")
+    host_start = before.get("captured_monotonic_ns")
+    host_end = after.get("captured_monotonic_ns")
+    valid_host_window = (
+        type(host_start) is int and type(host_end) is int and
+        0 < host_start < host_end and
+        boot_id == (after.get("kernel") or {}).get("boot_id"))
+    if not valid_host_window:
+        diagnose("UNAVAILABLE", "host.captured_monotonic_ns",
+                 "strict same-boot host before/after",
+                 reason="host monotonic window unavailable or reversed")
+    if summary.get("status") != "PASS":
+        diagnose("FAIL", "qualification.status", "PASS",
+                 reason="frozen evaluator has rejected or excluded attempts")
+
+    pair_identifiers, run_identifiers, windows = set(), set(), []
+    for record in records:
+        if not isinstance(record, dict):
+            diagnose("BLOCKED", "pair.schema", "physical pair object")
+            continue
+        workload = record.get("workload")
+        pair_index = record.get("pair_index")
+        if workload not in workloads:
+            diagnose("BLOCKED", "pair.workload", "frozen cohort")
+            continue
+        index = pair_index if type(pair_index) is int else None
+        identifier = (workload, record.get("pair_id"))
+        if (not isinstance(identifier[1], str) or not identifier[1] or
+                identifier in pair_identifiers):
+            diagnose("BLOCKED", "pair.pair_id", "unique per workload",
+                     workload=workload, pair_index=index,
+                     reason="missing or duplicated attempted pair")
+        pair_identifiers.add(identifier)
+        if record.get("status") != "PASS" or record.get("excluded") is not False:
+            diagnose("FAIL", "pair.status", "PASS and excluded=false",
+                     workload=workload, pair_index=index,
+                     reason="failed or excluded trials cannot be dropped")
+        if record.get("analysis_usable") is not True:
+            diagnose("FAIL", "pair.analysis_usable", True,
+                     workload=workload, pair_index=index,
+                     reason="screened, wrong cohort, invalid or incomplete pair")
+        for label in ("raw", "swapz"):
+            arm = record.get(label)
+            if not isinstance(arm, dict):
+                diagnose("UNAVAILABLE", "arm.evidence", "measured physical arm",
+                         workload=workload, pair_index=index, arm=label)
+                continue
+            run_identity = (workload, label, arm.get("workload_id"))
+            if (not isinstance(run_identity[2], str) or
+                    not run_identity[2] or run_identity in run_identifiers):
+                diagnose("BLOCKED", "arm.workload_id", "unique per cohort/candidate",
+                         workload=workload, pair_index=index, arm=label,
+                         reason="reused or absent physical run identifier")
+            run_identifiers.add(run_identity)
+            if arm.get("source_sha") != before.get("source_sha"):
+                diagnose("BLOCKED", "arm.source_sha", "admitted source",
+                         workload=workload, pair_index=index, arm=label,
+                         reason="stale source or artifact provenance")
+            if (arm.get("arm_boot_id") != boot_id or
+                    arm.get("arm_boot_id") !=
+                    (after.get("kernel") or {}).get("boot_id")):
+                diagnose("BLOCKED", "arm.arm_boot_id", "same host boot",
+                         workload=workload, pair_index=index, arm=label,
+                         reason="mixed or absent physical boot identity")
+            start, end = (arm.get("arm_started_monotonic_ns"),
+                          arm.get("arm_finished_monotonic_ns"))
+            if (type(start) is not int or type(end) is not int or
+                    not 0 < start < end):
+                diagnose("UNAVAILABLE", "arm.monotonic_window_ns", "start < end",
+                         workload=workload, pair_index=index, arm=label,
+                         reason="arm timestamp missing or reversed")
+            else:
+                windows.append((start, end, workload, index, label))
+                if valid_host_window and not host_start < start < end < host_end:
+                    diagnose("BLOCKED", "arm.monotonic_window_ns",
+                             "inside same-boot host snapshots",
+                             workload=workload, pair_index=index, arm=label,
+                             reason="cached, stale or post-snapshot arm")
+            required = [
+                "lower_io.lower_write_bytes", "lower_io.lower_write_requests",
+                "cpu.measured_cpu_seconds_per_useful_byte"]
+            if workload == "anonymous-swap":
+                required += ["swapin_latency.p95_ns", "swapin_latency.p99_ns",
+                             "throughput.useful_read_bytes"]
+            else:
+                required += [
+                    "throughput.logical_write_mbps", "read_ops", "write_ops",
+                    "latency.read_p95_ns", "latency.read_p99_ns",
+                    "latency.write_p95_ns", "latency.write_p99_ns",
+                    "measurement_snapshots.lower_before",
+                    "measurement_snapshots.lower_after"]
+                if workload == "sd-high-occupancy-churn":
+                    required += ["cold_read.p99_ns", "gc.wall_fraction",
+                                 "gc.gc_wall_ns", "minute_buckets",
+                                 "occupancy_transitions"]
+            for name in required:
+                observed = arm
+                for segment in name.split("."):
+                    observed = observed.get(segment) if isinstance(observed, dict) else None
+                if observed is None or (
+                        type(observed) is float and not math.isfinite(observed)):
+                    diagnose("UNAVAILABLE", name, "measured value",
+                             workload=workload, pair_index=index, arm=label,
+                             reason="required useful I/O, tail, CPU or GC missing")
+    windows.sort()
+    for prior, current in zip(windows, windows[1:]):
+        if prior[1] >= current[0]:
+            diagnose("BLOCKED", "arm.monotonic_window_ns", "nonoverlapping",
+                     workload=current[2], pair_index=current[3], arm=current[4],
+                     reason="replayed or overlapping physical arms")
+    for workload in workloads:
+        rows = sorted(
+            (r for r in records if isinstance(r, dict) and
+             r.get("workload") == workload and type(r.get("pair_index")) is int),
+            key=lambda r: r["pair_index"])
+        last_end = None
+        for row in rows:
+            times = [
+                (arm.get("arm_started_monotonic_ns"),
+                 arm.get("arm_finished_monotonic_ns"))
+                for arm in (row.get("raw"), row.get("swapz"))
+                if isinstance(arm, dict)]
+            if len(times) != 2 or any(
+                    type(a) is not int or type(b) is not int or
+                    not 0 < a < b for a, b in times):
+                continue
+            first, end = min(a for a, _ in times), max(b for _, b in times)
+            if last_end is not None and first <= last_end:
+                diagnose("BLOCKED", "pair.prospective_chronology_ns",
+                         "ascending pair indices",
+                         workload=workload, pair_index=row["pair_index"],
+                         reason="later pair reuses earlier physical time")
+            last_end = end
+
+    decisions = summary.get("decisions") or {}
+    for workload, decision in decisions.items():
+        if workload not in workloads or not isinstance(decision, dict):
+            continue
+        spec = workloads[workload]
+        attempts = [r for r in records if isinstance(r, dict) and
+                    r.get("workload") == workload]
+        for name, count in (
+                ("attempted_pairs", len(attempts)),
+                ("accepted_pairs",
+                 sum(r.get("analysis_usable") is True for r in attempts))):
+            if count != spec["pairs"]:
+                diagnose("FAIL", "qualification." + name,
+                         {"operator": "==", "value": spec["pairs"], "unit": "pairs"},
+                         count, workload=workload,
+                         reason="frozen plan requires every attempted pair")
+        if spec["evidence"] == "statistical_paired":
+            limits = QUALIFICATION["service_limits"](workload)
+            for name, endpoint, op, bound in (
+                    ("useful_write", "lower", ">=", "useful_write_ci_lower_min"),
+                    ("lower_write_bytes", "upper", "<=", "lower_write_bytes_ci_upper_max"),
+                    ("lower_write_requests", "upper", "<=", "lower_write_requests_ci_upper_max"),
+                    ("read_p95", "upper", "<=", "tail_ci_upper_max"),
+                    ("read_p99", "upper", "<=", "tail_ci_upper_max"),
+                    ("write_p95", "upper", "<=", "tail_ci_upper_max"),
+                    ("write_p99", "upper", "<=", "tail_ci_upper_max"),
+                    ("cpu", "upper", "<=", "cpu_ci_upper_max")):
+                if (decision.get("checks") or {}).get(name) is False:
+                    ci = (decision.get("confidence_intervals") or {}).get(name)
+                    value = ci.get(endpoint) if isinstance(ci, dict) else None
+                    diagnose("FAIL", name + ".paired_95pct_ci_" + endpoint,
+                             {"operator": op, "value": limits[bound],
+                              "unit": "fractional_delta"},
+                             value, workload=workload,
+                             reason="frozen paired uncertainty bound failed")
+            spread = (summary.get("raw_repeat_spread") or {}).get(workload)
+            bound = QUALIFICATION["CONTRACT"]["screening"][
+                "same_workload_raw_spread_max"]
+            if type(spread) in (int, float) and math.isfinite(spread) and spread > bound:
+                diagnose("FAIL", "raw_repeat_spread",
+                         {"operator": "<=", "value": bound, "unit": "fraction"},
+                         spread, workload=workload,
+                         reason="raw drift excludes entire cohort")
+        elif workload == "sd-high-occupancy-churn":
+            bounds = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"]
+            for name, op, bound in (
+                    ("useful_write", ">=", "useful_write_ratio_min"),
+                    ("lower_write_bytes", "<=", "lower_write_bytes_ratio_max"),
+                    ("lower_write_requests", "<=", "lower_write_requests_ratio_max"),
+                    ("read_p99", "<=", "tail_ratio_max"),
+                    ("write_p99", "<=", "tail_ratio_max"),
+                    ("cold_read_p99", "<=", "tail_ratio_max"),
+                    ("throughput_drift", ">=", "throughput_drift_ratio_min"),
+                    ("p99_drift", "<=", "p99_drift_ratio_max")):
+                if (decision.get("checks") or {}).get(name) is False:
+                    diagnose("FAIL", name + ".swapz_raw_ratio",
+                             {"operator": op, "value": bounds[bound], "unit": "ratio"},
+                             (decision.get("ratios") or {}).get(name),
+                             workload=workload, pair_index=1,
+                             reason="frozen 3600-second directional bound failed")
+        elif workload == "anonymous-swap":
+            bounds = QUALIFICATION["CONTRACT"]["acceptance"]["anonymous"]
+            for position, result in enumerate(decision.get("pairs") or [], 1):
+                for name, op, bound in (
+                        ("swapin_p95", "<=", "swapin_tail_ratio_max"),
+                        ("swapin_p99", "<=", "swapin_tail_ratio_max"),
+                        ("useful_read", ">=", "useful_read_ratio_min"),
+                        ("lower_write_bytes", "<=", "lower_write_bytes_ratio_max"),
+                        ("lower_write_requests", "<=", "lower_write_requests_ratio_max"),
+                        ("cpu", "<=", "cpu_ratio_max")):
+                    value = (result.get("ratios") or {}).get(name)
+                    if type(value) not in (int, float) or not math.isfinite(value):
+                        continue
+                    if value >= bounds[bound] if op == ">=" else value <= bounds[bound]:
+                        continue
+                    diagnose("FAIL", name + ".swapz_raw_ratio",
+                             {"operator": op, "value": bounds[bound], "unit": "ratio"},
+                             value, workload=workload, pair_index=position,
+                             reason="frozen three-pair directional bound failed")
+    return {
+        "status": ("PASS" if not diagnostics else
+                   "BLOCKED" if any(d["status"] == "BLOCKED" for d in diagnostics)
+                   else "FAIL" if any(d["status"] == "FAIL" for d in diagnostics)
+                   else "UNAVAILABLE"),
+        "diagnostics": diagnostics, "omitted_diagnostic_count": omitted,
+        "claim_boundary": QUALIFICATION["CONTRACT"]["claim_boundary"],
+        "measurement_authority": "host-visible lower I/O, not NAND wear",
+    }
+
+
 def campaign_status(summary_status: str, source_consistent: bool,
                     protocol_v2: bool, stability_status: str,
                     target_consistent: bool = True,
-                    arm_boot_consistent: bool = True) -> str:
+                    arm_boot_consistent: bool = True,
+                    physical_audit_ok: bool = True) -> str:
     if summary_status != "PASS":
         return "FAIL_OR_INCOMPLETE"
     if not source_consistent:
@@ -810,6 +1087,8 @@ def campaign_status(summary_status: str, source_consistent: bool,
         return "BLOCKED_ARM_BOOT_IDENTITY_CHANGED"
     if stability_status != "STABLE":
         return "BLOCKED_HOST_IDENTITY_CHANGED"
+    if not physical_audit_ok:
+        return "BLOCKED_PHYSICAL_EVIDENCE"
     return "PASS"
 
 
@@ -841,7 +1120,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
             raise ValueError("serialized RAM trace JSON is not canonical")
     validate_host_snapshot(before, source_sha)
     validate_host_snapshot(after, source_sha)
-    if snapshot_time(after) < snapshot_time(before):
+    if snapshot_time(after) <= snapshot_time(before):
         raise ValueError("campaign host snapshot time moved backwards")
     current_tree_sha = source_tree_sha(source_sha)
     if before["source_tree_sha"] != current_tree_sha or \
@@ -969,6 +1248,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
                 capacity_and_ram = None
             else:
                 capacity_and_ram["metadata_ram_host_binding"] = host_binding
+    physical_audit = audit_physical_pairs(summary, before, after)
     summary_status = summary.get("status")
     admitted_boot_id = before["kernel"]["boot_id"]
     arm_boot_consistent = all(
@@ -977,7 +1257,8 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         for pair in pair_records for label in ("raw", "swapz"))
     sealed_status = campaign_status(
         summary_status, source_consistent, protocol_v2, stability["status"],
-        target_binding["consistent"], arm_boot_consistent)
+        target_binding["consistent"], arm_boot_consistent,
+        physical_audit_ok=physical_audit["status"] == "PASS")
     if sealed_status == "PASS" and capacity_and_ram is None:
         raise ValueError(
             "PASS campaign lacks exact maximum-capacity/peak-RAM evidence")
@@ -997,6 +1278,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         "target": target_identity,
         "qualification_target_binding": target_binding,
         "arm_boot_consistent": arm_boot_consistent,
+        "physical_evidence_audit": physical_audit,
         "capacity_and_ram": capacity_and_ram,
         "host_stability": stability,
         "admitted_device_boundary": {

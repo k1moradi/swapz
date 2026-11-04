@@ -27,6 +27,7 @@ AMENDMENT_MANIFEST = ROOT / "tests/runtime/benchmark/physical-qualification-amen
 AMENDMENT_SCHEMA = "swapz-performance-qualification-amendment-v2"
 # A change to this blob requires a new prospectively versioned protocol.
 AMENDMENT_GIT_BLOB_SHA = "eac574fd204932e630e8bb45dca66b67c135a779"
+UINT64_MAX = (1 << 64) - 1
 MAJOR_MINOR_RE = re.compile(r"[0-9]+:[0-9]+")
 PARTUUID_RE = re.compile(r"[0-9a-f]+(?:-[0-9a-f]+)*")
 DM_UUID_RE = re.compile(r"SWAPZ-(?:PRIMARY|BENCH)-[a-f0-9]{32}")
@@ -718,13 +719,16 @@ def measurement_snapshot_reasons(
         after = metric(snapshots, "lower_after")
         if (not isinstance(before, list) or not isinstance(after, list) or
                 len(before) < 16 or len(before) != len(after) or
-                any(type(value) is not int or value < 0
+                any(type(value) is not int or not 0 <= value <= UINT64_MAX
                     for value in before + after)):
             raise ValueError("lower-device counter snapshots are malformed")
         deltas = [end_value - start_value
                   for start_value, end_value in zip(before, after)]
-        if any(deltas[index] < 0 for index in (0, 2, 4, 6, 15)):
+        # Index 8 is a gauge; all other Linux diskstats fields are cumulative.
+        if any(delta < 0 for index, delta in enumerate(deltas) if index != 8):
             raise ValueError("lower-device counters reset during measurement")
+        if deltas[2] > UINT64_MAX // 512 or deltas[6] > UINT64_MAX // 512:
+            raise ValueError("lower-device sector-to-byte counter overflow")
         lower = metric(arm, "lower_io")
         if not isinstance(lower, dict):
             raise ValueError("measured lower I/O is missing")
