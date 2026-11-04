@@ -334,7 +334,8 @@ exit 0
                     self.assertNotIn("BLOCKED_KERNEL_DEBUG_PRODUCER", output)
                 else:
                     self.assertEqual(published, [])
-                    self.assertEqual(status, "BLOCKED", reason)
+                    self.assertEqual(
+                        status, "BLOCKED" if phase == "teardown" else "FAIL", reason)
                     diagnostics = [line for line in output.splitlines()
                                    if line.startswith("BLOCKED_KERNEL_DEBUG_PRODUCER")]
                     self.assertEqual(len(diagnostics), 1, output)
