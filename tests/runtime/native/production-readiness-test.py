@@ -303,6 +303,7 @@ def physical_campaign_evidence(policy_raw):
         "campaign_source_sha": SOURCE,
         "pair_source_shas": [SOURCE],
         "source_consistent": True,
+        "arm_boot_consistent": True,
         "campaign_status": "PASS",
         "qualification_status": "PASS",
         "evaluation_protocol": "v2",
@@ -1315,6 +1316,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 "capacity_and_ram"].pop("metadata_ram_trace"),
             "source_tree_identity": lambda campaign: campaign.update(
                 campaign_source_sha="b" * 40),
+            "arm_boot_mismatch": lambda campaign: campaign.update(
+                arm_boot_consistent=False),
             "validator_artifact": lambda campaign: campaign["policy"][
                 "metadata_ram_validator"].update(sha256="f" * 64),
             "ram_trace_artifact": lambda campaign: campaign["artifacts"][
