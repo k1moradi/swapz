@@ -44,7 +44,7 @@ REQUIRED_RECORDS = (
 # All kernel diagnostics in the bounded session fail the gate, not just those
 # attributed to swapz: an unrelated issue makes the evidence ambiguous.
 KERNEL_DIAGNOSTIC = re.compile(
-    r"BUG: (?:KASAN|KCSAN|unable to handle kernel)|"
+    r"\bBUG:|Oops:|"
     r"KASAN:.*(?:use-after-free|out-of-bounds)|"
     r"KCSAN:.*data-race|"
     r"possible (?:circular locking dependency|recursive locking) detected|"

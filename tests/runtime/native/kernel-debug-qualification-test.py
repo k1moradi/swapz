@@ -2,8 +2,10 @@
 """Rootless negative controls for the private kernel-debug qualification lane."""
 from __future__ import annotations
 
+import contextlib
 import gzip
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -15,6 +17,7 @@ from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[2] / "tools/kernel-debug-qualify.py"
 WRAPPER = Path(__file__).resolve().parents[2] / "tools/qualify-kernel-debug-owned.sh"
+DEPLOY_HELPER = Path(__file__).resolve().parents[2] / "tools/deploy-nullblk.sh"
 SPEC = importlib.util.spec_from_file_location("swapz_kernel_debug_qualification", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 qualification = importlib.util.module_from_spec(SPEC)
@@ -277,6 +280,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
         diagnostics = (
             "BUG: KASAN: slab-use-after-free",
             "BUG: KCSAN: data-race",
+            "BUG: scheduling while atomic",
+            "Oops: 0000",
             "possible circular locking dependency detected",
             "refcount_t: underflow",
             "WARNING: CPU: 0 at dm_swapz",
@@ -333,6 +338,25 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertNotIn("kcsan.enabled=0", source)
         self.assertNotIn("lockdep=off", source)
 
+    def test_loaded_helper_exposes_required_debug_evidence_markers(self) -> None:
+        source = DEPLOY_HELPER.read_text(encoding="utf-8")
+        labels = (
+            "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP",
+            "PASS_LOADED_COMPOUND_BIO",
+            "PASS_LOADED_LIVE_GC",
+            "PASS_LOADED_DISCARD_TRIM",
+            "PASS_LOADED_SUSPEND_DRAIN",
+            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT",
+            "PASS_LOADED_SYNTHETIC_READ_FAULT",
+            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT",
+            "PASS_LOADED_CODEC_ERROR_PATHS",
+            "PASS_LOADED_COMPLETION_HANDOFF",
+            "PASS: loaded isolated swapz byte-exact I/O, clean teardown",
+        )
+        for label in labels:
+            with self.subTest(label=label):
+                self.assertEqual(source.count(label), 1)
+
     def test_sparse_simd_checker_seams_preserve_production_paths(self) -> None:
         root = Path(__file__).resolve().parents[3]
         shuffle = (root / "src/kernel/predictor-shuffle.h").read_text(
@@ -367,7 +391,14 @@ class KernelDebugQualificationTests(unittest.TestCase):
             runner.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="  CC /build/dm-target.o\n",
             )
-            self.assertEqual(qualification.run_static(Path("/repo"), Path("/headers"), "sparse")[0], "FAIL")
+            expected_failure_log = io.StringIO()
+            with contextlib.redirect_stderr(expected_failure_log):
+                self.assertEqual(
+                    qualification.run_static(
+                        Path("/repo"), Path("/headers"), "sparse")[0],
+                    "FAIL",
+                )
+            self.assertIn("FAIL_KERNEL_STATIC_SPARSE", expected_failure_log.getvalue())
             runner.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout=(
                     "  CHECK /build/dm-target.c\n"

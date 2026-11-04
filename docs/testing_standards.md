@@ -5682,7 +5682,11 @@ outside the official `make test` reporter pending runner-owner coordination.
 The dedicated workflow runs the rootless negative controls and a compile-only
 kernel static-analysis contract; it never installs or boots a debug kernel,
 inserts a module, provisions `null_blk`, or substitutes native sanitizers for
-kernel instrumentation.
+kernel instrumentation. Changes to the wrapper, its owned-null_blk
+helper/oracle/identity dependencies, the root Makefile/signing hook, or kernel
+source all trigger this workflow so the private lane cannot silently drift.
+Expected negative-control diagnostics are captured inside the fixture; a
+successful rootless contract job must not emit a synthetic FAIL marker.
 
 Static analysis uses the current HWE kernel headers required by the module and
 builds the pinned Debian Sparse 0.6.5~rc1 source archive only under
@@ -5743,8 +5747,9 @@ Runtime verification binds the helper's exact `SOURCE_HEAD` marker to the
 validated SHA, requires each selected loaded PASS marker exactly once, requires
 the clean-teardown record, requires active pre/post runtime snapshots, and
 compares readable pre/post kernel ring buffers with an unchanged baseline
-prefix. Any KASAN/KCSAN report, lockdep report, kernel warning, refcount
-diagnostic, workqueue-after-free indication, shortened log, missing/repeated
+prefix. Any kernel BUG/Oops, KASAN/KCSAN report, lockdep report, kernel
+warning, refcount diagnostic, workqueue-after-free indication, shortened log,
+missing/repeated
 marker, helper failure, or uncertain teardown fails or blocks the lane.
 Executed defects return FAIL rather than being relabeled BLOCKED merely because
 the wrapper is private. Failure evidence is monotonic: a post-run runtime-state
