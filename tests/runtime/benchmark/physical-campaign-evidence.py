@@ -693,12 +693,7 @@ def campaign_capacity_and_ram(
         return None
     logical_pages = swapz.get("logical_pages")
     resources = swapz.get("resources")
-    peak_ram_bytes = (
-        resources.get("metadata_and_target_peak_ram_bytes")
-        if isinstance(resources, dict) else None)
-    if (
-            type(logical_pages) is not int or logical_pages <= 0 or
-            type(peak_ram_bytes) is not int or peak_ram_bytes <= 0):
+    if type(logical_pages) is not int or logical_pages <= 0:
         return None
     logical_capacity_bytes = logical_pages * 4096
     # A smaller, easier-to-create mapper is not maximum-capacity evidence.
@@ -712,10 +707,22 @@ def campaign_capacity_and_ram(
     # pair, which completes before the mapper can be safely destroyed.
     trace = metadata_ram_trace
     try:
-        RAM_VALIDATOR["validate_metadata_ram_trace"](
-            trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
-            expected_peak_ram_bytes=peak_ram_bytes)
+        ram_summary = RAM_VALIDATOR["validate_metadata_ram_trace"](
+            trace, source_sha=source_sha, mapper_uuid=mapper_uuid)
     except ValueError:
+        return None
+    peak_ram_bytes = ram_summary["peak_ram_bytes"]
+    limit = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"][
+        "metadata_and_target_peak_ram_bytes_max"]
+    if peak_ram_bytes > limit:
+        return None
+    # The replay process cannot know a post-teardown host peak at start. Keep
+    # any legacy scalar diagnostic only when it agrees; zero/missing has no
+    # qualifying authority.
+    replay_peak = (
+        resources.get("metadata_and_target_peak_ram_bytes")
+        if isinstance(resources, dict) else None)
+    if replay_peak not in (None, 0, peak_ram_bytes):
         return None
     return {
         "page_bytes": 4096,
@@ -724,6 +731,7 @@ def campaign_capacity_and_ram(
         "peak_ram_bytes": peak_ram_bytes,
         "mapper_uuid": mapper_uuid,
         "metadata_ram_trace": trace,
+        "metadata_ram_summary": ram_summary,
     }
 
 
@@ -738,15 +746,31 @@ def metadata_ram_trace_within_host_window(
             not isinstance(first_kernel, dict) or
             not isinstance(last_kernel, dict) or
             trace.get("host_boot_id") != first_kernel.get("boot_id") or
-            trace.get("host_boot_id") != last_kernel.get("boot_id")):
+            trace.get("host_boot_id") != last_kernel.get("boot_id") or
+            type(first_kernel.get("uptime_seconds")) not in (int, float) or
+            type(last_kernel.get("uptime_seconds")) not in (int, float)):
         return False
     try:
         first = datetime.datetime.fromisoformat(
             samples[0]["timestamp_utc"].replace("Z", "+00:00"))
         last = datetime.datetime.fromisoformat(
             samples[-1]["timestamp_utc"].replace("Z", "+00:00"))
-        return snapshot_time(before) <= first < last <= snapshot_time(after)
-    except (KeyError, TypeError, ValueError):
+        first_monotonic = samples[0]["monotonic_ns"]
+        last_monotonic = samples[-1]["monotonic_ns"]
+        # /proc/uptime is sampled after the before timestamp and after the
+        # campaign for the closing snapshot. One second covers its coarse text
+        # precision without allowing a trace from another part of the boot.
+        monotonic_slack_ns = 1_000_000_000
+        within_monotonic_window = (
+            first_monotonic + monotonic_slack_ns >=
+                int(first_kernel["uptime_seconds"] * 1_000_000_000) and
+            last_monotonic <=
+                int(last_kernel["uptime_seconds"] * 1_000_000_000) +
+                monotonic_slack_ns)
+        return (
+            snapshot_time(before) <= first < last <= snapshot_time(after) and
+            within_monotonic_window)
+    except (KeyError, TypeError, ValueError, OverflowError):
         return False
 
 
