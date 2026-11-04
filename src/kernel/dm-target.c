@@ -1781,6 +1781,7 @@ static const char *swapz_failure_category(int error)
 	case -ERANGE:
 		return "integrity";
 	case -ENOMEM:
+	case -ENOSPC:
 		return "resource";
 	default:
 		return "internal";
@@ -1795,11 +1796,11 @@ static void swapz_fail_at(struct swapz_dm *ctx, int error,
 	int terminal_error;
 	bool first_failure = false;
 
-	/* Capacity exhaustion is a per-write result. Existing committed maps
-	 * remain authoritative and readable; only integrity/lower-I/O faults
-	 * poison the target. */
-	if (error == -ENOSPC)
-		return;
+	/*
+	 * Authority capacity exhaustion is filtered by the generic wrapper and
+	 * WRITE admission path before reaching this gate. An errno that reaches
+	 * swapz_fail_at() is terminal, including device-originated -ENOSPC.
+	 */
 	terminal_error = error < 0 ? error : -EIO;
 	/*
 	 * The preparation worker can fail concurrently with the ordered owner.
@@ -1823,6 +1824,9 @@ static void swapz_fail_at(struct swapz_dm *ctx, int error,
 /* Keep unclassified worker failures fail-closed, without logging success. */
 static void swapz_fail(struct swapz_dm *ctx, int error)
 {
+	/* Authority capacity exhaustion is a per-WRITE result, not target death. */
+	if (error == -ENOSPC)
+		return;
 	swapz_fail_at(ctx, error, "target", swapz_failure_category(error),
 		      "ordered-worker");
 }
@@ -1856,13 +1860,12 @@ static int swapz_dm_io(struct dm_io_request *req,
 #ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
 #define SWAPZ_DM_IO_NOTIFY_PARAMETERS(error_name, context_name) \
 	unsigned long error_name, unsigned long unsupported, void *context_name
-#define SWAPZ_DM_IO_NOTIFY_ERROR(error_bits) \
-	((error_bits) ? -EIO : (unsupported ? -EOPNOTSUPP : 0))
+#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) \
+	do { (error_name) |= unsupported; } while (0)
 #else
 #define SWAPZ_DM_IO_NOTIFY_PARAMETERS(error_name, context_name) \
 	unsigned long error_name, void *context_name
-#define SWAPZ_DM_IO_NOTIFY_ERROR(error_bits) \
-	((error_bits) ? -EIO : 0)
+#define SWAPZ_DM_IO_MERGE_UNSUPPORTED(error_name) do { } while (0)
 #endif
 
 static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
@@ -2010,14 +2013,37 @@ static void swapz_async_lower_write_done(
 	SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context))
 {
 	struct swapz_inflight_write *inflight = context;
-
-	/* Distinguish unsupported service from media EIO; both are terminal. */
-	int lower_error = SWAPZ_DM_IO_NOTIFY_ERROR(error);
 	struct swapz_dm *ctx = inflight->ctx;
 	unsigned long flags;
+	int lower_error;
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	bool unsupported_only = !error && unsupported;
+#endif
 
+	/*
+	 * Preserve the probed callback ABI while keeping unsupported service
+	 * distinct from a real lower I/O error. The merge remains the shared
+	 * lifetime-probe shape; unsupported_only preserves the lost category.
+	 */
+	SWAPZ_DM_IO_MERGE_UNSUPPORTED(error);
+	lower_error = error ? -EIO : 0;
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	if (unsupported_only)
+		lower_error = -EOPNOTSUPP;
+#endif
 	WRITE_ONCE(inflight->lower_error, lower_error);
 	WRITE_ONCE(inflight->lower_end_ns, ktime_get_ns());
+#ifdef __KERNEL__
+	/*
+	 * Elect the lower error before lower_done becomes visible. Otherwise a
+	 * concurrent preparation failure can obscure the actual callback errno.
+	 * The callback still owns the lower-I/O lifetime until complete().
+	 */
+	if (lower_error)
+		swapz_fail_at(ctx, lower_error, "write",
+			      swapz_failure_category(lower_error),
+			      "async-completion");
+#endif
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	ctx->prep_lower_write_end_queued += ctx->preparation_queued;
 	if (ctx->preparation_queued)
@@ -2586,10 +2612,13 @@ static int swapz_issue_flush(void *opaque)
 	int error = swapz_flush_accounted(&ctx->flush_meter,
 				      swapz_kernel_lower_flush, ctx);
 
-	if (error)
+	if (error) {
 		swapz_fail_at(ctx, error, "flush",
 			      swapz_failure_category(error),
 			      "durability-fence");
+		/* The detailed election above wins; this cannot log or rewrite it. */
+		swapz_fail(ctx, error);
+	}
 	return error;
 }
 
@@ -2766,12 +2795,26 @@ static void swapz_async_lower_read_done(
 	SWAPZ_DM_IO_NOTIFY_PARAMETERS(error, context))
 {
 	struct swapz_read_slot *slot = context;
+	int lower_error;
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	bool unsupported_only = !error && unsupported;
+#endif
 
-	/* A lower unsupported READ must not turn into an apparent success. */
-	int lower_error = SWAPZ_DM_IO_NOTIFY_ERROR(error);
-
+	SWAPZ_DM_IO_MERGE_UNSUPPORTED(error);
+	lower_error = error ? -EIO : 0;
+#ifdef SWAPZ_DM_IO_HAS_UNSUPPORTED_BITS
+	if (unsupported_only)
+		lower_error = -EOPNOTSUPP;
+#endif
 	WRITE_ONCE(slot->lower_error, lower_error);
 	WRITE_ONCE(slot->lower_end_ns, ktime_get_ns());
+#ifdef __KERNEL__
+	/* The ordered owner cannot join this slot until lower_done is visible. */
+	if (lower_error)
+		swapz_fail_at(slot->ctx, lower_error, "read",
+			      swapz_failure_category(lower_error),
+			      "parallel-async-completion");
+#endif
 	complete(&slot->lower_done);
 }
 
@@ -7236,6 +7279,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			swapz_fail_at(ctx, error, "read",
 				      swapz_failure_category(error),
 				      "independent-read");
+			/* The detailed election above wins the terminal attribution. */
+			swapz_fail(ctx, error);
 			ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 			/* Abort pending owners without submitting their data. */
 			swapz_flush_window(ctx);
@@ -8486,9 +8531,14 @@ static void swapz_drain(struct dm_target *ti)
 	    !bio_list_empty(&ctx->completion_bios) ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
-		/* One bounded terminal diagnostic names the drain stage. */
+		/*
+		 * swapz drain invariant: accepted BIOs remain after draining.
+		 * Elect the stage-specific diagnostic first; the generic hook below
+		 * cannot rewrite or duplicate the selected terminal error.
+		 */
 		swapz_fail_at(ctx, -EUCLEAN, "target", "integrity",
 			      "drain-invariant");
+		swapz_fail(ctx, -EUCLEAN);
 	} else {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
