@@ -49,6 +49,7 @@ def maximum_logical_pages_for_partition(
     """
     if (
             type(partition_bytes) is not int or partition_bytes <= 0 or
+            partition_bytes > (1 << 64) - 1 or
             partition_bytes % BLOCK_BYTES or
             type(size_t_max) is not int or size_t_max <= 0):
         return None
@@ -199,8 +200,12 @@ def validate_metadata_ram_trace(
                 "metadata RAM trace lacks baseline/init/steady/GC/teardown "
                 "observations")
 
-    if any(sample["mapper_present"] for sample in phase_samples["baseline"]):
+    baseline = phase_samples["baseline"]
+    if any(sample["mapper_present"] for sample in baseline):
         raise ValueError("metadata RAM baseline was sampled with mapper present")
+    if (baseline[-1]["monotonic_ns"] - baseline[0]["monotonic_ns"] <
+            900_000_000):
+        raise ValueError("metadata RAM baseline is shorter than one second")
 
     initialization = phase_samples["initialization"]
     seen_mapper = False
@@ -235,7 +240,6 @@ def validate_metadata_ram_trace(
         raise ValueError(
             "metadata RAM teardown lacks two seconds of quiescent recovery")
 
-    baseline = phase_samples["baseline"]
     baseline_available = [
         sample["mem_available_bytes"] for sample in baseline]
     baseline_median_available = _median(baseline_available)
