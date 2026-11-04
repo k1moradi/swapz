@@ -2044,6 +2044,13 @@ static void test_mountinfo_parser(void)
 		"37 36 8:0 / /mnt/parent rw - ext4 /dev/sda rw\n",
 		makedev(8U, 1U), makedev(8U, 0U), &facts) == 0);
 	assert(facts.target_mounted);
+	/* End-of-file without a trailing newline is valid when the final row is
+	 * complete; truncation means a structurally incomplete mountinfo row. */
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 259:0 / / rw - ext4 /dev/root rw\n"
+		"37 36 8:4 / /mnt/swap rw - swap /dev/sda4 rw",
+		makedev(8U, 4U), makedev(8U, 0U), &facts) == 0);
+	assert(facts.target_mounted);
 	assert(swapz_primary_parse_mountinfo(
 		"36 25 8:x / / rw - f2fs /dev/sda3 rw\n",
 		makedev(8U, 4U), makedev(8U, 0U), &facts) < 0);
