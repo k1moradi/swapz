@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Deterministic producer/ordered-owner interleavings of the production helpers.
- * This models ownership and ACK gates; it is not a Linux memory-model proof. */
+ * READY/ERROR payloads require the state acquire; RAW_SELECTED completion
+ * instead supplies the late-result acquire. This is not an LKMM proof. */
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <pthread.h>
@@ -72,6 +73,8 @@ struct prepared_handoff {
 	atomic64_t free_mask;
 	_Atomic unsigned int references;
 	_Atomic int result_ready;
+	/* Relaxed scheduling only: do not publish the producer payload through it. */
+	_Atomic int allow_result_completion;
 	_Atomic int terminal_error;
 	_Atomic unsigned int protocol_failures;
 	pthread_barrier_t snapshot_ready;
@@ -126,12 +129,19 @@ static void *prepare_in_background(void *opaque)
 		if (expected_state != SWAPZ_PREPARATION_PREPARING &&
 		    expected_state != SWAPZ_PREPARATION_RAW_SELECTED)
 			atomic_fetch_add(&handoff->protocol_failures, 1);
+		/*
+		 * Keep modeled completion unpublished until the producer-won consumer
+		 * has acquired the actual READY/ERROR state and inspected its payload.
+		 * RAW_SELECTED cannot change state and instead waits for completion.
+		 * This gate is relaxed scheduling, not a second publication edge.
+		 */
+		if (expected_state == SWAPZ_PREPARATION_PREPARING)
+			while (!atomic_load_explicit(
+				       &handoff->allow_result_completion,
+				       memory_order_relaxed))
+				sched_yield();
 		atomic_store_explicit(&handoff->result_ready, 1,
 					      memory_order_release);
-		/*
-		 * Do not add a post-publication barrier here: the consumer below must
-		 * acquire result_ready itself before it reads length or terminal_error.
-		 */
 		(void)pthread_barrier_wait(&handoff->allow_producer_release);
 		release_reference(handoff);
 		(void)pthread_barrier_wait(&handoff->slot_recycled);
@@ -152,6 +162,7 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 	atomic_init(&handoff.state.value, SWAPZ_PREPARATION_EMPTY);
 	atomic_init(&handoff.references, 0);
 	atomic_init(&handoff.result_ready, 0);
+	atomic_init(&handoff.allow_result_completion, 0);
 	atomic_init(&handoff.terminal_error, 0);
 	atomic_init(&handoff.protocol_failures, 0);
 	CHECK(pthread_barrier_init(&handoff.snapshot_ready, NULL, 2) == 0);
@@ -172,6 +183,8 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 		RACE_CHECK(swapz_preparation_claim_slot(&handoff.free_mask) == -1);
 		atomic_store_explicit(&handoff.references, 2, memory_order_relaxed);
 		atomic_store_explicit(&handoff.result_ready, 0, memory_order_relaxed);
+		atomic_store_explicit(&handoff.allow_result_completion, 0,
+				      memory_order_relaxed);
 		atomic_store_explicit(&handoff.terminal_error, 0, memory_order_relaxed);
 		atomic_store_explicit(&handoff.state.value,
 				      SWAPZ_PREPARATION_PREPARING,
@@ -191,31 +204,58 @@ static int test_ordered_ack_and_refcount_lifetime(void)
 			raw_wins++;
 		}
 		(void)pthread_barrier_wait(&handoff.allow_result);
-		while (!atomic_load_explicit(&handoff.result_ready,
-						     memory_order_acquire))
-			sched_yield();
-		/*
-		 * The acquire above, not a pthread barrier, publishes the producer's
-		 * exact result for a RAW_SELECTED ACK decision.
-		 */
-		state = swapz_preparation_select_raw(&handoff.state);
 		if (raw_wins_race) {
+			/*
+			 * RAW_SELECTED does not transition to READY or ERROR. Its late
+			 * result is published by the modeled producer completion.
+			 */
+			while (!atomic_load_explicit(&handoff.result_ready,
+						     memory_order_acquire))
+				sched_yield();
+			state = swapz_preparation_select_raw(&handoff.state);
 			RACE_CHECK(state == SWAPZ_PREPARATION_RAW_SELECTED);
 			RACE_CHECK(handoff.previous_state == SWAPZ_PREPARATION_RAW_SELECTED);
 		} else {
-			RACE_CHECK(handoff.previous_state == SWAPZ_PREPARATION_PREPARING);
+			/*
+			 * No result_ready acquire or pthread barrier before reading
+			 * length, errno and compressed bytes: these must be visible
+			 * through the real production READY/ERROR state acquire.
+			 */
+			do {
+				state = swapz_preparation_read_state(&handoff.state);
+				if (state == SWAPZ_PREPARATION_PREPARING)
+					sched_yield();
+			} while (state == SWAPZ_PREPARATION_PREPARING);
 			RACE_CHECK(state == swapz_preparation_codec_result_state(codec_result));
+			RACE_CHECK(handoff.length == codec_result);
+			if (codec_result < 0)
+				RACE_CHECK(atomic_load_explicit(&handoff.terminal_error,
+							       memory_order_relaxed) == codec_result);
+			if (codec_result > 0)
+				for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
+					RACE_CHECK(handoff.compressed_bytes[byte] ==
+					      (unsigned char)(iteration ^ byte));
+			/* The producer must still be parked before modeled completion. */
+			RACE_CHECK(!atomic_load_explicit(&handoff.result_ready,
+							memory_order_relaxed));
+			atomic_store_explicit(&handoff.allow_result_completion, 1,
+					      memory_order_relaxed);
+			while (!atomic_load_explicit(&handoff.result_ready,
+						     memory_order_acquire))
+				sched_yield();
+			/* previous_state was written after publication, not before it. */
+			RACE_CHECK(handoff.previous_state == SWAPZ_PREPARATION_PREPARING);
 			producer_wins++;
 		}
-		/* Publication and result_ready both precede reading exact errno. */
-		if (codec_result < 0) {
+		/* RAW_SELECTED uses result_ready; READY/ERROR was checked before it. */
+		if (raw_wins_race) {
 			RACE_CHECK(handoff.length == codec_result);
-			RACE_CHECK(atomic_load_explicit(&handoff.terminal_error,
-							   memory_order_acquire) == codec_result);
-			negative_results++;
-		} else {
-			RACE_CHECK(handoff.length == codec_result);
+			if (codec_result < 0)
+				RACE_CHECK(atomic_load_explicit(&handoff.terminal_error,
+							       memory_order_relaxed) == codec_result);
 		}
+		if (codec_result < 0)
+			negative_results++;
 		/* The upper BIO can finish, but the producer still owns the page. */
 		RACE_CHECK(atomic_load(&handoff.references) == 2);
 		release_reference(&handoff);
