@@ -1331,6 +1331,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         sampler.stop.return_value = {"normal": True}
         with mock.patch.object(qualify, "StopSampler", return_value=sampler), \
                 mock.patch.object(qualify, "_primary", return_value=stopped), \
+                mock.patch.object(qualify, "_post_stop_verify"), \
                 mock.patch.object(
                     qualify.time, "sleep",
                     side_effect=[None, KeyboardInterrupt()]), \
