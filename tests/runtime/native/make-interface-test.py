@@ -1390,8 +1390,10 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         concurrency = workflow.split("concurrency:\n", 1)[1].split(
             "\nenv:\n", 1)[0]
-        self.assertIn("group: project-goals-${{ github.ref }}", concurrency)
-        self.assertNotIn("github.run_id", concurrency)
+        self.assertIn(
+            "group: project-goals-${{ github.ref }}-${{ github.run_id }}",
+            concurrency)
+        self.assertIn("cancel-in-progress: false", concurrency)
         self.assertIn("fail-fast: false", workflow)
 
     def test_ci_runner_is_quiet_on_success_and_redacts_failure(self):
