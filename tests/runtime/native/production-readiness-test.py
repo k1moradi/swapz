@@ -1660,6 +1660,33 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "mapper capacity differs from authorized target" in blocker
             for blocker in result["cold_boot_blockers"]))
 
+    def test_direct_evidence_inputs_are_bounded_and_nonthrowing(self):
+        with self.assertRaises(EVALUATOR.EvidenceError):
+            EVALUATOR.parse_env_strict(
+                b"schema=" +
+                b"x" * EVALUATOR.MAX_ENV_EVIDENCE_INPUT_BYTES + b"\n")
+
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, "not-bytes")
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertTrue(any(
+            "sealed campaign evidence bytes are invalid" in blocker
+            for blocker in result["code_blockers"]))
+
     def test_campaign_raw_numeric_type_mismatch_is_not_authenticated(self):
         report = owner_report()
         policy = acceptance_policy()
