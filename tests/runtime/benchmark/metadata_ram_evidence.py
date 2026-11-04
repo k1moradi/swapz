@@ -36,8 +36,8 @@ UTC_TIME = re.compile(
     r"(?:\.[0-9]{1,9})?Z"
 )
 SAMPLE_FIELDS = {
-    "phase", "monotonic_ns", "timestamp_utc", "mem_available_bytes",
-    "s_unreclaim_bytes", "vmalloc_used_bytes", "mapper_present",
+    "phase", "monotonic_ns", "timestamp_utc", "mem_available_kib",
+    "s_unreclaim_kib", "vmalloc_used_kib", "mapper_present",
 }
 
 
@@ -116,13 +116,14 @@ def validate_metadata_ram_trace(
     """
     if not isinstance(trace, dict) or set(trace) != {
             "schema", "capture", "scope", "source_sha", "mapper_uuid",
-            "host_boot_id", "sampling_interval_ns", "samples"}:
+            "host_boot_id", "sampling_interval_ns", "meminfo_unit", "samples"}:
         raise ValueError("metadata RAM trace fields are incomplete")
     if (
             trace["schema"] != "swapz-metadata-ram-samples-v1" or
             trace["capture"] != "serialized-loaded-host" or
             trace["scope"] !=
             "whole-host-conservative-metadata-and-target-ram" or
+            trace["meminfo_unit"] != "kB" or
             not isinstance(source_sha, str) or
             not SOURCE_SHA.fullmatch(source_sha) or
             trace["source_sha"] != source_sha or
@@ -160,18 +161,19 @@ def validate_metadata_ram_trace(
         phase_index = next_index
 
         monotonic_ns = sample["monotonic_ns"]
-        mem_available = sample["mem_available_bytes"]
-        s_unreclaim = sample["s_unreclaim_bytes"]
-        vmalloc_used = sample["vmalloc_used_bytes"]
+        mem_available_kib = sample["mem_available_kib"]
+        s_unreclaim_kib = sample["s_unreclaim_kib"]
+        vmalloc_used_kib = sample["vmalloc_used_kib"]
         utc_text = sample["timestamp_utc"]
+        maximum_kib = ((1 << 64) - 1) // MEMINFO_UNIT_BYTES
         if (
                 type(monotonic_ns) is not int or monotonic_ns <= 0 or
-                type(mem_available) is not int or mem_available <= 0 or
-                mem_available % MEMINFO_UNIT_BYTES or
-                type(s_unreclaim) is not int or s_unreclaim < 0 or
-                s_unreclaim % MEMINFO_UNIT_BYTES or
-                type(vmalloc_used) is not int or vmalloc_used < 0 or
-                vmalloc_used % MEMINFO_UNIT_BYTES or
+                type(mem_available_kib) is not int or
+                not 0 < mem_available_kib <= maximum_kib or
+                type(s_unreclaim_kib) is not int or
+                not 0 <= s_unreclaim_kib <= maximum_kib or
+                type(vmalloc_used_kib) is not int or
+                not 0 <= vmalloc_used_kib <= maximum_kib or
                 type(sample["mapper_present"]) is not bool or
                 not isinstance(utc_text, str) or
                 not UTC_TIME.fullmatch(utc_text)):
@@ -244,15 +246,16 @@ def validate_metadata_ram_trace(
         raise ValueError(
             "metadata RAM teardown lacks two seconds of quiescent recovery")
 
-    baseline_available = [
-        sample["mem_available_bytes"] for sample in baseline]
-    baseline_median_available = _median(baseline_available)
+    baseline_available_kib = [
+        sample["mem_available_kib"] for sample in baseline]
+    baseline_median_available_kib = _median(baseline_available_kib)
     post_baseline = [
         sample for phase in PHASES[1:] for sample in phase_samples[phase]]
     minimum_sample = min(
-        post_baseline, key=lambda sample: sample["mem_available_bytes"])
+        post_baseline, key=lambda sample: sample["mem_available_kib"])
     peak_ram_bytes = (
-        baseline_median_available - minimum_sample["mem_available_bytes"])
+        baseline_median_available_kib - minimum_sample["mem_available_kib"]
+    ) * MEMINFO_UNIT_BYTES
     if peak_ram_bytes <= 0 or not minimum_sample["mapper_present"]:
         raise ValueError(
             "metadata RAM peak was not observed while mapper was present")
@@ -268,19 +271,21 @@ def validate_metadata_ram_trace(
     # fail-closed on a noisy/non-quiescent host rather than manufacturing PASS.
     recovery = absent_teardown[-11:]
     if (
-            _median([sample["mem_available_bytes"] for sample in recovery]) <
-            min(baseline_available) or
-            _median([sample["s_unreclaim_bytes"] for sample in recovery]) >
-            max(sample["s_unreclaim_bytes"] for sample in baseline) or
-            _median([sample["vmalloc_used_bytes"] for sample in recovery]) >
-            max(sample["vmalloc_used_bytes"] for sample in baseline)):
+            _median([sample["mem_available_kib"] for sample in recovery]) <
+            min(baseline_available_kib) or
+            _median([sample["s_unreclaim_kib"] for sample in recovery]) >
+            max(sample["s_unreclaim_kib"] for sample in baseline) or
+            _median([sample["vmalloc_used_kib"] for sample in recovery]) >
+            max(sample["vmalloc_used_kib"] for sample in baseline)):
         raise ValueError(
             "metadata RAM teardown did not recover the pre-create envelope")
 
     return {
         "peak_ram_bytes": peak_ram_bytes,
-        "baseline_median_mem_available_bytes": baseline_median_available,
-        "minimum_mem_available_bytes": minimum_sample["mem_available_bytes"],
+        "baseline_median_mem_available_bytes":
+            baseline_median_available_kib * MEMINFO_UNIT_BYTES,
+        "minimum_mem_available_bytes":
+            minimum_sample["mem_available_kib"] * MEMINFO_UNIT_BYTES,
         "baseline_samples": len(baseline),
         "teardown_samples": len(teardown),
         "sample_count": len(samples),
