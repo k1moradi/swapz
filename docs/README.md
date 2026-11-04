@@ -91,11 +91,13 @@ navigation document.
 
 ## Evidence boundaries and failure triage
 
-Read the current [test report](../test_results.json) before acting: bind its
-`tested_commit_sha`, source cleanliness, qualification scope, five stage
-results and artifact digests to the **same** source. Required CI must also
-PASS for that source; neither CI alone, a report-only commit, a dirty build,
-nor an older qualified source admits a newer `main`. The
+Read the current [test report](../test_results.json) before acting: bind
+`source_sha`/`tested_commit_sha`, qualification scope, the stages actually
+recorded and `qualified_artifacts` to the **same** source. A complete PASS
+requires all five official stages; fail-fast FAIL/BLOCKED reports may contain
+fewer. Required CI must also PASS for that source; neither CI alone, a
+report-only commit, a dirty build, nor an older qualified source admits a newer
+`main`. The
 [production status](production-status.json) is a timestamped read-only
 observation; [handoff readiness](handoff/production-readiness.json) is
 explicitly **historical**, not a live release verdict.
