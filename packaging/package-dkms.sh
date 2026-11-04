@@ -603,8 +603,54 @@ operation = sys.argv[5]
 if operation not in ("install", "uninstall"):
     raise SystemExit("unknown package transaction")
 backup = transaction / "backup"
-if not backup.is_dir() or backup.is_symlink():
-    raise SystemExit("missing backup directory")
+# Reject swapped or permission-weakened directories before *any* journal write.
+for directory in (transaction.parent, transaction, backup):
+    if directory.is_symlink() or not directory.is_dir():
+        raise SystemExit("unsafe package transaction directory")
+    metadata = directory.stat()
+    if (metadata.st_uid != os.geteuid()
+            or metadata.st_gid != os.getegid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700):
+        raise SystemExit("unsafe package transaction directory metadata")
+allowed_phases = {
+    "activation-files-removed",
+    "adding-dkms",
+    "building-dkms",
+    "cli-published",
+    "committed",
+    "creating-source",
+    "depmod-complete",
+    "depmod-pending",
+    "dkms-added",
+    "dkms-built",
+    "dkms-installed",
+    "dkms-removed",
+    "installed-module-removed",
+    "installing-dkms",
+    "module-promoted",
+    "package-files-published",
+    "prepared",
+    "promoting-qualified-module",
+    "publishing-cli",
+    "publishing-package-files",
+    "removing-activation-files",
+    "removing-dkms",
+    "removing-installed-module",
+    "removing-source",
+    "rollback-backend-restored",
+    "rollback-cli-restored",
+    "rollback-files-restored",
+    "rollback-incomplete",
+    "rollback-started",
+    "rollback-systemd-reloaded",
+    "rolled-back",
+    "source-created",
+    "source-removed",
+    "systemd-reload-complete",
+    "systemd-reload-pending",
+}
+if phase not in allowed_phases:
+    raise SystemExit("invalid package transaction phase")
 final = transaction / "state.json"
 temporary = transaction / "state.json.tmp"
 # The prepared state is the first durable point after the complete rollback
@@ -632,8 +678,11 @@ for path in sorted(backup.rglob("*")):
             digest.update(chunk)
         if not snapshot_previously_journaled:
             os.fsync(stream.fileno())
+    relative = str(path.relative_to(backup))
+    if len(relative) > 4096 or len(entries) >= 1024:
+        raise SystemExit("package rollback snapshot exceeds manifest bounds")
     entries.append({
-        "path": str(path.relative_to(backup)),
+        "path": relative,
         "sha256": digest.hexdigest(),
         "size": metadata.st_size,
         "mode": stat.S_IMODE(metadata.st_mode),
@@ -666,10 +715,22 @@ if final.exists() or final.is_symlink():
             or stat.S_IMODE(previous_metadata.st_mode) != 0o600
             or previous_metadata.st_nlink != 1):
         raise SystemExit("unsafe previous package journal metadata")
-    previous = json.loads(final.read_text(encoding="utf-8"))
+    if previous_metadata.st_size > 1024 * 1024:
+        raise SystemExit("oversized previous package journal")
+    previous_bytes = final.read_bytes()
+    previous = json.loads(previous_bytes)
+    if (not isinstance(previous, dict)
+            or set(previous) != set(state)
+            or previous.get("phase") not in allowed_phases
+            or previous_bytes != (json.dumps(previous, sort_keys=True,
+                                             separators=(",", ":")) + "\\n").encode()):
+        raise SystemExit("noncanonical previous package journal")
     for field in ("schema", "version", "kernel_release", "backup_files"):
         if previous.get(field) != state[field]:
             raise SystemExit(f"package rollback snapshot changed: {field}")
+state_bytes = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\\n").encode()
+if len(state_bytes) > 1024 * 1024:
+    raise SystemExit("package journal exceeds size bound")
 temporary_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                    os.O_NOFOLLOW | os.O_CLOEXEC)
 temporary_descriptor = os.open(temporary, temporary_flags, 0o600)
@@ -677,8 +738,7 @@ with os.fdopen(temporary_descriptor, "w", encoding="utf-8") as stream:
     # Create the private journal temp exclusively without following a stale
     # path, then make its exact mode durable with the journal contents.
     os.fchmod(stream.fileno(), 0o600)
-    json.dump(state, stream, sort_keys=True, separators=(",", ":"))
-    stream.write("\n")
+    stream.write(state_bytes.decode("utf-8"))
     stream.flush()
     os.fsync(stream.fileno())
 os.replace(temporary, final)
@@ -720,18 +780,64 @@ if (journal_metadata.st_uid != os.geteuid()
         or stat.S_IMODE(journal_metadata.st_mode) != 0o600
         or journal_metadata.st_nlink != 1):
     raise SystemExit("unsafe package rollback journal metadata")
-state = json.loads(journal.read_text(encoding="utf-8"))
+if journal_metadata.st_size > 1024 * 1024:
+    raise SystemExit("oversized package rollback journal")
+encoded_state = journal.read_bytes()
+state = json.loads(encoded_state)
+allowed_phases = {
+    "activation-files-removed",
+    "adding-dkms",
+    "building-dkms",
+    "cli-published",
+    "committed",
+    "creating-source",
+    "depmod-complete",
+    "depmod-pending",
+    "dkms-added",
+    "dkms-built",
+    "dkms-installed",
+    "dkms-removed",
+    "installed-module-removed",
+    "installing-dkms",
+    "module-promoted",
+    "package-files-published",
+    "prepared",
+    "promoting-qualified-module",
+    "publishing-cli",
+    "publishing-package-files",
+    "removing-activation-files",
+    "removing-dkms",
+    "removing-installed-module",
+    "removing-source",
+    "rollback-backend-restored",
+    "rollback-cli-restored",
+    "rollback-files-restored",
+    "rollback-incomplete",
+    "rollback-started",
+    "rollback-systemd-reloaded",
+    "rolled-back",
+    "source-created",
+    "source-removed",
+    "systemd-reload-complete",
+    "systemd-reload-pending",
+}
+if (not isinstance(state, dict) or set(state) != {
+        "schema", "phase", "version", "kernel_release", "backup_files"}
+        or state.get("phase") not in allowed_phases
+        or encoded_state != (json.dumps(state, sort_keys=True,
+                                        separators=(",", ":")) + "\\n").encode()):
+    raise SystemExit("noncanonical package rollback journal")
 if (state.get("schema") != f"swapz-package-{operation}-v1"
         or state.get("version") != version
         or state.get("kernel_release") != kernel_release):
     raise SystemExit("package rollback journal does not match this operation")
 entries = state.get("backup_files")
-if not isinstance(entries, list):
+if not isinstance(entries, list) or len(entries) > 1024:
     raise SystemExit("invalid rollback file manifest")
 seen = set()
 for entry in entries:
     relative = entry.get("path") if isinstance(entry, dict) else None
-    if (not isinstance(relative, str) or not relative
+    if (not isinstance(relative, str) or not relative or len(relative) > 4096
             or Path(relative).is_absolute()
             or any(part in (".", "..") for part in Path(relative).parts)
             or relative in seen):
