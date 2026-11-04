@@ -19,6 +19,7 @@ import errno
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -134,6 +135,17 @@ def _unique_json_object(pairs):
             raise ValueError(f"duplicate JSON key {key}")
         result[key] = value
     return result
+
+
+def _reject_nonfinite_json_constant(value: str):
+    raise ValueError(f"non-finite JSON number {value}")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"non-finite JSON number {value}")
+    return parsed
 
 
 def _exception_text(error: BaseException) -> str:
@@ -254,7 +266,9 @@ class SourceAdmissionClient:
         try:
             response = json.loads(
                 response_bytes.decode("ascii"),
-                object_pairs_hook=_unique_json_object)
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_nonfinite_json_constant,
+                parse_float=_finite_json_float)
         except (UnicodeError, ValueError, TypeError) as exc:
             raise Blocked("source admission response is malformed") from exc
         required = {
@@ -691,12 +705,11 @@ def _load_unique_json(text: str, label: str) -> dict:
             result[key] = value
         return result
 
-    def reject_constant(value: str):
-        raise ValueError(f"non-finite JSON number {value}")
-
     try:
         value = json.loads(
-            text, object_pairs_hook=unique, parse_constant=reject_constant)
+            text, object_pairs_hook=unique,
+            parse_constant=_reject_nonfinite_json_constant,
+            parse_float=_finite_json_float)
     except (ValueError, TypeError) as exc:
         raise Blocked(f"cannot parse {label}: {exc}") from exc
     if not isinstance(value, dict):
@@ -1846,6 +1859,12 @@ def require_oracle_worker_cgroup_ownership(
             len(expected) != len(processes):
         raise QualificationFailure(
             "dedicated oracle cgroup membership differs from owned worker PIDs")
+    # An exited task cannot still be in cgroup.procs. Reject a recycled PID
+    # rather than incorrectly attributing a foreign process to that worker.
+    if any(process.pid in observed and process.poll() is not None
+           for process in processes):
+        raise QualificationFailure(
+            "exited oracle PID is present in dedicated cgroup")
     # The cgroup may shrink after VERIFY only when a child has exited; a
     # still-running oracle outside our cgroup invalidates swap attribution.
     if allow_worker_exit and any(
@@ -1918,7 +1937,9 @@ def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
             try:
                 value = json.loads(
                     record[len(prefix_bytes):].decode("ascii"),
-                    object_pairs_hook=_unique_json_object)
+                    object_pairs_hook=_unique_json_object,
+                    parse_constant=_reject_nonfinite_json_constant,
+                    parse_float=_finite_json_float)
             except (UnicodeError, ValueError, TypeError) as exc:
                 raise QualificationFailure("real-swap oracle emitted malformed JSON") from exc
             if not isinstance(value, dict):
@@ -1986,11 +2007,14 @@ def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
             "backing partition READ counters do not cover swapz target physical READ bytes")
     if vm_after_verify["pswpin"] <= vm_before_verify["pswpin"]:
         raise QualificationFailure("kernel vmstat shows no swap-in during byte verification")
+    oracle_digest = oracle.get("digest")
     if expected_verified_pages <= 0 or \
             oracle.get("verified_pages") != expected_verified_pages or \
             oracle.get("verified_bytes") != expected_verified_pages * PAGE_BYTES or \
             oracle.get("mismatches") != 0 or \
-            oracle.get("digest") != oracle.get("expected_digest"):
+            not isinstance(oracle_digest, str) or \
+            re.fullmatch(r"[0-9a-f]{64}", oracle_digest) is None or \
+            oracle_digest != oracle.get("expected_digest"):
         raise QualificationFailure("real-swap byte oracle reported corruption or incomplete verification")
     for status in (fill_status_after, verify_status_after):
         if status["failed"] != 0 or status["error"] != 0:
@@ -2027,17 +2051,20 @@ def aggregate_oracle_verification(records: list[dict]) -> dict:
     verified_bytes = 0
     mismatches = 0
     for record in records:
-        try:
-            pages = int(record["verified_pages"])
-            byte_count = int(record["verified_bytes"])
-            mismatch_count = int(record["mismatches"])
-            observed_bytes = bytes.fromhex(str(record["digest"]))
-            expected_bytes = bytes.fromhex(str(record["expected_digest"]))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise QualificationFailure("concurrent oracle verification record is malformed") from exc
-        if pages <= 0 or byte_count != pages * PAGE_BYTES or mismatch_count < 0 or \
-                len(observed_bytes) != 32 or len(expected_bytes) != 32:
+        if not isinstance(record, dict) or any(
+                type(record.get(key)) is not int
+                for key in ("verified_pages", "verified_bytes", "mismatches")) or any(
+                not isinstance(record.get(key), str) or
+                re.fullmatch(r"[0-9a-f]{64}", record[key]) is None
+                for key in ("digest", "expected_digest")):
+            raise QualificationFailure("concurrent oracle verification record is malformed")
+        pages = record["verified_pages"]
+        byte_count = record["verified_bytes"]
+        mismatch_count = record["mismatches"]
+        if pages <= 0 or byte_count != pages * PAGE_BYTES or mismatch_count < 0:
             raise QualificationFailure("concurrent oracle verification geometry/digest is invalid")
+        observed_bytes = bytes.fromhex(record["digest"])
+        expected_bytes = bytes.fromhex(record["expected_digest"])
         verified_pages += pages
         verified_bytes += byte_count
         mismatches += mismatch_count
@@ -3083,6 +3110,22 @@ def _import_qualification(swapzctl: Path, report_path: Path) -> None:
         raise Blocked(f"cannot import exact qualification report: {detail}")
 
 
+def require_final_installed_artifact_identity(
+        qualified_swapzctl: Path, expected_hashes: dict[str, str]) -> None:
+    """Retain the initially qualified package identity through terminal PASS.
+
+    The imported report digest is intentionally pinned at admission; do not
+    re-hash its mutable pathname after the workload.
+    """
+    paths = installed_artifact_paths(qualified_swapzctl)
+    if set(expected_hashes) != set(paths):
+        raise QualificationFailure("final qualified artifact inventory is incomplete")
+    for artifact_key, path in paths.items():
+        if _sha256_file(path) != expected_hashes[artifact_key]:
+            raise QualificationFailure(
+                f"installed {artifact_key} bytes changed during real-swap campaign")
+
+
 def _execute_admitted(
         arguments: argparse.Namespace, admission: SourceAdmissionClient,
         terminal_cleanup: Callable[[], None] | None = None) -> dict:
@@ -3248,6 +3291,11 @@ def _execute_admitted(
             raise QualificationFailure(
                 f"private workspace cleanup failed before terminal PASS: "
                 f"{cleanup_error}") from cleanup_error
+        if _path_present(
+                private_parent, "private physical workspace",
+                QualificationFailure):
+            raise QualificationFailure(
+                "private physical workspace remains after reported cleanup")
         workspace_cleanup_complete = True
         result = {
             "schema": "swapz-primary-real-swap-v1",
@@ -3278,6 +3326,12 @@ def _execute_admitted(
         # Perform the final Git/source proof after all result inputs and owned
         # workspace cleanup have stabilized. Only channel close and the
         # fail-closed evidence commit follow this approval.
+        require_final_installed_artifact_identity(
+            qualified_swapzctl, artifact_hashes)
+        if acceptance_manifest_sha256() != acceptance_policy_sha256 or \
+                _sha256_file(Path(__file__)) != helper_sha256:
+            raise QualificationFailure(
+                "real-swap policy/helper source artifact changed during campaign")
         admission.require("final")
         if terminal_cleanup is not None:
             terminal_cleanup()
