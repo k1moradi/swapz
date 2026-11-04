@@ -767,11 +767,11 @@ static int run_mixed_seed(uint32_t seed)
 	MIXED_REQUIRE(mixed_failed_writes > 0U, "NO_WRITE_EIO_COVERAGE");
 	MIXED_REQUIRE(mixed_failed_reads > 0U, "NO_READ_EIO_COVERAGE");
 	MIXED_REQUIRE(mixed_gc_write_failures > 0U, "NO_GC_FAULT_COVERAGE");
-	printf("MIXED_PRODUCTION_C_PASS seed=0x%08x steps=%u "
+	printf("MIXED_PRODUCTION_C_PASS steps=%u "
 	       "failed_writes=%u failed_reads=%u rotations=%u "
 	       "gc_faults=%u recycled_segments=%u "
 	       "synthetic_native_host_only=1\n",
-	       seed, MIXED_STEPS, mixed_failed_writes, mixed_failed_reads,
+	       MIXED_STEPS, mixed_failed_writes, mixed_failed_reads,
 	       mixed_completed_rotations, mixed_gc_write_failures,
 	       rotation_count);
 	mixed_active = 0;
@@ -971,7 +971,7 @@ int main(void)
 		}
 	}
 	free(disk.bytes);
-	printf("RANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 "
+	printf("RANDOM_ENGINE_ALL_CAPS_PASS iterations=400 "
 	       "generated_records=%u plus duplicate/fault cases records=pass\n",
 	       total_records);
 	return 0;
