@@ -1340,20 +1340,31 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertEqual(failed["test"], "NativeCase.test_range")
         self.assertIn("AssertionError:", failed["first_error"])
 
-    def test_expected_negative_permission_is_not_the_causal_failure(self):
+    def test_expected_negative_output_is_not_the_causal_failure(self):
         negative_fixture = [
             "swapzctl format: REFUSED: pre-open identity: Permission denied",
-            "FAIL: test_runtime_boundary (NativeFixture)",
+            "BLOCKED: expected fixture import failed: No such device",
+            "FAIL: test_runtime_boundary "
+            "(__main__.NativeFixture.test_runtime_boundary)",
+            "Traceback (most recent call last):",
             "AssertionError: wrong tail guard",
             "FAILED (failures=1)",
         ]
         result = self.diagnostics.diagnose_ci_failure(
             negative_fixture, 1, "native-rootless")
         self.assertEqual(result["category"], "RUNTIME_ASSERTION")
-        self.assertEqual(result["test"],
-                         "NativeFixture.test_runtime_boundary")
+        self.assertEqual(
+            result["test"],
+            "__main__.NativeFixture.test_runtime_boundary")
         self.assertEqual(result["first_error"],
                          "AssertionError: wrong tail guard")
+
+        aborted = self.diagnostics.diagnose_ci_failure(
+            ["make[1]: *** [Makefile:156: test-userspace] Error 134"],
+            2, "native-rootless")
+        self.assertEqual(aborted["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(aborted["test"], "make:test-userspace")
+        self.assertIn("Error 134", aborted["first_error"])
 
     def test_skips_and_cancellation_cannot_pass_workflow_aggregation(self):
         workflow = (ROOT / ".github/workflows/project-goals.yml").read_text()
@@ -1388,7 +1399,8 @@ class CiFailureDiagnosticContract(unittest.TestCase):
             failed = subprocess.run(
                 command + [
                     "import sys; sys.stderr.write("
-                    "'AssertionError: token=privatevalue\\n'); sys.exit(3)"],
+                    "'AssertionError: token=privatevalue ' + 'x' * 5000 + "
+                    "' token=tailprivate\\n'); sys.exit(3)"],
                 cwd=ROOT, env=environment, capture_output=True,
                 text=True, timeout=12)
             self.assertEqual(failed.returncode, 3)
@@ -1399,8 +1411,34 @@ class CiFailureDiagnosticContract(unittest.TestCase):
             self.assertEqual(payload["category"], "RUNTIME_ASSERTION")
             self.assertEqual(payload["job"], "synthetic")
             self.assertTrue(log.exists())
-            self.assertNotIn("privatevalue", log.read_text())
-            self.assertNotIn("privatevalue", failed.stdout)
+            retained = log.read_text()
+            self.assertIn("SWAPZ_CI_FAILURE=", retained)
+            self.assertIn(source, retained)
+            self.assertIn("[truncated]", retained)
+            for secret in ("privatevalue", "tailprivate"):
+                self.assertNotIn(secret, retained)
+                self.assertNotIn(secret, failed.stdout)
+
+            cancel_log = ROOT / "build/ci-logs/synthetic-cancel.log"
+            cancel_log.unlink(missing_ok=True)
+            cancelled = subprocess.run(
+                ["python3", "-B", str(module), "ci-run", "--suite",
+                 "synthetic-cancel", "--", "python3", "-c",
+                 "import os, signal; "
+                 "os.kill(os.getpid(), signal.SIGTERM)"],
+                cwd=ROOT, env=environment, capture_output=True,
+                text=True, timeout=12)
+            self.assertEqual(cancelled.returncode, 1, cancelled.stderr)
+            self.assertIn("SWAPZ_CI_FAILURE=", cancelled.stdout)
+            cancelled_payload = json.loads(
+                cancelled.stdout.split("SWAPZ_CI_FAILURE=", 1)[1])
+            self.assertEqual(cancelled_payload["status"], "CANCELLED")
+            self.assertEqual(cancelled_payload["category"], "CANCELLATION")
+            self.assertEqual(cancelled_payload["tested_sha"], source)
+            self.assertTrue(cancel_log.exists())
+            self.assertIn('"status": "CANCELLED"',
+                          cancel_log.read_text())
+
             environment["GITHUB_SHA"] = "0" * 40
             mismatch = subprocess.run(
                 command + ["print('must not execute')"], cwd=ROOT,
@@ -1409,6 +1447,8 @@ class CiFailureDiagnosticContract(unittest.TestCase):
             self.assertIn("SOURCE_CONTRACT", mismatch.stdout)
         finally:
             log.unlink(missing_ok=True)
+            (ROOT / "build/ci-logs/synthetic-cancel.log").unlink(
+                missing_ok=True)
 
 
 if __name__ == "__main__":

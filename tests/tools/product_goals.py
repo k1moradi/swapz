@@ -268,91 +268,171 @@ def _ci_safe_line(line):
         r"\1<redacted>", line)
     line = re.sub(r"\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}",
                   "<redacted>", line)
-    # Keep the missing token, not a megabyte-long source literal.
-    line = re.sub(r"(AssertionError: .*? not found in ).*",
-                  r"\1<source excerpt omitted>", line)
+    # Keep the assertion operand, not a potentially huge source literal.
+    line = re.sub(
+        r"(AssertionError: .*? (?:not |unexpectedly )?found in ).*",
+        r"\1<source excerpt omitted>", line)
     line = re.sub(r"(?<!\w)/(?:tmp|var/tmp)/[^\s\x27\x22:]+",
                   "<temporary-path>", line)
-    return re.sub(r"[\x00-\x1f\x7f]", " ", line).strip()[:320]
+    clean_line = re.sub(r"[\x00-\x1f\x7f]", " ", line).strip()
+    if len(clean_line) > 320:
+        return clean_line[:306] + " [truncated]"
+    return clean_line
+
+
+def _ci_record_lines(record, maximum_bytes=4096):
+    """Yield at most one bounded prefix for each logical captured-output line."""
+    while True:
+        raw_line = record.readline(maximum_bytes)
+        if not raw_line:
+            return
+        truncated = len(raw_line) == maximum_bytes and not raw_line.endswith(b"\n")
+        if truncated:
+            # Drain the remainder without retaining or exposing it. Besides
+            # bounding memory/log size, this prevents a secret suffix on an
+            # enormous line from bypassing prefix-based redaction.
+            while True:
+                remainder = record.readline(maximum_bytes)
+                if not remainder or remainder.endswith(b"\n"):
+                    break
+        line = raw_line.decode("utf-8", errors="replace")
+        if truncated:
+            line = line.rstrip("\r\n") + " [line truncated]\n"
+        yield line
+
+
+def _ci_unittest_name(method_name, context):
+    """Normalize unittest's short and fully-qualified failure headers."""
+    suffix = "." + method_name
+    return context if context.endswith(suffix) else context + suffix
+
+
+def _ci_failure_category(line, contract_suite):
+    """Classify one already-sanitized causal candidate, or return None."""
+    import re
+
+    if re.search(
+            r"(?i)source.sha.*mismatch|source.contract.mismatch|"
+            r"contract violation|standards.cochange|SOURCE_CONTRACT_MISMATCH",
+            line):
+        return "SOURCE_CONTRACT"
+    if re.search(
+            r"(?i)(?:\.[ch](?::\d+){1,2}|\.cpp(?::\d+){1,2}|"
+            r"cc1(?:plus)?):\s*(?:fatal )?error:|"
+            r"undefined reference to|linker command failed|collect2: error:",
+            line):
+        return "NATIVE_COMPILE"
+    if re.search(
+            r"(?i)no space left on device|temporary failure resolving|"
+            r"could not resolve host|failed to fetch|network is unreachable|"
+            r"connection timed out|unable to locate package|runner image",
+            line):
+        return "INFRASTRUCTURE"
+    if re.search(
+            r"(?i)(?:^|\b)PermissionError:|"
+            r"^(?:FAIL:|ERROR:|BLOCKED:|sudo:|bash:).*(?:"
+            r"operation not permitted|permission denied|"
+            r"insufficient permissions|BLOCKED_LOADED_QUALIFICATION|password)|"
+            r"^BLOCKED_LOADED_QUALIFICATION",
+            line):
+        return "HOST_PERMISSION"
+    if re.search(
+            r"(?i)AssertionError:|^E\s+AssertionError|"
+            r"(?:RuntimeError|ValueError|TypeError|FileNotFoundError|"
+            r"(?:subprocess\.)?CalledProcessError):|"
+            r"AddressSanitizer|UndefinedBehaviorSanitizer|runtime error:|"
+            r"Assertion .* failed|Aborted(?: \(core dumped\))?|SIGABRT|"
+            r"terminate called after throwing|"
+            r"make(?:\[\d+\])?: \*\*\* \[[^\]]+\] Error (?:134|139)\b",
+            line):
+        return "SOURCE_CONTRACT" if contract_suite else "RUNTIME_ASSERTION"
+    if re.search(r"^FAIL:(?!\s+test_)\s+|^BLOCKED:\s+", line):
+        return "SOURCE_CONTRACT" if contract_suite else "RUNTIME_ASSERTION"
+    return None
 
 
 def diagnose_ci_failure(lines, exit_code, suite):
-    """Extract the first causal error, not the final generic failure count."""
+    """Extract a causal error and bind it to the test that actually failed."""
     import re
 
     first_error = None
-    category = None
+    first_category = None
     fallback = None
     failing_test = None
+    make_target = None
+    unittest_error = None
+    unittest_category = None
+    unittest_failure_active = False
     contract_suite = any(name in suite for name in
                          ("contract", "policy", "interface", "layout"))
+
     for line in lines:
         safe_line = _ci_safe_line(line)
         if not safe_line:
             continue
-        match = re.search(
+
+        unittest_match = re.search(
             r"(?:FAIL|ERROR):\s+(test_[A-Za-z0-9_]+)\s+\(([^)]+)\)",
             safe_line)
-        if match and failing_test is None:
-            failing_test = match.group(2) + "." + match.group(1)
+        if unittest_match:
+            if failing_test is None:
+                failing_test = _ci_unittest_name(
+                    unittest_match.group(1), unittest_match.group(2))
+                unittest_failure_active = True
+            elif unittest_error is None:
+                # Do not accidentally associate the second failing traceback
+                # with the first test when an unusual exception was unknown.
+                unittest_failure_active = False
+            continue
+
+        if make_target is None:
+            make_match = re.search(
+                r"make(?:\[\d+\])?: \*\*\* "
+                r"\[[^:\]]+:\d+:\s*([^\]]+)\] Error \d+",
+                safe_line)
+            if make_match:
+                make_target = "make:" + make_match.group(1).strip()
+
         if fallback is None and re.search(
-                r"(?i)\b(?:FAIL|ERROR|BLOCKED):|make(?:\[\d+\])?: \*\*\*|FAILED \(",
+                r"(?i)\b(?:FAIL|ERROR|BLOCKED):|"
+                r"make(?:\[\d+\])?: \*\*\*|FAILED \(",
                 safe_line):
             fallback = safe_line
-        if first_error is not None:
-            continue
-        # Negative fixture tests deliberately print REFUSED/permission errors.
-        # Attribute a permission blocker only when the failing context says
-        # so, never from an unrelated earlier expected-denial transcript.
-        if re.search(r"AssertionError:|^E\s+AssertionError", safe_line):
-            category = ("SOURCE_CONTRACT" if contract_suite
-                        else "RUNTIME_ASSERTION")
-        elif re.search(
-                r"(?i)^(?:FAIL:|ERROR:|BLOCKED:|PermissionError:|sudo:|bash:)"
-                r".*(?:operation not permitted|permission denied|"
-                r"insufficient permissions|BLOCKED_LOADED_QUALIFICATION|"
-                r"password)|^BLOCKED_LOADED_QUALIFICATION", safe_line):
-            category = "HOST_PERMISSION"
-        elif re.search(
-                r"(?i)(?:\.[ch](?::\d+){1,2}|\.cpp(?::\d+){1,2}|"
-                r"cc1(?:plus)?):\s*(?:fatal )?error:|"
-                r"undefined reference to|linker command failed", safe_line):
-            category = "NATIVE_COMPILE"
-        elif re.search(
-                r"(?i)no space left on device|temporary failure resolving|"
-                r"could not resolve host|failed to fetch|"
-                r"network is unreachable|connection timed out|"
-                r"unable to locate package|runner image", safe_line):
-            category = "INFRASTRUCTURE"
-        elif re.search(
-                r"(?i)source.sha.*mismatch|source.contract.mismatch|"
-                r"contract violation|standards.cochange|"
-                r"SOURCE_CONTRACT_MISMATCH", safe_line):
-            category = "SOURCE_CONTRACT"
-        elif re.search(r"^FAIL:(?!\s+test_)\s+|^BLOCKED:\s+", safe_line):
-            category = ("SOURCE_CONTRACT" if contract_suite
-                        else "RUNTIME_ASSERTION")
-        if category:
-            first_error = safe_line
 
+        category = _ci_failure_category(safe_line, contract_suite)
+        if (unittest_failure_active and unittest_error is None and
+                category is not None):
+            unittest_error = safe_line
+            unittest_category = category
+        if first_error is None and category is not None:
+            first_error = safe_line
+            first_category = category
+
+    causal_error = unittest_error or first_error or fallback
+    category = unittest_category or first_category
     cancelled = exit_code in (130, 143, -2, -15)
     if cancelled:
         status, category = "CANCELLED", "CANCELLATION"
+        reason = "execution interrupted; no qualification result"
+        causal_error = reason
+    elif exit_code == 124:
+        status, category = "FAIL", "INFRASTRUCTURE"
+        reason = "command timed out; no qualification result"
+        causal_error = reason
     else:
         status = "FAIL"
         category = category or (
-            "INFRASTRUCTURE" if exit_code in (124, 127) else
+            "INFRASTRUCTURE" if exit_code == 127 else
             "SOURCE_CONTRACT" if contract_suite else "UNKNOWN_FAILURE")
-    reason = (first_error or fallback or
-              "command exited without a recognizable causal diagnostic")
-    if cancelled:
-        reason = "execution interrupted; no qualification result"
-    elif exit_code == 124:
-        reason = "command timed out; no qualification result"
+        reason = (causal_error or
+                  "command exited without a recognizable causal diagnostic")
+        causal_error = causal_error or reason
+
     return {
         "status": status, "category": category,
-        "test": failing_test or suite, "first_error": first_error or fallback or reason,
-        "reason": reason, "exit_code": exit_code,
+        "test": failing_test or make_target or suite,
+        "first_error": causal_error, "reason": reason,
+        "exit_code": exit_code,
         "prerequisite": {
             "NATIVE_COMPILE": "hosted Ubuntu compiler, headers, liblz4",
             "HOST_PERMISSION": "unprivileged host filesystem/capability access",
@@ -364,16 +444,16 @@ def diagnose_ci_failure(lines, exit_code, suite):
     }
 
 
-def _ci_retain_log(record, destination):
-    """Save a bounded, sanitized head, first errors and tail on failure only."""
+def _ci_retain_log(record, destination, diagnostic):
+    """Save bounded sanitized failure evidence plus its exact-SHA diagnosis."""
     import re
     from collections import deque
 
     record.seek(0)
     beginning, recent, errors = [], deque(maxlen=96), []
     first_bytes = 0
-    for raw_line in iter(lambda: record.readline(4096), b""):
-        line = _ci_safe_line(raw_line.decode("utf-8", errors="replace"))
+    for raw_line in _ci_record_lines(record):
+        line = _ci_safe_line(raw_line)
         if not line:
             continue
         if first_bytes < 12000:
@@ -387,6 +467,8 @@ def _ci_retain_log(record, destination):
             errors.append(line)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("w", encoding="utf-8") as output:
+        output.write("SWAPZ_CI_FAILURE=" +
+                     json.dumps(diagnostic, sort_keys=True) + "\n")
         for label, lines in (("FIRST", beginning), ("FIRST ERRORS", errors),
                              ("LAST", recent)):
             output.write("=== " + label + " (sanitized, bounded) ===\n")
@@ -444,9 +526,7 @@ def _ci_run(argv):
             return 0
         record.seek(0)
         result = diagnose_ci_failure(
-            (line.decode("utf-8", errors="replace")
-             for line in iter(lambda: record.readline(4096), b"")),
-            return_code, arguments.suite)
+            _ci_record_lines(record), return_code, arguments.suite)
         result.update({
             "schema": "swapz-ci-diagnostic-v1", "tested_sha": tested_sha,
             "job": job, "suite": arguments.suite, "artifact": artifact,
@@ -454,7 +534,7 @@ def _ci_run(argv):
             "run_url": ("https://github.com/k1moradi/swapz/actions/runs/" +
                         os.environ.get("GITHUB_RUN_ID", "unknown")),
         })
-        _ci_retain_log(record, destination)
+        _ci_retain_log(record, destination, result)
         message = result["first_error"].replace("%", "%25").replace(
             "\r", "%0D").replace("\n", "%0A")
         print(f"::error title={result['category']} {arguments.suite}::{message}")
