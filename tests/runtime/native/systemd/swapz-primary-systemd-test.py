@@ -880,6 +880,19 @@ class EffectiveUnitContractTests(unittest.TestCase):
             shared_extra=shared_extra,
             base_overrides=base_overrides,
         )
+        base_override_keys: dict[str, set[tuple[str, str]]] = {}
+        for unit, replacement in (base_overrides or {}).items():
+            _, path = self.UNIT_PATHS[unit]
+            vendor_base, _ = self.merged_directives(read_text(path), ())
+            replacement_base, _ = self.merged_directives(
+                replacement, (), base_origin="admin unit override"
+            )
+            base_override_keys[unit] = {
+                key
+                for key in set(vendor_base) | set(replacement_base)
+                if vendor_base.get(key) != replacement_base.get(key)
+            }
+
         for unit in baseline:
             for key in sorted(set(baseline[unit]) | set(actual[unit])):
                 if key == ("Unit", "Description"):
@@ -890,10 +903,14 @@ class EffectiveUnitContractTests(unittest.TestCase):
                     continue
 
                 baseline_origin = baseline_origins[unit].get(key, "")
-                if baseline_origin.startswith("generator:") and shadows[unit]:
-                    origin = ", ".join(shadows[unit])
-                elif unit in (base_overrides or {}) and key not in actual[unit]:
+                if key in base_override_keys.get(unit, set()):
+                    # A generator may still add another value to an additive
+                    # directive after an administrator replaced the main unit.
+                    # Attribute the lost vendor contribution to the replacement,
+                    # not to the surviving generator fragment.
                     origin = "admin unit override"
+                elif baseline_origin.startswith("generator:") and shadows[unit]:
+                    origin = ", ".join(shadows[unit])
                 else:
                     origin = origins[unit].get(key, "missing")
 
@@ -993,17 +1010,32 @@ class EffectiveUnitContractTests(unittest.TestCase):
             },
         })
 
-    def test_higher_priority_unit_override_cannot_remove_recovery_requirement(self) -> None:
+    def test_higher_priority_unit_override_cannot_remove_required_dependencies(self) -> None:
         mapper = read_text(MAPPER_SERVICE)
-        required = "RequiresMountsFor=/var/lib/swapz/physical-recovery\n"
-        self.assertIn(required, mapper)
-        replaced = mapper.replace(required, "", 1)
-        with self.assertRaises(AssertionError) as caught:
-            self.assert_effective_security(base_overrides={"mapper": replaced})
-        diagnostic = str(caught.exception)
-        self.assertIn("mapper effective Unit.RequiresMountsFor", diagnostic)
-        self.assertIn("override=admin unit override", diagnostic)
-        self.assertIn("durable recovery storage", diagnostic)
+        cases = (
+            (
+                "RequiresMountsFor=/var/lib/swapz/physical-recovery\n",
+                "mapper effective Unit.RequiresMountsFor",
+                "durable recovery storage",
+            ),
+            (
+                "Requires=-.mount\n",
+                "mapper effective Unit.Requires",
+                "dependency or ordering graph",
+            ),
+        )
+        for removed, directive, consequence in cases:
+            with self.subTest(removed=removed.rstrip()):
+                self.assertIn(removed, mapper)
+                replaced = mapper.replace(removed, "", 1)
+                with self.assertRaises(AssertionError) as caught:
+                    self.assert_effective_security(
+                        base_overrides={"mapper": replaced}
+                    )
+                diagnostic = str(caught.exception)
+                self.assertIn(directive, diagnostic)
+                self.assertIn("override=admin unit override", diagnostic)
+                self.assertIn(consequence, diagnostic)
 
     def test_dropin_scope_and_same_name_precedence_match_systemd(self) -> None:
         self.assertEqual(

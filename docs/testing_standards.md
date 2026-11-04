@@ -5768,6 +5768,9 @@ recover -> prepare -> start, change the sole primary stop/swapoff owner,
 remove recovery-mount or selected-device requirements, weaken timeouts, or
 activate the passive swap alias. Report the effective directive, required
 value, observed override basename and safety consequence without host paths.
+If a whole-unit replacement removes a vendor contribution from an additive
+directive that a surviving generator fragment also augments, attribute the
+missing contribution to the replacing unit rather than the generator.
 systemd-analyze verify contributes syntax/dependency evidence when available;
 its absence is INCOMPLETE, not PASS, and its success is not proof of runtime
 sandbox support. The boot observer must revoke the single-use preflight
