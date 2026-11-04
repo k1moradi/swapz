@@ -715,6 +715,9 @@ def validate_metadata_ram_trace(
         "minimum_mem_available_bytes":
             minimum_sample["mem_available_kib"] * MEMINFO_UNIT_BYTES,
         "baseline_samples": len(baseline),
+        "initialization_samples": len(phase_samples["initialization"]),
+        "steady_samples": len(phase_samples["steady"]),
+        "gc_samples": len(phase_samples["gc"]),
         "teardown_samples": len(teardown),
         "recovery_samples": len(recovery),
         "recovery_span_ns": recovery_span_ns,
