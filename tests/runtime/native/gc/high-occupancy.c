@@ -401,7 +401,7 @@ static int test_sustained_all_raw_gc_rotations(void)
 	CHECK(cpu_end != (clock_t)-1);
 	printf("SWAPZ_GC_SYNTHETIC_NATIVE_HOST_CPU_WALL=rotations:%u "
 	       "cpu_ms:%.3f wall_ms:%.3f map_scan_count:%llu "
-	       "physical_qualification:NOT_RUN\\n",
+	       "physical_qualification:NOT_RUN\n",
 	       rotations, 1000.0 * (double)(cpu_end - cpu_start) / CLOCKS_PER_SEC,
 	       1000.0 * ((double)(wall_end.tv_sec - wall_start.tv_sec) +
 			 (double)(wall_end.tv_nsec - wall_start.tv_nsec) / 1.0e9),
