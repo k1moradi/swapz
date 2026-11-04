@@ -786,8 +786,9 @@ def metadata_ram_trace_within_host_window(
             not isinstance(last_memory, dict) or
             type(total_bytes) is not int or total_bytes <= 0 or
             last_memory.get("total_bytes") != total_bytes or
-            any(type(sample.get("mem_available_bytes")) is not int or
-                not 0 < sample["mem_available_bytes"] <= total_bytes
+            trace.get("meminfo_unit") != "kB" or
+            any(type(sample.get("mem_available_kib")) is not int or
+                not 0 < sample["mem_available_kib"] * 1024 <= total_bytes
                 for sample in samples if isinstance(sample, dict)) or
             any(not isinstance(sample, dict) for sample in samples) or
             trace.get("host_boot_id") != first_kernel.get("boot_id") or
