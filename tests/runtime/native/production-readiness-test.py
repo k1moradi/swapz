@@ -1084,6 +1084,26 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     any(expected in blocker for blocker in result["code_blockers"]),
                     (label, result["code_blockers"]))
 
+    def test_resealed_ram_trace_artifact_digest_mismatch_blocks_release(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign["artifacts"]["metadata_ram_trace"]["sha256"] = "f" * 64
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "sealed campaign RAM trace artifact digest mismatch" in blocker
+            for blocker in result["code_blockers"]))
+
     def test_unresolved_critical_issue_blocks_code_readiness(self):
         report = owner_report()
         policy = acceptance_policy()
