@@ -2886,13 +2886,30 @@ class PairReplayContract(unittest.TestCase):
                 },
             }
             for index in range(60)]
+        arm_started_ns = 1_000_000_000
         intervals = [
-            {"interval": index, "start_seconds": float(index * 60),
-             "end_seconds": float((index + 1) * 60),
-             "duration_seconds": 60.0, "max_no_progress_seconds": 1.0,
-             "gc": {"failed": 0, "error": 0, "gc_no_headroom_skips": 0}}
+            {
+                "interval": index,
+                "start_monotonic_ns":
+                    arm_started_ns + index * 60_000_000_000,
+                "end_monotonic_ns":
+                    arm_started_ns + (index + 1) * 60_000_000_000,
+                "start_seconds": float(index * 60),
+                "end_seconds": float((index + 1) * 60),
+                "duration_seconds": 60.0,
+                "max_no_progress_seconds": 1.0,
+                "gc": {
+                    "failed": 0, "error": 0, "gc_no_headroom_skips": 0,
+                    "gc_wall_ns": 1 if index == 20 else 0,
+                    "gc_victims": 1 if index == 20 else 0,
+                    "gc_pages": 1 if index == 20 else 0,
+                },
+            }
             for index in range(60)]
         raw = {
+            "arm_started_monotonic_ns": arm_started_ns,
+            "arm_finished_monotonic_ns":
+                arm_started_ns + 3600_000_000_000,
             "seconds": 3600.0, "logical_pages": 100,
             "occupied_pages": 90, "read_ops": 60, "write_ops": 60,
             "minute_buckets": minute_buckets, "sustained_intervals": intervals,
@@ -2917,6 +2934,9 @@ class PairReplayContract(unittest.TestCase):
                 "latency_histogram"]["bins"][0].__setitem__(1, 1),
             lambda arm: arm["sustained_intervals"].pop(),
             lambda arm: arm["sustained_intervals"][1].update(start_seconds=61.0),
+            lambda arm: arm["sustained_intervals"][1].update(
+                start_monotonic_ns=arm["sustained_intervals"][0][
+                    "start_monotonic_ns"]),
             lambda arm: arm["sustained_intervals"][20].update(
                 max_no_progress_seconds=11.0),
             lambda arm: arm["sustained_intervals"][20]["gc"].update(
@@ -2973,6 +2993,8 @@ class PairReplayContract(unittest.TestCase):
             sampler._append(current)
         self.assertEqual(len(sampler.rows), 1)
         row = sampler.rows[0]
+        self.assertEqual(row["start_monotonic_ns"], 100)
+        self.assertEqual(row["end_monotonic_ns"], 1_000_000_100)
         self.assertEqual(row["gc"]["gc_role_rotations"], 3)
         self.assertEqual(row["gc"]["cursor"], 1)
         self.assertAlmostEqual(row["gc"]["wall_fraction"], .01)
@@ -3279,6 +3301,16 @@ class PairReplayContract(unittest.TestCase):
                 "logical_pages": 256,
                 "arm_started_monotonic_ns": 1_300_000_000,
                 "arm_finished_monotonic_ns": 1_700_000_000,
+                "sustained_intervals": [{
+                    "interval": 0,
+                    "start_monotonic_ns": 1_300_000_000,
+                    "end_monotonic_ns": 1_700_000_000,
+                    "gc": {
+                        "gc_wall_ns": 1,
+                        "gc_victims": 1,
+                        "gc_pages": 1,
+                    },
+                }],
                 "device_identity": {"dm_uuid": mapper_uuid},
                 "resources": {
                     # A pre-teardown replay scalar has no qualifying authority.
@@ -3312,6 +3344,18 @@ class PairReplayContract(unittest.TestCase):
         wrong_arm["swapz"]["arm_started_monotonic_ns"] = 1_500_000_000
         self.assertIsNone(evidence.campaign_capacity_and_ram(
             [wrong_arm], target_bytes, source_sha, trace))
+        fake_gc = copy.deepcopy(capacity_pair)
+        fake_gc["swapz"]["sustained_intervals"][0]["gc"] = {
+            "gc_wall_ns": 0, "gc_victims": 0, "gc_pages": 0}
+        self.assertIsNone(evidence.campaign_capacity_and_ram(
+            [fake_gc], target_bytes, source_sha, trace))
+        displaced_gc = copy.deepcopy(capacity_pair)
+        displaced_gc["swapz"]["sustained_intervals"][0][
+            "start_monotonic_ns"] = 1_700_000_001
+        displaced_gc["swapz"]["sustained_intervals"][0][
+            "end_monotonic_ns"] = 1_800_000_000
+        self.assertIsNone(evidence.campaign_capacity_and_ram(
+            [displaced_gc], target_bytes, source_sha, trace))
         self.assertTrue(evidence.metadata_ram_trace_matches_swapz_arm(
             trace, capacity_pair["swapz"]))
 
