@@ -448,10 +448,13 @@ def validate_metadata_ram_trace(
 
     samples = trace["samples"]
     minimum_samples = sum(MINIMUM_PHASE_SAMPLES.values())
-    if (
-            not isinstance(samples, list) or
-            not minimum_samples <= len(samples) <= 1_000_000):
-        raise ValueError("metadata RAM trace is missing phase samples")
+    if not isinstance(samples, list):
+        raise ValueError("metadata RAM trace samples are missing")
+    if not minimum_samples <= len(samples) <= 1_000_000:
+        raise ValueError(
+            "metadata RAM trace sample count is invalid: "
+            f"metric=sample_count observed={len(samples)} "
+            f"minimum={minimum_samples} maximum=1000000")
 
     phase_index = 0
     phase_samples: dict[str, list[dict[str, Any]]] = {
@@ -479,17 +482,32 @@ def validate_metadata_ram_trace(
         maximum_kib = ((1 << 64) - 1) // MEMINFO_UNIT_BYTES
         if (
                 type(monotonic_ns) is not int or
-                not 0 < monotonic_ns <= MAX_UINT64 or
-                type(mem_available_kib) is not int or
-                not 0 < mem_available_kib <= maximum_kib or
-                type(s_unreclaim_kib) is not int or
-                not 0 <= s_unreclaim_kib <= maximum_kib or
-                type(vmalloc_used_kib) is not int or
-                not 0 <= vmalloc_used_kib <= maximum_kib or
-                type(sample["mapper_present"]) is not bool or
-                not isinstance(utc_text, str) or
-                not UTC_TIME.fullmatch(utc_text)):
-            raise ValueError("metadata RAM sample counters or timestamp invalid")
+                not 0 < monotonic_ns <= MAX_UINT64):
+            raise ValueError(
+                "metadata RAM sample counter is invalid: "
+                f"metric=monotonic_ns observed={monotonic_ns!r} "
+                f"minimum=1 maximum={MAX_UINT64}")
+        for metric, value, minimum in (
+                ("MemAvailable_kib", mem_available_kib, 1),
+                ("SUnreclaim_kib", s_unreclaim_kib, 0),
+                ("VmallocUsed_kib", vmalloc_used_kib, 0)):
+            if (
+                    type(value) is not int or
+                    not minimum <= value <= maximum_kib):
+                raise ValueError(
+                    "metadata RAM sample counter is invalid: "
+                    f"metric={metric} observed={value!r} "
+                    f"minimum={minimum} maximum={maximum_kib}")
+        if type(sample["mapper_present"]) is not bool:
+            raise ValueError(
+                "metadata RAM mapper-presence evidence is invalid: "
+                f"metric=mapper_present observed={sample['mapper_present']!r} "
+                "required=boolean")
+        if not isinstance(utc_text, str) or not UTC_TIME.fullmatch(utc_text):
+            raise ValueError(
+                "metadata RAM sample timestamp is invalid: "
+                f"metric=timestamp_utc observed={utc_text!r} "
+                "required=canonical_UTC_Z")
         try:
             utc_time = datetime.datetime.fromisoformat(
                 utc_text.replace("Z", "+00:00"))
