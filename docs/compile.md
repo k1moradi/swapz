@@ -48,9 +48,10 @@ The highest installed `linux-headers-*-generic` release is selected after
 installing `linux-headers-generic-hwe-24.04`; it is not pinned, and may change
 with the runner package repository. The workflow reports the selected header
 release, runner architecture, compiler, source SHA, target-source Git blob,
-module hash and vermagic. The CI warning gate excludes only Kbuild's
-compiler-identity and pahole-availability notices; other compiler warnings
-fail. A successful job does **not** cover the oldest
+module hash and vermagic. The CI warning gate rejects swapz-source
+warnings; it excludes Kbuild compiler-identity/pahole notices and reports
+warnings originating in installed kernel headers separately. This does not
+claim the distribution headers are warning-free. A successful job does **not** cover the oldest
 supported kernel, every intermediate kernel, or a future upgrade: none of
 those version boundaries is currently defined.
 

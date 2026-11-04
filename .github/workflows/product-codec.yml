@@ -110,7 +110,8 @@ jobs:
             first_error_line="$(awk '
               /error:|warning:|Error [0-9]+|^make.*\*\*\*/ &&
               !/^warning: the compiler differs from the one used to build the kernel$/ &&
-              !/^warning: pahole version differs from the one used to build the kernel$/ {
+              !/^warning: pahole version differs from the one used to build the kernel$/ &&
+              !/^\/usr\/src\/linux-headers-[^:]+:[0-9]+:[0-9]+: warning:/ {
                 print NR
                 exit
               }' "$build_log")"
@@ -142,12 +143,19 @@ jobs:
             if ! awk '
               /warning:/ &&
               !/^warning: the compiler differs from the one used to build the kernel$/ &&
-              !/^warning: pahole version differs from the one used to build the kernel$/ {
+              !/^warning: pahole version differs from the one used to build the kernel$/ &&
+              !/^\/usr\/src\/linux-headers-[^:]+:[0-9]+:[0-9]+: warning:/ {
                 exit 1
               }' "$build_log"; then
               echo "Compiler warning in $variant build" >&2
               show_build_failure
               return 1
+            fi
+            # Warn on external header diagnostics without treating them as module source.
+            local header_warning_count
+            header_warning_count="$(grep -Ec '^/usr/src/linux-headers-[^:]+:[0-9]+:[0-9]+: warning:' "$build_log" || true)"
+            if [[ "$header_warning_count" != 0 ]]; then
+              printf 'EXTERNAL_KERNEL_HEADER_WARNINGS phase=%s count=%s\n' "$variant" "$header_warning_count"
             fi
             if [[ ! -s "$artifact" ]]; then
               echo "Missing module artifact for $variant" >&2
