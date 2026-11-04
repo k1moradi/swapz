@@ -159,7 +159,7 @@ def _parse_json_object_bytes(raw: Any, evidence_name: str) -> dict[str, Any]:
             parse_int=_bounded_json_integer,
             parse_float=_finite_json_float,
             parse_constant=_reject_json_constant)
-    except (UnicodeDecodeError, ValueError, OverflowError) as exc:
+    except (UnicodeDecodeError, ValueError, OverflowError, RecursionError) as exc:
         raise EvidenceError(f"{evidence_name}: invalid JSON: {exc}") from exc
     if not isinstance(value, dict):
         raise EvidenceError(f"{evidence_name}: top level must be an object")
@@ -722,7 +722,7 @@ def validate_physical_campaign_evidence(
             parse_int=_bounded_json_integer,
             parse_float=_finite_json_float,
             parse_constant=_reject_json_constant)
-    except (UnicodeDecodeError, ValueError, OverflowError) as exc:
+    except (UnicodeDecodeError, ValueError, OverflowError, RecursionError) as exc:
         reject(f"sealed campaign evidence bytes are malformed: {exc}")
         return issues
     if not isinstance(serialized_campaign, dict):
