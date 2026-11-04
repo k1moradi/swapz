@@ -780,7 +780,7 @@ observe_runtime()
 				esac
 			done
 			for token_name in flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
-				eval "value=\$token_name"
+				eval "value=\$$token_name"
 				if [ "$value" = unavailable ]; then
 					append_reason observation_reasons dm_status_counter_unavailable
 				elif ! canonical_unsigned "$value"; then
@@ -790,7 +790,7 @@ observe_runtime()
 			# Monitoring cannot exclude a sustained GC stall when any of its
 			# pressure/progress counters are absent or unparseable.
 			for token_name in gc_victims gc_pages gc_no_headroom_skips window_gc_pressure; do
-				eval "value=\$token_name"
+				eval "value=\$$token_name"
 				canonical_unsigned "$value" || append_reason observation_reasons gc_progress_telemetry_unavailable
 			done
 			# Missing or malformed terminal-state telemetry is incomplete
