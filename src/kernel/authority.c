@@ -751,7 +751,18 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 			swapz_map_proof_resched(logical);
 			if (!map->valid)
 				continue;
-			if (map->start_block >= a->physical_blocks)
+			/*
+			 * The legacy no-sidecar path still owns the full logical map.
+			 * Reject malformed extents before deciding whether this candidate
+			 * is unreferenced: a corrupt extent starting in the preceding
+			 * segment must not overlap a segment that is about to be reused.
+			 */
+			if (map->start_block >= a->physical_blocks ||
+			    !swapz_legal_class(map->extent_blocks) ||
+			    map->extent_blocks >
+				    a->physical_blocks - map->start_block ||
+			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+				    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
 				return swapz_finish_alloc_probe(a, probe_start,
 					swapz_map_proof_refuse(
 						transition, "extent_geometry",

@@ -66,6 +66,47 @@ static int init_authority(void)
 	return 0;
 }
 
+/*
+ * Fixed-reserve research callers can run without mapped-page sidecars. A
+ * malformed live extent that starts in the preceding segment must therefore
+ * be rejected before the allocator reuses the segment it illegally overlaps.
+ */
+static int test_legacy_reuse_rejects_cross_segment_map(void)
+{
+	enum {
+		TEST_LOGICAL_PAGES = 2U,
+		TEST_PHYSICAL_BLOCKS = 4U * SWAPZ_SEGMENT_BLOCKS,
+	};
+	struct swapz_authority authority;
+	struct swapz_map test_maps[TEST_LOGICAL_PAGES];
+	swapz_u16 test_live[TEST_PHYSICAL_BLOCKS];
+	swapz_u8 test_classes[TEST_PHYSICAL_BLOCKS];
+	struct swapz_tx transaction;
+	const swapz_u32 corrupt_start = SWAPZ_SEGMENT_BLOCKS - 1U;
+	swapz_u32 page = 1U;
+
+	CHECK(swapz_authority_init(
+		&authority, test_maps, test_live, test_classes,
+		TEST_LOGICAL_PAGES, TEST_PHYSICAL_BLOCKS) == 0);
+	authority.reuse_dead_segments = 1;
+	test_maps[0] = (struct swapz_map) {
+		.start_block = corrupt_start,
+		.payload_length = SWAPZ_BLOCK_BYTES,
+		.extent_blocks = 2U,
+		.raw = 1U,
+		.valid = 1U,
+	};
+	test_live[corrupt_start] = 1U;
+	test_classes[corrupt_start] = 2U;
+
+	CHECK(swapz_stage(&authority, &page, 1U, 1U, &transaction) == -EUCLEAN);
+	CHECK(!authority.in_flight);
+	CHECK(authority.open_segment == ~(swapz_u32)0);
+	CHECK(authority.next_block == 0U);
+	puts("PASS: legacy fixed-reserve reclaim rejects cross-segment map corruption");
+	return 0;
+}
+
 
 /*
  * Measure GC's actual production authority dead-reserve claim, separating
@@ -541,6 +582,10 @@ static int measure_production_claim_proof(swapz_u32 logical_pages)
 			maximum_verified_wall_ns = final_publish_worst;
 		if (commit_worst > maximum_verified_wall_ns)
 			maximum_verified_wall_ns = commit_worst;
+		if (corrupt_wall > maximum_verified_wall_ns)
+			maximum_verified_wall_ns = corrupt_wall;
+		if (virgin_corrupt_wall > maximum_verified_wall_ns)
+			maximum_verified_wall_ns = virgin_corrupt_wall;
 		if (max_verified_latency_gate_ns &&
 		    maximum_verified_wall_ns > max_verified_latency_gate_ns) {
 			fprintf(stderr, "FAIL proof latency geometry=%u observed=%" PRIu64
@@ -700,6 +745,7 @@ int main(void)
 			      sizeof(checked_extent)));
 	}
 
+	CHECK(test_legacy_reuse_rejects_cross_segment_map() == 0);
 	CHECK(init_authority() == 0);
 
 	for (round = 0; round < BENCH_ROUNDS; ++round) {
