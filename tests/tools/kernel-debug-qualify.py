@@ -130,6 +130,10 @@ def check_features(features: dict[str, str], required: tuple[str, ...]) -> bool:
 
 def classify_warning(line: str) -> str:
     lower = line.lower()
+    if "undefined identifier '__builtin_shuffle'" in lower:
+        return "unsupported_simd_builtin"
+    if re.search(r"predictor-(?:sse2|avx2|avx512)\.c:[0-9]+:[0-9]+: error: invalid initializer", lower):
+        return "simd_initializer"
     if "context imbalance" in lower or "incorrect type in argument" in lower:
         return "locking_or_type"
     if "__user" in lower or "address space" in lower:
@@ -168,9 +172,14 @@ def run_static(root: Path, kdir: Path, analyzer: str) -> tuple[str, int, dict[st
     check_count, warnings = scan_static(result.stdout)
     checked_sources = {Path(path).name for path in CHECK_RECORD.findall(result.stdout)}
     required_sources = {"dm-target.c", "codec.c", "authority.c", "engine.c", "predictor.c"}
-    for line in result.stdout.splitlines():
-        if SOURCE_DIAGNOSTIC.search(line):
+    diagnostics = [line for line in result.stdout.splitlines() if SOURCE_DIAGNOSTIC.search(line)]
+    if diagnostics:
+        # Bounded fail-only logging: emit a representative sample and exact
+        # counts without flooding CI with repeated SIMD parser errors.
+        for line in diagnostics[:16]:
             print(line, file=sys.stderr)
+        if len(diagnostics) > 16:
+            print(f"KERNEL_STATIC_DIAGNOSTICS_SUPPRESSED={len(diagnostics) - 16}", file=sys.stderr)
     if result.returncode != 0 or not required_sources.issubset(checked_sources) or warnings:
         print(
             f"FAIL_KERNEL_STATIC_{analyzer.upper()}: exit={result.returncode} "

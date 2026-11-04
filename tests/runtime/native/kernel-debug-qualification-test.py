@@ -133,6 +133,24 @@ class KernelDebugQualificationTests(unittest.TestCase):
         })
         self.assertEqual(qualification.scan_static("module built\n")[0], 0)
         self.assertEqual(qualification.scan_static("warning: compiler differs\n")[1], {})
+        self.assertEqual(
+            qualification.classify_warning(
+                "predictor-shuffle.h:60:22: error: undefined identifier '__builtin_shuffle'"
+            ),
+            "unsupported_simd_builtin",
+        )
+        self.assertEqual(
+            qualification.classify_warning(
+                "predictor-avx512.c:87:38: error: invalid initializer"
+            ),
+            "simd_initializer",
+        )
+        self.assertEqual(
+            qualification.classify_warning(
+                "dm-target.c:30:11: error: invalid initializer"
+            ),
+            "other",
+        )
 
     def test_static_checker_requires_actual_check_and_zero_warnings(self) -> None:
         with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/sparse"), \
