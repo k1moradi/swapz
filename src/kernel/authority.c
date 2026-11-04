@@ -577,8 +577,9 @@ int swapz_extent_sequence_lookup(const struct swapz_authority *a,
  *
  * The primary logical map is the final ownership authority. Exact segment
  * sidecars reject obvious live candidates cheaply, while every zero-sidecar
- * segment receives an independent full-map proof before reuse. A false-zero
- * program count or lost extent-class byte must never waive that proof.
+ * segment receives an independent full-map proof before reuse. That proof also
+ * authenticates every surviving map's extent class and start-block liveness;
+ * false-zero cached metadata must never waive or weaken the ownership scan.
  */
 static int swapz_verify_segment_authoritative_maps(
 	const struct swapz_authority *a, swapz_u32 segment,
@@ -587,8 +588,8 @@ static int swapz_verify_segment_authoritative_maps(
 	const swapz_u32 none = ~(swapz_u32)0;
 	swapz_u32 logical, start_block, end_block, found_count = 0;
 
-	if (!a || !a->maps || segment >= a->segment_count ||
-	    expected_count > a->logical_pages ||
+	if (!a || !a->maps || !a->live_records || !a->extent_classes ||
+	    segment >= a->segment_count || expected_count > a->logical_pages ||
 	    (expected_logical != none &&
 	     (expected_logical >= a->logical_pages || expected_count != 1U)))
 		return -EINVAL;
@@ -605,7 +606,9 @@ static int swapz_verify_segment_authoritative_maps(
 		    !swapz_legal_class(map->extent_blocks) ||
 		    map->extent_blocks > a->physical_blocks - map->start_block ||
 		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
-			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
+			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+		    a->extent_classes[map->start_block] != map->extent_blocks ||
+		    !a->live_records[map->start_block])
 			return -EUCLEAN;
 		map_end_block = map->start_block + map->extent_blocks;
 		if (map->start_block >= end_block || map_end_block <= start_block)

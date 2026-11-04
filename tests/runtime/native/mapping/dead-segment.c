@@ -538,6 +538,52 @@ static int test_false_final_mapping_discard_is_rejected(void)
  * valid map remains, neither RAW nor compressed publication may zero the
  * cached count and authorize the caller's closed-segment early-TRIM.
  */
+/*
+ * Full-map recovery validation must authenticate surviving maps outside the
+ * segment being recycled too. Otherwise a corrupted extent-class or physical
+ * liveness sidecar can coexist with an irreversible recycle/role transition,
+ * hiding authority corruption until a later read or relocation.
+ */
+static int test_roll_forward_rejects_unrelated_map_sidecar_corruption(void)
+{
+	const swapz_u32 logical = 7U;
+	int corruption;
+
+	for (corruption = 0; corruption < 2; ++corruption) {
+		swapz_u32 start, destination;
+
+		CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+		a.next_segment_probe = 1U;
+		CHECK(write_page(logical) == 0);
+		start = maps[logical].start_block;
+		CHECK(start / SWAPZ_SEGMENT_BLOCKS == 1U);
+		CHECK(mapped_pages[0] == 0U && mapped_pages[1] == 1U);
+
+		/* Victim 0 is already dead; reserve 2 becomes the owned destination. */
+		CHECK(swapz_gc_begin_rotation(&a, 0U) == 0);
+		destination = a.gc_destination;
+		CHECK(destination == 2U && a.open_segment == destination);
+		/* Model an exhausted destination after uncertain lower writes. */
+		a.next_block = (destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
+		/* Force the old victim through the physical recycle callback. */
+		program_counts[0] = 1U;
+
+		if (corruption == 0)
+			classes[start] = 0U;
+		else
+			live[start] = 0U;
+		snapshot_integrity();
+
+		CHECK(swapz_gc_roll_forward_rotation(&a, destination) == -EUCLEAN);
+		CHECK(integrity_unchanged());
+		CHECK(recycle_hook_calls == 0);
+		CHECK(a.gc_allocation && a.gc_forbidden_victim == 0U &&
+		      a.gc_destination == destination);
+		CHECK(roles[0] == 1U && roles[destination] == 0U);
+	}
+	return 0;
+}
+
 static int test_false_final_mapping_overwrite_is_rejected(void)
 {
 	struct swapz_builder builder;
@@ -774,6 +820,7 @@ int main(void)
 	CHECK(test_indexed_false_empty_victim_cannot_exchange_gc_roles() == 0); passed++;
 	CHECK(test_forged_virgin_witness_still_requires_full_map_proof() == 0); passed++;
 	CHECK(test_false_final_mapping_discard_is_rejected() == 0); passed++;
+	CHECK(test_roll_forward_rejects_unrelated_map_sidecar_corruption() == 0); passed++;
 	CHECK(test_false_final_mapping_overwrite_is_rejected() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
 	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
