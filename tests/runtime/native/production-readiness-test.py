@@ -245,17 +245,17 @@ def campaign_artifact(name, byte):
     }
 
 
-def sampled_metadata_ram_trace(peak_ram_bytes=900000000):
+def sampled_metadata_ram_trace(peak_ram_bytes=900 * 1024 * 1024):
     # Rootless fixture only. Real RAM must come from the serialized loaded host.
-    baseline_available = 8_000_000_000
-    baseline_s_unreclaim = 100_000_000
-    baseline_vmalloc = 200_000_000
+    baseline_available = 8 * 1024 * 1024 * 1024
+    baseline_s_unreclaim = 100 * 1024 * 1024
+    baseline_vmalloc = 200 * 1024 * 1024
     phase_values = (
         ("baseline", [0] * 10, False),
-        ("initialization", [200_000_000, 400_000_000], True),
-        ("steady", [600_000_000, 800_000_000], True),
-        ("gc", [peak_ram_bytes, 850_000_000], True),
-        ("teardown", [850_000_000] + [0] * 21, None),
+        ("initialization", [200 * 1024 * 1024, 400 * 1024 * 1024], True),
+        ("steady", [600 * 1024 * 1024, 800 * 1024 * 1024], True),
+        ("gc", [peak_ram_bytes, 850 * 1024 * 1024], True),
+        ("teardown", [850 * 1024 * 1024] + [0] * 21, None),
     )
     samples = []
     for phase, deltas, mapper_present in phase_values:
@@ -293,7 +293,7 @@ def physical_campaign_evidence(policy_raw):
         "validate_metadata_ram_trace"](
             trace, source_sha=SOURCE,
             mapper_uuid="SWAPZ-PRIMARY-" + "f" * 32,
-            expected_peak_ram_bytes=900000000)
+            expected_peak_ram_bytes=900 * 1024 * 1024)
     return {
         "schema": "swapz-performance-campaign-evidence-v1",
         "sealed_at_utc": "2026-11-03T00:00:00+00:00",
@@ -327,7 +327,7 @@ def physical_campaign_evidence(policy_raw):
             "page_bytes": 4096,
             "logical_pages": 27080192,
             "logical_capacity_bytes": 110920466432,
-            "peak_ram_bytes": 900000000,
+            "peak_ram_bytes": 900 * 1024 * 1024,
             "mapper_uuid": "SWAPZ-PRIMARY-" + "f" * 32,
             "metadata_ram_trace": trace,
             "metadata_ram_summary": ram_summary,
@@ -463,7 +463,7 @@ def current_evidence(
                 policy_sha256=policy_digest,
                 target=dict(TARGET),
                 logical_capacity_bytes=110920466432,
-                peak_ram_bytes=900000000,
+                peak_ram_bytes=900 * 1024 * 1024,
                 evidence_sha256=hashlib.sha256(campaign_raw).hexdigest()),
             "sustained_physical_performance": pass_record(
                 policy_sha256=policy_digest,
