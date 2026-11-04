@@ -322,14 +322,18 @@ visible through `/proc/swaps` even if their mount is outside the formatter's
 mount namespace; it does not prove ancestry through arbitrary stacked filesystems.
 Mount inventory must inspect the formatter's own mount table and each
 visible process's /proc/<pid>/mountinfo, not just its own mount namespace.
-Unreadable or vanished process mount tables refuse formatting rather than
-prove absence of use. These are repeated snapshots, not an atomic freeze
-against new mounts or inaccessible mount namespaces. Mount inventory parsing
+Normal process exit is not storage ambiguity: an EINVAL, ENOENT or ESRCH
+failure to open a PID mount table may be ignored only when that PID's
+/proc/<pid>/ns/mnt is also absent. A still-present mount namespace, any other
+open failure, or any failure after the mount table was opened refuses
+formatting. These are repeated snapshots, not an atomic freeze against new
+mounts, detached namespace file descriptors or inaccessible mount namespaces.
+Mount inventory parsing
 must accept Linux pseudo-filesystem major-zero device identifiers (for example
 `0:20`) without mistaking them for the selected nonzero-major block device.
 Malformed mountinfo rows and unverified target identities still fail closed.
-Missing, malformed, unreadable, permission-denied, changing or ambiguous
-evidence fails closed.
+Missing evidence for an existing mount namespace, malformed, unreadable,
+permission-denied, changing or ambiguous evidence fails closed.
 
 After that read-only preflight, open the requested path exactly once with
 `O_RDWR | O_EXCL | O_CLOEXEC`. The opened descriptor is the I/O authority.

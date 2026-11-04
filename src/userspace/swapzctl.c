@@ -1369,8 +1369,10 @@ static int format_swap_entry_conflicts(const struct stat *info, dev_t device,
 
 /*
  * Mounts in another process's namespace still use the same backing device.
- * Inspect every visible process, not only /proc/self/mountinfo. Vanished PIDs
- * and unreadable mount tables are ambiguous, so refuse rather than assume free.
+ * Inspect every visible process, not only /proc/self/mountinfo. Process churn
+ * is normal: an exiting task can lose its mount namespace before its /proc PID
+ * entry disappears. Ignore only an unopened table whose namespace is also
+ * absent; opened, malformed, unreadable or still-namespaced tables fail closed.
  */
 static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 					 dev_t parent_device)
@@ -1408,13 +1410,18 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 }
 
 static int format_mountinfo_path_clear(const char *path, dev_t device,
-				       dev_t parent_device)
+				       dev_t parent_device, int *opened)
 {
-	FILE *stream = fopen(path, "r");
+	FILE *stream;
 	int saved_errno;
 
+	if (opened)
+		*opened = 0;
+	stream = fopen(path, "r");
 	if (!stream)
 		return -1;
+	if (opened)
+		*opened = 1;
 	if (format_mountinfo_stream_clear(stream, device, parent_device) < 0) {
 		saved_errno = errno;
 		(void)fclose(stream);
@@ -1437,6 +1444,49 @@ static int format_proc_entry_is_pid(const char *name)
 	return 1;
 }
 
+/*
+ * Linux can return EINVAL for /proc/<pid>/mountinfo after an exiting task has
+ * dropped its mount namespace but before its PID entry is reaped. ENOENT/ESRCH
+ * can likewise race task exit. Only classify those open failures as harmless
+ * after /proc/<pid>/ns/mnt is also proven absent. A present or unreadable
+ * namespace keeps the formatter fail-closed.
+ */
+static int format_proc_mount_namespace_present(const char *proc_path,
+					       const char *pid)
+{
+	char path[PATH_MAX];
+	struct stat info;
+	int length;
+
+	if (!proc_path || !pid || !format_proc_entry_is_pid(pid)) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(path, sizeof(path), "%s/%s/ns/mnt", proc_path, pid);
+	if (length < 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (stat(path, &info) == 0)
+		return 1;
+	if (errno == ENOENT || errno == ESRCH)
+		return 0;
+	return -1;
+}
+
+static int format_mountinfo_open_failure_ignorable(
+	const char *proc_path, const char *pid, int error)
+{
+	int namespace_present;
+
+	if (error != EINVAL && error != ENOENT && error != ESRCH)
+		return 0;
+	namespace_present = format_proc_mount_namespace_present(proc_path, pid);
+	if (namespace_present < 0)
+		return -1;
+	return namespace_present == 0;
+}
+
 static int format_mount_inventory_clear_from_proc(
 	const char *proc_path, dev_t device, dev_t parent_device)
 {
@@ -1455,7 +1505,7 @@ static int format_mount_inventory_clear_from_proc(
 		errno = ENAMETOOLONG;
 		return -1;
 	}
-	if (format_mountinfo_path_clear(path, device, parent_device) < 0)
+	if (format_mountinfo_path_clear(path, device, parent_device, NULL) < 0)
 		return -1;
 	directory = opendir(proc_path);
 	if (!directory)
@@ -1475,10 +1525,26 @@ static int format_mount_inventory_clear_from_proc(
 			saved_errno = ENAMETOOLONG;
 			break;
 		}
-		if (format_mountinfo_path_clear(path, device, parent_device) < 0) {
-			/* Do not treat a disappearing PID as a clean inventory. */
-			saved_errno = errno;
-			break;
+		{
+			int mountinfo_opened = 0;
+
+			if (format_mountinfo_path_clear(
+				    path, device, parent_device,
+				    &mountinfo_opened) < 0) {
+				int mountinfo_error = errno;
+				int ignorable = 0;
+
+				if (!mountinfo_opened)
+					ignorable =
+						format_mountinfo_open_failure_ignorable(
+							proc_path, entry->d_name,
+							mountinfo_error);
+				if (ignorable > 0)
+					continue;
+				saved_errno =
+					ignorable < 0 ? errno : mountinfo_error;
+				break;
+			}
 		}
 	}
 	if (closedir(directory) < 0 && !saved_errno)

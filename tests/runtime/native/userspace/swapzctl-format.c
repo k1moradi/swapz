@@ -485,6 +485,9 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 	assert(mkdir(path, 0700) == 0);
 	test_mountinfo_fixture_path(path, root, "3031");
 	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, root, "3031/ns");
+	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_write(root, "3031/ns/mnt", "namespace\n");
 	test_mountinfo_fixture_write(
 		root, "self/mountinfo",
 		"36 25 0:20 / /proc rw - proc proc rw\n");
@@ -507,7 +510,7 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 		"37 25 8:2 / /other rw - ext4 /dev/sda2 rw\n");
 	assert(format_mount_inventory_clear_from_proc(root, device, parent) == 0);
 
-	/* Malformed, unreadable, or disappeared inventory is not safety proof. */
+	/* Malformed or missing evidence for a live mount namespace still fails. */
 	test_mountinfo_fixture_write(root, "3031/mountinfo", "invalid\n");
 	errno = 0;
 	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
@@ -517,9 +520,30 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 	errno = 0;
 	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
 	assert(errno == ENOENT);
+	assert(format_mountinfo_open_failure_ignorable(
+		       root, "3031", EINVAL) == 0);
+
+	/*
+	 * A task with no mount namespace cannot keep the selected storage mounted.
+	 * Model the Linux zombie/exit race: the PID entry remains, mountinfo is
+	 * unavailable, and ns/mnt is absent. Only known task-exit errors may pass.
+	 */
+	test_mountinfo_fixture_path(path, root, "3031/ns/mnt");
+	assert(unlink(path) == 0);
+	assert(format_mountinfo_open_failure_ignorable(
+		       root, "3031", EINVAL) == 1);
+	assert(format_mountinfo_open_failure_ignorable(
+		       root, "3031", ENOENT) == 1);
+	assert(format_mountinfo_open_failure_ignorable(
+		       root, "3031", ESRCH) == 1);
+	assert(format_mountinfo_open_failure_ignorable(
+		       root, "3031", EACCES) == 0);
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) == 0);
 
 	test_mountinfo_fixture_path(path, root, "self/mountinfo");
 	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, root, "3031/ns");
+	assert(rmdir(path) == 0);
 	test_mountinfo_fixture_path(path, root, "3031");
 	assert(rmdir(path) == 0);
 	test_mountinfo_fixture_path(path, root, "self");
