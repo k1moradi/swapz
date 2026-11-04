@@ -948,10 +948,9 @@ def run(args):
                    if physical else None)
     if physical and not re.fullmatch(r"[a-f0-9]{40}", args.source_sha or ""):
         raise ValueError("physical qualification requires exact source SHA")
-    if physical and args.candidate == "swapz" and args.metadata_and_target_peak_ram_bytes is None:
-        raise ValueError("physical swapz qualification requires observed metadata/target peak RAM")
-    if args.metadata_and_target_peak_ram_bytes is not None and args.metadata_and_target_peak_ram_bytes < 0:
-        raise ValueError("metadata/target peak RAM must be nonnegative")
+    if (args.metadata_and_target_peak_ram_bytes is not None and
+            args.metadata_and_target_peak_ram_bytes < 0):
+        raise ValueError("metadata/target RAM diagnostic must be nonnegative")
 
     private = REPLAY["private_memory"]
     if (args.fill_content_profile == "representative" or
@@ -1160,7 +1159,9 @@ def run(args):
                     "metadata_and_target_peak_ram_bytes":
                         args.metadata_and_target_peak_ram_bytes or 0,
                     "metadata_ram_scope": (
-                        "scheduler-observed mapper creation/workload peak"
+                        "diagnostic-only; qualifying peak is derived by the "
+                        "campaign sealer from the separate post-teardown "
+                        "100ms host trace"
                         if identity.get("dm_uuid") else "not applicable")},
                 "host_cpu": host_cpu,
                 "performance_screening": {
