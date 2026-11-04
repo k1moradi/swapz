@@ -117,9 +117,9 @@ observations, not live release verdicts.
 
 | Evidence level | Proves when passing | Does not prove |
 | :--- | :--- | :--- |
-| Native/rootless (including CI) | Source contracts, mocked lifecycle/package failure paths and native-C correctness | Loaded kernel, real swap, SD card, reboot |
-| Owned loaded `null_blk` | Real kernel target on positively owned RAM backing, synthetic byte oracle/GC/pressure and service gates | Physical media behavior, real-swap semantics or cold boot |
-| Authorized physical SD card | Only completed identity-bound full-capacity RAM, real anonymous swap, physical service/GC/lifecycle gates | A successful reboot or hibernation |
+| Native/rootless (including CI) | The source contracts, mocked lifecycle/package failure paths and native-C regressions actually exercised by that run | Loaded kernel, real swap, SD card, reboot |
+| Owned loaded `null_blk` | The loaded gates that actually PASS on a positively owned RAM-backed kernel target, including their byte-oracle/GC/pressure/service evidence | Physical media behavior, real-swap semantics or cold boot |
+| Authorized physical SD card | Each individually completed exact-source/card-bound result: full-capacity RAM, real anonymous swap, physical service/GC or lifecycle evidence | Any physical gate that was not run, a successful reboot, or hibernation |
 | Owner-observed cold boot | Persisted next-boot verifier outcome for the exact source, partition, module and mapper | Hibernation/resume (unsupported) or survival of pre-crash swap pages |
 
 Find the **first failed phase**, not a presumed root cause from a downstream
@@ -137,13 +137,11 @@ symptom. These are safe diagnostic starting points, never bypass instructions:
 | Boot evidence absent/INCOMPLETE/FAIL | Missing owner-observed reboot, identity mismatch, degraded runtime health or unverifiable persistent observation. **Pending evidence or deployment**, not a rootless PASS. | Read the [boot/hibernation boundary](handoff/systemd-runtime-health.md) and durable verifier result; only the owner reboots. Hibernation remains unsupported. |
 | History plots `NOT UPDATED` | Missing Matplotlib or renderer/history error. **Optional report visualization**, not a changed test verdict. | Check the local plot log and keep the original source-pinned report; see [plot policy](benchmark.md#automatic-plots-for-each-computer). |
 
-For context, a previous published source-bound report failed the native phase
-on `SWAPZ_PREPARATION_PREPARING`; the symbol exists in current
-[`preparation-slots.h`](../src/kernel/preparation-slots.h), so that report
-alone cannot establish a current source regression or a specific missing-include
-root cause. A different, earlier [host snapshot](production-status.json)
-records an ID36 memory-headroom BLOCKED result. Neither observation may be
-promoted to current PASS/FAIL without matching the source and phase.
+Do not freeze one report's compiler symbol, blocker or inferred root cause into
+this active guide. `test_results.json` may itself describe an older source, and
+`production-status.json` is only a timestamped observation. Match source SHA,
+phase and diagnostic before acting; keep superseded failure narratives in
+source-bound reports, handoff history and Git history.
 
 Historical [old-host physical and live-swap evidence](live-swap-trial-recovery.md)
 is not current SD-card authorization or cold-boot proof. Current non-hibernation

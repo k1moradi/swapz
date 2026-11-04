@@ -689,17 +689,25 @@ The terminal prints the local index path under
 `build/history/<architecture>-<host-digest>/index.md`. Each report records a
 hashed OS machine identity; history is recovered from committed report revisions
 so uploads by other computers do not mix their measurements or erase prior runs.
-Exact-machine and audited x86 plots require complete five-stage PASS
-reports tied to that machine identity or an explicitly owner-approved immutable
-legacy report SHA. The default historical ARM64/NEON VM cohort uses overall
-PASS, seven observed online CPUs and an executed NEON backend; some older
-reports may lack a complete stage list or immutable host identity. This
-legacy cohort is descriptive only, not an exact-host qualification or evidence
-that its old reports qualify current `main`. A shared ISA/CPU count never
-automatically merges legacy reports into an exact-computer history; see
-[host-history.json](handoff/host-history.json) for explicit old-report
-assignments. An OS reinstall changes the history identity; cloned systems
-need distinct `/etc/machine-id` values.
+Exact-computer selection (`--host-id`) requires a complete five-stage PASS.
+A report with the exact `host_identity` is accepted directly; a legacy report
+that is not an exact identity match enters that computer's history only when its
+full report SHA is owner-confirmed in
+[host-history.json](handoff/host-history.json) and its architecture, online-CPU
+count and required backend signature still match.
+
+Audited x86 profile selection (`--host-profile`) is a separate cohort rule: the
+full report SHA must be in that profile's allowlist, all five stages must PASS,
+the configured CPU count must match every benchmark arm, and scalar, SSE2, AVX2
+and AVX-512 backend evidence must be present. If such a report carries
+`host_identity`, it must also be x86_64 and match the profile's host digest.
+The default historical ARM64/NEON VM cohort is intentionally weaker: it requires
+overall PASS, seven observed online CPUs and an executed NEON backend, so some
+older reports can lack a complete stage list or immutable host identity. That
+legacy cohort is descriptive only, not exact-host qualification or evidence that
+old reports qualify current `main`. A shared ISA/CPU count never automatically
+merges a legacy report into an exact-computer history. An OS reinstall changes
+the history identity; cloned systems need distinct `/etc/machine-id` values.
 Install Python Matplotlib on each test computer. Rendering failures are reported
 as `NOT UPDATED` with a local diagnostic log, independently of qualification.
 Plots are local generated artifacts; report publication keeps them reproducible.
