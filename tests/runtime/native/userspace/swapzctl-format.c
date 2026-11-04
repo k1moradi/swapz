@@ -472,6 +472,27 @@ static void test_mountinfo_device_parser(void)
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw shared:7 - ext4 /dev/sda2 rw\n",
 		&device) == 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other ro,nosuid - ext4 /dev/sda2 ro,errors=remount-ro\n",
+		&device) == 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other invalid - ext4 /dev/sda2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw - ext4 /dev/sda2 invalid\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw shared:7 shared:8 - ext4 /dev/sda2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw master:7 master:8 - ext4 /dev/sda2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw propagate_from:7 - ext4 /dev/sda2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw master:7 propagate_from:8 - ext4 /dev/sda2 rw\n",
+		&device) == 0);
 	/* Unknown optional fields are explicitly forward-compatible mountinfo. */
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw future:abc - ext4 /dev/sdb2 rw\n",
@@ -961,6 +982,7 @@ static void test_swap_adversarial_inventory(void)
 		"/tmp/swap\\9xx file 1 0 -2\n",
 		"/tmp/file file 18446744073709551616 0 -2\n",
 		"/tmp/file file 1 0 -2147483649\n",
+		"/tmp/file file 1 0 2147483648\n",
 		"/tmp/file file 1 0\n",
 		"relative file 1 0 -2\n",
 	};
@@ -969,6 +991,12 @@ static void test_swap_adversarial_inventory(void)
 	     ++index)
 		assert(format_swap_inventory_entry_parse(
 			       malformed_rows[index], parsed_path, &block_entry) < 0);
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/file file 1 0 2147483647\n", parsed_path,
+		       &block_entry) == 0);
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/file file 1 0 -2147483648\n", parsed_path,
+		       &block_entry) == 0);
 
 	for (unsigned int iteration = 0; iteration < 256U; ++iteration) {
 		char mutated[sizeof(inventory)];
