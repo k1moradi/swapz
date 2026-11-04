@@ -2148,6 +2148,29 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                             "parent_topology"):
                     probe._physical_parent_identity(8, 17)
 
+    def test_virtual_parent_name_is_not_physical_topology(self):
+        with tempfile.TemporaryDirectory() as directory:
+            disk = Path(directory) / "nbd0"
+            partition = disk / "nbd0p1"
+            partition.mkdir(parents=True)
+            (partition / "partition").write_text("1\n")
+            (disk / "dev").write_text("43:0\n")
+            (disk / "device").mkdir()
+            original_resolve = probe.Path.resolve
+
+            def resolve(path, *args, **kwargs):
+                if str(path) == "/sys/dev/block/43:1":
+                    return partition
+                if str(path) == "/sys/dev/block/43:0":
+                    return disk
+                return original_resolve(path, *args, **kwargs)
+
+            with mock.patch.object(probe.Path, "resolve", resolve):
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "parent_topology expected=one physical disk"):
+                    probe._physical_parent_identity(43, 1)
+
     def test_stale_swap_uuid_and_changed_device_block_preflight(self):
         probe._require_matching_swap_uuid(
             "/dev/disk/by-uuid/deadbeef-01", "DEADBEEF-01")

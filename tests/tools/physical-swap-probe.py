@@ -58,6 +58,8 @@ LOWER_IO_CLAIM_BOUNDARY = (
 KERNEL_FATAL_PATTERN = re.compile(
     r"\b(?:BUG|Oops|panic|WARNING|error|failed|failure|drain invariant|"
     r"corrupt(?:ion|ed)?)\b", re.IGNORECASE)
+VIRTUAL_BLOCK_PARENT_RE = re.compile(
+    r"(?:dm-|loop|ram|zram|nullb|nbd|rbd|md|zd|vd|xvd).*")
 POST_QUALIFICATION_PATHS = frozenset({
     "tests/tools/physical-swap-probe.py",
     "tests/runtime/native/physical-swap-probe-test.py",
@@ -310,8 +312,7 @@ def _physical_parent_identity(major, minor):
                 or Path(f"/sys/dev/block/{parent_identity}").resolve(
                     strict=True) != parent
                 or not (parent / "device").exists()
-                or re.fullmatch(r"(?:dm-|loop|ram|zram|nullb)[0-9]+",
-                                parent.name)):
+                or VIRTUAL_BLOCK_PARENT_RE.fullmatch(parent.name)):
             raise ProbeError(
                 f"parent_topology expected=one physical disk observed={parent}")
         return parent_identity
@@ -2340,9 +2341,7 @@ def _campaign_card_identity(device, parent_major_minor):
         raise ProbeError(
             f"card_parent_major_minor expected={parent_major_minor!r} "
             f"observed={observed_parent!r}")
-    if re.fullmatch(
-            r"(?:dm-|loop|ram|zram|nullb|nbd|rbd|md|zd|vd|xvd).*",
-            parent.name):
+    if VIRTUAL_BLOCK_PARENT_RE.fullmatch(parent.name):
         raise ProbeError(
             f"card_parent_device expected=physical observed={parent.name!r}")
     try:
@@ -2533,7 +2532,7 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
         raise ProbeError(
             "campaign_artifacts expected=qualified_bytes observed=mismatch")
     # The network/source checks above may take time. Re-prove target/module and
-    # lower-counter continuity immediately before publishing a preflight PASS.
+    # lower-counter continuity immediately before reporting read-only readiness.
     _require_campaign_target_quiescent(target)
     dm_inventory_after = _module_mapper_preflight()
     if dm_inventory_after != dm_inventory:
