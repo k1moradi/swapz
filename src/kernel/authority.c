@@ -843,6 +843,20 @@ static int swapz_verify_recovery_victim_dead(
 	end_block = start_block + SWAPZ_SEGMENT_BLOCKS;
 
 	/*
+	 * A physically dead recovery source must also have no GC scoring
+	 * authority. A stale/nonzero score or partially installed score index
+	 * contradicts the map/liveness proof; fail before any recycle hook.
+	 * This O(1) check adds no scan to ordinary foreground recycling.
+	 */
+	if (swapz_gc_accounting_enabled(a) &&
+	    (!a->segment_mapped_pages || !a->segment_gc_live_bytes ||
+	     !a->segment_gc_io_cost || !a->segment_gc_min_live_blocks ||
+	     a->segment_gc_live_bytes[segment] ||
+	     a->segment_gc_io_cost[segment] ||
+	     a->segment_gc_min_live_blocks[segment]))
+		return -EUCLEAN;
+
+	/*
 	 * Roll-forward is an exceptional recovery path, so prefer independent
 	 * authority proof over the ordinary O(1) segment sidecar fast path.
 	 * A stale/corrupt cached count must never permit reclaim, and a zero count

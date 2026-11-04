@@ -391,6 +391,9 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	static swapz_u8 near_full_classes[5U * SWAPZ_SEGMENT_BLOCKS];
 	static swapz_u8 near_full_roles[5];
 	static swapz_u32 near_full_mapped_pages[5];
+	static swapz_u32 near_full_gc_live_bytes[5];
+	static swapz_u32 near_full_gc_io_cost[5];
+	static swapz_u16 near_full_gc_min_live_blocks[5];
 	static swapz_u32 near_full_versions[SWAPZ_SEGMENT_BLOCKS];
 	const swapz_u32 survivors = SWAPZ_SEGMENT_BLOCKS - 1U;
 	struct swapz_tx tx;
@@ -406,6 +409,9 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 					    near_full_roles, 5) == 0);
 	CHECK(swapz_enable_segment_mapping_counts(
 		      &near_full_authority, near_full_mapped_pages, 5) == 0);
+	CHECK(swapz_enable_segment_gc_accounting(
+		      &near_full_authority, near_full_gc_live_bytes,
+		      near_full_gc_io_cost, near_full_gc_min_live_blocks, 5) == 0);
 	near_full_recycle_error = 0;
 	near_full_recycle_calls = 0;
 	near_full_recycle_segment = ~(swapz_u32)0;
@@ -489,6 +495,30 @@ static int test_one_uncertain_block_rolls_forward_raw_recovery_headroom(void)
 	      near_full_authority.next_block == 4U * SWAPZ_SEGMENT_BLOCKS);
 	CHECK(near_full_roles[0] == 1U && near_full_roles[3] == 0U);
 	near_full_mapped_pages[0] = 0U;
+
+	/* A dead victim must have no residual GC scoring authority either.
+	 * Corrupt each sidecar independently: no recycle hook or role swap. */
+	CHECK(!near_full_gc_live_bytes[0] && !near_full_gc_io_cost[0] &&
+	      !near_full_gc_min_live_blocks[0]);
+	near_full_gc_live_bytes[0] = 1U;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &near_full_authority, 3U) == -EUCLEAN);
+	CHECK(near_full_recycle_calls == 0U);
+	near_full_gc_live_bytes[0] = 0U;
+	near_full_gc_io_cost[0] = 1U;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &near_full_authority, 3U) == -EUCLEAN);
+	CHECK(near_full_recycle_calls == 0U);
+	near_full_gc_io_cost[0] = 0U;
+	near_full_gc_min_live_blocks[0] = 1U;
+	CHECK(swapz_gc_roll_forward_rotation(
+		      &near_full_authority, 3U) == -EUCLEAN);
+	CHECK(near_full_recycle_calls == 0U);
+	near_full_gc_min_live_blocks[0] = 0U;
+	CHECK(near_full_authority.gc_forbidden_victim == 0U &&
+	      near_full_authority.gc_destination == 3U &&
+	      near_full_authority.next_block == 4U * SWAPZ_SEGMENT_BLOCKS &&
+	      near_full_roles[0] == 1U && near_full_roles[3] == 0U);
 
 	near_full_liveness[0] = 1U;
 	CHECK(swapz_gc_roll_forward_rotation(
@@ -653,6 +683,9 @@ static int test_nonfull_recovery_tail_advances_destination(void)
 	static swapz_u8 tail_classes[5U * SWAPZ_SEGMENT_BLOCKS];
 	static swapz_u8 tail_roles[5];
 	static swapz_u32 tail_mapped_pages[5];
+	static swapz_u32 tail_gc_live_bytes[5];
+	static swapz_u32 tail_gc_io_cost[5];
+	static swapz_u16 tail_gc_min_live_blocks[5];
 	struct swapz_tx tx;
 	swapz_u32 blocked_destination, replacement_destination;
 	swapz_u32 page, block, index;
@@ -667,6 +700,9 @@ static int test_nonfull_recovery_tail_advances_destination(void)
 		      &tail_authority, tail_roles, 5U) == 0);
 	CHECK(swapz_enable_segment_mapping_counts(
 		      &tail_authority, tail_mapped_pages, 5U) == 0);
+	CHECK(swapz_enable_segment_gc_accounting(
+		      &tail_authority, tail_gc_live_bytes, tail_gc_io_cost,
+		      tail_gc_min_live_blocks, 5U) == 0);
 
 	/* Leave two authoritative pages in victim0, then move OPEN to segment1. */
 	page = 0U;
@@ -710,6 +746,15 @@ static int test_nonfull_recovery_tail_advances_destination(void)
 	CHECK(tail_authority.gc_destination == blocked_destination);
 	CHECK(!tail_roles[blocked_destination]);
 
+	/* An otherwise empty replacement reserve with stale GC cost metadata
+	 * is not independently dead and must not consume another reserve role. */
+	tail_gc_io_cost[4U] = 1U;
+	CHECK(swapz_gc_advance_rotation_destination(
+		      &tail_authority, blocked_destination) == -EUCLEAN);
+	CHECK(tail_authority.gc_destination == blocked_destination &&
+	      tail_authority.open_segment == blocked_destination &&
+	      !tail_roles[blocked_destination] && !tail_roles[4U]);
+	tail_gc_io_cost[4U] = 0U;
 	CHECK(swapz_gc_advance_rotation_destination(
 		      &tail_authority, blocked_destination) == 0);
 	replacement_destination = tail_authority.gc_destination;
