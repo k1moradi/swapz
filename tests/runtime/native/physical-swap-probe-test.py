@@ -2415,7 +2415,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             state["_test_results"]["recovery_error"],
             "partition ownership release refused: "
             "restoration_stage expected='COMPLETE' observed='ORACLE_PASS'; "
-            "active recovery marker not removed")
+            "ownership_marker_action=not_attempted")
         self.assertIn(("recover",), events)
         self.assertIn(("save", "RECOVERY_REQUIRED"), events)
         self.assertFalse(any(
@@ -2448,9 +2448,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "partition ownership release refused: "
                     "restoration_stage expected='COMPLETE' "
                     f"observed={observed!r}; "
-                    "active recovery marker not removed")
+                    "ownership_marker_action=not_attempted")
                 self.assertTrue(owner_marker.is_file())
                 self.assertTrue(consumed_review.is_file())
+
+        # The stage gate runs before marker validation. Do not claim that an
+        # active marker exists when damaged persisted state has already lost it.
+        owner_marker.unlink()
+        state["stage"] = "ORACLE_PASS"
+        with self.assertRaises(probe.ProbeError) as rejected:
+            probe._release_partition_ownership(state)
+        self.assertEqual(
+            str(rejected.exception),
+            "partition ownership release refused: "
+            "restoration_stage expected='COMPLETE' observed='ORACLE_PASS'; "
+            "ownership_marker_action=not_attempted")
+        self.assertFalse(owner_marker.exists())
+        self.assertTrue(consumed_review.is_file())
 
     def test_read_only_plan_blocks_missing_lower_counters(self):
         target, _, _ = self.reviewed_device_fixture()

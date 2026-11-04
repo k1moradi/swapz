@@ -3996,7 +3996,10 @@ The rootless teardown regression must prove that ORACLE_PASS instead preserves
 RECOVERY_REQUIRED evidence, leaves the partition ownership marker and one-use
 review intact, and cannot publish a smoke PASS. Failure diagnostics must state
 the expected and observed known restoration stages without echoing unknown
-untrusted stage data or private source paths.
+untrusted stage data or private source paths. Because the stage gate precedes
+ownership-marker validation, that diagnostic must describe the marker action as
+not attempted; it must not claim that a marker exists or was retained until the
+marker has actually been validated.
 
 The helper's read-only Device Mapper inventory must treat a successful
 `dmsetup info -c --noheadings -o name,uuid` response containing only the

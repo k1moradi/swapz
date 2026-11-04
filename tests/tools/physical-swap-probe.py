@@ -980,7 +980,8 @@ def _release_partition_ownership(state):
         raise ProbeError(
             "partition ownership release refused: "
             "restoration_stage expected='COMPLETE' "
-            f"observed={observed_stage!r}; active recovery marker not removed")
+            f"observed={observed_stage!r}; "
+            "ownership_marker_action=not_attempted")
     base = _recovery_base(state)
     active_path = base / f"partition-{state['partuuid']}.active"
     try:
