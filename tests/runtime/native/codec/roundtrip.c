@@ -179,7 +179,7 @@ static void reseal_metadata(uint8_t *bytes, swapz_u8 records)
 		offsetof(struct swapz_header, metadata_crc32c_le);
 
 	reference_store_le32(crc_bytes, 0);
-	crc = swapz_crc32c_bytes(bytes, (swapz_u32)end);
+	crc = reference_crc32c(bytes, (swapz_u32)end);
 	reference_store_le32(crc_bytes, crc);
 }
 
@@ -804,6 +804,186 @@ static int test_maximum_record_count(void)
 	return 0;
 }
 
+
+/* Invalid append sources must never be copied into the writer's own extent.
+ * A pointer just outside the logical 4KiB extent is a valid disjoint input,
+ * even when both regions share the same larger test allocation. */
+static int test_overlapping_append_inputs(void)
+{
+	struct swapz_builder builder;
+	swapz_u8 *inside = extent + SWAPZ_BLOCK_BYTES - 1U;
+	const swapz_u8 *outside = extent + SWAPZ_BLOCK_BYTES;
+	swapz_u32 crc;
+
+	*inside = 0x31U;
+	extent[SWAPZ_BLOCK_BYTES] = 0x72U;
+	crc = reference_crc32c(inside, 1U);
+	CHECK(swapz_begin(&builder, extent, SWAPZ_BLOCK_BYTES, 109) == 0);
+	CHECK(swapz_append(&builder, 1, 1, inside, 1U) == -EINVAL);
+	CHECK(swapz_append_encoded(&builder, 1, 1, inside, 1U,
+				   SWAPZ_ENCODING_DELTA64) == -EINVAL);
+	CHECK(swapz_append_prehashed(&builder, 1, 1, inside, 1U, crc) == -EINVAL);
+	CHECK(swapz_append_prehashed_encoded(&builder, 1, 1, inside, 1U, crc,
+					    SWAPZ_ENCODING_DELTA64_SHUF8) == -EINVAL);
+	CHECK(swapz_append_prehashed_encoded_unique(&builder, 1, 1, inside,
+						    1U, crc,
+						    SWAPZ_ENCODING_LZ4) == -EINVAL);
+	/* The overlap is rejected before inspecting even a truncated source. */
+	CHECK(swapz_append(&builder, 1, 1, inside, 2U) == -EINVAL);
+	CHECK(builder.count == 0 && builder.payload_start == SWAPZ_BLOCK_BYTES);
+	CHECK(*inside == 0x31U && extent[SWAPZ_BLOCK_BYTES] == 0x72U);
+	CHECK(swapz_append(&builder, 2, 1, outside, 1U) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(swapz_validate(extent, SWAPZ_BLOCK_BYTES) == 0);
+	return 0;
+}
+
+/* Rechecksum each forged descriptor using the independent bitwise oracle.
+ * Full validation must reject CRC-valid illegal placements and descriptor
+ * identities before lookup exposes payload bytes, for all extent classes. */
+static int test_authenticated_wire_mutations(void)
+{
+	static const swapz_u32 extent_sizes[] = {
+		SWAPZ_BLOCK_BYTES, 2U * SWAPZ_BLOCK_BYTES,
+		SWAPZ_MAX_EXTENT_BYTES,
+	};
+	const swapz_u32 metadata_bytes = sizeof(struct swapz_header) +
+		2U * sizeof(struct swapz_record);
+	swapz_u8 saved_metadata[sizeof(struct swapz_header) +
+				2U * sizeof(struct swapz_record)];
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+	const swapz_u8 *readable;
+	swapz_u32 class_index;
+	unsigned int mutation;
+
+	for (class_index = 0;
+	     class_index < sizeof(extent_sizes) / sizeof(extent_sizes[0]);
+	     ++class_index) {
+		swapz_u32 extent_bytes = extent_sizes[class_index];
+		swapz_u8 *first_record = extent + sizeof(struct swapz_header);
+		swapz_u8 *second_record = first_record + sizeof(struct swapz_record);
+
+		set_payload(23U, class_index);
+		CHECK(swapz_begin(&builder, extent, extent_bytes,
+				  0x12345678U) == 0);
+		CHECK(swapz_append_encoded(&builder, 17, 0x01020304U,
+					   payload, 17U, SWAPZ_ENCODING_LZ4) == 0);
+		CHECK(swapz_append_encoded(&builder, 18, 0xfedcba98U,
+					   payload, 23U,
+					   SWAPZ_ENCODING_DELTA64_SHUF8) == 0);
+		CHECK(swapz_seal(&builder) == 0);
+		CHECK(swapz_validate(extent, extent_bytes) == 0);
+		memcpy(saved_metadata, extent, metadata_bytes);
+		for (mutation = 0; mutation < 10U; ++mutation) {
+			swapz_u8 record_index = mutation == 2U || mutation == 3U ||
+				mutation == 4U ? 1U : 0U;
+
+			memcpy(extent, saved_metadata, metadata_bytes);
+			switch (mutation) {
+			case 0: /* Zero generation. */
+				reference_store_le32(first_record + 4U, 0U);
+				break;
+			case 1: /* Duplicate logical page. */
+				reference_store_le32(second_record, 17U);
+				break;
+			case 2: /* Reserved shuffle-only encoding. */
+				reference_store_le16(second_record + 10U,
+						     23U | SWAPZ_RECORD_SHUF8_FLAG);
+				break;
+			case 3: /* Empty stored payload. */
+				reference_store_le16(second_record + 10U, 0U);
+				break;
+			case 4: /* Length above the compressed bound. */
+				reference_store_le16(second_record + 10U,
+						     SWAPZ_MAX_COMPRESSED + 1U);
+				break;
+			case 5: /* Noncontiguous first payload. */
+				reference_store_le16(first_record + 8U,
+						     (swapz_u16)(extent_bytes - 18U));
+				break;
+			case 6: /* Gap/overlap between adjacent payloads. */
+				reference_store_le16(second_record + 8U,
+						     (swapz_u16)(extent_bytes - 39U));
+				break;
+			case 7: /* Payload aliases authenticated metadata. */
+				reference_store_le16(first_record + 8U, 16U);
+				break;
+			case 8: /* Offset exactly at extent end. */
+				reference_store_le16(first_record + 8U,
+						     (swapz_u16)extent_bytes);
+				break;
+			default: /* Offset beyond even the maximum extent. */
+				reference_store_le16(first_record + 8U, 0xffffU);
+				break;
+			}
+			reseal_metadata(extent, 2U);
+			CHECK(swapz_validate_metadata_crc(extent, extent_bytes) == 0);
+			CHECK(swapz_validate(extent, extent_bytes) == -EUCLEAN);
+			readable = payload;
+			CHECK(swapz_lookup(extent, extent_bytes, record_index,
+					   &decoded, &readable) == -EUCLEAN);
+			CHECK(readable == NULL && decoded.payload_length == 0U);
+			/* peek reads no payload and must work with just block zero. */
+			memcpy(metadata_only, extent, sizeof(metadata_only));
+			CHECK(swapz_peek(metadata_only, extent_bytes, record_index,
+					 &decoded) == -EUCLEAN);
+			CHECK(decoded.generation == 0U);
+			/* The lightweight descriptor API deliberately does not
+			 * validate full ordering or cross-record identity. */
+			if (mutation == 0U || mutation == 2U ||
+			    mutation == 3U || mutation == 4U ||
+			    mutation >= 7U) {
+				readable = payload;
+				CHECK(swapz_lookup_validated_descriptor(
+					      metadata_only, extent_bytes,
+					      record_index, &decoded,
+					      NULL) == -EUCLEAN);
+			}
+		}
+		memcpy(extent, saved_metadata, metadata_bytes);
+		/* Header identity checks must be independent of metadata CRC. */
+		for (mutation = 0; mutation < 6U; ++mutation) {
+			memcpy(extent, saved_metadata, metadata_bytes);
+			switch (mutation) {
+			case 0:
+				extent[0] ^= 1U;
+				break;
+			case 1:
+				extent[4] = 1U;
+				break;
+			case 2:
+				extent[6] = 0U;
+				break;
+			case 3:
+				extent[7] = SWAPZ_MAX_RECORDS + 1U;
+				break;
+			case 4:
+				extent[7] = 0U;
+				break;
+			default:
+				reference_store_le32(extent + 8U, 0U);
+				break;
+			}
+			CHECK(swapz_validate(extent, extent_bytes) == -EUCLEAN);
+		}
+		memcpy(extent, saved_metadata, metadata_bytes);
+		extent[metadata_bytes - 1U] ^= 1U;
+		CHECK(swapz_validate_metadata_crc(extent, extent_bytes) == -EBADMSG);
+		memcpy(extent, saved_metadata, metadata_bytes);
+		extent[extent_bytes - 1U] ^= 1U;
+		/* Structural metadata validation must not start hashing payloads. */
+		CHECK(swapz_validate(extent, extent_bytes) == 0);
+		memcpy(metadata_only, extent, sizeof(metadata_only));
+		CHECK(swapz_peek(metadata_only, extent_bytes, 0, &decoded) == 0);
+		readable = payload;
+		CHECK(swapz_lookup(extent, extent_bytes, 0, &decoded,
+				   &readable) == -EBADMSG);
+		CHECK(readable == NULL && decoded.payload_length == 0U);
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int tests = 0;
@@ -830,6 +1010,8 @@ int main(void)
 	CHECK(test_independent_wire_image() == 0); tests++;
 	CHECK(test_partial_metadata_and_extent_bounds() == 0); tests++;
 	CHECK(test_maximum_record_count() == 0); tests++;
+	CHECK(test_overlapping_append_inputs() == 0); tests++;
+	CHECK(test_authenticated_wire_mutations() == 0); tests++;
 	printf("SWAPZ_EXACT_PRODUCTION_C_TESTS_PASS=%d\n", tests);
 	return 0;
 }
