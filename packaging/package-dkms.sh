@@ -734,17 +734,26 @@ PY
 }
 
 # Transaction state stops being recovery authority only after the verified final
-# package state exists. Make removal of that authority durable in its parent.
-# Test-only failures exercise cleanup ordering without weakening production I/O.
+# package state exists. First rename it atomically out of the recovery namespace
+# and fsync that authority change; only then recursively delete the residue.
+# A partial delete can therefore never masquerade as a recoverable journal.
 remove_transaction_record() {
   local cleanup_failure="${SWAPZ_TEST_TRANSACTION_CLEANUP_FAILURE:-never}"
+  local transaction_name cleanup_path
   if [[ -n "$test_root" && "$cleanup_failure" == remove ]]; then
     return 73
   fi
-  rm -rf -- "$transaction_dir" || return $?
+  transaction_name="${transaction_dir##*/}"
+  [[ "$transaction_name" =~ ^swapz-(package|uninstall)[.][A-Za-z0-9]{8}$ ]] ||
+    return 75
+  cleanup_path="$transaction_parent/.finalized-$transaction_name"
+  [[ ! -e "$cleanup_path" && ! -L "$cleanup_path" ]] || return 75
+  mv -- "$transaction_dir" "$cleanup_path" || return $?
   if [[ -n "$test_root" && "$cleanup_failure" == fsync ]]; then
     return 74
   fi
+  durable_package_paths "$transaction_parent" || return $?
+  rm -rf -- "$cleanup_path" || return $?
   durable_package_paths "$transaction_parent"
 }
 
