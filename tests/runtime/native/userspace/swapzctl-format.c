@@ -676,6 +676,228 @@ static void test_swap_inventory_requires_complete_kernel_table(void)
 	assert(unlink(swap_path) == 0);
 }
 
+/*
+ * Exercise the real production parsers with byte-exact, rootless inventories.
+ * No swapon, mount, device nodes or formatter writes are performed.
+ */
+static FILE *test_inventory_binary_stream(const void *bytes, size_t length)
+{
+	FILE *stream = tmpfile();
+
+	assert(stream);
+	assert(fwrite(bytes, 1U, length, stream) == length);
+	rewind(stream);
+	return stream;
+}
+
+static void test_mountinfo_adversarial_inventory(void)
+{
+	static const char unrelated[] =
+		"36 25 8:2 / /other rw - ext4 /dev/sdb2 rw\n";
+	static const char duplicate[] =
+		"36 25 8:2 / /other rw - ext4 /dev/sdb2 rw\n"
+		"36 25 8:3 / /another rw - ext4 /dev/sdb3 rw\n";
+	static const char embedded_nul[] =
+		"36 25 8:2 / /other rw - ext4 /dev/sdb2 rw\n\0"
+		"37 25 8:1 / /card rw - ext4 /dev/sda1 rw\n";
+	static const char high_bytes[] =
+		"36 25 8:2 /r\xc3\xa9 /mnt rw - ext4 /dev/sdb2 rw\n";
+	const dev_t device = makedev(8U, 1U);
+	const dev_t parent = makedev(8U, 0U);
+	char oversized[SWAPZ_FORMAT_PROC_LINE_BYTES + 4U];
+	FILE *stream;
+	unsigned int state = 0x728b31f5U;
+
+	stream = test_inventory_binary_stream(unrelated, sizeof(unrelated) - 1U);
+	assert(format_mountinfo_stream_clear(stream, device, parent) == 0);
+	assert(fclose(stream) == 0);
+	stream = test_inventory_binary_stream(high_bytes, sizeof(high_bytes) - 1U);
+	assert(format_mountinfo_stream_clear(stream, device, parent) == 0);
+	assert(fclose(stream) == 0);
+	stream = test_inventory_binary_stream(duplicate, sizeof(duplicate) - 1U);
+	errno = 0;
+	assert(format_mountinfo_stream_clear(stream, device, parent) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+	stream = test_inventory_binary_stream(embedded_nul,
+					     sizeof(embedded_nul) - 1U);
+	errno = 0;
+	assert(format_mountinfo_stream_clear(stream, device, parent) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+	stream = test_inventory_binary_stream(unrelated, sizeof(unrelated) - 2U);
+	errno = 0;
+	assert(format_mountinfo_stream_clear(stream, device, parent) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+	memset(oversized, 'x', sizeof(oversized));
+	oversized[sizeof(oversized) - 1U] = '\n';
+	stream = test_inventory_binary_stream(oversized, sizeof(oversized));
+	errno = 0;
+	assert(format_mountinfo_stream_clear(stream, device, parent) < 0);
+	assert(errno == EOVERFLOW);
+	assert(fclose(stream) == 0);
+
+	/* Deterministic bounded byte mutation: NUL can never hide a busy row. */
+	for (unsigned int iteration = 0; iteration < 256U; ++iteration) {
+		char mutated[sizeof(unrelated)];
+		size_t index;
+
+		memcpy(mutated, unrelated, sizeof(unrelated) - 1U);
+		state ^= state << 13;
+		state ^= state >> 17;
+		state ^= state << 5;
+		index = state % (sizeof(unrelated) - 1U);
+		mutated[index] = '\0';
+		stream = test_inventory_binary_stream(mutated,
+						       sizeof(unrelated) - 1U);
+		assert(format_mountinfo_stream_clear(stream, device,
+							     parent) < 0);
+		assert(fclose(stream) == 0);
+	}
+}
+
+static void test_swap_adversarial_inventory(void)
+{
+	static const char header[] = "Filename Type Size Used Priority\n";
+	char file_path[] = "/tmp/swapzctl-unrelated-XXXXXX";
+	char inventory[PATH_MAX + 256U];
+	char duplicate[2U * PATH_MAX + 256U];
+	struct stat info;
+	dev_t device = makedev(8U, 1U);
+	dev_t parent = makedev(8U, 0U);
+	unsigned int state = 0x9e3779b9U;
+	FILE *stream;
+	int fd;
+	int length;
+	char parsed_path[PATH_MAX];
+	int block_entry;
+
+	fd = mkstemp(file_path);
+	assert(fd >= 0);
+	assert(fstat(fd, &info) == 0);
+	if (info.st_dev == device)
+		device = makedev(8U, 3U);
+	if (info.st_dev == parent)
+		parent = makedev(8U, 4U);
+	length = snprintf(inventory, sizeof(inventory),
+			  "%s%s file 1 0 -2\n", header, file_path);
+	assert(length > 0 && (size_t)length < sizeof(inventory));
+	stream = test_inventory_binary_stream(inventory, (size_t)length);
+	assert(format_swap_inventory_stream_clear(stream, device, parent) == 0);
+	assert(fclose(stream) == 0);
+	length = snprintf(duplicate, sizeof(duplicate),
+			  "%s%s file 1 0 -2\n%s file 1 0 -2\n",
+			  header, file_path, file_path);
+	assert(length > 0 && (size_t)length < sizeof(duplicate));
+	stream = test_inventory_binary_stream(duplicate, (size_t)length);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+	stream = test_inventory_binary_stream(inventory,
+					     strlen(inventory) - 1U);
+	errno = 0;
+	assert(format_swap_inventory_stream_clear(stream, device, parent) < 0);
+	assert(errno == EPROTO);
+	assert(fclose(stream) == 0);
+	assert(format_swap_inventory_entry_parse(
+		       "/tmp/\xc3\xa9 file 1 0 -2\n", parsed_path,
+		       &block_entry) == 0);
+	assert(!block_entry);
+
+	/* Unknown row types, invalid sizes, priorities and missing columns fail. */
+	static const char *const malformed_rows[] = {
+		"/tmp/file unknown 1 0 -2\n",
+		"/tmp/file file 0 0 -2\n",
+		"/tmp/file file 1 2 -2\n",
+		"/tmp/file file -1 0 -2\n",
+		"/tmp/file file 1 0 +2\n",
+		"/tmp/file file 18446744073709551616 0 -2\n",
+		"/tmp/file file 1 0 -2147483649\n",
+		"/tmp/file file 1 0\n",
+		"relative file 1 0 -2\n",
+	};
+	for (size_t index = 0;
+	     index < sizeof(malformed_rows) / sizeof(malformed_rows[0]);
+	     ++index)
+		assert(format_swap_inventory_entry_parse(
+			       malformed_rows[index], parsed_path, &block_entry) < 0);
+
+	for (unsigned int iteration = 0; iteration < 256U; ++iteration) {
+		char mutated[sizeof(inventory)];
+		size_t index;
+
+		memcpy(mutated, inventory, strlen(inventory));
+		state ^= state << 13;
+		state ^= state >> 17;
+		state ^= state << 5;
+		index = state % strlen(inventory);
+		mutated[index] = '\0';
+		stream = test_inventory_binary_stream(mutated,
+						       strlen(inventory));
+		assert(format_swap_inventory_stream_clear(stream, device,
+								     parent) < 0);
+		assert(fclose(stream) == 0);
+	}
+	/* A sysfs attribute with an embedded NUL cannot pass text validation. */
+	assert(lseek(fd, 0, SEEK_SET) == 0);
+	assert(write(fd, "1\0\n", 3U) == 3);
+	errno = 0;
+	assert(format_read_text_file(file_path, parsed_path,
+					     sizeof(parsed_path)) < 0);
+	assert(errno == EPROTO);
+	assert(close(fd) == 0);
+	assert(unlink(file_path) == 0);
+}
+
+static void test_formatter_path_admission(void)
+{
+	struct format_expectation expected = authorized_expectation();
+	struct stat path_info = {
+		.st_mode = S_IFBLK | 0600, .st_rdev = makedev(8U, 1U),
+		.st_dev = makedev(0U, 7U), .st_ino = 17U,
+	};
+	struct stat opened_info = path_info;
+	struct stat partuuid_info = path_info;
+	char regular[] = "/tmp/swapzctl-nofollow-XXXXXX";
+	char alias[sizeof(regular) + 8U];
+	int fd;
+
+	assert(format_identity_values_match(&expected, &path_info, &opened_info,
+						  &partuuid_info,
+						  expected.device_bytes,
+						  makedev(8U, 0U)));
+	opened_info.st_ino++;
+	assert(!format_identity_values_match(&expected, &path_info, &opened_info,
+						   &partuuid_info,
+						   expected.device_bytes,
+						   makedev(8U, 0U)));
+	opened_info = path_info;
+	path_info.st_uid = 42U;
+	assert(!format_identity_values_match(&expected, &path_info, &opened_info,
+						   &partuuid_info,
+						   expected.device_bytes,
+						   makedev(8U, 0U)));
+	path_info = opened_info;
+	path_info.st_mode |= S_IWOTH;
+	assert(!format_identity_values_match(&expected, &path_info, &opened_info,
+						   &partuuid_info,
+						   expected.device_bytes,
+						   makedev(8U, 0U)));
+
+	fd = mkstemp(regular);
+	assert(fd >= 0);
+	assert(snprintf(alias, sizeof(alias), "%s.link", regular) > 0);
+	assert(symlink(regular, alias) == 0);
+	errno = 0;
+	assert(format_default_open_device(NULL, alias) < 0);
+	assert(errno == ELOOP);
+	assert(unlink(alias) == 0);
+	assert(close(fd) == 0);
+	assert(unlink(regular) == 0);
+}
+
 static void test_superblock_validation_and_reserved_bytes(void)
 {
 	struct format_expectation expected = authorized_expectation();
@@ -1010,9 +1232,12 @@ int main(void)
 	test_identity_table_rejects_substitution();
 	test_topology_flags_fail_closed();
 	test_mountinfo_device_parser();
+	test_mountinfo_adversarial_inventory();
 	test_mount_and_swap_identity_conflicts();
 	test_mounts_in_other_namespaces_refuse_formatting();
 	test_swap_inventory_requires_complete_kernel_table();
+	test_swap_adversarial_inventory();
+	test_formatter_path_admission();
 	test_superblock_validation_and_reserved_bytes();
 	test_unbound_cli_is_blocked_before_io();
 	test_protected_selector_is_mandatory();
