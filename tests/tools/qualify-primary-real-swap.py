@@ -216,8 +216,10 @@ class SourceAdmissionClient:
     def close(self) -> None:
         channel = getattr(self, "_channel", None)
         if channel is not None:
-            self._channel = None
+            # Keep ownership until close succeeds so a reported close failure
+            # can be retried by the outer cleanup path.
             channel.close()
+            self._channel = None
 
     def _read_line(self) -> bytes:
         data = bytearray()

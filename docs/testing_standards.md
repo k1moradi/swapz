@@ -140,9 +140,11 @@ created, including preflight/import/plan/device/evidence-construction failures;
 runtime finalizers are not cleanup authority. Terminal PASS evidence may be
 committed only after that private workspace has been removed successfully and,
 when the helper owns the source-admission channel, after that channel has been
-closed successfully. A cleanup failure must leave or write non-PASS evidence
-rather than a durable false PASS. Its SHA-256 must be recorded in persistent
-evidence whenever admission reaches durable evidence creation.
+closed successfully. A reported channel-close failure must retain ownership so
+outer cleanup can retry it; it cannot be marked closed before the close succeeds.
+A cleanup failure must leave or write non-PASS evidence rather than a durable
+false PASS. Its SHA-256 must be recorded in persistent evidence whenever
+admission reaches durable evidence creation.
 
 The report values, private primary plan qualified/live values, embedded control
 source SHA, and observed installed bytes must all agree with the exact validated

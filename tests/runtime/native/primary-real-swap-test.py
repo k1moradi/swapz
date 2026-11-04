@@ -456,6 +456,21 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(
             child_environment["SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION"], "1")
 
+    def test_source_admission_close_failure_remains_retryable(self):
+        client = object.__new__(qualify.SourceAdmissionClient)
+        channel = mock.Mock()
+        channel.close.side_effect = [
+            OSError("synthetic close failure"), None]
+        client._channel = channel
+
+        with self.assertRaisesRegex(OSError, "synthetic close failure"):
+            client.close()
+        self.assertIs(client._channel, channel)
+
+        client.close()
+        self.assertIsNone(client._channel)
+        self.assertEqual(channel.close.call_count, 2)
+
     def test_owned_source_admission_close_preserves_original_failure(self):
         arguments = qualify.build_parser().parse_args([
             "--validated-source", "a" * 40,
