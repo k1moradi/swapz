@@ -5413,7 +5413,15 @@ timestamps, raw \`MemAvailable\`/\`SUnreclaim\`/\`VmallocUsed\` KiB
 counters with an exact unit declaration, mapper-presence state, one second of
 target-absent baseline, initialization,
 steady and GC observations, ordinary teardown, and at least two seconds of
-target-absent recovery. Initialization must precede the exact sustained swapz
+target-absent recovery. Each adjacent monotonic sample interval must be
+50-150 ms and the mean cadence across the full trace must remain within
+10% of 100 ms; a 100 ms label on systematically slower samples does not
+qualify. The last second of mapper-absent teardown samples must recover the
+pre-constructor baseline **median** for `MemAvailable` (no lower) and for
+`SUnreclaim`/`VmallocUsed` (no higher), with integer-exact half-KiB median
+arithmetic. A single extreme baseline outlier cannot excuse persistent
+post-removal memory use; failure to recover blocks qualification.
+Initialization must precede the exact sustained swapz
 arm, steady/GC samples must fall inside that arm's monotonic interval, and
 teardown must follow its completion; a correctly shaped trace from elsewhere
 in the same boot cannot qualify. Sustained telemetry preserves absolute
