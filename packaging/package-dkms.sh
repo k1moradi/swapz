@@ -242,6 +242,29 @@ query_dkms_status() {
   printf -v "$output_name" '%s' "$output"
 }
 
+# DKMS versions differ in slash/comma formatting. Require one exact record for
+# our version and running kernel; a successful status command or substring is
+# not evidence that this module was installed for this kernel.
+dkms_status_exact_installed() {
+  local report="$1" record architecture
+  local -a lines
+  [[ -n "$report" ]] || return 1
+  mapfile -t lines <<< "$report"
+  (( ${#lines[@]} == 1 )) || return 1
+  record="${lines[0]}"
+  case "$record" in
+    "swapz/$version, $kernel_release, "*": installed")
+      architecture="${record#"swapz/$version, $kernel_release, "}"
+      ;;
+    "swapz, $version, $kernel_release, "*": installed")
+      architecture="${record#"swapz, $version, $kernel_release, "}"
+      ;;
+    *) return 1 ;;
+  esac
+  architecture="${architecture%: installed}"
+  [[ "$architecture" =~ ^[A-Za-z0-9_+.-]+$ ]]
+}
+
 safe_input_file() {
   local path="$1" mode owner links
   [[ -f "$path" && ! -L "$path" ]] || return 1
@@ -817,8 +840,7 @@ restore_uninstall_backup() {
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
   query_dkms_status restored_status -m swapz -v "$version" -k "$kernel_release" ||
     return 1
-  [[ "$restored_status" == *": installed"* &&
-     "$restored_status" == *"$kernel_release"* ]] || return 1
+  dkms_status_exact_installed "$restored_status" || return 1
   prepare_exact_module_restore || return 1
   install -d -m0755 "$installed_module_dir"
   install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
@@ -885,7 +907,7 @@ if [[ "$action" == uninstall ]]; then
   uninstall_dkms_status=""
   query_dkms_status uninstall_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
     blocked "cannot inspect current-kernel DKMS state before package removal"
-  [[ "$uninstall_dkms_status" == *": installed"* ]] ||
+  dkms_status_exact_installed "$uninstall_dkms_status" ||
     blocked "verified package does not have an installed current-kernel DKMS state"
   if [[ -z "$test_root" && "$action" == uninstall ]] &&
      [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
@@ -1132,7 +1154,7 @@ query_dkms_status current_dkms_status -m swapz -v "$version" -k "$kernel_release
 if [[ -z "$existing_kind" && -n "$current_dkms_status" ]]; then
   blocked "DKMS state exists without a verified package"
 fi
-if [[ -n "$existing_kind" && "$current_dkms_status" != *": installed"* ]]; then
+if [[ -n "$existing_kind" ]] && ! dkms_status_exact_installed "$current_dkms_status"; then
   blocked "verified package does not have an installed current-kernel DKMS state"
 fi
 if [[ -n "$existing_kind" ]]; then
@@ -1143,7 +1165,7 @@ if [[ -n "$existing_kind" ]]; then
 fi
 if [[ "$existing_kind" == current ]] &&
    cmp -s "$src/$qualification_marker" <(incoming_identity) &&
-   [[ "$current_dkms_status" == *": installed"* ]]; then
+   dkms_status_exact_installed "$current_dkms_status"; then
   verify_module_resolution ||
     blocked "installed module lookup does not match package ownership"
   echo "Installed swapz package already matches the exact qualified artifacts"
@@ -1274,8 +1296,7 @@ restore_previous_package() {
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
   query_dkms_status restored_status -m swapz -v "$version" -k "$kernel_release" ||
     return 1
-  [[ "$restored_status" == *": installed"* &&
-     "$restored_status" == *"$kernel_release"* ]] || return 1
+  dkms_status_exact_installed "$restored_status" || return 1
   prepare_exact_module_restore || return 1
   [[ -f "$backup_dir/installed-module" && ! -L "$backup_dir/installed-module" ]] ||
     return 1
@@ -1426,7 +1447,7 @@ install_test_checkpoint dkms-installed
 status=""
 query_dkms_status status -m swapz -v "$version" -k "$kernel_release" ||
   blocked "cannot verify current-kernel DKMS state after installation"
-[[ "$status" == *": installed"* && "$status" == *"$kernel_release"* ]] ||
+dkms_status_exact_installed "$status" ||
   blocked "DKMS did not report the current kernel installed"
 
 existing_module_candidates=()
