@@ -2576,7 +2576,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "deadbeef-01", source_sha)
         output = "\n".join(
             str(call.args[0]) for call in printed.call_args_list)
-        self.assertIn("CAMPAIGN_PREFLIGHT=PASS", output)
+        self.assertIn("CAMPAIGN_PREFLIGHT=READY_READ_ONLY", output)
+        self.assertNotIn("CAMPAIGN_PREFLIGHT=PASS", output)
+        self.assertNotIn("CAMPAIGN_MODULE_MAPPER_GATE=PASS", output)
+        self.assertNotIn("CAMPAIGN_KERNEL_DIAGNOSTICS_GATE=PASS", output)
+        self.assertNotIn("CAMPAIGN_LOWER_IO_GATE=PASS", output)
         self.assertIn("PAIRED_RAW_VS_SWAPZ=NOT_RUN", output)
         self.assertIn("HIGH_OCCUPANCY_3600S=NOT_RUN", output)
         self.assertIn("ANONYMOUS_LINUX_SWAP=NOT_RUN", output)

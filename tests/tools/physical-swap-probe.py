@@ -2445,17 +2445,17 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
     _require_kernel_diagnostics(
         diagnostics, "campaign_kernel_diagnostics")
 
-    print("CAMPAIGN_PREFLIGHT=PASS "
+    print("CAMPAIGN_PREFLIGHT=READY_READ_ONLY "
           f"major_minor={target['major']}:{target['minor']} "
           f"parent_major_minor={target['parent_major_minor']} "
           f"partuuid={target['partuuid']} bytes={target['size_bytes']}")
     print(f"CAMPAIGN_SOURCE_SHA={source_sha}")
-    print("CAMPAIGN_MODULE_MAPPER_GATE=PASS module=absent "
+    print("CAMPAIGN_MODULE_MAPPER_GATE=READY module=absent "
           f"other_mapper_count={dm_inventory['other_mapper_count']} "
           f"other_mapper_sha256={dm_inventory['other_mapper_sha256']}")
-    print("CAMPAIGN_KERNEL_DIAGNOSTICS_GATE=PASS source="
+    print("CAMPAIGN_KERNEL_DIAGNOSTICS_GATE=READY source="
           f"{diagnostics.get('source')} time_filtered=true complete=true")
-    print("CAMPAIGN_LOWER_IO_GATE=PASS source="
+    print("CAMPAIGN_LOWER_IO_GATE=READY source="
           f"/sys/dev/block/{target['parent_major_minor']}/stat "
           f"fields={len(lower_after['values'])} sector_bytes=512")
     print(f"LOWER_IO_CLAIM_BOUNDARY={LOWER_IO_CLAIM_BOUNDARY}")
