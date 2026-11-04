@@ -347,6 +347,15 @@ def physical_campaign_evidence(policy_raw):
                     "gc_pages": 1,
                 }],
             },
+            "metadata_ram_host_binding": {
+                "host_boot_id":
+                    "11111111-1111-4111-8111-111111111111",
+                "host_before_captured_at_utc":
+                    "2026-11-03T00:00:00+00:00",
+                "host_after_captured_at_utc":
+                    "2026-11-03T00:00:10+00:00",
+                "memory_total_bytes": 16 * 1024 * 1024 * 1024,
+            },
         },
         "host_stability": {
             "status": "STABLE",
@@ -1112,6 +1121,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "arm_binding_tamper": lambda capacity: capacity[
                 "metadata_ram_arm_binding"]["gc_activity_intervals"][0].update(
                     start_monotonic_ns=1_700_000_001),
+            "host_binding_tamper": lambda capacity: capacity[
+                "metadata_ram_host_binding"].update(
+                    host_boot_id="22222222-2222-4222-8222-222222222222"),
             "short_capacity": lambda capacity: (
                 capacity.update(logical_pages=27080191,
                                 logical_capacity_bytes=27080191 * 4096)),
