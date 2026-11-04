@@ -1490,6 +1490,104 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "sealed campaign object differs from artifact bytes" in blocker
             for blocker in result["code_blockers"]))
 
+    def test_serialized_owner_report_is_authoritative(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        serialized_report = owner_report()
+        serialized_report["overall"] = "FAIL"
+        report_raw = encoded(serialized_report)
+        report = owner_report()
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "owner qualification report: parsed object differs from "
+            "serialized bytes" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_serialized_policy_cannot_be_paired_with_larger_ram_limit(self):
+        report = owner_report()
+        report_raw = encoded(report)
+        frozen_policy = acceptance_policy()
+        policy_raw = encoded(frozen_policy)
+        policy = copy.deepcopy(frozen_policy)
+        policy["physical_qualification"]["acceptance"]["sustained"][
+            "metadata_and_target_peak_ram_bytes_max"] *= 2
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertIsNone(result["METADATA_RAM_MEASUREMENT"]["limit_bytes"])
+        self.assertTrue(any(
+            "production acceptance policy: parsed object differs from "
+            "serialized bytes" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_serialized_real_swap_evidence_is_authoritative(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        serialized_physical = copy.deepcopy(physical)
+        serialized_physical["status"] = "FAIL"
+        physical_raw = encoded(serialized_physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent real-swap evidence: parsed object differs from "
+            "serialized bytes" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_serialized_cold_boot_arm_evidence_is_authoritative(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        arm_raw = cold_boot_arm_evidence_raw(
+            expected_module_source_sha="b" * 40)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw, arm_raw)
+        valid_arm = EVALUATOR.parse_env_strict(cold_boot_arm_evidence_raw())
+
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw,
+            None, None, valid_arm, arm_raw)
+        self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "cold-boot arm evidence: parsed object differs from serialized "
+            "bytes" in blocker
+            for blocker in result["deployment_blockers"]))
+
     def test_campaign_raw_numeric_type_mismatch_is_not_authenticated(self):
         report = owner_report()
         policy = acceptance_policy()
