@@ -312,10 +312,10 @@ models used by `make test` (default: three repeats each of SATA mixed,
 NVMe Gen4 mixed, NVMe Gen5 mixed, fast mixed, fast QD4 and fast QD8). A selected `nvme5-stripes` or `sata-stripes` scenario runs the
 existing mixed-QD32 multi-target N=1/2/4 experiment. `fast-stripes-w4` and
 `fast-stripes-w8` run the same independent-target experiment with sustained
-WRITE-only QD4 or QD8, respectively, as described below. It prints one table of useful READ/WRITE, lower WRITE bytes ratio
-and requests, READ/WRITE p99, windows, deadline and idle-bound closes,
-accepted-work lower idle, lower-WRITE service and its EWMA, and keeps detailed
-telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
+WRITE-only QD4 or QD8, respectively, as described below. It prints compact development tables covering useful READ/WRITE, lower WRITE
+bytes ratio and requests, READ/WRITE p99, windows, deadline and idle-bound
+closes, accepted-work lower idle, lower-WRITE service and its EWMA, and keeps
+detailed telemetry in `build/tests/fast-test/latest.json`. `SCENARIOS=` and `REPEAT=`
 select scenarios and repeats. Every emulated scenario must use the production
 delta64 + `DELTA64_SHUF8` byte-plane shuffle (byte shuffle) + LZ4
 stack. Delta64-off benchmark arms are retired and must not be added to
