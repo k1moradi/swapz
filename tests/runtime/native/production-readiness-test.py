@@ -2228,6 +2228,22 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             EVALUATOR.RAM_TRACE_VALIDATOR[
                 "validate_metadata_ram_host_binding"](trace, binding)
 
+        nanosecond_trace = sampled_metadata_ram_trace()
+        nanosecond_trace["samples"][-1]["timestamp_utc"] = (
+            "2026-11-03T00:00:03.900000001Z")
+        EVALUATOR.RAM_TRACE_VALIDATOR["validate_metadata_ram_trace"](
+            nanosecond_trace, source_sha=SOURCE,
+            mapper_uuid=nanosecond_trace["mapper_uuid"],
+            expected_peak_ram_bytes=900 * 1024 * 1024)
+        nanosecond_binding = copy.deepcopy(
+            campaign["capacity_and_ram"]["metadata_ram_host_binding"])
+        nanosecond_binding["host_after_captured_at_utc"] = (
+            "2026-11-03T00:00:03.900000000+00:00")
+        with self.assertRaisesRegex(ValueError, "outside host snapshot window"):
+            EVALUATOR.RAM_TRACE_VALIDATOR[
+                "validate_metadata_ram_host_binding"](
+                    nanosecond_trace, nanosecond_binding)
+
         for sealed_at in (
                 "2026-11-03 00:00:11+00:00",
                 "2026-11-03T00:00:11." + "1" * 10000 + "+00:00"):
@@ -2275,6 +2291,24 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     self.assertEqual(
                         result["FULL_CAPACITY_LOADED_CONSTRUCTION"],
                         "NOT_MEASURED")
+
+        nanosecond_campaign = physical_campaign_evidence(policy_raw)
+        nanosecond_campaign["sealed_at_utc"] = (
+            "2026-11-03T00:00:11.123456789+00:00")
+        nanosecond_raw = encoded(nanosecond_campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, nanosecond_raw)
+        evidence["release_evidence"]["maximum_capacity_and_ram"][
+            "observed_at_utc"] = "2026-11-03T00:00:11.123456788Z"
+        result = evaluate(
+            report=report, evidence=evidence, policy=policy,
+            physical=json.loads(physical_raw), campaign=nanosecond_campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(
+            result["METADATA_RAM_MEASUREMENT"]["status"], "NOT_MEASURED")
+        self.assertTrue(any(
+            "observation predates sealed campaign" in blocker
+            for blocker in result["code_blockers"]))
 
     def test_gc_binding_handles_many_ordered_activity_windows(self):
         # Rootless stress of the declared evidence bounds, with no loaded
