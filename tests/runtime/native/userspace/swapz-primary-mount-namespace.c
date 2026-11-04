@@ -192,9 +192,12 @@ static int fixture_lstat(const char *path, struct stat *info)
 #define opendir(...) fixture_opendir(__VA_ARGS__)
 #define stat(...) fixture_stat(__VA_ARGS__)
 #define lstat(...) fixture_lstat(__VA_ARGS__)
+/* Keep the synthetic foreign PID distinct from the production reader's self. */
+#define getpid() ((pid_t)65535)
 #define main swapz_primary_program_main
 #include "../../../../src/userspace/swapz-primary.c"
 #undef main
+#undef getpid
 #undef lstat
 #undef stat
 #undef opendir
