@@ -37,8 +37,21 @@ swapz_u32 swapz_predict_delta64_avx2(const swapz_u8 *input, swapz_u8 *output)
 
 void swapz_unpredict_delta64_avx2(const swapz_u8 *input, swapz_u8 *output)
 {
+#if defined(__CHECKER__)
+	swapz_u64x4 upper_mask;
+	swapz_u64x4 base;
+
+	/*
+	 * Checker-only values are never executed. Initializing the objects through
+	 * memory keeps Sparse's vector type flow intact without its unsupported
+	 * brace-list vector initializer.
+	 */
+	memset(&upper_mask, 0, sizeof(upper_mask));
+	memset(&base, 0, sizeof(base));
+#else
 	const swapz_u64x4 upper_mask = {0ULL, 0ULL, ~0ULL, ~0ULL};
 	swapz_u64x4 base = {0ULL, 0ULL, 0ULL, 0ULL};
+#endif
 	swapz_u32 offset = 0;
 
 	/*

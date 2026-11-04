@@ -5692,14 +5692,17 @@ because it lacks the required `typeof_unqual` support. At minimum
 `predictor.c` must have observed CHECK records. Source-located Sparse/Smatch
 warnings and errors are classified and fail the static gate; compiler/pahole
 compatibility banners without a source location are not findings. Smatch is
-used only when already installed and otherwise reports UNAVAILABLE. The current
-Sparse version checks all eight module C translation units but cannot analyze
-the GCC vector `__builtin_shuffle` paths and emits dependent SIMD initializer
-errors; those diagnostics remain explicitly classified
-`unsupported_simd_builtin`/`simd_initializer` and the all-module Sparse
-result remains FAIL until that analyzer limitation is resolved. Missing CHECK
-units, headers, analyzer execution, or nonzero Kbuild exits must never produce
-static PASS.
+used only when already installed and otherwise reports UNAVAILABLE. Sparse
+0.6.5~rc1 does not model GCC's vector `__builtin_shuffle` or several GNU
+vector brace initializers used by the production SIMD backends. Narrow
+`__CHECKER__`-only type/data-flow stand-ins cover only those parser
+limitations; ordinary GCC/Clang builds retain the exact production builtins and
+initializers, whose byte semantics remain covered by native predictor tests.
+The rootless source contract requires both the checker seam and the production
+expressions to remain present. All eight module C translation units must be
+checked, and every other source-located Sparse finding still fails the gate.
+Missing CHECK units, headers, analyzer execution, or nonzero Kbuild exits must
+never produce static PASS.
 
 The read-only host Kconfig probe distinguishes DETECTED, UNAVAILABLE,
 DISABLED_AT_BOOT, and UNKNOWN from executed qualification. KASAN+lockdep

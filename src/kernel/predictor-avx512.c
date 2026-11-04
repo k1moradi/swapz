@@ -84,6 +84,14 @@ void swapz_unpredict_delta64_avx512(const swapz_u8 *input, swapz_u8 *output)
 			: "=v"(shifted1) : "v"(zero), "v"(prefix1));
 		prefix0 += shifted0;
 		prefix1 += shifted1;
+#if defined(__CHECKER__)
+		/*
+		 * Sparse cannot build a GNU vector from the broadcast brace list.
+		 * Preserve vector dependency/type flow for static analysis only.
+		 */
+		step0 = prefix0;
+		step1 = prefix1;
+#else
 		step0 = (swapz_u64x8){
 			prefix0[7], prefix0[7], prefix0[7], prefix0[7],
 			prefix0[7], prefix0[7], prefix0[7], prefix0[7]
@@ -92,6 +100,7 @@ void swapz_unpredict_delta64_avx512(const swapz_u8 *input, swapz_u8 *output)
 			prefix1[7], prefix1[7], prefix1[7], prefix1[7],
 			prefix1[7], prefix1[7], prefix1[7], prefix1[7]
 		};
+#endif
 		step_pair = step0 + step1;
 		out0 = prefix0 + base;
 		out1 = prefix1 + (base + step0);

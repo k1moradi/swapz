@@ -94,7 +94,14 @@ swapz_u32 swapz_predict_delta64_sse2_baseline(const swapz_u8 *input,
 
 void swapz_unpredict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 {
+#if defined(__CHECKER__)
+	swapz_u64x2 base;
+
+	/* Sparse cannot initialize GNU vector types from a brace list. */
+	memset(&base, 0, sizeof(base));
+#else
 	swapz_u64x2 base = { 0ULL, 0ULL };
+#endif
 	swapz_u32 offset = 0;
 
 	/*

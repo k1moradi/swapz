@@ -18,7 +18,21 @@
 
 typedef unsigned char swapz_u8x16 __attribute__((vector_size(16)));
 
-#if defined(__clang__)
+/*
+ * Sparse 0.6.x does not model GCC's __builtin_shuffle vector builtin. Keep a
+ * checker-only type/data-flow stand-in so C=2 can analyze the surrounding
+ * kernel code; native production builds still compile the exact shuffle below,
+ * whose byte semantics are covered by the predictor round-trip qualification.
+ */
+#if defined(__CHECKER__)
+static inline swapz_u8x16 swapz_checker_shuffle16(swapz_u8x16 first,
+						  swapz_u8x16 second)
+{
+	(void)second;
+	return first;
+}
+#define SWAPZ_SHUFFLE16(a, b, ...) swapz_checker_shuffle16((a), (b))
+#elif defined(__clang__)
 #define SWAPZ_SHUFFLE16(a, b, ...) __builtin_shufflevector((a), (b), __VA_ARGS__)
 #else
 #define SWAPZ_SHUFFLE16(a, b, ...) \

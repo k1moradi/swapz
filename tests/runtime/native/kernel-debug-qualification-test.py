@@ -318,6 +318,34 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertNotIn("kcsan.enabled=0", source)
         self.assertNotIn("lockdep=off", source)
 
+    def test_sparse_simd_checker_seams_preserve_production_paths(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        shuffle = (root / "src/kernel/predictor-shuffle.h").read_text(
+            encoding="utf-8")
+        self.assertIn("#if defined(__CHECKER__)", shuffle)
+        self.assertIn("swapz_checker_shuffle16", shuffle)
+        self.assertIn("__builtin_shuffle((a), (b)", shuffle)
+        self.assertLess(
+            shuffle.index("swapz_checker_shuffle16"),
+            shuffle.index("__builtin_shuffle((a), (b)"),
+        )
+
+        sse2 = (root / "src/kernel/predictor-sse2.c").read_text(
+            encoding="utf-8")
+        avx2 = (root / "src/kernel/predictor-avx2.c").read_text(
+            encoding="utf-8")
+        avx512 = (root / "src/kernel/predictor-avx512.c").read_text(
+            encoding="utf-8")
+        for source in (sse2, avx2, avx512):
+            self.assertIn("#if defined(__CHECKER__)", source)
+        self.assertIn("swapz_u64x2 base = { 0ULL, 0ULL };", sse2)
+        self.assertIn(
+            "const swapz_u64x4 upper_mask = {0ULL, 0ULL, ~0ULL, ~0ULL};",
+            avx2,
+        )
+        self.assertIn("step0 = (swapz_u64x8){", avx512)
+        self.assertIn("step1 = (swapz_u64x8){", avx512)
+
     def test_static_checker_requires_actual_check_and_zero_warnings(self) -> None:
         with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/sparse"), \
              mock.patch.object(qualification.subprocess, "run") as runner:
