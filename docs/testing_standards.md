@@ -5618,3 +5618,54 @@ Persistent real-swap release evidence must prove that the private physical execu
 Every loaded shell helper in the official rootless syntax list must remain `bash -n` clean. When a `[[ ... ]]` binary comparison is split across physical lines, use an explicit shell line continuation before the newline so syntax validation and runtime parsing agree; never silence the syntax gate.
 
 The isolated `make test` loaded-evidence fixture and report-contract assertions must emit and expect the same complete primary interruption-recovery matrix required by the parser and owned-nullblk qualifier. When that matrix grows, its `PASS_LOADED_PRIMARY_NULLBLK_INTERRUPTION_RECOVERY=cases:<n>` count, phase set, parsed summary count, and report regression must be updated together; a stale smaller fixture or stale assertion must fail qualification rather than silently reducing or misreporting coverage.
+
+## Private kernel-native diagnostics and static analysis lane
+
+A separate, optional `tests/tools/kernel-debug-qualify.py` lane and rootless
+`tests/runtime/native/kernel-debug-qualification-test.py` fixture remain
+outside the official `make test` reporter pending runner-owner coordination.
+Their CI workflow performs rootless negative controls and kernel-header-only
+`W=1 C=2 CHECK=sparse` checks of the real module. At least dm-target, codec,
+authority, engine and predictor translation units must have observed CHECK
+records. Every sparse warning/error is classified (locking/type,
+address-space, endian/bitwise, uninitialized, other) and makes the gate fail.
+Smatch is run only when already installed; an unavailable Smatch is reported
+UNAVAILABLE, never passed. Missing sparse, incomplete Kbuild execution,
+missing headers or build errors must not produce static PASS. CI does not
+install or boot a debug kernel, insert a module or provision `null_blk`.
+
+The read-only host probe distinguishes DETECTED, UNAVAILABLE,
+DISABLED_AT_BOOT and UNKNOWN from an actual executed qualification. The
+KASAN+lockdep lane requires running-kernel `CONFIG_KASAN`,
+`CONFIG_PROVE_LOCKING`, `CONFIG_LOCKDEP` and `CONFIG_DEBUG_LOCK_ALLOC`;
+KCSAN uses `CONFIG_KCSAN` as an independent lane. Missing config visibility
+or explicit disabling boot parameters block a required lane. A probe result
+is configuration evidence only and must not be presented as runtime PASS.
+
+The private opt-in owned-device wrapper
+`tests/tools/qualify-kernel-debug-owned.sh` requires a current, clean
+`main` checkout, exact HEAD source, an explicit Codex-coordination token,
+noninteractive privilege and an absent pre-existing `dm_swapz` module. It
+runs only the existing bounded `deploy-nullblk.sh` helper: a freshly owned,
+identity-verified, RAM-backed `null_blk` lower with 14,000 ns configured
+completion delay, the eight constructor-stage `-ENOMEM` injections,
+read/write/codec faults, byte-exact GC and DISCARD, suspend/drain, FUA/flush,
+completion-handoff accounting and normal teardown. It never selects physical
+swap, changes kernel fault injection globally or force-removes a mapper.
+If the existing helper quarantines an uncertain mapping, follow its
+fail-closed recovery policy; do not relax cleanup to make this lane pass.
+
+Runtime evidence requires each exact expected loaded PASS record once, the
+clean-teardown record, matching required running-kernel feature detection,
+and readable pre/post kernel ring buffers with an unchanged baseline prefix.
+Any KASAN/KCSAN report, lockdep report, kernel warning, refcount diagnostic,
+workqueue-after-free indication, shortened log, missing marker or uncertain
+teardown fails or blocks the lane. The rootless fixture deliberately tests
+negative cases. Delayed lower completion plus end_io/status counters provide
+bounded exactly-once evidence, not a proof against every concurrent interleaving.
+In particular, full simultaneous READ/WRITE/DISCARD/FUA **while** GC is active,
+general allocator-failure injection beyond the eight constructor stages, and
+debug-instrumented runtime qualification on an actually suitable host remain
+open until executed and recorded. Native ASan/UBSan/TSan, source contracts,
+configuration detection and sparse compile checks are never KASAN/KCSAN
+runtime evidence.
