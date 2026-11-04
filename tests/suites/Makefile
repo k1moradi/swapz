@@ -152,7 +152,7 @@ test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/windo
 test-concurrency: $(OUT)/preparation-slots $(OUT)/preparation-codec-result $(OUT)/preparation-publication-lifetime
 	@set -e; "$(OUT)/preparation-slots"; "$(OUT)/preparation-codec-result"; "$(OUT)/preparation-publication-lifetime"
 
-test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-format $(OUT)/swapzctl-removable-media $(OUT)/swapz-primary-policy
+test-userspace: $(OUT)/swapzctl-status $(OUT)/swapzctl-format $(OUT)/swapzctl-removable-media $(OUT)/swapz-primary-policy $(OUT)/swapz-primary-mount-namespace
 	@set -e; "$(OUT)/swapzctl-status"; "$(OUT)/swapzctl-format"; "$(OUT)/swapzctl-removable-media"; "$(OUT)/swapz-primary-policy"; "$(OUT)/swapz-primary-mount-namespace"
 
 test-replay-helper: $(OUT)/io-replay-native
