@@ -26,8 +26,8 @@ RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
 # CAP_SYS_ADMIN is retained only for read-only DM inspection. Prevent it from
-# undoing filesystem isolation, and independently forbid module mutation.
-SystemCallFilter=~@mount @module
+# undoing filesystem isolation, loading modules, or taking swap ownership.
+SystemCallFilter=~@mount @module @swap
 SystemCallErrorNumber=EPERM
 # Do not add ReadOnlyPaths bind mounts around recovery or package journals:
 # native preflight rejects mount substitution and needs the original mount IDs.
