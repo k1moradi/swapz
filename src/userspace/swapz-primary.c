@@ -4145,6 +4145,7 @@ static int swapz_primary_package_transactions_clear_at(
 	struct statx parent_mount;
 	struct statx named_parent_mount;
 	struct statx transaction_mount;
+	struct statx named_transaction_mount;
 	struct dirent *entry;
 	DIR *entries = NULL;
 	const char *separator;
@@ -4237,13 +4238,18 @@ static int swapz_primary_package_transactions_clear_at(
 	if (errno)
 		goto out;
 	if (fstatat(parent_fd, directory_name, &named_transaction_info,
-		    AT_SYMLINK_NOFOLLOW) < 0)
+		    AT_SYMLINK_NOFOLLOW) < 0 ||
+	    statx(parent_fd, directory_name, AT_SYMLINK_NOFOLLOW,
+		  STATX_MNT_ID, &named_transaction_mount) < 0)
 		goto out;
 	if (!S_ISDIR(named_transaction_info.st_mode) ||
 	    named_transaction_info.st_dev != transaction_info.st_dev ||
 	    named_transaction_info.st_ino != transaction_info.st_ino ||
 	    named_transaction_info.st_uid != expected_owner ||
-	    (named_transaction_info.st_mode & 0777U) != 0700U) {
+	    (named_transaction_info.st_mode & 0777U) != 0700U ||
+	    !(named_transaction_mount.stx_mask & STATX_MNT_ID) ||
+	    named_transaction_mount.stx_mnt_id !=
+		    transaction_mount.stx_mnt_id) {
 		errno = ESTALE;
 		goto out;
 	}
