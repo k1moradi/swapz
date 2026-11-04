@@ -270,6 +270,9 @@ sample_host_memory_admission
         self.assertIn(
             'BLOCKED: ID36 missing required command %s;', source)
         self.assertLess(
+            source.index("START_ID36_RESOURCE_PRESSURE=admission"),
+            source.index("for required_command in"))
+        self.assertLess(
             source.index("for required_command in"),
             source.index("[[ $(id -u) == 0 ]]"))
         self.assertLess(
@@ -279,6 +282,10 @@ sample_host_memory_admission
             'if ! token="$(od -An -N8 -tx1 /dev/urandom', source)
         self.assertIn(
             'if ! SESSION="$(mktemp -d "', source)
+        self.assertIn(
+            'mktemp -d "/tmp/swapz-id36.XXXXXXXX"', source)
+        self.assertNotIn(
+            '${TMPDIR:-/tmp}/swapz-id36.XXXXXXXX', source)
         self.assertIn(
             'if ! online_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"; then',
             source)
@@ -326,6 +333,7 @@ swapz_clear_tmp_before_memory_check
         self.assertIn(
             'write_cgroup_control memory.high "$MEMORY_HIGH_BYTES" || exit 2',
             source)
+        self.assertIn('rm -rf -- "$SESSION" 2>/dev/null', source)
         self.assertNotIn("rm -rf /tmp", source)
         self.assertNotIn("drop_caches", source)
 
