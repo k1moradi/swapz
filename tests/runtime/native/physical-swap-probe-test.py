@@ -2434,6 +2434,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target = {
             "device": "/dev/synthetic", "major": 8, "minor": 17,
             "parent_major_minor": "8:16", "partuuid": "deadbeef-01",
+            "card_identity_sha256": "a" * 64,
             "size_bytes": 64 << 20,
         }
         active = {
@@ -2442,6 +2443,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "used_kib": 0, "priority": -1,
         }
         with mock.patch.object(probe, "_verify_target_identity"), \
+                mock.patch.object(
+                    probe, "_campaign_card_identity",
+                    return_value={
+                        "sha256": "a" * 64,
+                        "model": "synthetic-card",
+                        "transport": "usb",
+                    }), \
                 mock.patch.object(probe, "_holder_names", return_value=[]), \
                 mock.patch.object(probe, "_mountinfo_has_device",
                                   return_value=False), \
@@ -2466,6 +2474,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target = {
             "device": "/dev/synthetic", "major": 8, "minor": 17,
             "parent_major_minor": "8:16", "partuuid": "deadbeef-01",
+            "parent_model": "synthetic-card",
+            "parent_transport": "usb",
+            "parent_size_bytes": 128 << 20,
+            "card_identity_sha256": "c" * 64,
             "size_bytes": 64 << 20,
         }
         source_sha = "a" * 40
@@ -2491,6 +2503,63 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "matching_line_count": 0, "messages": "",
         }
         return target, source_sha, evidence, lower, inventory, diagnostics
+
+    def test_campaign_card_identity_fingerprint_detects_stale_card(self):
+        with tempfile.TemporaryDirectory() as directory:
+            card = Path(directory) / "mmcblk0"
+            (card / "device").mkdir(parents=True)
+            (card / "dev").write_text("179:0\n")
+            (card / "size").write_text("262144\n")
+            (card / "device/model").write_text("SD-A\n")
+            (card / "device/serial").write_text("serial-a\n")
+            (card / "device/wwid").write_text("wwid-a\n")
+            original_resolve = probe.Path.resolve
+
+            def resolve(path, *args, **kwargs):
+                if str(path) == "/sys/dev/block/179:0":
+                    return card
+                return original_resolve(path, *args, **kwargs)
+
+            lsblk = subprocess.CompletedProcess(
+                [], 0, stdout="mmc\n", stderr="")
+            with mock.patch.object(probe.Path, "resolve", resolve), \
+                    mock.patch.object(probe, "_run", return_value=lsblk):
+                first = probe._campaign_card_identity(
+                    "/dev/synthetic", "179:0")
+                self.assertEqual(first["model"], "SD-A")
+                self.assertEqual(first["transport"], "mmc")
+                self.assertEqual(first["parent_size_bytes"], 262144 * 512)
+                self.assertTrue(first["serial_present"])
+                self.assertTrue(first["wwid_present"])
+                (card / "device/model").write_text("SD-B\n")
+                second = probe._campaign_card_identity(
+                    "/dev/synthetic", "179:0")
+            self.assertNotEqual(first["sha256"], second["sha256"])
+
+    def test_campaign_stale_card_identity_blocks_before_quiescence_claim(self):
+        target = {
+            "device": "/dev/synthetic", "major": 8, "minor": 17,
+            "parent_major_minor": "8:16", "partuuid": "deadbeef-01",
+            "card_identity_sha256": "a" * 64,
+            "size_bytes": 64 << 20,
+        }
+        with mock.patch.object(probe, "_verify_target_identity"), \
+                mock.patch.object(
+                    probe, "_campaign_card_identity",
+                    return_value={
+                        "sha256": "b" * 64,
+                        "model": "replacement-card",
+                        "transport": "usb",
+                    }), \
+                mock.patch.object(
+                    probe, "_holder_names",
+                    side_effect=AssertionError(
+                        "stale card must block before quiescence claim")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "campaign_card_identity expected='a{64}' "
+                    "observed='b{64}'.*replacement-card"):
+                probe._require_campaign_target_quiescent(target)
 
     def test_campaign_plan_source_trace_and_lower_evidence_fail_closed(self):
         target, source_sha, evidence, lower, inventory, diagnostics = (

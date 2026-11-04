@@ -2302,6 +2302,85 @@ def plan(device_arg, confirm_arg, review_path=None):
 
 
 
+def _optional_card_identity_text(path):
+    try:
+        value = Path(path).read_text().strip()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ProbeError(
+            f"card_identity_field expected=readable observed={_bounded_text(exc)}"
+        ) from exc
+    return value or None
+
+
+def _campaign_card_identity(device, parent_major_minor):
+    """Fingerprint stable parent-card properties without exposing serial values."""
+    if not isinstance(parent_major_minor, str) or not re.fullmatch(
+            r"[0-9]+:[0-9]+", parent_major_minor):
+        raise ProbeError(
+            f"card_parent_major_minor expected=number:number "
+            f"observed={parent_major_minor!r}")
+    try:
+        parent = Path(
+            f"/sys/dev/block/{parent_major_minor}").resolve(strict=True)
+        observed_parent = (parent / "dev").read_text().strip()
+        sectors_text = (parent / "size").read_text().strip()
+    except (OSError, RuntimeError) as exc:
+        raise ProbeError(
+            f"card_parent_topology expected=readable observed={_bounded_text(exc)}"
+        ) from exc
+    if observed_parent != parent_major_minor:
+        raise ProbeError(
+            f"card_parent_major_minor expected={parent_major_minor!r} "
+            f"observed={observed_parent!r}")
+    if re.fullmatch(
+            r"(?:dm-|loop|ram|zram|nullb|nbd|rbd|md|zd|vd|xvd).*",
+            parent.name):
+        raise ProbeError(
+            f"card_parent_device expected=physical observed={parent.name!r}")
+    try:
+        parent_sectors = int(sectors_text)
+    except ValueError as exc:
+        raise ProbeError(
+            f"card_parent_sectors expected=integer observed={sectors_text!r}"
+        ) from exc
+    if parent_sectors <= 0 or parent_sectors > MAX_BLOCK_COUNTER // 512:
+        raise ProbeError(
+            f"card_parent_sectors expected=1..uint64_max/512 "
+            f"observed={parent_sectors}")
+    model = _optional_card_identity_text(parent / "device/model")
+    serial = _optional_card_identity_text(parent / "device/serial")
+    wwid = _optional_card_identity_text(parent / "device/wwid")
+    transport = _run(
+        ["lsblk", "-dnro", "TRAN", device]).stdout.strip().lower()
+    if not model or not transport:
+        raise ProbeError(
+            "card_identity expected=nonempty_model_and_transport "
+            f"observed=model={model!r},transport={transport!r}")
+    canonical = {
+        "parent_major_minor": parent_major_minor,
+        "physical_disk": parent.name,
+        "model": model,
+        "transport": transport,
+        "parent_size_bytes": parent_sectors * 512,
+        "serial": serial,
+        "wwid": wwid,
+    }
+    digest = hashlib.sha256(json.dumps(
+        canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {
+        "sha256": digest,
+        "parent_major_minor": parent_major_minor,
+        "physical_disk": parent.name,
+        "model": model,
+        "transport": transport,
+        "parent_size_bytes": parent_sectors * 512,
+        "serial_present": serial is not None,
+        "wwid_present": wwid is not None,
+    }
+
+
 def _normalize_expected_partuuid(value):
     normalized = value.lower() if isinstance(value, str) else None
     if (
@@ -2315,8 +2394,19 @@ def _normalize_expected_partuuid(value):
 
 
 def _require_campaign_target_quiescent(target):
-    """Campaign arms require the admitted partition to be entirely inactive."""
+    """Campaign arms require an unchanged card and entirely inactive partition."""
     _verify_target_identity(target)
+    observed_card = _campaign_card_identity(
+        target["device"], target["parent_major_minor"])
+    expected_card_sha = target.get("card_identity_sha256")
+    if (not isinstance(expected_card_sha, str) or
+            not re.fullmatch(r"[0-9a-f]{64}", expected_card_sha) or
+            observed_card["sha256"] != expected_card_sha):
+        raise ProbeError(
+            f"campaign_card_identity expected={expected_card_sha!r} "
+            f"observed={observed_card['sha256']!r} "
+            f"model={observed_card['model']!r} "
+            f"transport={observed_card['transport']!r}")
     try:
         holders = _holder_names(target["major"], target["minor"])
     except OSError as exc:
@@ -2394,11 +2484,16 @@ def inspect_campaign_target(device_arg, confirm_arg, expected_partuuid):
     if blockdev_size != size_bytes:
         raise ProbeError(
             f"campaign_geometry expected={size_bytes} observed={blockdev_size}")
+    card_identity = _campaign_card_identity(device, parent_major_minor)
     target = {
         "device": device,
         "major": major,
         "minor": minor,
         "parent_major_minor": parent_major_minor,
+        "parent_model": card_identity["model"],
+        "parent_transport": card_identity["transport"],
+        "parent_size_bytes": card_identity["parent_size_bytes"],
+        "card_identity_sha256": card_identity["sha256"],
         "size_bytes": size_bytes,
         "partuuid": partuuid,
     }
@@ -2452,7 +2547,10 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
     print("CAMPAIGN_PREFLIGHT=READY_READ_ONLY "
           f"major_minor={target['major']}:{target['minor']} "
           f"parent_major_minor={target['parent_major_minor']} "
-          f"partuuid={target['partuuid']} bytes={target['size_bytes']}")
+          f"partuuid={target['partuuid']} bytes={target['size_bytes']} "
+          f"card_identity_sha256={target['card_identity_sha256']} "
+          f"parent_model={target['parent_model']!r} "
+          f"parent_transport={target['parent_transport']!r}")
     print(f"CAMPAIGN_SOURCE_SHA={source_sha}")
     print("CAMPAIGN_MODULE_MAPPER_GATE=READY module=absent "
           f"other_mapper_count={dm_inventory['other_mapper_count']} "
