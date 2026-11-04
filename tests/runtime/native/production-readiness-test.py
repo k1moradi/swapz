@@ -1719,6 +1719,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertLess(len(str(failure.exception)), 400)
         self.assertIn("(truncated)", str(failure.exception))
 
+        with mock.patch.object(
+                EVALUATOR, "_same_json_value",
+                side_effect=RecursionError("synthetic nesting")):
+            with self.assertRaisesRegex(
+                    EVALUATOR.EvidenceError, "nesting exceeds"):
+                EVALUATOR._bound_json_object(
+                    {}, b"{}\n", "synthetic nested evidence")
+
         report = owner_report()
         policy = acceptance_policy()
         report_raw = encoded(report)
