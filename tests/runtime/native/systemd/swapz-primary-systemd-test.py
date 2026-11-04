@@ -487,10 +487,17 @@ class BootVerifierTests(unittest.TestCase):
         self.etc = self.root / "etc"
         self.report = self.root / "var" / "lib" / "swapz" / "boot-acceptance"
         self.recovery = self.report.parent / "physical-recovery"
-        for directory in (self.sbin, self.libexec, self.bin, self.proc, self.sys, self.dev, self.etc, self.report, self.recovery):
+        self.package_sources = self.root / "usr" / "src"
+        self.package_transactions = self.root / "var" / "lib" / "swapz-package-transactions"
+        self.installed_module = self.root / "lib" / "modules" / "mock" / "dm-swapz.ko"
+        for directory in (self.sbin, self.libexec, self.bin, self.proc, self.sys,
+                          self.dev, self.etc, self.report, self.recovery,
+                          self.package_sources, self.package_transactions,
+                          self.installed_module.parent):
             directory.mkdir(parents=True, exist_ok=True)
         self.report.chmod(0o700)
         self.recovery.chmod(0o700)
+        self.package_transactions.chmod(0o700)
         (self.proc / "sys" / "kernel" / "random").mkdir(parents=True)
         # Model a readable running-kernel hibernation state with no resume
         # target configured. Individual tests override these files when they
@@ -510,6 +517,23 @@ class BootVerifierTests(unittest.TestCase):
             (self.dev / "disk" / "by-partuuid" / partuuid).touch()
         (self.dev / "disk" / "by-uuid" / "target-uuid").touch()
         (self.libexec / "dm-swapz.ko").write_bytes(b"mock-module")
+        self.installed_module.write_bytes(b"mock-module")
+        (self.libexec / "dm-swapz.ko").chmod(0o644)
+        self.installed_module.chmod(0o644)
+        package_source = self.package_sources / "swapz-3.0.0-alpha.1"
+        package_source.mkdir()
+        self.qualification_marker = package_source / ".swapz-qualification"
+        self.qualification_marker.write_text(
+            "schema=swapz-package-v1\n"
+            "version=3.0.0-alpha.1\n"
+            f"kernel_release={os.uname().release}\n"
+            f"source_sha={SOURCE_SHA}\n"
+            f"qualification_report_sha256={'c' * 64}\n"
+            f"swapzctl_sha256={'d' * 64}\n"
+            f"module_sha256={MODULE_SHA}\n"
+            f"oracle_sha256={'e' * 64}\n", encoding="ascii",
+        )
+        self.qualification_marker.chmod(0o644)
         shutil.copy2(BOOT_VERIFY, self.sbin / "swapz-primary-boot-verify")
         (self.sbin / "swapz-primary-boot-verify").chmod(0o755)
         shutil.copy2(RUNTIME_HEALTH, self.sbin / "swapz-primary-runtime-health")
@@ -554,6 +578,12 @@ class BootVerifierTests(unittest.TestCase):
                 "SWAPZ_PRIMARY_TEST_REPORT_BASE": str(self.report),
                 "SWAPZ_PRIMARY_TEST_RECOVERY_BASE": str(self.recovery),
                 "SWAPZ_PRIMARY_TEST_MODULE_ARTIFACT": str(self.libexec / "dm-swapz.ko"),
+                "SWAPZ_PRIMARY_TEST_INSTALLED_MODULE": str(self.installed_module),
+                "SWAPZ_PRIMARY_TEST_PACKAGE_SOURCES_ROOT": str(self.package_sources),
+                "SWAPZ_PRIMARY_TEST_PACKAGE_TRANSACTIONS": str(self.package_transactions),
+                "MOCK_MODULE_VERMAGIC": os.uname().release + " SMP",
+                "MOCK_INSTALLED_MODULE_SHA": MODULE_SHA,
+                "MOCK_PASSIVE_ENABLEMENT": "static",
                 "MOCK_PARTUUID": PARTUUID,
                 "MOCK_TARGET_BYTES": str(TARGET_BYTES),
                 "MOCK_MODULE_SHA": MODULE_SHA,
@@ -608,16 +638,31 @@ class BootVerifierTests(unittest.TestCase):
         )
         write_executable(
             self.bin / "sha256sum",
-            "#!/bin/sh\nprintf '%s  %s\\n' \"$MOCK_MODULE_SHA\" \"$2\"\n",
+            textwrap.dedent(
+                """\
+                #!/bin/sh
+                if [ "$2" = "$SWAPZ_PRIMARY_TEST_INSTALLED_MODULE" ]; then
+                    printf '%s  %s\\n' "$MOCK_INSTALLED_MODULE_SHA" "$2"
+                else
+                    printf '%s  %s\\n' "$MOCK_MODULE_SHA" "$2"
+                fi
+                """
+            ),
         )
         write_executable(
             self.bin / "modinfo",
             textwrap.dedent(
                 """\
                 #!/bin/sh
+                if [ "$1" = -n ]; then
+                    printf '%s\\n' "$SWAPZ_PRIMARY_TEST_INSTALLED_MODULE"
+                    exit 0
+                fi
+                [ "$1" = -F ] || exit 2
                 case "$2" in
                 swapz_build_source_sha) printf '%s\\n' "$MOCK_SOURCE_SHA" ;;
                 swapz_build_source_clean) printf '1\\n' ;;
+                vermagic) printf '%s\\n' "$MOCK_MODULE_VERMAGIC" ;;
                 *) exit 1 ;;
                 esac
                 """
@@ -641,6 +686,10 @@ class BootVerifierTests(unittest.TestCase):
             textwrap.dedent(
                 r"""\
                 #!/bin/sh
+                if [ "$1" = is-enabled ]; then
+                    printf '%s\n' "$MOCK_PASSIVE_ENABLEMENT"
+                    exit 0
+                fi
                 if [ "$1" = list-units ]; then
                     printf 'dev-mapper-swapz\\x2dprimary.swap loaded %s %s Primary swap\n' "${MOCK_SWAP_ACTIVE:-active}" "${MOCK_SWAP_SUB:-active}"
                     if [ -n "${MOCK_RAW_UNIT_WHAT:-}" ] || [ "${MOCK_RAW_UNIT_PRESENT:-0}" = 1 ]; then
@@ -748,6 +797,9 @@ class BootVerifierTests(unittest.TestCase):
         self.write_boot_id(BOOT_B)
         self.write_proc_swaps(active=True)
         self.write_active_transaction()
+        # The mapper ExecStartPre always runs preflight before native start.
+        preflight = self.run_verifier("preflight")
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
 
     def write_active_transaction(self) -> None:
         (self.recovery / "primary-state.json").write_text(
@@ -1358,6 +1410,159 @@ class BootVerifierTests(unittest.TestCase):
         self.assertFalse(activation_token.exists())
 
 
+    def assert_activation_revoked(self) -> None:
+        """No failed admission or observation may retain execution authority."""
+        self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
+
+    def test_rearming_failure_revokes_previous_arm_and_runtime_token(self) -> None:
+        self.arm_then_reboot()
+        self.assertTrue((self.report / "runtime" / "primary-execution.env").exists())
+        env = self.env.copy()
+        env["MOCK_PLAN_STATUS"] = "1"
+        rejected = self.run_verifier("arm", env=env)
+        self.assertEqual(rejected.returncode, 1, rejected.stderr)
+        self.assertIn("COLD_BOOT_HARNESS=BLOCKED", rejected.stderr)
+        self.assertIn("cannot query read-only recovery storage plan", rejected.stderr)
+        self.assertFalse((self.report / "armed.env").exists())
+        self.assert_activation_revoked()
+        # A staged arm record from an interrupted write has no authority.
+        (self.report / ".armed.env.interrupted").write_text(
+            "schema=swapz-primary-boot-arm-v1\n", encoding="ascii")
+        unarmed = self.run_verifier("preflight")
+        self.assertEqual(unarmed.returncode, 1, unarmed.stderr)
+        self.assertIn("cold-boot harness is not securely armed", unarmed.stderr)
+        self.assert_activation_revoked()
+
+    def test_recovery_storage_unavailable_blocks_without_fallback(self) -> None:
+        self.arm_then_reboot()
+        self.recovery.rename(self.root / "disconnected-recovery")
+        blocked = self.run_verifier("preflight")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
+        self.assertIn("primary recovery directory is unavailable", blocked.stderr)
+        self.assert_activation_revoked()
+        self.assertFalse((self.dev / "disk" / "by-partuuid" / OTHER_PARTUUID).is_symlink())
+
+    def test_incomplete_package_journal_blocks_preflight_and_acceptance(self) -> None:
+        self.arm_then_reboot()
+        retained = self.package_transactions / "swapz-package.interrupted"
+        retained.mkdir(mode=0o700)
+        blocked = self.run_verifier("preflight")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
+        self.assertIn("incomplete package transaction", blocked.stderr)
+        self.assert_activation_revoked()
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("incomplete_package_transaction",
+                      (self.report / "latest.env").read_text())
+        self.assert_activation_revoked()
+
+    def test_module_qualification_and_running_kernel_are_independent_of_arm(self) -> None:
+        for env_override, reason in (
+            ({"MOCK_INSTALLED_MODULE_SHA": "f" * 64},
+             "installed_module_hash_mismatch"),
+            ({"MOCK_MODULE_VERMAGIC": "unqualified-kernel SMP"},
+             "running kernel is unqualified"),
+        ):
+            with self.subTest(reason=reason):
+                env = self.env.copy()
+                env.update(env_override)
+                self.write_proc_swaps(active=False)
+                rejected = self.run_verifier("arm", env=env)
+                self.assertEqual(rejected.returncode, 1, rejected.stderr)
+                self.assertIn("COLD_BOOT_HARNESS=BLOCKED", rejected.stderr)
+                self.assertIn(reason, rejected.stderr)
+                self.assert_activation_revoked()
+
+        # The root-owned marker must bind both source and kernel qualification.
+        marker = self.qualification_marker.read_text(encoding="ascii")
+        self.qualification_marker.write_text(
+            marker.replace(f"source_sha={SOURCE_SHA}", "source_sha=" + "f" * 40),
+            encoding="ascii",
+        )
+        self.write_proc_swaps(active=False)
+        rejected = self.run_verifier("arm")
+        self.assertEqual(rejected.returncode, 1, rejected.stderr)
+        self.assertIn("qualified_package_marker_missing_or_invalid", rejected.stderr)
+        self.assert_activation_revoked()
+
+    def test_passive_mapper_swap_accidentally_enabled_blocks_all_admission(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_PASSIVE_ENABLEMENT"] = "enabled"
+        blocked = self.run_verifier("preflight", env=env)
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("passive mapper .swap is enabled", blocked.stderr)
+        self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
+        self.assert_activation_revoked()
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("passive_swap_unit_enabled_or_uninspectable",
+                      (self.report / "latest.env").read_text())
+        self.assert_activation_revoked()
+
+    def test_changed_selector_and_missing_media_never_pick_another_card(self) -> None:
+        for scenario in ("selected_card_removed", "wrong_partuuid"):
+            with self.subTest(scenario=scenario):
+                self.write_boot_id(BOOT_A)
+                self.arm_then_reboot()
+                env = self.env.copy()
+                if scenario == "selected_card_removed":
+                    (self.dev / "disk" / "by-partuuid" / PARTUUID).unlink()
+                    expected = "selected PARTUUID device is unavailable after reboot"
+                else:
+                    env["MOCK_PARTUUID"] = OTHER_PARTUUID
+                    expected = "selected PARTUUID changed after arming"
+                blocked = self.run_verifier("preflight", env=env)
+                self.assertEqual(blocked.returncode, 1, blocked.stderr)
+                self.assertIn(expected, blocked.stderr)
+                self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
+                self.assert_activation_revoked()
+                # Restore the same exact card fixture for the next subcase.
+                if scenario == "selected_card_removed":
+                    (self.dev / "disk" / "by-partuuid" / PARTUUID).touch()
+
+    def test_forged_post_boot_pass_is_not_start_authorization(self) -> None:
+        self.arm_then_reboot()
+        self.assertTrue((self.report / "runtime" / "primary-execution.env").exists())
+        (self.report / "runtime" / "primary-execution.env").unlink()
+        # An attacker-controlled old report may say PASS but is never read as
+        # an input to preflight or observation.
+        (self.report / "latest.env").write_text(
+            f"status=PASS\ncold_boot_observed=yes\nboot_id={BOOT_B}\n",
+            encoding="ascii",
+        )
+        (self.report / "latest.env").chmod(0o600)
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("COLD_BOOT_OBSERVATION=FAIL", observed.stderr)
+        self.assertIn("runtime_preflight_authorization_missing_or_invalid",
+                      (self.report / "latest.env").read_text())
+        self.assert_activation_revoked()
+
+    def test_stale_mapper_geometry_uuid_and_missing_health_telemetry_deny_pass(self) -> None:
+        scenarios = (
+            ({"MOCK_DM_UUID": "SWAPZ-PRIMARY-" + "f" * 32},
+             1, "mapper_uuid_not_bound_to_active_run"),
+            ({"MOCK_DM_TABLE": "0 216641536 swapz 8:9 0 64 0 2 0 1 0 0"},
+             1, "mapper_backing_identity_mismatch"),
+            ({"MOCK_DM_STATUS_OVERRIDE_SET": "1",
+              "MOCK_DM_STATUS_OVERRIDE": ""},
+             2, "mapper_status_unavailable"),
+        )
+        for override, returncode, reason in scenarios:
+            with self.subTest(reason=reason):
+                self.write_boot_id(BOOT_A)
+                self.arm_then_reboot()
+                env = self.env.copy()
+                env.update(override)
+                observed = self.run_verifier("observe", env=env)
+                self.assertEqual(observed.returncode, returncode, observed.stderr)
+                self.assertIn(reason, (self.report / "latest.env").read_text())
+                self.assert_activation_revoked()
+
+
 class RuntimeHealthTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="swapz-runtime-health-")
@@ -1465,6 +1670,10 @@ class RuntimeHealthTests(unittest.TestCase):
             textwrap.dedent(
                 r"""\
                 #!/bin/sh
+                if [ "$1" = is-enabled ]; then
+                    printf '%s\n' "${MOCK_PASSIVE_ENABLEMENT:-static}"
+                    exit 0
+                fi
                 property=
                 for argument in "$@"; do
                     case "$argument" in --property=*) property=${argument#--property=} ;; esac
@@ -1530,6 +1739,31 @@ class RuntimeHealthTests(unittest.TestCase):
             env=env or self.env,
             timeout=timeout,
         )
+
+
+    def test_enabled_passive_unit_is_failure_even_if_monitor_runs(self) -> None:
+        env = self.env.copy()
+        env["MOCK_PASSIVE_ENABLEMENT"] = "enabled"
+        once = self.run_helper("once", env)
+        self.assertEqual(once.returncode, 1, once.stderr)
+        self.assertIn("passive_swap_unit_enabled", once.stderr)
+        monitor = self.run_helper("monitor", env)
+        self.assertEqual(monitor.returncode, 0, monitor.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", monitor.stderr)
+
+    def test_failed_normal_swapoff_is_observed_without_a_retry(self) -> None:
+        # A failed manager stop can leave /proc/swaps and the mapper alive;
+        # no helper may invoke physical swapoff or synthesize a recovery.
+        observed = self.run_helper("stop-observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_STOP=FAIL", observed.stderr)
+        self.assertIn("reason=swap_or_mapper_still_present", observed.stderr)
+        self.assertIn("action=inspect_failed_primary_stop_no_retry", observed.stderr)
+        self.assertIn("mapper_present=1", observed.stderr)
+        self.assertIn("active_swap=1", observed.stderr)
+        helper = read_text(RUNTIME_HEALTH)
+        self.assertNotRegex(helper, r"(^|[^A-Za-z])swapoff([^A-Za-z]|$)")
+        self.assertNotIn("dmsetup remove", helper)
 
     def test_healthy_snapshot_reports_capacity_and_identity(self) -> None:
         result = self.run_helper("once")

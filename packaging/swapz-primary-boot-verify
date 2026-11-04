@@ -26,6 +26,8 @@ sys_root=/sys
 dev_root=/dev
 report_base=/var/lib/swapz/boot-acceptance
 expected_uid=0
+package_sources_root=/usr/src
+package_transaction_parent=/var/lib/swapz-package-transactions
 
 # Isolated rootless regression fixtures override only observation roots and the
 # installed module path. Production systemd units never set this marker.
@@ -36,6 +38,8 @@ if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 	report_base=${SWAPZ_PRIMARY_TEST_REPORT_BASE:?missing test report base}
 	module_artifact=${SWAPZ_PRIMARY_TEST_MODULE_ARTIFACT:?missing test module artifact}
 	expected_uid=$(id -u)
+	package_sources_root=${SWAPZ_PRIMARY_TEST_PACKAGE_SOURCES_ROOT:?missing test package source root}
+	package_transaction_parent=${SWAPZ_PRIMARY_TEST_PACKAGE_TRANSACTIONS:?missing test package transaction root}
 fi
 
 recovery_base=/var/lib/swapz/physical-recovery
@@ -54,7 +58,13 @@ incomplete_reasons=
 
 fail()
 {
-	echo "swapz-primary-boot-verify: $*" >&2
+	# Admission failure is BLOCKED; a failed persistent observation is FAIL.
+	case "$mode" in
+	arm) phase=COLD_BOOT_HARNESS; verdict=BLOCKED ;;
+	preflight) phase=PRIMARY_BOOT_PREFLIGHT; verdict=BLOCKED ;;
+	*) phase=COLD_BOOT_OBSERVATION; verdict=FAIL ;;
+	esac
+	printf 'swapz-primary-boot-verify: %s=%s reason=%s\n' "$phase" "$verdict" "$*" >&2
 	exit 1
 }
 
@@ -343,11 +353,19 @@ target_identity()
 
 module_artifact_metadata()
 {
+	module_artifact_issue=installed_module_unavailable
 	[ -f "$module_artifact" ] && [ ! -L "$module_artifact" ] || return 1
 	module_sha256=$(sha256sum -- "$module_artifact" 2>/dev/null | awk '{print $1}') || return 1
 	printf '%s\n' "$module_sha256" | grep -Eq '^[0-9a-f]{64}$' || return 1
 	module_source_sha=$(modinfo -F swapz_build_source_sha "$module_artifact" 2>/dev/null) || return 1
 	module_source_clean=$(modinfo -F swapz_build_source_clean "$module_artifact" 2>/dev/null) || return 1
+	module_vermagic=$(modinfo -F vermagic "$module_artifact" 2>/dev/null) || return 1
+	module_kernel_release=${module_vermagic%% *}
+	installed_kernel_release=$(uname -r 2>/dev/null) || return 1
+	[ "$module_kernel_release" = "$installed_kernel_release" ] || {
+		module_artifact_issue=installed_module_unqualified_for_running_kernel
+		return 1
+	}
 	case "$module_source_sha" in *'
 '*|'') return 1 ;; esac
 	case "$module_source_clean" in *'
@@ -355,6 +373,109 @@ module_artifact_metadata()
 	printf '%s\n' "$module_source_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
 	[ "$module_source_clean" = 1 ] || return 1
 	return 0
+}
+
+# An arm record is not package authentication. Recheck independent package
+# qualification and the exact module installed for the running kernel.
+qualified_installed_package()
+{
+	qualification_issue=installed_module_missing_or_unsafe
+	installed_image=/lib/modules/$installed_kernel_release/updates/dkms/dm-swapz.ko
+	if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
+		installed_image=$SWAPZ_PRIMARY_TEST_INSTALLED_MODULE
+	fi
+	for candidate in "$module_artifact" "$installed_image"; do
+		[ -f "$candidate" ] && [ ! -L "$candidate" ] || return 1
+		[ "$(stat -c '%u' -- "$candidate")" = "$expected_uid" ] &&
+			[ "$(stat -c '%a' -- "$candidate")" = 644 ] &&
+			[ "$(stat -c '%h' -- "$candidate")" = 1 ] || return 1
+	done
+	installed_image_sha=$(sha256sum -- "$installed_image" 2>/dev/null | awk '{print $1}') || return 1
+	[ "$installed_image_sha" = "$module_sha256" ] || {
+		qualification_issue=installed_module_hash_mismatch
+		return 1
+	}
+	qualification_issue=module_resolution_not_installed_image
+	resolved_image=$(modinfo -n dm_swapz 2>/dev/null) || return 1
+	[ "$(readlink -f -- "$resolved_image" 2>/dev/null)" = \
+		"$(readlink -f -- "$installed_image" 2>/dev/null)" ] || return 1
+
+	qualification_issue=qualified_package_marker_missing_or_invalid
+	qualified_count=0
+	for marker in "$package_sources_root"/swapz-*/.swapz-qualification; do
+		[ -e "$marker" ] || [ -L "$marker" ] || continue
+		[ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+		[ "$(stat -c '%u' -- "$marker")" = "$expected_uid" ] &&
+			[ "$(stat -c '%a' -- "$marker")" = 644 ] &&
+			[ "$(stat -c '%h' -- "$marker")" = 1 ] &&
+			[ "$(stat -c '%s' -- "$marker")" -le 1024 ] || return 1
+		if LC_ALL=C awk -v kernel="$installed_kernel_release" \
+			-v source="$module_source_sha" -v digest="$module_sha256" '
+			NR > 8 || /[^[:print:]]/ { invalid=1 }
+			NR == 1 && $0 != "schema=swapz-package-v1" { invalid=1 }
+			NR == 2 && $0 !~ /^version=3[.]0[.]0-alpha[.][0-9]+$/ { invalid=1 }
+			NR == 3 && $0 != "kernel_release=" kernel { invalid=1 }
+			NR == 4 && $0 != "source_sha=" source { invalid=1 }
+			NR == 5 && $0 !~ /^qualification_report_sha256=[0-9a-f]{64}$/ { invalid=1 }
+			NR == 6 && $0 !~ /^swapzctl_sha256=[0-9a-f]{64}$/ { invalid=1 }
+			NR == 7 && $0 != "module_sha256=" digest { invalid=1 }
+			NR == 8 && $0 !~ /^oracle_sha256=[0-9a-f]{64}$/ { invalid=1 }
+			END { if (invalid || NR != 8) exit 1 }
+		' "$marker"; then
+			qualified_count=$((qualified_count + 1))
+		fi
+	done
+	[ "$qualified_count" -eq 1 ]
+}
+
+package_transaction_guard()
+{
+	# Retained installation/uninstallation journals require explicit rollback.
+	[ ! -L "$package_transaction_parent" ] ||
+		fail "unsafe package transaction directory; repair package ownership"
+	if [ -e "$package_transaction_parent" ]; then
+		[ -d "$package_transaction_parent" ] &&
+			[ "$(stat -c '%u' -- "$package_transaction_parent")" = "$expected_uid" ] &&
+			[ "$(stat -c '%a' -- "$package_transaction_parent")" = 700 ] ||
+			fail "unsafe package transaction directory; require owned mode 0700"
+	fi
+	for transaction in "$package_transaction_parent"/swapz-package.* \
+		"$package_transaction_parent"/swapz-uninstall.*; do
+		[ ! -e "$transaction" ] && [ ! -L "$transaction" ] ||
+			fail "incomplete package transaction at $transaction; finish package rollback before arming"
+	done
+}
+
+passive_swap_unit_guard()
+{
+	# The passive unit may reflect active swap but must never activate it.
+	enablement=$(systemctl is-enabled "$mapper_swap_unit" 2>/dev/null) || :
+	case "$enablement" in
+	static|disabled) return 0 ;;
+	enabled|enabled-runtime|linked|linked-runtime|alias)
+		echo "swapz-primary-boot-verify: passive mapper .swap is enabled ($enablement); disable its activation job" >&2
+		return 1
+		;;
+	*)
+		echo "swapz-primary-boot-verify: passive mapper .swap enablement is untrusted (state=$enablement)" >&2
+		return 1
+		;;
+	esac
+}
+
+valid_runtime_preflight_authorization()
+{
+	# Report files are observations, not authority. Require the preflight
+	# token consumed by swapzctl, bound to this boot and current target.
+	[ -f "$runtime_enable_file" ] && [ ! -L "$runtime_enable_file" ] || return 1
+	[ "$(stat -c '%u' -- "$runtime_enable_file")" = "$expected_uid" ] &&
+		[ "$(stat -c '%a' -- "$runtime_enable_file")" = 600 ] &&
+		[ "$(stat -c '%h' -- "$runtime_enable_file")" = 1 ] &&
+		[ "$(stat -c '%s' -- "$runtime_enable_file")" -le 512 ] || return 1
+	[ "$(cat -- "$runtime_enable_file")" = "$(printf \
+		'schema=swapz-primary-execution-v2\nboot_id=%s\nsource_sha=%s\npartuuid=%s\ntarget_device=%s\ntarget_size_bytes=%s' \
+		"$boot_id" "$expected_source_sha" "$selected_partuuid" \
+		"$target_major_minor" "$target_size_bytes")" ]
 }
 
 path_major_minor()
@@ -537,16 +658,15 @@ verify_persistent_report_storage()
 	# belongs to a different physical disk from the selected SD card. Keep the
 	# boot evidence on that *same filesystem* rather than trusting a pathname
 	# that might itself be a mount over the disposable card or a tmpfs.
-	if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" != 1 ]; then
-		[ -d "$recovery_base" ] && [ ! -L "$recovery_base" ] ||
-			fail "primary recovery directory is unavailable or symlinked"
-		report_filesystem=$(stat -c '%d' -- "$report_base") ||
-			fail "cannot identify report filesystem"
-		recovery_filesystem=$(stat -c '%d' -- "$recovery_base") ||
-			fail "cannot identify recovery filesystem"
-		[ "$report_filesystem" = "$recovery_filesystem" ] ||
-			fail "boot evidence is not on the qualified recovery filesystem"
-	fi
+	# Rootless fixtures also prove directory availability and filesystem identity.
+	[ -d "$recovery_base" ] && [ ! -L "$recovery_base" ] ||
+		fail "primary recovery directory is unavailable or symlinked; restore qualified recovery storage"
+	report_filesystem=$(stat -c '%d' -- "$report_base") ||
+		fail "cannot identify report filesystem"
+	recovery_filesystem=$(stat -c '%d' -- "$recovery_base") ||
+		fail "cannot identify recovery filesystem"
+	[ "$report_filesystem" = "$recovery_filesystem" ] ||
+		fail "boot evidence is not on the qualified recovery filesystem"
 
 	# primary plan is deliberately a read-only BLOCKED report today, so its
 	# documented success path exits 2 after emitting complete JSON. Accept
@@ -567,7 +687,15 @@ verify_persistent_report_storage()
 arm_harness()
 {
 	secure_report_directory
-	for command_name in grep sed awk stat sync lsblk blockdev sha256sum modinfo findmnt systemctl uname date; do
+	# Invalidate old arming and volatile authority before any interruptible
+	# readiness probes, so a failed re-arm cannot reuse earlier evidence.
+	clear_runtime_authorization
+	if [ -e "$arm_file" ] || [ -L "$arm_file" ]; then
+		validate_arm_file || fail "existing arm record is unsafe; inspect and remove it manually"
+		rm -f -- "$arm_file" || fail "cannot revoke previous arm record"
+		sync -f "$report_base"
+	fi
+	for command_name in grep sed awk stat sync lsblk blockdev sha256sum modinfo findmnt systemctl uname date readlink; do
 		require_command "$command_name"
 	done
 	[ -x "$swapzctl" ] || fail "installed swapzctl is unavailable"
@@ -579,12 +707,17 @@ arm_harness()
 	# A removable reader's model alone does not identify the selected parent.
 	[ "$target_serial" != unavailable ] || [ "$target_wwn" != unavailable ] || \
 		fail "selected target parent has neither a stable serial nor WWN"
+	package_transaction_guard
 	verify_persistent_report_storage
 	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
+	passive_swap_unit_guard || fail "passive mapper .swap must remain disabled"
 	hibernation_resume_guard || fail "unsupported hibernation/resume configuration selects swapz"
-	module_artifact_metadata || fail "installed module provenance is unavailable or unqualified"
+	module_artifact_metadata || fail "installed module provenance is unavailable or running kernel is unqualified"
+	qualified_installed_package || fail "installed package qualification cannot be authenticated: $qualification_issue"
 
 	temporary=$(mktemp "$report_base/.armed.env.XXXXXX") || fail "cannot create arm record"
+	# An interrupted write cannot retain the old arm or a stray temporary.
+	trap 'rm -f -- "$temporary"' EXIT HUP INT TERM
 	cat > "$temporary" <<ARM
 schema=swapz-primary-boot-arm-v1
 arm_boot_id=$boot_id
@@ -602,6 +735,7 @@ expected_module_source_sha=$module_source_sha
 expected_module_source_clean=$module_source_clean
 ARM
 	commit_file "$temporary" "$arm_file"
+	trap - EXIT HUP INT TERM
 	printf 'COLD_BOOT_HARNESS=ARMED arm_boot_id=%s partuuid=%s module_source=%s COLD_BOOT_OBSERVED=NO\n' \
 		"$boot_id" "$selected_partuuid" "$module_source_sha"
 }
@@ -612,7 +746,7 @@ preflight_boot()
 	# Any failed or repeated preflight must remove an earlier authorization
 	# before evaluating current boot/source/target facts.
 	clear_runtime_authorization
-	for command_name in grep sed awk stat sync lsblk blockdev sha256sum modinfo findmnt systemctl uname; do
+	for command_name in grep sed awk stat sync lsblk blockdev sha256sum modinfo findmnt systemctl uname readlink; do
 		require_command "$command_name"
 	done
 	[ -x "$swapzctl" ] || fail "installed swapzctl is unavailable"
@@ -650,13 +784,16 @@ preflight_boot()
 	[ "$target_wwn" = "$expected_wwn" ] || fail "selected target WWN changed after arming"
 	[ "$target_transport" = "$expected_transport" ] || fail "selected target transport changed after arming"
 	[ "$target_removable" = "$expected_removable" ] || fail "selected target removable marker changed after arming"
+	package_transaction_guard
 	verify_persistent_report_storage
 	raw_swap_alias_guard || fail "selected partition has a raw-swap alias conflict or alias inventory is unavailable"
+	passive_swap_unit_guard || fail "passive mapper .swap must remain disabled"
 	hibernation_resume_guard || fail "unsupported hibernation/resume configuration selects swapz"
-	module_artifact_metadata || fail "installed module provenance cannot be verified after reboot"
+	module_artifact_metadata || fail "installed module provenance cannot be verified for the running kernel after reboot"
 	[ "$module_sha256" = "$expected_module_sha" ] || fail "installed module bytes changed after arming"
 	[ "$module_source_sha" = "$expected_source_sha" ] || fail "installed module source changed after arming"
 	[ "$module_source_clean" = "$expected_source_clean" ] || fail "installed module clean marker changed after arming"
+	qualified_installed_package || fail "installed package qualification cannot be authenticated after reboot: $qualification_issue"
 	commit_runtime_authorization \
 		"$boot_id" "$expected_source_sha" "$selected_partuuid" \
 		"$target_size_bytes" "$target_major_minor"
@@ -801,9 +938,15 @@ observe_boot()
 	target_wwn=unavailable
 	target_transport=unavailable
 	target_removable=unavailable
-	if [ -x "$swapzctl" ] && manager_target_identity && target_identity; then
+	selected_identity_valid=0
+	if [ -x "$swapzctl" ] && manager_target_identity; then
 		if [ "$observation_expected" -eq 1 ]; then
 			[ "$selected_partuuid" = "$expected_partuuid" ] || append_failure selected_partuuid_mismatch
+		fi
+		target_identity && selected_identity_valid=1
+	fi
+	if [ "$selected_identity_valid" -eq 1 ]; then
+		if [ "$observation_expected" -eq 1 ]; then
 			[ "$target_size_bytes" = "$expected_target_size" ] || append_failure selected_target_size_mismatch
 			[ "$expected_target_serial" != unavailable ] || [ "$expected_target_wwn" != unavailable ] || append_failure armed_parent_identity_unavailable
 			[ "$expected_target_removable" = 1 ] && [ "$target_removable" = 1 ] || append_failure selected_target_not_removable
@@ -821,6 +964,40 @@ observe_boot()
 		else
 			append_incomplete selected_target_unavailable
 		fi
+	fi
+
+	if [ "$observation_expected" -eq 1 ]; then
+		# Missing recovery storage is not an invitation to select a new disk.
+		if [ ! -d "$recovery_base" ] || [ -L "$recovery_base" ]; then
+			append_failure recovery_storage_unavailable
+		elif [ "$(stat -c '%d' -- "$recovery_base" 2>/dev/null)" != \
+		       "$(stat -c '%d' -- "$report_base" 2>/dev/null)" ]; then
+			append_failure recovery_filesystem_mismatch
+		fi
+		# Do not mistake a forged post-boot report for an authorized start.
+		if ! valid_runtime_preflight_authorization; then
+			append_failure runtime_preflight_authorization_missing_or_invalid
+		fi
+		if ! passive_swap_unit_guard; then
+			append_failure passive_swap_unit_enabled_or_uninspectable
+		fi
+		# Package rollback journals also exclude a cold-boot acceptance.
+		# This call emits an explicit FAIL diagnostic if admission was unsafe.
+		if [ -L "$package_transaction_parent" ]; then
+			append_failure package_transaction_directory_unsafe
+		elif [ -e "$package_transaction_parent" ]; then
+			if [ ! -d "$package_transaction_parent" ] ||
+			   [ "$(stat -c '%u:%a' -- "$package_transaction_parent" 2>/dev/null)" != "$expected_uid:700" ]; then
+				append_failure package_transaction_directory_unsafe
+			fi
+		fi
+		for transaction in "$package_transaction_parent"/swapz-package.* \
+			"$package_transaction_parent"/swapz-uninstall.*; do
+			if [ -e "$transaction" ] || [ -L "$transaction" ]; then
+				append_failure incomplete_package_transaction
+				break
+			fi
+		done
 	fi
 
 	if [ ! -x "$runtime_health" ]; then
@@ -853,12 +1030,13 @@ observe_boot()
 	module_source_clean=unavailable
 	if module_artifact_metadata 2>/dev/null; then
 		if [ "$observation_expected" -eq 1 ]; then
+			qualified_installed_package || append_failure "$qualification_issue"
 			[ "$module_sha256" = "$expected_module_sha" ] || append_failure installed_module_hash_mismatch
 			[ "$module_source_sha" = "$expected_source_sha" ] || append_failure installed_module_source_mismatch
 			[ "$expected_source_clean" = 1 ] && [ "$module_source_clean" = "$expected_source_clean" ] || append_failure installed_module_clean_provenance_mismatch
 		fi
 	else
-		if [ "$observation_expected" -eq 1 ]; then append_failure installed_module_unavailable; else append_incomplete installed_module_unavailable; fi
+		if [ "$observation_expected" -eq 1 ]; then append_failure "$module_artifact_issue"; else append_incomplete "$module_artifact_issue"; fi
 	fi
 
 	loaded_module_source_sha=unavailable
@@ -1163,8 +1341,10 @@ SWAPS
 		rm -f -- "$journal_raw"
 		fail "cannot create kernel-error temporary"
 	}
-	if valid_boot_id "$boot_id" 2>/dev/null && command -v journalctl >/dev/null 2>&1 && \
-	   journalctl --boot "$boot_id" --kernel --priority=err..alert --no-pager --output=short-monotonic \
+	if valid_boot_id "$boot_id" 2>/dev/null && command -v journalctl >/dev/null 2>&1 &&
+	   command -v timeout >/dev/null 2>&1 && \
+	   timeout --signal=TERM --kill-after=1s 5s journalctl --boot "$boot_id" --kernel \
+		--priority=err..alert --lines=256 --no-pager --output=short-monotonic \
 		>"$journal_raw" 2>/dev/null; then
 		grep -Ei 'swapz|device-mapper|dm-[0-9]+|I/O error|blk_update_request|Buffer I/O' \
 			"$journal_raw" > "$journal_filtered" || :
@@ -1261,6 +1441,8 @@ REPORT
 	commit_file "$latest_temporary" "$report_base/latest.env"
 	if [ "$status" != PASS ]; then
 		clear_runtime_authorization
+		printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=%s failure_reasons=%s incomplete_reasons=%s action=inspect_cold_boot_report_before_rearming\n' \
+			"$status" "${failure_reasons:-none}" "${incomplete_reasons:-none}" >&2
 	fi
 	printf 'COLD_BOOT_OBSERVATION=%s boot_id=%s armed_boot_id=%s report=%s\n' \
 		"$status" "$boot_id" "$armed_boot_id" "$report"
