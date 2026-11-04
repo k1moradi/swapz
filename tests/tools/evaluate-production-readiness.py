@@ -548,6 +548,9 @@ def validate_physical_campaign_evidence(
                 RAM_TRACE_VALIDATOR["validate_metadata_ram_arm_binding"](
                     capacity_and_ram.get("metadata_ram_trace"),
                     capacity_and_ram.get("metadata_ram_arm_binding"))
+                RAM_TRACE_VALIDATOR["validate_metadata_ram_host_binding"](
+                    capacity_and_ram.get("metadata_ram_trace"),
+                    capacity_and_ram.get("metadata_ram_host_binding"))
             except ValueError as exc:
                 reject(f"sealed campaign RAM trace is invalid: {exc}")
 
