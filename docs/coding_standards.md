@@ -2296,9 +2296,14 @@ RAW validation; zero is an invalid-input sentinel, not cost-free live authority.
 Native GC cost oracles must keep the prior authoritative mapping, generation,
 per-segment mapped count, live-byte/I/O/min-block costs and committed-block
 count unchanged after failed or short lower writes, even when a failed lower
-callback reports completed physical blocks. These attempts quarantine reserved
-blocks but cannot earn durable relocation savings. A necessary headroom
-preflight is never evidence that a subsequent reserve rotation succeeded.
+callback reports completed physical blocks. At least one compressed short-write
+oracle must stage a multi-block extent and report a nonzero strict completion
+prefix; zero completed blocks alone is not incomplete-prefix coverage. Failed
+or short reservations must remain absent from liveness/extent-class sidecars,
+and the allocator cursor must stay beyond every quarantined block. RAW uses one
+block, so its uncertainty oracle pairs a completed block with an error. These
+attempts cannot earn durable relocation savings. A necessary headroom preflight
+is never evidence that a subsequent reserve rotation succeeded.
 
 
 ### Physical placement and reclaim evidence

@@ -18,6 +18,7 @@ static struct swapz_map maps[32];
 static swapz_u16 live[1024];
 static swapz_u8 classes[1024];
 static swapz_u8 bytes[4096];
+static swapz_u8 failed_extent[2U * SWAPZ_BLOCK_BYTES];
 static swapz_u8 p0[2200], p1[1600];
 static swapz_u8 segment_roles[4];
 static swapz_u32 segment_maps[4];
@@ -246,10 +247,31 @@ static struct gc_cost_snapshot gc_cost_capture(swapz_u32 logical)
 
 static int gc_cost_check_rejected_write(
 	const char *phase, swapz_u32 logical, swapz_u32 attempted_block,
-	const struct gc_cost_snapshot *expected, int actual_error)
+	swapz_u8 attempted_blocks, const struct gc_cost_snapshot *expected,
+	int actual_error)
 {
 	const swapz_u32 segment = expected->authoritative_map.start_block /
 				 SWAPZ_SEGMENT_BLOCKS;
+	swapz_u32 expected_abandoned_blocks = expected->abandoned_blocks;
+	swapz_u8 block_offset;
+	int reservation_unpublished = 1;
+
+	if (!attempted_blocks || attempted_block >= a.physical_blocks ||
+	    attempted_blocks > a.physical_blocks - attempted_block ||
+	    expected_abandoned_blocks > ~(swapz_u32)0 - attempted_blocks) {
+		reservation_unpublished = 0;
+	} else {
+		expected_abandoned_blocks += attempted_blocks;
+		for (block_offset = 0; block_offset < attempted_blocks;
+		     ++block_offset) {
+			const swapz_u32 block = attempted_block + block_offset;
+
+			if (a.live_records[block] || a.extent_classes[block]) {
+				reservation_unpublished = 0;
+				break;
+			}
+		}
+	}
 
 	if (actual_error == -EIO && !a.in_flight &&
 	    !memcmp(&maps[logical], &expected->authoritative_map,
@@ -259,15 +281,17 @@ static int gc_cost_check_rejected_write(
 	    segment_io[segment] == expected->io_cost &&
 	    segment_min_blocks[segment] == expected->min_blocks &&
 	    a.committed_blocks == expected->committed_blocks &&
-	    a.abandoned_blocks == expected->abandoned_blocks + 1U)
+	    reservation_unpublished &&
+	    a.abandoned_blocks == expected_abandoned_blocks &&
+	    a.next_block == attempted_block + attempted_blocks)
 		return 0;
 
 	fprintf(stderr,
-		"GC_COST_FAIL phase=%s logical=%u physical=%u "
+		"GC_COST_FAIL phase=%s logical=%u physical=%u blocks=%u "
 		"expected_authority=previous_mapping expected_block=%u "
 		"expected_generation=%u actual_generation=%u "
 		"expected_errno=%d actual_errno=%d\n",
-		phase, logical, attempted_block,
+		phase, logical, attempted_block, (unsigned int)attempted_blocks,
 		expected->authoritative_map.start_block,
 		expected->authoritative_map.generation,
 		maps[logical].generation, -EIO, actual_error);
@@ -315,8 +339,23 @@ static int test_failed_lower_writes_preserve_committed_costs(void)
 		actual_error = swapz_finish(&a, &tx, bytes, sizeof(bytes),
 					    completed, lower_error);
 		CHECK(!gc_cost_check_rejected_write(
-			phase, logical, tx.start_block, &expected, actual_error));
+			phase, logical, tx.start_block, tx.extent_blocks,
+			&expected, actual_error));
 	}
+
+	/*
+	 * A one-block short write can only report zero completed blocks. Exercise
+	 * a nonzero strict prefix of a multi-block compressed reservation so
+	 * incomplete lower-I/O observation cannot masquerade as durable savings.
+	 */
+	expected = gc_cost_capture(logical);
+	CHECK(swapz_stage(&a, &logical, 1, 2, &tx) == 0);
+	CHECK(segment_bytes[0] == expected.live_bytes);
+	actual_error = swapz_finish(&a, &tx, failed_extent,
+				    sizeof(failed_extent), 1, 0);
+	CHECK(!gc_cost_check_rejected_write(
+		"compressed_partial_short_write", logical, tx.start_block,
+		tx.extent_blocks, &expected, actual_error));
 
 	/* RAW changes the live cost only after a successful publication. */
 	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
@@ -338,7 +377,8 @@ static int test_failed_lower_writes_preserve_committed_costs(void)
 		actual_error = swapz_finish_raw(&a, &tx, bytes,
 						completed, lower_error);
 		CHECK(!gc_cost_check_rejected_write(
-			phase, logical, tx.start_block, &expected, actual_error));
+			phase, logical, tx.start_block, tx.extent_blocks,
+			&expected, actual_error));
 	}
 	return 0;
 }
