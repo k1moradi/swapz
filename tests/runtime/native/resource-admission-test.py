@@ -252,6 +252,71 @@ sample_host_memory_admission
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_bounded_child_diagnostic_unavailable_returns_status_two(self):
+        helper = shell_function(QUALIFIER, "bounded_safe_log_reason")
+        script = helper + 'bounded_safe_log_reason "$1" "FAIL: "\n'
+        missing = self.root / "missing-private-log"
+        result = self.run_shell(script, missing)
+        self.assertEqual(result.returncode, 2, (result.stdout, result.stderr))
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn(str(missing), result.stderr)
+
+    def test_cgroup_word_distinguishes_absent_from_unreadable_telemetry(self):
+        helper = shell_function(QUALIFIER, "require_cgroup_word")
+        source = self.root / "controllers"
+        script = (
+            helper +
+            'require_cgroup_word "$1" cgroup.controllers memory '
+            '"memory controller unavailable; enable it"\n'
+        )
+
+        source.write_text("cpu memory\n", encoding="ascii")
+        result = self.run_shell(script, source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        source.write_text("cpu\n", encoding="ascii")
+        result = self.run_shell(script, source)
+        self.assertEqual(result.returncode, 2, (result.stdout, result.stderr))
+        self.assertIn(
+            "BLOCKED: ID36 memory controller unavailable; enable it",
+            result.stderr)
+
+        source.unlink()
+        source.mkdir()
+        result = self.run_shell(script, source)
+        self.assertEqual(result.returncode, 2, (result.stdout, result.stderr))
+        self.assertIn(
+            "BLOCKED: ID36 cgroup.controllers telemetry unavailable while checking memory",
+            result.stderr)
+        self.assertNotIn(str(source), result.stderr)
+
+    def test_pair_ready_pid_requires_one_canonical_bounded_value(self):
+        helper = shell_function(QUALIFIER, "read_pair_ready_pid")
+        ready = self.root / "pair.ready"
+        script = helper + 'read_pair_ready_pid "$1"\n'
+
+        ready.write_text("pid=123\n", encoding="ascii")
+        result = self.run_shell(script, ready)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "123")
+
+        for contents in (
+                "pid=0\n",
+                "pid=0123\n",
+                "pid=-1\n",
+                "pid=123\npid=124\n",
+                "pid=1000000000000000000\n",
+                "other=123\n"):
+            with self.subTest(contents=contents):
+                ready.write_text(contents, encoding="ascii")
+                result = self.run_shell(script, ready)
+                self.assertNotEqual(result.returncode, 0)
+
+        ready.unlink()
+        result = self.run_shell(script, ready)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(str(ready), result.stderr)
+
     def test_cgroup_control_write_failure_is_blocked_without_path_leak(self):
         directory = self.root / "cgroup"
         directory.mkdir()
@@ -275,9 +340,13 @@ sample_host_memory_admission
         self.assertLess(
             source.index("for required_command in"),
             source.index("[[ $(id -u) == 0 ]]"))
+        self.assertIn("require_cgroup_word() {", source)
+        self.assertIn(
+            "cgroup v2 controller telemetry unreadable;",
+            source)
         self.assertLess(
             source.index("for required_command in"),
-            source.index('grep -qw memory "$CGROUP_ROOT/cgroup.controllers"'))
+            source.index("require_cgroup_word() {"))
         self.assertIn(
             'if ! token="$(od -An -N8 -tx1 /dev/urandom', source)
         self.assertIn(
@@ -343,6 +412,15 @@ sample_host_memory_admission
         self.assertIn(
             "BLOCKED: ID36 owned temporary-cleanup helper unavailable",
             qualifier)
+        self.assertLess(
+            qualifier.index("START_ID36_RESOURCE_PRESSURE=admission"),
+            qualifier.index('script_source="${BASH_SOURCE[0]}"'))
+        self.assertLess(
+            qualifier.index('cleanup_helper="$ROOT/tests/tools/clear-tmp-before-memory-check.sh"'),
+            qualifier.index("[[ -r $cleanup_helper ]]"))
+        self.assertLess(
+            qualifier.index("[[ -r $cleanup_helper ]]"),
+            qualifier.index('source "$cleanup_helper" 2>/dev/null'))
         self.assertIn(
             'if ! source "$cleanup_helper" 2>/dev/null; then',
             qualifier)
