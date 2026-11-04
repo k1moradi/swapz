@@ -407,6 +407,9 @@ def validate_metadata_ram_trace(
         raise ValueError("metadata RAM baseline is shorter than one second")
 
     initialization = phase_samples["initialization"]
+    if initialization[0]["mapper_present"]:
+        raise ValueError(
+            "metadata RAM initialization did not start before mapper creation")
     seen_mapper = False
     for sample in initialization:
         if sample["mapper_present"]:
@@ -443,19 +446,24 @@ def validate_metadata_ram_trace(
         sample["mem_available_kib"] for sample in baseline]
     baseline_median_available_twice_kib = _median_twice(
         baseline_available_kib)
-    mapper_present_samples = [
-        sample for phase in PHASES[1:] for sample in phase_samples[phase]
-        if sample["mapper_present"]]
-    if not mapper_present_samples:
-        raise ValueError("metadata RAM trace never observed the mapper")
+    # Constructor allocations occur before Device Mapper publishes the exact
+    # UUID, so the qualifying target-lifecycle window starts with the first
+    # initialization sample and ends with the last target-present teardown
+    # sample. Post-removal recovery is intentionally excluded from the peak.
+    lifecycle_samples = [
+        *initialization,
+        *phase_samples["steady"],
+        *phase_samples["gc"],
+        *teardown[:first_absent],
+    ]
     minimum_sample = min(
-        mapper_present_samples, key=lambda sample: sample["mem_available_kib"])
+        lifecycle_samples, key=lambda sample: sample["mem_available_kib"])
     peak_ram_bytes = (
         baseline_median_available_twice_kib * (MEMINFO_UNIT_BYTES // 2) -
         minimum_sample["mem_available_kib"] * MEMINFO_UNIT_BYTES)
     if peak_ram_bytes <= 0:
         raise ValueError(
-            "metadata RAM peak was not observed while mapper was present")
+            "metadata RAM peak was not observed during target lifecycle")
     if (
             expected_peak_ram_bytes is not None and
             (type(expected_peak_ram_bytes) is not int or
