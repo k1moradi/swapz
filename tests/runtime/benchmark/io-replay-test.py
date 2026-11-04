@@ -6,6 +6,7 @@ the trace contract, oracle, safety guard and fail-closed pair comparator.
 """
 import contextlib
 import copy
+import errno
 import hashlib
 import io
 import json
@@ -14,6 +15,7 @@ import random
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -2092,6 +2094,289 @@ class PairReplayContract(unittest.TestCase):
         self.assertAlmostEqual(summary["pages_per_lower_write"], 10.24)
         self.assertEqual(summary["service_us"], 300.0)
         self.assertEqual(summary["block_service_us"], 150.0)
+
+
+    @contextlib.contextmanager
+    def python_final_drain_case(self, replay_mode):
+        """Small canonical-plan regular-file replay; never touches swap or a mapper."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(bytes([index + 1]) * PAGE
+                                         for index in range(16)))
+            plan = root / "plan"
+            mode_flags = ({"persistent-write": ["--sustained-write"],
+                           "persistent-mixed": ["--mixed-lanes", "persistent"]}
+                          .get(replay_mode, []))
+            self.run_cmd("prepare", "--fixture", fixture,
+                         "--output-dir", plan, "--seed", "0x51a0a9",
+                         "--logical-pages", 64, "--writer-pages", 16,
+                         "--reader-start", 32, "--reader-pages", 16,
+                         "--qd", 4, "--warmup-ops", 8, "--measure-ops", 24,
+                         "--read-pct", 0 if replay_mode == "persistent-write" else 25,
+                         "--iops", 0, *mode_flags)
+            manifest = json.loads((plan / "manifest.json").read_text())
+            self.assertEqual(manifest["replay_mode"], replay_mode)
+            target = root / "swapz-replay-off.bin"
+            with target.open("wb") as handle:
+                handle.truncate(64 * PAGE)
+            result = root / "report.json"
+            arguments = ["run", "--fixture", fixture,
+                         "--trace", plan / "trace.jsonl",
+                         "--manifest", plan / "manifest.json",
+                         "--device", target, "--candidate", "off",
+                         "--source-sha", "rootless-no-module",
+                         "--regular-file-test", "--result", result]
+            yield manifest, target, result, arguments
+
+    def invoke_python_replay_main(self, replay_module, arguments):
+        output, errors = io.StringIO(), io.StringIO()
+        status = 0
+        with mock.patch.object(sys, "argv", [str(SCRIPT), *map(str, arguments)]), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            try:
+                replay_module.main()
+            except SystemExit as error:
+                status = error.code
+        return status, output.getvalue(), errors.getvalue()
+
+    def python_replay_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("swapz_final_drain_replay", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_python_final_drain_success_is_after_workers_and_inside_clock(self):
+        for mode in ("qd-waves", "persistent-write", "persistent-mixed"):
+            with self.subTest(mode=mode), self.python_final_drain_case(mode) as case:
+                manifest, target, result, arguments = case
+                module = self.python_replay_module()
+                original_pool = module.concurrent.futures.ThreadPoolExecutor
+                original_fsync = os.fsync
+                jobs, drains = [], []
+
+                class ObservedPool(original_pool):
+                    def submit(self, function, *args, **kwargs):
+                        future = super().submit(function, *args, **kwargs)
+                        jobs.append(future)
+                        return future
+
+                def checked_fsync(descriptor):
+                    drains.append(time.monotonic_ns())
+                    self.assertEqual(os.fstat(descriptor).st_ino, target.stat().st_ino)
+                    if len(drains) == 3:
+                        self.assertTrue(jobs)
+                        self.assertTrue(all(job.done() for job in jobs))
+                        self.assertFalse(result.exists())
+                    original_fsync(descriptor)
+                    drains.append(time.monotonic_ns())
+
+                with mock.patch.object(module.os, "fsync", side_effect=checked_fsync), \
+                        mock.patch.object(module.concurrent.futures,
+                                          "ThreadPoolExecutor", ObservedPool):
+                    status, output, errors = self.invoke_python_replay_main(
+                        module, arguments)
+                self.assertEqual(status, 0, errors)
+                self.assertEqual(len(drains), 4)  # prefill plus one measured drain
+                self.assertEqual(len(jobs), 4 if mode != "qd-waves" else 32)
+                report = json.loads(result.read_text())
+                self.assertEqual(report["verdict"], "PASS")
+                self.assertIn('"verdict": "PASS"', output)
+                self.assertEqual(report["replay_mode"], mode)
+                self.assertEqual(report["write_ops"],
+                                 manifest["workload_opportunity"]["measured_write_ops"])
+                self.assertLessEqual(report["measured_start_monotonic_ns"], drains[2])
+                self.assertGreaterEqual(report["measured_end_monotonic_ns"], drains[3])
+                self.assertAlmostEqual(report["seconds"],
+                    (report["measured_end_monotonic_ns"] -
+                     report["measured_start_monotonic_ns"]) / 1e9)
+
+    def test_python_final_drain_eio_blocks_pass_with_redacted_reason(self):
+        for mode in ("qd-waves", "persistent-write", "persistent-mixed"):
+            with self.subTest(mode=mode), self.python_final_drain_case(mode) as case:
+                manifest, target, result, arguments = case
+                candidate = "swapz" if mode == "persistent-mixed" else "off"
+                arguments[arguments.index("--candidate") + 1] = candidate
+                module = self.python_replay_module()
+                original_fsync = os.fsync
+                calls = 0
+                private_path = str(target.parent / "PRIVATE-FILENAME-MUST-NOT-LEAK")
+                expected_bytes = (manifest["workload_opportunity"]
+                                  ["measured_write_ops"] * PAGE)
+
+                def fail_final_fsync(descriptor):
+                    nonlocal calls
+                    calls += 1
+                    self.assertEqual(os.fstat(descriptor).st_ino, target.stat().st_ino)
+                    if calls == 1:
+                        return original_fsync(descriptor)
+                    self.assertEqual(calls, 2)
+                    raise OSError(errno.EIO, "synthetic final-drain device error",
+                                  private_path)
+
+                with mock.patch.object(module.os, "fsync", side_effect=fail_final_fsync):
+                    status, output, errors = self.invoke_python_replay_main(
+                        module, arguments)
+                self.assertEqual(status, 2)
+                self.assertEqual(calls, 2)
+                self.assertFalse(result.exists())
+                self.assertNotIn('"verdict": "PASS"', output)
+                self.assertIn(f"BENCH_IO_PHASE={candidate}:mixed", errors)
+                self.assertIn(f"{candidate}:mixed final fsync failed", errors)
+                self.assertIn(
+                    f"expected measured WRITE bytes {expected_bytes}, "
+                    f"observed completed WRITE bytes {expected_bytes}", errors)
+                self.assertIn("final-drain oracle=success, observed=synthetic "
+                              "final-drain device error", errors)
+                self.assertNotIn(private_path, output + errors)
+                self.assertNotIn("PRIVATE-FILENAME", output + errors)
+
+    def test_python_partial_worker_completion_rejects_without_final_drain(self):
+        for mode in ("qd-waves", "persistent-write", "persistent-mixed"):
+            with self.subTest(mode=mode), self.python_final_drain_case(mode) as case:
+                _, _, result, arguments = case
+                module = self.python_replay_module()
+                original_fsync = os.fsync
+                original_pwrite = os.pwrite
+                original_begin = module.LowerInflightSampler.begin
+                measured = False
+                failed = False
+                fsync_calls = 0
+
+                def begin_measurement(sampler):
+                    nonlocal measured
+                    started = original_begin(sampler)
+                    measured = True
+                    return started
+
+                def incomplete_write(descriptor, data, offset):
+                    nonlocal failed
+                    if measured and not failed:
+                        failed = True
+                        return PAGE - 1
+                    return original_pwrite(descriptor, data, offset)
+
+                def count_fsync(descriptor):
+                    nonlocal fsync_calls
+                    fsync_calls += 1
+                    return original_fsync(descriptor)
+
+                with mock.patch.object(module.LowerInflightSampler, "begin",
+                                       begin_measurement), \
+                        mock.patch.object(module.os, "pwrite",
+                                          side_effect=incomplete_write), \
+                        mock.patch.object(module.os, "fsync", side_effect=count_fsync):
+                    status, output, errors = self.invoke_python_replay_main(
+                        module, arguments)
+                self.assertTrue(failed)
+                self.assertEqual(status, 2)
+                self.assertEqual(fsync_calls, 1)  # prefill only; workers failed
+                self.assertFalse(result.exists())
+                self.assertNotIn('"verdict": "PASS"', output)
+                self.assertIn("BENCH_IO_PHASE=off:mixed", errors)
+                self.assertIn("short or mismatched timed logical I/O", errors)
+                self.assertNotIn("final fsync failed", errors)
+
+    def test_python_final_drain_failure_precedes_sampler_cleanup_error(self):
+        for mode in ("qd-waves", "persistent-write", "persistent-mixed"):
+            with self.subTest(mode=mode), self.python_final_drain_case(mode) as case:
+                _, _, result, arguments = case
+                module = self.python_replay_module()
+                original_fsync = os.fsync
+                fsync_calls = 0
+
+                def fail_final_fsync(descriptor):
+                    nonlocal fsync_calls
+                    fsync_calls += 1
+                    if fsync_calls == 1:
+                        return original_fsync(descriptor)
+                    raise OSError(errno.EIO, "synthetic primary drain error")
+
+                with mock.patch.object(module.os, "fsync", side_effect=fail_final_fsync), \
+                        mock.patch.object(module.LowerInflightSampler, "close",
+                                          side_effect=OSError(errno.EIO,
+                                                              "synthetic cleanup error")):
+                    status, output, errors = self.invoke_python_replay_main(
+                        module, arguments)
+                self.assertEqual(fsync_calls, 2)
+                self.assertEqual(status, 2)
+                self.assertFalse(result.exists())
+                self.assertNotIn('"verdict": "PASS"', output)
+                self.assertIn("off:mixed final fsync failed", errors)
+                self.assertIn("synthetic primary drain error", errors)
+                self.assertNotIn("synthetic cleanup error", errors)
+
+    def test_python_sampler_cleanup_error_alone_blocks_pass(self):
+        with self.python_final_drain_case("qd-waves") as case:
+            _, _, result, arguments = case
+            module = self.python_replay_module()
+            original_fsync = os.fsync
+            fsync_calls = 0
+
+            def track_fsync(descriptor):
+                nonlocal fsync_calls
+                fsync_calls += 1
+                return original_fsync(descriptor)
+
+            with mock.patch.object(module.os, "fsync", side_effect=track_fsync), \
+                    mock.patch.object(module.LowerInflightSampler, "close",
+                                      side_effect=OSError(errno.EIO,
+                                                          "synthetic sampler close error")):
+                status, output, errors = self.invoke_python_replay_main(
+                    module, arguments)
+            self.assertEqual(fsync_calls, 2)
+            self.assertEqual(status, 2)
+            self.assertFalse(result.exists())
+            self.assertNotIn('"verdict": "PASS"', output)
+            self.assertIn("synthetic sampler close error", errors)
+            self.assertNotIn("final fsync failed", errors)
+
+    def test_python_byte_oracle_failure_is_not_a_drain_failure(self):
+        with self.python_final_drain_case("persistent-write") as case:
+            manifest, _, result, arguments = case
+            module = self.python_replay_module()
+            original_pwrite = os.pwrite
+            original_begin = module.LowerInflightSampler.begin
+            original_fsync = os.fsync
+            expected_writes = manifest["workload_opportunity"]["measured_write_ops"]
+            measuring = False
+            measured_writes = 0
+            drains = 0
+
+            def begin_measurement(sampler):
+                nonlocal measuring
+                started = original_begin(sampler)
+                measuring = True
+                return started
+
+            def corrupt_last_write(descriptor, data, offset):
+                nonlocal measured_writes
+                if measuring:
+                    measured_writes += 1
+                    if measured_writes == expected_writes:
+                        return original_pwrite(descriptor, bytes(PAGE), offset)
+                return original_pwrite(descriptor, data, offset)
+
+            def track_fsync(descriptor):
+                nonlocal drains
+                drains += 1
+                return original_fsync(descriptor)
+
+            with mock.patch.object(module.LowerInflightSampler, "begin",
+                                   begin_measurement), \
+                    mock.patch.object(module.os, "pwrite",
+                                      side_effect=corrupt_last_write), \
+                    mock.patch.object(module.os, "fsync", side_effect=track_fsync):
+                status, output, errors = self.invoke_python_replay_main(
+                    module, arguments)
+            self.assertEqual(measured_writes, expected_writes)
+            self.assertEqual(drains, 2)  # successful final drain precedes oracle
+            self.assertEqual(status, 2)
+            self.assertFalse(result.exists())
+            self.assertNotIn('"verdict": "PASS"', output)
+            self.assertIn("short or mismatched logical page read", errors)
+            self.assertNotIn("final fsync failed", errors)
 
     def test_sustained_write_uses_persistent_lane_owned_streams(self):
         with tempfile.TemporaryDirectory() as temp:

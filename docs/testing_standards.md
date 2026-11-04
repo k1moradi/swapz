@@ -491,6 +491,18 @@ must identify the candidate/mixed phase, OS failure reason, expected versus
 observed measured WRITE byte counts and the failed final-drain oracle; final
 byte readback cannot replace it.
 The native-C engine retains its independently checked final fsync.
+The checked-in rootless replay suite must exercise the actual Python CLI
+regular-file replay for QD waves, persistent WRITE and persistent mixed lanes:
+prove all workers complete before exactly one measured final fsync after prefill,
+and that the measured end timestamp follows the successful drain. Injected
+final-fsync EIO must block PASS and report publication, preserve the original
+path-redacted OS reason, and report expected versus observed measured WRITE
+bytes with the candidate/mixed phase. Short worker completion must fail before
+final drain; a byte-oracle mismatch after a successful drain must remain
+distinguishable from a syscall drain failure. A sampler cleanup error must fail
+an otherwise clean replay but never hide a primary worker or drain error.
+These synthetic cases must not change the frozen trace cohorts, native helper,
+source-bound hashes or loaded acceptance policy.
 Results must identify the replay mode and remain outside the existing history series.
 This is workload sensitivity, not a production-source performance A/B; actual
 reclaim can be bursty too. Keep new traces out of the qualification matrix until

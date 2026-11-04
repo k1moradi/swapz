@@ -2168,11 +2168,19 @@ def replay(args):
                         kernel_write_after = kernel_write_snapshot(path, identity)
                         kernel_read_after = kernel_read_snapshot(path, identity)
                     finally:
-                        lower_inflight_sampler.close()
-                        for view in mixed_views:
-                            view.release()
-                        for buffer in mixed_buffers:
-                            buffer.close()
+                        primary_failure = sys.exc_info()[1]
+                        try:
+                            lower_inflight_sampler.close()
+                        except Exception:
+                            # A failed cleanup must not replace the first
+                            # worker or final-drain failure; alone it is fatal.
+                            if primary_failure is None:
+                                raise
+                        finally:
+                            for view in mixed_views:
+                                view.release()
+                            for buffer in mixed_buffers:
+                                buffer.close()
 
                 post_hash = hashlib.sha256()
                 buffer = mmap.mmap(-1, PAGE)
