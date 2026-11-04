@@ -628,9 +628,12 @@ Lifecycle coordinators must emit one fail-only boundary diagnostic before
 attempting durable recovery-state repair, naming the current prepare/start/stop/
 recover phase and the original errno. Preparation diagnostics must identify the
 specific admission or persistence check that failed without exposing secret
-contents. Successful commands stay quiet except for their existing completion
-record, and diagnostic logging must never replace, reinterpret or mask the
-original failure or recovery obligation.
+contents, transaction run IDs or device paths. Successful commands stay quiet
+except for their existing completion record, and diagnostic logging must never
+replace, reinterpret or mask the original failure or recovery obligation.
+Final preclaim identity revalidation and physical-parent swap inventory must
+retain separate phase labels so stale identity is not reported as a swap-state
+failure.
 
 The shared transaction admission check must read the run's immutable 4096-byte
 block-zero backup when the transaction records one and verify its recorded

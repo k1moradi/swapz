@@ -9227,6 +9227,7 @@ static int swapz_primary_prepare_metadata(void)
 		dev_t verified_target_parent = 0;
 		dev_t verified_root_parent = 0;
 
+		failure_phase = "final-preclaim-identity-revalidation";
 		if (swapz_primary_target_preflight(
 			    target.partuuid, &verified_target,
 			    &verified_device_bytes, &verified_swap_header,
@@ -9270,6 +9271,7 @@ static int swapz_primary_prepare_metadata(void)
 			errno = ESTALE;
 			goto out;
 		}
+		failure_phase = "final-physical-parent-swap-inventory";
 		{
 			int verified_parent_swap_active =
 				swapz_primary_swap_device_active(
@@ -9364,8 +9366,8 @@ static int swapz_primary_prepare_metadata(void)
 	if (result < 0 && claimed)
 		fprintf(stderr,
 			"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "
-			"run_id=%s claim=retained target_unchanged=true\n",
-			failure_phase, saved_errno, strerror(saved_errno), run_id);
+			"claim=retained target_unchanged=true\n",
+			failure_phase, saved_errno, strerror(saved_errno));
 	else if (result < 0)
 		fprintf(stderr,
 			"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "
