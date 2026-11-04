@@ -269,6 +269,7 @@ static void test_numeric_bound_parser(void)
 	const char *end = NULL;
 	unsigned long long value = 0;
 
+	assert(SWAPZ_FORMAT_PROC_MAX_PID_TABLES >= 4U * 1024U * 1024U);
 	assert(parse_unsigned_decimal("1", 1ULL, &end, &value) == 0);
 	assert(*end == '\0' && value == 1ULL);
 	assert(parse_unsigned_decimal("2", 1ULL, &end, &value) < 0);
@@ -492,6 +493,12 @@ static void test_mountinfo_device_parser(void)
 		&device) < 0);
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw shared:7 shared:8 - ext4 /dev/sda2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw shared: - ext4 /dev/sda2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw unbindable unbindable - ext4 /dev/sda2 rw\n",
 		&device) < 0);
 	assert(format_mountinfo_line_device(
 		"36 25 8:2 / /other rw master:7 master:8 - ext4 /dev/sda2 rw\n",
