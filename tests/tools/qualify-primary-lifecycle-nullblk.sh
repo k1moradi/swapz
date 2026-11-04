@@ -206,7 +206,7 @@ mapper_swap_entry_count() {
 assert_exact_owned_mapper() {
 	local expected_present="$1"
 	local table_mode="${2:-active}"
-	local mapper_uuid mapper_table
+	local mapper_uuid mapper_table expected_table
 	local table_start table_sectors table_target table_lower table_rest
 
 	if [[ "$expected_present" == 0 ]]; then
@@ -238,6 +238,12 @@ assert_exact_owned_mapper() {
 	[[ "$table_start" == 0 && "$table_sectors" =~ ^[1-9][0-9]*$ &&
 	   "$table_target" == swapz && "$table_lower" == "$PART_DEVNO" ]] ||
 		fail "interrupted mapper table is not bound to the owned partition"
+	# Reject extra target rows, altered geometry and silently changed target
+	# parameters, not just a matching first four fields.
+	expected_table="$(sed -n 's/^dm_table=//p' "$RECOVERY_BASE/primary-manifest-$RUN_ID.txt")" ||
+		fail "cannot read the run-bound durable mapper table"
+	[[ -n "$expected_table" && "$mapper_table" == "$expected_table" ]] ||
+		fail "mapper table differs from the exact run-bound durable manifest"
 }
 
 unrelated_swap_inventory_identity() {
@@ -1361,7 +1367,8 @@ grep -Fxq "PARTUUID=$PARTUUID" "$PART_SYSFS/uevent" ||
 BY_PARTUUID="/dev/disk/by-partuuid/$PARTUUID"
 
 udev_alias_verified() {
-	local alias_dev partition_dev udev_properties
+	local alias_dev partition_dev udev_properties devlinks published_link
+	local -a published_links
 	[[ -b "$BY_PARTUUID" ]] || return 1
 	alias_dev="$(block_node_devno "$BY_PARTUUID")" || return 1
 	partition_dev="$(block_node_devno "$PARTITION")" || return 1
@@ -1371,8 +1378,16 @@ udev_alias_verified() {
 		return 1
 	udev_properties="$(udevadm info --query=property --path="$PART_SYSFS" 2>/dev/null)" ||
 		return 1
-	printf '%s\n' "$udev_properties" | grep -F 'DEVLINKS=' |
-		grep -Fq -- "$BY_PARTUUID"
+	# Exact whitespace-delimited DEVLINKS token only. A similarly prefixed
+	# link or a different udev property cannot claim this partition alias.
+	devlinks="$(printf '%s\n' "$udev_properties" | sed -n 's/^DEVLINKS=//p')" ||
+		return 1
+	[[ -n "$devlinks" && "$devlinks" != *$'\n'* ]] || return 1
+	read -r -a published_links <<< "$devlinks"
+	for published_link in "${published_links[@]}"; do
+		[[ "$published_link" == "$BY_PARTUUID" ]] && return 0
+	done
+	return 1
 }
 
 # The host's standard persistent-storage rules intentionally exclude nullb*

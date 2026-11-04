@@ -174,6 +174,29 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn('"$alias_dev" == "$PART_DEVNO"', alias_verifier)
         self.assertIn('"$partition_dev" == "$PART_DEVNO"', alias_verifier)
 
+    def test_udev_claim_requires_exact_published_alias_token(self):
+        start = self.script.index("udev_alias_verified() {")
+        end = self.script.index("\n}", start)
+        verifier = self.script[start:end]
+        self.assertIn("sed -n 's/^DEVLINKS=//p'", verifier)
+        self.assertIn('read -r -a published_links <<< "$devlinks"',
+                      verifier)
+        self.assertIn('[[ "$published_link" == "$BY_PARTUUID" ]]',
+                      verifier)
+        self.assertNotIn('grep -Fq -- "$BY_PARTUUID"', verifier)
+
+    def test_mapper_table_requires_exact_manifest_geometry_and_parameters(self):
+        start = self.script.index("assert_exact_owned_mapper() {")
+        end = self.script.index("\n}", start)
+        verifier = self.script[start:end]
+        self.assertIn(
+            '''expected_table="$(sed -n 's/^dm_table=//p' '''
+            '''"$RECOVERY_BASE/primary-manifest-$RUN_ID.txt")"''',
+            verifier)
+        self.assertIn(
+            '[[ -n "$expected_table" && "$mapper_table" == "$expected_table" ]]',
+            verifier)
+
     def test_partition_reread_is_locked_and_not_duplicated_after_sfdisk(self):
         partition_write = self.script.index(
             'if ! sfdisk --lock --wipe always "$LOWER"')
