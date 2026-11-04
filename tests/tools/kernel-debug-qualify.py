@@ -631,17 +631,21 @@ def inactive_runtime_reason(
     return ", ".join(inactive) if inactive else None
 
 
+def _module_sha256(module: Path) -> str:
+    digest = hashlib.sha256()
+    with module.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def inspect_module_provenance(module: Path) -> dict[str, str]:
     """Read the actual built module, without loading it or claiming host evidence."""
     if not module.is_file():
         return {"error": f"module artifact missing: {module}"}
     evidence: dict[str, str] = {}
     try:
-        digest = hashlib.sha256()
-        with module.open("rb") as source:
-            while chunk := source.read(1024 * 1024):
-                digest.update(chunk)
-        evidence["sha256"] = digest.hexdigest()
+        evidence["sha256"] = _module_sha256(module)
     except OSError as error:
         return {"error": f"module artifact unreadable: {error}"}
     commands = (
@@ -666,6 +670,12 @@ def inspect_module_provenance(module: Path) -> dict[str, str]:
                          f"(exit={result.returncode})"
             }
         evidence[field] = result.stdout.strip()
+    try:
+        final_sha256 = _module_sha256(module)
+    except OSError as error:
+        return {"error": f"module artifact unreadable after provenance inspection: {error}"}
+    if final_sha256 != evidence["sha256"]:
+        return {"error": "module artifact changed during provenance inspection"}
     return evidence
 
 

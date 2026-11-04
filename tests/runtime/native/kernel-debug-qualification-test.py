@@ -604,6 +604,26 @@ class KernelDebugQualificationTests(unittest.TestCase):
             self.assertIn("query failed",
                           qualification.inspect_module_provenance(module)["error"])
 
+        valid_queries = [
+            subprocess.CompletedProcess([], 0, SOURCE_SHA + "\n", ""),
+            subprocess.CompletedProcess([], 0, "1\n", ""),
+            subprocess.CompletedProcess(
+                [], 0, KERNEL_RELEASE + " SMP preempt mod_unload\n", ""),
+            subprocess.CompletedProcess(
+                [], 0, "U __asan_load8\nU __tsan_read8\n", ""),
+        ]
+        with mock.patch.object(
+                qualification, "_module_sha256",
+                side_effect=[MODULE_SHA256, "b" * 64]), \
+             mock.patch.object(
+                 qualification.shutil, "which", return_value="/usr/bin/tool"), \
+             mock.patch.object(
+                 qualification.subprocess, "run",
+                 side_effect=valid_queries):
+            changed = qualification.inspect_module_provenance(module)
+            self.assertIn(
+                "changed during provenance inspection", changed["error"])
+
     def test_sparse_source_warnings_vs_infrastructure_absence(self) -> None:
         headers = Path(self.temporary_directory.name) / "sparse-headers"
         headers.mkdir()
