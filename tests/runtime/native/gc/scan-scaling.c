@@ -440,12 +440,23 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 		maps, live_records, extent_classes, logical_pages, &safe);
 	if (!safe)
 		goto out;
+	/* Class-only interior corruption must be sufficient to refuse. */
 	extent_classes[logical_pages - 1U] = 1U;
 	(void)authoritative_negative_scan(
 		maps, live_records, extent_classes, logical_pages, &safe);
 	if (safe)
 		goto out;
 	extent_classes[logical_pages - 1U] = 0U;
+
+	/* Liveness-only interior corruption is independently invalid. */
+	live_records[logical_pages - 1U] = 1U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (safe)
+		goto out;
+	live_records[logical_pages - 1U] = 0U;
+
+	/* A valid class with a falsely zero extent-start liveness is invalid. */
 	live_records[logical_pages - 2U] = 0U;
 	(void)authoritative_negative_scan(
 		maps, live_records, extent_classes, logical_pages, &safe);
