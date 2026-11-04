@@ -124,7 +124,7 @@ sample_host_memory_admission() {
 
     for admission_sample in 1 2 3 4 5; do
         if ! memory_inventory="$(read_host_memory_inventory "$inventory_source")"; then
-            printf 'BLOCKED: ID36 MemAvailable unavailable or malformed (required:%s kB; /proc/meminfo must be readable with one canonical kB value for each inventory field)\\n' \
+            printf 'BLOCKED: ID36 MemAvailable unavailable or malformed (required:%s kB; /proc/meminfo must be readable with one canonical kB value for each inventory field)\n' \
                 "$MIN_AVAILABLE_KIB" >&2
             return 2
         fi
@@ -148,7 +148,7 @@ sample_host_memory_admission() {
             sleep 1
         fi
     done
-    printf 'BLOCKED: ID36 host MemAvailable lacks two consecutive samples at the 1 GiB floor: initial:%s last:%s minimum:%s maximum:%s required:%s unit:kB samples:5; allow ordinary reclaim or free legitimate workloads, do not drop caches or alter host swap\\n' \
+    printf 'BLOCKED: ID36 host MemAvailable lacks two consecutive samples at the 1 GiB floor: initial:%s last:%s minimum:%s maximum:%s required:%s unit:kB samples:5; allow ordinary reclaim or free legitimate workloads, do not drop caches or alter host swap\n' \
         "$initial_available_kib" "$last_available_kib" "$minimum_observed_kib" \
         "$maximum_observed_kib" "$MIN_AVAILABLE_KIB" >&2
     return 2
@@ -167,20 +167,20 @@ read_cgroup_root_memory_inventory() {
     local memory_max memory_current headroom_status
 
     if [[ ! -e $memory_max_path && ! -e $memory_current_path ]]; then
-        printf '%s\\n' 'root-exempt root-exempt unbounded unbounded'
+        printf '%s\n' 'root-exempt root-exempt unbounded unbounded'
         return 0
     fi
     if [[ ! -e $memory_max_path || ! -e $memory_current_path ]]; then
-        printf '%s\\n' 'BLOCKED: ID36 parent cgroup memory.max/current telemetry incomplete; restore both controls or a verified root-exempt hierarchy' >&2
+        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max/current telemetry incomplete; restore both controls or a verified root-exempt hierarchy' >&2
         return 2
     fi
     if ! memory_max="$(cat "$memory_max_path" 2>/dev/null)" ||
        ! memory_current="$(cat "$memory_current_path" 2>/dev/null)"; then
-        printf '%s\\n' 'BLOCKED: ID36 parent cgroup memory.max/current unreadable; restore readable cgroup v2 memory controls' >&2
+        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max/current unreadable; restore readable cgroup v2 memory controls' >&2
         return 2
     fi
     if (( ${#memory_max} > 20 || ${#memory_current} > 20 )); then
-        printf '%s\\n' 'BLOCKED: ID36 parent cgroup memory.max/current exceeds unsigned 64-bit telemetry bounds; repair cgroup reporting' >&2
+        printf '%s\n' 'BLOCKED: ID36 parent cgroup memory.max/current exceeds unsigned 64-bit telemetry bounds; repair cgroup reporting' >&2
         return 2
     fi
     # cgroup byte counters are unsigned 64-bit values. Validate that range
@@ -220,7 +220,7 @@ except ValueError as error:
     raise SystemExit(2)
 PY
     )" || return 2
-    printf '%s %s %s\\n' "$memory_max" "$memory_current" "$headroom_status"
+    printf '%s %s %s\n' "$memory_max" "$memory_current" "$headroom_status"
 }
 
 if ! parent_memory_inventory="$(read_cgroup_root_memory_inventory)"; then
@@ -229,7 +229,7 @@ fi
 read -r parent_memory_max parent_memory_current parent_headroom_status \
     parent_headroom_bytes <<< "$parent_memory_inventory"
 if [[ $parent_headroom_status == insufficient ]]; then
-    printf 'BLOCKED: ID36 finite parent cgroup headroom insufficient: memory.max:%s memory.current:%s headroom:%s required:%s deficit:%s unit:bytes; raise the delegated parent limit or reduce its legitimate charge before retrying\\n' \
+    printf 'BLOCKED: ID36 finite parent cgroup headroom insufficient: memory.max:%s memory.current:%s headroom:%s required:%s deficit:%s unit:bytes; raise the delegated parent limit or reduce its legitimate charge before retrying\n' \
         "$parent_memory_max" "$parent_memory_current" "$parent_headroom_bytes" \
         "$MIN_AVAILABLE_BYTES" "$((MIN_AVAILABLE_BYTES - parent_headroom_bytes))" >&2
     exit 2
