@@ -157,6 +157,11 @@ static void assert_status_problem(const char *status, int expected_result,
 	assert(parse_swapz_ratio_status_diagnostic(status, &ratio, &problem) ==
 	       expected_result);
 	assert(problem.field && !strcmp(problem.field, field));
+	if (!problem.observed || !strstr(problem.observed, condition))
+		fprintf(stderr,
+			"status diagnostic mismatch: field=%s expected=%s observed=%s\n",
+			problem.field ? problem.field : "(null)", condition,
+			problem.observed ? problem.observed : "(null)");
 	assert(problem.observed && strstr(problem.observed, condition));
 }
 
@@ -246,7 +251,8 @@ static void test_checked_counter_arithmetic(void)
 	assert_status_problem(
 		"failed=0 error=0 logical_write=4096 physical_write=0 gc_write=0 "
 		"compressed=1 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=0",
-		STATUS_RETRY, "physical_write-gc_write-raw*4096", "disagree");
+		STATUS_RETRY, "physical_write-gc_write-raw*4096",
+		"no lower bytes remain for committed compressed pages");
 }
 
 static size_t fixture_align_target_offset(size_t value)
