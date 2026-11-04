@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import shutil
 import socket
 import stat
@@ -22,10 +23,12 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 PRIVILEGED_HELPER = ROOT / "tests/tools/qualify-primary-real-swap.py"
 DEFAULT_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
+CANONICAL_REMOTE_URL = "https://github.com/k1moradi/swapz.git"
 SOURCE_ADMISSION_SCHEMA = "swapz-primary-real-swap-admission-v1"
 PHYSICAL_CONTROL_INPUT_PATHS = (
     "src/kernel/VERSION",
@@ -39,17 +42,41 @@ PHYSICAL_CONTROL_INPUT_PATHS = (
 )
 MAX_LINE_BYTES = 4096
 MAX_CYCLES = 4
+SAFE_COMMAND_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+PRIVILEGED_HELPER_BOOTSTRAP = (
+    "import sys\n"
+    "path = sys.argv[1]\n"
+    "source_root = sys.argv[2]\n"
+    "sys.argv = [path, *sys.argv[3:]]\n"
+    "source = sys.stdin.buffer.read()\n"
+    "namespace = {"
+    "'__name__': '__main__', '__file__': path, "
+    "'__package__': None, '__cached__': None, "
+    "'__swapz_source_root__': source_root}\n"
+    "exec(compile(source, path, 'exec'), namespace, namespace)\n"
+)
 
 
 class Blocked(RuntimeError):
     pass
 
 
+def _source_command_environment() -> dict[str, str]:
+    return {
+        "LC_ALL": "C",
+        "LANG": "C",
+        "PATH": SAFE_COMMAND_PATH,
+        "HOME": "/",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+    }
+
+
 def _run(command: list[str], *, check: bool = True,
-         timeout: int = 30) -> subprocess.CompletedProcess[str]:
+         timeout: int = 30, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        command, cwd=ROOT, text=True, capture_output=True,
-        check=False, timeout=timeout)
+        command, cwd=cwd, text=True, capture_output=True,
+        check=False, timeout=timeout, env=_source_command_environment())
     if check and result.returncode != 0:
         raise Blocked(f"source admission command failed: {command[0]}")
     return result
@@ -75,8 +102,9 @@ def _check_git_source(validated_source: str, git: str | None = None) -> None:
             "physical qualification requires main == origin/main == "
             "validated source")
     remote_main = _run(
-        [git, "ls-remote", "--exit-code", "origin", "refs/heads/main"],
-        check=False, timeout=30)
+        [git, "ls-remote", "--exit-code",
+         CANONICAL_REMOTE_URL, "refs/heads/main"],
+        check=False, timeout=30, cwd=Path("/"))
     if remote_main.returncode != 0:
         raise Blocked(
             "cannot verify the current remote main for physical qualification")
@@ -87,27 +115,40 @@ def _check_git_source(validated_source: str, git: str | None = None) -> None:
         raise Blocked("production source tree is not clean")
 
 
-def _git_file_sha256(validated_source: str, path: Path,
-                       git: str | None = None) -> str:
-    """Hash exact bytes from the validated commit, not the mutable worktree."""
+def _git_file_bytes(validated_source: str, path: Path,
+                    git: str | None = None) -> bytes:
+    """Read exact file bytes from the validated commit object."""
     try:
-        relative = path.resolve().relative_to(ROOT.resolve()).as_posix()
-    except (OSError, ValueError) as exc:
+        relative_path = path.relative_to(ROOT)
+    except ValueError as exc:
         raise Blocked("source admission file is outside the repository") from exc
+    if not relative_path.parts or any(
+            part in {"", ".", ".."} for part in relative_path.parts):
+        raise Blocked("source admission file path is not canonical")
+    relative = relative_path.as_posix()
     git = _trusted_executable("git") if git is None else git
     try:
         result = subprocess.run(
             [git, "show", f"{validated_source}:{relative}"],
-            cwd=ROOT, capture_output=True, check=False, timeout=10)
+            cwd=ROOT, capture_output=True, check=False, timeout=10,
+            env=_source_command_environment())
     except (OSError, subprocess.SubprocessError) as exc:
         raise Blocked("cannot read source admission file from validated commit") from exc
     if result.returncode != 0:
         raise Blocked("validated commit lacks required source admission file")
-    return hashlib.sha256(result.stdout).hexdigest()
+    return result.stdout
+
+
+def _git_file_sha256(validated_source: str, path: Path,
+                     git: str | None = None) -> str:
+    """Hash exact bytes from the validated commit, not the mutable worktree."""
+    return hashlib.sha256(
+        _git_file_bytes(validated_source, path, git)
+    ).hexdigest()
 
 
 def _trusted_executable(name: str) -> str:
-    candidate = shutil.which(name)
+    candidate = shutil.which(name, path=SAFE_COMMAND_PATH)
     if not candidate:
         raise Blocked(f"missing required command {name}")
     resolved = Path(candidate).resolve()
@@ -133,7 +174,8 @@ def _unique_json_object(pairs):
 
 def _read_request(
         stream, validated_source: str,
-        expected_physical_control_inputs_sha256: dict[str, str]) -> dict:
+        expected_physical_control_inputs_sha256: dict[str, str],
+        expected_helper_sha256: str) -> dict:
     line = stream.readline(MAX_LINE_BYTES + 2)
     if not line:
         raise EOFError
@@ -147,7 +189,7 @@ def _read_request(
         raise Blocked("source admission request is malformed") from exc
     required = {
         "schema", "phase", "source_sha", "nonce",
-        "physical_control_inputs_sha256",
+        "physical_control_inputs_sha256", "executed_helper_sha256",
     }
     source_hashes = (
         request.get("physical_control_inputs_sha256")
@@ -163,6 +205,7 @@ def _read_request(
             request.get("source_sha") != validated_source or
             not hashes_valid or
             source_hashes != expected_physical_control_inputs_sha256 or
+            request.get("executed_helper_sha256") != expected_helper_sha256 or
             not re.fullmatch(
                 r"[0-9a-f]{32}", str(request.get("nonce", ""))) or
             not re.fullmatch(
@@ -243,6 +286,7 @@ def _serve_admission(server: socket.socket,
                      git: str,
                      oracle_sha256: str,
                      physical_control_inputs_sha256: dict[str, str],
+                     helper_sha256: str,
                      cycles: int) -> int:
     expected_phases = (
         ["initial"] +
@@ -289,7 +333,7 @@ def _serve_admission(server: socket.socket,
                 try:
                     request = _read_request(
                         stream, validated_source,
-                        physical_control_inputs_sha256)
+                        physical_control_inputs_sha256, helper_sha256)
                 except EOFError:
                     break
                 except Blocked as exc:
@@ -347,10 +391,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def _child_arguments(arguments: argparse.Namespace,
                      socket_path: Path,
                      parent_uid: int,
-                     python3: str) -> list[str]:
+                     helper_sha256: str) -> list[str]:
     return [
-        python3, "-I", "-B", os.fspath(PRIVILEGED_HELPER),
+        os.fspath(PRIVILEGED_HELPER),
+        os.fspath(ROOT),
         "--validated-source", arguments.validated_source,
+        "--executed-helper-sha256", helper_sha256,
         "--qualification-report", arguments.qualification_report,
         "--swapzctl", arguments.swapzctl,
         "--oracle", arguments.oracle,
@@ -362,6 +408,62 @@ def _child_arguments(arguments: argparse.Namespace,
         "--source-admission-socket", os.fspath(socket_path),
         "--source-admission-parent-uid", str(parent_uid),
     ]
+
+
+def _start_privileged_child(
+        sudo: str, python3: str, arguments: argparse.Namespace,
+        socket_path: Path, parent_uid: int,
+        helper_payload: bytes, helper_sha256: str) -> subprocess.Popen:
+    command = [
+        sudo, "-n", "--", python3, "-I", "-B", "-c",
+        PRIVILEGED_HELPER_BOOTSTRAP,
+        *_child_arguments(
+            arguments, socket_path, parent_uid, helper_sha256),
+    ]
+    try:
+        child = subprocess.Popen(
+            command, cwd=ROOT, stdin=subprocess.PIPE,
+            env=_source_command_environment())
+    except OSError as exc:
+        raise Blocked("cannot start commit-bound privileged qualifier") from exc
+    if child.stdin is None:
+        failure = Blocked("privileged qualifier source pipe is unavailable")
+        _stop_unadmitted_child_preserving(child, failure)
+        raise failure
+    descriptor = child.stdin.fileno()
+    deadline = time.monotonic() + 10.0
+    offset = 0
+    try:
+        os.set_blocking(descriptor, False)
+        while offset < len(helper_payload):
+            if child.poll() is not None:
+                raise OSError("privileged qualifier exited before source transfer")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    "privileged qualifier source transfer timed out")
+            _readable, writable, _exceptional = select.select(
+                [], [descriptor], [], min(0.1, remaining))
+            if not writable:
+                continue
+            try:
+                written = os.write(descriptor, helper_payload[offset:])
+            except BlockingIOError:
+                continue
+            if written <= 0:
+                raise OSError("short privileged qualifier source transfer")
+            offset += written
+        child.stdin.close()
+    except (OSError, TimeoutError) as exc:
+        failure = Blocked(
+            "cannot stream commit-bound privileged qualifier source")
+        try:
+            child.stdin.close()
+        except OSError:
+            pass
+        _stop_unadmitted_child_preserving(child, failure)
+        raise failure from exc
+    return child
 
 
 def main() -> int:
@@ -392,6 +494,9 @@ def main() -> int:
     try:
         git = _trusted_executable("git")
         _check_git_source(arguments.validated_source, git)
+        helper_payload = _git_file_bytes(
+            arguments.validated_source, PRIVILEGED_HELPER, git)
+        helper_sha256 = hashlib.sha256(helper_payload).hexdigest()
         oracle_sha256 = _git_file_sha256(
             arguments.validated_source, DEFAULT_ORACLE, git)
         physical_control_inputs_sha256 = {
@@ -405,7 +510,8 @@ def main() -> int:
         probe = subprocess.run(
             [sudo, "-n", "--", true],
             cwd=ROOT, check=False, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, timeout=10)
+            stderr=subprocess.DEVNULL, timeout=10,
+            env=_source_command_environment())
         if probe.returncode != 0:
             raise Blocked(
                 "noninteractive root privilege is unavailable")
@@ -419,14 +525,13 @@ def main() -> int:
                 server.bind(os.fspath(socket_path))
                 os.chmod(socket_path, 0o600)
                 server.listen(1)
-                child = subprocess.Popen(
-                    [sudo, "-n", "--", *_child_arguments(
-                        arguments, socket_path, parent_uid, python3)],
-                    cwd=ROOT)
+                child = _start_privileged_child(
+                    sudo, python3, arguments, socket_path, parent_uid,
+                    helper_payload, helper_sha256)
                 return _serve_admission(
                     server, child, arguments.validated_source,
                     git, oracle_sha256, physical_control_inputs_sha256,
-                    arguments.cycles)
+                    helper_sha256, arguments.cycles)
     except Blocked as exc:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),

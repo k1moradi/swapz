@@ -36,7 +36,14 @@ import threading
 import time
 from typing import Callable
 
-ROOT = Path(__file__).resolve().parents[2]
+_BOOTSTRAP_SOURCE_ROOT = globals().get("__swapz_source_root__")
+if _BOOTSTRAP_SOURCE_ROOT is None:
+    ROOT = Path(__file__).resolve().parents[2]
+else:
+    if not isinstance(_BOOTSTRAP_SOURCE_ROOT, str) or \
+            not Path(_BOOTSTRAP_SOURCE_ROOT).is_absolute():
+        raise RuntimeError("invalid commit-bound source root")
+    ROOT = Path(_BOOTSTRAP_SOURCE_ROOT)
 SELECTOR = Path("/etc/swapz/primary-target")
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
@@ -237,6 +244,16 @@ class SourceAdmissionClient:
         self._validated_source = validated_source
         self._oracle_sha256: str | None = None
         self._physical_control_inputs_sha256: dict[str, str] | None = None
+        self._executed_helper_sha256: str | None = None
+
+    def bind_executed_helper_sha256(self, digest: str) -> None:
+        if not isinstance(digest, str) or \
+                re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise Blocked("executed helper digest is malformed")
+        if self._executed_helper_sha256 is not None and \
+                self._executed_helper_sha256 != digest:
+            raise Blocked("executed helper identity changed")
+        self._executed_helper_sha256 = digest
 
     def bind_physical_control_inputs(self, hashes: dict[str, str]) -> None:
         if not isinstance(hashes, dict) or set(hashes) != set(PHYSICAL_CONTROL_INPUT_PATHS):
@@ -276,6 +293,8 @@ class SourceAdmissionClient:
             raise Blocked("source admission phase is invalid")
         if self._physical_control_inputs_sha256 is None:
             raise Blocked("physical control source inputs are not pinned")
+        if self._executed_helper_sha256 is None:
+            raise Blocked("executed helper identity is not pinned")
         nonce = os.urandom(16).hex()
         request = {
             "schema": SOURCE_ADMISSION_SCHEMA,
@@ -283,6 +302,7 @@ class SourceAdmissionClient:
             "source_sha": self._validated_source,
             "nonce": nonce,
             "physical_control_inputs_sha256": self._physical_control_inputs_sha256,
+            "executed_helper_sha256": self._executed_helper_sha256,
         }
         try:
             self._channel.sendall(
@@ -3413,6 +3433,10 @@ def require_final_installed_artifact_identity(
 def _execute_admitted(
         arguments: argparse.Namespace, admission: SourceAdmissionClient,
         terminal_cleanup: Callable[[], None] | None = None) -> dict:
+    helper_sha256 = getattr(arguments, "executed_helper_sha256", None)
+    if not isinstance(helper_sha256, str) or \
+            re.fullmatch(r"[0-9a-f]{64}", helper_sha256) is None:
+        raise Blocked("commit-bound executed helper digest is required")
     _ensure_commands(("cc", "dmsetup", "lsblk", "dmesg"))
     if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
         raise Blocked("primary real-swap qualification requires a 4096-byte host page")
@@ -3441,6 +3465,7 @@ def _execute_admitted(
             pin_physical_control_inputs(private_parent)
         admission.bind_physical_control_inputs(
             physical_control_inputs_sha256)
+        admission.bind_executed_helper_sha256(helper_sha256)
         expected_oracle_sha256 = admission.require("initial")
         private_directory = private_parent / "control"
         swapzctl, execution_control_sha256 = build_physical_execution_control(
@@ -3475,7 +3500,6 @@ def _execute_admitted(
         # Bind evidence to the exact report digest imported and independently
         # verified above. Do not re-hash a mutable pathname after the workload.
         qualification_report_sha256 = plan["qualification_report_sha256"]
-        helper_sha256 = _sha256_file(Path(__file__))
         installed_plan = _read_installed_plan(qualified_swapzctl)
         if installed_plan.get("privileged_execution_enabled") is not False:
             raise Blocked(
@@ -3621,10 +3645,9 @@ def _execute_admitted(
         # fail-closed evidence commit follow this approval.
         require_final_installed_artifact_identity(
             qualified_swapzctl, artifact_hashes)
-        if acceptance_manifest_sha256() != acceptance_policy_sha256 or \
-                _sha256_file(Path(__file__)) != helper_sha256:
+        if acceptance_manifest_sha256() != acceptance_policy_sha256:
             raise QualificationFailure(
-                "real-swap policy/helper source artifact changed during campaign")
+                "real-swap acceptance policy changed during campaign")
         admission.require("final")
         if terminal_cleanup is not None:
             terminal_cleanup()
@@ -3723,6 +3746,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resident-mib", type=int, default=DEFAULT_RESIDENT_MIB)
     parser.add_argument("--swap-limit-mib", type=int, default=DEFAULT_SWAP_LIMIT_MIB)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument(
+        "--executed-helper-sha256", default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--source-admission-socket", default=None, help=argparse.SUPPRESS)
     parser.add_argument(

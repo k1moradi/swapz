@@ -559,6 +559,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 "--qualification-report", str(report),
                 "--swapzctl", str(qualified),
                 "--oracle", str(oracle_path),
+                "--executed-helper-sha256", "8" * 64,
             ])
             admission = mock.Mock()
             with mock.patch.dict(os.environ, {}, clear=True), \
@@ -608,6 +609,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 "--qualification-report", str(report),
                 "--swapzctl", str(qualified),
                 "--oracle", str(oracle_path),
+                "--executed-helper-sha256", "8" * 64,
             ])
             private_control = workspace_path / "control/swapzctl"
             private_control.parent.mkdir()
@@ -706,6 +708,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     "--qualification-report", str(report),
                     "--swapzctl", str(qualified),
                     "--oracle", str(oracle_path),
+                    "--executed-helper-sha256", "8" * 64,
                 ])
                 admission = mock.Mock()
                 admission.require.side_effect = ["0" * 64, "0" * 64]
@@ -923,6 +926,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         client = object.__new__(qualify.SourceAdmissionClient)
         client._validated_source = source_sha
         client._oracle_sha256 = None
+        client._executed_helper_sha256 = "8" * 64
         client._physical_control_inputs_sha256 = {
             item: "d" * 64
             for item in qualify.PHYSICAL_CONTROL_INPUT_PATHS
@@ -1021,7 +1025,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     item: "c" * 64
                     for item in parent.PHYSICAL_CONTROL_INPUT_PATHS
                 },
-                2)
+                "8" * 64, 2)
         self.assertEqual(result, 1)
         stop_child.assert_called_once_with(child)
 
@@ -1044,8 +1048,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                       stdout=source_sha + "\trefs/heads/main\n", stderr=""),
             completed(args=[], returncode=0, stdout="", stderr=""),
         ]
-        with mock.patch.object(parent, "_run", side_effect=good):
+        with mock.patch.object(parent, "_run", side_effect=good) as run:
             parent._check_git_source(source_sha, "/usr/bin/git")
+        remote_call = run.call_args_list[3]
+        self.assertEqual(
+            remote_call.args[0],
+            ["/usr/bin/git", "ls-remote", "--exit-code",
+             parent.CANONICAL_REMOTE_URL, "refs/heads/main"])
+        self.assertEqual(remote_call.kwargs["cwd"], Path("/"))
 
         wrong_origin = list(good)
         wrong_origin[2] = completed(
@@ -1924,6 +1934,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_source_admission_transport_failure_is_blocked(self):
         client = object.__new__(qualify.SourceAdmissionClient)
         client._validated_source = "a" * 40
+        client._executed_helper_sha256 = "8" * 64
         client._physical_control_inputs_sha256 = {
             item: "d" * 64
             for item in qualify.PHYSICAL_CONTROL_INPUT_PATHS
@@ -2604,6 +2615,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "source_sha": source_sha,
             "nonce": "1" * 32,
             "physical_control_inputs_sha256": dict(expected),
+            "executed_helper_sha256": "8" * 64,
         }
 
         def read_request(value):
@@ -2612,7 +2624,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     (json.dumps(
                         value, sort_keys=True, separators=(",", ":")) +
                      "\n").encode("ascii")),
-                source_sha, expected)
+                source_sha, expected, "8" * 64)
 
         self.assertEqual(read_request(request), request)
         changed = json.loads(json.dumps(request))
@@ -2774,18 +2786,107 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             if variable != "PATH":
                 self.assertNotIn(variable, environment)
 
-    def test_parent_launches_privileged_helper_with_isolated_python(self):
+    def test_parent_streams_commit_bound_helper_into_isolated_root_python(self):
         arguments = parent._build_parser().parse_args([
             "--validated-source", "a" * 40,
             "--qualification-report", "/tmp/report.json",
         ])
-        child = parent._child_arguments(
-            arguments, Path("/tmp/admission.sock"), 1000,
-            "/usr/bin/python3")
+
+        read_descriptor, write_descriptor = os.pipe()
+        source_pipe = os.fdopen(write_descriptor, "wb", buffering=0)
+        child = mock.Mock(stdin=source_pipe)
+        child.poll.return_value = None
+        helper_payload = b"print('commit-bound helper')\n"
+        helper_digest = hashlib.sha256(helper_payload).hexdigest()
+        try:
+            with mock.patch.object(
+                    parent.subprocess, "Popen", return_value=child) as popen:
+                observed = parent._start_privileged_child(
+                    "/usr/bin/sudo", "/usr/bin/python3", arguments,
+                    Path("/tmp/admission.sock"), 1000,
+                    helper_payload, helper_digest)
+            self.assertIs(observed, child)
+            self.assertEqual(
+                os.read(read_descriptor, len(helper_payload) + 1),
+                helper_payload)
+            self.assertTrue(source_pipe.closed)
+        finally:
+            os.close(read_descriptor)
+        command = popen.call_args.args[0]
         self.assertEqual(
-            child[:4],
-            ["/usr/bin/python3", "-I", "-B",
-             os.fspath(parent.PRIVILEGED_HELPER)])
+            command[:7],
+            ["/usr/bin/sudo", "-n", "--", "/usr/bin/python3",
+             "-I", "-B", "-c"])
+        self.assertEqual(command[7], parent.PRIVILEGED_HELPER_BOOTSTRAP)
+        self.assertIn(os.fspath(parent.PRIVILEGED_HELPER), command)
+        self.assertIn(os.fspath(parent.ROOT), command)
+        self.assertIn("--executed-helper-sha256", command)
+        self.assertIn(helper_digest, command)
+
+
+    def test_parent_reads_privileged_helper_from_validated_commit_object(self):
+        source_sha = "a" * 40
+        payload = b"exact committed privileged helper bytes\n"
+        completed = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0, stdout=payload, stderr=b"")
+        with mock.patch.object(
+                parent.subprocess, "run", return_value=completed) as run:
+            observed = parent._git_file_bytes(
+                source_sha, parent.PRIVILEGED_HELPER, "/usr/bin/git")
+        self.assertEqual(observed, payload)
+        self.assertEqual(
+            run.call_args.args[0],
+            ["/usr/bin/git", "show",
+             f"{source_sha}:tests/tools/qualify-primary-real-swap.py"])
+
+    def test_terminal_helper_identity_is_commit_bound_not_mutable_path_hash(self):
+        source = HELPER.read_text(encoding="utf-8")
+        execute_start = source.index("def _execute_admitted(")
+        execute_end = source.index("\ndef execute(", execute_start)
+        execute_source = source[execute_start:execute_end]
+        self.assertIn(
+            'helper_sha256 = getattr(arguments, "executed_helper_sha256", None)',
+            execute_source)
+        self.assertIn(
+            "admission.bind_executed_helper_sha256(helper_sha256)",
+            execute_source)
+        self.assertNotIn("_sha256_file(Path(__file__))", execute_source)
+
+
+    def test_parent_commit_bound_helper_transfer_is_bounded(self):
+        arguments = parent._build_parser().parse_args([
+            "--validated-source", "a" * 40,
+            "--qualification-report", "/tmp/report.json",
+        ])
+        read_descriptor, write_descriptor = os.pipe()
+        source_pipe = os.fdopen(write_descriptor, "wb", buffering=0)
+        child = mock.Mock(stdin=source_pipe)
+        child.poll.return_value = None
+        with mock.patch.object(
+                parent.subprocess, "Popen", return_value=child), \
+                mock.patch.object(
+                    parent.select, "select", return_value=([], [], [])), \
+                mock.patch.object(
+                    parent.time, "monotonic", side_effect=[0.0, 0.0, 11.0]), \
+                mock.patch.object(
+                    parent, "_stop_unadmitted_child_preserving") as stop:
+            with self.assertRaisesRegex(
+                    parent.Blocked, "cannot stream commit-bound"):
+                parent._start_privileged_child(
+                    "/usr/bin/sudo", "/usr/bin/python3", arguments,
+                    Path("/tmp/admission.sock"), 1000,
+                    b"x" * 32, "8" * 64)
+        stop.assert_called_once()
+        os.close(read_descriptor)
+
+
+    def test_streamed_helper_uses_parent_bound_source_root_not_mutable_file_resolution(self):
+        helper_source = HELPER.read_text(encoding="utf-8")
+        self.assertIn(
+            'globals().get("__swapz_source_root__")', helper_source)
+        self.assertIn(
+            "'__swapz_source_root__': source_root",
+            parent.PRIVILEGED_HELPER_BOOTSTRAP)
 
 
 if __name__ == "__main__":
