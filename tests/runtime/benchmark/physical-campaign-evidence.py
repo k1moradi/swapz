@@ -938,9 +938,12 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                     "measurement_snapshots.lower_before",
                     "measurement_snapshots.lower_after"]
                 if workload == "sd-high-occupancy-churn":
-                    required += ["cold_read.p99_ns", "gc.wall_fraction",
-                                 "gc.gc_wall_ns", "minute_buckets",
+                    required += ["cold_read.p99_ns", "minute_buckets",
                                  "occupancy_transitions"]
+                    # Raw has no Device Mapper target status by contract.
+                    # GC wall evidence is authoritative only for swapz.
+                    if label == "swapz":
+                        required += ["gc.wall_fraction", "gc.gc_wall_ns"]
             for name in required:
                 observed = arm
                 for segment in name.split("."):

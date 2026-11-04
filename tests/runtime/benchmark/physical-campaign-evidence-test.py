@@ -162,6 +162,29 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertNotEqual(evaluated["status"], "PASS")
         self.assertFalse(evaluated["records"][0]["analysis_usable"])
 
+    def test_sustained_gc_evidence_is_swapz_only(self):
+        record = pair(1, 1100)
+        record["workload"] = "sd-high-occupancy-churn"
+        record["order"] = "raw-first"
+        for label in ("raw", "swapz"):
+            record[label]["cold_read"] = {"p99_ns": 200}
+            record[label]["minute_buckets"] = []
+            record[label]["occupancy_transitions"] = []
+        # The raw producer deliberately emits no target-status/GC object.
+        record["swapz"]["gc"] = {"wall_fraction": 0.01, "gc_wall_ns": 10}
+        audited, _ = inspect([record])
+        self.assertEqual(audited["status"], "PASS", audited["diagnostics"])
+        self.assertFalse(any(
+            item["arm"] == "raw" and item["metric"].startswith("gc.")
+            for item in audited["diagnostics"]))
+
+        del record["swapz"]["gc"]
+        audited, _ = inspect([record])
+        self.assertTrue(any(
+            item["arm"] == "swapz" and item["metric"] == "gc.wall_fraction"
+            and item["status"] == "UNAVAILABLE"
+            for item in audited["diagnostics"]))
+
     def test_failed_attempts_and_95_percent_bound(self):
         records = [pair(i, 1100 + 500 * i) for i in range(1, 6)]
         records[1]["status"] = "EXCLUDED"

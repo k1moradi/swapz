@@ -17,6 +17,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The patch-hygiene step intentionally reads HEAD^.
+          fetch-depth: 2
       - name: Synthetic-only adversarial physical evidence regression
         run: python3 -B tests/runtime/benchmark/physical-campaign-evidence-test.py -v
       - name: Validate committed patch whitespace
