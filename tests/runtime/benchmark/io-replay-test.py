@@ -3015,13 +3015,12 @@ class PairReplayContract(unittest.TestCase):
                 "device_identity": {"dm_uuid": mapper_uuid},
                 "resources": {
                     "metadata_and_target_peak_ram_bytes": 8192,
-                    "metadata_ram_trace": trace,
                 },
             },
         }
         self.assertEqual(
             evidence.campaign_capacity_and_ram(
-                [capacity_pair], target_bytes, source_sha),
+                [capacity_pair], target_bytes, source_sha, trace),
             {
                 "page_bytes": 4096,
                 "logical_pages": 256,
@@ -3032,12 +3031,15 @@ class PairReplayContract(unittest.TestCase):
             })
         self.assertIsNone(
             evidence.campaign_capacity_and_ram(
-                [capacity_pair], 4096, source_sha))
+                [capacity_pair], 4096, source_sha, trace))
         validator = evidence.RAM_VALIDATOR["validate_metadata_ram_trace"]
         validator(trace, source_sha=source_sha, mapper_uuid=mapper_uuid,
                   expected_peak_ram_bytes=8192)
+        # A scalar-only pair cannot be sealed without the post-teardown trace.
+        self.assertIsNone(evidence.campaign_capacity_and_ram(
+            [capacity_pair], target_bytes, source_sha))
         capacity = evidence.campaign_capacity_and_ram(
-            [capacity_pair], target_bytes, source_sha)
+            [capacity_pair], target_bytes, source_sha, trace)
         before = {
             "kernel": {"boot_id": trace["host_boot_id"]},
             "captured_at_utc": "2026-11-03T00:00:00Z",
@@ -3086,11 +3088,9 @@ class PairReplayContract(unittest.TestCase):
                     validator(
                         damaged, source_sha=source_sha,
                         mapper_uuid=mapper_uuid, expected_peak_ram_bytes=8192)
-                bad_pair = copy.deepcopy(capacity_pair)
-                bad_pair["swapz"]["resources"]["metadata_ram_trace"] = damaged
                 self.assertIsNone(
                     evidence.campaign_capacity_and_ram(
-                        [bad_pair], 27 * 4096 + 4096, source_sha))
+                        [capacity_pair], target_bytes, source_sha, damaged))
 
         qualification_path = SCRIPT.with_name("qualification.py")
         qualification_spec = importlib.util.spec_from_file_location(
