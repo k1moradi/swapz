@@ -813,6 +813,8 @@ static int test_overlapping_append_inputs(void)
 	struct swapz_builder builder;
 	swapz_u8 *inside = extent + SWAPZ_BLOCK_BYTES - 1U;
 	const swapz_u8 *outside = extent + SWAPZ_BLOCK_BYTES;
+	swapz_u8 *shifted_extent = misaligned_extent + 1U;
+	const swapz_u8 *before_shifted_extent = misaligned_extent;
 	swapz_u32 crc;
 
 	*inside = 0x31U;
@@ -828,13 +830,27 @@ static int test_overlapping_append_inputs(void)
 	CHECK(swapz_append_prehashed_encoded_unique(&builder, 1, 1, inside,
 						    1U, crc,
 						    SWAPZ_ENCODING_LZ4) == -EINVAL);
-	/* The overlap is rejected before inspecting even a truncated source. */
+	/* A source range that starts inside the extent and crosses its end is
+	 * still rejected before any payload hashing or mutation. */
 	CHECK(swapz_append(&builder, 1, 1, inside, 2U) == -EINVAL);
 	CHECK(builder.count == 0 && builder.payload_start == SWAPZ_BLOCK_BYTES);
 	CHECK(*inside == 0x31U && extent[SWAPZ_BLOCK_BYTES] == 0x72U);
 	CHECK(swapz_append(&builder, 2, 1, outside, 1U) == 0);
 	CHECK(swapz_seal(&builder) == 0);
 	CHECK(swapz_validate(extent, SWAPZ_BLOCK_BYTES) == 0);
+
+	/* Exercise the other address-order branch. A source ending exactly at
+	 * the extent start is disjoint; extending it by one byte overlaps. */
+	misaligned_extent[0] = 0x93U;
+	CHECK(swapz_begin(&builder, shifted_extent, SWAPZ_BLOCK_BYTES, 110) == 0);
+	CHECK(swapz_append(&builder, 3, 1, before_shifted_extent, 1U) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(swapz_validate(shifted_extent, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(misaligned_extent[0] == 0x93U);
+
+	CHECK(swapz_begin(&builder, shifted_extent, SWAPZ_BLOCK_BYTES, 111) == 0);
+	CHECK(swapz_append(&builder, 4, 1, before_shifted_extent, 2U) == -EINVAL);
+	CHECK(builder.count == 0 && builder.payload_start == SWAPZ_BLOCK_BYTES);
 	return 0;
 }
 
@@ -876,8 +892,10 @@ static int test_authenticated_wire_mutations(void)
 		CHECK(swapz_validate(extent, extent_bytes) == 0);
 		memcpy(saved_metadata, extent, metadata_bytes);
 		for (mutation = 0; mutation < 10U; ++mutation) {
-			swapz_u8 record_index = mutation == 2U || mutation == 3U ||
-				mutation == 4U ? 1U : 0U;
+			swapz_u8 record_index =
+				mutation == 1U || mutation == 2U ||
+				mutation == 3U || mutation == 4U ||
+				mutation == 6U ? 1U : 0U;
 
 			memcpy(extent, saved_metadata, metadata_bytes);
 			switch (mutation) {
@@ -926,19 +944,28 @@ static int test_authenticated_wire_mutations(void)
 			CHECK(readable == NULL && decoded.payload_length == 0U);
 			/* peek reads no payload and must work with just block zero. */
 			memcpy(metadata_only, extent, sizeof(metadata_only));
+			CHECK(swapz_validate_metadata_crc(metadata_only,
+							 extent_bytes) == 0);
 			CHECK(swapz_peek(metadata_only, extent_bytes, record_index,
 					 &decoded) == -EUCLEAN);
 			CHECK(decoded.generation == 0U);
-			/* The lightweight descriptor API deliberately does not
-			 * validate full ordering or cross-record identity. */
-			if (mutation == 0U || mutation == 2U ||
-			    mutation == 3U || mutation == 4U ||
-			    mutation >= 7U) {
-				readable = payload;
+			/* Descriptor-only lookup intentionally validates one record
+			 * in isolation. Duplicate identity and inter-record adjacency
+			 * remain full-validator/caller responsibilities. */
+			if (mutation == 1U || mutation == 5U || mutation == 6U) {
+				CHECK(swapz_lookup_validated_descriptor(
+					      metadata_only, extent_bytes,
+					      record_index, &decoded, NULL) == 0);
+				CHECK(decoded.generation != 0U);
+				CHECK(decoded.payload_length ==
+				      (record_index ? 23U : 17U));
+			} else {
 				CHECK(swapz_lookup_validated_descriptor(
 					      metadata_only, extent_bytes,
 					      record_index, &decoded,
 					      NULL) == -EUCLEAN);
+				CHECK(decoded.generation == 0U &&
+				      decoded.payload_length == 0U);
 			}
 		}
 		memcpy(extent, saved_metadata, metadata_bytes);
