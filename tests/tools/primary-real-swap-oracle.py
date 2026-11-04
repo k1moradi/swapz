@@ -115,6 +115,10 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
             expected = page_pattern(seed_hex, page_index)
             offset = page_index * PAGE_BYTES
             observed = allocation[offset:offset + PAGE_BYTES]
+            if len(observed) != PAGE_BYTES:
+                raise RuntimeError(
+                    f"short oracle page read at page {page_index}: "
+                    f"{len(observed)} of {PAGE_BYTES} bytes")
             observed_digest.update(observed)
             if observed != expected:
                 differences = [
