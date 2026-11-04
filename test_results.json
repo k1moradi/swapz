@@ -249,14 +249,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1784,
+"inverse_ns_per_page": 1725,
 "name": "scalar",
-"transform_ns_per_page": 1795
+"transform_ns_per_page": 1840
 },
 {
-"inverse_ns_per_page": 1379,
+"inverse_ns_per_page": 1398,
 "name": "sse2",
-"transform_ns_per_page": 1111
+"transform_ns_per_page": 1197
 }
 ],
 "classifier": {
@@ -266,9 +266,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 664,
+"ns_per_page": 900,
 "sample_pairs": 32,
-"scalar_ns_per_page": 664,
+"scalar_ns_per_page": 900,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -283,7 +283,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 12041
+"wall_ns_per_page": 12522
 },
 {
 "acceleration": 2,
@@ -291,7 +291,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11615
+"wall_ns_per_page": 11655
 },
 {
 "acceleration": 3,
@@ -299,7 +299,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 11239
+"wall_ns_per_page": 10526
 },
 {
 "acceleration": 4,
@@ -307,7 +307,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10308
+"wall_ns_per_page": 10064
 }
 ],
 "negative_pages": 256,
@@ -324,9 +324,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6524,
-"modeled_wall_ns_total": 3757824,
-"ns_per_saved_block": 72265,
+"modeled_wall_ns_per_page": 6984,
+"modeled_wall_ns_total": 4022784,
+"ns_per_saved_block": 77361,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -351,29 +351,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 1231,
+"baseline_ns_per_page": 1236,
 "order": "baseline_first",
-"unrolled_ns_per_page": 1183
+"unrolled_ns_per_page": 895
 },
 {
-"baseline_ns_per_page": 1284,
+"baseline_ns_per_page": 1128,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 1122
+"unrolled_ns_per_page": 930
 },
 {
-"baseline_ns_per_page": 1092,
+"baseline_ns_per_page": 1471,
 "order": "baseline_first",
-"unrolled_ns_per_page": 908
+"unrolled_ns_per_page": 1194
 },
 {
-"baseline_ns_per_page": 1367,
+"baseline_ns_per_page": 1297,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 889
+"unrolled_ns_per_page": 1410
 },
 {
-"baseline_ns_per_page": 1266,
+"baseline_ns_per_page": 1470,
 "order": "baseline_first",
-"unrolled_ns_per_page": 1165
+"unrolled_ns_per_page": 1186
 }
 ],
 "repeats_per_arm": 64,
@@ -422,14 +422,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 73656,
+"ns_per_saved_block": 78630,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 7288,
-"routed_cpu_ns_total": 4198407,
+"routed_cpu_ns_per_page": 7781,
+"routed_cpu_ns_total": 4481946,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -477,14 +477,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74149,
+"ns_per_saved_block": 79213,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 7080,
-"routed_cpu_ns_total": 4078248,
+"routed_cpu_ns_per_page": 7563,
+"routed_cpu_ns_total": 4356720,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -532,14 +532,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72265,
+"ns_per_saved_block": 77361,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6524,
-"routed_cpu_ns_total": 3757824,
+"routed_cpu_ns_per_page": 6984,
+"routed_cpu_ns_total": 4022784,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -587,14 +587,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72265,
+"ns_per_saved_block": 77361,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6524,
-"routed_cpu_ns_total": 3757824,
+"routed_cpu_ns_per_page": 6984,
+"routed_cpu_ns_total": 4022784,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -642,14 +642,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 72265,
+"ns_per_saved_block": 77361,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6524,
-"routed_cpu_ns_total": 3757824,
+"routed_cpu_ns_per_page": 6984,
+"routed_cpu_ns_total": 4022784,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -666,17 +666,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1379,
+"inverse_ns_per_page": 1398,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1784,
-"scalar_transform_ns_per_page": 1795,
-"second_lz4_ns_per_page": 12240,
+"scalar_inverse_ns_per_page": 1725,
+"scalar_transform_ns_per_page": 1840,
+"second_lz4_ns_per_page": 12717,
 "transform_backend": "sse2",
-"transform_ns_per_page": 1111
+"transform_ns_per_page": 1197
 }
 ]
 }
@@ -690,23 +690,23 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "32d19d95068f47d2495639a304d278fc7f81b4783bbc56cec453f901e9e943b7",
-"module_sha256": "a842baa173cd9d3f224c68f2dcadc8288e01782a77fdb5020edbc7c831432c90",
+"formatter_sha256": "1b9b32514c5189b1b8cc0d335f42d2e073dd6571396617edf836abc5ba45e161",
+"module_sha256": "3e712cf909d89f8fd7b6f9233f590e21c016a79a8dceb3a498eda3ac1ed77ecc",
 "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "e1bc54878c4f4b5b20ff95f1e8e7331f91cb7b2c",
+"source_sha": "9e187df7b09c67becf86c5b5aced5f1cdb3e3e86",
 "stages": [
 {
-"elapsed_s": 13.546,
+"elapsed_s": 13.402,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_malformed_initial_admission_reaps_unadmitted_child",
-"elapsed_s": 189.996,
+"diagnostic": "Unit test failed: test_strict_json_rejects_nonfinite_and_overflow_exponents",
+"elapsed_s": 317.875,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -718,5 +718,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "e1bc54878c4f4b5b20ff95f1e8e7331f91cb7b2c"
+"tested_commit_sha": "9e187df7b09c67becf86c5b5aced5f1cdb3e3e86"
 }
