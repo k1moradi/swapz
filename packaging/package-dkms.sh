@@ -790,7 +790,7 @@ restore_uninstall_cli_backup() {
 }
 
 restore_uninstall_backup() {
-  local current_status=""
+  local current_status="" restored_status=""
   backup_dir="$transaction_dir/backup"
   query_dkms_status current_status -m swapz -v "$version" || return 1
   cleanup_activation_files
@@ -812,6 +812,10 @@ restore_uninstall_backup() {
   "$dkms_bin" add -m swapz -v "$version" || return 1
   "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
+  query_dkms_status restored_status -m swapz -v "$version" -k "$kernel_release" ||
+    return 1
+  [[ "$restored_status" == *": installed"* &&
+     "$restored_status" == *"$kernel_release"* ]] || return 1
   prepare_exact_module_restore || return 1
   install -d -m0755 "$installed_module_dir"
   install -m0644 "$backup_dir/installed-module" "$installed_module" || return 1
@@ -1249,6 +1253,7 @@ restore_cli_backup() {
 }
 
 restore_previous_package() {
+  local restored_status=""
   (( had_existing == 1 )) || return 0
   cleanup_package_files
   install -d -m0755 "$src/src/kernel"
@@ -1264,6 +1269,10 @@ restore_previous_package() {
   "$dkms_bin" add -m swapz -v "$version" || return 1
   "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release" || return 1
   "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release" || return 1
+  query_dkms_status restored_status -m swapz -v "$version" -k "$kernel_release" ||
+    return 1
+  [[ "$restored_status" == *": installed"* &&
+     "$restored_status" == *"$kernel_release"* ]] || return 1
   prepare_exact_module_restore || return 1
   [[ -f "$backup_dir/installed-module" && ! -L "$backup_dir/installed-module" ]] ||
     return 1

@@ -143,7 +143,8 @@ activation-capable CLI atomically only after the qualified module resolves,
 all non-CLI helpers/units are installed and systemd reload has succeeded.
 Failure restores the previous verified package with DKMS state, the exact
 qualified module, depmod and module-path resolution all proven before the CLI
-is restored; changed rollback snapshots are refused, and incomplete recovery
+is restored; rollback re-queries the exact current-kernel DKMS installed state
+after rebuilding it rather than trusting the install command's exit status; changed rollback snapshots are refused, and incomplete recovery
 keeps activation revoked and later package operations blocked. DKMS status
 query failures are uncertainty and block mutation rather than being interpreted
 as an empty registration. Abrupt process or host termination can retain a

@@ -152,6 +152,7 @@ class PackageLifecycle(unittest.TestCase):
                 self.module_lookup_saw_cli_marker),
             SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS="0",
             SWAPZ_FAKE_DKMS_MODULE_SUFFIX="",
+            SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS="0",
             SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
             SWAPZ_FAKE_FAIL_AT="never",
             SWAPZ_FAKE_BUILD_SLEEP="0",
@@ -220,6 +221,11 @@ if [[ "$cmd" == remove && "$SWAPZ_FAKE_REMOVE_SLEEP" != 0 &&
 fi
 case "$cmd" in
   status)
+    status_threshold="${SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS:-0}"
+    if [[ "$status_threshold" != 0 ]]; then
+      build_count="$(grep -c '^build$' "$SWAPZ_DKMS_LOG" 2>/dev/null || true)"
+      (( build_count < status_threshold )) || exit 62
+    fi
     if [[ -f "$SWAPZ_DKMS_STATE" ]]; then
       printf 'swapz, %s, x86_64: installed\n' "$SWAPZ_TEST_KERNEL_RELEASE"
     fi
@@ -1046,6 +1052,37 @@ exec "{flock_binary}" "$@"
         durable_write = journal_write.index("os.fsync(stream.fileno())")
         self.assertLess(mode_set, durable_write)
         self.assertNotIn("os.chmod(temporary, 0o600)", journal_write)
+
+    def test_upgrade_rollback_dkms_status_uncertainty_revokes_activation(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        failed = self.invoke("install", {
+            "SWAPZ_FAKE_SYSTEMCTL_FAIL_ONCE": "1",
+            "SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS": "3",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("previous package restoration failed", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        transactions = list(
+            (self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(transactions), 1)
+        state = json.loads((transactions[0] / "state.json").read_text())
+        self.assertEqual(state["phase"], "rollback-incomplete")
+
+    def test_uninstall_rollback_dkms_status_uncertainty_revokes_activation(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed = self.invoke("uninstall", {
+            "SWAPZ_TEST_UNINSTALL_FAIL_AFTER": "dkms-removed",
+            "SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS": "2",
+        })
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("rollback incomplete", failed.stderr)
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        transactions = self.uninstall_transactions()
+        self.assertEqual(len(transactions), 1)
+        state = json.loads((transactions[0] / "state.json").read_text())
+        self.assertEqual(state["phase"], "rollback-incomplete")
 
     def test_upgrade_rollback_resolves_module_before_restoring_cli(self):
         self.assertEqual(self.invoke("install").returncode, 0)
