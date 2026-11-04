@@ -242,10 +242,27 @@ fi
 # was still alive. Recover only the exact private harness identity. Never
 # remove multiple mappings, arbitrary swapz mappings, physical lowers, mounts,
 # swap aliases, open mappings, or anything requiring force.
-swapz_map_list="$(
+# Do not turn a malformed dmsetup device number into an apparent owned name.
+# Every record needs one bounded name and a canonical decimal major:minor pair.
+if swapz_map_list="$(
     dmsetup ls --target swapz --noheadings 2>/dev/null |
-        awk 'NF { print $1 }'
-)" || refuse BLOCKED mapper_inventory unavailable "cannot enumerate pre-existing swapz mappings"
+        awk '
+            {
+                if (NF != 2 || length($1) > 127 || length($2) > 23 ||
+                    $2 !~ /^[(](0|[1-9][0-9]*):(0|[1-9][0-9]*)[)]$/) {
+                    malformed = 1
+                    next
+                }
+                print $1
+            }
+            END { if (malformed) exit 2 }
+        '
+)"; then
+    :
+else
+    inventory_status=$?
+    refuse BLOCKED mapper_inventory unavailable "pipeline_status=$inventory_status; cannot enumerate pre-existing swapz mappings: expected bounded name (canonical decimal major:minor) records, observed invalid or unreadable listing; inspect dmsetup inventory without cleanup"
+fi
 swapz_maps=()
 if [[ -n $swapz_map_list ]]; then
     mapfile -t swapz_maps <<< "$swapz_map_list" ||

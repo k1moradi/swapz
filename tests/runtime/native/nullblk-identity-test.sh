@@ -180,6 +180,10 @@ case "$*" in
             exit 98
         elif [[ $SWAPZ_FIXTURE_CASE == busy_mapper ]]; then
             printf 'swapz-demo-aaaaaaaaaaaaaaaa (253:0)\nswapz-demo-bbbbbbbbbbbbbbbb (253:1)\n'
+        elif [[ $SWAPZ_FIXTURE_CASE == noncanonical_mapper_major ]]; then
+            printf 'swapz-demo-aaaaaaaaaaaaaaaa (0253:0)\n'
+        elif [[ $SWAPZ_FIXTURE_CASE == malformed_mapper_fields ]]; then
+            printf 'swapz-demo-aaaaaaaaaaaaaaaa (253:0) extra\n'
         else
             printf 'swapz-demo-aaaaaaaaaaaaaaaa (253:0)\n'
         fi
@@ -255,7 +259,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|stale_token|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|stale_token|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -294,7 +298,7 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+        noncanonical_mapper_major|malformed_mapper_fields|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
             setup_owned_lower
             setup_mapper_node
             ;;
@@ -335,6 +339,12 @@ run_case() {
         [[ "$output" == *"$expected"* ]] ||
             die "$case_name omitted expected observation: $output"
     fi
+    if [[ "$case_name" == noncanonical_mapper_major ||
+          "$case_name" == malformed_mapper_fields ]]; then
+        [[ "$output" == *'pipeline_status=2; '* &&
+           "$output" == *'observed invalid or unreadable listing;'* ]] ||
+            die "$case_name did not refuse malformed mapper identity before cleanup: $output"
+    fi
     [[ -f "$FIXTURE/proc/swaps" ]] || die "host swap inventory was mutated"
     if [[ "$case_name" == unrelated_swap ]]; then
         grep -Fxq '/var/swapfile file 1024 0 -3' "$FIXTURE/proc/swaps" ||
@@ -357,6 +367,8 @@ run_case cleanup_permission completed_owned_tmp_cleanup BLOCKED unavailable
 run_case idle_module_busy idle_module_removal BLOCKED unavailable
 run_case busy_mapper mapper_inventory BLOCKED unavailable
 run_case mapper_inventory_error mapper_inventory BLOCKED unavailable
+run_case noncanonical_mapper_major mapper_inventory BLOCKED unavailable
+run_case malformed_mapper_fields mapper_inventory BLOCKED unavailable
 run_case stale_token stale_run_token BLOCKED unavailable
 run_case wrong_owner null_blk_owner BLOCKED unavailable
 run_case owned_swap active_owned_swap BLOCKED unavailable
@@ -377,4 +389,4 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity and 30 isolated preflight refusal/observation fixtures'
+printf '%s\n' 'PASS: null_blk identity and 32 isolated preflight refusal/observation fixtures'

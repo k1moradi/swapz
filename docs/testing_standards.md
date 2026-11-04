@@ -1175,7 +1175,13 @@ mode is part of the harness contract and must not silently drift. Preflight's
 required-command audit must include every unconditional utility it executes.
 Mapper enumeration and lower-dependency parsing are explicit fail-closed
 operations; they must not rely on an unguarded pipeline/assignment under
-`set -e`. Stale-mapper identity, UUID, open-count and lower-device validation
+`set -e`. Busy-module `dmsetup ls --target swapz --noheadings` records
+must have exactly two bounded fields: one mapper name and one parenthesized,
+canonical unsigned-decimal major:minor tuple, without leading zeroes. Empty
+lines, extra fields, or malformed device numbers are not proof of a single
+owned mapper: refuse at `mapper_inventory` before any holder signaling or
+device cleanup, report the pipeline status and safe inventory inspection,
+never echo inventory/device paths. Stale-mapper identity, UUID, open-count and lower-device validation
 must avoid runtime-dependent Bash extended-regex capture state; exact shell
 patterns and guarded parsers are preferred so malformed input reaches an
 explicit `BLOCKED:` path rather than shell status 2. Canonical mapper identity
