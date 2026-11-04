@@ -1157,6 +1157,15 @@ def _memory_events(path: Path) -> dict[str, int]:
     return values
 
 
+def require_no_cgroup_oom_events(
+        initial_events: dict[str, int], observed_events: dict[str, int]) -> None:
+    """An OOM event or counter regression invalidates the dedicated workload."""
+    if any(observed_events[key] != initial_events[key]
+           for key in ("oom", "oom_kill")):
+        raise QualificationFailure(
+            "cgroup OOM counters changed during admitted real-swap workload")
+
+
 def _psi_total(path: Path, kind: str = "some") -> int:
     observed: int | None = None
     try:
@@ -1826,6 +1835,13 @@ def require_oracle_worker_cgroup_ownership(
             len(expected) != len(processes):
         raise QualificationFailure(
             "dedicated oracle cgroup membership differs from owned worker PIDs")
+    # The cgroup may shrink after VERIFY only when a child has exited; a
+    # still-running oracle outside our cgroup invalidates swap attribution.
+    if allow_worker_exit and any(
+            process.pid not in observed and process.poll() is None
+            for process in processes):
+        raise QualificationFailure(
+            "live oracle worker left dedicated cgroup during verification")
 
 
 def _close_oracle_pipes(process: subprocess.Popen) -> None:
@@ -2099,10 +2115,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             require_oracle_worker_cgroup_ownership(
                 cgroup, guard_processes,
                 allow_worker_exit=guard_allow_worker_exit)
-        events = _memory_events(cgroup / "memory.events")
-        if events.get("oom", 0) > events_before.get("oom", 0) or \
-                events.get("oom_kill", 0) > events_before.get("oom_kill", 0):
-            raise QualificationFailure("cgroup OOM occurred during admitted real-swap workload")
+        require_no_cgroup_oom_events(
+            events_before, _memory_events(cgroup / "memory.events"))
         if _read_uint(cgroup / "memory.swap.current") > swap_limit_mib * MIB:
             raise QualificationFailure("cgroup exceeded configured swap-usage bound")
         if _mem_available_mib() < MIN_AVAILABLE_MIB:
@@ -2359,6 +2373,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
 
         reuse = evaluate_reuse_rounds(rounds)
         events_after = _memory_events(cgroup / "memory.events")
+        # Do not trust a previously clean guard observation as terminal proof.
+        require_no_cgroup_oom_events(events_before, events_after)
         psi_after = _psi_total(cgroup / "memory.pressure")
         if psi_window.observe(time.monotonic(), psi_after):
             raise QualificationFailure(

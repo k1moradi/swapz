@@ -186,6 +186,8 @@ BLOCKED because traffic attribution or mapper ownership is ambiguous.
 The byte oracle expands the run/worker/round seed into position-distinct 4 KiB
 pages; swap-in checks every byte, counts all corrupt bytes and caps only the
 diagnostic samples. The cgroup's OOM event keys must be present and parseable.
+OOM counters must remain unchanged, including at the final post-release sample;
+counter regressions cannot qualify as zero OOM events.
 OOM, cgroup swap and PSI telemetry begin before FILL; guard checks enforce the
 1 GiB host MemAvailable floor and stop when any rolling interval of at least
 five seconds has cgroup memory PSI "some" above 85%. Earlier quiet time must
@@ -257,7 +259,8 @@ cgroup. Removal of the dedicated cgroup still requires every worker exited.
 Workers are tracked before cgroup migration. `cgroup.procs` must show
 exactly those workers before pressure, must contain no foreign PID while
 workers are active, may shrink only after a worker has entered its verified
-exit phase, and must be empty after every worker is reaped. If the process
+exit phase and actually exited (a live worker escaping its cgroup is not
+acceptable), and must be empty after every worker is reaped. If the process
 inventory of an empty preflight or final workload cgroup
 is unreadable, an ordinary rmdir is still attempted; the kernel refuses that
 operation for a non-empty cgroup, so an empty group is removed without treating

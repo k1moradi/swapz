@@ -1830,6 +1830,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             membership.write_text("501\n502\n", encoding="ascii")
             qualify.require_oracle_worker_cgroup_ownership(cgroup, workers)
             membership.write_text("501\n", encoding="ascii")
+            workers[1].poll.return_value = None
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "live oracle worker"):
+                qualify.require_oracle_worker_cgroup_ownership(
+                    cgroup, workers, allow_worker_exit=True)
+            workers[1].poll.return_value = 0
             qualify.require_oracle_worker_cgroup_ownership(
                 cgroup, workers, allow_worker_exit=True)
             membership.write_text("501\n503\n", encoding="ascii")
@@ -1912,6 +1918,35 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             events.write_text("oom 0\noom_kill 0\n")
             self.assertEqual(qualify._memory_events(events),
                              {"oom": 0, "oom_kill": 0})
+
+    def test_cgroup_oom_counters_reject_increase_and_regression(self):
+        initial_events = {"oom": 2, "oom_kill": 1}
+        qualify.require_no_cgroup_oom_events(initial_events, dict(initial_events))
+        for counter in ("oom", "oom_kill"):
+            for difference in (-1, 1):
+                with self.subTest(counter=counter, difference=difference):
+                    observed_events = dict(initial_events)
+                    observed_events[counter] += difference
+                    with self.assertRaisesRegex(
+                            qualify.QualificationFailure, "OOM counters changed"):
+                        qualify.require_no_cgroup_oom_events(
+                            initial_events, observed_events)
+
+    def test_final_cgroup_oom_is_rejected_after_last_release(self):
+        # Zero rounds avoid physical workers while exercising the final sample
+        # independently of the in-round guard and verification checks.
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(qualify, "_cgroup_create", return_value=Path(directory)), \
+                mock.patch.object(qualify, "_remove_cgroup"), \
+                mock.patch.object(qualify, "_memory_events", side_effect=[
+                    {"oom": 0, "oom_kill": 0}, {"oom": 1, "oom_kill": 0}]), \
+                mock.patch.object(qualify, "_psi_total", return_value=0), \
+                mock.patch.object(qualify, "REUSE_ROUNDS", 0), \
+                mock.patch.object(qualify, "evaluate_reuse_rounds",
+                                  return_value={"slot_reuse_proven": True}):
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure, "OOM counters changed"):
+                qualify._run_workload({}, {}, Path(directory), 384, 128, 384, 240)
 
     def test_slot_reuse_requires_full_release_then_second_concurrent_allocation(self):
         rounds = [
