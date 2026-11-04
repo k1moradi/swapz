@@ -1375,8 +1375,7 @@ else
 	udevadm info --query=property --path="$PART_SYSFS" 2>/dev/null |
 		grep -E '^(DEVPATH|DEVTYPE|ID_PART_ENTRY_UUID|DEVLINKS)=' >&2 || true
 	udevadm test --verbose --action=add "$PART_SYSFS" 2>&1 |
-		grep -E 'rules\.d|swapz-owned-nullblk|ID_PART_ENTRY_UUID|by-partuuid|DEVLINKS|DEVPATH' |
-		sed -n '1,80p' >&2 || true
+		grep -E "$UDEV_RULE|$UDEV_DEVPATH|$PARTUUID|by-partuuid|[Ee]rror|[Ff]ailed|Invalid" >&2 || true
 	blocked "udev did not publish the owned partition by-PARTUUID node"
 fi
 
