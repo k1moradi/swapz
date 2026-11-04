@@ -1750,7 +1750,11 @@ PY
     printf 'BLOCKED: recovery phase %s final state verified; rollback %s; transaction-record cleanup failed (status %d)\n'       "$transaction_phase" "$recovery_rollback_outcome" "$cleanup_status" >&2
     exit "$cleanup_status"
   fi
-  echo "Recovered verified swapz package transaction ($action: $recovery_phase)"
+  if [[ "$recovery_rollback_outcome" == succeeded ]]; then
+    echo "Recovered verified swapz package transaction ($action: $recovery_phase; previous-state rollback succeeded)"
+  else
+    echo "Recovered verified swapz package transaction ($action: $recovery_phase; rollback not attempted)"
+  fi
   exit 0
 fi
 

@@ -2047,6 +2047,7 @@ exec "{flock_binary}" "$@"
 
         recovered = self.invoke("recover")
         self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertIn("previous-state rollback succeeded", recovered.stdout)
         self.assert_absent()
         self.assertFalse(transaction.exists())
 
@@ -2072,6 +2073,7 @@ exec "{flock_binary}" "$@"
 
         recovered = self.invoke("recover")
         self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertIn("previous-state rollback succeeded", recovered.stdout)
         self.assert_absent()
         self.assertFalse(transactions[0].exists())
 
@@ -2382,6 +2384,7 @@ exec "{flock_binary}" "$@"
                       self.invoke("uninstall").stderr)
         restored = self.invoke("recover")
         self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertIn("rollback not attempted", restored.stdout)
         self.assert_installed_exact()
         self.assertFalse(committed_install.exists())
         self.assertEqual(self.invoke("recover").returncode, 0)
