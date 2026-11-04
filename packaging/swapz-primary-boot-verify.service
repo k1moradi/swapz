@@ -7,6 +7,25 @@ Type=oneshot
 ExecStart=@SWAPZ_SBINDIR@/swapz-primary-boot-verify observe
 TimeoutStartSec=30s
 UMask=0077
+# Observe is not an activator, but can persist cold-boot evidence and revoke
+# /run/swapz authorization. /var and /run therefore cannot be globally read-only.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# Never let an observer update the manager's recovery records or the package
+# installer's transaction journal, even when both live on writable /var.
+ReadOnlyPaths=-/var/lib/swapz/physical-recovery -/var/lib/swapz-package-transactions
 
 [Install]
 WantedBy=multi-user.target
