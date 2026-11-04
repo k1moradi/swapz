@@ -5749,12 +5749,19 @@ is eligible for `Restart=on-failure`.
 
 Effective systemd unit qualification must inspect the merged deployed
 configuration, not just the vendor unit source. Rootless fixtures must layer
-generator-authorized selected-PARTUUID device/swap dependencies with sorted
-administrator drop-ins; repeated scalar settings are last-wins, while empty
-list assignments reset dependency and Exec command lists before later entries
-are added. Security-sensitive capability and syscall-filter group changes
-must fail closed rather than assuming the current systemd/kernel can enforce
-every syntactically valid sandbox directive. Reject overrides that relax
+generator-authorized selected-PARTUUID device/swap dependencies with
+administrator configuration using systemd's effective precedence rules.
+Repeated scalar settings are last-wins; Exec/filter/install lists honor their
+documented empty-assignment resets, while unit dependencies (including
+RequiresMountsFor= path dependencies) are additive in drop-ins and cannot be
+removed by an empty assignment. Model top-level type and dash-prefix drop-ins,
+lexicographic application, and same-name specificity/load-path precedence,
+including an exact administrator drop-in shadowing a normal generator
+fragment. Also exercise a higher-priority whole-unit replacement, because
+that can remove dependencies which a drop-in cannot. Security-sensitive
+capability and syscall-filter group changes must fail closed rather than
+assuming the current systemd/kernel can enforce every syntactically valid
+sandbox directive. Reject overrides that relax
 observer @swap/@module denial, grant observer lifecycle commands, remove
 mapper DM/module/swap capability, reorder activation guard -> preflight ->
 recover -> prepare -> start, change the sole primary stop/swapoff owner,

@@ -587,23 +587,27 @@ class UnitSandboxContractTests(unittest.TestCase):
 
 
 class EffectiveUnitContractTests(unittest.TestCase):
-    """Rootless effective-systemd model for generator and ordered local drop-ins.
+    """Rootless model of effective systemd unit and drop-in security.
 
-    Scalar settings are last-wins; dependencies and commands are accumulated
-    until an empty assignment resets the list. Filter/capability groups retain
-    all assignments: changes are refused conservatively rather than assuming
-    runtime sandbox support from syntax validation alone.
+    Scalar settings are last-wins. Exec/filter/install lists honor their
+    documented empty-assignment reset behavior. Unit dependency directives,
+    including RequiresMountsFor= path dependencies, are additive in drop-ins:
+    an empty assignment is a no-op and cannot remove the vendor edge.
     """
 
-    DEPENDENCY_KEYS = frozenset(
-        (section, key)
-        for section, keys in (
-            ("Unit", ("After", "Before", "Requires", "RequiresMountsFor",
-                      "Wants", "Conflicts", "BindsTo", "PartOf", "Requisite",
-                      "OnFailure", "Upholds")),
-            ("Install", ("WantedBy", "RequiredBy", "Alias", "Also")),
+    ADDITIVE_UNIT_KEYS = frozenset(
+        ("Unit", key)
+        for key in (
+            "After", "Before", "Requires", "RequiresMountsFor",
+            "Wants", "WantsMountsFor", "Conflicts", "BindsTo", "PartOf",
+            "Requisite", "OnFailure", "OnSuccess", "Upholds",
+            "PropagatesReloadTo", "ReloadPropagatedFrom",
+            "PropagatesStopTo", "StopPropagatedFrom", "JoinsNamespaceOf",
         )
-        for key in keys
+    )
+    INSTALL_LIST_KEYS = frozenset(
+        ("Install", key)
+        for key in ("WantedBy", "RequiredBy", "UpheldBy", "Alias", "Also")
     )
     COMMAND_KEYS = frozenset(
         ("Service", key) for key in (
@@ -621,15 +625,81 @@ class EffectiveUnitContractTests(unittest.TestCase):
         "health": ("swapz-primary-runtime-health.service", RUNTIME_HEALTH_SERVICE),
         "passive_swap": (r"dev-mapper-swapz\x2dprimary.swap", PRIMARY_SWAP),
     }
+    SOURCE_PRIORITIES = {"generator": 0, "admin": 1}
+
+    @classmethod
+    def matching_dropin_scopes(cls, unit_filename: str) -> tuple[str, ...]:
+        stem, unit_type = unit_filename.rsplit(".", 1)
+        scopes = [f"{unit_type}.d"]
+        for index, character in enumerate(stem):
+            if character == "-":
+                scopes.append(f"{stem[:index + 1]}.{unit_type}.d")
+        scopes.append(f"{unit_filename}.d")
+        # A malformed name could otherwise produce duplicate scope entries.
+        return tuple(dict.fromkeys(scopes))
+
+    @classmethod
+    def resolve_dropins(
+        cls,
+        unit_filename: str,
+        sources: dict[str, dict[str, dict[str, str]]],
+    ) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
+        scope_priority = {
+            scope: index
+            for index, scope in enumerate(cls.matching_dropin_scopes(unit_filename))
+        }
+        candidates: dict[str, list[tuple[int, int, str, str, str]]] = {}
+        for source_name, scoped_fragments in sources.items():
+            source_priority = cls.SOURCE_PRIORITIES[source_name]
+            for scope, fragments in scoped_fragments.items():
+                if scope not in scope_priority:
+                    continue
+                for filename, contents in fragments.items():
+                    if not filename.endswith(".conf"):
+                        continue
+                    origin = f"{source_name}:{scope}/{filename}"
+                    candidates.setdefault(filename, []).append(
+                        (
+                            scope_priority[scope],
+                            source_priority,
+                            source_name,
+                            origin,
+                            contents,
+                        )
+                    )
+
+        selected: list[tuple[str, str, str]] = []
+        shadowed_authorized: list[str] = []
+        for filename, same_name_candidates in candidates.items():
+            winner = max(
+                same_name_candidates,
+                key=lambda candidate: (candidate[0], candidate[1]),
+            )
+            selected.append((filename, winner[3], winner[4]))
+            if winner[2] == "admin" and any(
+                candidate[2] == "generator"
+                for candidate in same_name_candidates
+                if candidate is not winner
+            ):
+                shadowed_authorized.append(winner[3])
+
+        selected.sort(key=lambda fragment: fragment[0])
+        return (
+            tuple((origin, contents) for _, origin, contents in selected),
+            tuple(sorted(shadowed_authorized)),
+        )
 
     @classmethod
     def merged_directives(
-        cls, base: str, dropins: dict[str, str]
+        cls,
+        base: str,
+        dropins: tuple[tuple[str, str], ...],
+        *,
+        base_origin: str = "vendor unit",
     ) -> tuple[dict[tuple[str, str], tuple[str, ...]], dict[tuple[str, str], str]]:
         values: dict[tuple[str, str], list[str]] = {}
         origins: dict[tuple[str, str], str] = {}
-        # Only .conf fragments are supplied, already scoped to this unit.
-        for filename, contents in (("vendor unit", base), *sorted(dropins.items())):
+        for filename, contents in ((base_origin, base), *dropins):
             section = ""
             for original_line in contents.splitlines():
                 line = original_line.strip()
@@ -643,21 +713,50 @@ class EffectiveUnitContractTests(unittest.TestCase):
                 if not section or "=" not in line or line.endswith("\\"):
                     raise ValueError(f"invalid effective unit fragment in {filename}")
                 directive, value = line.split("=", 1)
+                directive = directive.strip()
+                value = value.strip()
+                if not directive:
+                    raise ValueError(f"invalid effective unit fragment in {filename}")
                 key = (section, directive)
-                if key in cls.DEPENDENCY_KEYS:
+                origin = f"{filename}: {directive}={value}"
+
+                if key in cls.ADDITIVE_UNIT_KEYS:
+                    # systemd dependency entries cannot be removed by an
+                    # empty drop-in assignment; only whole-unit replacement
+                    # can discard dependencies from the main unit.
+                    if not value:
+                        continue
+                    entries = values.setdefault(key, [])
+                    changed = False
+                    for item in value.split():
+                        if item not in entries:
+                            entries.append(item)
+                            changed = True
+                    if changed:
+                        origins[key] = origin
+                    continue
+
+                if key in cls.INSTALL_LIST_KEYS:
                     if not value:
                         values[key] = []
                     else:
-                        values.setdefault(key, []).extend(value.split())
-                elif key in cls.COMMAND_KEYS or key in cls.FILTER_KEYS:
+                        entries = values.setdefault(key, [])
+                        for item in value.split():
+                            if item not in entries:
+                                entries.append(item)
+                    origins[key] = origin
+                    continue
+
+                if key in cls.COMMAND_KEYS or key in cls.FILTER_KEYS:
                     if not value:
                         values[key] = []
                     else:
                         values.setdefault(key, []).append(value)
-                else:
-                    values[key] = [value]
-                # Report only a fixture drop-in basename, never private paths.
-                origins[key] = f"{filename}: {directive}={value}"
+                    origins[key] = origin
+                    continue
+
+                values[key] = [value]
+                origins[key] = origin
         return {key: tuple(value) for key, value in values.items()}, origins
 
     @staticmethod
@@ -685,32 +784,102 @@ class EffectiveUnitContractTests(unittest.TestCase):
             selected_swap,
         )
 
+    def dropin_sources(
+        self,
+        extra: dict[str, dict[str, str]] | None,
+        shared_extra: dict[str, dict[str, str]] | None,
+    ) -> tuple[dict[str, dict[str, dict[str, str]]], str, str]:
+        authorized, selected_device, selected_swap = self.authorized_dropins()
+        unit_filenames = {
+            unit: filename for unit, (filename, _) in self.UNIT_PATHS.items()
+        }
+        unit_filenames["device"] = selected_device
+
+        generator: dict[str, dict[str, str]] = {}
+        for unit, fragments in authorized.items():
+            generator[f"{unit_filenames[unit]}.d"] = dict(fragments)
+
+        admin = {
+            scope: dict(fragments)
+            for scope, fragments in (shared_extra or {}).items()
+        }
+        for unit, fragments in (extra or {}).items():
+            scope = f"{unit_filenames[unit]}.d"
+            admin.setdefault(scope, {}).update(fragments)
+
+        return {"generator": generator, "admin": admin}, selected_device, selected_swap
+
     def effective_fixture(
-        self, extra: dict[str, dict[str, str]] | None = None
+        self,
+        extra: dict[str, dict[str, str]] | None = None,
+        *,
+        shared_extra: dict[str, dict[str, str]] | None = None,
+        base_overrides: dict[str, str] | None = None,
     ) -> tuple[
         dict[str, dict[tuple[str, str], tuple[str, ...]]],
         dict[str, dict[tuple[str, str], str]],
+        dict[str, tuple[str, ...]],
     ]:
-        dropins, _, _ = self.authorized_dropins()
-        for unit, fragments in (extra or {}).items():
-            dropins.setdefault(unit, {}).update(fragments)
+        sources, selected_device, _ = self.dropin_sources(extra, shared_extra)
         effective = {}
         origins = {}
-        for unit, (_, path) in self.UNIT_PATHS.items():
+        shadows = {}
+        base_overrides = base_overrides or {}
+
+        for unit, (filename, path) in self.UNIT_PATHS.items():
+            fragments, shadows[unit] = self.resolve_dropins(filename, sources)
+            base_origin = "admin unit override" if unit in base_overrides else "vendor unit"
             effective[unit], origins[unit] = self.merged_directives(
-                read_text(path), dropins.get(unit, {})
+                base_overrides.get(unit, read_text(path)),
+                fragments,
+                base_origin=base_origin,
             )
-        # udev synthesizes the .device unit; only its generator drop-in exists.
-        effective["device"], origins["device"] = self.merged_directives(
-            "", dropins["device"]
+
+        fragments, shadows["device"] = self.resolve_dropins(
+            selected_device, sources
         )
-        return effective, origins
+        # udev synthesizes the .device unit; only its generator/admin drop-ins
+        # participate in this fixture.
+        effective["device"], origins["device"] = self.merged_directives(
+            "", fragments
+        )
+        return effective, origins, shadows
+
+    @classmethod
+    def safety_consequence(
+        cls, unit: str, key: tuple[str, str]
+    ) -> str:
+        section, directive = key
+        if unit == "passive_swap" and section == "Install":
+            return "passive swap may become independently enabled and issue a second swapon"
+        if key in cls.COMMAND_KEYS:
+            return "lifecycle ownership or activation sequence changed"
+        if key in cls.FILTER_KEYS or directive in {
+            "NoNewPrivileges", "ProtectSystem", "ProtectHome",
+            "ProtectKernelModules", "PrivateDevices", "PrivateTmp",
+        }:
+            return "sandbox privilege boundary or required mapper access changed"
+        if directive in {"TimeoutStartSec", "TimeoutStopSec", "JobTimeoutSec"}:
+            return "boot or shutdown work may escape its bounded deadline"
+        if directive == "RequiresMountsFor":
+            return "durable recovery storage may no longer gate lifecycle mutation"
+        if section == "Unit":
+            return "dependency or ordering graph changed around swap lifecycle ownership"
+        return "required deployed unit contract changed"
 
     def assert_effective_security(
-        self, extra: dict[str, dict[str, str]] | None = None
+        self,
+        extra: dict[str, dict[str, str]] | None = None,
+        *,
+        shared_extra: dict[str, dict[str, str]] | None = None,
+        base_overrides: dict[str, str] | None = None,
     ) -> None:
-        baseline, _ = self.effective_fixture()
-        actual, origins = self.effective_fixture(extra)
+        baseline, baseline_origins, _ = self.effective_fixture()
+        actual, origins, shadows = self.effective_fixture(
+            extra,
+            shared_extra=shared_extra,
+            base_overrides=base_overrides,
+        )
         for unit in baseline:
             for key in sorted(set(baseline[unit]) | set(actual[unit])):
                 if key == ("Unit", "Description"):
@@ -719,17 +888,21 @@ class EffectiveUnitContractTests(unittest.TestCase):
                 observed = actual[unit].get(key)
                 if required == observed:
                     continue
+
+                baseline_origin = baseline_origins[unit].get(key, "")
+                if baseline_origin.startswith("generator:") and shadows[unit]:
+                    origin = ", ".join(shadows[unit])
+                elif unit in (base_overrides or {}) and key not in actual[unit]:
+                    origin = "admin unit override"
+                else:
+                    origin = origins[unit].get(key, "missing")
+
                 section, directive = key
-                origin = origins[unit].get(key, "missing")
-                consequence = (
-                    "possible privilege widening or loss of required access"
-                    if section == "Service" and key not in self.COMMAND_KEYS
-                    else "lifecycle ownership, authorization or ordering changed"
-                )
                 self.fail(
                     f"FAIL {unit} effective {section}.{directive}: "
                     f"required={required!r}; observed={observed!r}; "
-                    f"override={origin}; safety={consequence}"
+                    f"override={origin}; "
+                    f"safety={self.safety_consequence(unit, key)}"
                 )
 
     def test_authorized_generator_dependencies_preserve_lifecycle(self) -> None:
@@ -741,7 +914,7 @@ class EffectiveUnitContractTests(unittest.TestCase):
             health=read_text(RUNTIME_HEALTH_SERVICE),
             passive_swap=read_text(PRIMARY_SWAP),
         )
-        effective, _ = self.effective_fixture()
+        effective, _, _ = self.effective_fixture()
         _, device, raw_swap = self.authorized_dropins()
         mapper = effective["mapper"]
         self.assertEqual(mapper[("Unit", "Requires")], ("-.mount", device))
@@ -784,32 +957,149 @@ class EffectiveUnitContractTests(unittest.TestCase):
         self.assertEqual(effective["device"][("Unit", "JobTimeoutAction")], ("none",))
         self.assert_effective_security()
 
-    def test_last_wins_and_reset_restore_use_effective_values(self) -> None:
-        _, device, _ = self.authorized_dropins()
+    def test_scalar_and_resettable_list_semantics_use_effective_values(self) -> None:
         self.assert_effective_security({
             "mapper": {
                 "60-temporary.conf": (
-                    "[Service]\nTimeoutStartSec=15s\nSystemCallFilter=\n"
-                    "[Unit]\nRequires=\n"
+                    "[Service]\n"
+                    "TimeoutStartSec=15s\n"
+                    "SystemCallFilter=\n"
+                    "[Unit]\n"
+                    "Requires=\n"
                 ),
                 "90-restore.conf": (
-                    "[Service]\nTimeoutStartSec=120s\nSystemCallFilter=~@mount\n"
-                    f"[Unit]\nRequires=-.mount {device}\n"
+                    "[Service]\n"
+                    "TimeoutStartSec=120s\n"
+                    "SystemCallFilter=~@mount\n"
                 ),
             },
         })
-        with self.assertRaisesRegex(AssertionError, "effective Unit.Requires"):
+        with self.assertRaisesRegex(AssertionError, "effective Service.TimeoutStartSec"):
             self.assert_effective_security({
-                "mapper": {"90-erase.conf": "[Unit]\nRequires=\n"}
+                "mapper": {"90-unbounded.conf": "[Service]\nTimeoutStartSec=infinity\n"}
             })
+
+    def test_empty_dependency_assignments_do_not_remove_required_edges(self) -> None:
+        self.assert_effective_security({
+            "mapper": {
+                "90-empty-dependencies.conf": (
+                    "[Unit]\n"
+                    "Requires=\n"
+                    "RequiresMountsFor=\n"
+                    "After=\n"
+                    "Before=\n"
+                    "Conflicts=\n"
+                ),
+            },
+        })
+
+    def test_higher_priority_unit_override_cannot_remove_recovery_requirement(self) -> None:
+        mapper = read_text(MAPPER_SERVICE)
+        required = "RequiresMountsFor=/var/lib/swapz/physical-recovery\n"
+        self.assertIn(required, mapper)
+        replaced = mapper.replace(required, "", 1)
+        with self.assertRaises(AssertionError) as caught:
+            self.assert_effective_security(base_overrides={"mapper": replaced})
+        diagnostic = str(caught.exception)
+        self.assertIn("mapper effective Unit.RequiresMountsFor", diagnostic)
+        self.assertIn("override=admin unit override", diagnostic)
+        self.assertIn("durable recovery storage", diagnostic)
+
+    def test_dropin_scope_and_same_name_precedence_match_systemd(self) -> None:
+        self.assertEqual(
+            self.matching_dropin_scopes("swapz-primary-mapper.service"),
+            (
+                "service.d",
+                "swapz-.service.d",
+                "swapz-primary-.service.d",
+                "swapz-primary-mapper.service.d",
+            ),
+        )
+
+        sources, _, _ = self.dropin_sources(
+            None,
+            {
+                "service.d": {
+                    # The generator's exact-unit fragment with this same name
+                    # has higher scope specificity and must win for the mapper.
+                    "50-selected-target.conf": (
+                        "[Service]\nNoNewPrivileges=no\n"
+                    ),
+                },
+            },
+        )
+        fragments, shadows = self.resolve_dropins(
+            "swapz-primary-mapper.service", sources
+        )
+        origins = tuple(origin for origin, _ in fragments)
+        self.assertIn(
+            "generator:swapz-primary-mapper.service.d/50-selected-target.conf",
+            origins,
+        )
+        self.assertNotIn(
+            "admin:service.d/50-selected-target.conf", origins
+        )
+        self.assertEqual(shadows, ())
+
+        with self.assertRaises(AssertionError) as caught:
+            self.assert_effective_security({
+                "mapper": {
+                    # Same scope and filename: /etc-style administrator
+                    # configuration outranks normal generator output.
+                    "50-selected-target.conf": (
+                        "[Unit]\n"
+                        "JobTimeoutSec=300s\n"
+                        "JobTimeoutAction=none\n"
+                    ),
+                },
+            })
+        diagnostic = str(caught.exception)
+        self.assertIn(
+            "override=admin:swapz-primary-mapper.service.d/"
+            "50-selected-target.conf",
+            diagnostic,
+        )
+        self.assertIn("effective Unit.", diagnostic)
+
+    def test_type_and_dash_prefix_dropins_are_security_relevant(self) -> None:
+        cases = (
+            (
+                "service.d",
+                "[Service]\nNoNewPrivileges=no\n",
+                "mapper effective Service.NoNewPrivileges",
+            ),
+            (
+                "swapz-primary-boot-.service.d",
+                "[Service]\nCapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_MODULE\n",
+                "verifier effective Service.CapabilityBoundingSet",
+            ),
+            (
+                "swap.d",
+                "[Install]\nWantedBy=swap.target\n",
+                "passive_swap effective Install.WantedBy",
+            ),
+        )
+        for scope, fragment, expected in cases:
+            with self.subTest(scope=scope):
+                with self.assertRaises(AssertionError) as caught:
+                    self.assert_effective_security(
+                        shared_extra={
+                            scope: {"99-untrusted.conf": fragment},
+                        }
+                    )
+                diagnostic = str(caught.exception)
+                self.assertIn(expected, diagnostic)
+                self.assertIn(
+                    f"admin:{scope}/99-untrusted.conf", diagnostic
+                )
 
     def test_untrusted_dropins_cannot_override_security_or_ownership(self) -> None:
         mutations = (
-            ("mapper", "[Unit]\nRequiresMountsFor=\n", "Unit.RequiresMountsFor"),
-            ("mapper", "[Unit]\nAfter=\nAfter=swap.target\n", "Unit.After"),
-            ("mapper", "[Unit]\nBefore=\nBefore=shutdown.target\n", "Unit.Before"),
-            ("mapper", "[Unit]\nConflicts=\n", "Unit.Conflicts"),
-            ("mapper", "[Unit]\nRequires=\n", "Unit.Requires"),
+            ("mapper", "[Unit]\nAfter=swap.target\n", "Unit.After"),
+            ("mapper", "[Unit]\nBefore=systemd-modules-load.service\n", "Unit.Before"),
+            ("mapper", "[Unit]\nConflicts=swap.target\n", "Unit.Conflicts"),
+            ("mapper", "[Unit]\nRequires=dev-mapper-swapz\\x2dprimary.swap\n", "Unit.Requires"),
+            ("mapper", "[Unit]\nBindsTo=dev-mapper-swapz\\x2dprimary.swap\n", "Unit.BindsTo"),
             ("mapper", "[Unit]\nJobTimeoutSec=infinity\n", "Unit.JobTimeoutSec"),
             ("device", "[Unit]\nJobTimeoutSec=infinity\n", "Unit.JobTimeoutSec"),
             ("mapper", "[Service]\nTimeoutStartSec=infinity\n", "Service.TimeoutStartSec"),
@@ -835,13 +1125,15 @@ class EffectiveUnitContractTests(unittest.TestCase):
             ("verifier", "[Unit]\nRequires=swapz-primary-mapper.service\n", "Unit.Requires"),
             ("health", "[Unit]\nWants=swapz-primary-mapper.service\n", "Unit.Wants"),
             ("passive_swap", "[Install]\nWantedBy=swap.target\n", "Install.WantedBy"),
-            ("passive_swap", "[Install]\nAlias=dev-disk-by\\x2dpartuuid-unauthorized.swap\n", "Install.Alias"),
+            ("passive_swap", "[Install]\nRequiredBy=swap.target\n", "Install.RequiredBy"),
             ("passive_swap", "[Unit]\nRefuseManualStart=no\n", "Unit.RefuseManualStart"),
         )
         for unit, fragment, directive in mutations:
             with self.subTest(unit=unit, directive=directive, fragment=fragment):
                 with self.assertRaises(AssertionError) as caught:
-                    self.assert_effective_security({unit: {"99-untrusted.conf": fragment}})
+                    self.assert_effective_security(
+                        {unit: {"99-untrusted.conf": fragment}}
+                    )
                 diagnostic = str(caught.exception)
                 self.assertIn(f"{unit} effective {directive}", diagnostic)
                 self.assertIn("required=", diagnostic)
@@ -851,9 +1143,13 @@ class EffectiveUnitContractTests(unittest.TestCase):
 
     def test_unsupported_continuation_fails_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid effective unit fragment"):
-            self.merged_directives("[Service]\nExecStart=/bin/true\n", {
-                "99-unsupported.conf": "[Service]\nExecStartPre=/bin/\\\n/usr/bin/true\n",
-            })
+            self.merged_directives(
+                "[Service]\nExecStart=/bin/true\n",
+                ((
+                    "admin:swapz-primary-mapper.service.d/99-unsupported.conf",
+                    "[Service]\nExecStartPre=/bin/\\\n/usr/bin/true\n",
+                ),),
+            )
 
     def test_systemd_analyze_accepts_authorized_fixture_syntax_only(self) -> None:
         analyzer = shutil.which("systemd-analyze")
@@ -890,6 +1186,41 @@ class EffectiveUnitContractTests(unittest.TestCase):
             # Syntax is not evidence that the actual kernel and systemd
             # support this sandbox with DM, module and swap syscalls.
             self.assert_effective_security()
+
+    def test_systemd_analyze_confirms_dependency_reset_is_a_noop(self) -> None:
+        analyzer = shutil.which("systemd-analyze")
+        if analyzer is None:
+            self.skipTest("INCOMPLETE: systemd-analyze absent; contracts still run")
+        with tempfile.TemporaryDirectory(prefix="swapz-systemd-dependency-") as directory:
+            unit_dir = Path(directory)
+            unit = unit_dir / "swapz-dependency-reset.service"
+            dropin_dir = unit_dir / "swapz-dependency-reset.service.d"
+            dropin_dir.mkdir()
+            unit.write_text(
+                "[Unit]\n"
+                "DefaultDependencies=no\n"
+                "Requires=swapz-intentionally-missing.service\n"
+                "After=swapz-intentionally-missing.service\n"
+                "[Service]\n"
+                "Type=oneshot\n"
+                "ExecStart=/usr/bin/true\n",
+                encoding="utf-8",
+            )
+            (dropin_dir / "90-empty.conf").write_text(
+                "[Unit]\nRequires=\nAfter=\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["SYSTEMD_UNIT_PATH"] = str(unit_dir)
+            result = subprocess.run(
+                [analyzer, "verify", str(unit)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("swapz-intentionally-missing.service", result.stderr)
 
 
 class ControlledLifecycleTests(unittest.TestCase):
