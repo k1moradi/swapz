@@ -1481,7 +1481,8 @@ def evaluate_release(
     def require_campaign_chronology(
             name: str, record: dict[str, Any] | None) -> bool:
         if (
-                record is None or campaign_sealed_time is None or
+                record is None or campaign_issues != [] or
+                campaign_sealed_time is None or
                 not isinstance(campaign_sealed_at, str)):
             return False
         observed_text = record.get("observed_at_utc")
