@@ -35,24 +35,13 @@ static int swapz_append_page(struct swapz_engine *engine,
 	int error;
 
 	if (!page->payload_crc32c_valid) {
-		if (!logical_page_unique)
-			return swapz_append_encoded(
+		if (logical_page_unique)
+			return swapz_append_encoded_unique(
 				builder, page->logical_page, generation,
 				page->payload, page->length, page->encoding);
-		/*
-		 * Hash only after the same cheap safety checks the generic
-		 * encoded append performs before touching caller payload.
-		 */
-		if (!swapz_page_valid(page) || !generation ||
-		    !builder || !builder->bytes || builder->sealed ||
-		    swapz_payload_overlaps_extent(builder, page->payload,
-						page->length))
-			return -EINVAL;
-		return swapz_append_prehashed_encoded_unique(
+		return swapz_append_encoded(
 			builder, page->logical_page, generation,
-			page->payload, page->length,
-			swapz_crc32c_bytes(page->payload, page->length),
-			page->encoding);
+			page->payload, page->length, page->encoding);
 	}
 	if (logical_page_unique)
 		error = swapz_append_prehashed_encoded_unique(

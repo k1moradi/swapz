@@ -47,6 +47,21 @@ static inline int swapz_valid_extent_bytes(swapz_u32 bytes_total)
 	       bytes_total == 4U * SWAPZ_BLOCK_BYTES;
 }
 
+/* Reject an append source anywhere inside the builder-owned extent. Compare
+ * address differences instead of forming potentially wrapping end addresses;
+ * unrelated C object pointers must not be ordered or subtracted directly. */
+static inline int swapz_payload_overlaps_extent(const struct swapz_builder *builder,
+						const void *payload,
+						swapz_u16 length)
+{
+	unsigned long extent_address = (unsigned long)builder->bytes;
+	unsigned long payload_address = (unsigned long)payload;
+
+	if (payload_address >= extent_address)
+		return payload_address - extent_address < builder->bytes_total;
+	return extent_address - payload_address < length;
+}
+
 static swapz_u32 swapz_crc32c_state(swapz_u32 state, const void *data,
 				    swapz_u32 length)
 {
@@ -304,10 +319,11 @@ int swapz_append_prehashed_encoded_unique(struct swapz_builder *builder,
 				length, payload_crc32c, encoding, 1);
 }
 
-int swapz_append_encoded(struct swapz_builder *builder,
-			 swapz_u32 logical_page, swapz_u32 generation,
-			 const void *payload, swapz_u16 length,
-			 swapz_u8 encoding)
+static int swapz_append_encoded_checked(struct swapz_builder *builder,
+				       swapz_u32 logical_page,
+				       swapz_u32 generation,
+				       const void *payload, swapz_u16 length,
+				       swapz_u8 encoding, int logical_page_unique)
 {
 	if (!builder || !builder->bytes || builder->sealed ||
 	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
@@ -316,7 +332,25 @@ int swapz_append_encoded(struct swapz_builder *builder,
 		return -EINVAL;
 	return swapz_append_crc(builder, logical_page, generation, payload,
 				length, swapz_crc32c_bytes(payload, length),
-				encoding, 0);
+				encoding, logical_page_unique);
+}
+
+int swapz_append_encoded(struct swapz_builder *builder,
+			 swapz_u32 logical_page, swapz_u32 generation,
+			 const void *payload, swapz_u16 length,
+			 swapz_u8 encoding)
+{
+	return swapz_append_encoded_checked(builder, logical_page, generation,
+					    payload, length, encoding, 0);
+}
+
+int swapz_append_encoded_unique(struct swapz_builder *builder,
+				swapz_u32 logical_page, swapz_u32 generation,
+				const void *payload, swapz_u16 length,
+				swapz_u8 encoding)
+{
+	return swapz_append_encoded_checked(builder, logical_page, generation,
+					    payload, length, encoding, 1);
 }
 
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,

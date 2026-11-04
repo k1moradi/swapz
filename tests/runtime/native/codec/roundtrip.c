@@ -12,6 +12,13 @@
 #include "authority.h"
 #include <stddef.h>
 #if defined(__SANITIZE_ADDRESS__)
+#define SWAPZ_TEST_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SWAPZ_TEST_ASAN 1
+#endif
+#endif
+#if defined(SWAPZ_TEST_ASAN)
 #include <sanitizer/asan_interface.h>
 #endif
 
@@ -890,15 +897,13 @@ static int test_append_overlap_matrix(void)
 		const swapz_u16 length = cases[case_index].length;
 		const swapz_u32 expected_crc = cases[case_index].overlaps ? 0U :
 			reference_crc32c(source, length);
-		for (append_kind = 0; append_kind < 5U; ++append_kind) {
+		for (append_kind = 0; append_kind < 6U; ++append_kind) {
 			swapz_u8 encoding = SWAPZ_ENCODING_LZ4;
 			int error;
 
 			CHECK(swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES,
-					  0x20400000U + 5U * case_index +
+					  0x20400000U + 6U * case_index +
 					  append_kind) == 0);
-			CHECK(swapz_payload_overlaps_extent(&builder, source, length) ==
-			      cases[case_index].overlaps);
 			switch (append_kind) {
 			case 0:
 				error = swapz_append(&builder, 41U, 9U, source, length);
@@ -909,10 +914,15 @@ static int test_append_overlap_matrix(void)
 						     source, length, encoding);
 				break;
 			case 2:
+				encoding = SWAPZ_ENCODING_DELTA64_SHUF8;
+				error = swapz_append_encoded_unique(
+					&builder, 41U, 9U, source, length, encoding);
+				break;
+			case 3:
 				error = swapz_append_prehashed(&builder, 41U, 9U,
 						       source, length, expected_crc);
 				break;
-			case 3:
+			case 4:
 				encoding = SWAPZ_ENCODING_DELTA64_SHUF8;
 				error = swapz_append_prehashed_encoded(
 					&builder, 41U, 9U, source, length,
@@ -954,6 +964,9 @@ static int test_append_overlap_matrix(void)
 	CHECK(swapz_append_encoded(&builder, 1U, 1U, payload,
 				   SWAPZ_MAX_COMPRESSED + 1U,
 				   SWAPZ_ENCODING_DELTA64) == -EINVAL);
+	CHECK(swapz_append_encoded_unique(&builder, 1U, 1U, payload,
+					  SWAPZ_MAX_COMPRESSED + 1U,
+					  SWAPZ_ENCODING_DELTA64_SHUF8) == -EINVAL);
 	CHECK(builder.count == 0U);
 	return 0;
 }
@@ -963,7 +976,7 @@ static int test_append_overlap_matrix(void)
  * SWAPZ_NEGATIVE_CONTROL_PREHASH reproduces that forbidden read. */
 static int test_no_overlapping_prehash(void)
 {
-#if defined(__SANITIZE_ADDRESS__)
+#if defined(SWAPZ_TEST_ASAN)
 	struct swapz_builder builder;
 	const swapz_u8 *poisoned = extent + 512U;
 	int error, encoded_error;
@@ -974,7 +987,7 @@ static int test_no_overlapping_prehash(void)
 	(void)swapz_crc32c_bytes(poisoned, 32U);
 #endif
 	error = swapz_append(&builder, 1U, 1U, poisoned, 32U);
-	encoded_error = swapz_append_encoded(
+	encoded_error = swapz_append_encoded_unique(
 		&builder, 1U, 1U, poisoned, 32U, SWAPZ_ENCODING_DELTA64);
 	__asan_unpoison_memory_region(poisoned, 32U);
 	CHECK(error == -EINVAL && encoded_error == -EINVAL);
