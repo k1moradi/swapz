@@ -691,7 +691,9 @@ The transaction-publication native fixture must additionally use the exact
 batched engine/authority paths for one finite mixed replacement at the
 logical-generation limit: an existing RAW page becomes compressed, an existing
 compressed page becomes RAW, and a previously unmapped compressed sibling
-shares a run. One prefix block must actually reach isolated test media before
+shares a run. The serialized fixture must explicitly enable the rotating
+allocator before registering segment roles so batch pause owns the staged
+reservations. One prefix block must actually reach isolated test media before
 the lower callback returns its original -EIO. While the immutable batch is
 paused, staging and DISCARD must both return -EBUSY. A failed completion must
 report zero committed pages, zero publication callbacks, exact submitted/

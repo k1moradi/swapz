@@ -578,6 +578,9 @@ static int test_torn_mixed_replacement_discard_generation_rollover(void)
 	CHECK(swapz_enable_extent_sequence_index(
 		&a, publication_sequence_delta, publication_sequence_base,
 		PHYSICAL / SWAPZ_SEGMENT_BLOCKS) == 0);
+	/* Batch pause requires the ordered owner to opt into rotating allocation.
+	 * Segment-role storage alone does not enable the publication fence. */
+	a.reuse_dead_segments = 1;
 	CHECK(swapz_enable_segment_rotation(
 		&a, publication_roles, PHYSICAL / SWAPZ_SEGMENT_BLOCKS) == 0);
 	memset(publication_media, 0, sizeof(publication_media));
