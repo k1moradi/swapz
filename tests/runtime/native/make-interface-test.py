@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Owner policy: only five user-visible root Make commands."""
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -183,8 +184,7 @@ class PublicMakeContract(unittest.TestCase):
     def test_make_test_is_only_official_documented_test_command(self):
         canonical = ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
-                     "docs/compile.md", "docs/benchmark.md",
-                     "docs/context.md")
+                     "docs/compile.md", "docs/benchmark.md")
         policy = "**Single official test command (read before every prompt):**"
         for document in canonical:
             with self.subTest(canonical=document):
@@ -194,6 +194,13 @@ class PublicMakeContract(unittest.TestCase):
                 self.assertIn("report BLOCKED (nonzero)", content)
                 self.assertIn("Do not create, publish, recommend, or document "
                               "alternative test commands", content)
+
+        context = (ROOT / "docs/context.md").read_text()
+        self.assertIn("**Current contracts (linked rather than restated):**",
+                      context)
+        self.assertIn("[VISION.md](VISION.md)", context)
+        self.assertIn("sole official qualification\ninterface `make test`",
+                      context)
 
         testing = (ROOT / "docs/testing_standards.md").read_text()
         self.assertIn("~~~sh\nmake test\n~~~", testing)
@@ -309,9 +316,59 @@ class PublicMakeContract(unittest.TestCase):
                 "printf '%s\\n' 'SWAPZ_GC_SCAN_SCALE_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_GC_SCALE_ONLY\",\"rows\":[{\"logical_pages\":262144,\"segments\":1024,\"legacy_score_scan_ns\":2000000,\"incremental_select_ns\":20000,\"relocation_scan_ns\":800000,\"relocation_list_ns\":4000,\"legacy_dead_probe_ns\":700000,\"mapped_dead_probe_ns\":12000,\"victim_records\":256},{\"logical_pages\":1048576,\"segments\":4096,\"legacy_score_scan_ns\":8000000,\"incremental_select_ns\":80000,\"relocation_scan_ns\":3200000,\"relocation_list_ns\":4500,\"legacy_dead_probe_ns\":2800000,\"mapped_dead_probe_ns\":15000,\"victim_records\":256}]}'\n"
                 "printf '%s\\n' 'SWAPZ_EXTENT_GEOMETRY_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY\",\"logical_pages\":1024,\"normal_windows\":64,\"rows\":[{\"name\":\"aligned_1_2_4\",\"physical_blocks\":320,\"waste_blocks\":24,\"write_runs\":80,\"cold_read_blocks_x1000\":1800,\"seq_4m_requests\":1500},{\"name\":\"packed_1_2_4\",\"physical_blocks\":320,\"waste_blocks\":4,\"write_runs\":60,\"cold_read_blocks_x1000\":1800,\"seq_4m_requests\":1500},{\"name\":\"packed_1_2_3_4\",\"physical_blocks\":300,\"waste_blocks\":3,\"write_runs\":55,\"cold_read_blocks_x1000\":1750,\"seq_4m_requests\":1450},{\"name\":\"packed_1_2_4_8\",\"physical_blocks\":292,\"waste_blocks\":2,\"write_runs\":48,\"cold_read_blocks_x1000\":1900,\"seq_4m_requests\":1300},{\"name\":\"packed_1_2_4_8_16\",\"physical_blocks\":288,\"waste_blocks\":1,\"write_runs\":44,\"cold_read_blocks_x1000\":2150,\"seq_4m_requests\":1200}]}'\n"
                 "printf 'rootless\\n' >> build/order.log\n")
+            # Keep this synthetic native marker aligned with the four
+            # production GC-scaling geometries checked by the reporter.
+            gc_scale_fixture = {
+                "scope": "OFFLINE_NATIVE_GC_SCALE_ONLY",
+                "rows": [
+                    {"logical_pages": 262144, "segments": 1024,
+                     "legacy_score_scan_ns": 2000000,
+                     "incremental_select_ns": 20000,
+                     "relocation_scan_ns": 800000,
+                     "relocation_list_ns": 4000,
+                     "legacy_dead_probe_ns": 700000,
+                     "mapped_dead_probe_ns": 12000,
+                     "victim_records": 256},
+                    {"logical_pages": 1048576, "segments": 4096,
+                     "legacy_score_scan_ns": 8000000,
+                     "incremental_select_ns": 80000,
+                     "relocation_scan_ns": 3200000,
+                     "relocation_list_ns": 4500,
+                     "legacy_dead_probe_ns": 2800000,
+                     "mapped_dead_probe_ns": 15000,
+                     "victim_records": 256},
+                    {"logical_pages": 4194304, "segments": 16384,
+                     "legacy_score_scan_ns": 32000000,
+                     "incremental_select_ns": 320000,
+                     "relocation_scan_ns": 12800000,
+                     "relocation_list_ns": 4600,
+                     "legacy_dead_probe_ns": 11200000,
+                     "mapped_dead_probe_ns": 60000,
+                     "victim_records": 256},
+                    {"logical_pages": 27080192, "segments": 105782,
+                     "legacy_score_scan_ns": 200000000,
+                     "incremental_select_ns": 2000000,
+                     "relocation_scan_ns": 80000000,
+                     "relocation_list_ns": 5000,
+                     "legacy_dead_probe_ns": 70000000,
+                     "mapped_dead_probe_ns": 100000,
+                     "victim_records": 256},
+                ],
+            }
+            rootless_script = fixture / "tests/tools/test-rootless.sh"
+            script_lines = [
+                line for line in rootless_script.read_text().splitlines()
+                if "SWAPZ_GC_SCAN_SCALE_EVIDENCE=" not in line
+            ]
+            marker_index = script_lines.index(
+                "printf 'rootless\\n' >> build/order.log")
+            marker = (
+                "printf '%s\\n' 'SWAPZ_GC_SCAN_SCALE_EVIDENCE=" +
+                json.dumps(gc_scale_fixture, separators=(",", ":")) + "'")
+            script_lines.insert(marker_index, marker)
+            rootless_script.write_text("\n".join(script_lines) + "\n")
             # Synthetic records mirror the modeled RAM-only session schemas;
             # mock Kbuild / loaded phase never touch actual host devices.
-            import json
             # This is STILL an unprivileged mock. Resolve provenance exactly
             # as the outer runner does: a report-only HEAD names its nearest
             # non-report source revision rather than the generated report.

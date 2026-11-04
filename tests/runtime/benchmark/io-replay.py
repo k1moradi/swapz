@@ -2071,19 +2071,29 @@ def replay(args):
 
                                 def persistent_worker(lane):
                                     durations = []
+                                    measurement_started = False
                                     try:
                                         for item in lane_events[lane]:
                                             if item["phase"] == "warmup":
                                                 execute(item, lane)
                                         ready.wait(timeout=30)
                                         start_gate.wait(timeout=30)
+                                        measurement_started = True
                                         for item in lane_events[lane]:
                                             if item["phase"] == "measure":
                                                 durations.append((item["op"], execute(item, lane)))
                                         return durations
                                     except Exception:
-                                        ready.abort()
-                                        start_gate.abort()
+                                        # Before the start gate opens, abort
+                                        # both barriers to release the owner
+                                        # and sibling workers. Once released,
+                                        # aborting it can race with waiters
+                                        # returning from the same generation
+                                        # and mask the original I/O failure
+                                        # with BrokenBarrierError.
+                                        if not measurement_started:
+                                            ready.abort()
+                                            start_gate.abort()
                                         raise
 
                                 persistent_jobs = [

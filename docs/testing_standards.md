@@ -489,7 +489,10 @@ precede a checked final fsync of the opened target, within the timed interval
 and before the final lower-I/O/CPU snapshots or a PASS result. A failed drain
 must identify the candidate/mixed phase, OS failure reason, expected versus
 observed measured WRITE byte counts and the failed final-drain oracle; final
-byte readback cannot replace it.
+byte readback cannot replace it. A worker failure before the persistent start
+gate opens must abort barriers to release waiting peers. After that gate opens,
+workers must preserve the original I/O failure without aborting the released
+barrier generation and masking it as `BrokenBarrierError`.
 The native-C engine retains its independently checked final fsync.
 The checked-in rootless replay suite must exercise the actual Python CLI
 regular-file replay for QD waves, persistent WRITE and persistent mixed lanes:
@@ -3491,12 +3494,16 @@ output.
 ### Native GC map-scan scaling evidence
 
 The rootless stage must run a bounded native GC scaling microbenchmark at
-262,144 and 1,048,576 logical pages (1GiB and 4GiB at 4KiB/page). It reports
+262,144, 1,048,576, 4,194,304 and 27,080,192 logical pages. These represent
+1GiB, 4GiB, 16GiB, and the current authorized card's maximum logical capacity
+at 4KiB/page (1,024, 4,096, 16,384 and 105,782 physical segments). It reports
 four CPU-only timings: the retired full-map score rebuild, current per-segment
 victim selection, legacy full-map relocation ownership discovery, and ID61b
-per-segment-list relocation of the same 256 survivors. The sanitized report
-must retain both geometry rows. Timing is directional CPU evidence, not a
-physical-media latency claim. Loaded qualification must additionally prove that
+per-segment-list relocation of the same 256 survivors. Timing is directional
+CPU evidence, not a physical-media latency claim. The sanitized report must
+retain all four rows.
+The final row follows the currently authorized card geometry and must be
+updated if that target changes. Loaded qualification must additionally prove that
 successful GC visits exactly `gc_pages` relocation-list entries, rather than
 merely timing a native surrogate. Report `85aeac4` satisfies this production
 gate with 20 relocation-list visits for 20 relocated pages,
@@ -3541,8 +3548,9 @@ retain the safe test source and line so the sanitized report identifies the
 failing check without publishing host paths.
 
 Native GC scale evidence compares the previous per-probed-segment 256-entry
-dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
-logical pages. Production-C fault injection must forge indexed empty-segment
+dead-segment scan with mapped-page fast rejection at the four required
+geometries above, including current-card logical capacity. Production-C fault
+injection must forge indexed empty-segment
 views (mapped count, physical liveness, reverse-list headers and GC costs)
 while retaining authoritative logical maps, then additionally clear the
 extent-class bytes and the segment-open count. The candidate must still reject

@@ -1215,7 +1215,12 @@ def parse_gc_scan_scale_evidence(output):
             "OFFLINE_NATIVE_GC_SCALE_ONLY"):
         return None
     rows = record.get("rows")
-    expected = ((262144, 1024), (1048576, 4096))
+    expected = (
+        (262144, 1024),
+        (1048576, 4096),
+        (4194304, 16384),
+        (27080192, 105782),
+    )
     if not isinstance(rows, list) or len(rows) != len(expected):
         return None
     clean = []

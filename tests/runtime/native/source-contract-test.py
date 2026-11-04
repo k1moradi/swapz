@@ -1240,8 +1240,7 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn('"swapz3"', DM)
         for path in ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
-                     "docs/compile.md", "docs/benchmark.md",
-                     "docs/context.md"):
+                     "docs/compile.md", "docs/benchmark.md"):
             with self.subTest(naming_policy=path):
                 document = (ROOT / path).read_text()
                 self.assertIn("Immutable naming policy (read before every prompt)",
@@ -1249,6 +1248,11 @@ static swapz_u16 swapz_probe_set(
                 self.assertIn("Device Mapper target is exactly `swapz`",
                               document)
                 self.assertIn("module alias is `dm-swapz`", document)
+        context = (ROOT / "docs/context.md").read_text()
+        self.assertIn("**Current contracts (linked rather than restated):**",
+                      context)
+        self.assertIn("[VISION.md](VISION.md)", context)
+        self.assertIn("immutable product/module/SWZ names", context)
         self.assertNotIn("SWAPZ_BUILD_SMOKE", MK)
         self.assertNotIn("swapz_extent", MK)
         # A public README must link to the single version source rather
@@ -3982,7 +3986,8 @@ int main(void)
         self.assertNotIn('sys.stdout.write("       " + line)', runner)
         authority = (ROOT / "src/kernel/authority.h").read_text()
 
-        self.assertIn("262144U, 1048576U", scale)
+        self.assertIn(
+            "262144U, 1048576U, 4194304U, 27080192U", scale)
         self.assertIn("legacy_score_scan", scale)
         self.assertIn("incremental_select", scale)
         self.assertIn("relocation_scan", scale)

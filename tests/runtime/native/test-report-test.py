@@ -189,6 +189,26 @@ def gc_scan_scale_evidence():
                 "mapped_dead_probe_ns": 15000,
                 "victim_records": 256,
             },
+            {
+                "logical_pages": 4194304, "segments": 16384,
+                "legacy_score_scan_ns": 32000000,
+                "incremental_select_ns": 320000,
+                "relocation_scan_ns": 12800000,
+                "relocation_list_ns": 4600,
+                "legacy_dead_probe_ns": 11200000,
+                "mapped_dead_probe_ns": 60000,
+                "victim_records": 256,
+            },
+            {
+                "logical_pages": 27080192, "segments": 105782,
+                "legacy_score_scan_ns": 200000000,
+                "incremental_select_ns": 2000000,
+                "relocation_scan_ns": 80000000,
+                "relocation_list_ns": 5000,
+                "legacy_dead_probe_ns": 70000000,
+                "mapped_dead_probe_ns": 100000,
+                "victim_records": 256,
+            },
         ],
     }
 
@@ -1843,6 +1863,11 @@ class ReportContract(unittest.TestCase):
             "SWAPZ_GC_SCAN_SCALE_EVIDENCE=" + json.dumps(raw) + "\n")
         self.assertEqual(parsed["rows"][1]["logical_pages"], 1048576)
         self.assertEqual(parsed["rows"][1]["relocation_list_ns"], 4500)
+        self.assertEqual(parsed["rows"][3]["logical_pages"], 27080192)
+        truncated = json.loads(json.dumps(raw))
+        truncated["rows"].pop()
+        self.assertIsNone(runner.parse_gc_scan_scale_evidence(
+            "SWAPZ_GC_SCAN_SCALE_EVIDENCE=" + json.dumps(truncated) + "\n"))
         broken = json.loads(json.dumps(raw))
         broken["rows"][1]["victim_records"] = 255
         self.assertIsNone(runner.parse_gc_scan_scale_evidence(

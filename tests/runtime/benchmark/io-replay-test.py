@@ -4034,6 +4034,10 @@ class PairReplayContract(unittest.TestCase):
             evidence.campaign_capacity_and_ram(
                 [capacity_pair], target_bytes, source_sha, trace),
             {
+                "ram_acceptance_status": "PASS",
+                "ram_limit_bytes": evidence.QUALIFICATION["CONTRACT"]
+                    ["acceptance"]["sustained"]
+                    ["metadata_and_target_peak_ram_bytes_max"],
                 "page_bytes": 4096,
                 "logical_pages": 256,
                 "logical_capacity_bytes": 256 * 4096,
