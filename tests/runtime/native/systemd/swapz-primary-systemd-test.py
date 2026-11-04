@@ -1573,20 +1573,20 @@ class RuntimeHealthTests(unittest.TestCase):
     def test_unconfigured_by_id_dm_alias_requires_inspectable_identity(self) -> None:
         (self.etc / "swapz" / "primary-target").unlink()
         (self.dev / "mapper" / "swapz-primary").unlink()
-        write_executable(self.sbin / "swapzctl", "#!/bin/sh\\nexit 2\\n")
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")
         write_executable(
             self.bin / "lsblk",
-            "#!/bin/sh\\n"
-            '[ "$4" = /dev/disk/by-id/opaque-swap ] || exit 1\\n'
-            'case "$2" in\\n'
-            'MAJ:MIN) echo "$MOCK_ALIAS_MAJOR_MINOR" ;;\\n'
-            'KNAME) echo "$MOCK_ALIAS_KERNEL_NAME" ;;\\n'
-            '*) exit 1 ;;\\n'
-            'esac\\n',
+            "#!/bin/sh\n"
+            '[ "$4" = /dev/disk/by-id/opaque-swap ] || exit 1\n'
+            'case "$2" in\n'
+            'MAJ:MIN) echo "$MOCK_ALIAS_MAJOR_MINOR" ;;\n'
+            'KNAME) echo "$MOCK_ALIAS_KERNEL_NAME" ;;\n'
+            '*) exit 1 ;;\n'
+            'esac\n',
         )
         (self.proc / "swaps").write_text(
-            "Filename Type Size Used Priority\\n"
-            "/dev/disk/by-id/opaque-swap partition 10000 2000 -1\\n",
+            "Filename Type Size Used Priority\n"
+            "/dev/disk/by-id/opaque-swap partition 10000 2000 -1\n",
             encoding="ascii",
         )
         env = self.env.copy()
