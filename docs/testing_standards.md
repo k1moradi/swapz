@@ -5632,6 +5632,28 @@ attributes to that same validated arm record; a summary `armed=true` bit alone
 must never make `PRODUCTION_READY_FOR_OWNER_REBOOT` PASS.
 
 
+The systemd/package GitHub Actions gate is rootless exact-source evidence, not a
+privileged deployment gate. Its workflow-level concurrency group must contain
+`${{ github.run_id }}` as well as the workflow-specific ref prefix:
+GitHub's default one-pending-run group replaces an older pending member even
+when `cancel-in-progress: false`. Ref-only or SHA-only groups therefore lose
+independently useful runs, including multiple dispatches of one SHA. Every job
+must explicitly check out `${{ github.sha }}` and identify that SHA in its
+run and job labels. The one hosted-runner job must retain shell syntax checks,
+the complete hermetic package suite, systemd runtime-health regressions, the
+rootless workflow-contract fixture, and patch hygiene without sudo, loading
+modules, enabling services, or touching swap. Retain verbose failure steps in
+GitHub Actions logs; diagnostics may contain the public run ID and commit SHA,
+but must not disclose tokens or private sandbox paths.
+
+Treat three outcomes separately: an executed check failure has a runner log
+and a source-bound error annotation; a cancelled run is not a passing or
+failing test; and a queued run with no assigned runner has not executed any
+test. Runner-capacity or scheduling delay is not a source regression and cannot
+reliably emit job-side diagnostics before runner allocation. Never interpret
+absence of a runner log as a PASS or misclassify scheduling as a test failure.
+
+
 ### Primary runtime observer audit regressions
 
 Rootless systemd tests must use authentic tab-delimited `/proc/swaps`

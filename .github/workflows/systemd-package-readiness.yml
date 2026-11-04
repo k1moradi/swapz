@@ -1,4 +1,5 @@
 name: Systemd and package production-readiness
+run-name: Systemd/package ${{ github.sha }} (run ${{ github.run_id }})
 
 on:
   push:
@@ -8,8 +9,10 @@ on:
 permissions:
   contents: read
 
+# GitHub replaces older pending runs sharing a group, even without cancelling
+# in-progress runs. Give each exact-SHA run its own group; runner capacity may still queue it.
 concurrency:
-  group: systemd-package-readiness-${{ github.ref }}
+  group: systemd-package-readiness-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -17,10 +20,14 @@ env:
 
 jobs:
   rootless-systemd-package:
+    name: Systemd/package rootless ${{ github.sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Prepare isolated Python cache
         run: mkdir -p build/python-cache
       - name: Validate shell syntax and systemd tooling
@@ -35,9 +42,16 @@ jobs:
             packaging/swapz-primary-generator \
             packaging/swapz-primary-runtime-health \
             packaging/swapz-primary-boot-verify
+      - name: Validate exact-run workflow contract
+        run: python3 -B tests/runtime/native/systemd/systemd-package-workflow-contract-test.py -v
       - name: Hermetic package transaction readiness
         run: python3 -B tests/runtime/native/package-dkms-test.py -v
       - name: Rootless systemd runtime-health readiness
         run: python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
       - name: Verify patch hygiene
         run: git diff --check
+      - name: Explain executed-job failures
+        if: failure()
+        shell: bash
+        run: |
+          printf '::error title=SYSTEMD_PACKAGE_ROOTLESS_FAILED::A runner started for SHA %s (run %s), but a check failed; inspect the first failing step above. Queued runs without a runner and cancelled runs are not source-test failures.\n' "$GITHUB_SHA" "$GITHUB_RUN_ID"
