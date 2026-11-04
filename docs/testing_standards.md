@@ -1108,20 +1108,24 @@ lower-device bytes/requests; no improvement is asserted from native tests.
 
 The private bounded `tests/tools/quiet-lower-io.sh` sampler must never publish
 quiescence based solely on command success or missing fields. Each paired
-observation requires a fully parsed single-line `swapz` INFO status with
-required health/attribution counters and its terminal field, unchanged target
-geometry and mapping UUID/device/event identity, and two matching canonical
-17-field backing block-stat records. Validate all numeric tokens and signed
-Bash arithmetic bounds before comparison; reject malformed, duplicate,
-noncanonical, overflowing, regressing or wrapping counters within a pair or
-across retries, and changing record width or identity. Shorter 11/15-field block-stat layouts omit optional
-discard/flush evidence and are UNAVAILABLE, not zero lower I/O. A failed
-command/read, incomplete status, missing prerequisite, interval timeout or
-exhausted finite attempts must report one concise phase/reason/attempt-count
-UNAVAILABLE diagnostic while retaining diagnostic samples separately from
-withheld published counters. Stable synthetic fixtures verify only the
-rootless observer contract, never loaded, anonymous-swap or physical I/O
-attribution.
+observation requires the complete current single-line `swapz` INFO schema,
+including health/attribution and current-work fields plus its terminal field,
+unchanged target geometry and mapping UUID/device/event identity, and two
+matching canonical 17-field backing block-stat records. Validate all numeric
+tokens and signed Bash arithmetic bounds before comparison; reject malformed,
+duplicate, noncanonical or overflowing fields and reject regressions/wraps in
+the tracked cumulative attribution counters within a pair and across retries.
+Equal samples are not quiescent while block-stat `in_flight` or target
+preparation/completion ownership remains nonzero. Shorter 11/15-field block-stat
+layouts omit optional discard/flush evidence and are UNAVAILABLE, not zero lower
+I/O. Bound every `dmsetup` identity/status observation with a finite timeout.
+A failed or timed-out command/read, incomplete status, missing prerequisite,
+interval timeout or exhausted finite attempts must report one concise
+phase/reason/attempt-count UNAVAILABLE diagnostic, include the command return
+code when available, identify retained identity/status/lower samples, and keep
+those diagnostic samples separate from withheld published counters. Stable
+synthetic fixtures verify only the rootless observer contract, never loaded,
+anonymous-swap or physical I/O attribution.
 
 Loaded tests use only newly created, positively owned, RAM-backed `null_blk`. Before and after use, verify device identity, size, major/minor, DM UUID, holders, mounts and active-swap aliases. Never substitute a physical or existing block device.
 

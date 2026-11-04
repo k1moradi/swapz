@@ -13,11 +13,28 @@ swapz_quiet_valid_counter() {
                                $value < 9223372036854775807 ]]
 }
 
+swapz_quiet_observe_dmsetup() {
+    local observation="$1" command_rc
+    shift
+    SWAPZ_QUIET_OBSERVED_DMSETUP=""
+    SWAPZ_QUIET_FAILURE_DETAIL=""
+    SWAPZ_QUIET_OBSERVED_DMSETUP="$(timeout --signal=TERM --kill-after=1s 5s \
+        dmsetup "$@" 2>/dev/null)" && command_rc=0 || command_rc=$?
+    if (( command_rc != 0 )); then
+        SWAPZ_QUIET_FAILURE_DETAIL="rc=$command_rc"
+        SWAPZ_QUIET_PARSE_REASON="${observation}-command-failed"
+        (( command_rc == 124 || command_rc == 137 )) &&
+            SWAPZ_QUIET_PARSE_REASON="${observation}-command-timeout"
+        return 1
+    fi
+}
+
 # The complete single-line INFO status must contain the production fields at
 # both ends, with no incomplete, duplicate or unparseable key/value tokens.
 swapz_quiet_parse_status() {
     local status_text="$1" token key value required_field
     local -n parsed_values="$2"
+    local expected_field_count=476
     local -a fields=()
     local -A seen_fields=()
     local IFS=$' \t\n'
@@ -25,8 +42,19 @@ swapz_quiet_parse_status() {
     SWAPZ_QUIET_PARSE_REASON=malformed-status
     [[ -n $status_text && ${#status_text} -le 65536 &&
        $status_text != *$'\n'* && $status_text != *$'\r'* ]] || return 1
+    [[ $status_text != *" status_snapshot_error="* ]] || {
+        SWAPZ_QUIET_PARSE_REASON=status-snapshot-error
+        return 1
+    }
     read -r -a fields <<< "$status_text"
-    (( ${#fields[@]} >= 16 )) || return 1
+    # Current production INFO has three DM header fields plus 473 complete
+    # key/value fields. Schema drift blocks qualification until this oracle
+    # and its source-derived rootless fixture are updated together.
+    if (( ${#fields[@]} < expected_field_count )); then
+        SWAPZ_QUIET_PARSE_REASON=incomplete-status
+        return 1
+    fi
+    (( ${#fields[@]} == expected_field_count )) || return 1
     swapz_quiet_valid_counter "${fields[0]}" &&
         swapz_quiet_valid_counter "${fields[1]}" &&
         [[ ${fields[2]} == swapz ]] || return 1
@@ -42,7 +70,7 @@ swapz_quiet_parse_status() {
         case "$key" in
             version|mode)
                 [[ $value =~ ^[a-zA-Z0-9._-]+$ ]] || return 1 ;;
-            error|read_fault_calls)
+            error)
                 if [[ $value == -* ]]; then
                     [[ $value != -0 ]] && swapz_quiet_valid_counter "${value#-}" || return 1
                 else
@@ -53,9 +81,12 @@ swapz_quiet_parse_status() {
         parsed_values["$key"]="$value"
     done
     for required_field in version mode logical_write logical_read physical_write \
-            physical_write_reqs physical_read physical_read_reqs failed error \
-            completion_active upper_write_completed_ok upper_write_completed_err \
-            endio_write_forced_err; do
+            physical_write_reqs physical_read physical_read_reqs compressed raw \
+            zero_elided discarded gc_pages gc_read gc_write segment_discards_issued \
+            read_submitted read_submitted_reqs flush_calls flush_ok flush_err \
+            window_records read_payload_reqs prep_ready_current prep_slots_in_use \
+            submitter_prepare_active delta64_adopted failed error completion_active \
+            upper_write_completed_ok upper_write_completed_err endio_write_forced_err; do
         [[ -n ${seen_fields[$required_field]+present} ]] || {
             SWAPZ_QUIET_PARSE_REASON="missing-status-field:$required_field"
             return 1
@@ -67,9 +98,9 @@ swapz_quiet_parse_status() {
 
 swapz_quiet_observe_identity() {
     local mapping_name="$1" identity_text uuid major minor events
-    SWAPZ_QUIET_PARSE_REASON=identity-command-failed
-    identity_text="$(dmsetup info -c --noheadings --separator : \
-        -o uuid,major,minor,events "$mapping_name" 2>/dev/null)" || return 1
+    swapz_quiet_observe_dmsetup identity info -c --noheadings --separator : \
+        -o uuid,major,minor,events "$mapping_name" || return 1
+    identity_text="$SWAPZ_QUIET_OBSERVED_DMSETUP"
     SWAPZ_QUIET_PARSE_REASON=malformed-mapping-identity
     [[ ${#identity_text} -le 512 && $identity_text != *$'\n'* &&
        $identity_text =~ ^[[:blank:]]*([A-Za-z0-9_.+-]+)[[:blank:]]*:[[:blank:]]*([^:[:blank:]]+)[[:blank:]]*:[[:blank:]]*([^:[:blank:]]+)[[:blank:]]*:[[:blank:]]*([^:[:blank:]]+)[[:blank:]]*$ ]] || return 1
@@ -102,10 +133,32 @@ swapz_quiet_observe_lower() {
 }
 
 swapz_quiet_unavailable() {
-    local phase="$1" reason="$2" attempts="$3" budget="$4" retained=none
-    [[ -n $SWAPZ_QUIET_RETAINED_STATUS_BEFORE ]] && retained=initial
-    [[ -n $SWAPZ_QUIET_RETAINED_STATUS_AFTER ]] && retained=initial+final
-    SWAPZ_QUIET_LAST_FAILURE="phase=$phase reason=$reason attempts=$attempts/$budget retained=$retained"
+    local phase="$1" reason="$2" attempts="$3" budget="$4"
+    local retained_status=none retained_evidence=none
+    local -a retained_parts=()
+
+    [[ -n $SWAPZ_QUIET_RETAINED_IDENTITY_BEFORE ]] && retained_parts+=(identity-before)
+    [[ -n $SWAPZ_QUIET_RETAINED_STATUS_BEFORE ]] && {
+        retained_status=initial
+        retained_parts+=(status-before)
+    }
+    (( ${#SWAPZ_QUIET_RETAINED_LOWER_BEFORE[@]} != 0 )) &&
+        retained_parts+=(lower-before)
+    [[ -n $SWAPZ_QUIET_RETAINED_STATUS_AFTER ]] && {
+        retained_status=initial+final
+        retained_parts+=(status-after)
+    }
+    (( ${#SWAPZ_QUIET_RETAINED_LOWER_AFTER[@]} != 0 )) &&
+        retained_parts+=(lower-after)
+    [[ -n $SWAPZ_QUIET_RETAINED_IDENTITY_AFTER ]] &&
+        retained_parts+=(identity-after)
+    if (( ${#retained_parts[@]} != 0 )); then
+        printf -v retained_evidence '%s,' "${retained_parts[@]}"
+        retained_evidence="${retained_evidence%,}"
+    fi
+    SWAPZ_QUIET_LAST_FAILURE="phase=$phase reason=$reason attempts=$attempts/$budget retained_status=$retained_status retained_evidence=$retained_evidence"
+    [[ -n $SWAPZ_QUIET_FAILURE_DETAIL ]] &&
+        SWAPZ_QUIET_LAST_FAILURE+=" detail=$SWAPZ_QUIET_FAILURE_DETAIL"
     printf 'UNAVAILABLE: quiet-lower-io %s published=none\n' "$SWAPZ_QUIET_LAST_FAILURE" >&2
     return 1
 }
@@ -115,16 +168,20 @@ swapz_capture_quiescent_io() {
     local interval_seconds="$4" initial_status final_status initial_identity
     local final_identity baseline_identity="" baseline_header="" baseline_width=0
     local initial_header="" attempt counter_key counter_index sleep_rc mismatch_reason
+    local target_work_active
     local -a initial_lower=() final_lower=() previous_final_lower=()
     local -A initial_values=() final_values=() previous_final_values=()
     local -a monotonic_status_fields=(logical_write logical_read physical_write
         physical_write_reqs physical_read physical_read_reqs
         upper_write_completed_ok upper_write_completed_err endio_write_forced_err)
+    local -a active_status_fields=(prep_ready_current prep_slots_in_use
+        submitter_prepare_active completion_active)
 
     SWAPZ_QUIET_STATUS=""
     SWAPZ_QUIET_LOWER=()
     SWAPZ_QUIET_ATTEMPTS=0
     SWAPZ_QUIET_LAST_FAILURE=""
+    SWAPZ_QUIET_FAILURE_DETAIL=""
     SWAPZ_QUIET_RETAINED_STATUS_BEFORE=""
     SWAPZ_QUIET_RETAINED_STATUS_AFTER=""
     SWAPZ_QUIET_RETAINED_LOWER_BEFORE=()
@@ -135,7 +192,9 @@ swapz_capture_quiescent_io() {
     [[ $mapping_name =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$ &&
        $maximum_attempts =~ ^[1-9][0-9]?$ &&
        $interval_seconds =~ ^(0|[1-9])(\.[0-9]{1,3})?$ &&
-       -f $lower_stats_file && -r $lower_stats_file && ! -L $lower_stats_file ]] || {
+       -f $lower_stats_file && -r $lower_stats_file && ! -L $lower_stats_file ]] &&
+       command -v dmsetup >/dev/null 2>&1 &&
+       command -v timeout >/dev/null 2>&1 || {
         swapz_quiet_unavailable prerequisite invalid-or-missing 0 0
         return 1
     }
@@ -156,8 +215,9 @@ swapz_capture_quiescent_io() {
             return 1
         fi
         baseline_identity="$initial_identity"
-        initial_status="$(dmsetup status "$mapping_name" 2>/dev/null)" ||
-            { swapz_quiet_unavailable initial-status status-command-failed "$attempt" "$maximum_attempts"; return 1; }
+        swapz_quiet_observe_dmsetup status status "$mapping_name" ||
+            { swapz_quiet_unavailable initial-status "$SWAPZ_QUIET_PARSE_REASON" "$attempt" "$maximum_attempts"; return 1; }
+        initial_status="$SWAPZ_QUIET_OBSERVED_DMSETUP"
         swapz_quiet_parse_status "$initial_status" initial_values ||
             { swapz_quiet_unavailable initial-status "$SWAPZ_QUIET_PARSE_REASON" "$attempt" "$maximum_attempts"; return 1; }
         initial_header="$SWAPZ_QUIET_PARSED_HEADER"
@@ -198,15 +258,19 @@ swapz_capture_quiescent_io() {
             done
         fi
 
-        if sleep "$interval_seconds"; then :; else
+        if sleep "$interval_seconds"; then
+            SWAPZ_QUIET_FAILURE_DETAIL=""
+        else
             sleep_rc=$?
+            SWAPZ_QUIET_FAILURE_DETAIL="rc=$sleep_rc"
             mismatch_reason=interval-command-failed
             (( sleep_rc == 124 || sleep_rc == 137 )) && mismatch_reason=interval-timeout
             swapz_quiet_unavailable sample-interval "$mismatch_reason" "$attempt" "$maximum_attempts"
             return 1
         fi
-        final_status="$(dmsetup status "$mapping_name" 2>/dev/null)" ||
-            { swapz_quiet_unavailable final-status status-command-failed "$attempt" "$maximum_attempts"; return 1; }
+        swapz_quiet_observe_dmsetup status status "$mapping_name" ||
+            { swapz_quiet_unavailable final-status "$SWAPZ_QUIET_PARSE_REASON" "$attempt" "$maximum_attempts"; return 1; }
+        final_status="$SWAPZ_QUIET_OBSERVED_DMSETUP"
         swapz_quiet_parse_status "$final_status" final_values ||
             { swapz_quiet_unavailable final-status "$SWAPZ_QUIET_PARSE_REASON" "$attempt" "$maximum_attempts"; return 1; }
         SWAPZ_QUIET_RETAINED_STATUS_AFTER="$final_status"
@@ -242,27 +306,41 @@ swapz_capture_quiescent_io() {
                 return 1
             fi
         done
-        # Compare the entire status AND stat line; no untracked changes to
-        # in-flight, read, write, or flush counters during the sample.
-        if [[ "$initial_status" == "$final_status" &&
-              "${initial_lower[*]}" == "${final_lower[*]}" ]]; then
-            SWAPZ_QUIET_STATUS="$final_status"
-            SWAPZ_QUIET_LOWER=("${final_lower[@]}")
-            SWAPZ_QUIET_ATTEMPTS="$attempt"
-            SWAPZ_QUIET_RETAINED_STATUS_BEFORE=""
-            SWAPZ_QUIET_RETAINED_STATUS_AFTER=""
-            SWAPZ_QUIET_RETAINED_LOWER_BEFORE=()
-            SWAPZ_QUIET_RETAINED_LOWER_AFTER=()
-            SWAPZ_QUIET_RETAINED_IDENTITY_BEFORE=""
-            SWAPZ_QUIET_RETAINED_IDENTITY_AFTER=""
-            return 0
+        # Equal samples are not quiescent while a lower request or target-owned
+        # preparation/completion is still active across the whole interval.
+        mismatch_reason=unstable-target-status
+        if [[ "$initial_status" == "$final_status" ]]; then
+            mismatch_reason=unstable-lower-counter
+            if [[ "${initial_lower[*]}" == "${final_lower[*]}" ]]; then
+                mismatch_reason=lower-io-in-flight
+                if (( initial_lower[8] == 0 )); then
+                    target_work_active=0
+                    for counter_key in "${active_status_fields[@]}"; do
+                        if (( initial_values[$counter_key] != 0 )); then
+                            target_work_active=1
+                            break
+                        fi
+                    done
+                    mismatch_reason=active-target-work
+                    if (( target_work_active == 0 )); then
+                        SWAPZ_QUIET_STATUS="$final_status"
+                        SWAPZ_QUIET_LOWER=("${final_lower[@]}")
+                        SWAPZ_QUIET_ATTEMPTS="$attempt"
+                        SWAPZ_QUIET_RETAINED_STATUS_BEFORE=""
+                        SWAPZ_QUIET_RETAINED_STATUS_AFTER=""
+                        SWAPZ_QUIET_RETAINED_LOWER_BEFORE=()
+                        SWAPZ_QUIET_RETAINED_LOWER_AFTER=()
+                        SWAPZ_QUIET_RETAINED_IDENTITY_BEFORE=""
+                        SWAPZ_QUIET_RETAINED_IDENTITY_AFTER=""
+                        return 0
+                    fi
+                fi
+            fi
         fi
         previous_final_lower=("${final_lower[@]}")
         for counter_key in "${monotonic_status_fields[@]}"; do
             previous_final_values["$counter_key"]="${final_values[$counter_key]}"
         done
-        mismatch_reason=unstable-target-status
-        [[ "$initial_status" == "$final_status" ]] && mismatch_reason=unstable-lower-counter
     done
     swapz_quiet_unavailable attempt-budget "exhausted:$mismatch_reason" "$maximum_attempts" "$maximum_attempts"
 }

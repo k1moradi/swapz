@@ -13,10 +13,34 @@ SLEEP_CALLS="$TMP/sleep-calls"
 LOWER_17='3 0 24 0 0 0 0 0 0 0 0 0 0 0 0 0 0'
 LOWER_15='3 0 24 0 0 0 0 0 0 0 0 0 0 0 0'
 LOWER_11='3 0 24 0 0 0 0 0 0 0 0'
-EXPECTED_STATUS='0 32768 swapz version=1 mode=alpha-live-gc logical_write=0 logical_read=0 physical_write=0 physical_write_reqs=0 physical_read=0 physical_read_reqs=0 failed=0 error=0 completion_active=0 upper_write_completed_ok=0 upper_write_completed_err=0 endio_write_forced_err=0'
 mode=steady
 case_count=0
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
+EXPECTED_STATUS="$(python3 - "$ROOT/src/kernel/dm-target.c" <<'PY'
+import re
+import sys
+
+source = open(sys.argv[1], encoding="utf-8").read()
+start = source.index("static void swapz_status(")
+end = source.index("static int swapz_message", start)
+status_source = source[start:end]
+fields = re.findall(r"([A-Za-z0-9_]+)=%(?:[0-9.*]*)(?:[A-Za-z]+)", status_source)
+fields = [field for field in fields if field != "status_snapshot_error"]
+tokens = []
+for field in fields:
+    if field == "version":
+        tokens.extend(("version=1", "mode=alpha-live-gc"))
+    else:
+        tokens.append(f"{field}=0")
+print("0 32768 swapz " + " ".join(tokens))
+PY
+)" || fail 'cannot construct production status fixture'
+[[ $(wc -w <<< "$EXPECTED_STATUS") == 476 &&
+   $EXPECTED_STATUS == *' gc_pages=0 '* &&
+   $EXPECTED_STATUS == *' prep_slots_in_use=0 '* &&
+   $EXPECTED_STATUS == *' submitter_prepare_active=0 '* &&
+   $EXPECTED_STATUS == *' endio_write_forced_err=0' ]] ||
+    fail 'production status schema changed; update the quiet-I/O parser and fixture together'
 reset_case() {
     mode="$1"
     printf '%s\n' "$LOWER_17" > "$STAT"
@@ -24,6 +48,25 @@ reset_case() {
     printf '0\n' > "$INFO_CALLS"
     printf '0\n' > "$SLEEP_CALLS"
     case_count=$((case_count + 1))
+}
+
+# The production helper bounds dmsetup with coreutils timeout. This rootless
+# shim keeps fake dmsetup as a shell function and injects deterministic timeout.
+timeout() {
+    while (( $# > 0 )); do
+        case "$1" in
+            --signal=*|--kill-after=*) shift ;;
+            *s) shift; break ;;
+            *) break ;;
+        esac
+    done
+    if [[ $mode == identity_timeout_first && ${1:-} == dmsetup && ${2:-} == info ]]; then
+        return 124
+    fi
+    if [[ $mode == status_timeout_first && ${1:-} == dmsetup && ${2:-} == status ]]; then
+        return 124
+    fi
+    "$@"
 }
 
 # This function deliberately accepts *only* read-only observational dmsetup
@@ -70,6 +113,12 @@ dmsetup() {
         lower_wrap_between_attempts)
             (( calls == 2 )) && printf '%s\n' '4 0 32 0 0 0 0 0 0 0 0 0 0 0 0 0 0' > "$STAT"
             (( calls == 3 )) && printf '%s\n' '3 0 24 0 0 0 0 0 0 0 0 0 0 0 0 0 0' > "$STAT" ;;
+        lower_inflight_once)
+            if (( calls <= 2 )); then
+                printf '%s\n' '3 0 24 0 0 0 0 0 1 0 0 0 0 0 0 0 0' > "$STAT"
+            else
+                printf '%s\n' "$LOWER_17" > "$STAT"
+            fi ;;
         width_change)
             (( calls == 2 )) && printf '%s\n' "$LOWER_15" > "$STAT" ;;
         width_change_later)
@@ -79,6 +128,7 @@ dmsetup() {
     case $mode in
         target_busy|identity_switch_later) physical_read="$calls" ;;
         target_once) (( calls >= 2 )) && physical_read=1 ;;
+        target_active_once) : ;;
         target_wrap) (( calls == 1 )) && physical_read=19 || physical_read=2 ;;
         target_wrap_between_attempts)
             (( calls == 2 )) && physical_read=7
@@ -88,15 +138,22 @@ dmsetup() {
         overflow_status) physical_read=9223372036854775808 ;;
     esac
     status_text="${EXPECTED_STATUS/physical_read=0 /physical_read=$physical_read }"
+    if [[ $mode == target_active ]]; then
+        status_text="${status_text/completion_active=0/completion_active=1}"
+    elif [[ $mode == target_active_once && $calls -le 2 ]]; then
+        status_text="${status_text/completion_active=0/completion_active=1}"
+    fi
     case $mode in
         truncated_status) status_text="${status_text% endio_write_forced_err=0}" ;;
         partial_status) status_text='0 32768 swapz version=1 mode=alpha-live-gc physical_read=0' ;;
-        duplicate_status) status_text="${status_text/ endio_write_forced_err=0/ physical_read=0 endio_write_forced_err=0}" ;;
+        internal_truncated_status) status_text="${status_text/ gc_pages=0 / }" ;;
+        duplicate_status) status_text="${status_text/ gc_pages=0 / physical_read=0 }" ;;
         malformed_status) status_text="${status_text/ endio_write_forced_err=0/ opaque=invalid endio_write_forced_err=0}" ;;
         snapshot_error) status_text='0 32768 swapz status_snapshot_error=-12' ;;
         wrong_target) status_text="${status_text/swapz version=/linear version=}" ;;
         newline_status) status_text="$status_text"$'\n''0 32768 swapz physical_read=0' ;;
         noncanonical_failure) status_text="${status_text/failed=0/failed=01}" ;;
+        negative_read_fault_calls) status_text="${status_text/read_fault_calls=0/read_fault_calls=-1}" ;;
         bad_tail_with_failed_one) status_text="${status_text/failed=0/failed=1}"; status_text="${status_text% endio_write_forced_err=0}" ;;
         failed_target) status_text="${status_text/failed=0 error=0/failed=1 error=-5}" ;;
     esac
@@ -138,7 +195,8 @@ expect_unavailable() {
         fail "$mode unexpected success or repeated logs"
     grep -Fq "phase=$phase reason=$reason" "$TMP/err" ||
         fail "$mode wrong diagnostic: $(command cat "$TMP/err")"
-    grep -Fq "retained=$retained published=none" "$TMP/err" ||
+    grep -Fq "retained_status=$retained " "$TMP/err" &&
+        grep -Fq 'published=none' "$TMP/err" ||
         fail "$mode wrong retained evidence: $(command cat "$TMP/err")"
     [[ -z $SWAPZ_QUIET_STATUS && ${#SWAPZ_QUIET_LOWER[@]} == 0 &&
        $SWAPZ_QUIET_ATTEMPTS == 0 &&
@@ -164,6 +222,15 @@ reset_case target_once
 expect_success 2 17
 reset_case lower_once
 expect_success 2 17
+reset_case target_active_once
+expect_success 2 17
+reset_case lower_inflight_once
+expect_success 2 17
+reset_case target_active
+expect_unavailable attempt-budget exhausted:active-target-work initial+final
+reset_case lower_inflight
+printf '%s\n' '3 0 24 0 0 0 0 0 1 0 0 0 0 0 0 0 0' > "$STAT"
+expect_unavailable attempt-budget exhausted:lower-io-in-flight initial+final
 reset_case target_busy
 expect_unavailable attempt-budget exhausted:unstable-target-status initial+final
 [[ $(command cat "$CALLS") == 6 ]] || fail 'target-busy attempts not bounded'
@@ -182,15 +249,17 @@ expect_unavailable final-lower lower-counter-width-changed initial+final
 reset_case width_change_later
 expect_unavailable initial-lower lower-counter-width-changed initial
 reset_case truncated_status
-expect_unavailable initial-status missing-status-field:endio_write_forced_err none
+expect_unavailable initial-status incomplete-status none
 reset_case partial_status
-expect_unavailable initial-status malformed-status none
+expect_unavailable initial-status incomplete-status none
+reset_case internal_truncated_status
+expect_unavailable initial-status incomplete-status none
 reset_case duplicate_status
 expect_unavailable initial-status malformed-status none
 reset_case malformed_status
 expect_unavailable initial-status malformed-status none
 reset_case snapshot_error
-expect_unavailable initial-status malformed-status none
+expect_unavailable initial-status status-snapshot-error none
 reset_case wrong_target
 expect_unavailable initial-status malformed-status none
 reset_case newline_status
@@ -203,8 +272,10 @@ reset_case overflow_status
 expect_unavailable initial-status malformed-status none
 reset_case noncanonical_failure
 expect_unavailable initial-status malformed-status none
+reset_case negative_read_fault_calls
+expect_unavailable initial-status malformed-status none
 reset_case bad_tail_with_failed_one
-expect_unavailable initial-status missing-status-field:endio_write_forced_err none
+expect_unavailable initial-status incomplete-status none
 reset_case malformed_identity
 expect_unavailable initial-identity malformed-mapping-identity none
 reset_case identity_switch
@@ -213,16 +284,33 @@ reset_case identity_switch_later
 expect_unavailable initial-identity mapping-identity-changed none
 reset_case identity_fail_first
 expect_unavailable initial-identity identity-command-failed none
+grep -Fq 'detail=rc=7' "$TMP/err" || fail 'identity failure lost command status'
 reset_case identity_fail_second
 expect_unavailable final-identity identity-command-failed initial+final
+reset_case identity_timeout_first
+expect_unavailable initial-identity identity-command-timeout none
+grep -Fq 'detail=rc=124' "$TMP/err" || fail 'identity timeout lost command status'
+reset_case status_timeout_first
+expect_unavailable initial-status status-command-timeout none
+grep -Fq 'retained_evidence=identity-before' "$TMP/err" ||
+    fail 'status timeout lost retained mapping identity'
+grep -Fq 'detail=rc=124' "$TMP/err" || fail 'status timeout lost command status'
 reset_case status_fail_first
 expect_unavailable initial-status status-command-failed none
+grep -Fq 'retained_evidence=identity-before' "$TMP/err" ||
+    fail 'status failure lost retained mapping identity'
+grep -Fq 'detail=rc=9' "$TMP/err" || fail 'status failure lost command status'
 reset_case status_fail_second
 expect_unavailable final-status status-command-failed initial
+grep -Fq 'retained_evidence=identity-before,status-before,lower-before' "$TMP/err" ||
+    fail 'final status failure lost retained initial evidence'
+grep -Fq 'detail=rc=9' "$TMP/err" || fail 'final status failure lost command status'
 reset_case sleep_timeout
 expect_unavailable sample-interval interval-timeout initial
+grep -Fq 'detail=rc=124' "$TMP/err" || fail 'interval timeout lost command status'
 reset_case sleep_failed
 expect_unavailable sample-interval interval-command-failed initial
+grep -Fq 'detail=rc=7' "$TMP/err" || fail 'interval failure lost command status'
 reset_case malformed_lower_short
 printf '%s\n' '3 0 24 0 0 0 0' > "$STAT"
 expect_unavailable initial-lower malformed-lower-stat initial
