@@ -3312,6 +3312,8 @@ class ReportContract(unittest.TestCase):
                                      ["unused"], report, parse_bench=True), 0)
         finally:
             runner.subprocess.Popen = original_popen
+        self.assertTrue(fake_process.stdout.closed,
+                        "streamed child stdout must be released")
         stage = report["stages"][-1]
         self.assertEqual(stage["status"], "PASS")
         diagnostic = report["benchmarks"]["parallel_read_ab"]

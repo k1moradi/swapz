@@ -3746,6 +3746,9 @@ happen. Live terminal output is deliberately filtered to phase transitions and
 `FAIL:`/`BLOCKED:` diagnostics. Full child stdout, including status snapshots,
 JSON benchmark records and detailed evidence counters, remains captured verbatim
 for report parsing but must not be echoed line-for-line to the operator terminal.
+The runner owns the streamed child stdout pipe and must close it after the child
+is reaped so repeated qualification stages cannot leak descriptors or emit
+resource-lifetime warnings.
 Retained synthetic write/flush fault PASS markers remain visible as phase
 completion even though their marker prefix is not `PASS_LOADED_`.
 

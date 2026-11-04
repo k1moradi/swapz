@@ -2485,6 +2485,7 @@ def run_stage(title, command, result, *, parse_bench=False):
                     sys.stdout.write("       " + progress + "\n")
                     sys.stdout.flush()
             rc = proc.wait()
+            proc.stdout.close()
             output = "".join(chunks)
         else:
             proc = subprocess.run(
