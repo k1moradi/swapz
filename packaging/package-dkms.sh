@@ -2204,10 +2204,12 @@ rollback() {
       exit "$rc"
   fi
   if [[ -n "$rollback_dkms_status" ]]; then
-    if ! "$dkms_bin" remove -m swapz -v "$version" --all >/dev/null 2>&1; then
+    local dkms_remove_status=0
+    "$dkms_bin" remove -m swapz -v "$version" --all || dkms_remove_status=$?
+    if (( dkms_remove_status != 0 )); then
       quarantine_activation || true
       record_incomplete_rollback || true
-      echo "BLOCKED: cannot clear DKMS state during rollback; rollback incomplete; recovery-required journal retained" >&2
+      printf 'BLOCKED: cannot clear DKMS state during rollback (status %d); rollback incomplete; recovery-required journal retained\n'         "$dkms_remove_status" >&2
       exit "$rc"
     fi
   fi
@@ -2248,10 +2250,11 @@ rollback() {
       echo "BLOCKED: previous package restoration failed; rollback incomplete; verified recovery-required journal retained" >&2
     fi
   else
-    local cleanup_ok=1
-    "$depmod_bin" "$kernel_release" >/dev/null 2>&1 || cleanup_ok=0
-    "$systemctl_bin" daemon-reload >/dev/null 2>&1 || cleanup_ok=0
-    if (( cleanup_ok == 1 )) && persist_transaction_state rolled-back; then
+    local depmod_status=0 systemd_reload_status=0
+    "$depmod_bin" "$kernel_release" || depmod_status=$?
+    "$systemctl_bin" daemon-reload || systemd_reload_status=$?
+    if (( depmod_status == 0 && systemd_reload_status == 0 )) &&
+       persist_transaction_state rolled-back; then
       local cleanup_status=0
       remove_transaction_record || cleanup_status=$?
       if (( cleanup_status == 0 )); then
@@ -2261,6 +2264,12 @@ rollback() {
       fi
     else
       record_incomplete_rollback || true
+      if (( depmod_status != 0 )); then
+        printf 'BLOCKED: rollback depmod failed (status %d); recovery-required journal retained\n'           "$depmod_status" >&2
+      fi
+      if (( systemd_reload_status != 0 )); then
+        printf 'BLOCKED: rollback systemd reload failed (status %d); recovery-required journal retained\n'           "$systemd_reload_status" >&2
+      fi
       echo "BLOCKED: rollback cleanup incomplete; recovery-required journal retained" >&2
     fi
   fi

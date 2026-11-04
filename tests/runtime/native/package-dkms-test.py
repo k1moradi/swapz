@@ -879,6 +879,27 @@ exec "{flock_binary}" "$@"
         self.assert_absent()
         self.assertEqual(self.uninstall_transactions(), [])
 
+    def test_initial_install_rollback_reports_cleanup_exit_status(self):
+        failed = self.invoke("install", {
+            "SWAPZ_TEST_INSTALL_FAIL_AFTER": "source-created",
+            "SWAPZ_FAKE_DEPMOD_FAIL_ONCE": "1",
+        })
+        self.assertEqual(failed.returncode, 2, failed.stderr)
+        self.assertIn("rollback depmod failed (status 45)", failed.stderr)
+        self.assertIn("rollback cleanup incomplete", failed.stderr)
+        self.assert_absent()
+        transactions = list(
+            (self.home / "transactions").glob("swapz-package.*"))
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(
+            json.loads((transactions[0] / "state.json").read_text())["phase"],
+            "rollback-incomplete")
+
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(transactions[0].exists())
+
     def test_upgrade_active_refusal_and_failed_upgrade_restores(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_binary = (self.prefix / "sbin/swapzctl").read_bytes()
