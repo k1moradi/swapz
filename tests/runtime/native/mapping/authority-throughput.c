@@ -66,6 +66,188 @@ static int init_authority(void)
 	return 0;
 }
 
+
+/*
+ * Measure GC's actual production authority dead-reserve claim, separating
+ * a never-claimed segment from the identical, previously-claimed segment.
+ * The only semantic difference is the monotonic claim witness, so the
+ * excess is attributable to the corruption-resistant logical-map proof
+ * plus its small reuse cleanup. Runs offline in one thread with no lower I/O.
+ */
+#define CLAIM_SCAN_REPEATS 5U
+
+static int compare_scan_u64(const void *left, const void *right)
+{
+	uint64_t first = *(const uint64_t *)left;
+	uint64_t second = *(const uint64_t *)right;
+
+	return (first > second) - (first < second);
+}
+
+static uint64_t scan_median(uint64_t values[CLAIM_SCAN_REPEATS])
+{
+	qsort(values, CLAIM_SCAN_REPEATS, sizeof(values[0]), compare_scan_u64);
+	return values[CLAIM_SCAN_REPEATS / 2U];
+}
+
+static uint64_t thread_cpu_ns(void)
+{
+	struct timespec ts;
+
+	if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts))
+		return 0;
+	return (uint64_t)ts.tv_sec * UINT64_C(1000000000) +
+	       (uint64_t)ts.tv_nsec;
+}
+
+static int measure_production_claim_proof(swapz_u32 logical_pages)
+{
+	struct swapz_authority authority, sample;
+	struct swapz_map *large_maps = NULL;
+	swapz_u16 *large_live = NULL;
+	swapz_u8 *large_classes = NULL, *large_roles = NULL;
+	swapz_u32 *large_counts = NULL, *large_programs = NULL;
+	uint64_t virgin_wall[CLAIM_SCAN_REPEATS], claimed_wall[CLAIM_SCAN_REPEATS];
+	uint64_t virgin_cpu[CLAIM_SCAN_REPEATS], claimed_cpu[CLAIM_SCAN_REPEATS];
+	uint64_t claimed_worst = 0, corrupt_wall;
+	uint64_t map_bytes = (uint64_t)logical_pages * sizeof(*large_maps);
+	uint64_t reserve = (uint64_t)logical_pages / 8U +
+			   (logical_pages % 8U != 0U);
+	uint64_t physical_64, clock_start, cpu_start;
+	swapz_u32 physical_blocks, segments, reserve_segment, logical;
+	unsigned int repeat;
+	int result = 1;
+#define REQUIRE_CLAIM(condition) do { if (!(condition)) { \
+	fprintf(stderr, "%s:%d: FAIL claim geometry=%u: %s\n", \
+		__FILE__, __LINE__, logical_pages, #condition); \
+	goto cleanup; \
+} } while (0)
+
+	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
+		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
+	/* One full foreground headroom segment plus the reserved blocks. */
+	physical_64 = (logical_pages + reserve +
+		       2U * SWAPZ_SEGMENT_BLOCKS - 1U) /
+		      SWAPZ_SEGMENT_BLOCKS * SWAPZ_SEGMENT_BLOCKS;
+	REQUIRE_CLAIM(physical_64 <= UINT32_MAX);
+	physical_blocks = (swapz_u32)physical_64;
+	segments = physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	reserve_segment = segments - 1U;
+
+	large_maps = calloc(logical_pages, sizeof(*large_maps));
+	large_live = calloc(physical_blocks, sizeof(*large_live));
+	large_classes = calloc(physical_blocks, sizeof(*large_classes));
+	large_roles = calloc(segments, sizeof(*large_roles));
+	large_counts = calloc(segments, sizeof(*large_counts));
+	large_programs = calloc(segments, sizeof(*large_programs));
+	REQUIRE_CLAIM(large_maps && large_live && large_classes &&
+		      large_roles && large_counts && large_programs);
+	REQUIRE_CLAIM(swapz_authority_init(
+		&authority, large_maps, large_live, large_classes,
+		logical_pages, physical_blocks) == 0);
+	authority.reuse_dead_segments = 1;
+	REQUIRE_CLAIM(swapz_enable_segment_rotation(
+		&authority, large_roles, segments) == 0);
+	REQUIRE_CLAIM(swapz_enable_segment_mapping_counts(
+		&authority, large_counts, segments) == 0);
+	REQUIRE_CLAIM(swapz_enable_segment_program_counts(
+		&authority, large_programs, segments) == 0);
+	REQUIRE_CLAIM(!large_roles[reserve_segment] && large_roles[1U]);
+
+	/* Every logical map is valid, distinct, and physically within the
+	 * foreground. The last reserve is unreferenced and must scan to end. */
+	for (logical = 0; logical < logical_pages; ++logical) {
+		large_maps[logical].start_block = logical;
+		large_maps[logical].valid = 1;
+		large_maps[logical].raw = 1;
+		large_maps[logical].extent_blocks = 1;
+		large_maps[logical].payload_length = SWAPZ_BLOCK_BYTES;
+		large_counts[logical / SWAPZ_SEGMENT_BLOCKS]++;
+	}
+	authority.open_segment = 0;
+	authority.next_segment_probe = reserve_segment;
+	for (repeat = 0; repeat < CLAIM_SCAN_REPEATS; ++repeat) {
+		/* A clean virgin witness is an intentionally reset measurement
+		 * fixture only. Production counters must never be decremented. */
+		large_programs[reserve_segment] = 0;
+		sample = authority;
+		clock_start = now_ns();
+		cpu_start = thread_cpu_ns();
+		REQUIRE_CLAIM(clock_start && cpu_start);
+		REQUIRE_CLAIM(swapz_gc_begin_rotation(&sample, 1U) == 0);
+		virgin_wall[repeat] = now_ns() - clock_start;
+		virgin_cpu[repeat] = thread_cpu_ns() - cpu_start;
+		REQUIRE_CLAIM(sample.gc_destination == reserve_segment &&
+			      sample.alloc_probe_full_scans == 1ULL &&
+			      large_programs[reserve_segment] == 1U);
+
+		large_programs[reserve_segment] = 1;
+		sample = authority;
+		clock_start = now_ns();
+		cpu_start = thread_cpu_ns();
+		REQUIRE_CLAIM(clock_start && cpu_start);
+		REQUIRE_CLAIM(swapz_gc_begin_rotation(&sample, 1U) == 0);
+		claimed_wall[repeat] = now_ns() - clock_start;
+		claimed_cpu[repeat] = thread_cpu_ns() - cpu_start;
+		REQUIRE_CLAIM(sample.gc_destination == reserve_segment &&
+			      sample.alloc_probe_full_scans == 1ULL &&
+			      large_programs[reserve_segment] == 2U);
+		if (claimed_wall[repeat] > claimed_worst)
+			claimed_worst = claimed_wall[repeat];
+	}
+
+	/* A forged zero sidecar cannot hide even a final-entry reference. */
+	large_programs[reserve_segment] = 1;
+	large_maps[logical_pages - 1U].start_block =
+		reserve_segment * SWAPZ_SEGMENT_BLOCKS;
+	sample = authority;
+	clock_start = now_ns();
+	REQUIRE_CLAIM(swapz_gc_begin_rotation(&sample, 1U) == -EUCLEAN);
+	corrupt_wall = now_ns() - clock_start;
+	REQUIRE_CLAIM(!sample.gc_allocation &&
+		      sample.alloc_probe_full_scans == 1ULL &&
+		      large_programs[reserve_segment] == 1U);
+	large_maps[logical_pages - 1U].start_block = logical_pages - 1U;
+
+	{
+		uint64_t virgin_median = scan_median(virgin_wall);
+		uint64_t claimed_median = scan_median(claimed_wall);
+		uint64_t virgin_cpu_median = scan_median(virgin_cpu);
+		uint64_t claimed_cpu_median = scan_median(claimed_cpu);
+		uint64_t excess = claimed_median > virgin_median ?
+			claimed_median - virgin_median : 0;
+
+		printf("SWAPZ_GC_PRODUCTION_CLAIM_SCAN_EVIDENCE={"
+		       "\"scope\":\"OFFLINE_NATIVE_PRODUCTION_AUTHORITY\","
+		       "\"logical_pages\":%u,\"map_bytes\":%" PRIu64 ","
+		       "\"repeats\":%u,\"virgin_full_map_scans\":0,"
+		       "\"claimed_full_map_scans\":%u,"
+		       "\"virgin_claim_wall_median_ns\":%" PRIu64 ","
+		       "\"claimed_claim_wall_median_ns\":%" PRIu64 ","
+		       "\"claimed_claim_wall_max_observed_ns\":%" PRIu64 ","
+		       "\"virgin_claim_cpu_median_ns\":%" PRIu64 ","
+		       "\"claimed_claim_cpu_median_ns\":%" PRIu64 ","
+		       "\"paired_path_excess_wall_ns\":%" PRIu64 ","
+		       "\"effective_map_scan_gbps\":%.3f,"
+		       "\"last_entry_corruption_rejected_wall_ns\":%" PRIu64 "}\n",
+		       logical_pages, map_bytes, CLAIM_SCAN_REPEATS,
+		       CLAIM_SCAN_REPEATS, virgin_median, claimed_median,
+		       claimed_worst, virgin_cpu_median, claimed_cpu_median,
+		       excess, excess ? (double)map_bytes / (double)excess : 0.0,
+		       corrupt_wall);
+	}
+	result = 0;
+cleanup:
+	free(large_programs);
+	free(large_counts);
+	free(large_roles);
+	free(large_classes);
+	free(large_live);
+	free(large_maps);
+#undef REQUIRE_CLAIM
+	return result;
+}
+
 int main(void)
 {
 	swapz_u8 raw_page[SWAPZ_BLOCK_BYTES];
@@ -241,5 +423,10 @@ int main(void)
 		       unique_append_ns / APPEND_ROUNDS);
 		printf("PASS: authority finish and discard throughput microbenchmark\n");
 	}
+	/* Actual production-C authority path; measured separately from GC I/O. */
+	CHECK(measure_production_claim_proof(262144U) == 0);
+	CHECK(measure_production_claim_proof(1048576U) == 0);
+	CHECK(measure_production_claim_proof(4194304U) == 0);
+	CHECK(measure_production_claim_proof(27080192U) == 0);
 	return 0;
 }

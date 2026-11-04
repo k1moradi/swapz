@@ -29,6 +29,7 @@ static swapz_u16 live[PHYSICAL_BLOCKS];
 static swapz_u8 classes[PHYSICAL_BLOCKS];
 static swapz_u8 roles[PHYSICAL_SEGMENTS];
 static swapz_u32 segment_maps[PHYSICAL_SEGMENTS];
+static swapz_u32 program_counts[PHYSICAL_SEGMENTS];
 static swapz_u32 versions[LOGICAL_PAGES];
 static swapz_u8 media[PHYSICAL_BLOCKS * SWAPZ_BLOCK_BYTES];
 static swapz_u8 page_bytes[SWAPZ_BLOCK_BYTES];
@@ -69,6 +70,10 @@ static int setup(void)
 		return error;
 	error = swapz_enable_segment_mapping_counts(
 		&a, segment_maps, PHYSICAL_SEGMENTS);
+	if (error)
+		return error;
+	error = swapz_enable_segment_program_counts(&a, program_counts,
+						     PHYSICAL_SEGMENTS);
 	if (error)
 		return error;
 	memset(media, 0, sizeof(media));
@@ -123,7 +128,7 @@ static int verify_all_pages(void)
 	return 0;
 }
 
-static int relocate_segment(swapz_u32 victim)
+static int relocate_segment_pages(swapz_u32 victim)
 {
 	swapz_u32 logical;
 	int error;
@@ -156,7 +161,14 @@ static int relocate_segment(swapz_u32 victim)
 		gc_writes++;
 		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
 	}
-	return swapz_gc_commit_rotation(&a, victim);
+	return 0;
+}
+
+static int relocate_segment(swapz_u32 victim)
+{
+	int error = relocate_segment_pages(victim);
+
+	return error ? error : swapz_gc_commit_rotation(&a, victim);
 }
 
 static unsigned int reserve_segments(void)
@@ -385,6 +397,59 @@ static int test_sustained_all_raw_gc_rotations(void)
 }
 
 
+
+/*
+ * The sidecar zero condition never authorizes reclaim or role exchange by
+ * itself. A fabricated, last-survivor reference is checked after all 204
+ * other pages have moved. Restore it before byte-exact verification.
+ */
+static int test_false_zero_sidecar_blocks_commit_and_reuse(void)
+{
+	swapz_u32 logical, saved_block, saved_open, saved_next;
+	unsigned long long probes_before;
+
+	CHECK(setup() == 0);
+	CHECK(fill_all_pages(1) == 0);
+	for (logical = 0; logical < 52U; ++logical)
+		CHECK(write_page(logical, 2) == 0);
+	CHECK(relocate_segment_pages(0) == 0);
+	CHECK(!segment_maps[0] && program_counts[0] != 0);
+	CHECK(roles[0] && !roles[6]);
+
+	logical = 52U;
+	saved_block = maps[logical].start_block;
+	CHECK(saved_block / SWAPZ_SEGMENT_BLOCKS == 6U);
+	maps[logical].start_block = logical; /* Hidden authoritative victim ref. */
+	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(roles[0] && !roles[6] && a.gc_allocation);
+	maps[logical].start_block = saved_block;
+	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
+	CHECK(!roles[0] && roles[6] && !segment_maps[0]);
+	CHECK(verify_all_pages() == 0);
+
+	/* The former victim is now a claimed reserve with zero sidecars.
+	 * A false-zero reuse candidate must fail before roles or reclaim move. */
+	saved_open = a.open_segment;
+	saved_next = a.next_block;
+	probes_before = a.alloc_probe_full_scans;
+	maps[logical].start_block = logical;
+	a.next_segment_probe = 0;
+	CHECK(swapz_gc_begin_rotation(&a, 1) == -EUCLEAN);
+	CHECK(!a.gc_allocation && !roles[0] && roles[6]);
+	CHECK(a.alloc_probe_full_scans == probes_before + 1ULL);
+	CHECK(a.next_block == saved_next);
+	maps[logical].start_block = saved_block;
+
+	/* Production caller restores the saved cursor after failed GC begin. */
+	a.open_segment = saved_open;
+	a.next_segment_probe = 0;
+	CHECK(swapz_gc_begin_rotation(&a, 1) == 0);
+	CHECK(a.gc_destination == 0 && program_counts[0] >= 2U);
+	CHECK(!roles[0] && roles[6]);
+	CHECK(verify_all_pages() == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -392,10 +457,11 @@ int main(void)
 	CHECK(test_repeated_raw_reclaim_and_reuse() == 0); passed++;
 	CHECK(test_sustained_all_raw_gc_rotations() == 0); passed++;
 	CHECK(test_fragmented_raw_gc_restores_progress() == 0); passed++;
+	CHECK(test_false_zero_sidecar_blocks_commit_and_reuse() == 0); passed++;
 	printf("SWAPZ_GC_HIGH_OCCUPANCY_PASS=%d "
 	       "foreground_writes=%llu gc_reads=%llu gc_writes=%llu "
-	       "gc_bytes_relocated=%llu\n",
+	       "gc_bytes_relocated=%llu alloc_probe_256_block_scans=%llu\n",
 	       passed, foreground_writes, gc_reads, gc_writes,
-	       gc_bytes_relocated);
+	       gc_bytes_relocated, a.alloc_probe_full_scans);
 	return 0;
 }
