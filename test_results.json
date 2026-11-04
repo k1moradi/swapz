@@ -249,24 +249,24 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 7820,
-"legacy_dead_probe_ns": 780641,
-"legacy_score_scan_ns": 5852439,
+"incremental_select_ns": 4906,
+"legacy_dead_probe_ns": 576448,
+"legacy_score_scan_ns": 6234128,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3875,
-"relocation_list_ns": 2637,
-"relocation_scan_ns": 1937723,
+"mapped_dead_probe_ns": 2624,
+"relocation_list_ns": 2055,
+"relocation_scan_ns": 1275589,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 25481,
-"legacy_dead_probe_ns": 3384926,
-"legacy_score_scan_ns": 23214104,
+"incremental_select_ns": 21303,
+"legacy_dead_probe_ns": 2427580,
+"legacy_score_scan_ns": 25801969,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 13508,
-"relocation_list_ns": 2436,
-"relocation_scan_ns": 7598483,
+"mapped_dead_probe_ns": 10256,
+"relocation_list_ns": 2477,
+"relocation_scan_ns": 5053399,
 "segments": 4096,
 "victim_records": 256
 }
@@ -276,14 +276,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 878,
+"inverse_ns_per_page": 1521,
 "name": "scalar",
-"transform_ns_per_page": 921
+"transform_ns_per_page": 1626
 },
 {
-"inverse_ns_per_page": 706,
+"inverse_ns_per_page": 1245,
 "name": "sse2",
-"transform_ns_per_page": 551
+"transform_ns_per_page": 849
 }
 ],
 "classifier": {
@@ -293,9 +293,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 342,
+"ns_per_page": 715,
 "sample_pairs": 32,
-"scalar_ns_per_page": 342,
+"scalar_ns_per_page": 715,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -310,7 +310,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 8096
+"wall_ns_per_page": 8055
 },
 {
 "acceleration": 2,
@@ -318,7 +318,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 7603
+"wall_ns_per_page": 7453
 },
 {
 "acceleration": 3,
@@ -326,7 +326,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 7288
+"wall_ns_per_page": 7216
 },
 {
 "acceleration": 4,
@@ -334,7 +334,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 7073
+"wall_ns_per_page": 7379
 }
 ],
 "negative_pages": 256,
@@ -351,9 +351,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 4938,
-"modeled_wall_ns_total": 2844416,
-"ns_per_saved_block": 54700,
+"modeled_wall_ns_per_page": 6457,
+"modeled_wall_ns_total": 3719680,
+"ns_per_saved_block": 71532,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -378,29 +378,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 641,
+"baseline_ns_per_page": 929,
 "order": "baseline_first",
-"unrolled_ns_per_page": 544
+"unrolled_ns_per_page": 863
 },
 {
-"baseline_ns_per_page": 633,
+"baseline_ns_per_page": 1048,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 598
+"unrolled_ns_per_page": 867
 },
 {
-"baseline_ns_per_page": 589,
+"baseline_ns_per_page": 1010,
 "order": "baseline_first",
-"unrolled_ns_per_page": 599
+"unrolled_ns_per_page": 853
 },
 {
-"baseline_ns_per_page": 588,
+"baseline_ns_per_page": 1015,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 594
+"unrolled_ns_per_page": 861
 },
 {
-"baseline_ns_per_page": 622,
+"baseline_ns_per_page": 1018,
 "order": "baseline_first",
-"unrolled_ns_per_page": 642
+"unrolled_ns_per_page": 869
 }
 ],
 "repeats_per_arm": 64,
@@ -449,14 +449,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 55938,
+"ns_per_saved_block": 72841,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 5535,
-"routed_cpu_ns_total": 3188507,
+"routed_cpu_ns_per_page": 7208,
+"routed_cpu_ns_total": 4151980,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -504,14 +504,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 56266,
+"ns_per_saved_block": 73346,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 5372,
-"routed_cpu_ns_total": 3094664,
+"routed_cpu_ns_per_page": 7003,
+"routed_cpu_ns_total": 4034080,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -559,14 +559,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 54700,
+"ns_per_saved_block": 71532,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 4938,
-"routed_cpu_ns_total": 2844416,
+"routed_cpu_ns_per_page": 6457,
+"routed_cpu_ns_total": 3719680,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -614,14 +614,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 54700,
+"ns_per_saved_block": 71532,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 4938,
-"routed_cpu_ns_total": 2844416,
+"routed_cpu_ns_per_page": 6457,
+"routed_cpu_ns_total": 3719680,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -669,14 +669,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 54700,
+"ns_per_saved_block": 71532,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 4938,
-"routed_cpu_ns_total": 2844416,
+"routed_cpu_ns_per_page": 6457,
+"routed_cpu_ns_total": 3719680,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -693,17 +693,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 706,
+"inverse_ns_per_page": 1245,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 878,
-"scalar_transform_ns_per_page": 921,
-"second_lz4_ns_per_page": 9876,
+"scalar_inverse_ns_per_page": 1521,
+"scalar_transform_ns_per_page": 1626,
+"second_lz4_ns_per_page": 12251,
 "transform_backend": "sse2",
-"transform_ns_per_page": 551
+"transform_ns_per_page": 849
 }
 ]
 }
@@ -717,33 +717,32 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "c7189bc394c53d96e79fd54fe3134f26e8ae99a52c76f0d1c838f0223c0c339f",
-"module_sha256": "393b465fb029ae0794f8b25306d51430693b5ec78d0c838d8713b13d52b86eaf",
+"formatter_sha256": "f27e67c46e6b6ba9288657f375b3d90663f3d4fd578868f573b5b067a4860fb5",
+"module_sha256": "645d15552b02542a904a404930d96c59e1e3be8c883515bcaa45206dbc5b8a6a",
 "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "dbb6ff97dc27aad13253d76596df87d6f944fa39",
+"source_sha": "fcb38264533a400a32be62ac88064363ece05580",
 "stages": [
 {
-"elapsed_s": 12.736,
+"elapsed_s": 12.735,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_cross_namespace_mount_scan_revalidates_before_first_mutation",
-"elapsed_s": 100.992,
+"diagnostic": "Unit test failed: test_terminal_pass_waits_for_owned_cleanup",
+"elapsed_s": 102.334,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
 "signals": [
 "PASS",
-"BLOCKED",
-"FAIL"
+"BLOCKED"
 ],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "dbb6ff97dc27aad13253d76596df87d6f944fa39"
+"tested_commit_sha": "fcb38264533a400a32be62ac88064363ece05580"
 }
