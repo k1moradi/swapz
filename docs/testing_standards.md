@@ -3177,9 +3177,10 @@ dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
 logical pages. Production-C fault injection must forge indexed empty-segment
 views (mapped count, physical liveness, reverse-list headers and GC costs)
 while retaining authoritative logical maps, then additionally clear the
-extent-class bytes. A previously claimed segment must still reject reuse before
-the recycle hook, role change, generation change or new mapping publication;
-the monotonic nonzero segment-open count is the virgin/reclaim discriminator.
+extent-class bytes and the segment-open count. The candidate must still reject
+reuse before the recycle hook, role change, generation change or new mapping
+publication; neither an apparent virgin program count nor any other false-zero
+sidecar may waive the independent authoritative-map proof.
 
 A separate production-C case must forge a closed segment into an apparent
 single-mapping state while retaining a second authoritative map with zeroed

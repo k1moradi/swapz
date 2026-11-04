@@ -2048,14 +2048,14 @@ count per physical segment. Every successful compressed/raw publication and
 logical discard updates it in the same serialized authority phase as
 `live_records`. Dead-segment selection and victim-role commit cross-check the
 segment count against physical liveness; disagreement is corruption and fails
-closed. Nonzero counts remain an O(1) rejection path. A zero candidate that was
-previously claimed must be checked against the authoritative logical map before
-irreversible recycle or victim-role exchange, even when extent-class bytes,
-reverse links, liveness and GC-cost sidecars all appear empty. Production uses
-the monotonic segment-open counter as the independent virgin witness: claim
-increments it before any extent can be staged and it never decreases, so only
-a zero-open-count segment with no extent history may skip the O(logical_pages)
-reclaim proof. The exact counter value remains telemetry.
+closed. Nonzero counts remain an O(1) rejection path. Every zero candidate must
+be checked against the authoritative logical map before irreversible recycle or
+victim-role exchange, even when the monotonic segment-open count, extent-class
+bytes, reverse links, liveness and GC-cost sidecars all appear empty. The
+segment-open counter still increments before any extent can be staged and never
+decreases, but its zero/nonzero value is cached evidence rather than permission
+to waive the O(logical_pages) ownership proof. The exact counter value remains
+telemetry.
 
 When logical DISCARD or zero-elision appears to remove the final mapping from a
 closed segment, authority must independently prove that this page is the sole
@@ -2206,12 +2206,12 @@ Asynchronous early DISCARD remains a separate concurrency experiment and may
 not race allocation or an upper BIO.
 
 Per-segment program/open counters describe logical allocator claim cycles.
-Their exact values remain telemetry and are not NAND wear measurements. The
-zero/nonzero state also has one correctness role: because the counter is
-incremented before staging and never decremented, zero proves the segment is
-virgin in the current authority lifetime, while nonzero forces authoritative
-map verification before reuse even if current extent-class metadata is lost.
-A default-off allocator experiment may still use the exact values to compare
+Their exact values remain telemetry and are not NAND wear measurements. Because
+the counter is incremented before staging and never decremented, nonzero remains
+useful corruption/history evidence, but zero is not sufficient reclaim
+authority: every zero-mapped reuse candidate still requires the independent
+authoritative-map proof even if the program count and extent-class metadata are
+both zero. A default-off allocator experiment may still use the exact values to compare
 logical-open spread or choose the least-opened eligible destination without
 additional I/O; neither that experiment nor a GC score tie break may be
 described as wear leveling or authorize cold-data relocation without separately
