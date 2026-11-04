@@ -308,7 +308,7 @@ sample_host_memory_admission
             "BLOCKED: ID36 pressure helper could not enter isolated cgroup",
             source)
         self.assertIn(
-            'printf "%s\\\\n" "$" > "$cgroup/cgroup.procs"',
+            'printf "%s\\\\n" "$$" > "$cgroup/cgroup.procs"',
             source)
         self.assertNotIn(
             'printf "%s\\\\n" "$BASHPID" > "$cgroup/cgroup.procs"',
