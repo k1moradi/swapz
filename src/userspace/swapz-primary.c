@@ -9355,8 +9355,58 @@ static int swapz_primary_start_prepared(void)
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting");
 	failure_phase = "header-write";
 	if (swapz_primary_module_load_intent_write_at(
-		    recovery_fd, lock_fd, &manifest, 0) < 0 ||
-	    swapz_primary_write_header_checked_fd(
+		    recovery_fd, lock_fd, &manifest, 0) < 0)
+		goto out;
+	/*
+	 * The admission snapshot predates this exclusive descriptor. Recheck the
+	 * mount namespaces, physical-parent identity and swap inventory at the last
+	 * boundary before changing block zero, so a newly visible mount or swap is
+	 * not mistaken for the earlier clear snapshot.
+	 */
+	{
+		struct swapz_primary_mount_facts prewrite_mount_facts = {0};
+		dev_t prewrite_target_parent = 0;
+		dev_t prewrite_root_parent = 0;
+		int active;
+
+		if (!swapz_primary_recovery_source_chain(
+			    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0,
+			    &prewrite_target_parent))
+			goto out;
+		if (prewrite_target_parent != target_parent) {
+			errno = ESTALE;
+			goto out;
+		}
+		if (swapz_primary_read_mount_facts(
+			    &prewrite_mount_facts, prewrite_target_parent) < 0)
+			goto out;
+		if (prewrite_mount_facts.target_mounted) {
+			errno = EBUSY;
+			goto out;
+		}
+		if (!swapz_primary_recovery_source_chain(
+			    "/sys", prewrite_mount_facts.root_device,
+			    SWAPZ_PRIMARY_TARGET_DEVICE, &prewrite_root_parent))
+			goto out;
+		if (prewrite_root_parent != root_parent) {
+			errno = ESTALE;
+			goto out;
+		}
+		active = swapz_primary_swap_device_active(prewrite_target_parent);
+		if (active != 0) {
+			if (active > 0)
+				errno = EBUSY;
+			goto out;
+		}
+		active = swapz_primary_swap_device_active(
+			SWAPZ_PRIMARY_TARGET_DEVICE);
+		if (active != 0) {
+			if (active > 0)
+				errno = EBUSY;
+			goto out;
+		}
+	}
+	if (swapz_primary_write_header_checked_fd(
 		    target_fd, &manifest.target, original_header, swapz_header) < 0)
 		goto out;
 	if (close(target_fd) < 0) {
