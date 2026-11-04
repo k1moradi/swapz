@@ -105,48 +105,71 @@ for the current dedicated SD card.
 
 ## Evidence boundaries and failure triage
 
-Treat **source qualification**, **host execution**, **physical acceptance**, and
-**deployment observation** as separate gates. Read current
-[`test_results.json`](../test_results.json) before citing a PASS or failure:
-its `tested_commit_sha`, `qualification`, per-stage diagnostics and artifact
-hashes must describe the **same** source. A historical PASS, report-only
-publication commit, unqualified dirty build, or CI alone does not qualify
-current `main`. The [read-only status snapshot](production-status.json) and
-[historical readiness snapshot](handoff/production-readiness.json) are captured
-observations, not live release verdicts.
+Read the current [test report](../test_results.json) before acting: bind its
+`tested_commit_sha`, source cleanliness, qualification scope, five stage
+results and artifact digests to the **same** source. Required CI must also
+PASS for that source; neither CI alone, a report-only commit, a dirty build,
+nor an older qualified source admits a newer `main`. The
+[production status](production-status.json) is a timestamped read-only
+observation; [handoff readiness](handoff/production-readiness.json) is
+explicitly **historical**, not a live release verdict.
 
-| Evidence level | Proves when passing | Does not prove |
+| Evidence gate | A PASS establishes only | Never infer |
 | :--- | :--- | :--- |
-| Native/rootless (including CI) | The source contracts, mocked lifecycle/package failure paths and native-C regressions actually exercised by that run | Loaded kernel, real swap, SD card, reboot |
-| Owned loaded `null_blk` | The loaded gates that actually PASS on a positively owned RAM-backed kernel target, including their byte-oracle/GC/pressure/service evidence | Physical media behavior, real-swap semantics or cold boot |
-| Authorized physical SD card | Each individually completed exact-source/card-bound result: full-capacity RAM, real anonymous swap, physical service/GC or lifecycle evidence | Any physical gate that was not run, a successful reboot, or hibernation |
-| Owner-observed cold boot | Persisted next-boot verifier outcome for the exact source, partition, module and mapper | Hibernation/resume (unsupported) or survival of pre-crash swap pages |
+| Native/rootless and source-bound CI | The contracts actually exercised on that source | Loaded kernel, real swap, physical SD or boot |
+| Positively owned loaded `null_blk` | Loaded RAM-backed byte-oracle, GC, pressure and service checks actually run | Physical behavior, anonymous swap-in, cold boot |
+| Authorized physical SD | Separately completed full-capacity incompressible RAM/geometry, anonymous swap, physical GC/churn and lifecycle gates | A skipped gate, NAND lifetime, boot or hibernation |
+| Owner-observed next boot | The durable verifier's matching boot ID, source, PARTUUID/parent, mapper and services | Recovery of pre-crash swap pages or hibernation |
 
-Find the **first failed phase**, not a presumed root cause from a downstream
-symptom. These are safe diagnostic starting points, never bypass instructions:
+### Diagnose the first record
 
-| Failed phase / symptom | Likely evidence and fault domain | Next safe verification step |
-| :--- | :--- | :--- |
-| Build, signing or W=1/W=2 | Kbuild/compilation warnings, unavailable noninteractive `sudo -n`, Secure Boot key/signature rejection. **Source/build or environment/authorization**; the first error decides. | Inspect build diagnostics, running-kernel headers and [signing requirements](compile.md#secure-boot-module-signing); never load an unqualified artifact. |
-| Native/rootless contracts FAIL | Compiler diagnostic, failing assertion or source/test interface mismatch. **Source/test**, but the first diagnostic may not prove the root cause. | Compare the report's source SHA and first error with the actual current symbol/header/test; do not treat an old report as a current failure. |
-| Owned RAM stage BLOCKED on ID36 | `MemAvailable` below the 1 GiB pressure floor, cgroup/PSI gates or background load. **Host environment**, not a logical byte mismatch. | Read the captured counters; safely reduce unrelated load before authorized official qualification. Never manipulate unrelated swap as a workaround. |
-| Owned RAM preflight or module load BLOCKED | `null_blk` ownership, `dmsetup`, privilege, vermagic, signature or module availability. **Environment/authorization** unless source diagnostics show otherwise. | Verify identities and logs read-only; do not seize another agent's device or force-load a foreign module. |
-| Qualification or artifact admission refused | `SWAPZ_BUILD_SOURCE_CLEAN=0`, mismatched source/hashes, incomplete five-stage PASS. **Provenance/evidence**, not qualification. | Compare source ancestry, immutable build-info, report and installed digests; [install](compile.md#packaging) admits exact bytes rather than rebuilding. |
-| Primary physical preflight/acceptance BLOCKED | PARTUUID/parent, mount/swap conflict, missing exact-size SWZ header, inactive `allow_physical_backing=1`, unmeasured peak RAM or incomplete physical campaign. **Identity/authorization/pending test**; inspect the actual failed check. | Check the protected selector and read-only inventory against [authorization](AGENT_CONTEXT.md#standing-owner-authorization) and the [physical protocol](benchmark.md#physical-media-and-workload-validity). Never mutate media just to diagnose. |
-| Package upgrade/uninstall or primary recovery refused | Retained transaction journal/snapshot, DKMS/ownership/hash mismatch, active mapper or ambiguous state. **Deployment/recovery**, not permission to erase markers. | Preserve the failure record; read [transactional recovery](compile.md#packaging) and validate ownership/digests before an authorized recovery attempt. |
-| Boot evidence absent/INCOMPLETE/FAIL | Missing owner-observed reboot, identity mismatch, degraded runtime health or unverifiable persistent observation. **Pending evidence or deployment**, not a rootless PASS. | Read the [boot/hibernation boundary](handoff/systemd-runtime-health.md) and durable verifier result; only the owner reboots. Hibernation remains unsupported. |
-| History plots `NOT UPDATED` | Missing Matplotlib or renderer/history error. **Optional report visualization**, not a changed test verdict. | Check the local plot log and keep the original source-pinned report; see [plot policy](benchmark.md#automatic-plots-for-each-computer). |
+Record **operation, earliest failed phase, numeric errno when emitted, observed
+prerequisite, retained ownership/state, and next safe action**. Prefer the
+producer's original FAIL/BLOCKED/UNAVAILABLE record over the last downstream
+exception. The primary lifecycle emits `PRIMARY_PREPARE`, `PRIMARY_START`,
+`PRIMARY_STOP` and `PRIMARY_RECOVER` with `phase` and `errno` on
+many execution failures; `PRIMARY_PREPARE` additionally reports `claim=none`
+or `claim=retained` after its ownership decision. Other operations may not
+emit a claim: inspect durable state and live identity **read-only**, never
+infer that a failed operation released a mapper, module or partition lock.
 
-Do not freeze one report's compiler symbol, blocker or inferred root cause into
-this active guide. `test_results.json` may itself describe an older source, and
-`production-status.json` is only a timestamped observation. Match source SHA,
-phase and diagnostic before acting; keep superseded failure narratives in
-source-bound reports, handoff history and Git history.
+`BLOCKED` means a prerequisite or safe admission is not established;
+`UNAVAILABLE` means an observation is missing or cannot be trusted;
+`FAIL`/`FAILED` identifies a failed check or operation, not automatic
+permission to retry. A missing value is not zero, an absent mapper is not
+proof of an unowned partition, and a `PASS` from mocks is not a host PASS.
+Keep logs privacy-safe: phase, errno, counts, booleans, sanitized identities
+and hashes suffice. Do not capture swap-page contents, representative fixture
+bytes, signing private keys or unredacted unrelated host data.
 
-Historical [old-host physical and live-swap evidence](live-swap-trial-recovery.md)
-is not current SD-card authorization or cold-boot proof. Current non-hibernation
-deployment scope and retained package recovery are governed by
-[AGENT_CONTEXT](AGENT_CONTEXT.md) and [compile](compile.md#packaging).
+**Illustrative only — synthesized failures, not completed qualifications:**
+
+```text
+PRIMARY_PREPARE=FAILED phase=partition-lock-close errno=5 error=Input/output error claim=retained target_unchanged=true
+PRIMARY_START=FAILED phase=swapon errno=16 error=Device or resource busy
+```
+
+The first sample explicitly retains the claim; the second does **not** state
+whether the mapper is still live. Preserve recovery files and inspect the
+exact selected device, `/proc/swaps`, mapper and journal before any action.
+
+| First failure / operation | Read-only prerequisite and safe response |
+| :--- | :--- |
+| Build, W=1/W=2, signature or native contracts | Read first compiler/assertion error, current source, running-kernel headers and [signing boundary](compile.md#secure-boot-module-signing). A missing `sudo -n`, key or load permission is BLOCKED, not a verified module. |
+| Qualification or package install | Compare tested source, current CI, module/CLI/oracle digests and DKMS ownership. [Installation](compile.md#packaging) admits qualified bytes; it never repairs stale qualification by rebuilding. |
+| Package upgrade/uninstall/recover | Read the retained journal's **durable** phase, operation and snapshot hashes; refuse ambiguous files, DKMS state or owners. [Transactional packaging](compile.md#packaging) requires explicit recovery, not deleting a journal/marker or activating a partial install. |
+| Primary plan/prepare/start | The read-only `swapzctl primary plan` exposes selector, geometry, original header, recovery storage, mount/swap inventories, module provenance and authorization checks. Protect the exact PARTUUID **and physical parent**, recovery filesystem and source-bound token. Prepare/start remain runtime-locked until qualified. Do not interpret an available `/dev/sda1` path as identity. |
+| Primary stop/recover | Use normal swapoff and only exact-owned teardown. A failed drain or unknown `READY`/`STARTING`/`ACTIVE`/`STOPPING`/`RECOVERING`/`RECOVERY_REQUIRED` record retains evidence; do not force-remove, clear the header, re-enable raw swap or unload a module with users. See [lifecycle safety](AGENT_CONTEXT.md#standing-owner-authorization). |
+| Loaded RAM or physical admission | Distinguish ID36 `MemAvailable`/PSI/cgroup pressure from byte mismatches. A loaded `null_blk` proof is not anonymous-page swap, full-capacity RAM, physical GC/churn or cold READ evidence. Recheck mounts, active swap aliases, protected parent, exact-size SWZ header and `allow_physical_backing=1` **without mutation**. Follow the [frozen physical protocol](benchmark.md#physical-media-and-workload-validity). |
+| Runtime health or cold-boot evidence | Read the latest `SWAPZ_RUNTIME_HEALTH=` journal result and the persisted boot verifier observation. `DEGRADED`/INCOMPLETE can mean telemetry missing, not confirmed target failure; only a separate **owner-initiated** reboot can establish cold-boot PASS. Never reboot as Codex; [hibernation stays unsupported](handoff/systemd-runtime-health.md#hibernation-and-resume-boundary). |
+| Plot history `NOT UPDATED` | Check the renderer's local diagnostic log and [per-host history selection](benchmark.md#automatic-plots-for-each-computer); optional Matplotlib failure cannot change the source-pinned test verdict. |
+
+For safe startup/stop/recovery policy use [AGENT_CONTEXT](AGENT_CONTEXT.md),
+for package journal ownership use [compile](compile.md#packaging), and for
+qualification/negative storage-admission limits use
+[benchmark](benchmark.md#physical-media-and-workload-validity). The old
+[/dev/sda4 trial](live-swap-trial-recovery.md) is historical evidence only,
+never authority for the current dedicated card.
 
 ## Documentation
 
