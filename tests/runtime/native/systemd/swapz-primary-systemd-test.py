@@ -1383,6 +1383,29 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
         self.assertIn("gc_reserve_telemetry_unavailable", result.stderr)
 
+    def test_missing_target_terminal_state_is_not_reported_healthy(self) -> None:
+        valid_status = (
+            "0 216641536 swapz failed=0 error=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0"
+        )
+        for omitted_field in ("failed=0 ", "error=0 "):
+            with self.subTest(omitted_field=omitted_field):
+                env = self.env.copy()
+                env["MOCK_DM_STATUS"] = valid_status.replace(omitted_field, "")
+                result = self.run_helper("once", env)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
+                self.assertIn("target_failure_state_unavailable", result.stderr)
+
+        env = self.env.copy()
+        env["MOCK_DM_STATUS"] = valid_status.replace("failed=0", "failed=1")
+        failed = self.run_helper("once", env)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", failed.stderr)
+        self.assertIn("failures=target_failed", failed.stderr)
+        self.assertIn("failed=1", failed.stderr)
+
     def test_monitoring_error_is_degraded_not_a_destructive_action(self) -> None:
         env = self.env.copy()
         env["MOCK_DM_STATUS_UNAVAILABLE"] = "1"
@@ -1546,6 +1569,43 @@ class RuntimeHealthTests(unittest.TestCase):
         blocked = self.run_helper("hibernate-guard")
         self.assertEqual(blocked.returncode, 1, blocked.stderr)
         self.assertIn("cannot prove swapz-primary inactive", blocked.stderr)
+
+    def test_unconfigured_by_id_dm_alias_requires_inspectable_identity(self) -> None:
+        (self.etc / "swapz" / "primary-target").unlink()
+        (self.dev / "mapper" / "swapz-primary").unlink()
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\\nexit 2\\n")
+        write_executable(
+            self.bin / "lsblk",
+            "#!/bin/sh\\n"
+            '[ "$4" = /dev/disk/by-id/opaque-swap ] || exit 1\\n'
+            'case "$2" in\\n'
+            'MAJ:MIN) echo "$MOCK_ALIAS_MAJOR_MINOR" ;;\\n'
+            'KNAME) echo "$MOCK_ALIAS_KERNEL_NAME" ;;\\n'
+            '*) exit 1 ;;\\n'
+            'esac\\n',
+        )
+        (self.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\\n"
+            "/dev/disk/by-id/opaque-swap partition 10000 2000 -1\\n",
+            encoding="ascii",
+        )
+        env = self.env.copy()
+        env["MOCK_ALIAS_MAJOR_MINOR"] = "253:7"
+        env["MOCK_ALIAS_KERNEL_NAME"] = "dm-7"
+        blocked = self.run_helper("hibernate-guard", env)
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("cannot prove swapz-primary inactive", blocked.stderr)
+
+        # A proven physical partition with no dm/name remains unrelated.
+        env["MOCK_ALIAS_MAJOR_MINOR"] = "8:7"
+        env["MOCK_ALIAS_KERNEL_NAME"] = "sdc7"
+        allowed = self.run_helper("hibernate-guard", env)
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+        # Unknown kernel identity is also not evidence of safe hibernation.
+        env["MOCK_ALIAS_KERNEL_NAME"] = ""
+        ambiguous = self.run_helper("hibernate-guard", env)
+        self.assertEqual(ambiguous.returncode, 1, ambiguous.stderr)
 
     def test_unresolved_resume_alias_blocks_when_selected_media_is_absent(self) -> None:
         (self.dev / "disk" / "by-partuuid" / PARTUUID).unlink()

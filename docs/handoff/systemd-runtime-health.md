@@ -19,6 +19,9 @@ start while a hibernation-capable systemd unit is active or activating. This
 two-sided admission policy closes the check-then-activate race without
 automatically stopping swap.
 
+Resolved block-swap aliases under by-id/by-UUID are not automatically
+physical: when the sysfs DM name is unavailable, the read-only hibernation
+check requires a non-DM kernel block name, otherwise it refuses hibernation.
 Resume aliases that cannot be resolved are rejected when a selected swapz
 identity exists. A provably distinct canonical PARTUUID may still be treated as
 unrelated when the removable target is absent. Current runtime/config checks do
@@ -33,7 +36,9 @@ state is not a health verdict: operators must use the latest
 `SWAPZ_RUNTIME_HEALTH=` journal record. `FAIL` preserves evidence and never
 causes automatic swapoff, mapper removal, reformatting, or lifecycle restart.
 External observation commands are time-bounded and the production helper uses a
-fixed system executable path and locale.
+fixed system executable path and locale. Missing `failed` or `error`
+terminal-state fields in an otherwise readable DM status yield `DEGRADED`,
+not `HEALTHY`; a confirmed nonzero terminal state remains `FAIL`.
 
 Package installation keeps all primary units disabled and does not start the
 mapper, monitor, passive swap, hibernation action, or any swap mutation. The

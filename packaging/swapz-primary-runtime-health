@@ -435,6 +435,15 @@ active_swapz_swap()
 			dm_name=$(cat -- "$dm_name_file" 2>/dev/null) || exit 11
 			[ -n "$dm_name" ] || exit 11
 			[ "$dm_name" = "$mapper_name" ] && exit 10
+		elif [ "$type" = partition ]; then
+			# A DM block node may also be exposed through by-id/by-UUID
+			# aliases. Without sysfs dm/name, its kernel name must prove
+			# it is not a DM device before hibernation can be admitted.
+			kernel_name=$(run_bounded lsblk -dnro KNAME -- "$source" 2>/dev/null) || exit 11
+			case "$kernel_name" in
+			''|*'
+'*|dm-[0-9]*) exit 11 ;;
+			esac
 		fi
 	done; then
 		status=0
@@ -653,6 +662,11 @@ observe_runtime()
 				eval "value=\$$token_name"
 				[ "$value" = unavailable ] || canonical_unsigned "${value#-}" || append_reason observation_reasons dm_status_counter_invalid
 			done
+			# An omitted terminal-state field is not proof of a healthy
+			# target, even if the remaining status counters are valid.
+			if [ "$failed" = unavailable ] || [ "$first_error" = unavailable ]; then
+				append_reason observation_reasons target_failure_state_unavailable
+			fi
 			[ "$failed" = 0 ] || [ "$failed" = unavailable ] || append_reason failure_reasons target_failed
 			[ "$first_error" = 0 ] || [ "$first_error" = unavailable ] || append_reason failure_reasons first_terminal_error
 			[ "$flush_err" = 0 ] || [ "$flush_err" = unavailable ] || append_reason warning_reasons flush_errors
