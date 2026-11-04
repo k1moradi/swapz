@@ -1436,10 +1436,33 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["ALLOCATION_FAILURE_COVERAGE"],
                          "SEPARATE_NOT_CONSTRUCTION_EVIDENCE")
 
+    def test_mutable_campaign_object_cannot_substitute_sealed_bytes(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, campaign_raw)
+        campaign["sealed_at_utc"] = "2026-11-04T00:00:00+00:00"
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, campaign_raw)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["METADATA_RAM_MEASUREMENT"]["status"],
+                         "NOT_MEASURED")
+        self.assertTrue(any(
+            "sealed campaign object differs from artifact bytes" in blocker
+            for blocker in result["code_blockers"]))
+
     def test_strict_json_rejects_nonfinite_and_overflow_exponents(self):
         with TemporaryDirectory(prefix="swapz-ram-json-") as directory:
             path = Path(directory) / "evidence.json"
-            for number in ("NaN", "Infinity", "-Infinity", "1e999"):
+            for number in ("NaN", "Infinity", "-Infinity", "1e999",
+                           "9" * 5000):
                 with self.subTest(number=number):
                     path.write_text('{"value":' + number + '}')
                     with self.assertRaises(EVALUATOR.EvidenceError):
