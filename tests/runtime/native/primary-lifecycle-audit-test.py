@@ -1012,6 +1012,49 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             lifecycle.index("swapz_primary_mutation_lock()"),
             lifecycle.index("swapz_primary_recover()"))
 
+    def test_durable_package_transactions_gate_prepare_and_start(self):
+        package = PACKAGE_DKMS.read_text(encoding="utf-8")
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        macros = active_preprocessor_macros()
+        lifecycle = c_function_body(
+            preprocessed_primary_source(),
+            "swapz_primary_run_mutating_action")
+        transaction_guard = c_function_body(
+            source, "swapz_primary_package_transactions_clear_at")
+
+        self.assertIn(
+            'transaction_parent="/var/lib/swapz-package-transactions"',
+            package)
+        self.assertEqual(
+            macros.get("SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY"),
+            '"/var/lib/swapz-package-transactions"')
+        self.assertIn("swapz_primary_mutation_lock()", lifecycle)
+        self.assertIn(
+            "swapz_primary_package_transactions_clear_at(", lifecycle)
+        self.assertLess(
+            lifecycle.index("swapz_primary_mutation_lock()"),
+            lifecycle.index("swapz_primary_package_transactions_clear_at("))
+        self.assertLess(
+            lifecycle.index("swapz_primary_package_transactions_clear_at("),
+            lifecycle.index("swapz_primary_prepare_metadata()"))
+        self.assertLess(
+            lifecycle.index("swapz_primary_package_transactions_clear_at("),
+            lifecycle.index("swapz_primary_start_prepared()"))
+        self.assertRegex(
+            lifecycle,
+            r"action\s*==\s*SWAPZ_PRIMARY_MUTATING_PREPARE\s*\|\|"
+            r"\s*action\s*==\s*SWAPZ_PRIMARY_MUTATING_START")
+        self.assertIn("goto unlock;", lifecycle)
+        self.assertIn("fdopendir(", transaction_guard)
+        self.assertIn("readdir(", transaction_guard)
+        self.assertIn("O_NOFOLLOW", transaction_guard)
+        self.assertIn("O_NONBLOCK", transaction_guard)
+        self.assertIn("AT_SYMLINK_NOFOLLOW", transaction_guard)
+        self.assertIn("STATX_MNT_ID", transaction_guard)
+        self.assertIn("stx_mnt_id", transaction_guard)
+        self.assertIn("EBUSY", transaction_guard)
+        self.assertNotIn("state.json", transaction_guard)
+
     def test_qualification_import_serializes_before_partition_state(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         ordinary = preprocessed_primary_source()
