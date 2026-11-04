@@ -1695,6 +1695,7 @@ exec "{flock_binary}" "$@"
             self.assertIn("attempting transaction rollback", failed.stderr)
             self.assertIn("activation quarantine failed", failed.stderr)
             self.assertIn("rollback incomplete", failed.stderr)
+            self.assertNotIn(str(self.home), failed.stderr)
             # The CLI is removed before the unwritable helper directory makes
             # rm fail, so retained recovery state remains deactivated.
             self.assertFalse((self.prefix / "sbin/swapzctl").exists())
