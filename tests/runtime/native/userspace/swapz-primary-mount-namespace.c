@@ -388,10 +388,18 @@ static void test_active_swapfile_gate(void)
 static void test_independent_admission_gates(void)
 {
 	struct swapz_primary_swap_entry entries[2] = {0};
+	struct swapz_primary_target wrong_device = swapz_primary_selected_target;
 	dev_t devices[2] = {0};
 	unsigned char is_block[2] = {0};
 	char holder_path[PATH_MAX];
 	int length;
+
+	/* Use production geometry/major:minor identity, never the source label. */
+	assert(swapz_primary_target_identity_equal(
+		&swapz_primary_selected_target, &wrong_device));
+	wrong_device.device_minor = 2U;
+	assert(!swapz_primary_target_identity_equal(
+		&swapz_primary_selected_target, &wrong_device));
 
 	/* An unrelated active swapfile is not a selected block-swap alias. */
 	strcpy(entries[0].path, "/unrelated-swapfile");
