@@ -768,7 +768,7 @@ static int test_bounded_queue_pressure_and_retry(void)
 	const unsigned long long deadline_ns =
 		swapz_window_retention_deadline_ns(first_ns, 2U);
 	unsigned int index, lane_index, queue_index, hand_index, count;
-	int reserve_error = -ENOSPC;
+	int reserve_error = 0;
 
 	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index) {
 		staged[index].logical = 1000U + index;
@@ -839,6 +839,7 @@ static int test_bounded_queue_pressure_and_retry(void)
 	/* Foreground ENOSPC is a per-WRITE capacity result: it must not poison
 	 * committed disjoint READs while the caller runs bounded GC/retry. A
 	 * terminal lower-I/O error does set the caller's blocking failure state. */
+	reserve_error = -ENOSPC;
 	CHECK_PRESSURE(swapz_window_read_independent(
 		staged, SWAPZ_MAX_RECORDS, 999U, 2, 0),
 		"reserve-enospc-readable", 8, 0, SWAPZ_MAX_RECORDS, 0,
