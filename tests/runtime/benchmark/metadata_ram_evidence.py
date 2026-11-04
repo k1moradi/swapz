@@ -17,6 +17,7 @@ FOREGROUND_HEADROOM_BLOCKS = SEGMENT_BLOCKS
 MINIMUM_GC_RESERVE_BLOCKS = 2 * SEGMENT_BLOCKS
 SAMPLING_INTERVAL_NS = 100_000_000
 MEMINFO_UNIT_BYTES = 1024
+CLOCK_AGREEMENT_TOLERANCE_NS = 500_000_000
 SIZE_T_MAX = (1 << (8 * struct.calcsize("P"))) - 1
 PHASES = ("baseline", "initialization", "steady", "gc", "teardown")
 MINIMUM_PHASE_SAMPLES = {
@@ -137,6 +138,13 @@ def _median_twice(values: list[int]) -> int:
     if len(ordered) % 2:
         return 2 * ordered[middle]
     return ordered[middle - 1] + ordered[middle]
+
+
+def _timedelta_ns(value: datetime.timedelta) -> int:
+    """Convert a timedelta to nanoseconds without floating-point rounding."""
+    return (
+        (value.days * 86400 + value.seconds) * 1_000_000_000 +
+        value.microseconds * 1000)
 
 
 def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
@@ -341,6 +349,7 @@ def validate_metadata_ram_trace(
     }
     previous_monotonic = None
     previous_utc = None
+    first_utc = None
     for sample in samples:
         if not isinstance(sample, dict) or set(sample) != SAMPLE_FIELDS:
             raise ValueError("metadata RAM sample fields are invalid")
@@ -375,6 +384,8 @@ def validate_metadata_ram_trace(
                 utc_text.replace("Z", "+00:00"))
         except ValueError as exc:
             raise ValueError("metadata RAM sample UTC timestamp invalid") from exc
+        if first_utc is None:
+            first_utc = utc_time
         if previous_monotonic is not None:
             elapsed_ns = monotonic_ns - previous_monotonic
             if (
@@ -382,11 +393,11 @@ def validate_metadata_ram_trace(
                     elapsed_ns > SAMPLING_INTERVAL_NS +
                                  SAMPLING_INTERVAL_NS // 2):
                 raise ValueError("metadata RAM sample cadence is invalid")
-            wall_elapsed_ns = int(
-                (utc_time - previous_utc).total_seconds() * 1_000_000_000)
+            wall_elapsed_ns = _timedelta_ns(utc_time - previous_utc)
             if (
                     wall_elapsed_ns < 0 or
-                    abs(wall_elapsed_ns - elapsed_ns) > 500_000_000):
+                    abs(wall_elapsed_ns - elapsed_ns) >
+                    CLOCK_AGREEMENT_TOLERANCE_NS):
                 raise ValueError(
                     "metadata RAM sample UTC/monotonic clocks disagree")
         previous_monotonic = monotonic_ns
@@ -399,6 +410,10 @@ def validate_metadata_ram_trace(
     observed_span_ns = (
         samples[-1]["monotonic_ns"] - samples[0]["monotonic_ns"])
     expected_span_ns = (len(samples) - 1) * SAMPLING_INTERVAL_NS
+    wall_span_ns = _timedelta_ns(previous_utc - first_utc)
+    if abs(wall_span_ns - observed_span_ns) > CLOCK_AGREEMENT_TOLERANCE_NS:
+        raise ValueError(
+            "metadata RAM UTC/monotonic trace spans disagree")
     if not (9 * expected_span_ns <= 10 * observed_span_ns <=
             11 * expected_span_ns):
         raise ValueError(

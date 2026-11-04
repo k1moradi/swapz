@@ -5435,7 +5435,10 @@ steady and GC observations, ordinary teardown, and at least two seconds of
 target-absent recovery. Each adjacent monotonic sample interval must be
 50-150 ms and the mean cadence across the full trace must remain within
 10% of 100 ms; a 100 ms label on systematically slower samples does not
-qualify. The last second of mapper-absent teardown samples must recover the
+qualify. The first-to-last UTC elapsed time must also agree with the monotonic
+elapsed time within 500 ms, so per-sample wall-clock tolerance cannot accumulate
+into a fabricated host-snapshot chronology. The last second of mapper-absent
+teardown samples must recover the
 pre-constructor baseline **median** for `MemAvailable` (no lower) and for
 `SUnreclaim`/`VmallocUsed` (no higher), with integer-exact half-KiB median
 arithmetic. A single extreme baseline outlier cannot excuse persistent

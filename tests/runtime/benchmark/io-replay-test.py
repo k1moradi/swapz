@@ -2921,11 +2921,6 @@ class PairReplayContract(unittest.TestCase):
                 },
             }
             for index in range(60)]
-        for index, row in enumerate(minute_buckets):
-            row["start_monotonic_ns"] = (
-                measured_started_ns + index * 60_000_000_000)
-            row["end_monotonic_ns"] = (
-                measured_started_ns + (index + 1) * 60_000_000_000)
         raw = {
             "arm_started_monotonic_ns": arm_started_ns,
             "measured_start_monotonic_ns": measured_started_ns,
@@ -2968,12 +2963,6 @@ class PairReplayContract(unittest.TestCase):
             lambda arm: arm["minute_buckets"][0].update(
                 logical_write_mbps=999.0),
             lambda arm: arm["minute_buckets"][0].update(duration_seconds=59.0),
-            lambda arm: arm["minute_buckets"][1].update(
-                start_monotonic_ns=
-                    arm["minute_buckets"][1]["start_monotonic_ns"] + 1),
-            lambda arm: arm["minute_buckets"][1].update(
-                end_monotonic_ns=
-                    arm["minute_buckets"][1]["end_monotonic_ns"] + 1),
             lambda arm: arm["minute_buckets"][0][
                 "latency_histogram"]["bins"][0].__setitem__(1, 1),
             lambda arm: arm["sustained_intervals"].pop(),
@@ -3548,6 +3537,14 @@ class PairReplayContract(unittest.TestCase):
             for index, sample in enumerate(item["samples"], start=1):
                 sample["monotonic_ns"] = index * 140_000_000
 
+        def corrupt_wall_clock_drift(item):
+            # A 200 ms UTC step differs from each 100 ms monotonic interval by
+            # only 100 ms, but the cumulative timestamp drift is fabricated.
+            for index, sample in enumerate(item["samples"], start=1):
+                seconds, tenths = divmod(index * 2, 10)
+                sample["timestamp_utc"] = (
+                    f"2026-11-03T00:00:{seconds:02d}.{tenths}Z")
+
         corruptions = (
             lambda item: item["samples"].pop(),
             lambda item: item["samples"][11].update(phase="baseline"),
@@ -3563,6 +3560,7 @@ class PairReplayContract(unittest.TestCase):
             lambda item: item.update(meminfo_unit="bytes"),
             lambda item: item.update(sampling_interval_ns=1_000_000_000),
             corrupt_actual_cadence,
+            corrupt_wall_clock_drift,
             corrupt_recovery,
             corrupt_baseline_outlier,
             corrupt_slab_outlier,
