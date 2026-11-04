@@ -13,6 +13,8 @@ transaction_phase="preflight"
 # install may temporarily preserve activation while read-only recovery admission
 # checks run.
 recovery_quarantine_on_error=1
+# Set only after recovery has durably journaled the rollback-started phase.
+recovery_rollback_attempted=0
 
 staging_abort() {
   local rc="${1:-1}" reason="${2:-failure}"
@@ -35,10 +37,14 @@ blocked() {
   elif (( transaction_active == 3 )); then
     uninstall_rollback 2 "$condition (phase: $transaction_phase)"
   elif (( transaction_active == 4 )); then
+    local rollback_outcome="not attempted"
+    if (( recovery_rollback_attempted == 1 )); then
+      rollback_outcome="incomplete"
+    fi
     if (( recovery_quarantine_on_error == 1 )); then
       quarantine_activation || true
     fi
-    printf 'BLOCKED: recovery phase %s refused (%s); rollback not attempted or incomplete; recovery-required record retained\n' "$transaction_phase" "$condition" >&2
+    printf 'BLOCKED: recovery phase %s refused (%s); rollback %s; recovery-required record retained\n' "$transaction_phase" "$condition" "$rollback_outcome" >&2
   else
     printf 'BLOCKED: preflight phase %s refused (%s); rollback not attempted\n' "$transaction_phase" "$condition" >&2
   fi
@@ -354,7 +360,7 @@ installed_directory_metadata() {
 
 reject_symlinked_destination() {
   local path="$1"
-  [[ ! -L "$path" ]] || blocked "symlinked package destination: $path"
+  [[ ! -L "$path" ]] || blocked "symlinked package destination"
 }
 
 for destination in "$srcbase" "$modules_root" "$modules_root/$kernel_release" "$prefix" \
@@ -647,7 +653,7 @@ cleanup_source_files() {
 }
 
 cleanup_package_files() {
-  cleanup_activation_files
+  cleanup_activation_files || return 1
   cleanup_source_files
 }
 
@@ -847,13 +853,13 @@ directories = {backup, transaction, transaction.parent,
                transaction.parent.parent}
 for path in sorted(backup.rglob("*")):
     if path.is_symlink():
-        raise SystemExit(f"unsafe backup symlink: {path}")
+        raise SystemExit("unsafe backup symlink")
     metadata = path.stat()
     if path.is_dir():
         directories.add(path)
         continue
     if not path.is_file():
-        raise SystemExit(f"unsafe backup entry: {path}")
+        raise SystemExit("unsafe backup entry")
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -1402,7 +1408,7 @@ uninstall_rollback() {
   fi
   if ! persist_transaction_state rollback-started; then
     quarantine_activation || true
-    echo "BLOCKED: cannot journal uninstall rollback; recovery-required journal retained" >&2
+    echo "BLOCKED: cannot journal uninstall rollback; rollback not attempted; recovery-required journal retained" >&2
     exit "$rc"
   fi
   if restore_uninstall_backup && persist_transaction_state rolled-back; then
@@ -1535,6 +1541,7 @@ PY
     # install or uninstall. A rolled-back journal is also safe to re-verify.
     persist_transaction_state rollback-started ||
       blocked "recovery rollback-started journal not durable"
+    recovery_rollback_attempted=1
     if [[ "$recovery_kind" == none ]]; then
       recovery_status=""
       query_dkms_status recovery_status -m swapz -v "$version" ||
@@ -1622,11 +1629,11 @@ if [[ "$action" == uninstall ]]; then
   assert_single_kernel_dkms_scope
   if [[ -z "$test_root" && "$action" == uninstall ]] &&
      [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
-    echo "BLOCKED: loaded module; refusing DKMS removal" >&2
+    echo "BLOCKED: uninstall preflight: loaded module; refusing DKMS removal; rollback not attempted" >&2
     exit 1
   fi
   if [[ -n "$test_root" ]] && swapz_module_loaded; then
-    echo "BLOCKED: loaded module; refusing DKMS removal" >&2
+    echo "BLOCKED: uninstall preflight: loaded module; refusing DKMS removal; rollback not attempted" >&2
     exit 1
   fi
   swapz_mapper_present && blocked "active swapz mapping; refusing package removal"
@@ -1662,7 +1669,10 @@ if [[ "$action" == uninstall ]]; then
       *) blocked "cannot verify whether $unit is enabled" ;;
     esac
   done
-  verify_owned || { echo "BLOCKED: foreign, absent or modified swapz package" >&2; exit 1; }
+  verify_owned || {
+    echo "BLOCKED: uninstall preflight: foreign, absent or modified swapz package; rollback not attempted" >&2
+    exit 1
+  }
 
   ensure_transaction_parent
   transaction_dir="$(mktemp -d "$transaction_parent/swapz-uninstall.XXXXXXXX")"
@@ -2085,7 +2095,7 @@ rollback() {
   fi
   if ! persist_transaction_state rollback-started; then
     quarantine_activation || true
-    echo "BLOCKED: cannot journal install rollback; recovery-required journal retained" >&2
+    echo "BLOCKED: cannot journal install rollback; rollback not attempted; recovery-required journal retained" >&2
     exit "$rc"
   fi
   if ! query_dkms_status rollback_dkms_status -m swapz -v "$version" ||
@@ -2093,27 +2103,33 @@ rollback() {
      ! other_kernel_module_candidates_absent; then
       quarantine_activation || true
       record_incomplete_rollback || true
-      echo "BLOCKED: rollback DKMS scope uncertain (query, other kernel or variant); recovery-required journal retained" >&2
+      echo "BLOCKED: rollback DKMS scope uncertain (query, other kernel or variant); rollback incomplete; recovery-required journal retained" >&2
       exit "$rc"
   fi
   if [[ -n "$rollback_dkms_status" ]]; then
     if ! "$dkms_bin" remove -m swapz -v "$version" --all >/dev/null 2>&1; then
       quarantine_activation || true
       record_incomplete_rollback || true
-      echo "BLOCKED: cannot clear DKMS state during rollback; recovery-required journal retained" >&2
+      echo "BLOCKED: cannot clear DKMS state during rollback; rollback incomplete; recovery-required journal retained" >&2
       exit "$rc"
     fi
   fi
-  cleanup_package_files
-  rm -f -- "$installed_module"
+  if ! cleanup_package_files || ! rm -f -- "$installed_module"; then
+    quarantine_activation || true
+    record_incomplete_rollback || true
+    echo "BLOCKED: install rollback package cleanup failed; rollback incomplete; recovery-required journal retained" >&2
+    exit "$rc"
+  fi
   if ! module_candidates_absent; then
     quarantine_activation || true
     record_incomplete_rollback || true
-    echo "BLOCKED: rollback left ambiguous module images; recovery-required journal retained" >&2
+    echo "BLOCKED: rollback left ambiguous module images; rollback incomplete; recovery-required journal retained" >&2
     exit "$rc"
   fi
   durable_package_paths "$installed_module_dir" || {
+    quarantine_activation || true
     record_incomplete_rollback || true
+    echo "BLOCKED: install rollback filesystem durability failed; rollback incomplete; recovery-required journal retained" >&2
     exit "$rc"
   }
   if (( had_existing == 1 )); then
@@ -2128,7 +2144,7 @@ rollback() {
       # Do not publish a CLI after failed rollback re-verification.
       quarantine_activation || true
       record_incomplete_rollback || true
-      echo "BLOCKED: previous package restoration failed; verified recovery-required journal retained" >&2
+      echo "BLOCKED: previous package restoration failed; rollback incomplete; verified recovery-required journal retained" >&2
     fi
   else
     local cleanup_ok=1
