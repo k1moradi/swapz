@@ -2596,6 +2596,9 @@ class PairReplayContract(unittest.TestCase):
                     row["raw"].update(operation_recipe_sha256="0" * 64),
                     row["swapz"].update(operation_recipe_sha256="0" * 64)),
                 lambda row: row["raw"]["latency"].update(read_p50_ns=101),
+                lambda row: row["swapz"].update(resources=["malformed"]),
+                lambda row: row["swapz"].update(
+                    device_identity=["malformed"]),
         ):
             tampered_pairs = json.loads(json.dumps(stable_pairs))
             corrupt(tampered_pairs[0])
