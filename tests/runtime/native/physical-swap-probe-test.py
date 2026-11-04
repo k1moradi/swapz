@@ -1473,6 +1473,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "validate_review", return_value=review),
                 mock.patch.object(probe.shutil, "which", return_value="/usr/bin/mock"),
                 mock.patch.object(probe.Path, "exists", return_value=False),
+                mock.patch.object(probe, "_module_loaded_from_sysfs",
+                                  return_value=False),
                 mock.patch.object(probe.Path, "is_file", is_file),
                 mock.patch.object(probe.Path, "read_text", read_text),
                 mock.patch.object(probe.Path, "iterdir", iter_directory),
@@ -1820,6 +1822,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         mock.patch.object(probe.os, "geteuid", return_value=0),
                         mock.patch.object(probe.Path, "exists", autospec=True,
                                           side_effect=is_present),
+                        mock.patch.object(probe, "_module_loaded_from_sysfs",
+                                          return_value=False),
                         mock.patch.object(probe, "current_source_evidence",
                                           return_value=evidence),
                         mock.patch.object(probe, "inspect_target",
@@ -2261,7 +2265,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         sector_overflow = list(good_values)
         sector_overflow[2] = 2 ** 64 // 512
         for values, expected in (
-                ([0] * 15, "lower_stat_fields"),
+                ([0] * 15,
+                 "lower_flush_requests expected=field_16 observed=missing "
+                 "field_count=15"),
+                ([0] * 16, "lower_stat_fields expected=17 observed=16"),
+                ([0] * 18, "lower_stat_fields expected=17 observed=18"),
                 (negative, "lower_stat\\[2\\]"),
                 (nonnumeric, "lower_stat\\[2\\]"),
                 (counter_overflow, "uint64_max"),
@@ -2303,11 +2311,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 (snapshot(4, 6, 8, 10, 6),
                  "lower_flush_requests.*reset_or_wrap"),
                 (snapshot(4, 6, 8, 10, 9, "8:32"), "lower_io_device"),
-                ({**after, "values": [-1] + [0] * 15}, "uint64"),
-                ({**after, "values": [2**64] + [0] * 15}, "uint64"),
-                ({**after, "values": after["values"][:15]}, "uint64"),
+                ({**after, "values": [-1] + [0] * 16}, "uint64"),
+                ({**after, "values": [2**64] + [0] * 16}, "uint64"),
+                ({**after, "values": after["values"][:16]},
+                 "expected=17_uint64_counters"),
                 ({**after, "values": after["values"] + [0]},
-                 "lower_io_field_count"),
+                 "expected=17_uint64_counters"),
                 ({"available": False, "error": "missing stat"},
                  "lower_io_after.*missing stat"),
         ):
@@ -2390,7 +2399,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch.object(probe, "inspect_target", return_value=target), \
                 mock.patch.object(probe, "_block_stat_snapshot",
                     return_value={"available": False,
-                                  "error": "lower_stat_fields expected>=16 observed=0"}), \
+                                  "error": "lower_stat_fields expected=17 observed=0"}), \
                 mock.patch.object(probe, "current_source_evidence",
                                   side_effect=AssertionError(
                                       "source evidence should not be consulted")):
@@ -2617,6 +2626,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         source_sha = "a" * 40
         evidence = {
             "head": source_sha, "source_sha": source_sha,
+            "helper_sha256": "d" * 64,
             "artifact_digests": {
                 key: str(index) * 64 for index, (key, _, _) in
                 enumerate(probe.PHYSICAL_ARTIFACTS, start=1)},
@@ -2644,6 +2654,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             (card / "device").mkdir(parents=True)
             (card / "dev").write_text("179:0\n")
             (card / "size").write_text("262144\n")
+            (card / "removable").write_text("1\n")
             (card / "device/model").write_text("SD-A\n")
             (card / "device/serial").write_text("serial-a\n")
             (card / "device/wwid").write_text("wwid-a\n")
@@ -2663,12 +2674,66 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 self.assertEqual(first["model"], "SD-A")
                 self.assertEqual(first["transport"], "mmc")
                 self.assertEqual(first["parent_size_bytes"], 262144 * 512)
+                self.assertTrue(first["parent_removable"])
                 self.assertTrue(first["serial_present"])
                 self.assertTrue(first["wwid_present"])
-                (card / "device/model").write_text("SD-B\n")
+                (card / "removable").write_text("0\n")
                 second = probe._campaign_card_identity(
                     "/dev/synthetic", "179:0")
+                (card / "removable").write_text("1\n")
+                (card / "device/model").write_text("SD-B\n")
+                third = probe._campaign_card_identity(
+                    "/dev/synthetic", "179:0")
             self.assertNotEqual(first["sha256"], second["sha256"])
+            self.assertNotEqual(first["sha256"], third["sha256"])
+
+    def test_campaign_card_identity_rejects_unverifiable_removable_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            card = Path(directory) / "mmcblk0"
+            (card / "device").mkdir(parents=True)
+            (card / "dev").write_text("179:0\n")
+            (card / "size").write_text("262144\n")
+            (card / "removable").write_text("unknown\n")
+            original_resolve = probe.Path.resolve
+
+            def resolve(path, *args, **kwargs):
+                if str(path) == "/sys/dev/block/179:0":
+                    return card
+                return original_resolve(path, *args, **kwargs)
+
+            with mock.patch.object(probe.Path, "resolve", resolve):
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "card_parent_removable expected=0_or_1 "
+                        "observed=invalid_format"):
+                    probe._campaign_card_identity(
+                        "/dev/synthetic", "179:0")
+
+    def test_campaign_changed_removable_parent_blocks_before_quiescence(self):
+        target = {
+            "device": "/dev/synthetic", "major": 8, "minor": 17,
+            "parent_major_minor": "8:16", "partuuid": "deadbeef-01",
+            "parent_removable": True,
+            "card_identity_sha256": "a" * 64,
+            "size_bytes": 64 << 20,
+        }
+        with mock.patch.object(probe, "_verify_target_identity"), \
+                mock.patch.object(
+                    probe, "_campaign_card_identity",
+                    return_value={
+                        "sha256": "b" * 64,
+                        "model": "replacement-card",
+                        "transport": "usb",
+                        "parent_removable": False,
+                    }), \
+                mock.patch.object(
+                    probe, "_holder_names",
+                    side_effect=AssertionError(
+                        "removable-state change must block before holders")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "campaign_parent_removable expected=True observed=False"):
+                probe._require_campaign_target_quiescent(target)
 
     def test_campaign_stale_card_identity_blocks_before_quiescence_claim(self):
         target = {
@@ -2796,6 +2861,59 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                             "/dev/disk/by-partuuid/deadbeef-01",
                             "deadbeef-01", source_sha)
 
+    def test_campaign_plan_rechecks_source_and_artifacts_before_ready(self):
+        target, source_sha, evidence, lower, inventory, diagnostics = (
+            self.campaign_preflight_fixture())
+        changed_artifacts = {
+            **evidence["artifact_digests"],
+            "module_sha256": "f" * 64,
+        }
+        cases = (
+            (
+                "source",
+                [evidence, {**evidence, "head": "b" * 40}],
+                [evidence["artifact_digests"], evidence["artifact_digests"]],
+                "campaign_source_sha",
+            ),
+            (
+                "artifact",
+                [evidence, evidence],
+                [evidence["artifact_digests"], changed_artifacts],
+                "campaign_artifacts.module_sha256 "
+                "expected=qualified_sha256 observed=changed_sha256",
+            ),
+        )
+        for name, source_samples, artifact_samples, expected in cases:
+            with self.subTest(name=name), ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    probe, "inspect_campaign_target", return_value=target))
+                stack.enter_context(mock.patch.object(
+                    probe, "_block_stat_snapshot",
+                    side_effect=[lower, lower]))
+                stack.enter_context(mock.patch.object(
+                    probe, "_module_mapper_preflight",
+                    return_value=inventory))
+                stack.enter_context(mock.patch.object(
+                    probe, "_kernel_swapz_messages",
+                    return_value=diagnostics))
+                stack.enter_context(mock.patch.object(
+                    probe, "current_source_evidence",
+                    side_effect=source_samples))
+                stack.enter_context(mock.patch.object(
+                    probe, "_artifact_digests",
+                    side_effect=artifact_samples))
+                stack.enter_context(mock.patch.object(
+                    probe, "_require_campaign_target_quiescent"))
+                printed = stack.enter_context(mock.patch("builtins.print"))
+                with self.assertRaisesRegex(probe.ProbeError, expected):
+                    probe.campaign_plan(
+                        "/dev/disk/by-partuuid/deadbeef-01",
+                        "/dev/disk/by-partuuid/deadbeef-01",
+                        "deadbeef-01", source_sha)
+                self.assertFalse(any(
+                    "CAMPAIGN_PREFLIGHT=READY_READ_ONLY" in str(call.args[0])
+                    for call in printed.call_args_list))
+
     def test_campaign_plan_counter_reset_and_required_work_stay_not_run(self):
         target, source_sha, evidence, lower, inventory, diagnostics = (
             self.campaign_preflight_fixture())
@@ -2854,12 +2972,28 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn("ANONYMOUS_LINUX_SWAP=NOT_RUN", output)
         self.assertIn(probe.LOWER_IO_CLAIM_BOUNDARY, output)
 
+    def test_module_mapper_preflight_rejects_missing_module_provenance(self):
+        denied = PermissionError(13, "private module inventory", "/sys/module")
+        with mock.patch.object(probe.os, "scandir", side_effect=denied), \
+                mock.patch.object(
+                    probe, "_dm_inventory_snapshot",
+                    side_effect=AssertionError(
+                        "missing module provenance must stop before DM claim")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "module_provenance expected=readable_module_inventory "
+                    "observed=unavailable_errno_13") as blocked:
+                probe._module_mapper_preflight()
+        self.assertNotIn("private module inventory", str(blocked.exception))
+        self.assertNotIn("/sys/module", str(blocked.exception))
+
     def test_module_mapper_preflight_rejects_swapz_namespaced_inventory(self):
         completed = subprocess.CompletedProcess(
             [], 0,
             stdout="swapz-stale:SWAPZ-FOREIGN-0123456789abcdef\n",
             stderr="")
-        with mock.patch.object(probe.Path, "exists", return_value=False), \
+        with mock.patch.object(
+                probe, "_module_loaded_from_sysfs", return_value=False), \
                 mock.patch.object(probe, "_run", return_value=completed):
             with self.assertRaisesRegex(
                     probe.ProbeError,

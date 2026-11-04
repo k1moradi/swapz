@@ -1092,8 +1092,10 @@ def _captured_command(args, timeout=15):
 # Linux /sys/block/*/stat sector units are 512 bytes, independent of
 # logical/physical sector sizes. These are host-visible device I/O counters,
 # NOT direct SD NAND wear, write amplification or endurance observations.
+# The supported Linux ABI is exactly 17 fields; reject missing or extra fields
+# so a shifted/truncated record cannot be certified as continuous evidence.
 MAX_BLOCK_COUNTER = (1 << 64) - 1
-MIN_BLOCK_STAT_FIELDS = 16
+MIN_BLOCK_STAT_FIELDS = 17
 LOWER_COUNTER_FIELDS = (
     ("lower_read_requests", 0),
     ("lower_read_sectors", 2),
@@ -1113,9 +1115,13 @@ def _block_stat_snapshot(target):
     path = Path(f"/sys/dev/block/{parent}/stat")
     try:
         tokens = path.read_text().split()
-        if len(tokens) < MIN_BLOCK_STAT_FIELDS:
+        if len(tokens) <= LOWER_COUNTER_FIELDS[-1][1]:
             raise ValueError(
-                f"lower_stat_fields expected>={MIN_BLOCK_STAT_FIELDS} "
+                "lower_flush_requests expected=field_16 observed=missing "
+                f"field_count={len(tokens)}")
+        if len(tokens) != MIN_BLOCK_STAT_FIELDS:
+            raise ValueError(
+                f"lower_stat_fields expected={MIN_BLOCK_STAT_FIELDS} "
                 f"observed={len(tokens)}")
         fields = []
         for index, token in enumerate(tokens):
@@ -1153,12 +1159,12 @@ def _lower_io_delta(before, after):
             raise ProbeError(
                 f"lower_io_{label} expected=available observed={_bounded_text(detail)}")
         values = snapshot.get("values")
-        if not isinstance(values, list) or len(values) < MIN_BLOCK_STAT_FIELDS or any(
+        if not isinstance(values, list) or len(values) != MIN_BLOCK_STAT_FIELDS or any(
                 type(value) is not int or value < 0 or value > MAX_BLOCK_COUNTER
                 for value in values):
             raise ProbeError(
                 f"lower_io_{label}.values "
-                f"expected>={MIN_BLOCK_STAT_FIELDS}_uint64_counters "
+                f"expected={MIN_BLOCK_STAT_FIELDS}_uint64_counters "
                 f"observed={_bounded_text(values)}")
         for field, index in LOWER_COUNTER_FIELDS:
             if "sectors" in field and values[index] > MAX_BLOCK_COUNTER // 512:
@@ -1348,14 +1354,25 @@ def _dm_inventory_snapshot(
     return {"other_mapper_count": len(rows), "other_mapper_sha256": digest}
 
 
+def _module_loaded_from_sysfs():
+    """Read the module inventory so unreadable provenance cannot look absent."""
+    try:
+        with os.scandir("/sys/module") as entries:
+            return any(entry.name == "dm_swapz" for entry in entries)
+    except OSError as exc:
+        raise ProbeError(
+            "module_provenance expected=readable_module_inventory "
+            f"observed=unavailable_errno_{exc.errno}"
+        ) from exc
+
+
 def _module_mapper_preflight():
     """Prove a clean swapz module baseline and readable DM inventory."""
-    module_path = Path("/sys/module/dm_swapz")
-    if module_path.exists():
+    if _module_loaded_from_sysfs():
         raise ProbeError(
             "module_provenance expected=dm_swapz_absent observed=loaded")
     inventory = _dm_inventory_snapshot(reject_swapz_namespace=True)
-    if module_path.exists():
+    if _module_loaded_from_sysfs():
         raise ProbeError(
             "module_provenance expected=stable_absence observed=loaded_during_check")
     return inventory
@@ -2371,6 +2388,7 @@ def _campaign_card_identity(device, parent_major_minor):
             f"/sys/dev/block/{parent_major_minor}").resolve(strict=True)
         observed_parent = (parent / "dev").read_text().strip()
         sectors_text = (parent / "size").read_text().strip()
+        removable_text = (parent / "removable").read_text().strip()
     except (OSError, RuntimeError) as exc:
         raise ProbeError(
             "card_parent_topology expected=readable "
@@ -2393,6 +2411,10 @@ def _campaign_card_identity(device, parent_major_minor):
         raise ProbeError(
             f"card_parent_sectors expected=1..uint64_max/512 "
             f"observed={parent_sectors}")
+    if removable_text not in {"0", "1"}:
+        raise ProbeError(
+            "card_parent_removable expected=0_or_1 observed=invalid_format")
+    parent_removable = removable_text == "1"
     model = _optional_card_identity_text(parent / "device/model")
     serial = _optional_card_identity_text(parent / "device/serial")
     wwid = _optional_card_identity_text(parent / "device/wwid")
@@ -2408,6 +2430,7 @@ def _campaign_card_identity(device, parent_major_minor):
         "model": model,
         "transport": transport,
         "parent_size_bytes": parent_sectors * 512,
+        "parent_removable": parent_removable,
         "serial": serial,
         "wwid": wwid,
     }
@@ -2420,6 +2443,7 @@ def _campaign_card_identity(device, parent_major_minor):
         "model": model,
         "transport": transport,
         "parent_size_bytes": parent_sectors * 512,
+        "parent_removable": parent_removable,
         "serial_present": serial is not None,
         "wwid_present": wwid is not None,
     }
@@ -2442,6 +2466,12 @@ def _require_campaign_target_quiescent(target):
     _verify_target_identity(target)
     observed_card = _campaign_card_identity(
         target["device"], target["parent_major_minor"])
+    expected_removable = target.get("parent_removable")
+    if (type(expected_removable) is bool and
+            observed_card["parent_removable"] != expected_removable):
+        raise ProbeError(
+            f"campaign_parent_removable expected={expected_removable} "
+            f"observed={observed_card['parent_removable']}")
     expected_card_sha = target.get("card_identity_sha256")
     if (not isinstance(expected_card_sha, str) or
             not re.fullmatch(r"[0-9a-f]{64}", expected_card_sha) or
@@ -2541,6 +2571,7 @@ def inspect_campaign_target(device_arg, confirm_arg, expected_partuuid):
         "parent_model": card_identity["model"],
         "parent_transport": card_identity["transport"],
         "parent_size_bytes": card_identity["parent_size_bytes"],
+        "parent_removable": card_identity["parent_removable"],
         "card_identity_sha256": card_identity["sha256"],
         "size_bytes": size_bytes,
         "partuuid": partuuid,
@@ -2549,22 +2580,12 @@ def inspect_campaign_target(device_arg, confirm_arg, expected_partuuid):
     return target
 
 
-def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
-    """Read-only campaign admission; it never substitutes for physical arms."""
-    preflight_start = _utc_timestamp()
-    if not isinstance(source_sha, str) or not re.fullmatch(
-            r"[0-9a-f]{40}", source_sha):
-        raise ProbeError(
-            "campaign_source_sha expected=40_lower_hex observed=invalid_format")
-    target = inspect_campaign_target(
-        device_arg, confirm_arg, expected_partuuid)
-    lower_before = _block_stat_snapshot(target)
-    if lower_before.get("available") is not True:
-        raise ProbeError(
-            "campaign_lower_io_before expected=available "
-            f"observed={lower_before.get('error')}")
-    dm_inventory = _module_mapper_preflight()
+def _campaign_source_artifacts(source_sha):
+    """Return one exact source/artifact sample or fail closed."""
     evidence = current_source_evidence()
+    if not isinstance(evidence, dict):
+        raise ProbeError(
+            "campaign_source_evidence expected=object observed=invalid")
     if evidence.get("head") != source_sha or evidence.get("source_sha") != source_sha:
         raise ProbeError(
             f"campaign_source_sha expected={source_sha!r} "
@@ -2585,8 +2606,37 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
             raise ProbeError(
                 f"campaign_artifacts.{artifact_name} "
                 "expected=qualified_sha256 observed=changed_sha256")
-    # The network/source checks above may take time. Re-prove target/module and
-    # lower-counter continuity immediately before reporting read-only readiness.
+    return evidence, live_artifacts
+
+
+def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
+    """Read-only campaign admission; it never substitutes for physical arms."""
+    preflight_start = _utc_timestamp()
+    if not isinstance(source_sha, str) or not re.fullmatch(
+            r"[0-9a-f]{40}", source_sha):
+        raise ProbeError(
+            "campaign_source_sha expected=40_lower_hex observed=invalid_format")
+    target = inspect_campaign_target(
+        device_arg, confirm_arg, expected_partuuid)
+    lower_before = _block_stat_snapshot(target)
+    if lower_before.get("available") is not True:
+        raise ProbeError(
+            "campaign_lower_io_before expected=available "
+            f"observed={lower_before.get('error')}")
+    dm_inventory = _module_mapper_preflight()
+    evidence, live_artifacts = _campaign_source_artifacts(source_sha)
+    diagnostics = _kernel_swapz_messages(preflight_start)
+    _require_kernel_diagnostics(
+        diagnostics, "campaign_kernel_diagnostics")
+    evidence_after, live_artifacts_after = _campaign_source_artifacts(source_sha)
+    if evidence_after != evidence:
+        raise ProbeError(
+            "campaign_source_evidence expected=stable observed=changed")
+    if live_artifacts_after != live_artifacts:
+        raise ProbeError(
+            "campaign_artifacts expected=stable observed=changed")
+    # Kernel and source checks can take time. Re-prove the selected card,
+    # module/mapper inventory and lower counters last, immediately before READY.
     _require_campaign_target_quiescent(target)
     dm_inventory_after = _module_mapper_preflight()
     if dm_inventory_after != dm_inventory:
@@ -2599,9 +2649,6 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
             "campaign_lower_io_after expected=available "
             f"observed={lower_after.get('error')}")
     _lower_io_delta(lower_before, lower_after)
-    diagnostics = _kernel_swapz_messages(preflight_start)
-    _require_kernel_diagnostics(
-        diagnostics, "campaign_kernel_diagnostics")
 
     print("CAMPAIGN_PREFLIGHT=READY_READ_ONLY "
           f"major_minor={target['major']}:{target['minor']} "
