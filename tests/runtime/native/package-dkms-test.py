@@ -1499,6 +1499,41 @@ exec "{flock_binary}" "$@"
         self.assertFalse((self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service").exists())
         self.assertFalse(list((self.home / "transactions").glob("swapz-package.*")))
 
+    def test_recover_interrupted_legacy_upgrade_restores_legacy_snapshot(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        original_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        original_module = self.installed_module.read_bytes()
+        source = self.home / "usr/src" / ("swapz-" + VERSION)
+        (source / ".swapz-qualification").unlink()
+        (self.prefix / "sbin/swapz-primary-runtime-health").unlink()
+        (self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service").unlink()
+        binary_manifest = source / ".swapz-binaries.sha256"
+        binary_manifest.write_text("".join(
+            line for line in binary_manifest.read_text().splitlines(keepends=True)
+            if "swapz-primary-runtime-health" not in line))
+        source_manifest = source / ".swapz-sources.sha256"
+        source_manifest.write_text("".join(
+            line for line in source_manifest.read_text().splitlines(keepends=True)
+            if ".swapz-qualification" not in line))
+
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        transaction = self.kill_at_durable_phase(
+            "install", "package-files-published")
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertEqual(
+            (self.prefix / "sbin/swapzctl").read_bytes(), original_cli)
+        self.assertEqual(self.installed_module.read_bytes(), original_module)
+        self.assertFalse((source / ".swapz-qualification").exists())
+        self.assertFalse(
+            (self.prefix / "sbin/swapz-primary-runtime-health").exists())
+        self.assertFalse(
+            (self.prefix / "lib/systemd/system/"
+             "swapz-primary-runtime-health.service").exists())
+        self.assertFalse(transaction.exists())
+        self.assertEqual(self.invoke("recover").returncode, 0)
+
     def test_uninstall_failed_reverification_revokes_activation(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         failed = self.invoke("uninstall", {
