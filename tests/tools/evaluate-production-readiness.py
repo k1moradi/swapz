@@ -1376,13 +1376,10 @@ def evaluate_release(
         "observed_peak_ram_bytes": None,
         "limit_bytes": peak_ram_limit,
         "initialization_peak_ram_bytes": None,
-        "constructor_peak_ram_bytes": None,
         "initialization_samples": None,
         "steady_peak_ram_bytes": None,
-        "steady_state_peak_ram_bytes": None,
         "steady_samples": None,
         "gc_peak_ram_bytes": None,
-        "gc_pressure_peak_ram_bytes": None,
         "gc_samples": None,
         "teardown_recovery": "NOT_MEASURED",
         "teardown_recovery_samples": None,
@@ -1451,17 +1448,11 @@ def evaluate_release(
                     "observed_peak_ram_bytes": peak,
                     "initialization_peak_ram_bytes":
                         summary["initialization_peak_ram_bytes"],
-                    "constructor_peak_ram_bytes":
-                        summary["initialization_peak_ram_bytes"],
                     "initialization_samples":
                         summary["initialization_samples"],
                     "steady_peak_ram_bytes": summary["steady_peak_ram_bytes"],
-                    "steady_state_peak_ram_bytes":
-                        summary["steady_peak_ram_bytes"],
                     "steady_samples": summary["steady_samples"],
                     "gc_peak_ram_bytes": summary["gc_peak_ram_bytes"],
-                    "gc_pressure_peak_ram_bytes":
-                        summary["gc_peak_ram_bytes"],
                     "gc_samples": summary["gc_samples"],
                     "teardown_recovery": "MEASURED_RECOVERED",
                     "teardown_recovery_samples": summary["recovery_samples"],
@@ -1691,13 +1682,10 @@ def main() -> int:
             "METADATA_RAM_MEASUREMENT": {
                 "status": "NOT_MEASURED", "observed_peak_ram_bytes": None,
                 "limit_bytes": None, "initialization_peak_ram_bytes": None,
-                "constructor_peak_ram_bytes": None,
                 "initialization_samples": None,
                 "steady_peak_ram_bytes": None,
-                "steady_state_peak_ram_bytes": None,
                 "steady_samples": None,
                 "gc_peak_ram_bytes": None,
-                "gc_pressure_peak_ram_bytes": None,
                 "gc_samples": None,
                 "teardown_recovery": "NOT_MEASURED",
                 "teardown_recovery_samples": None,
