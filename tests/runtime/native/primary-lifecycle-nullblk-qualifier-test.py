@@ -117,7 +117,10 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertLess(trigger, alias_wait)
         self.assertLess(partuuid_proof, alias_verifier)
         self.assertIn('DEVPATH=="%s"', self.script)
-        self.assertIn('ENV{ID_PART_ENTRY_UUID}=="%s"', self.script)
+        uuid_import = self.script.index('IMPORT{builtin}="blkid"')
+        uuid_match = self.script.index('ENV{ID_PART_ENTRY_UUID}=="%s"')
+        self.assertLess(uuid_import, uuid_match)
+        self.assertIn('\\nACTION=="add"', self.script)
         self.assertIn('SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"',
                       self.script)
         self.assertIn('udevadm info --query=property --path="$PART_SYSFS"',

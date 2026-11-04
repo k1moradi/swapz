@@ -4434,8 +4434,11 @@ by-PARTUUID block-device alias with the same major:minor. Some host persistent-
 storage rule sets deliberately exclude `nullb*`; when the normal rules do not
 publish the link, install one temporary udev rule matching only the verified
 partition's exact `DEVPATH` rule key and PARTUUID, reload the rules, and trigger that
-partition again. Prove the link in udev's recorded `DEVLINKS` property as well
-as by block-device identity; never create the alias with a shell symlink.
+partition again. The temporary rule must import the partition-table UUID in
+one rule and match it in a subsequent rule, because udev checks match keys
+before applying assignments from the same rule. Prove the link in udev's
+recorded `DEVLINKS` property as well as by block-device identity; never create
+the alias with a shell symlink.
 Remove the temporary rule after null_blk teardown and require its alias to be
 gone. If publication fails, capture the exact fixture rule, relevant udev
 properties, and udev's event-rule diagnostic before cleanup. Initialize only

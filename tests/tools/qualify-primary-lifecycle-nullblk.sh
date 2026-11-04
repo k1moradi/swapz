@@ -1341,9 +1341,11 @@ if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then
 	[[ "$PART_SYSFS_REAL" == "/sys/devices/virtual/block/$DISK/$PART_NAME" ]] ||
 		fail "owned null_blk partition sysfs path changed"
 	UDEV_DEVPATH="${PART_SYSFS_REAL#/sys}"
+	# Udev evaluates a rule's match keys before its assignments, so the
+	# imported partition UUID must be matched in a following rule.
 	printf -v UDEV_RULE_CONTENT \
-		'ACTION=="add", SUBSYSTEM=="block", DEVPATH=="%s", IMPORT{builtin}="blkid", ENV{ID_PART_ENTRY_UUID}=="%s", SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"' \
-		"$UDEV_DEVPATH" "$PARTUUID"
+		'ACTION=="add", SUBSYSTEM=="block", DEVPATH=="%s", IMPORT{builtin}="blkid"\nACTION=="add", SUBSYSTEM=="block", DEVPATH=="%s", ENV{ID_PART_ENTRY_UUID}=="%s", SYMLINK+="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"' \
+		"$UDEV_DEVPATH" "$UDEV_DEVPATH" "$PARTUUID"
 	if ! (
 		set -o noclobber
 		printf '%s\n' "$UDEV_RULE_CONTENT" > "$UDEV_RULE"
