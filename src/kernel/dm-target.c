@@ -4701,9 +4701,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
-	/* Exactly the ordered owner can set this: all synchronous writes (also
-	 * GC relocation while obtaining space) must clear FUA before publishing. */
-	ctx->prepublication_fua = needs_fua;
 	/*
 	 * ID175: a submitter-owned lone WRITE runs inside ->map, where a lower BIO
 	 * is only queued until ->map returns. It must detach; it can never wait.
@@ -4925,10 +4922,17 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		section_start = ktime_get_ns();
 		/* Sealing of the window's first run starts with this flush. */
 		swapz_lane_gap_sync_window_begin(ctx, committed, section_start);
+		/*
+		 * Scope FUA to this foreground engine call only. If planning reports
+		 * ENOSPC, clear the flag before GC relocation: those copies preserve
+		 * already-authoritative data and are not part of this upper FUA.
+		 */
+		ctx->prepublication_fua = needs_fua;
 		error = swapz_engine_write_window_batched_read_cap(&ctx->engine,
 				ctx->planned + committed,
 				count - committed, &succeeded,
 				planning_read_cap);
+		ctx->prepublication_fua = false;
 		commit_end = ktime_get_ns();
 		/*
 		 * A successful synchronous publication consumes each run through
@@ -5063,8 +5067,8 @@ commit_done:
 	if (acknowledgements.delivered_ns)
 		swapz_lane_gap_ack_flush(ctx, &acknowledgements);
 accounted:
-	/* No callback owns this flag; the ordered owner clears it before
-	 * processing another BIO or releasing ordered_owner. */
+	/* Defensive invariant: every foreground lower-write scope clears this
+	 * before error recovery, completion, or release of ordered_owner. */
 	ctx->prepublication_fua = false;
 	ctx->windows++;
 	ctx->window_records_total += count;
@@ -5166,8 +5170,14 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 	}
 	if (error)
 		return error;
+	/*
+	 * Any GC needed to obtain this reservation has finished. Apply FUA only
+	 * to the actual foreground RAW lower write, never to GC relocation I/O.
+	 */
+	ctx->prepublication_fua = !!(bio->bi_opf & REQ_FUA);
 	error = swapz_lower_write(ctx, tx.start_block, 1, ctx->input_page,
 				&completed);
+	ctx->prepublication_fua = false;
 	if (!error && completed == 1)
 		error = swapz_verify_raw_write(ctx, tx.start_block,
 					   ctx->input_page);
@@ -5948,11 +5958,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		error = swapz_flush_window(ctx);
 		if (error)
 			return error;
-		/* A standalone RAW write has the same pre-publication FUA gate
-		 * as packed writes. Only this ordered caller sets the flag. */
-		ctx->prepublication_fua = !!(bio->bi_opf & REQ_FUA);
 		error = swapz_raw_write(ctx, bio, logical);
-		ctx->prepublication_fua = false;
 		/*
 		 * A standalone RAW write can be the request that first discovers
 		 * foreground ENOSPC and starts GC. If that GC then hits a transient
