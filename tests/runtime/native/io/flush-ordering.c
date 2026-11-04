@@ -186,14 +186,23 @@ struct lower_completion_fixture {
 	bool callback_done;
 	bool upper_done;
 	int lower_error;
+	int terminal_error;
 	int final_error;
 };
+
+static void record_terminal_failure(struct lower_completion_fixture *fixture,
+				    int error)
+{
+	if (error && !fixture->terminal_error)
+		fixture->terminal_error = error;
+}
 
 static void lower_callback(struct lower_completion_fixture *fixture, int error)
 {
 	fixture->callbacks++;
 	fixture->callback_done = true;
 	fixture->lower_error = error;
+	record_terminal_failure(fixture, error);
 }
 
 static int finalize_or_drain(struct lower_completion_fixture *fixture)
@@ -206,7 +215,8 @@ static int finalize_or_drain(struct lower_completion_fixture *fixture)
 	if (!fixture->callback_done)
 		return -EAGAIN;
 #endif
-	fixture->upper.lower_write_error = fixture->lower_error;
+	fixture->upper.lower_write_error = fixture->lower_error ?
+		fixture->lower_error : fixture->terminal_error;
 	error = submit_durable_upper(&fixture->upper, 1);
 	fixture->upper_done = true;
 	fixture->final_completions++;
@@ -246,6 +256,38 @@ static int test_callback_before_or_after_drain(void)
 	return 0;
 }
 
+static int test_first_terminal_error_and_no_late_success(void)
+{
+	struct lower_completion_fixture lower_first = { 0 };
+	struct lower_completion_fixture generic_first = { 0 };
+	struct lower_completion_fixture success_then_failure = { 0 };
+
+	lower_callback(&lower_first, -EOPNOTSUPP);
+	record_terminal_failure(&lower_first, -EIO);
+	CHECK(lower_first.terminal_error == -EOPNOTSUPP);
+	CHECK(finalize_or_drain(&lower_first) == -EOPNOTSUPP);
+	CHECK(lower_first.final_completions == 1);
+	CHECK(!lower_first.upper.success_acks && !lower_first.upper.generation);
+
+	record_terminal_failure(&generic_first, -EIO);
+	lower_callback(&generic_first, -EOPNOTSUPP);
+	CHECK(generic_first.terminal_error == -EIO);
+	/* The run reports its own lower errno but still cannot publish success. */
+	CHECK(finalize_or_drain(&generic_first) == -EOPNOTSUPP);
+	CHECK(generic_first.final_completions == 1);
+	CHECK(!generic_first.upper.success_acks && !generic_first.upper.generation);
+
+	lower_callback(&success_then_failure, 0);
+	record_terminal_failure(&success_then_failure, -EIO);
+	CHECK(success_then_failure.terminal_error == -EIO);
+	CHECK(finalize_or_drain(&success_then_failure) == -EIO);
+	CHECK(success_then_failure.final_completions == 1);
+	CHECK(!success_then_failure.upper.success_acks &&
+	      !success_then_failure.upper.generation);
+	CHECK(success_then_failure.upper.flush.called == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -258,6 +300,7 @@ int main(void)
 	CHECK(test_prepublication_fua_write_gate() == 0); passed++;
 	CHECK(test_no_ack_or_new_generation_before_fua() == 0); passed++;
 	CHECK(test_callback_before_or_after_drain() == 0); passed++;
+	CHECK(test_first_terminal_error_and_no_late_success() == 0); passed++;
 	printf("SWAPZ_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
 	return 0;
 }
