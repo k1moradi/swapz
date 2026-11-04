@@ -11,6 +11,7 @@
 #include <linux/dm-ioctl.h>
 #include <linux/fs.h>
 #include <linux/magic.h>
+#include <linux/stat.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,6 +43,8 @@ static void swapz_primary_selected_target_clear(void)
 
 #define SWAPZ_PRIMARY_BLOCK_BYTES ((uint64_t)SWAPZ_BLOCK_BYTES)
 #define SWAPZ_PRIMARY_MUTATION_LOCK_NAME "package.lock"
+#define SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY \
+	"/var/lib/swapz-package-transactions"
 #define SWAPZ_PRIMARY_EXECUTION_RUNTIME_DIRECTORY "/run/swapz"
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_NAME "primary-execution.env"
 #define SWAPZ_PRIMARY_BOOT_ID_LENGTH 36U
@@ -4119,6 +4122,170 @@ static int swapz_primary_mutation_lock(void)
 {
 	return swapz_primary_mutation_lock_at(
 		SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY, 0);
+}
+
+/*
+ * The installer keeps every uncommitted (including interrupted staging)
+ * transaction as an entry in this private durable directory. A flock alone
+ * cannot prove completion: process death releases it without removing the
+ * journal. Never open an entry or parse its potentially torn state.json;
+ * even an empty transaction directory is independently incomplete.
+ *
+ * The caller holds package.lock. Anchor the directory lookup to a verified
+ * parent, reject mount substitution (including same-filesystem bind mounts),
+ * and recheck both pathname identities after scanning.
+ */
+static int swapz_primary_package_transactions_clear_at(
+	const char *directory, uid_t expected_owner)
+{
+	struct stat parent_info;
+	struct stat named_parent_info;
+	struct stat transaction_info;
+	struct stat named_transaction_info;
+	struct statx parent_mount;
+	struct statx named_parent_mount;
+	struct statx transaction_mount;
+	struct dirent *entry;
+	DIR *entries = NULL;
+	const char *separator;
+	const char *directory_name;
+	char parent_path[PATH_MAX];
+	size_t parent_length;
+	int parent_fd = -1;
+	int transaction_fd = -1;
+	int result = -1;
+	int saved_errno;
+
+	if (!directory || directory[0] != '/') {
+		errno = EINVAL;
+		return -1;
+	}
+	separator = strrchr(directory, '/');
+	if (!separator || !separator[1] || !strcmp(separator + 1, ".") ||
+	    !strcmp(separator + 1, "..")) {
+		errno = EINVAL;
+		return -1;
+	}
+	parent_length = (size_t)(separator - directory);
+	if (parent_length >= sizeof(parent_path) ||
+	    strlen(directory) >= PATH_MAX) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (parent_length) {
+		memcpy(parent_path, directory, parent_length);
+		parent_path[parent_length] = '\0';
+	} else {
+		memcpy(parent_path, "/", sizeof("/"));
+	}
+	directory_name = separator + 1;
+	parent_fd = open(parent_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW |
+				    O_NONBLOCK | O_CLOEXEC);
+	if (parent_fd < 0)
+		return -1;
+	if (fstat(parent_fd, &parent_info) < 0 ||
+	    statx(parent_fd, "", AT_EMPTY_PATH, STATX_MNT_ID,
+		  &parent_mount) < 0)
+		goto out;
+	if (!S_ISDIR(parent_info.st_mode) ||
+	    parent_info.st_uid != expected_owner ||
+	    (parent_info.st_mode & 0022U) != 0U ||
+	    !(parent_mount.stx_mask & STATX_MNT_ID)) {
+		errno = EPERM;
+		goto out;
+	}
+	transaction_fd = openat(parent_fd, directory_name,
+				O_RDONLY | O_DIRECTORY | O_NOFOLLOW |
+				O_NONBLOCK | O_CLOEXEC);
+	if (transaction_fd < 0) {
+		if (errno != ENOENT)
+			goto out;
+		/* No transaction parent yet is clean only while still absent. */
+		if (fstatat(parent_fd, directory_name, &named_transaction_info,
+			    AT_SYMLINK_NOFOLLOW) == 0 || errno != ENOENT) {
+			errno = ESTALE;
+			goto out;
+		}
+		result = 0;
+		goto verify_parent;
+	}
+	if (fstat(transaction_fd, &transaction_info) < 0 ||
+	    statx(transaction_fd, "", AT_EMPTY_PATH, STATX_MNT_ID,
+		  &transaction_mount) < 0)
+		goto out;
+	if (!S_ISDIR(transaction_info.st_mode) ||
+	    transaction_info.st_uid != expected_owner ||
+	    (transaction_info.st_mode & 0777U) != 0700U ||
+	    transaction_info.st_dev != parent_info.st_dev ||
+	    !(transaction_mount.stx_mask & STATX_MNT_ID) ||
+	    transaction_mount.stx_mnt_id != parent_mount.stx_mnt_id) {
+		errno = EPERM;
+		goto out;
+	}
+	entries = fdopendir(transaction_fd);
+	if (!entries)
+		goto out;
+	transaction_fd = -1; /* closedir owns the descriptor from here on */
+	errno = 0;
+	while ((entry = readdir(entries))) {
+		if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
+			errno = EBUSY;
+			goto out;
+		}
+		errno = 0;
+	}
+	if (errno)
+		goto out;
+	if (fstatat(parent_fd, directory_name, &named_transaction_info,
+		    AT_SYMLINK_NOFOLLOW) < 0)
+		goto out;
+	if (!S_ISDIR(named_transaction_info.st_mode) ||
+	    named_transaction_info.st_dev != transaction_info.st_dev ||
+	    named_transaction_info.st_ino != transaction_info.st_ino ||
+	    named_transaction_info.st_uid != expected_owner ||
+	    (named_transaction_info.st_mode & 0777U) != 0700U) {
+		errno = ESTALE;
+		goto out;
+	}
+	result = 0;
+
+verify_parent:
+	if (fstatat(AT_FDCWD, parent_path, &named_parent_info,
+		    AT_SYMLINK_NOFOLLOW) < 0 ||
+	    statx(AT_FDCWD, parent_path, AT_SYMLINK_NOFOLLOW,
+		  STATX_MNT_ID, &named_parent_mount) < 0) {
+		result = -1;
+		goto out;
+	}
+	if (!S_ISDIR(named_parent_info.st_mode) ||
+	    named_parent_info.st_dev != parent_info.st_dev ||
+	    named_parent_info.st_ino != parent_info.st_ino ||
+	    named_parent_info.st_uid != expected_owner ||
+	    (named_parent_info.st_mode & 0022U) != 0U ||
+	    !(named_parent_mount.stx_mask & STATX_MNT_ID) ||
+	    named_parent_mount.stx_mnt_id != parent_mount.stx_mnt_id) {
+		errno = ESTALE;
+		result = -1;
+	}
+
+out:
+	saved_errno = errno ? errno : EIO;
+	if (entries && closedir(entries) < 0 && result == 0) {
+		saved_errno = errno;
+		result = -1;
+	}
+	if (transaction_fd >= 0 && close(transaction_fd) < 0 &&
+	    result == 0) {
+		saved_errno = errno;
+		result = -1;
+	}
+	if (close(parent_fd) < 0 && result == 0) {
+		saved_errno = errno;
+		result = -1;
+	}
+	if (result < 0)
+		errno = saved_errno;
+	return result;
 }
 
 static int swapz_primary_partition_lock_at(int recovery_fd,
@@ -10234,6 +10401,14 @@ static int swapz_primary_run_mutating_action(
 	mutation_lock_fd = swapz_primary_mutation_lock();
 	if (mutation_lock_fd < 0)
 		return -1;
+	/* The volatile flock survives no process crash; durable state must agree. */
+	if ((action == SWAPZ_PRIMARY_MUTATING_PREPARE ||
+	     action == SWAPZ_PRIMARY_MUTATING_START) &&
+	    swapz_primary_package_transactions_clear_at(
+		    SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY, 0) < 0) {
+		result = -1;
+		goto unlock;
+	}
 	switch (action) {
 	case SWAPZ_PRIMARY_MUTATING_PREPARE:
 		result = swapz_primary_prepare_metadata();
@@ -10252,6 +10427,7 @@ static int swapz_primary_run_mutating_action(
 		result = -1;
 		break;
 	}
+unlock:
 	saved_errno = errno;
 	if (close(mutation_lock_fd) < 0 && result == 0) {
 		result = -1;
