@@ -602,9 +602,17 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
                 raise ValueError(
                     "minute throughput/duration or tail latency is inconsistent")
         intervals = metric(arm, "sustained_intervals")
-        if not isinstance(intervals, list) or not intervals:
-            raise ValueError("one-hour telemetry intervals are absent")
+        arm_started = arm.get("arm_started_monotonic_ns")
+        arm_finished = arm.get("arm_finished_monotonic_ns")
+        if (not isinstance(intervals, list) or not intervals or
+                type(arm_started) is not int or arm_started <= 0 or
+                type(arm_finished) is not int or
+                arm_finished <= arm_started):
+            raise ValueError(
+                "one-hour telemetry intervals or arm chronology are absent")
         previous_end = 0.0
+        previous_monotonic_end = None
+        positive_gc_interval = False
         for index, row in enumerate(intervals):
             if not isinstance(row, dict) or type(row.get("interval")) is not int or row["interval"] != index:
                 raise ValueError("telemetry interval indexing is invalid")
@@ -612,22 +620,47 @@ def sustained_coverage_reasons(arm: dict, label: str) -> list[str]:
             end = number(metric(row, "end_seconds"), "interval.end_seconds")
             duration = number(metric(row, "duration_seconds"), "interval.duration_seconds")
             gap = number(metric(row, "max_no_progress_seconds"), "interval.max_no_progress_seconds")
-            if (start < 0 or
+            monotonic_start = row.get("start_monotonic_ns")
+            monotonic_end = row.get("end_monotonic_ns")
+            if (type(monotonic_start) is not int or
+                    type(monotonic_end) is not int or
+                    monotonic_start < arm_started or
+                    monotonic_end <= monotonic_start or
+                    monotonic_end > arm_finished or
+                    (previous_monotonic_end is not None and
+                     monotonic_start != previous_monotonic_end) or
+                    not math.isclose(
+                        (monotonic_end - monotonic_start) / 1e9, duration,
+                        rel_tol=1e-9, abs_tol=1e-6) or
+                    start < 0 or
                     (start > 1.0 if index == 0 else
                      not math.isclose(start, previous_end, abs_tol=1e-6)) or
                     duration <= 0 or
                     not math.isclose(end - start, duration, rel_tol=1e-9, abs_tol=1e-6) or
                     gap < 0 or gap > CONTRACT["acceptance"]["sustained"]["max_no_progress_seconds"]):
-                raise ValueError("telemetry has a gap, negative duration or stalled forward progress")
+                raise ValueError(
+                    "telemetry has invalid absolute chronology, a gap, "
+                    "negative duration or stalled forward progress")
             if label == "swapz":
                 gc = row.get("gc")
                 if (not target_health_ok(gc) or
                         type(gc.get("gc_no_headroom_skips")) is not int or
                         gc["gc_no_headroom_skips"] != 0):
                     raise ValueError("interval target failure or GC no-headroom skip")
+                for field in ("gc_wall_ns", "gc_victims", "gc_pages"):
+                    if type(gc.get(field)) is not int or gc[field] < 0:
+                        raise ValueError(
+                            "interval GC activity counters are missing or malformed")
+                positive_gc_interval = positive_gc_interval or any(
+                    gc[field] > 0
+                    for field in ("gc_wall_ns", "gc_victims", "gc_pages"))
             previous_end = end
+            previous_monotonic_end = monotonic_end
         if previous_end < spec["measure_seconds"]:
             raise ValueError("telemetry does not cover the full measured hour")
+        if label == "swapz" and not positive_gc_interval:
+            raise ValueError(
+                "telemetry contains no interval with measured GC activity")
         occupancy = metric(arm, "occupancy_transitions")
         required_phases = ("initial", "post-fill", "post-warmup", "measured-end")
         occupied = metric(arm, "occupied_pages")
