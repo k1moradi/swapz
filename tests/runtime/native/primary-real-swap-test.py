@@ -2685,5 +2685,108 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
 
 
+    def test_privileged_external_commands_require_root_owned_nonwritable_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = Path(directory) / "dmsetup"
+            fake.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+            fake.chmod(0o777)
+            with mock.patch.object(
+                    qualify.shutil, "which", return_value=str(fake)) as which, \
+                    self.assertRaisesRegex(
+                        qualify.Blocked, "unsafe required command dmsetup"):
+                qualify._trusted_executable("dmsetup")
+            which.assert_called_once_with(
+                "dmsetup", path=qualify.SAFE_CHILD_PATH)
+
+    def test_required_command_execution_uses_trusted_resolved_path(self):
+        completed = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.object(
+                qualify, "_trusted_executable",
+                return_value="/trusted/dmsetup") as trusted, \
+                mock.patch.object(
+                    qualify.subprocess, "run",
+                    return_value=completed) as run:
+            qualify._run(["dmsetup", "status", "swapz-primary"], check=False)
+        trusted.assert_called_once_with("dmsetup")
+        self.assertEqual(
+            run.call_args.args[0],
+            ["/trusted/dmsetup", "status", "swapz-primary"])
+
+    def test_lsblk_topology_uses_strict_json_and_exact_container_types(self):
+        valid = (
+            '{"blockdevices":[{"maj:min":"8:0","children":'
+            '[{"maj:min":"8:1"}]}]}')
+        rows = qualify.parse_lsblk_topology(valid)
+        self.assertEqual(
+            [row["maj:min"] for row in rows], ["8:0", "8:1"])
+        for malformed in (
+                '{"blockdevices":[],"blockdevices":[]}',
+                '{"blockdevices":[NaN]}',
+                '{"blockdevices":[null]}',
+                '{"blockdevices":{}}',
+                '{"blockdevices":[{"children":{}}]}'):
+            with self.subTest(malformed=malformed), self.assertRaises(
+                    qualify.Blocked):
+                qualify.parse_lsblk_topology(malformed)
+
+    def test_stable_artifact_hash_streams_without_whole_file_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "artifact"
+            artifact.write_bytes(b"x" * (2 * 1024 * 1024 + 17))
+            expected = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            with mock.patch.object(
+                    qualify, "_read_stable_file_bytes",
+                    side_effect=AssertionError(
+                        "streaming hash must not buffer whole artifact")):
+                self.assertEqual(qualify._sha256_file(artifact), expected)
+
+    def test_physical_control_input_inventory_matches_admission_parent(self):
+        self.assertEqual(
+            qualify.PHYSICAL_CONTROL_INPUT_PATHS,
+            parent.PHYSICAL_CONTROL_INPUT_PATHS)
+
+
+    def test_privileged_child_environment_drops_compiler_and_loader_influence(self):
+        poison = {
+            "PATH": "/attacker/bin",
+            "CPATH": "/attacker/include",
+            "COMPILER_PATH": "/attacker/compiler",
+            "GCC_EXEC_PREFIX": "/attacker/gcc",
+            "LIBRARY_PATH": "/attacker/lib",
+            "LD_PRELOAD": "/attacker/libhook.so",
+            "PYTHONPATH": "/attacker/python",
+        }
+        completed = __import__("subprocess").CompletedProcess(
+            args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.dict(os.environ, poison, clear=True), \
+                mock.patch.object(
+                    qualify, "_trusted_executable",
+                    return_value="/usr/bin/cc"), \
+                mock.patch.object(
+                    qualify.subprocess, "run",
+                    return_value=completed) as run:
+            qualify._run(["cc", "--version"], check=False)
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(environment["PATH"], qualify.SAFE_CHILD_PATH)
+        self.assertEqual(environment["LC_ALL"], "C")
+        for variable in poison:
+            if variable != "PATH":
+                self.assertNotIn(variable, environment)
+
+    def test_parent_launches_privileged_helper_with_isolated_python(self):
+        arguments = parent._build_parser().parse_args([
+            "--validated-source", "a" * 40,
+            "--qualification-report", "/tmp/report.json",
+        ])
+        child = parent._child_arguments(
+            arguments, Path("/tmp/admission.sock"), 1000,
+            "/usr/bin/python3")
+        self.assertEqual(
+            child[:4],
+            ["/usr/bin/python3", "-I", "-B",
+             os.fspath(parent.PRIVILEGED_HELPER)])
+
+
 if __name__ == "__main__":
     unittest.main()

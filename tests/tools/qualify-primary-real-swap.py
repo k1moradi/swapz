@@ -91,6 +91,8 @@ PSI_STOP_SAMPLE_INTERVAL_SECONDS = 0.05
 PSI_STOP_MAX_SAMPLES = 256
 CYCLE_TELEMETRY_INTERVAL_SECONDS = 0.1
 CYCLE_TELEMETRY_THREAD_TIMEOUT_SECONDS = 5
+TRUSTED_EXTERNAL_COMMANDS = frozenset(("cc", "dmsetup", "lsblk", "dmesg"))
+SAFE_CHILD_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 class Blocked(RuntimeError):
@@ -481,16 +483,51 @@ class PersistentEvidence:
         self._write()
 
 
+def _trusted_executable_path(candidate: str, label: str) -> str:
+    try:
+        resolved = Path(candidate).resolve(strict=True)
+        info = resolved.stat()
+    except OSError as exc:
+        raise Blocked(f"cannot inspect required {label}") from exc
+    if not resolved.is_absolute() or not stat.S_ISREG(info.st_mode) or \
+            info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o022 or \
+            not os.access(resolved, os.X_OK):
+        raise Blocked(f"unsafe required {label}")
+    return os.fspath(resolved)
+
+
+def _trusted_executable(name: str) -> str:
+    candidate = shutil.which(name, path=SAFE_CHILD_PATH)
+    if not candidate:
+        raise Blocked(f"missing required command {name}")
+    return _trusted_executable_path(candidate, f"command {name}")
+
+
+def _safe_child_environment(
+        extra_environment: dict[str, str] | None = None) -> dict[str, str]:
+    environment = {
+        "LC_ALL": "C",
+        "LANG": "C",
+        "PATH": SAFE_CHILD_PATH,
+    }
+    if extra_environment:
+        environment.update(extra_environment)
+    return environment
+
+
 def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
          input_text: str | None = None,
          extra_environment: dict[str, str] | None = None
          ) -> subprocess.CompletedProcess[str]:
-    environment = {**os.environ, "LC_ALL": "C", "LANG": "C"}
-    if extra_environment:
-        environment.update(extra_environment)
+    if not argv:
+        raise Blocked("required command invocation is empty")
+    command = list(argv)
+    if command[0] in TRUSTED_EXTERNAL_COMMANDS:
+        command[0] = _trusted_executable(command[0])
+    environment = _safe_child_environment(extra_environment)
     try:
         result = subprocess.run(
-            argv,
+            command,
             input=input_text,
             text=True,
             capture_output=True,
@@ -499,11 +536,12 @@ def _run(argv: list[str], *, check: bool = True, timeout: float = 30,
             env=environment,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise Blocked(f"cannot execute required command {argv[0]}: {exc}") from exc
+        raise Blocked(
+            f"cannot execute required command {command[0]}: {exc}") from exc
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().replace("\n", "; ")
         raise QualificationFailure(
-            f"command failed rc={result.returncode}: {' '.join(argv)}: {detail}")
+            f"command failed rc={result.returncode}: {' '.join(command)}: {detail}")
     return result
 
 
@@ -561,9 +599,48 @@ def _read_stable_file_bytes(
 
 def _sha256_file(
         path: Path, *, error_type: type[Exception] = Blocked) -> str:
-    return hashlib.sha256(
-        _read_stable_file_bytes(path, f"hash input {path}", error_type)
-    ).hexdigest()
+    """Hash a stable regular file without buffering the entire artifact."""
+    label = f"hash input {path}"
+    file_descriptor = -1
+    try:
+        named_before = path.lstat()
+        if not stat.S_ISREG(named_before.st_mode):
+            raise error_type(f"{label} is not a regular file")
+        file_descriptor = os.open(
+            path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        opened_before = os.fstat(file_descriptor)
+        if not stat.S_ISREG(opened_before.st_mode) or \
+                opened_before.st_dev != named_before.st_dev or \
+                opened_before.st_ino != named_before.st_ino:
+            raise error_type(f"{label} pathname identity changed before open")
+        digest = hashlib.sha256()
+        byte_count = 0
+        while True:
+            chunk = os.read(file_descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            byte_count += len(chunk)
+        opened_after = os.fstat(file_descriptor)
+        named_after = path.lstat()
+        if _stable_file_identity(opened_after) != _stable_file_identity(opened_before) or \
+                _stable_file_identity(named_after) != _stable_file_identity(opened_after) or \
+                byte_count != opened_after.st_size:
+            raise error_type(f"{label} changed while being hashed")
+        return digest.hexdigest()
+    except (Blocked, QualificationFailure):
+        raise
+    except OSError as exc:
+        raise error_type(f"cannot read {label}: {exc}") from exc
+    finally:
+        original_error = sys.exc_info()[1]
+        if file_descriptor >= 0:
+            try:
+                os.close(file_descriptor)
+            except OSError as cleanup_error:
+                _raise_cleanup_errors(
+                    original_error, [f"{label} descriptor: {cleanup_error}"],
+                    error_type=error_type)
 
 
 def pin_real_swap_oracle(oracle_path: Path, private_directory: Path,
@@ -1400,13 +1477,27 @@ def _block_size(path: Path) -> int:
 
 
 def _flatten_lsblk(rows: list[dict]) -> list[dict]:
+    if not isinstance(rows, list):
+        raise Blocked("lsblk blockdevices inventory is not a list")
     result: list[dict] = []
     for row in rows:
+        if not isinstance(row, dict):
+            raise Blocked("lsblk topology row is not an object")
         result.append(row)
         children = row.get("children")
-        if isinstance(children, list):
+        if children is not None:
+            if not isinstance(children, list):
+                raise Blocked("lsblk topology children are not a list")
             result.extend(_flatten_lsblk(children))
     return result
+
+
+def parse_lsblk_topology(text: str) -> list[dict]:
+    topology = _load_unique_json(text, "lsblk topology")
+    rows = topology.get("blockdevices")
+    if not isinstance(rows, list):
+        raise Blocked("lsblk topology lacks blockdevices list")
+    return _flatten_lsblk(rows)
 
 
 def require_plan_storage_separation(plan: dict) -> None:
@@ -1581,10 +1672,7 @@ def verify_authorized_target(
         "lsblk", "--json", "--bytes", "--output",
         "PATH,TYPE,MAJ:MIN,SIZE,PARTUUID,PKNAME,RM,TRAN,MODEL",
     ], timeout=15)
-    try:
-        rows = _flatten_lsblk(json.loads(result.stdout).get("blockdevices", []))
-    except (ValueError, AttributeError) as exc:
-        raise Blocked("cannot parse lsblk topology") from exc
+    rows = parse_lsblk_topology(result.stdout)
     target_rows = [row for row in rows if row.get("maj:min") == f"{major}:{minor}"]
     parent_rows = [row for row in rows if row.get("maj:min") == f"{parent_major}:{parent_minor}"]
     if len(target_rows) != 1 or len(parent_rows) != 1:
@@ -1734,8 +1822,7 @@ def verify_loaded_module_provenance(validated_source: str) -> dict[str, str]:
 
 def _ensure_commands(names: tuple[str, ...]) -> None:
     for name in names:
-        if shutil.which(name) is None:
-            raise Blocked(f"missing required command {name}")
+        _trusted_executable(name)
 
 
 def _validate_precycle_state(
@@ -1763,10 +1850,8 @@ def _read_primary_output(result: subprocess.CompletedProcess[str], prefix: str) 
 
 
 def _primary(swapzctl: Path, action: str, timeout: float, *, admitted: bool = False) -> subprocess.CompletedProcess[str]:
-    environment = {
-        **os.environ, "LC_ALL": "C", "LANG": "C",
-        **_physical_control_environment(),
-    }
+    environment = _safe_child_environment(
+        _physical_control_environment())
     try:
         return subprocess.run(
             [str(swapzctl), "primary", action],
@@ -2357,6 +2442,8 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
             raise QualificationFailure(
                 "sustained cgroup memory PSI exceeded safe stop threshold")
 
+    oracle_python = _trusted_executable_path(
+        sys.executable, "running Python interpreter")
     try:
         for round_index in range(1, REUSE_ROUNDS + 1):
             _write_control(cgroup / "memory.max", str(resident_mib * MIB), admitted=True)
@@ -2379,11 +2466,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     ).hexdigest()
                     worker_seeds.append(seed)
                     process = subprocess.Popen(
-                        [sys.executable, "-B", str(oracle_path), "--seed", seed,
-                         "--memory-mib", str(memory_mib)],
+                        [oracle_python, "-I", "-B", str(oracle_path),
+                         "--seed", seed, "--memory-mib", str(memory_mib)],
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                         text=True, bufsize=1,
-                        env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+                        env=_safe_child_environment(),
                     )
                     # Own the worker and descriptors before cgroup migration.
                     round_processes.append(process)

@@ -349,7 +349,7 @@ def _child_arguments(arguments: argparse.Namespace,
                      parent_uid: int,
                      python3: str) -> list[str]:
     return [
-        python3, "-B", os.fspath(PRIVILEGED_HELPER),
+        python3, "-I", "-B", os.fspath(PRIVILEGED_HELPER),
         "--validated-source", arguments.validated_source,
         "--qualification-report", arguments.qualification_report,
         "--swapzctl", arguments.swapzctl,
