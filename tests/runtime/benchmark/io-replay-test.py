@@ -3234,6 +3234,28 @@ class PairReplayContract(unittest.TestCase):
             expected_peak_ram_bytes=8192)
         self.assertEqual(ram_summary["peak_ram_bytes"], 8192)
 
+        parse_meminfo = evidence.RAM_VALIDATOR["parse_meminfo_counters"]
+        self.assertEqual(
+            parse_meminfo(
+                "MemTotal:       8388608 kB\n"
+                "MemAvailable:     16384 kB\n"
+                "SUnreclaim:        1024 kB\n"
+                "VmallocUsed:       2048 kB\n"),
+            {
+                "mem_available_kib": 16384,
+                "s_unreclaim_kib": 1024,
+                "vmalloc_used_kib": 2048,
+            })
+        for malformed in (
+                "MemAvailable: 16384 kB\nSUnreclaim: 1024 kB\n",
+                "MemAvailable: 16384 bytes\nSUnreclaim: 1024 kB\n"
+                "VmallocUsed: 2048 kB\n",
+                "MemAvailable: 16384 kB\nMemAvailable: 16384 kB\n"
+                "SUnreclaim: 1024 kB\nVmallocUsed: 2048 kB\n"):
+            with self.subTest(meminfo=malformed):
+                with self.assertRaises(ValueError):
+                    parse_meminfo(malformed)
+
         # Four segment-rounded data segments support exactly 256 pages after
         # the separate two-segment GC reserve and foreground headroom.
         target_bytes = (1024 + 1) * 4096
