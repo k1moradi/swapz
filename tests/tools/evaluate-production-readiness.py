@@ -666,8 +666,8 @@ def validate_physical_campaign_evidence(
             parse_int=_bounded_json_integer,
             parse_float=_finite_json_float,
             parse_constant=_reject_json_constant)
-    except (UnicodeDecodeError, ValueError, OverflowError):
-        reject("sealed campaign evidence bytes are malformed")
+    except (UnicodeDecodeError, ValueError, OverflowError) as exc:
+        reject(f"sealed campaign evidence bytes are malformed: {exc}")
         return issues
     if not isinstance(serialized_campaign, dict):
         reject("sealed campaign evidence bytes have invalid top level")
