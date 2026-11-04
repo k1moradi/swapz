@@ -146,6 +146,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_SYSTEMCTL_LOG=str(self.systemctl_log),
             SWAPZ_REMOVE_SLEEP_MARKER=str(self.remove_sleep_marker),
             SWAPZ_TEST_INSTALLED_MODULE=str(self.installed_module),
+            SWAPZ_TEST_INSTALLED_CLI=str(self.home / "usr/local/sbin/swapzctl"),
             SWAPZ_FAKE_FAIL_AT="never",
             SWAPZ_FAKE_BUILD_SLEEP="0",
             SWAPZ_FAKE_REMOVE_SLEEP="0",
@@ -311,6 +312,10 @@ case "${1:-}" in
           ! -e "$SWAPZ_SYSTEMCTL_FAIL_MARKER" ]]; then
       : > "$SWAPZ_SYSTEMCTL_FAIL_MARKER"
       exit 46
+    fi
+    if [[ "${SWAPZ_TEST_ASSERT_CLI_ABSENT_AT_RELOAD:-0}" == 1 &&
+          -e "$SWAPZ_TEST_INSTALLED_CLI" ]]; then
+      exit 57
     fi
     ;;
   is-active)
@@ -759,6 +764,111 @@ esac
         self.assertEqual(len(transactions), 1)
         blocked = self.invoke("install")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_upgrade_all_mutation_checkpoints_restore_exact_old_package(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        installed_cli = self.prefix / "sbin/swapzctl"
+        old_cli = installed_cli.read_bytes()
+        old_module = self.installed_module.read_bytes()
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+
+        # Fail after every backend and activation publication boundary.
+        phases = (
+            "activation-files-removed", "dkms-removed", "source-removed",
+            "source-created", "dkms-added", "dkms-built", "dkms-installed",
+            "module-promoted", "depmod-complete", "package-files-published",
+            "systemd-reload-complete", "cli-published",
+        )
+        for phase in phases:
+            with self.subTest(phase=phase):
+                result = self.invoke(
+                    "install", {"SWAPZ_TEST_INSTALL_FAIL_AFTER": phase})
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("attempting transaction rollback", result.stderr)
+                self.assertEqual(installed_cli.read_bytes(), old_cli)
+                self.assertEqual(self.installed_module.read_bytes(), old_module)
+                self.assertFalse(
+                    list((self.home / "transactions").glob("swapz-package.*")))
+
+    def test_install_cli_only_published_after_systemd_reload(self):
+        gated = {"SWAPZ_TEST_ASSERT_CLI_ABSENT_AT_RELOAD": "1"}
+        first = self.invoke("install", gated)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assert_installed_exact()
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        upgraded = self.invoke("install", gated)
+        self.assertEqual(upgraded.returncode, 0, upgraded.stderr)
+        self.assert_installed_exact()
+
+    def interrupt_upgrade_with_snapshot(self, corrupt_backup):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        old_module = self.installed_module.read_bytes()
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        environment = dict(self.env, SWAPZ_FAKE_REMOVE_SLEEP="30")
+        process = subprocess.Popen(
+            ["bash", str(self.script), "install", str(self.prefix)],
+            cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                if self.remove_sleep_marker.exists():
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("upgrade DKMS removal did not start")
+
+            transactions = list(
+                (self.home / "transactions").glob("swapz-package.*"))
+            self.assertEqual(len(transactions), 1)
+            transaction = transactions[0]
+            state_path = transaction / "state.json"
+            self.assertEqual(state_path.stat().st_mode & 0o777, 0o600)
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["schema"], "swapz-package-install-v1")
+            self.assertEqual(state["phase"], "removing-dkms")
+            self.assertTrue(state["backup_files"])
+            for entry in state["backup_files"]:
+                self.assertEqual(
+                    sha256(transaction / "backup" / entry["path"]),
+                    entry["sha256"])
+            # The old CLI is revoked before DKMS begins replacing its module.
+            self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+            if corrupt_backup:
+                (transaction / "backup/source/dkms.conf").write_bytes(
+                    b"corrupted-rollback-snapshot\n")
+
+            os.killpg(process.pid, signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 143, stdout + "\n" + stderr)
+            if corrupt_backup:
+                self.assertIn("rollback snapshot invalid", stderr)
+                self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+                self.assertEqual(
+                    len(list((self.home / "transactions").glob(
+                        "swapz-package.*"))), 1)
+                refused = self.invoke("install")
+                self.assertIn("incomplete package transaction retained",
+                              refused.stderr)
+            else:
+                self.assertEqual(
+                    self.installed_module.read_bytes(), old_module)
+                self.assertTrue((self.prefix / "sbin/swapzctl").exists())
+                self.assertFalse(
+                    list((self.home / "transactions").glob("swapz-package.*")))
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=8)
+
+    def test_interrupted_upgrade_restores_journaled_snapshot(self):
+        self.interrupt_upgrade_with_snapshot(corrupt_backup=False)
+
+    def test_corrupt_upgrade_snapshot_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(corrupt_backup=True)
 
     def test_upgrade_refuses_primary_recovery_authority(self):
         self.assertEqual(self.invoke("install").returncode, 0)

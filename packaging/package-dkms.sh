@@ -454,9 +454,9 @@ assert_no_incomplete_package_transactions() {
     blocked "incomplete package transaction retained at ${stale_transactions[0]}"
 }
 
-persist_uninstall_state() {
+persist_transaction_state() {
   local phase="$1"
-  python3 - "$transaction_dir" "$phase" "$version" "$kernel_release" <<'PY'
+  python3 - "$transaction_dir" "$phase" "$version" "$kernel_release" "$action" <<'PY'
 import hashlib
 import json
 import os
@@ -468,6 +468,9 @@ transaction = Path(sys.argv[1])
 phase = sys.argv[2]
 version = sys.argv[3]
 kernel_release = sys.argv[4]
+operation = sys.argv[5]
+if operation not in ("install", "uninstall"):
+    raise SystemExit("unknown package transaction")
 backup = transaction / "backup"
 if not backup.is_dir() or backup.is_symlink():
     raise SystemExit("missing backup directory")
@@ -507,7 +510,7 @@ for directory in sorted(directories, key=lambda item: len(item.parts), reverse=T
         os.close(descriptor)
 
 state = {
-    "schema": "swapz-package-uninstall-v1",
+    "schema": f"swapz-package-{operation}-v1",
     "phase": phase,
     "version": version,
     "kernel_release": kernel_release,
@@ -515,6 +518,14 @@ state = {
 }
 temporary = transaction / "state.json.tmp"
 final = transaction / "state.json"
+# Never silently rebaseline a backed-up file after the prepared checkpoint.
+if final.exists() or final.is_symlink():
+    if final.is_symlink() or not final.is_file():
+        raise SystemExit("unsafe previous package journal")
+    previous = json.loads(final.read_text(encoding="utf-8"))
+    for field in ("schema", "version", "kernel_release", "backup_files"):
+        if previous.get(field) != state[field]:
+            raise SystemExit(f"package rollback snapshot changed: {field}")
 with temporary.open("w", encoding="utf-8") as stream:
     json.dump(state, stream, sort_keys=True, separators=(",", ":"))
     stream.write("\n")
@@ -527,6 +538,68 @@ try:
     os.fsync(descriptor)
 finally:
     os.close(descriptor)
+PY
+}
+
+verify_transaction_snapshot() {
+  python3 - "$transaction_dir" "$action" "$version" "$kernel_release" <<'PY'
+import hashlib
+import json
+import stat
+import sys
+from pathlib import Path
+
+transaction = Path(sys.argv[1])
+operation = sys.argv[2]
+version = sys.argv[3]
+kernel_release = sys.argv[4]
+backup = transaction / "backup"
+journal = transaction / "state.json"
+if (backup.is_symlink() or not backup.is_dir() or journal.is_symlink()
+        or not journal.is_file()):
+    raise SystemExit("missing or unsafe package rollback snapshot")
+state = json.loads(journal.read_text(encoding="utf-8"))
+if (state.get("schema") != f"swapz-package-{operation}-v1"
+        or state.get("version") != version
+        or state.get("kernel_release") != kernel_release):
+    raise SystemExit("package rollback journal does not match this operation")
+entries = state.get("backup_files")
+if not isinstance(entries, list):
+    raise SystemExit("invalid rollback file manifest")
+seen = set()
+for entry in entries:
+    relative = entry.get("path") if isinstance(entry, dict) else None
+    if (not isinstance(relative, str) or not relative
+            or Path(relative).is_absolute()
+            or any(part in (".", "..") for part in Path(relative).parts)
+            or relative in seen):
+        raise SystemExit("invalid rollback file path")
+    seen.add(relative)
+    path = backup / relative
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit("missing or substituted rollback file")
+    metadata = path.stat()
+    if (entry.get("size") != metadata.st_size
+            or entry.get("mode") != stat.S_IMODE(metadata.st_mode)
+            or entry.get("uid") != metadata.st_uid
+            or entry.get("gid") != metadata.st_gid):
+        raise SystemExit("rollback file metadata changed")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if entry.get("sha256") != digest.hexdigest():
+        raise SystemExit("rollback file digest changed")
+actual = set()
+for path in backup.rglob("*"):
+    if path.is_symlink():
+        raise SystemExit("substituted rollback entry")
+    if path.is_file():
+        actual.add(str(path.relative_to(backup)))
+    elif not path.is_dir():
+        raise SystemExit("unexpected rollback entry type")
+if actual != seen:
+    raise SystemExit("rollback file set changed")
 PY
 }
 
@@ -608,16 +681,16 @@ restore_uninstall_backup() {
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
   "$depmod_bin" "$kernel_release" || return 1
   cmp -s "$backup_dir/installed-module" "$installed_module" || return 1
-  persist_uninstall_state rollback-backend-restored || return 1
+  persist_transaction_state rollback-backend-restored || return 1
 
   # Restore all non-CLI package files only after module/DKMS state and depmod
   # are valid. The CLI is the activation gate and is restored atomically last.
   restore_uninstall_file_backups_except_cli || return 1
-  persist_uninstall_state rollback-files-restored || return 1
+  persist_transaction_state rollback-files-restored || return 1
   "$systemctl_bin" daemon-reload || return 1
-  persist_uninstall_state rollback-systemd-reloaded || return 1
+  persist_transaction_state rollback-systemd-reloaded || return 1
   restore_uninstall_cli_backup || return 1
-  persist_uninstall_state rollback-cli-restored || return 1
+  persist_transaction_state rollback-cli-restored || return 1
   # Hermetic failure at the last verification boundary after CLI publication.
   if [[ -n "$test_root" && ${SWAPZ_TEST_UNINSTALL_ROLLBACK_VERIFY_FAILURE:-0} == 1 ]]; then
     return 1
@@ -630,14 +703,23 @@ uninstall_rollback() {
   trap - ERR HUP INT TERM
   transaction_active=0
   echo "BLOCKED: package uninstall $reason; attempting transaction rollback" >&2
-  persist_uninstall_state rollback-started >/dev/null 2>&1 || true
+  if ! verify_transaction_snapshot; then
+    cleanup_activation_files || true
+    echo "BLOCKED: uninstall rollback snapshot invalid; recovery data retained at $transaction_dir" >&2
+    exit "$rc"
+  fi
+  if ! persist_transaction_state rollback-started; then
+    cleanup_activation_files || true
+    echo "BLOCKED: cannot journal uninstall rollback; recovery data retained at $transaction_dir" >&2
+    exit "$rc"
+  fi
   if restore_uninstall_backup; then
-    persist_uninstall_state rolled-back >/dev/null 2>&1 || true
+    persist_transaction_state rolled-back >/dev/null 2>&1 || true
     rm -rf -- "$transaction_dir"
   else
     # A failed final check must never leave activation entry points online.
     cleanup_activation_files || true
-    persist_uninstall_state rollback-incomplete >/dev/null 2>&1 || true
+    persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
     echo "BLOCKED: uninstall rollback incomplete; verified recovery data retained at $transaction_dir" >&2
   fi
   exit "$rc"
@@ -707,7 +789,7 @@ if [[ "$action" == uninstall ]]; then
   trap 'staging_abort 130 interruption' INT
   trap 'staging_abort 143 interruption' TERM
   backup_verified_package_for_uninstall
-  persist_uninstall_state prepared
+  persist_transaction_state prepared
 
   transaction_active=3
   trap 'uninstall_rollback $? failure' ERR
@@ -717,34 +799,34 @@ if [[ "$action" == uninstall ]]; then
 
   # Remove all activation entry points only after the private rollback snapshot
   # and its independently verifiable hash manifest are durable.
-  persist_uninstall_state removing-activation-files
+  persist_transaction_state removing-activation-files
   cleanup_activation_files
-  persist_uninstall_state activation-files-removed
+  persist_transaction_state activation-files-removed
   uninstall_test_checkpoint activation-files-removed
 
-  persist_uninstall_state removing-dkms
+  persist_transaction_state removing-dkms
   "$dkms_bin" remove -m swapz -v "$version" --all
-  persist_uninstall_state dkms-removed
+  persist_transaction_state dkms-removed
   uninstall_test_checkpoint dkms-removed
 
-  persist_uninstall_state removing-source
+  persist_transaction_state removing-source
   cleanup_source_files
-  persist_uninstall_state source-removed
+  persist_transaction_state source-removed
   uninstall_test_checkpoint source-removed
 
-  persist_uninstall_state removing-installed-module
+  persist_transaction_state removing-installed-module
   rm -f -- "$installed_module"
-  persist_uninstall_state installed-module-removed
+  persist_transaction_state installed-module-removed
   uninstall_test_checkpoint installed-module-removed
 
-  persist_uninstall_state depmod-pending
+  persist_transaction_state depmod-pending
   "$depmod_bin" "$kernel_release"
-  persist_uninstall_state depmod-complete
+  persist_transaction_state depmod-complete
   uninstall_test_checkpoint depmod-complete
 
-  persist_uninstall_state systemd-reload-pending
+  persist_transaction_state systemd-reload-pending
   "$systemctl_bin" daemon-reload
-  persist_uninstall_state systemd-reload-complete
+  persist_transaction_state systemd-reload-complete
   uninstall_test_checkpoint systemd-reload-complete
 
   transaction_active=0
@@ -944,6 +1026,35 @@ if [[ -n "$existing_kind" ]]; then
   fi
 fi
 
+# Stage and hash every replacement before touching a verified installation.
+# Prepare all userspace/systemd bytes before replacing any live package file.
+install -m0755 "$cli_artifact" "$stage_dir/swapzctl"
+install -m0755 packaging/swapz-primary-boot-verify "$stage_dir/swapz-primary-boot-verify"
+install -m0755 packaging/swapz-primary-runtime-health "$stage_dir/swapz-primary-runtime-health"
+install -m0755 "$oracle_artifact" "$stage_dir/device-roundtrip"
+install -m0644 "$module_artifact" "$stage_dir/dm-swapz.ko"
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-mapper.service > "$stage_dir/swapz-primary-mapper.service"
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-boot-verify.service > "$stage_dir/swapz-primary-boot-verify.service"
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-runtime-health.service > "$stage_dir/swapz-primary-runtime-health.service"
+sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-generator > "$stage_dir/swapz-primary-generator"
+chmod 0644 "$stage_dir/swapz-primary-mapper.service" "$stage_dir/swapz-primary-boot-verify.service" \
+  "$stage_dir/swapz-primary-runtime-health.service"
+chmod 0755 "$stage_dir/swapz-primary-generator"
+install -m0644 packaging/swapz-primary.swap "$stage_dir/$swap_unit_name"
+
+[[ "$(hash_file "$stage_dir/swapzctl")" == "$qualified_cli_sha256" &&
+   "$(hash_file "$stage_dir/device-roundtrip")" == "$qualified_oracle_sha256" &&
+   "$(hash_file "$stage_dir/dm-swapz.ko")" == "$qualified_module_sha256" ]] ||
+  blocked "staged artifact digest mismatch"
+
+persist_transaction_state prepared
+
+install_test_checkpoint() {
+  local phase="$1"
+  [[ -z "$test_root" || ${SWAPZ_TEST_INSTALL_FAIL_AFTER:-never} != "$phase" ]] ||
+    blocked "test install checkpoint after $phase"
+}
+
 new_source_created=0
 new_dkms_registered=0
 new_files_committed=0
@@ -1025,26 +1136,41 @@ rollback() {
   rollback_in_progress=1
   trap - ERR HUP INT TERM
   echo "BLOCKED: package $reason; attempting transaction rollback" >&2
+  if [[ -n "${temporary_cli:-}" ]]; then
+    rm -f -- "$temporary_cli" || true
+  fi
+  if ! verify_transaction_snapshot; then
+    cleanup_activation_files || true
+    echo "BLOCKED: install rollback snapshot invalid; recovery data retained at $transaction_dir" >&2
+    exit "$rc"
+  fi
+  if ! persist_transaction_state rollback-started; then
+    cleanup_activation_files || true
+    echo "BLOCKED: cannot journal install rollback; recovery data retained at $transaction_dir" >&2
+    exit "$rc"
+  fi
   if (( new_dkms_registered == 1 )) || [[ -n "$({ "$dkms_bin" status -m swapz -v "$version" || true; } 2>/dev/null)" ]]; then
     "$dkms_bin" remove -m swapz -v "$version" --all >/dev/null 2>&1 || true
   fi
   cleanup_package_files
   rm -f -- "$installed_module"
   if (( had_existing == 1 )); then
-    if restore_previous_package; then
+    if restore_previous_package && persist_transaction_state rolled-back; then
       rm -rf -- "$transaction_dir"
     else
       # Do not publish a CLI after failed rollback re-verification.
       cleanup_activation_files || true
+      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
       echo "BLOCKED: previous package restoration failed; preserved rollback data at $transaction_dir" >&2
     fi
   else
     local cleanup_ok=1
     "$depmod_bin" "$kernel_release" >/dev/null 2>&1 || cleanup_ok=0
     "$systemctl_bin" daemon-reload >/dev/null 2>&1 || cleanup_ok=0
-    if (( cleanup_ok == 1 )); then
+    if (( cleanup_ok == 1 )) && persist_transaction_state rolled-back; then
       rm -rf -- "$transaction_dir"
     else
+      persist_transaction_state rollback-incomplete >/dev/null 2>&1 || true
       echo "BLOCKED: rollback cleanup incomplete; preserved transaction data at $transaction_dir" >&2
     fi
   fi
@@ -1057,11 +1183,25 @@ trap 'rollback 130 interruption' INT
 trap 'rollback 143 interruption' TERM
 
 if (( had_existing == 1 )); then
+  # Revoke activation-capable entry points before replacing the backend.
+  persist_transaction_state removing-activation-files
+  cleanup_activation_files
+  persist_transaction_state activation-files-removed
+  install_test_checkpoint activation-files-removed
+
+  persist_transaction_state removing-dkms
   "$dkms_bin" remove -m swapz -v "$version" --all
+  persist_transaction_state dkms-removed
+  install_test_checkpoint dkms-removed
+
+  persist_transaction_state removing-source
   rm -rf -- "$src"
+  persist_transaction_state source-removed
+  install_test_checkpoint source-removed
 fi
 
 [[ ! -e "$src" && ! -L "$src" ]] || blocked "DKMS source path became occupied"
+persist_transaction_state creating-source
 install -d -m0755 "$src/src/kernel"
 new_source_created=1
 install -m0644 dkms.conf "$src/dkms.conf"
@@ -1076,11 +1216,24 @@ incoming_identity > "$src/$qualification_marker"
 chmod 0644 "$src/$marker" "$src/$qualification_marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
   src/kernel/*.c src/kernel/*.h "$qualification_marker") > "$src/$source_manifest"
+persist_transaction_state source-created
+install_test_checkpoint source-created
 
+persist_transaction_state adding-dkms
 "$dkms_bin" add -m swapz -v "$version"
 new_dkms_registered=1
+persist_transaction_state dkms-added
+install_test_checkpoint dkms-added
+
+persist_transaction_state building-dkms
 "$dkms_bin" build -m swapz -v "$version" -k "$kernel_release"
+persist_transaction_state dkms-built
+install_test_checkpoint dkms-built
+
+persist_transaction_state installing-dkms
 "$dkms_bin" install -m swapz -v "$version" -k "$kernel_release"
+persist_transaction_state dkms-installed
+install_test_checkpoint dkms-installed
 status="$("$dkms_bin" status -m swapz -v "$version" -k "$kernel_release")"
 [[ "$status" == *installed* && "$status" == *"$kernel_release"* ]] ||
   blocked "DKMS did not report the current kernel installed"
@@ -1093,6 +1246,7 @@ done
 dkms_installed_module="${existing_module_candidates[0]}"
 [[ -f "$dkms_installed_module" && ! -L "$dkms_installed_module" ]] ||
   blocked "DKMS installed module is not a regular file"
+persist_transaction_state promoting-qualified-module
 if [[ "$dkms_installed_module" != "$installed_module" ]]; then
   rm -f -- "$dkms_installed_module"
 fi
@@ -1100,34 +1254,20 @@ install -d -m0755 "$installed_module_dir"
 install -m0644 "$module_artifact" "$installed_module"
 [[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
   blocked "installed module digest mismatch"
+persist_transaction_state module-promoted
+install_test_checkpoint module-promoted
+
+persist_transaction_state depmod-pending
 "$depmod_bin" "$kernel_release"
 [[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
   blocked "installed module changed during depmod"
 verify_module_resolution ||
   blocked "module lookup does not resolve to the qualified installed image"
+persist_transaction_state depmod-complete
+install_test_checkpoint depmod-complete
 
-# Prepare all userspace/systemd bytes before replacing any live package file.
-install -m0755 "$cli_artifact" "$stage_dir/swapzctl"
-install -m0755 packaging/swapz-primary-boot-verify "$stage_dir/swapz-primary-boot-verify"
-install -m0755 packaging/swapz-primary-runtime-health "$stage_dir/swapz-primary-runtime-health"
-install -m0755 "$oracle_artifact" "$stage_dir/device-roundtrip"
-install -m0644 "$module_artifact" "$stage_dir/dm-swapz.ko"
-sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-mapper.service > "$stage_dir/swapz-primary-mapper.service"
-sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-boot-verify.service > "$stage_dir/swapz-primary-boot-verify.service"
-sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-runtime-health.service > "$stage_dir/swapz-primary-runtime-health.service"
-sed "s|@SWAPZ_SBINDIR@|$cli_dir|g" packaging/swapz-primary-generator > "$stage_dir/swapz-primary-generator"
-chmod 0644 "$stage_dir/swapz-primary-mapper.service" "$stage_dir/swapz-primary-boot-verify.service" \
-  "$stage_dir/swapz-primary-runtime-health.service"
-chmod 0755 "$stage_dir/swapz-primary-generator"
-install -m0644 packaging/swapz-primary.swap "$stage_dir/$swap_unit_name"
-
-[[ "$(hash_file "$stage_dir/swapzctl")" == "$qualified_cli_sha256" &&
-   "$(hash_file "$stage_dir/device-roundtrip")" == "$qualified_oracle_sha256" &&
-   "$(hash_file "$stage_dir/dm-swapz.ko")" == "$qualified_module_sha256" ]] ||
-  blocked "staged artifact digest mismatch"
-
+persist_transaction_state publishing-package-files
 install -d -m0755 "$cli_dir" "$helper_dir" "$unit_dir" "$generator_dir"
-install -m0755 "$stage_dir/swapzctl" "$cli"
 install -m0755 "$stage_dir/swapz-primary-boot-verify" "$boot_verifier"
 install -m0755 "$stage_dir/swapz-primary-runtime-health" "$runtime_health"
 install -m0755 "$stage_dir/device-roundtrip" "$helper"
@@ -1139,18 +1279,40 @@ install -m0644 "$stage_dir/swapz-primary-runtime-health.service" "$runtime_healt
 install -m0644 "$stage_dir/$swap_unit_name" "$primary_swap"
 new_files_committed=1
 
-sha256sum "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
-  "$primary_generator" "$mapper_service" "$boot_verifier_service" \
-  "$runtime_health_service" "$primary_swap" \
-  "$installed_module" > "$src/$binary_manifest"
-verify_owned || blocked "installed ownership or digest verification failed"
-[[ "$(hash_file "$cli")" == "$qualified_cli_sha256" &&
-   "$(hash_file "$helper")" == "$qualified_oracle_sha256" &&
+# The activation-capable CLI is intentionally absent until the exact module,
+# non-CLI helpers, unit files and systemd's cached unit view are all ready.
+{
+  sha256sum "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
+    "$primary_generator" "$mapper_service" "$boot_verifier_service" \
+    "$runtime_health_service" "$primary_swap" "$installed_module"
+  printf '%s  %s\n' "$qualified_cli_sha256" "$cli"
+} > "$src/$binary_manifest"
+[[ "$(hash_file "$helper")" == "$qualified_oracle_sha256" &&
    "$(hash_file "$module_snapshot")" == "$qualified_module_sha256" &&
    "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
   blocked "installed artifact digest mismatch"
+persist_transaction_state package-files-published
+install_test_checkpoint package-files-published
 
+persist_transaction_state systemd-reload-pending
 "$systemctl_bin" daemon-reload
+persist_transaction_state systemd-reload-complete
+install_test_checkpoint systemd-reload-complete
+
+persist_transaction_state publishing-cli
+temporary_cli="$cli_dir/.swapzctl.publish.$$"
+[[ ! -e "$temporary_cli" && ! -L "$temporary_cli" ]] ||
+  blocked "temporary CLI destination became occupied"
+install -m0755 "$stage_dir/swapzctl" "$temporary_cli"
+cmp -s "$stage_dir/swapzctl" "$temporary_cli" ||
+  blocked "temporary CLI digest mismatch"
+mv -f -- "$temporary_cli" "$cli"
+persist_transaction_state cli-published
+install_test_checkpoint cli-published
+verify_owned || blocked "installed ownership or digest verification failed"
+[[ "$(hash_file "$cli")" == "$qualified_cli_sha256" ]] ||
+  blocked "installed CLI digest mismatch"
+persist_transaction_state committed
 
 transaction_active=0
 trap - ERR HUP INT TERM

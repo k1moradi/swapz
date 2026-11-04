@@ -130,9 +130,17 @@ the module selected for a later checked load therefore identify the same bytes.
 
 Install/upgrade is serialized and transactional. An identical verified install
 is a no-op. A non-identical upgrade refuses a loaded swapz module or existing
-swapz mapper, stages replacement files first, and restores the previous
-verified package if DKMS, hashing, depmod, systemd reload, a signal, or another
-commit step fails.
+swapz mapper, stages replacement files before mutation and durably journals
+the private rollback snapshot and each destructive transition. Upgrade revokes
+the existing activation entry points before touching DKMS. It publishes the
+activation-capable CLI atomically only after the qualified module resolves,
+all non-CLI helpers/units are installed and systemd reload has succeeded.
+Failure restores the previous verified package with the backend and module
+resolution restored before the CLI; changed rollback snapshots are refused,
+and incomplete recovery keeps activation revoked and later package operations
+blocked. Abrupt process or host termination can retain a journal requiring
+explicit recovery; the installer never guesses that a partial transaction
+succeeded.
 
 Uninstall is transactional too. It refuses active/enabled deployment state,
 active mapper/module use, recovery ownership, or any ownership/digest mismatch,
@@ -160,9 +168,9 @@ A kernel upgrade is deliberately not automatic deployment: because
 qualified module for that kernel, and an explicit admission/install cycle.
 Rootless packaging tests exercise repeated install/uninstall, missing headers,
 cryptographic signature/enrollment mismatch, path substitution, foreign and
-tampered artifacts, partial install/upgrade/uninstall failure, failed depmod
-and daemon-reload, active upgrade/uninstall refusal, signal rollback,
-interrupted rollback retention and cleanup. They are hermetic package contract
+tampered artifacts, each install/upgrade and uninstall mutation checkpoint,
+failed depmod and daemon-reload, active upgrade/uninstall refusal, signal rollback,
+journaled snapshot tampering, interrupted rollback retention and cleanup. They are hermetic package contract
 evidence, not system-install or target-kernel module-acceptance qualification.
 
 ## Removed build paths
