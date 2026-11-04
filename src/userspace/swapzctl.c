@@ -1298,46 +1298,72 @@ static int format_sysfs_partuuid_matches(dev_t device,
 
 static int format_mountinfo_line_device(const char *line, dev_t *device)
 {
-	const char *cursor = line;
+	const char *cursor;
 	const char *separator;
-	unsigned int field;
+	unsigned int mounted_major = 0U;
+	unsigned int mounted_minor = 0U;
+	unsigned int field = 0U;
 
 	if (!line || !device)
 		return -1;
 	separator = strstr(line, " - ");
 	if (!separator)
 		return -1;
-	for (field = 0; field < 3U; ++field) {
+	cursor = line;
+	while (cursor < separator) {
 		const char *token_end;
 
-		while (*cursor == ' ' || *cursor == '\t')
+		while (cursor < separator && (*cursor == ' ' || *cursor == '\t'))
 			++cursor;
-		if (!*cursor || *cursor == '\n')
-			return -1;
+		if (cursor == separator)
+			break;
 		token_end = cursor;
-		while (*token_end && *token_end != ' ' && *token_end != '\t' &&
-		       *token_end != '\n')
+		while (token_end < separator && *token_end != ' ' &&
+		       *token_end != '\t')
 			++token_end;
-		if (field == 2U) {
+		if (field < 2U) {
+			const char *end;
+			unsigned long long mount_identifier;
+
+			if (parse_unsigned_decimal(cursor, ULLONG_MAX, &end,
+						   &mount_identifier) < 0 ||
+			    end != token_end || !mount_identifier)
+				return -1;
+		} else if (field == 2U) {
 			char token[64];
 			size_t length = (size_t)(token_end - cursor);
-			unsigned int mounted_major;
-			unsigned int mounted_minor;
 
-			if (!length || length >= sizeof(token) ||
-			    token_end >= separator)
+			if (!length || length >= sizeof(token))
 				return -1;
 			memcpy(token, cursor, length);
 			token[length] = '\0';
 			if (parse_device_identity_fields(token, &mounted_major,
 							 &mounted_minor, 0) < 0)
 				return -1;
-			*device = makedev(mounted_major, mounted_minor);
-			return 0;
 		}
+		++field;
 		cursor = token_end;
 	}
-	return -1;
+	/* Mount ID, parent ID, device, root, mountpoint and options are required. */
+	if (field < 6U)
+		return -1;
+	cursor = separator + 3U;
+	/* Filesystem type, source and superblock options are also required. */
+	for (field = 0U; field < 3U; ++field) {
+		while (*cursor == ' ' || *cursor == '\t')
+			++cursor;
+		if (!*cursor || *cursor == '\n')
+			return -1;
+		while (*cursor && *cursor != ' ' && *cursor != '\t' &&
+		       *cursor != '\n')
+			++cursor;
+	}
+	while (*cursor == ' ' || *cursor == '\t')
+		++cursor;
+	if (*cursor != '\0' && (*cursor != '\n' || cursor[1] != '\0'))
+		return -1;
+	*device = makedev(mounted_major, mounted_minor);
+	return 0;
 }
 
 static int format_inventory_device_conflicts(dev_t observed_device,
@@ -1378,6 +1404,7 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 					 dev_t parent_device)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
+	int saw_mount = 0;
 
 	if (!stream) {
 		errno = EINVAL;
@@ -1395,6 +1422,7 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 			errno = EPROTO;
 			return -1;
 		}
+		saw_mount = 1;
 		if (format_inventory_device_conflicts(mounted_device, device,
 						     parent_device)) {
 			errno = EBUSY;
@@ -1404,6 +1432,10 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 	if (ferror(stream)) {
 		if (!errno)
 			errno = EIO;
+		return -1;
+	}
+	if (!saw_mount) {
+		errno = EPROTO;
 		return -1;
 	}
 	return 0;

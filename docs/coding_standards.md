@@ -338,7 +338,11 @@ mounts, detached namespace file descriptors or inaccessible mount namespaces.
 Mount inventory parsing
 must accept Linux pseudo-filesystem major-zero device identifiers (for example
 `0:20`) without mistaking them for the selected nonzero-major block device.
-Malformed mountinfo rows and unverified target identities still fail closed.
+Every opened mount table must contain at least one complete row, including
+both numeric mount IDs, the mount root/path/options and the three required
+post-separator fields. An empty table or a structurally incomplete unrelated
+sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
+unverified target identities still fail closed.
 Missing evidence for an existing mount namespace, malformed, unreadable,
 permission-denied, changing or ambiguous evidence fails closed.
 

@@ -437,6 +437,22 @@ static void test_mountinfo_device_parser(void)
 		&device) < 0);
 	assert(format_mountinfo_line_device(
 		"36 25 -1:20 / /proc rw - proc proc rw\n", &device) < 0);
+	/* An unrelated device cannot make an incomplete inventory harmless. */
+	assert(format_mountinfo_line_device(
+		"garbage 25 8:2 / /other rw - ext4 /dev/sda2 rw\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 - ext4 /dev/sda2 rw\n", &device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw - ext4 /dev/sda2\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw - ext4 /dev/sda2 rw trailing\n",
+		&device) < 0);
+	assert(format_mountinfo_line_device(
+		"36 25 8:2 / /other rw shared:7 - ext4 /dev/sda2 rw\n",
+		&device) == 0);
+
 }
 
 static void test_mount_and_swap_identity_conflicts(void)
@@ -509,6 +525,28 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 		root, "3031/mountinfo",
 		"37 25 8:2 / /other rw - ext4 /dev/sda2 rw\n");
 	assert(format_mount_inventory_clear_from_proc(root, device, parent) == 0);
+
+	/* A readable but empty or truncated live inventory is not clearance. */
+	test_mountinfo_fixture_write(
+		root, "3031/mountinfo",
+		"37 25 8:2 / /other rw - ext4 /dev/sda2\n");
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EPROTO);
+	test_mountinfo_fixture_write(root, "3031/mountinfo", "");
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EPROTO);
+	test_mountinfo_fixture_write(
+		root, "3031/mountinfo",
+		"37 25 8:2 / /other rw - ext4 /dev/sda2 rw\n");
+	test_mountinfo_fixture_write(root, "self/mountinfo", "");
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EPROTO);
+	test_mountinfo_fixture_write(
+		root, "self/mountinfo",
+		"36 25 0:20 / /proc rw - proc proc rw\n");
 
 	/* Malformed or missing evidence for a live mount namespace still fails. */
 	test_mountinfo_fixture_write(root, "3031/mountinfo", "invalid\n");

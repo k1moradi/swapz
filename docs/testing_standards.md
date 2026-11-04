@@ -3556,7 +3556,9 @@ while unrelated sibling mounts remain nonconflicting. Missing or malformed
 mountinfo for a PID whose ns/mnt marker is still present must fail closed;
 the fixture must also model EINVAL/ENOENT/ESRCH from an exiting or zombie task
 with ns/mnt absent and require that process-churn case to be ignored without
-weakening EACCES or opened-table failures. The mountinfo parser must accept normal major-zero pseudo-filesystem
+weakening EACCES or opened-table failures. An empty readable mount table or a structurally incomplete unrelated sibling
+entry must fail closed, including when the malformed table is in another PID
+namespace. The mountinfo parser must accept normal major-zero pseudo-filesystem
 entries (including `0:0`) while still rejecting malformed/overflowed rows;
 major zero must remain forbidden for a configured physical partition or parent.
 For every ownership/identity uncertainty before publication, the test
