@@ -1132,10 +1132,22 @@ an entirely unavailable .config remains UNAVAILABLE, not a fabricated debug
 PASS. The initial MemAvailable sample is observation only, with the 1 GiB
 admission floor owned by later ID36. Preflight safety refusals use bounded
 `BLOCKED: LOADED_PREFLIGHT=<NOT_AUTHORIZED|BLOCKED> check=<fixed-name>
-errno=<numeric|unavailable> remedy=<bounded-action>` diagnostics; the original
-file-access errno is retained, while an external command exit status is not
-misrepresented as an errno. Unexpected Bash failure remains FAIL with its
-numeric status and source line. Rootless tests must run a private transformed
+errno=<numeric|unavailable> remedy=<bounded-action>` diagnostics. Numeric
+`errno` is reserved for a captured operating-system error; semantic
+mismatches and external-command failures use `unavailable`, with a bounded
+command status in the remedy when useful. Mount and swap inventory are
+tri-state safety proofs: `findmnt` status 1 alone means no matching mount,
+status 0 must include a mount identity, and any other status is BLOCKED;
+`/proc/swaps` must have the canonical header/record shape and distinguish an
+owned match, proven absence, and read/parse failure. For an owned block source,
+preflight must also compare every block-device swap entry by device identity
+so a `/dev/dm-*` alias cannot hide an active `/dev/mapper/*` mapping; unrelated
+swapfiles remain untouched. A stale mapper UUID must match an exact currently
+emitted owned phase for the same run token; arbitrary suffixes are never
+ownership proof. Resolved null_blk `dev` telemetry must be one canonical
+newline-terminated major:minor record, not a prefix of malformed or
+multi-record input. Unexpected Bash failure remains FAIL with its numeric
+status and source line. Rootless tests must run a private transformed
 fake-proc/fake-sysfs preflight with stubbed privileged commands for each refusal
 and prove unrelated swap remains untouched. No test may select arbitrary
 `/dev` fallback for a configured PARTUUID or remove non-owned /tmp occupants.

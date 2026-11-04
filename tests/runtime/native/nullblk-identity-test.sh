@@ -41,6 +41,10 @@ printf 'garbage\n' > "$TMP/sysblock/$NAME/dev"
 refused_disk "$NAME" 7 "$TMP/sysblock"
 printf '240:07\n' > "$TMP/sysblock/$NAME/dev"
 refused_disk "$NAME" 7 "$TMP/sysblock"
+printf '240:7\n241:8\n' > "$TMP/sysblock/$NAME/dev"
+refused_disk "$NAME" 7 "$TMP/sysblock"
+printf '240:7' > "$TMP/sysblock/$NAME/dev"
+refused_disk "$NAME" 7 "$TMP/sysblock"
 rm -- "$TMP/sysblock/$NAME/dev"
 ln -s /dev/null "$TMP/sysblock/$NAME/dev"
 refused_disk "$NAME" 7 "$TMP/sysblock"
@@ -68,6 +72,20 @@ for original, replacement in (
     ("/dev", str(root / "dev")),
 ):
     source = source.replace(original, replacement)
+source = source.replace(
+    '[[ -n $mapper_node && -b $mapper_node ]] ||',
+    '[[ -n $mapper_node && -e $mapper_node ]] ||',
+)
+source = source.replace('[[ -b $source ]]', '[[ -e $source ]]')
+source = source.replace(
+    '[[ -n $source_devno && -b $swap_path ]]',
+    '[[ -n $source_devno && -e $swap_path ]]',
+)
+source = source.replace(
+    'trap \'rc=$?; preflight_internal_error "$rc" "$LINENO"\' ERR',
+    'trap \'rc=$?; preflight_internal_error "$rc" "$LINENO"\' ERR\n'
+    '[[ ${SWAPZ_FIXTURE_CASE:-} != internal_failure ]] || false',
+)
 pathlib.Path(sys.argv[2]).write_text(source, encoding="utf-8")
 PY
 cat > "$TOOLS/clear-tmp-before-memory-check.sh" <<'SH'
@@ -75,17 +93,42 @@ cat > "$TOOLS/clear-tmp-before-memory-check.sh" <<'SH'
 swapz_clear_tmp_before_memory_check() {
     if [[ $SWAPZ_FIXTURE_CASE == cleanup_permission ]]; then
         printf 'BLOCKED: exact completed-owned cleanup helper returned EACCES\n' >&2
-        return 13
+        return 1
     fi
     return 0
 }
 SH
 # Only these utilities exist in the child PATH. All potentially privileged
 # commands are fixed stubs, never inherited host commands.
-for command in bash awk tr cat readlink stat ls find rm rmdir python3; do
+for command in bash tr cat readlink find rm rmdir python3; do
     executable="$(command -v "$command")" || die "fixture setup lacks $command"
     ln -s "$executable" "$STUBS/$command"
 done
+REAL_AWK="$(command -v awk)" || die "fixture setup lacks awk"
+REAL_LS="$(command -v ls)" || die "fixture setup lacks ls"
+REAL_STAT="$(command -v stat)" || die "fixture setup lacks stat"
+cat > "$STUBS/awk" <<SH
+#!/bin/bash
+if [[ \${SWAPZ_FIXTURE_CASE:-} == swap_inventory_error &&
+      "\$*" == *"/proc/swaps"* ]]; then
+    exit 98
+fi
+exec "$REAL_AWK" "\$@"
+SH
+cat > "$STUBS/ls" <<SH
+#!/bin/bash
+if [[ \${SWAPZ_FIXTURE_CASE:-} == journal_permission ]]; then
+    exit 98
+fi
+exec "$REAL_LS" "\$@"
+SH
+cat > "$STUBS/stat" <<SH
+#!/bin/bash
+if [[ \${SWAPZ_FIXTURE_CASE:-} == unreadable_identity ]]; then
+    exit 13
+fi
+exec "$REAL_STAT" "\$@"
+SH
 cat > "$STUBS/id" <<'SH'
 #!/bin/bash
 [[ "$*" == "-u" ]] || exit 98
@@ -112,25 +155,43 @@ exit 98
 SH
 cat > "$STUBS/findmnt" <<'SH'
 #!/bin/bash
-[[ $SWAPZ_FIXTURE_CASE != mounted_mapper ]] || printf 'fixture-mount\n'
-[[ $SWAPZ_FIXTURE_CASE != mounted_mapper ]]
+case "$SWAPZ_FIXTURE_CASE" in
+    mounted_mapper)
+        printf 'fixture-mount\n'
+        exit 0
+        ;;
+    mount_inventory_empty)
+        exit 0
+        ;;
+    mount_inventory_error)
+        exit 98
+        ;;
+    *)
+        exit 1
+        ;;
+esac
 SH
 cat > "$STUBS/dmsetup" <<'SH'
 #!/bin/bash
 case "$*" in
     "ls --target swapz --noheadings")
-        if [[ $SWAPZ_FIXTURE_CASE == busy_mapper ]]; then
+        if [[ $SWAPZ_FIXTURE_CASE == mapper_inventory_error ]]; then
+            exit 98
+        elif [[ $SWAPZ_FIXTURE_CASE == busy_mapper ]]; then
             printf 'swapz-demo-aaaaaaaaaaaaaaaa (253:0)\nswapz-demo-bbbbbbbbbbbbbbbb (253:1)\n'
         else
             printf 'swapz-demo-aaaaaaaaaaaaaaaa (253:0)\n'
         fi
         ;;
     "info -c --noheadings -o uuid swapz-demo-aaaaaaaaaaaaaaaa")
-        if [[ $SWAPZ_FIXTURE_CASE == stale_token ]]; then
-            printf 'SWAPZ-TEST-bbbbbbbbbbbbbbbb\n'
-        else
-            printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa\n'
-        fi
+        case "$SWAPZ_FIXTURE_CASE" in
+            stale_token) printf 'SWAPZ-TEST-bbbbbbbbbbbbbbbb\n' ;;
+            recognized_readfault) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa-readfault\n' ;;
+            recognized_codec) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa-codec-background\n' ;;
+            recognized_completion) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa-completionfault\n' ;;
+            recognized_constructor) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa-ctor-8\n' ;;
+            *) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa\n' ;;
+        esac
         ;;
     "deps -o devname swapz-demo-aaaaaaaaaaaaaaaa")
         if [[ $SWAPZ_FIXTURE_CASE == wrong_owner ]]; then
@@ -149,7 +210,8 @@ cat > "$STUBS/sleep" <<'SH'
 #!/bin/bash
 exit 98
 SH
-chmod 0755 "$STUBS"/id "$STUBS"/uname "$STUBS"/modprobe \
+chmod 0755 "$STUBS"/awk "$STUBS"/ls "$STUBS"/stat \
+    "$STUBS"/id "$STUBS"/uname "$STUBS"/modprobe \
     "$STUBS"/rmmod "$STUBS"/timeout "$STUBS"/findmnt \
     "$STUBS"/dmsetup "$STUBS"/sleep
 
@@ -174,32 +236,56 @@ setup_owned_lower() {
     printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/power"
 }
 run_case() {
-    local case_name="$1" expected="$2" expected_result="$3"
+    local case_name="$1" expected="$2" expected_result="$3" expected_errno="$4"
     local result=0 output
     reset_fake
     case "$case_name" in
         missing_capability) printf 'CapEff:\t0000000000000000\n' > "$FIXTURE/proc/self/status" ;;
-        missing_module|missing_tool|cleanup_permission|retained_journal|invalid_debug|low_memory|unrelated_swap) ;;
-        busy_mapper|stale_token|wrong_owner|owned_swap|unreadable_identity|mounted_mapper)
-            setup_busy_module ;;
+        capability_unreadable)
+            rm -- "$FIXTURE/proc/self/status"
+            mkdir "$FIXTURE/proc/self/status"
+            ;;
+        missing_module|missing_tool|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|unclaimed_nullb|internal_failure) ;;
+        idle_module_busy)
+            mkdir -p "$FIXTURE/sys/module/dm_swapz"
+            printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
+            ;;
+        busy_mapper|mapper_inventory_error|stale_token|wrong_owner|owned_swap|owned_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+            setup_busy_module
+            ;;
         *) die "unknown fixture case $case_name" ;;
     esac
     case "$case_name" in
         invalid_debug)
             mkdir -p "$FIXTURE/proc"
             printf 'not a gzip kernel configuration\n' > "$FIXTURE/proc/config.gz" ;;
-        retained_journal)
+        retained_journal|journal_permission)
             mkdir -p "$FIXTURE/var/lib/swapz-package-transactions"
             printf 'retain\n' > "$FIXTURE/var/lib/swapz-package-transactions/transaction" ;;
         low_memory) printf 'MemAvailable: 512000 kB\n' > "$FIXTURE/proc/meminfo" ;;
         unrelated_swap)
             printf '/var/swapfile file 1024 0 -3\n' >> "$FIXTURE/proc/swaps" ;;
         owned_swap)
-            printf '/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa partition 1024 0 -2\n' >> "$FIXTURE/proc/swaps" ;;
+            printf '%s\n' "$FIXTURE/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa partition 1024 0 -2" >> "$FIXTURE/proc/swaps" ;;
+        owned_swap_alias)
+            : > "$FIXTURE/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa"
+            : > "$FIXTURE/dev/dm-0"
+            printf '%s\n' "$FIXTURE/dev/dm-0 partition 1024 0 -2" >> "$FIXTURE/proc/swaps" ;;
+        malformed_swap_inventory)
+            printf 'malformed swap record\n' >> "$FIXTURE/proc/swaps" ;;
         wrong_owner)
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN"
             printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/memory_backed" ;;
-        unreadable_identity) setup_owned_lower ;;
+        unreadable_identity)
+            setup_owned_lower
+            : > "$FIXTURE/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa"
+            ;;
+        recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+            setup_owned_lower
+            ;;
+        unclaimed_nullb)
+            mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
+            ;;
     esac
     if [[ "$case_name" == missing_tool ]]; then
         mv -- "$STUBS/rmmod" "$STUBS/rmmod.hidden"
@@ -216,11 +302,18 @@ run_case() {
     fi
     output="$(cat "$FIXTURE/output.log")"
     if [[ "$expected_result" == BLOCKED ]]; then
-        [[ $result == 1 && "$output" == *"BLOCKED: LOADED_PREFLIGHT=BLOCKED check=$expected"* ]] ||
-            die "$case_name failed to refuse with check=$expected status=$result: $output"
+        [[ $result == 1 &&
+           "$output" == *"BLOCKED: LOADED_PREFLIGHT=BLOCKED check=$expected errno=$expected_errno "* ]] ||
+            die "$case_name failed to refuse with check=$expected errno=$expected_errno status=$result: $output"
     elif [[ "$expected_result" == NOT_AUTHORIZED ]]; then
-        [[ $result == 1 && "$output" == *"BLOCKED: LOADED_PREFLIGHT=NOT_AUTHORIZED check=$expected"* ]] ||
+        [[ $result == 1 &&
+           "$output" == *"BLOCKED: LOADED_PREFLIGHT=NOT_AUTHORIZED check=$expected errno=$expected_errno "* ]] ||
             die "$case_name did not classify lack of authorization: $output"
+    elif [[ "$expected_result" == FAIL ]]; then
+        [[ $result == 1 &&
+           "$output" == *'FAIL: loaded preflight internal command failed status=1 line='* &&
+           "$output" != *'BLOCKED: LOADED_PREFLIGHT='* ]] ||
+            die "$case_name did not preserve unexpected failure attribution: $output"
     else
         [[ $result == 0 && "$output" != *'BLOCKED:'* && "$output" != *'FAIL:'* ]] ||
             die "$case_name unexpectedly refused or masked a failure: $output"
@@ -238,19 +331,34 @@ run_case() {
     die "preflight executable mode is missing"
 bash -n "$TOOLS/loaded-preflight.sh" ||
     die "sandboxed preflight syntax is invalid"
-run_case missing_capability cap_sys_admin NOT_AUTHORIZED
-run_case missing_module null_blk_module BLOCKED
-run_case missing_tool required_tool BLOCKED
-run_case invalid_debug kernel_debug_config BLOCKED
-run_case retained_journal package_journal BLOCKED
-run_case cleanup_permission completed_owned_tmp_cleanup BLOCKED
-run_case busy_mapper mapper_inventory BLOCKED
-run_case stale_token stale_run_token BLOCKED
-run_case wrong_owner null_blk_owner BLOCKED
-run_case owned_swap active_owned_swap BLOCKED
-run_case mounted_mapper mounted_owned_mapper BLOCKED
-run_case unreadable_identity mapper_device_identity BLOCKED
+run_case missing_capability cap_sys_admin NOT_AUTHORIZED unavailable
+run_case capability_unreadable cap_sys_admin BLOCKED 21
+run_case missing_module null_blk_module BLOCKED unavailable
+run_case missing_tool required_tool BLOCKED unavailable
+run_case invalid_debug kernel_debug_config BLOCKED unavailable
+run_case retained_journal package_journal BLOCKED unavailable
+run_case journal_permission package_journal BLOCKED unavailable
+run_case cleanup_permission completed_owned_tmp_cleanup BLOCKED unavailable
+run_case idle_module_busy idle_module_removal BLOCKED unavailable
+run_case busy_mapper mapper_inventory BLOCKED unavailable
+run_case mapper_inventory_error mapper_inventory BLOCKED unavailable
+run_case stale_token stale_run_token BLOCKED unavailable
+run_case wrong_owner null_blk_owner BLOCKED unavailable
+run_case owned_swap active_owned_swap BLOCKED unavailable
+run_case owned_swap_alias active_owned_swap BLOCKED unavailable
+run_case mounted_mapper mounted_owned_mapper BLOCKED unavailable
+run_case mount_inventory_empty mount_inventory BLOCKED unavailable
+run_case mount_inventory_error mount_inventory BLOCKED unavailable
+run_case swap_inventory_error swap_inventory BLOCKED unavailable
+run_case malformed_swap_inventory swap_inventory BLOCKED unavailable
+run_case unreadable_identity swap_device_identity BLOCKED unavailable
+run_case recognized_readfault mapper_device_identity BLOCKED unavailable
+run_case recognized_codec mapper_device_identity BLOCKED unavailable
+run_case recognized_completion mapper_device_identity BLOCKED unavailable
+run_case recognized_constructor mapper_device_identity BLOCKED unavailable
+run_case unclaimed_nullb unclaimed_null_blk BLOCKED unavailable
+run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
-run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS
-run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS
-printf '%s\n' 'PASS: null_blk identity and 14 isolated preflight refusal/observation fixtures'
+run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
+run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
+printf '%s\n' 'PASS: null_blk identity and 29 isolated preflight refusal/observation fixtures'
