@@ -41,12 +41,12 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            build-essential linux-headers-generic-hwe-24.04 sparse
+            build-essential linux-headers-generic sparse
       - name: Run kernel sparse and optional installed Smatch
         shell: bash
         run: |
           set -euo pipefail
-          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -1)"
+          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-6.8.*-generic' | sort -V | tail -1)"
           test -n "$KDIR"
           python3 -B tests/tools/kernel-debug-qualify.py static --kdir "$KDIR"
           echo "KERNEL_DEBUG_STATIC_COMPILE_ONLY_NO_MODULE_LOADING"

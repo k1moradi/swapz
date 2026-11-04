@@ -5671,3 +5671,4 @@ open until executed and recorded. Native ASan/UBSan/TSan, source contracts,
 configuration detection and sparse compile checks are never KASAN/KCSAN
 runtime evidence.
 Kernel compiler/pahole compatibility banners without a source-file diagnostic location are not counted as sparse findings; nonzero Kbuild exits and missing CHECK units still fail with a bounded build-log tail.
+The independent Sparse CI selects Ubuntu 24.04 GA 6.8 headers explicitly, rather than the moving HWE headers, because the currently packaged sparse may be rejected by newer Kbuild before any source CHECK. This is header compile-only coverage, not an assertion about the running owner kernel.
