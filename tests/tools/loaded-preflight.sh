@@ -11,12 +11,12 @@ case "$script_source" in
     */*) script_directory="${script_source%/*}" ;;
     *) script_directory=. ;;
 esac
-SCRIPT_DIR="$(cd -- "$script_directory" && pwd -P)" ||
+SCRIPT_DIR="$(cd -- "$script_directory" 2>/dev/null && pwd -P)" ||
     fail "cannot resolve loaded-preflight helper directory"
 cleanup_helper="$SCRIPT_DIR/clear-tmp-before-memory-check.sh"
 [[ -r $cleanup_helper ]] ||
     fail "owned temporary-cleanup helper unavailable; restore the readable checkout helper"
-source "$cleanup_helper" ||
+source "$cleanup_helper" 2>/dev/null ||
     fail "owned temporary-cleanup helper could not be loaded safely"
 note() { printf '%s\n' "$*"; }
 is_uint() {
