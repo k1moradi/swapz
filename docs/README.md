@@ -60,6 +60,10 @@ navigation document.
   qualification scope, stage results, and qualified-artifact hashes together.
   A PASS for an older source does not qualify a newer `main`, and a report-only
   commit is evidence publication rather than a new production source revision.
+- [`production-status.json`](production-status.json) is a timestamped,
+  source-bound snapshot of read-only host observations, current CI observations,
+  and open production gates. It is not a live monitor or a qualification result;
+  use its capture timestamp and source SHA when interpreting it.
 - [`handoff/production-readiness.json`](handoff/production-readiness.json) is
   explicitly marked `snapshot_kind: HISTORICAL` and `SNAPSHOT_CURRENT: NO`.
   Its `updated_at_utc` and repository SHAs document a past host observation,
