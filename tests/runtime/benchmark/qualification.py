@@ -874,13 +874,27 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
     if mismatch:
         reasons.append("pair provenance mismatch: " + ", ".join(mismatch))
     if workload != "anonymous-swap":
+        raw_identity = raw.get("device_identity")
+        swapz_identity = swapz.get("device_identity")
+        if not isinstance(raw_identity, dict):
+            reasons.append("raw physical pair identity is missing or malformed")
+            raw_identity = {}
+        if not isinstance(swapz_identity, dict):
+            reasons.append("swapz physical pair identity is missing or malformed")
+            swapz_identity = {}
         for field in ("physical_partuuid", "physical_device_bytes", "lower_major_minor",
                       "parent_major_minor", "parent_model", "parent_transport"):
-            if (raw.get("device_identity") or {}).get(field) != (swapz.get("device_identity") or {}).get(field):
+            if raw_identity.get(field) != swapz_identity.get(field):
                 reasons.append("physical pair identity mismatch: " + field)
     else:
-        raw_identity = raw.get("swap_device_identity") or {}
-        swapz_identity = swapz.get("swap_device_identity") or {}
+        raw_identity = raw.get("swap_device_identity")
+        swapz_identity = swapz.get("swap_device_identity")
+        if not isinstance(raw_identity, dict):
+            reasons.append("raw anonymous pair identity is missing or malformed")
+            raw_identity = {}
+        if not isinstance(swapz_identity, dict):
+            reasons.append("swapz anonymous pair identity is missing or malformed")
+            swapz_identity = {}
         if raw_identity.get("device") != swapz_identity.get("lower_device"):
             reasons.append("anonymous pair physical lower identity mismatch")
         for field in (
@@ -892,12 +906,24 @@ def compare_pair(raw: dict, swapz: dict, workload: str, pair_id: str,
     for label, arm in (("raw", raw), ("swapz", swapz)):
         if arm.get("verdict") != "PASS":
             reasons.append(f"{label} arm verdict is not PASS")
-        oracle_mismatches = (arm.get("oracle") or {}).get("mismatches")
+        oracle = arm.get("oracle")
+        if not isinstance(oracle, dict):
+            reasons.append(f"{label} byte oracle evidence is malformed")
+            oracle = {}
+        oracle_mismatches = oracle.get("mismatches")
         if type(oracle_mismatches) is not int or oracle_mismatches != 0:
             reasons.append(f"{label} byte oracle failed or is unavailable")
-        screen = arm.get("performance_screening") or {}
+        screen = arm.get("performance_screening")
+        if not isinstance(screen, dict):
+            reasons.append(f"{label} performance screening is malformed")
+            screen = {}
         if screen.get("status") != "SCREENED":
-            for reason in screen.get("reasons") or ["screening not usable"]:
+            screen_reasons = screen.get("reasons")
+            if (not isinstance(screen_reasons, list) or
+                    any(not isinstance(reason, str)
+                        for reason in screen_reasons)):
+                screen_reasons = ["screening not usable"]
+            for reason in screen_reasons or ["screening not usable"]:
                 reasons.append(f"{label}: {reason}")
     if raw.get("measure_operations") is not None and (
             raw.get("read_ops"), raw.get("write_ops")) != (
@@ -946,7 +972,7 @@ def pair_integrity_reasons(pair: dict) -> list[str]:
         derived = compare_pair(
             raw, swapz, pair.get("workload"), pair.get("pair_id"),
             pair.get("pair_index"), pair.get("order"))
-    except (KeyError, TypeError, ValueError) as exc:
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
         return ["pair cannot be re-derived from arm evidence: " + str(exc)]
 
     reasons = []
