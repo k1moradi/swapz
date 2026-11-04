@@ -1234,10 +1234,12 @@ baseline through mapper initialization, steady operation, measured GC and
 ordinary mapper teardown, followed by at least two seconds with the mapper
 observed absent. Each sample records \`MemAvailable\`, \`SUnreclaim\`,
 \`VmallocUsed\`, UTC time, a monotonic timestamp and mapper-presence state.
-The three \`/proc/meminfo\` counters are converted from kernel-reported KiB
-to bytes and must remain 1024-byte multiples; treating raw KiB integers as
-bytes is invalid evidence. Mapper-present means the exact source-bound mapper
-UUID named by the trace, not merely some Device Mapper node. The qualifying
+The trace preserves the three \`/proc/meminfo\` integers in their
+kernel-reported \`kB\` units and declares \`meminfo_unit: "kB"\`; the
+validator alone converts them to bytes before applying the ceiling. A trace
+that relabels byte values or silently treats KiB integers as bytes is invalid.
+Mapper-present means the exact source-bound mapper UUID named by the trace, not
+merely some Device Mapper node. The qualifying
 peak is derived from the raw samples as baseline-median
 \`MemAvailable\` minus the minimum \`MemAvailable\` while the mapper is
 present; an asserted replay scalar is diagnostic only. The final target-absent
@@ -5340,8 +5342,9 @@ segment alignment and foreground headroom. Rootless synthetic traces never
 qualify the host. A resource PASS must carry source-bound and mapper-UUID-bound
 serialized loaded-host samples from the conservative whole-host measurement
 above: exact 100 ms cadence declaration, boot identity, UTC and monotonic
-timestamps, raw \`MemAvailable\`/\`SUnreclaim\`/\`VmallocUsed\` counters,
-mapper-presence state, one second of target-absent baseline, initialization,
+timestamps, raw \`MemAvailable\`/\`SUnreclaim\`/\`VmallocUsed\` KiB
+counters with an exact unit declaration, mapper-presence state, one second of
+target-absent baseline, initialization,
 steady and GC observations, ordinary teardown, and at least two seconds of
 target-absent recovery. Initialization must precede the exact sustained swapz
 arm, steady/GC samples must fall inside that arm's monotonic interval, and
