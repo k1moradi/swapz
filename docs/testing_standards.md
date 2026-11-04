@@ -1103,6 +1103,31 @@ never permitted. After cleanup the reference count must be zero and ordinary
 `rmmod` remains authoritative against races.
 
 Cleanup never force-removes uncertain resources. If identity or teardown is ambiguous, quarantine and fail.
+An unclaimed `nullb-swapz-<token>` configfs directory is not independently
+owned merely because its name has the expected form: preflight must refuse it,
+not power it down or report successful cleanup. A proven stale mapper's lower
+config may be removed only after exact run-token, index, memory-backed, mount,
+swap, and mapper/device identity proofs, and any failed power-off or configfs
+removal remains a BLOCKED disposition. An index collision with a different
+run's null_blk must not be adopted.
+
+Before completion-only scratch cleanup or device mutation, loaded preflight
+must distinguish absent host CAP_SYS_ADMIN (NOT_AUTHORIZED) from a reproduced
+source/test FAIL, audit its commands, and inspect null_blk module discoverability
+without loading it. A retained package journal belongs to package recovery;
+it must not be erased to make the benchmark advance. An available but
+contradictory running-kernel debug .config is BLOCKED with its named check;
+an entirely unavailable .config remains UNAVAILABLE, not a fabricated debug
+PASS. The initial MemAvailable sample is observation only, with the 1 GiB
+admission floor owned by later ID36. Preflight safety refusals use bounded
+`BLOCKED: LOADED_PREFLIGHT=<NOT_AUTHORIZED|BLOCKED> check=<fixed-name>
+errno=<numeric|unavailable> remedy=<bounded-action>` diagnostics; the original
+file-access errno is retained, while an external command exit status is not
+misrepresented as an errno. Unexpected Bash failure remains FAIL with its
+numeric status and source line. Rootless tests must run a private transformed
+fake-proc/fake-sysfs preflight with stubbed privileged commands for each refusal
+and prove unrelated swap remains untouched. No test may select arbitrary
+`/dev` fallback for a configured PARTUUID or remove non-owned /tmp occupants.
 
 The private loaded preflight is an executable repository helper and rootless
 qualification must fail if its executable bit is lost. Privileged orchestration

@@ -4,7 +4,16 @@
 # observation and may remove only an idle module or a proven stale mapping.
 set -Eeuo pipefail
 
-fail() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
+# Safety refusals are not reproduced test failures. Never guess a kernel errno
+# from the exit code of an external utility.
+refuse() {
+    local disposition="$1" check="$2" original_errno="$3"
+    shift 3
+    printf 'BLOCKED: LOADED_PREFLIGHT=%s check=%s errno=%s remedy=%s\n' \
+        "$disposition" "$check" "$original_errno" "$*" >&2
+    exit 1
+}
+fail() { refuse BLOCKED ownership_proof unavailable "$*"; }
 
 script_source="${BASH_SOURCE[0]}"
 case "$script_source" in
@@ -48,13 +57,106 @@ preflight_internal_error() {
 }
 trap 'rc=$?; preflight_internal_error "$rc" "$LINENO"' ERR
 
-for cmd in rmmod dmsetup timeout awk tr findmnt cat readlink stat sleep id ls find rm python3; do
-    command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
+# Include every unconditionally used external utility in the audit.
+for cmd in rmmod dmsetup modprobe timeout awk tr findmnt cat readlink stat sleep id ls find rm rmdir python3 uname; do
+    command -v "$cmd" >/dev/null ||
+        refuse BLOCKED required_tool 2 "install required executable $cmd before make test"
 done
-[[ $(id -u) == 0 ]] || fail "root required for loaded preflight"
+[[ $(id -u) == 0 ]] ||
+    refuse NOT_AUTHORIZED effective_uid 1 "provide noninteractive root authorization"
 
-swapz_clear_tmp_before_memory_check ||
-    fail "completed-owned /tmp cleanup refused; verify private session completion proofs, ownership, mounts and helper availability before retrying (no broad cleanup attempted)"
+# UID zero in a container need not have host CAP_SYS_ADMIN. This read-only
+# probe returns the original file-read errno, never a guessed command errno.
+capability_status="$(python3 - /proc/self/status <<'PY'
+import sys
+try:
+    with open(sys.argv[1], "r", encoding="ascii") as status_file:
+        matches = [line.split()[1] for line in status_file
+                   if line.startswith("CapEff:") and len(line.split()) == 2]
+except OSError as error:
+    print("unreadable:" + str(error.errno if error.errno is not None else "unavailable"))
+else:
+    try:
+        if len(matches) != 1 or not matches[0] or len(matches[0]) > 16:
+            raise ValueError("invalid CapEff")
+        effective = int(matches[0], 16)
+        print("present" if effective & (1 << 21) else "missing")
+    except ValueError:
+        print("invalid")
+PY
+)" || refuse BLOCKED cap_sys_admin unavailable "cannot inspect effective capability record"
+case "$capability_status" in
+    present) ;;
+    missing) refuse NOT_AUTHORIZED cap_sys_admin 1 "CAP_SYS_ADMIN is missing; use an authorized host, not a rootless container" ;;
+    invalid) refuse BLOCKED cap_sys_admin 22 "repair malformed /proc/self/status capability evidence" ;;
+    unreadable:*) refuse BLOCKED cap_sys_admin "${capability_status#unreadable:}" "restore readable capability evidence" ;;
+    *) refuse BLOCKED cap_sys_admin unavailable "unexpected capability probe result" ;;
+esac
+
+# Probe module support without loading any module. A configured built-in
+# null_blk is already sufficient for this gate.
+if [[ ! -d /sys/kernel/config/nullb ]] &&
+   ! modprobe -n -q null_blk >/dev/null 2>&1; then
+    refuse BLOCKED null_blk_module unavailable "null_blk is not discoverable; restore its kernel module/configuration"
+fi
+
+# The later loaded debug evidence remains authoritative. Reject only an
+# available but contradictory kernel .config here; a missing config remains
+# UNAVAILABLE evidence, not a fabricated sanitizer failure.
+kernel_debug_status="$(python3 - /proc/config.gz "/boot/config-$(uname -r)" "/lib/modules/$(uname -r)/build/.config" <<'PY'
+import gzip
+import os
+import sys
+
+selected = None
+for candidate in sys.argv[1:]:
+    if os.path.isfile(candidate):
+        selected = candidate
+        break
+if selected is None:
+    print("unavailable")
+else:
+    try:
+        opener = gzip.open if selected.endswith(".gz") else open
+        with opener(selected, "rt", encoding="ascii") as config_file:
+            lines = config_file.read().splitlines()
+        for symbol in ("CONFIG_KASAN", "CONFIG_KCSAN", "CONFIG_PROVE_LOCKING"):
+            enabled = sum(line == symbol + "=y" for line in lines)
+            disabled = sum(line == "# " + symbol + " is not set" for line in lines)
+            if enabled + disabled != 1:
+                raise ValueError("ambiguous kernel debug configuration")
+        print("valid")
+    except OSError as error:
+        print("unreadable:" + str(error.errno if error.errno is not None else 22))
+    except (ValueError, UnicodeError):
+        print("invalid")
+PY
+)" || refuse BLOCKED kernel_debug_config unavailable "cannot inspect kernel debug configuration"
+case "$kernel_debug_status" in
+    valid|unavailable) ;;
+    invalid) refuse BLOCKED kernel_debug_config 22 "running kernel debug options are contradictory or malformed; verify original .config" ;;
+    unreadable:*) refuse BLOCKED kernel_debug_config "${kernel_debug_status#unreadable:}" "restore readable running-kernel debug configuration" ;;
+    *) refuse BLOCKED kernel_debug_config unavailable "unexpected debug configuration probe result" ;;
+esac
+
+# A retained package transaction belongs to the package recovery owner.
+# Do not erase its journal or conflate it with a clean preflight.
+package_journal=/var/lib/swapz-package-transactions
+if [[ -e $package_journal || -L $package_journal ]]; then
+    [[ -d $package_journal && ! -L $package_journal ]] ||
+        refuse BLOCKED package_journal 22 "package journal directory identity is invalid"
+    journal_entries="$(ls -A -- "$package_journal" 2>/dev/null)" ||
+        refuse BLOCKED package_journal unavailable "inspect journal permissions and recovery ownership"
+    [[ -z $journal_entries ]] ||
+        refuse BLOCKED package_journal 16 "recover the retained package transaction under its own lock; never delete it to retry"
+fi
+
+if swapz_clear_tmp_before_memory_check; then
+    :
+else
+    cleanup_status=$?
+    refuse BLOCKED completed_owned_tmp_cleanup unavailable "helper_status=$cleanup_status; check private completion proof and permissions; no broad /tmp deletion"
+fi
 note "LOADED_PREFLIGHT_TMP_CLEANUP=completed-owned-only"
 
 # Diagnostic only: early loaded-stage RAM is not the later ID36 admission
@@ -81,38 +183,19 @@ elif (( early_available_kib < 1048576 )); then
         "$early_available_kib" >&2
 fi
 
+# A token-shaped configfs name alone does not prove that this run owns it.
+# Never power off or remove another session's RAM device on speculation.
 clean_orphaned_nullb() {
     local cfgbase=/sys/kernel/config/nullb
+    local cfg name orphan_token
     [[ -d $cfgbase ]] || return 0
-    local cfg name orphan_token idx dev_disk dev_path holders
-    shopt -s nullglob
     for cfg in "$cfgbase"/nullb-swapz-*; do
         [[ -d $cfg ]] || continue
         name="${cfg##*/}"
-        case "$name" in
-            nullb-swapz-*) orphan_token="${name#nullb-swapz-}" ;;
-            *) continue ;;
-        esac
+        orphan_token="${name#nullb-swapz-}"
         is_hex16 "$orphan_token" || continue
-        [[ -r $cfg/memory_backed && "$(cat "$cfg/memory_backed" 2>/dev/null)" == 1 ]] || continue
-        idx="$(cat "$cfg/index" 2>/dev/null || true)"
-        if is_uint "$idx"; then
-            dev_disk="nullb$idx"
-            dev_path="/dev/$dev_disk"
-            if [[ -d "/sys/block/$dev_disk/holders" ]]; then
-                holders="$(ls -A "/sys/block/$dev_disk/holders" 2>/dev/null || true)"
-                [[ -z "$holders" ]] || continue
-            fi
-            [[ -z "$(findmnt -rn -S "$dev_path" 2>/dev/null || true)" ]] || continue
-            if awk -v path="$dev_path" 'NR > 1 && $1 == path { found=1 } END { exit found ? 0 : 1 }' /proc/swaps 2>/dev/null; then
-                continue
-            fi
-        fi
-        echo 0 > "$cfg/power" 2>/dev/null || true
-        rmdir "$cfg" 2>/dev/null || true
-        note "AUTO_REMOVED_ORPHANED_NULLB=$name"
+        refuse BLOCKED unclaimed_null_blk 16 "token-named null_blk exists without unique mapper ownership proof; leave it untouched"
     done
-    shopt -u nullglob
 }
 
 if [[ ! -d /sys/module/dm_swapz ]]; then
@@ -133,13 +216,17 @@ read_refcount() {
 }
 
 remove_idle_module() {
-    rmmod dm_swapz ||
-        fail "idle pre-existing dm_swapz could not be removed normally"
+    if rmmod dm_swapz; then
+        :
+    else
+        module_remove_status=$?
+        refuse BLOCKED idle_module_removal unavailable "rmmod_status=$module_remove_status; inspect module users; do not force remove"
+    fi
     [[ ! -d /sys/module/dm_swapz ]] ||
-        fail "dm_swapz still present after ordinary removal"
+        refuse BLOCKED idle_module_removal 16 "module remains after ordinary removal"
 }
 
-refcount="$(read_refcount)"
+refcount="$(read_refcount)" || exit 1
 if [[ $refcount == 0 ]]; then
     remove_idle_module
     clean_orphaned_nullb
@@ -161,14 +248,14 @@ if [[ -n $swapz_map_list ]]; then
         fail "cannot parse pre-existing swapz mapping list"
 fi
 [[ ${#swapz_maps[@]} == 1 ]] ||
-    fail "pre-existing dm_swapz module is busy with non-unique mappings; no cleanup attempted"
+    refuse BLOCKED mapper_inventory 16 "busy dm_swapz has zero or multiple mappings; no cleanup attempted"
 owned_map="${swapz_maps[0]}"
 case "$owned_map" in
     swapz-demo-*) token="${owned_map#swapz-demo-}" ;;
     *) fail "pre-existing dm_swapz mapping is not harness-owned; no cleanup attempted" ;;
 esac
 is_hex16 "$token" ||
-    fail "pre-existing dm_swapz mapping is not harness-owned; no cleanup attempted"
+    refuse BLOCKED stale_run_token 22 "mapper ownership token is malformed"
 uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
     tr -d '[:space:]')" ||
     fail "cannot read pre-existing dm_swapz mapping UUID"
@@ -177,13 +264,13 @@ case "$uuid" in
     "SWAPZ-TEST-$token-discardtrim"|"SWAPZ-TEST-$token-suspend"| \
     "SWAPZ-TEST-$token-writefault"|"SWAPZ-TEST-$token-flushfault"| \
     "SWAPZ-TEST-$token-packed") ;;
-    *) fail "pre-existing dm_swapz mapping UUID is not harness-owned; no cleanup attempted" ;;
+    *) refuse BLOCKED stale_run_token 16 "mapper UUID is not bound to the expected run token" ;;
 esac
 mapper="/dev/mapper/$owned_map"
 [[ -z "$(findmnt -rn -S "$mapper" 2>/dev/null)" ]] ||
-    fail "pre-existing harness dm_swapz mapping is mounted; no cleanup attempted"
+    refuse BLOCKED mounted_owned_mapper 16 "owned mapper is mounted; no cleanup attempted"
 if awk -v path="$mapper" 'NR > 1 && $1 == path { found=1 } END { exit found ? 0 : 1 }' /proc/swaps; then
-    fail "pre-existing harness dm_swapz mapping is active swap; no cleanup attempted"
+    refuse BLOCKED active_owned_swap 16 "owned mapper is active swap; leave host swap unchanged"
 fi
 
 read_opens() {
@@ -218,7 +305,9 @@ case "$lower_name" in
     nullb-swapz-*)
         lower_token="${lower_name#nullb-swapz-}"
         is_hex16 "$lower_token" ||
-            fail "pre-existing harness dm_swapz lower is not null_blk"
+            refuse BLOCKED null_blk_owner 22 "lower identity is not an owned null_blk"
+        [[ "$lower_token" == "$token" ]] ||
+            refuse BLOCKED null_blk_owner 16 "lower ownership token differs from mapper token"
         [[ -d $cfgbase/$lower_name ]] &&
             owned_config="$cfgbase/$lower_name"
         ;;
@@ -227,16 +316,15 @@ case "$lower_name" in
         is_uint "$lower_index" ||
             fail "pre-existing harness dm_swapz lower is not null_blk"
         matches=()
-        shopt -s nullglob
         for config in "$cfgbase"/nullb-swapz-*; do
             [[ -d $config && -r $config/index ]] || continue
             [[ "$(cat "$config/index" 2>/dev/null)" == "$lower_index" ]] &&
                 matches+=("$config")
         done
-        shopt -u nullglob
-        if [[ ${#matches[@]} == 1 ]]; then
-            owned_config="${matches[0]}"
-        fi
+        [[ ${#matches[@]} == 1 &&
+           ${matches[0]:-} == "$cfgbase/nullb-swapz-$token" ]] ||
+            refuse BLOCKED null_blk_owner 16 "index has no unique run-token-bound configfs owner"
+        owned_config="${matches[0]}"
         ;;
     *)
         fail "pre-existing harness dm_swapz lower is not null_blk"
@@ -251,9 +339,9 @@ esac
 
 lower="/dev/$lower_name"
 [[ -z "$(findmnt -rn -S "$lower" 2>/dev/null)" ]] ||
-    fail "pre-existing harness null_blk lower is mounted; no cleanup attempted"
+    refuse BLOCKED mounted_owned_lower 16 "owned lower is mounted; no cleanup attempted"
 if awk -v path="$lower" 'NR > 1 && $1 == path { found=1 } END { exit found ? 0 : 1 }' /proc/swaps; then
-    fail "pre-existing harness null_blk lower is active swap; no cleanup attempted"
+    refuse BLOCKED active_owned_swap 16 "null_blk lower is active swap; leave host swap unchanged"
 fi
 
 # Holder termination is allowed only after the mapper and its lower dependency
@@ -261,19 +349,20 @@ fi
 # dm block node so stale replay processes cannot hide behind the mapper symlink.
 mapper_node="$(readlink -f "$mapper" 2>/dev/null || true)"
 [[ -n $mapper_node && -b $mapper_node ]] ||
-    fail "pre-existing harness dm_swapz canonical device is unavailable"
+    refuse BLOCKED mapper_device_identity unavailable "canonical mapper block node is missing or unreadable; no holder signal"
 mapper_dev="$(stat -Lc '%t:%T' "$mapper" 2>/dev/null)" ||
-    fail "cannot stat pre-existing harness dm_swapz mapper"
+    refuse BLOCKED mapper_device_identity unavailable "cannot stat mapper; no holder signal"
 canonical_dev="$(stat -Lc '%t:%T' "$mapper_node" 2>/dev/null)" ||
-    fail "cannot stat pre-existing harness dm_swapz canonical device"
+    refuse BLOCKED mapper_device_identity unavailable "cannot stat canonical mapper; no holder signal"
 [[ -n $mapper_dev && $mapper_dev == "$canonical_dev" ]] ||
-    fail "pre-existing harness dm_swapz canonical device identity changed"
+    refuse BLOCKED mapper_device_identity 16 "canonical device identity changed; no holder signal"
 
 wait_for_zero_opens() {
     local attempt
 
     for attempt in {1..30}; do
-        opens="$(read_opens 2>/dev/null || echo "$opens")"
+        opens="$(read_opens)" ||
+            refuse BLOCKED mapper_open_count unavailable "cannot inspect live mapper opens; no holder signal"
         [[ $opens == 0 ]] && return 0
         command -v udevadm >/dev/null 2>&1 &&
             udevadm settle --timeout=3 2>/dev/null || true
@@ -282,7 +371,8 @@ wait_for_zero_opens() {
     return 1
 }
 
-opens="$(read_opens 2>/dev/null || true)"
+opens="$(read_opens)" ||
+    refuse BLOCKED mapper_open_count unavailable "cannot inspect initial mapper opens; no holder signal"
 if is_uint "$opens" && [[ $opens != 0 ]]; then
     wait_for_zero_opens || true
 fi
@@ -296,18 +386,24 @@ if is_uint "$opens" && [[ $opens != 0 ]] && command -v fuser >/dev/null 2>&1; th
 fi
 
 is_uint "$opens" && [[ $opens == 0 ]] ||
-    fail "proven-owned stale dm_swapz mapping remains open after bounded holder cleanup; reboot required before make test"
+    refuse BLOCKED mapper_open_count 16 "owned mapping remains open after bounded cleanup; reboot required before make test"
 
-timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$owned_map" ||
-    fail "stale harness dm_swapz mapping could not be removed normally"
+if timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$owned_map"; then
+    :
+else
+    mapper_remove_status=$?
+    refuse BLOCKED owned_mapper_removal unavailable "dmsetup_status=$mapper_remove_status; nonforce removal refused"
+fi
 [[ ! -e $mapper ]] ||
     fail "stale harness dm_swapz mapping still exists after ordinary removal"
-refcount="$(read_refcount)"
+refcount="$(read_refcount)" || exit 1
 [[ $refcount == 0 ]] ||
     fail "dm_swapz still has references after stale harness mapping removal"
 if [[ -n $owned_config && -d $owned_config ]]; then
-    echo 0 > "$owned_config/power" 2>/dev/null || true
-    rmdir "$owned_config" 2>/dev/null || true
+    printf '0\n' > "$owned_config/power" 2>/dev/null ||
+        refuse BLOCKED null_blk_power_off unavailable "owned configfs power-off refused; retain proof"
+    rmdir -- "$owned_config" 2>/dev/null ||
+        refuse BLOCKED null_blk_config_removal unavailable "owned configfs removal refused; retain proof"
 fi
 remove_idle_module
 clean_orphaned_nullb
