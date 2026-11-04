@@ -702,6 +702,9 @@ exec "{flock_binary}" "$@"
             cwd=ROOT, env=verify_env, capture_output=True, text=True)
         self.assertEqual(verified.returncode, 0, verified.stderr)
         self.assertIn("cryptographic signature verified", verified.stdout)
+        # Detached CMS verification is not proof that the running kernel will
+        # accept a module under its active Secure Boot policy.
+        self.assertIn("kernel acceptance is not claimed", verified.stdout)
 
         tampered = bytearray(signed_module.read_bytes())
         tampered[0] ^= 1
@@ -1075,7 +1078,8 @@ exec "{flock_binary}" "$@"
             self, corrupt_backup, corrupt_metadata=False,
             corrupt_journal_metadata=False, collide_journal_temp=False,
             missing_journal=False, substitute_directory=False,
-            unsafe_transaction_mode=False, corrupt_journal_phase=False):
+            unsafe_transaction_mode=False, corrupt_journal_phase=False,
+            oversized_journal=False):
         self.assertEqual(self.invoke("install").returncode, 0)
         old_module = self.installed_module.read_bytes()
         self.module.write_bytes(b"replacement-qualified-module\n")
@@ -1134,6 +1138,8 @@ exec "{flock_binary}" "$@"
                 state["phase"] = "unrecognized-package-phase"
                 state_path.write_text(
                     json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
+            if oversized_journal:
+                state_path.write_bytes(b" " * (1024 * 1024 + 1))
             if substitute_directory:
                 original = transaction.with_name(
                     transaction.name + ".original")
@@ -1158,7 +1164,8 @@ exec "{flock_binary}" "$@"
                               refused.stderr)
             elif (corrupt_backup or corrupt_metadata or corrupt_journal_metadata
                   or missing_journal or substitute_directory
-                  or unsafe_transaction_mode or corrupt_journal_phase):
+                  or unsafe_transaction_mode or corrupt_journal_phase
+                  or oversized_journal):
                 self.assertIn("rollback snapshot invalid", stderr)
                 self.assertFalse((self.prefix / "sbin/swapzctl").exists())
                 # The relocated original and substituted link are both stale.
@@ -1205,6 +1212,10 @@ exec "{flock_binary}" "$@"
     def test_unsafe_transaction_directory_mode_quarantines_activation(self):
         self.interrupt_upgrade_with_snapshot(
             corrupt_backup=False, unsafe_transaction_mode=True)
+
+    def test_oversized_rollback_journal_quarantines_activation(self):
+        self.interrupt_upgrade_with_snapshot(
+            corrupt_backup=False, oversized_journal=True)
 
     def test_noncanonical_rollback_phase_quarantines_activation(self):
         self.interrupt_upgrade_with_snapshot(
