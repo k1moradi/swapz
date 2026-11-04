@@ -3881,7 +3881,15 @@ human-approval mechanics are not a current gate for repeated work on the
 dedicated `/dev/sda1` card. Its device-identity, provenance and fail-closed
 techniques remain useful patterns.
 Rootless qualification must exercise the production formatter decision path
-with synthetic descriptor/kernel operations and identity tables. It must cover
+with synthetic descriptor/kernel operations and identity tables. Deterministic
+diagnostic-clobber injection must prove the original errno survives exclusive
+open, identity/inventory refusal, read, random, final descriptor access mode,
+write/durability and secondary close failures. The real final formatter gate
+must query F_GETFL on the returned descriptor, require O_RDWR after O_ACCMODE,
+and refuse a query failure or O_RDONLY/O_WRONLY with zero writes and zero
+syncs. Tests inspect numeric errno, expected condition and safe action in
+diagnostics; fake O_EXCL requests never prove kernel BLK_EXCL or mount/swap
+exclusion. It must cover
 malformed PARTUUIDs, numeric overflow and single digits exceeding small
 numeric bounds (for example removable=2 when maximum=1), copied cloneable
 identifiers with a

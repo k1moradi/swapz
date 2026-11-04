@@ -14,6 +14,9 @@
 
 /* Interpose only synthetic sysfs/proc and a fake block descriptor. */
 static int admission_open(const char *path, int flags, ...);
+static int admission_fcntl(int fd, int command, ...);
+static int admission_fprintf(FILE *stream, const char *format, ...);
+static inline void admission_perror(const char *description);
 static int admission_close(int fd);
 static int admission_stat(const char *path, struct stat *info);
 static int admission_lstat(const char *path, struct stat *info);
@@ -33,6 +36,9 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 static FILE *test_format_fopen(const char *path, const char *mode);
 
 #define open(...) admission_open(__VA_ARGS__)
+#define fcntl(...) admission_fcntl(__VA_ARGS__)
+#define fprintf(...) admission_fprintf(__VA_ARGS__)
+#define perror(...) admission_perror(__VA_ARGS__)
 #define close(...) admission_close(__VA_ARGS__)
 #define stat(...) admission_stat(__VA_ARGS__)
 #define lstat(...) admission_lstat(__VA_ARGS__)
@@ -47,6 +53,9 @@ static FILE *test_format_fopen(const char *path, const char *mode);
 #define main swapzctl_program_main
 #include "../../../../src/userspace/swapzctl.c"
 #undef main
+#undef perror
+#undef fprintf
+#undef fcntl
 #undef fopen
 #undef pwrite
 #undef realpath
@@ -62,6 +71,28 @@ static FILE *test_format_fopen(const char *path, const char *mode);
 
 #include <assert.h>
 
+/* Make libc diagnostic errno clobber deterministic in the formatter. */
+static int test_diagnostic_errno_clobber;
+
+static int admission_fprintf(FILE *stream, const char *format, ...)
+{
+	va_list arguments;
+	int written;
+
+	va_start(arguments, format);
+	written = vfprintf(stream, format, arguments);
+	va_end(arguments);
+	if (stream == stderr && test_diagnostic_errno_clobber)
+		errno = test_diagnostic_errno_clobber;
+	return written;
+}
+
+static inline void admission_perror(const char *description)
+{
+	perror(description);
+	if (test_diagnostic_errno_clobber)
+		errno = test_diagnostic_errno_clobber;
+}
 
 /*
  * Rootless CLI integration: default formatter callbacks consume actual
@@ -106,7 +137,23 @@ static struct {
 	unsigned int observed_identity_calls;
 	int enabled, path_is_symlink, path_is_regular;
 	int open_error, observed_open_flags;
+	int descriptor_mode, descriptor_error, close_error;
+	unsigned int descriptor_queries;
 } admission_fixture;
+
+static int admission_fcntl(int fd, int command, ...)
+{
+	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
+		assert(command == F_GETFL);
+		admission_fixture.descriptor_queries++;
+		if (admission_fixture.descriptor_error) {
+			errno = admission_fixture.descriptor_error;
+			return -1;
+		}
+		return admission_fixture.descriptor_mode;
+	}
+	return fcntl(fd, command);
+}
 
 static void admission_observe_identity(const char *identity)
 {
@@ -322,6 +369,10 @@ static int admission_close(int fd)
 {
 	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
 		++admission_fixture.closes;
+		if (admission_fixture.close_error) {
+			errno = admission_fixture.close_error;
+			return -1;
+		}
 		return 0;
 	}
 	return close(fd);
@@ -456,6 +507,7 @@ static void admission_start(enum admission_change change)
 	admission_fixture.geometry_bytes = 124787884032ULL;
 	admission_fixture.alias_device = makedev(8U, 1U);
 	admission_fixture.path_inode = 17U;
+	admission_fixture.descriptor_mode = O_RDWR;
 	for (size_t index = 0; index < sizeof(dirs) / sizeof(dirs[0]); ++index)
 		admission_make_directory(dirs[index]);
 
@@ -542,7 +594,9 @@ static void test_real_cli_exclusive_open_permission_refuses_without_io(void)
 
 	admission_start(ADMISSION_UNCHANGED);
 	admission_fixture.open_error = EACCES;
+	test_diagnostic_errno_clobber = ECHILD;
 	status = admission_capture_cli(report, &observed_errno);
+	test_diagnostic_errno_clobber = 0;
 	if (status != 1 || observed_errno != EACCES ||
 	    !strstr(report, "swapzctl format: exclusive open:") ||
 	    !strstr(report, strerror(EACCES)) ||
@@ -605,7 +659,9 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		int status, observed_errno;
 
 		admission_start(cases[index].change);
+		test_diagnostic_errno_clobber = ECHILD;
 		status = admission_capture_cli(report, &observed_errno);
+		test_diagnostic_errno_clobber = 0;
 
 		if (status != 2 || observed_errno != cases[index].expected_errno ||
 		    !strstr(report, "REFUSED: target identity changed before "
@@ -654,6 +710,57 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 			      admission_fixture.geometry_bytes));
 	admission_stop();
 	puts("PASS: rootless CLI snapshot admission; kernel exclusivity NOT PROVEN");
+}
+
+/* The fake descriptor exercises the real final mode check, not BLK_EXCL. */
+static void test_real_cli_descriptor_access_modes_refuse_without_write(void)
+{
+	static const struct {
+		int descriptor_mode;
+		int descriptor_error;
+		int expected_errno;
+		const char *failed_stage;
+	} cases[] = {
+		{ O_RDWR, ENODEV, ENODEV, "descriptor mode query failed" },
+		{ O_RDONLY, 0, EBADF, "descriptor mode is not O_RDWR" },
+		{ O_WRONLY, 0, EBADF, "descriptor mode is not O_RDWR" },
+	};
+	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
+
+	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
+	     ++index) {
+		char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+		int status, observed_errno;
+
+		admission_start(ADMISSION_UNCHANGED);
+		admission_fixture.descriptor_mode = cases[index].descriptor_mode;
+		admission_fixture.descriptor_error = cases[index].descriptor_error;
+		admission_fixture.close_error = EOVERFLOW;
+		test_diagnostic_errno_clobber = ECHILD;
+		status = admission_capture_cli(report, &observed_errno);
+		test_diagnostic_errno_clobber = 0;
+		if (status != 2 || observed_errno != cases[index].expected_errno ||
+		    !strstr(report, cases[index].failed_stage) ||
+		    !strstr(report, "expected=") ||
+		    !strstr(report, "errno=") ||
+		    !strstr(report, "CLEANUP FAILED: close") ||
+		    strstr(report, ADMISSION_DEVICE) ||
+		    admission_fixture.opens != 1U ||
+		    admission_fixture.reads != 1U ||
+		    admission_fixture.descriptor_queries != 1U ||
+		    admission_fixture.writes != 0U ||
+		    admission_fixture.syncs != 0U ||
+		    admission_fixture.closes != 1U ||
+		    memcmp(admission_fixture.block_zero, unchanged,
+			   sizeof(unchanged))) {
+			fprintf(stderr, "FAIL: stage=descriptor-mode case=%zu "
+				"errno=%d expected=%d writes=%u syncs=%u\n",
+				index, observed_errno, cases[index].expected_errno,
+				admission_fixture.writes, admission_fixture.syncs);
+			abort();
+		}
+		admission_stop();
+	}
 }
 
 static const char *test_configured_partuuid = "f13428f6-01";
@@ -736,6 +843,9 @@ struct mock_format_context {
 	unsigned char media[SWAPZ_SUPERBLOCK_BYTES];
 	int preopen_error;
 	int open_error;
+	int descriptor_error;
+	int descriptor_mode;
+	int descriptor_mode_overridden;
 	int read_error;
 	int random_error;
 	int write_error;
@@ -750,6 +860,7 @@ struct mock_format_context {
 	unsigned int authorization_calls;
 	unsigned int preopen_calls;
 	unsigned int open_calls;
+	unsigned int descriptor_query_calls;
 	unsigned int verify_calls;
 	unsigned int read_calls;
 	unsigned int random_calls;
@@ -825,6 +936,20 @@ static int mock_open_device(void *opaque, const char *path)
 		return -1;
 	}
 	return 17;
+}
+
+static int mock_descriptor_flags(void *opaque, int fd)
+{
+	struct mock_format_context *context = opaque;
+
+	assert(fd == 17);
+	context->descriptor_query_calls++;
+	if (context->descriptor_error) {
+		errno = context->descriptor_error;
+		return -1;
+	}
+	return context->descriptor_mode_overridden ?
+		context->descriptor_mode : O_RDWR;
 }
 
 static int mock_verify_opened(void *opaque, int fd, const char *path,
@@ -942,6 +1067,7 @@ static struct format_runtime_ops mock_ops(struct mock_format_context *context)
 		.authorized_target_verify = mock_authorized_target_verify,
 		.preopen_verify = mock_preopen_verify,
 		.open_device = mock_open_device,
+		.get_descriptor_flags = mock_descriptor_flags,
 		.verify_opened = mock_verify_opened,
 		.read_header = mock_read_header,
 		.random_bytes = mock_random_bytes,
@@ -2356,6 +2482,64 @@ static void test_read_only_transition_before_write_refuses(void)
 	assert(context.close_calls == 1U);
 }
 
+/* A secondary close failure and diagnostic output must not replace errno. */
+static void test_formatter_originating_errno_survives_diagnostics_and_close(void)
+{
+	struct format_expectation expected = authorized_expectation();
+	struct mock_format_context fixtures[] = {
+		{ .authorization_errors = { EPERM },
+		  .authorization_error_count = 1U },
+		{ .preopen_error = EBUSY },
+		{ .open_error = EACCES },
+		{ .verify_errors = { ESTALE }, .verify_error_count = 1U,
+		  .close_error = EOVERFLOW },
+		{ .read_error = EIO, .close_error = EOVERFLOW },
+		{ .random_error = EAGAIN, .close_error = EOVERFLOW },
+		{ .verify_errors = { 0, ESTALE }, .verify_error_count = 2U,
+		  .close_error = EOVERFLOW },
+		{ .descriptor_error = ENODEV, .close_error = EOVERFLOW },
+		{ .descriptor_mode_overridden = 1, .descriptor_mode = O_RDONLY,
+		  .close_error = EOVERFLOW },
+		{ .descriptor_mode_overridden = 1, .descriptor_mode = O_WRONLY,
+		  .close_error = EOVERFLOW },
+		{ .write_error = EIO, .close_error = EOVERFLOW },
+		{ .sync_error = ENOSPC, .close_error = EOVERFLOW },
+	};
+	static const int expected_errno[] = {
+		EPERM, EBUSY, EACCES, ESTALE, EIO, EAGAIN,
+		ESTALE, ENODEV, EBADF, EBADF, EIO, ENOSPC,
+	};
+	static const int expected_status[] = {
+		2, 2, 1, 2, 1, 1, 2, 2, 2, 2, 3, 3,
+	};
+
+	assert(sizeof(fixtures) / sizeof(fixtures[0]) ==
+	       sizeof(expected_errno) / sizeof(expected_errno[0]));
+	for (size_t index = 0; index < sizeof(fixtures) / sizeof(fixtures[0]);
+	     ++index) {
+		struct mock_format_context *context = &fixtures[index];
+		struct format_runtime_ops ops = mock_ops(context);
+		int status, observed_errno;
+
+		test_diagnostic_errno_clobber = ECHILD;
+		errno = 0;
+		status = format_device_with_ops("/synthetic/card", &expected, &ops);
+		observed_errno = errno;
+		test_diagnostic_errno_clobber = 0;
+		if (status != expected_status[index] ||
+		    observed_errno != expected_errno[index] ||
+		    context->write_calls != (index >= 10U ? 1U : 0U) ||
+		    context->sync_calls != (index == 11U ? 1U : 0U) ||
+		    context->close_calls != (index >= 3U ? 1U : 0U)) {
+			fprintf(stderr, "FAIL: originating-errno case=%zu "
+				"status=%d errno=%d expected=%d writes=%u syncs=%u\n",
+				index, status, observed_errno, expected_errno[index],
+				context->write_calls, context->sync_calls);
+			abort();
+		}
+	}
+}
+
 static void test_publication_failures_are_explicitly_uncertain(void)
 {
 	struct format_expectation expected = authorized_expectation();
@@ -2514,12 +2698,14 @@ int main(void)
 	test_inventory_gate_errors_never_reach_header_write();
 	test_device_disappearance_before_write_refuses();
 	test_read_only_transition_before_write_refuses();
+	test_formatter_originating_errno_survives_diagnostics_and_close();
 	test_publication_failures_are_explicitly_uncertain();
 	test_zero_header_format_and_readback();
 	test_repeat_format_is_idempotent_and_non_destructive();
 	test_disappearance_after_write_is_never_success();
 	test_truncated_read_and_close_failure_are_not_success();
 	test_real_cli_exclusive_open_permission_refuses_without_io();
+	test_real_cli_descriptor_access_modes_refuse_without_write();
 	test_real_cli_snapshots_refuse_before_first_header_write();
 	puts("PASS: swapzctl formatter identity and destructive-action gates");
 	return 0;

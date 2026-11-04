@@ -3174,6 +3174,7 @@ struct format_runtime_ops {
 	int (*preopen_verify)(void *context, const char *path,
 			      const struct format_expectation *expected);
 	int (*open_device)(void *context, const char *path);
+	int (*get_descriptor_flags)(void *context, int fd);
 	int (*verify_opened)(void *context, int fd, const char *path,
 			     const struct format_expectation *expected);
 	int (*read_header)(void *context, int fd,
@@ -3223,6 +3224,13 @@ static int format_default_open_device(void *context, const char *path)
 	return open(path, O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW);
 }
 
+/* The returned access mode is checkable; F_GETFL cannot prove O_EXCL. */
+static int format_default_descriptor_flags(void *context, int fd)
+{
+	(void)context;
+	return fcntl(fd, F_GETFL);
+}
+
 static int format_default_verify_opened(
 	void *context, int fd, const char *path,
 	const struct format_expectation *expected)
@@ -3265,17 +3273,43 @@ static int format_default_close_device(void *context, int fd)
 	return close(fd);
 }
 
-static void format_report_refusal(const char *stage, int error)
-{
-	fprintf(stderr, "swapzctl format: REFUSED: %s: %s\n", stage,
-		strerror(error ? error : EPERM));
-}
-
-static void format_report_uncertain(const char *stage, int error)
+/*
+ * Output and cleanup cannot replace the errno of the originating failure.
+ * Callers pass that saved errno; restore it after every diagnostic.
+ */
+static void format_report_error(const char *classification, const char *stage,
+				const char *expected, int original_errno,
+				const char *next_action)
 {
 	fprintf(stderr,
-		"swapzctl format: UNCERTAIN: %s: %s; RECOVERY REQUIRED before retry\n",
-		stage, strerror(error ? error : EIO));
+		"swapzctl format: %s%s: expected=%s; errno=%d (%s); action=%s\n",
+		classification, stage, expected, original_errno,
+		strerror(original_errno), next_action);
+	errno = original_errno;
+}
+
+static void format_report_refusal(const char *stage, const char *expected,
+				  int original_errno)
+{
+	format_report_error("REFUSED: ", stage, expected, original_errno,
+			    "inspect selector, identity, topology and inventory "
+			    "read-only; no header write");
+}
+
+static void format_report_uncertain(const char *stage, const char *expected,
+				    int original_errno)
+{
+	format_report_error("UNCERTAIN: ", stage, expected, original_errno,
+			    "RECOVERY REQUIRED before retry; inspect header and "
+			    "target identity read-only");
+}
+
+static void format_report_failure(const char *stage, const char *expected,
+				  int original_errno)
+{
+	format_report_error("", stage, expected, original_errno,
+			    "inspect failed prerequisite read-only; no header "
+			    "write attempted");
 }
 
 static int format_authorized_opened_verify(
@@ -3301,7 +3335,8 @@ static int format_device_with_ops(
 
 	if (!path || !expected || !ops || !ops->authorized_target_verify ||
 	    !ops->preopen_verify ||
-	    !ops->open_device || !ops->verify_opened || !ops->read_header ||
+	    !ops->open_device || !ops->get_descriptor_flags ||
+	    !ops->verify_opened || !ops->read_header ||
 	    !ops->random_bytes || !ops->write_header || !ops->sync_device ||
 	    !ops->close_device) {
 		errno = EINVAL;
@@ -3310,29 +3345,38 @@ static int format_device_with_ops(
 	if (ops->authorized_target_verify(ops->context, expected) < 0) {
 		saved_errno = errno;
 		format_report_refusal("protected target selector does not authorize "
-				      "this partition", saved_errno);
+				      "this partition",
+				"protected selector/identity, topology and mount/swap "
+				      "inventory remain clear", saved_errno);
 		return 2;
 	}
 	if (ops->preopen_verify(ops->context, path, expected) < 0) {
 		saved_errno = errno;
 		format_report_refusal("pre-open target identity is not proven",
-				      saved_errno);
+				"protected selector/identity, topology and mount/swap "
+				      "inventory remain clear", saved_errno);
 		return 2;
 	}
 	fd = ops->open_device(ops->context, path);
 	if (fd < 0) {
-		perror("swapzctl format: exclusive open");
+		saved_errno = errno;
+		format_report_failure("exclusive open",
+				      "O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW "
+				      "accepted on selected block device", saved_errno);
 		return 1;
 	}
 	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
 		format_report_refusal("opened descriptor identity is not proven",
-				      saved_errno);
+				"protected selector/identity, topology and mount/swap "
+				      "inventory remain clear", saved_errno);
 		result = 2;
 		goto close_error;
 	}
 	if (ops->read_header(ops->context, fd, block) < 0) {
-		perror("swapzctl format: read block 0");
+		saved_errno = errno;
+		format_report_failure("read block 0", "exact 4096-byte header read",
+				      saved_errno);
 		goto close_error;
 	}
 	if (swapz_sb_valid(block, expected->device_bytes)) {
@@ -3341,16 +3385,19 @@ static int format_device_with_ops(
 			saved_errno = errno;
 			format_report_refusal(
 				"target identity changed while recognizing existing SWZ header",
-				saved_errno);
+					"protected selector/identity, topology and mount/swap "
+				      "inventory remain clear", saved_errno);
 			result = 2;
 			goto close_error;
 		}
 		goto close_success;
 	}
 	if (!block_is_zero(block)) {
-		fputs("swapzctl format: REFUSED: block 0 is neither zero nor a valid "
-		      "SWZ authorization header; RECOVERY REQUIRED before retry\n",
-		      stderr);
+		errno = EINVAL;
+		format_report_error("REFUSED: ",
+				    "block 0 is neither zero nor a valid SWZ authorization header",
+				    "all-zero or valid 4096-byte SWZ header", errno,
+				    "RECOVERY REQUIRED before retry; inspect header read-only");
 		result = 2;
 		goto close_error;
 	}
@@ -3367,7 +3414,9 @@ static int format_device_with_ops(
 	if (ops->random_bytes(ops->context,
 			      block + SWAPZ_SUPERBLOCK_UUID_OFFSET,
 			      SWAPZ_SUPERBLOCK_UUID_BYTES) < 0) {
-		perror("swapzctl format: getrandom");
+		saved_errno = errno;
+		format_report_failure("getrandom", "16 random UUID bytes",
+				      saved_errno);
 		goto close_error;
 	}
 	block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 6U] =
@@ -3377,9 +3426,10 @@ static int format_device_with_ops(
 		(unsigned char)((block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 8U] & 0x3fU) |
 				0x80U);
 	if (!swapz_sb_valid(block, expected->device_bytes)) {
-		fputs("swapzctl format: internal SWZ header construction failed\n",
-		      stderr);
 		errno = EINVAL;
+		format_report_failure("internal SWZ header construction failed",
+				      "valid 4096-byte SWZ authorization header",
+				      errno);
 		goto close_error;
 	}
 
@@ -3387,22 +3437,47 @@ static int format_device_with_ops(
 	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
 		saved_errno = errno;
 		format_report_refusal("target identity changed before header write",
-				      saved_errno);
+				"protected selector/identity, topology and mount/swap "
+				      "inventory remain clear", saved_errno);
 		result = 2;
 		goto close_error;
+	}
+	/*
+	 * Final returned-FD access check after identity/topology/inventory.
+	 * F_GETFL validates access mode, never kernel O_EXCL/holder exclusion.
+	 */
+	{
+		int descriptor_flags = ops->get_descriptor_flags(ops->context, fd);
+
+		if (descriptor_flags < 0) {
+			saved_errno = errno;
+			format_report_refusal("descriptor mode query failed",
+					      "fcntl(F_GETFL) succeeds and reports O_RDWR",
+					      saved_errno);
+			result = 2;
+			goto close_error;
+		}
+		if ((descriptor_flags & O_ACCMODE) != O_RDWR) {
+			errno = EBADF;
+			format_report_refusal("descriptor mode is not O_RDWR",
+					      "fcntl(F_GETFL) & O_ACCMODE == O_RDWR",
+					      errno);
+			result = 2;
+			goto close_error;
+		}
 	}
 	publication_attempted = 1;
 	if (ops->write_header(ops->context, fd, block) < 0) {
 		saved_errno = errno;
 		format_report_uncertain("header write did not complete",
-					saved_errno);
+				"durable valid 4096-byte header and unchanged identity", saved_errno);
 		result = 3;
 		goto close_error;
 	}
 	if (ops->sync_device(ops->context, fd) < 0) {
 		saved_errno = errno;
 		format_report_uncertain("header durability is not proven",
-					saved_errno);
+				"durable valid 4096-byte header and unchanged identity", saved_errno);
 		result = 3;
 		goto close_error;
 	}
@@ -3410,21 +3485,22 @@ static int format_device_with_ops(
 		saved_errno = errno;
 		format_report_uncertain(
 			"target identity became uncertain after header write",
-			saved_errno);
+				"durable valid 4096-byte header and unchanged identity", saved_errno);
 		result = 3;
 		goto close_error;
 	}
 	if (ops->read_header(ops->context, fd, readback) < 0) {
 		saved_errno = errno;
 		format_report_uncertain("header readback could not be verified",
-					saved_errno);
+				"durable valid 4096-byte header and unchanged identity", saved_errno);
 		result = 3;
 		goto close_error;
 	}
 	if (memcmp(readback, block, sizeof(block)) ||
 	    !swapz_sb_valid(readback, expected->device_bytes)) {
 		errno = EIO;
-		format_report_uncertain("SWZ header readback mismatch", errno);
+		format_report_uncertain("SWZ header readback mismatch",
+					"byte-identical valid 4096-byte readback", errno);
 		result = 3;
 		goto close_error;
 	}
@@ -3432,7 +3508,7 @@ static int format_device_with_ops(
 		saved_errno = errno;
 		format_report_uncertain(
 			"target identity changed after header verification",
-			saved_errno);
+				"durable valid 4096-byte header and unchanged identity", saved_errno);
 		result = 3;
 		goto close_error;
 	}
@@ -3443,11 +3519,11 @@ close_success:
 		if (publication_attempted) {
 			format_report_uncertain(
 				"device close failed after verified header publication",
-				saved_errno);
+					"durable valid 4096-byte header and unchanged identity", saved_errno);
 			return 3;
 		}
-		errno = saved_errno;
-		perror("swapzctl format: close");
+		format_report_failure("close", "descriptor closes without publication",
+				      saved_errno);
 		return 1;
 	}
 	if (already_formatted) {
@@ -3463,8 +3539,14 @@ close_success:
 
 close_error:
 	saved_errno = errno;
-	if (fd >= 0 && ops->close_device(ops->context, fd) < 0)
-		perror("swapzctl format: close");
+	if (fd >= 0 && ops->close_device(ops->context, fd) < 0) {
+		const int cleanup_errno = errno;
+
+		format_report_error("CLEANUP FAILED: ", "close",
+				    "descriptor closes; original error remains authoritative",
+				    cleanup_errno,
+				    "retain original failure; inspect target read-only");
+	}
 	errno = saved_errno;
 	return result;
 }
@@ -3477,6 +3559,7 @@ static int format_device(const char *path,
 		.authorized_target_verify = format_default_authorized_target_verify,
 		.preopen_verify = format_default_preopen_verify,
 		.open_device = format_default_open_device,
+		.get_descriptor_flags = format_default_descriptor_flags,
 		.verify_opened = format_default_verify_opened,
 		.read_header = format_default_read_header,
 		.random_bytes = format_default_random_bytes,

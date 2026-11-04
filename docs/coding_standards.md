@@ -436,13 +436,15 @@ flags, never BLK_EXCL behavior against real concurrent holders or swapon.
 Synthetic final-gate tests must model reachable failures such as pathname
 terminal-object replacement, descriptor state-query failure, or a read-only
 transition; they must not manufacture an already-open inode changing file type
-or make fstat() stand in for device-driver liveness. The production opener
-currently requests O_RDWR/O_EXCL/O_CLOEXEC/O_NOFOLLOW and rechecks BLKROGET
-and descriptor identity, but does not separately query F_GETFL to confirm the
-returned descriptor's access mode or acquire an additional userspace lock.
-These are source-owner review items, not invariants established by synthetic
-tests. Kernel-level exclusivity and mount/swap races after the last snapshot
-require separate safe loaded-kernel qualification.
+or make fstat() stand in for device-driver liveness. The production opener requests O_RDWR/O_EXCL/O_CLOEXEC/O_NOFOLLOW and rechecks
+BLKROGET and descriptor identity. At the last prepublication gate it
+independently requires fcntl(F_GETFL) to succeed and
+`(returned_flags & O_ACCMODE) == O_RDWR`; failed queries preserve the kernel
+errno, while an incompatible access mode refuses with EBADF. This returned-FD
+check does not establish O_EXCL exclusion: F_GETFL cannot report O_EXCL, and
+no additional userspace lock is acquired. Kernel-level exclusivity and
+mount/swap races after the last snapshot remain UNQUALIFIED until separately
+authorized loaded-kernel tests establish them.
 
 Block zero is accepted only when it is all zero or is an exact existing SWZ
 authorization header. The shared validator requires the eight-byte magic,
@@ -464,7 +466,12 @@ Status 2 remains a pre-publication refusal and status 1 is reserved for
 operational errors where no header publication was attempted. Every
 pre-publication rejection must preserve the triggering prerequisite errno
 across diagnostic output and descriptor cleanup; reporting functions are not
-allowed to become the returned error authority. The standalone
+allowed to become the returned error authority. Fail-only diagnostics name the
+stage, expected condition, original numeric errno and safe next action without
+exposing device paths or block contents. A secondary close failure must be
+reported separately and cannot replace the originating failure errno.
+Once publication is attempted, write, durability, identity, readback and
+close failures still retain status 3 and RECOVERY REQUIRED. The standalone
 formatter never creates a mapper or activates swap. After a successful write it
 revalidates device identity, rereads the entire header, requires byte-for-byte
 equality and full SWZ validation, then revalidates identity once more before
