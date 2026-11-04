@@ -69,6 +69,14 @@ grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
     printf '%s\n' 'BLOCKED: ID36 required owned RAM pair or pressure helper unavailable; restore readable checkout helpers before qualification' >&2
     exit 2
 }
+for required_command in awk bash cat cut getconf grep id mkdir mktemp od python3 \
+                        rm rmdir sleep tail timeout tr; do
+    command -v "$required_command" >/dev/null 2>&1 || {
+        printf 'BLOCKED: ID36 missing required command %s; restore the standard qualification toolchain before retrying\n' \
+            "$required_command" >&2
+        exit 2
+    }
+done
 
 # This marker precedes admission so an early BLOCKED result cannot inherit the
 # preceding synthetic storage envelope's last benchmark phase.
@@ -247,13 +255,24 @@ PY
     exit 2
 fi
 
-token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
+if ! token="$(od -An -N8 -tx1 /dev/urandom 2>/dev/null |
+        tr -d '[:space:]' 2>/dev/null)"; then
+    printf '%s\n' 'BLOCKED: ID36 random identity unavailable; require readable /dev/urandom and working od/tr before private cgroup creation' >&2
+    exit 2
+fi
 [[ $token =~ ^[a-f0-9]{16}$ ]] || {
-    printf '%s\n' 'BLOCKED: ID36 random identity unavailable; require readable /dev/urandom for private cgroup identity' >&2
+    printf '%s\n' 'BLOCKED: ID36 random identity malformed; require exactly 8 bytes of readable kernel randomness' >&2
     exit 2
 }
 CGROUP="$CGROUP_ROOT/swapz-id36-$token"
-SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-id36.XXXXXXXX")"
+if ! SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-id36.XXXXXXXX" 2>/dev/null)"; then
+    printf '%s\n' 'BLOCKED: ID36 cannot create private scratch session; require a writable temporary directory with safe mktemp semantics' >&2
+    exit 2
+fi
+[[ -d $SESSION && ! -L $SESSION ]] || {
+    printf '%s\n' 'BLOCKED: ID36 private scratch session identity is unsafe; require a newly created real directory' >&2
+    exit 2
+}
 READY="$SESSION/pressure.ready"
 PRESSURE_ACTIVATE="$SESSION/pressure.activate"
 PRESSURE_ACTIVE="$SESSION/pressure.active"
@@ -264,6 +283,36 @@ PRESSURE_LOG="$SESSION/pressure.log"
 PAIR_LOG="$SESSION/pair.log"
 PRESSURE_PID=""
 PAIR_PID=""
+
+# Extract at most one short fail-only reason from a private helper log. Never
+# echo paths or unbounded diagnostics from privileged children.
+bounded_safe_log_reason() {
+    local log_path="$1" prefix="$2"
+
+    [[ $prefix == 'BLOCKED: ' || $prefix == 'FAIL: ' ]] || return 2
+    awk -v prefix="$prefix" '
+        NR > 128 { exit }
+        index($0, prefix) == 1 {
+            reason = substr($0, length(prefix) + 1)
+            if (length(reason) > 192 || reason ~ /[\\/]/ ||
+                reason ~ /[[:cntrl:]]/)
+                print "diagnostic details withheld for privacy"
+            else
+                print reason
+            exit
+        }
+    ' "$log_path" 2>/dev/null
+}
+
+write_cgroup_control() {
+    local control="$1" value="$2"
+
+    if ! (printf '%s\n' "$value" > "$CGROUP/$control") 2>/dev/null; then
+        printf 'BLOCKED: ID36 cannot set cgroup control %s; require a writable delegated cgroup v2 memory subtree\n' \
+            "$control" >&2
+        return 2
+    fi
+}
 
 cleanup() {
     local result=$?
@@ -313,15 +362,18 @@ for control in memory.max memory.high memory.current memory.peak memory.events c
     }
 done
 
-echo "$MEMORY_MAX_BYTES" > "$CGROUP/memory.max"
+write_cgroup_control memory.max "$MEMORY_MAX_BYTES" || exit 2
 # Establish the resident helper baseline before applying the real high
 # watermark. The workload-scoped boundary is installed just before release.
-echo "$MEMORY_MAX_BYTES" > "$CGROUP/memory.high"
+write_cgroup_control memory.high "$MEMORY_MAX_BYTES" || exit 2
 if [[ -e $CGROUP/memory.swap.max ]]; then
-    echo 0 > "$CGROUP/memory.swap.max"
+    write_cgroup_control memory.swap.max 0 || exit 2
 fi
 
-online_cpus="$(getconf _NPROCESSORS_ONLN)"
+if ! online_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"; then
+    printf '%s\n' 'BLOCKED: ID36 online CPU count unavailable; restore working getconf _NPROCESSORS_ONLN telemetry' >&2
+    exit 2
+fi
 [[ $online_cpus =~ ^[1-9][0-9]*$ && ${#online_cpus} -le 18 ]] || {
     printf '%s\n' 'BLOCKED: ID36 online CPU count unavailable or malformed; restore canonical getconf _NPROCESSORS_ONLN telemetry' >&2
     exit 2
@@ -411,7 +463,22 @@ PAIR_PID=$!
 for _ in {1..600}; do
     [[ -s $PAIR_READY ]] && break
     kill -0 "$PAIR_PID" 2>/dev/null || {
-        printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before null_blk prewarm barrier' >&2
+        if ! pair_blocked_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'BLOCKED: ')"; then
+            printf '%s\n' 'BLOCKED: ID36 owned-RAM pair prerequisite telemetry is unreadable; preserve the private session and retry after restoring scratch access' >&2
+            exit 2
+        fi
+        if [[ -n $pair_blocked_reason ]]; then
+            printf 'BLOCKED: ID36 owned-RAM pair prerequisite before prewarm: %s\n' \
+                "$pair_blocked_reason" >&2
+            exit 2
+        fi
+        pair_fail_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'FAIL: ' 2>/dev/null || true)"
+        if [[ -n $pair_fail_reason ]]; then
+            printf 'FAIL: ID36 owned-RAM pair exited before prewarm: %s\n' \
+                "$pair_fail_reason" >&2
+        else
+            printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before null_blk prewarm barrier without a bounded diagnostic' >&2
+        fi
         exit 1
     }
     sleep 0.05
@@ -420,21 +487,35 @@ done
     printf '%s\n' 'FAIL: ID36 owned-RAM pair did not reach null_blk prewarm barrier' >&2
     exit 1
 }
-pair_cgroup_pid="$(awk -F= '$1 == "pid" && $2 ~ /^[0-9]+$/ { print $2; exit }' "$PAIR_READY")"
+if ! pair_cgroup_pid="$(awk -F= '$1 == "pid" && $2 ~ /^[0-9]+$/ { print $2; exit }' \
+        "$PAIR_READY" 2>/dev/null)"; then
+    printf '%s\n' 'BLOCKED: ID36 pair readiness telemetry became unreadable; require the owned private barrier to remain readable' >&2
+    exit 2
+fi
 [[ $pair_cgroup_pid =~ ^[1-9][0-9]*$ ]] || {
     printf '%s\n' 'FAIL: ID36 pair readiness did not report migrated PID' >&2
     exit 1
 }
-grep -Fxq "$pair_cgroup_pid" "$CGROUP/cgroup.procs" || {
+if grep -Fxq "$pair_cgroup_pid" "$CGROUP/cgroup.procs" 2>/dev/null; then
+    :
+else
+    cgroup_procs_rc=$?
+    if (( cgroup_procs_rc > 1 )); then
+        printf '%s\n' 'BLOCKED: ID36 cgroup.procs telemetry unreadable after pair migration; restore readable cgroup v2 process membership' >&2
+        exit 2
+    fi
     printf '%s\n' 'FAIL: ID36 pair did not enter pressure cgroup after prewarm' >&2
     exit 1
-}
+fi
 
 bash -c '
     set -e
     cgroup=$1
     shift
-    echo $$ > "$cgroup/cgroup.procs"
+    if ! (printf "%s\\n" "$" > "$cgroup/cgroup.procs") 2>/dev/null; then
+        printf "%s\\n" "BLOCKED: ID36 pressure helper could not enter isolated cgroup" >&2
+        exit 2
+    fi
     exec "$@"
 ' _ "$CGROUP" python3 -B "$PRESSURE_SCRIPT" \
     --memory-mib "$PRESSURE_MIB" --ready-memory-mib "$READY_PRESSURE_MIB" \
@@ -446,7 +527,22 @@ PRESSURE_PID=$!
 for _ in {1..800}; do
     [[ -s $READY ]] && break
     kill -0 "$PRESSURE_PID" 2>/dev/null || {
-        printf '%s\n' 'FAIL: ID36 pressure helper exited before readiness' >&2
+        if ! pressure_blocked_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'BLOCKED: ')"; then
+            printf '%s\n' 'BLOCKED: ID36 pressure-helper diagnostic telemetry is unreadable; require the private scratch log to remain readable' >&2
+            exit 2
+        fi
+        if [[ -n $pressure_blocked_reason ]]; then
+            printf 'BLOCKED: ID36 pressure-helper prerequisite before readiness: %s\n' \
+                "$pressure_blocked_reason" >&2
+            exit 2
+        fi
+        pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ' 2>/dev/null || true)"
+        if [[ -n $pressure_fail_reason ]]; then
+            printf 'FAIL: ID36 pressure helper exited before readiness: %s\n' \
+                "$pressure_fail_reason" >&2
+        else
+            printf '%s\n' 'FAIL: ID36 pressure helper exited before readiness without a bounded diagnostic' >&2
+        fi
         exit 1
     }
     sleep 0.05
@@ -500,7 +596,7 @@ MEMORY_HIGH_BYTES=$((pressure_current + MEMORY_HEADROOM_BYTES))
     printf '%s\n' 'FAIL: ID36 staged pressure must cross the memory.high headroom' >&2
     exit 1
 }
-echo "$MEMORY_HIGH_BYTES" > "$CGROUP/memory.high"
+write_cgroup_control memory.high "$MEMORY_HIGH_BYTES" || exit 2
 
 # Establish high-pressure evidence deliberately before releasing the benchmark.
 # The final anonymous working set remains 576 MiB; only its last 80 MiB is
@@ -515,7 +611,10 @@ printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%
     "$pressure_current" "$MEMORY_HEADROOM_BYTES" "$READY_PRESSURE_MIB" \
     "$PRESSURE_RAMP_MIB"
 
-: > "$PRESSURE_ACTIVATE"
+if ! (: > "$PRESSURE_ACTIVATE") 2>/dev/null; then
+    printf '%s\n' 'BLOCKED: ID36 cannot signal staged pressure activation; require the owned private scratch session to remain writable' >&2
+    exit 2
+fi
 for _ in {1..800}; do
     [[ -s $PRESSURE_ACTIVE ]] && break
     kill -0 "$PRESSURE_PID" 2>/dev/null || {
@@ -550,7 +649,10 @@ fi
 # CPU PSI qualification is scoped to the actual released pair, while the
 # already-proven memory.high event remains part of the same bounded ID36 run.
 cpu_some_before="$(cpu_some_total)"
-: > "$PAIR_GO"
+if ! (: > "$PAIR_GO") 2>/dev/null; then
+    printf '%s\n' 'BLOCKED: ID36 cannot release the owned pair barrier; require the private scratch session to remain writable' >&2
+    exit 2
+fi
 set +e
 wait "$PAIR_PID"
 pair_rc=$?
