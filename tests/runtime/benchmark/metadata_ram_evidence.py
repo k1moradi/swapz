@@ -668,12 +668,13 @@ def validate_metadata_ram_trace(
     if (
             expected_peak_ram_bytes is not None and
             (type(expected_peak_ram_bytes) is not int or
-             expected_peak_ram_bytes <= 0 or
+             not 0 < expected_peak_ram_bytes <= MAX_UINT64 or
              expected_peak_ram_bytes != peak_ram_bytes)):
         raise ValueError(
             "metadata RAM peak is not derived from raw samples: "
             f"metric=peak_ram_bytes observed={peak_ram_bytes} "
-            f"reported={expected_peak_ram_bytes}")
+            f"reported={_bounded_observed(expected_peak_ram_bytes)} "
+            f"maximum={MAX_UINT64}")
 
     # Use the last second of target-absent samples to prove the whole-host
     # counters returned to the pre-create envelope. This is intentionally
