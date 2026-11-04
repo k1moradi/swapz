@@ -23,9 +23,9 @@ RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
-# Never let an observer update the manager's recovery records or the package
-# installer's transaction journal, even when both live on writable /var.
-ReadOnlyPaths=-/var/lib/swapz/physical-recovery -/var/lib/swapz-package-transactions
+# Do not add ReadOnlyPaths bind mounts around recovery or package journals:
+# native preflight rejects mount substitution and needs the original mount IDs.
+# The verifier's observe command only writes its report and /run authorization.
 
 [Install]
 WantedBy=multi-user.target
