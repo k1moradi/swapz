@@ -127,6 +127,43 @@ static void test_geometry_holders_and_active_inventory_fail_closed(void)
 	assert(!format_topology_flags_allowed(1, 0, 1, 1, 1, 1, 1, 1, 1));
 }
 
+static void test_same_device_number_is_not_inode_authority(void)
+{
+	struct format_expectation expected = expectation("8:1", "8:0");
+	struct stat path_info = block_stat(8U, 1U);
+	struct stat opened_info = path_info;
+	struct stat alias_info = path_info;
+
+	path_info.st_dev = makedev(0U, 5U);
+	opened_info.st_dev = path_info.st_dev;
+	path_info.st_ino = 101U;
+	opened_info.st_ino = path_info.st_ino;
+	alias_info.st_uid = 0;
+	assert(format_identity_values_match(
+		&expected, &path_info, &opened_info, &alias_info,
+		expected.device_bytes, makedev(8U, 0U)));
+	/* A replacement mknod of the same major:minor is a different pathname. */
+	opened_info.st_ino = 102U;
+	assert(!format_identity_values_match(
+		&expected, &path_info, &opened_info, &alias_info,
+		expected.device_bytes, makedev(8U, 0U)));
+	opened_info.st_ino = 101U;
+	opened_info.st_dev = makedev(0U, 6U);
+	assert(!format_identity_values_match(
+		&expected, &path_info, &opened_info, &alias_info,
+		expected.device_bytes, makedev(8U, 0U)));
+	opened_info.st_dev = path_info.st_dev;
+	alias_info.st_uid = 1000U;
+	assert(!format_identity_values_match(
+		&expected, &path_info, &opened_info, &alias_info,
+		expected.device_bytes, makedev(8U, 0U)));
+	alias_info.st_uid = 0U;
+	alias_info.st_mode |= S_IWOTH;
+	assert(!format_identity_values_match(
+		&expected, &path_info, &opened_info, &alias_info,
+		expected.device_bytes, makedev(8U, 0U)));
+}
+
 static void test_transport_path_must_still_be_usb(void)
 {
 	assert(format_usb_transport_path(
@@ -147,10 +184,22 @@ static void test_swapfile_backing_identity_conflicts(void)
 	swap_entry.st_dev = makedev(259U, 1U);
 	assert(!format_swap_entry_conflicts(&swap_entry, device, parent));
 
+	/* File identity is st_dev; an incidental rdev must not misclassify it. */
+	swap_entry.st_dev = makedev(259U, 1U);
+	swap_entry.st_rdev = device;
+	assert(!format_swap_entry_conflicts(&swap_entry, device, parent));
+	swap_entry.st_dev = device;
+	swap_entry.st_rdev = makedev(259U, 2U);
+	assert(format_swap_entry_conflicts(&swap_entry, device, parent));
+
 	swap_entry.st_mode = S_IFBLK;
+	swap_entry.st_dev = device;
 	swap_entry.st_rdev = device;
 	assert(format_swap_entry_conflicts(&swap_entry, device, parent));
 	swap_entry.st_rdev = makedev(8U, 2U);
+	assert(!format_swap_entry_conflicts(&swap_entry, device, parent));
+	/* Block swap identity is rdev; a matching containing filesystem is not. */
+	swap_entry.st_dev = parent;
 	assert(!format_swap_entry_conflicts(&swap_entry, device, parent));
 
 	swap_entry.st_mode = S_IFDIR;
@@ -166,6 +215,7 @@ int main(void)
 	test_reconnection_requires_fresh_exact_device_identity();
 	test_geometry_holders_and_active_inventory_fail_closed();
 	test_swapfile_backing_identity_conflicts();
+	test_same_device_number_is_not_inode_authority();
 	test_transport_path_must_still_be_usb();
 	puts("PASS: removable-media identity rejects substitution and topology drift");
 	return 0;
