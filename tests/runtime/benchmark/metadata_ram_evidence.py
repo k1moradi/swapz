@@ -639,7 +639,10 @@ def validate_metadata_ram_trace(
     if first_absent is None:
         raise ValueError("metadata RAM teardown never observed mapper removal")
     if any(sample["mapper_present"] for sample in teardown[first_absent:]):
-        raise ValueError("metadata RAM mapper reappeared during teardown")
+        raise ValueError(
+            "metadata RAM mapper reappeared during teardown: "
+            "metric=mapper_present observed=true "
+            "required=false_after_first_removal")
     absent_teardown = teardown[first_absent:]
     if (
             len(absent_teardown) < 21 or
