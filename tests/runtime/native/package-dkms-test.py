@@ -153,6 +153,8 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_FAKE_MODULE_LOOKUP_FAIL_AFTER_BUILDS="0",
             SWAPZ_FAKE_DKMS_MODULE_SUFFIX="",
             SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX="",
+            SWAPZ_FAKE_REMOVE_RETAIN_SUFFIX="",
+            SWAPZ_FAKE_REMOVE_KEEP_STATE="0",
             SWAPZ_FAKE_DKMS_STATUS_OVERRIDE="",
             SWAPZ_TEST_DKMS_VERSION=VERSION,
             SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS="0",
@@ -252,7 +254,14 @@ case "$cmd" in
     fi
     ;;
   remove)
-    rm -f "$SWAPZ_DKMS_STATE" "$SWAPZ_TEST_INSTALLED_MODULE"*
+    if [[ "$SWAPZ_FAKE_REMOVE_KEEP_STATE" != 1 ]]; then
+      rm -f "$SWAPZ_DKMS_STATE" "$SWAPZ_TEST_INSTALLED_MODULE"*
+    fi
+    if [[ -n "$SWAPZ_FAKE_REMOVE_RETAIN_SUFFIX" ]]; then
+      mkdir -p "$(dirname "$SWAPZ_TEST_INSTALLED_MODULE")"
+      printf 'orphaned-foreign-module\n' > \
+        "$SWAPZ_TEST_INSTALLED_MODULE$SWAPZ_FAKE_REMOVE_RETAIN_SUFFIX"
+    fi
     ;;
   *) exit 2 ;;
 esac
@@ -1664,6 +1673,97 @@ exec "{flock_binary}" "$@"
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate(timeout=8)
+
+    def test_dkms_remove_success_must_leave_no_registration_or_image(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        for flag, value in (
+            ("SWAPZ_FAKE_REMOVE_KEEP_STATE", "1"),
+            ("SWAPZ_FAKE_REMOVE_RETAIN_SUFFIX", ".zst"),
+        ):
+            with self.subTest(flag=flag):
+                result = self.invoke("install", {flag: value})
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("DKMS removal left", result.stderr)
+                transactions = list(
+                    (self.home / "transactions").glob("swapz-package.*"))
+                if transactions:
+                    self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+                    blocked = self.invoke("uninstall")
+                    self.assertIn("incomplete package transaction retained",
+                                  blocked.stderr)
+                    break
+                self.assertTrue((self.prefix / "sbin/swapzctl").exists())
+
+    def kill_at_durable_phase(self, action, phase, extra=None):
+        """SIGKILL is untrappable, so a durable phase must remain discoverable."""
+        ready = self.home / "package-checkpoint.ready"
+        ready.unlink(missing_ok=True)
+        environment = dict(self.env, SWAPZ_TEST_PAUSE_AFTER=phase)
+        if extra:
+            environment.update(extra)
+        process = subprocess.Popen(
+            ["bash", str(self.script), action, str(self.prefix)],
+            cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline and not ready.exists():
+                if process.poll() is not None:
+                    stdout, stderr = process.communicate(timeout=8)
+                    self.fail(f"checkpoint {phase} not reached: {stdout}\n{stderr}")
+                time.sleep(0.025)
+            self.assertTrue(ready.exists(), f"missing durable checkpoint {phase}")
+            transactions = list(
+                (self.home / "transactions").glob("swapz-*.*"))
+            self.assertEqual(len(transactions), 1)
+            state = json.loads((transactions[0] / "state.json").read_text())
+            self.assertEqual(state["phase"], phase)
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=8)
+            self.assertEqual(process.returncode, -signal.SIGKILL)
+            return transactions[0]
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=8)
+
+    def test_sigkill_after_install_module_publication_retains_recovery_gate(self):
+        transaction = self.kill_at_durable_phase("install", "module-promoted")
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue((transaction / "state.json").exists())
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_after_install_cli_publication_is_exact_but_journaled(self):
+        transaction = self.kill_at_durable_phase("install", "cli-published")
+        self.assert_installed_exact()
+        self.assertTrue((transaction / "state.json").exists())
+        blocked = self.invoke("uninstall")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_after_uninstall_backend_removal_retains_recovery_gate(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase("uninstall", "dkms-removed")
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertTrue((transaction / "backup/installed-module").exists())
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_sigkill_mid_upgrade_rollback_retains_recovery_gate(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        transaction = self.kill_at_durable_phase(
+            "install", "rollback-backend-restored",
+            {"SWAPZ_TEST_INSTALL_FAIL_AFTER": "dkms-removed"})
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        self.assertEqual(
+            json.loads((transaction / "state.json").read_text())["phase"],
+            "rollback-backend-restored")
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
 
     def test_dkms_config_tracks_changed_canonical_version(self):
         other = self.home / "synthetic-release"
