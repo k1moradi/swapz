@@ -1197,8 +1197,11 @@ class BootVerifierTests(unittest.TestCase):
             valid_arm + "unexpected=value\n",
             valid_arm + "x" * 4096,
         )
-        for malformed in mutations:
-            with self.subTest(malformed=malformed[:80]):
+        for mutation_index, malformed in enumerate(mutations):
+            with self.subTest(mutation_index=mutation_index):
+                self.assertNotEqual(
+                    malformed, valid_arm, "mutation must change the arm record"
+                )
                 arm_file.write_text(malformed, encoding="ascii")
                 arm_file.chmod(0o600)
                 preflight = self.run_verifier("preflight")
@@ -1267,11 +1270,11 @@ class BootVerifierTests(unittest.TestCase):
             "gc_destination_advances=0 window_gc_pressure=0"
         )
         for ambiguous in (
-            valid.replace("failed=0", "failed=0 failed=1"),
+            valid.replace("swapz failed=0 ", "swapz failed=0 failed=1 "),
             valid.replace("error=0", "error=0 error=-5"),
             valid.replace("flush_err=0 ", ""),
             valid.replace("gc_destination_advances=0 ", ""),
-            valid.replace("failed=0", "failed=1 failed=0"),
+            valid.replace("swapz failed=0 ", "swapz failed=1 failed=0 "),
             valid + "\nstatus=PASS",
             valid.replace("swapz", "linear", 1),
         ):
