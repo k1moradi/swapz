@@ -128,6 +128,25 @@ static int test_representation_race(void)
 	return 0;
 }
 
+/*
+ * Negative control for the READY publication oracle below. This intentionally
+ * weakens only the failed-CAS reread to relaxed ordering while preserving the
+ * returned state value, so the test must reject it on acquire-count evidence.
+ */
+static int swapz_preparation_select_raw_relaxed_reread_mutant(atomic_t *state)
+{
+	int observed = swapz_preparation_read_state(state);
+
+	if (observed == SWAPZ_PREPARATION_PREPARING) {
+		observed = atomic_cmpxchg(state, SWAPZ_PREPARATION_PREPARING,
+					 SWAPZ_PREPARATION_RAW_SELECTED);
+		if (observed != SWAPZ_PREPARATION_PREPARING)
+			return atomic_read(state);
+	}
+	return observed == SWAPZ_PREPARATION_PREPARING ?
+		SWAPZ_PREPARATION_RAW_SELECTED : observed;
+}
+
 static int test_capacity_high_bit_and_reuse(void)
 {
 	atomic64_t mask;
@@ -176,6 +195,22 @@ static int test_ready_publication_wins_raw_cas(void)
 		CHECK(publication.failed_cas == 1);
 		CHECK(publication.ready_acquires == 1);
 		CHECK(publication.acquire_reads == 2);
+		CHECK(atomic_read(&state) == states[i]);
+
+		/*
+		 * Compiled negative control: the weakened reread returns the same
+		 * READY value but must not satisfy the acquire-publication oracle.
+		 */
+		atomic_store(&state.value, SWAPZ_PREPARATION_PREPARING);
+		publication.publish_before_cas = 1;
+		publication.acquire_reads = 0;
+		publication.ready_acquires = 0;
+		publication.failed_cas = 0;
+		CHECK(swapz_preparation_select_raw_relaxed_reread_mutant(&state) ==
+		      states[i]);
+		CHECK(publication.failed_cas == 1);
+		CHECK(publication.ready_acquires == 0);
+		CHECK(publication.acquire_reads == 1);
 		CHECK(atomic_read(&state) == states[i]);
 
 		/* Already-READY is the ordinary one-acquire fast path. */
