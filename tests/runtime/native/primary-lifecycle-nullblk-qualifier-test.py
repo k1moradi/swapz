@@ -282,6 +282,156 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn(')" || true', self.script)
         self.assertIn('PRIMARY_PREPARE_DIAGNOSTIC_PLAN=', self.script)
 
+
+    def test_preparation_phase_matches_each_explicit_refusal_gate(self):
+        prepare = self.primary[
+            self.primary.index("static int swapz_primary_prepare_metadata(void)"):
+            self.primary.index("static int swapz_primary_unload_owned_module(", 
+                               self.primary.index("static int swapz_primary_prepare_metadata(void)"))]
+        owner_claim = prepare.index("swapz_primary_claim_partition_owner_at(")
+        # Every early refusal must precede durable claim or target mutation.
+        for phase in (
+            "recovery-directory-safety",
+            "recovery-filesystem-persistence",
+            "recovery-target-device-separation",
+            "recovery-physical-parent-identity",
+            "prior-active-marker",
+            "qualification-source-identity",
+            "qualified-artifact-identity",
+            "target-geometry-identity",
+            "original-header-rollback-proof",
+            "target-physical-parent-identity",
+            "target-recovery-parent-separation",
+            "target-mounted-in-visible-namespace",
+            "root-device-parent-identity",
+            "target-root-device-parent-separation",
+            "repeated-target-physical-parent-identity",
+            "repeated-target-recovery-parent-separation",
+            "repeated-target-mounted-in-visible-namespace",
+            "repeated-root-device-parent-identity",
+            "repeated-target-root-parent-separation",
+        ):
+            with self.subTest(phase=phase):
+                index = prepare.index('failure_phase = "' + phase + '";')
+                self.assertLess(index, owner_claim)
+                gate = prepare[index:prepare.index("goto out;", index)]
+                self.assertIn("errno = EPERM;", gate)
+
+        for phase, helper in (
+            ("qualification-report-read", "swapz_primary_read_qualification_report"),
+            ("qualified-artifact-hash-readback", "swapz_primary_live_artifact_hashes"),
+            ("raw-target-swap-inventory", "swapz_primary_original_swap_is_quiescent"),
+            ("cross-namespace-mount-inventory", "swapz_primary_read_mount_facts"),
+            ("repeated-raw-target-swap-inventory", "swapz_primary_original_swap_is_quiescent"),
+            ("repeated-cross-namespace-mount-inventory", "swapz_primary_read_mount_facts"),
+            ("physical-parent-swap-inventory", "swapz_primary_swap_device_active"),
+            ("final-raw-target-swap-inventory", "swapz_primary_original_swap_is_quiescent"),
+        ):
+            with self.subTest(phase=phase):
+                index = prepare.index('failure_phase = "' + phase + '";')
+                self.assertLess(index, owner_claim)
+                self.assertIn(helper, prepare[index:prepare.index("goto out;", index)])
+
+        for mutation in ("swapon(", "swapoff(", "swapz_primary_dm_create_mapper(",
+                         "swapz_primary_write_header_checked_fd("):
+            self.assertNotIn(mutation, prepare)
+
+    def test_prepare_preclaim_revalidation_has_distinct_failure_phases(self):
+        prepare = self.primary[
+            self.primary.index("static int swapz_primary_prepare_metadata(void)"):
+            self.primary.index("static int swapz_primary_unload_owned_module(",
+                               self.primary.index("static int swapz_primary_prepare_metadata(void)"))]
+        final_check = prepare[
+            prepare.index('failure_phase = "final-raw-target-swap-inventory";'):
+            prepare.index('failure_phase = "run-id-and-header-construction";')]
+        # A stale source, parent, mount, or recovery readback is not a raw-swap
+        # inventory error. Likewise, an active parent swap is not ESTALE.
+        identity_check = final_check[:final_check.index(
+            "if (swapz_primary_target_preflight(")]
+        self.assertIn('failure_phase = "final-preclaim-identity-revalidation";',
+                      identity_check)
+        parent_check = final_check[
+            final_check.index("int verified_parent_swap_active ="):]
+        self.assertIn('failure_phase = "final-physical-parent-swap-inventory";',
+                      parent_check[:parent_check.index(
+                          "if (verified_parent_swap_active != 0)")])
+        self.assertIn("errno = ESTALE;", final_check)
+        self.assertIn("errno = EBUSY;", parent_check)
+
+    def test_preparation_failure_formats_do_not_expose_transaction_ids(self):
+        preparation = self.primary[
+            self.primary.index("static int swapz_primary_prepare_metadata(void)"):
+            self.primary.index("static int swapz_primary_unload_owned_module(",
+                               self.primary.index("static int swapz_primary_prepare_metadata(void)"))]
+        failure_format = preparation[preparation.index("if (result < 0 && claimed)"):
+                                     preparation.index("if (result < 0)\n\t\terrno = saved_errno;")]
+        # Recovery claims can be retained, but their 32-hex IDs belong in
+        # durable private metadata, not in public diagnostic records.
+        self.assertIn("claim=retained target_unchanged=true", failure_format)
+        self.assertIn("claim=none", failure_format)
+        self.assertNotIn("run_id=%s", failure_format)
+        self.assertNotIn("target=%s", failure_format)
+
+    def test_rootless_prepare_diagnostic_verifier_rejects_leaks_and_ambiguity(self):
+        begin = self.script.index("verify_prepare_failure_diagnostic() {")
+        end = self.script.index("\n}", begin) + 2
+        verifier = self.script[begin:end]
+        program = ("fail() { printf '%s\\n' FAIL >&2; exit 1; }\n" +
+                   verifier + '\nverify_prepare_failure_diagnostic "$1"\n')
+
+        def check(diagnostic, should_pass):
+            result = subprocess.run(
+                ["bash", "-c", program, "synthetic-prepare", diagnostic],
+                capture_output=True, text=True, timeout=5, check=False,
+                cwd=ROOT)
+            self.assertEqual(result.returncode == 0, should_pass,
+                             result.stdout + result.stderr)
+            if should_pass:
+                self.assertEqual(result.stderr.strip(), diagnostic.splitlines()[-1])
+            else:
+                self.assertEqual(result.stderr.strip(), "FAIL")
+            self.assertEqual(result.stdout, "")
+
+        permitted = "Operation not permitted"
+        check(f"PRIMARY_PREPARE=FAILED phase=qualification-source-identity "
+              f"errno=1 error={permitted} claim=none", True)
+        check(f"PRIMARY_PREPARE=FAILED phase=target-root-device-parent-separation "
+              f"errno=1 error={permitted} claim=retained target_unchanged=true",
+              True)
+        check("PRIMARY_PREPARE=FAILED phase=package-transaction-preflight "
+              "errno=16 error=Device or resource busy", True)
+        for diagnostic in (
+            "",
+            "PRIMARY_PREPARE=FAILED",
+            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=0 "
+            "error=Success claim=none",
+            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
+            "error=Device or resource busy claim=none",
+            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
+            "error=Operation not permitted claim=none path=/private/secret",
+            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
+            "error=Operation not permitted run_id=" + "a" * 32 +
+            " claim=retained target_unchanged=true",
+            "PRIMARY_PREPARE=FAILED phase=raw-target-swap-inventory errno=1 "
+            "error=Operation not permitted claim=none swap=/unrelated",
+            "PRIMARY_PREPARE=FAILED phase=package-transaction-preflight errno=16 "
+            "error=Device or resource busy transaction_id=private",
+            "PRIMARY_PREPARE=FAILED phase=qualification-source-identity "
+            "errno=1 error=Operation not permitted claim=none\n"
+            "PRIMARY_PREPARE=FAILED phase=qualified-artifact-identity "
+            "errno=1 error=Operation not permitted claim=none",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                check(diagnostic, False)
+        failure_path = self.script[
+            self.script.index('note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"'):
+            self.script.index('RUN_ID="$(printf', self.script.index(
+                'note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"'))]
+        self.assertIn('verify_prepare_failure_diagnostic "$prepare_output"',
+                      failure_path)
+        self.assertIn('PRIMARY_PREPARE_DIAGNOSTIC_PLAN=available', failure_path)
+        self.assertNotIn('printf \'%s\\n\' "$prepare_output" >&2', failure_path)
+
     def test_private_qualification_report_binds_running_kernel_release(self):
         self.assertIn('"kernel_release": os.uname().release', self.script)
 

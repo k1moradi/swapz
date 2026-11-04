@@ -22,6 +22,45 @@ note() {
 	printf '%s\n' "$*"
 }
 
+
+# Keep the first refusal actionable without echoing free-form command output:
+# only a single canonical errno/phase record may escape this private harness.
+verify_prepare_failure_diagnostic() {
+	local output="$1"
+	local line phase number description expected_error
+	local count=0
+	local diagnostic=""
+
+	while IFS= read -r line; do
+		[[ "$line" == PRIMARY_PREPARE=FAILED* ]] || continue
+		count=$((count + 1))
+		if [[ ! "$line" =~ ^PRIMARY_PREPARE=FAILED[[:space:]]phase=([a-z][a-z0-9-]*)[[:space:]]errno=([1-9][0-9]{0,3})[[:space:]]error=(.*)$ ]]; then
+			fail "prepare refusal has a malformed phase/errno diagnostic"
+		fi
+		phase="${BASH_REMATCH[1]}"
+		number="${BASH_REMATCH[2]}"
+		description="${BASH_REMATCH[3]}"
+		(( number <= 4095 )) ||
+			fail "prepare refusal has an invalid errno"
+		expected_error="$(python3 -c 'import os, sys; print(os.strerror(int(sys.argv[1])))' "$number")" ||
+			fail "prepare refusal errno cannot be decoded"
+		case "$phase" in
+		global-mutation-lock|package-transaction-preflight)
+			[[ "$description" == "$expected_error" ]] ||
+				fail "prepare refusal exposed a noncanonical diagnostic"
+			;;
+		*)
+			[[ "$description" == "$expected_error claim=none" ||
+			   "$description" == "$expected_error claim=retained target_unchanged=true" ]] ||
+				fail "prepare refusal exposed private state or lacks disposition"
+			;;
+		esac
+		diagnostic="$line"
+	done <<< "$output"
+	(( count == 1 )) || fail "prepare refusal did not emit exactly one phase/errno diagnostic"
+	printf '%s\n' "$diagnostic" >&2
+}
+
 block0_sha256() {
 	local device_path="$1"
 	local digest
@@ -351,7 +390,7 @@ prepare_interruption_run() {
 
 	if ! output="$(timeout --signal=TERM --kill-after=10s 90s \
 		"$CONTROL" primary prepare 2>&1)"; then
-		printf '%s\n' "$output" >&2
+		verify_prepare_failure_diagnostic "$output"
 		fail "interruption prepare failed"
 	fi
 	printf '%s\n' "$output"
@@ -1520,11 +1559,12 @@ chmod 0600 "$CONFIG_BASE/primary-target"
 note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"
 if ! prepare_output="$(timeout --signal=TERM --kill-after=10s 90s \
 	"$CONTROL" primary prepare 2>&1)"; then
-	printf '%s\n' "$prepare_output" >&2
+	verify_prepare_failure_diagnostic "$prepare_output"
 	prepare_plan="$(timeout --signal=TERM --kill-after=10s 90s \
 		"$CONTROL" primary plan 2>&1)" || true
 	if [[ -n "$prepare_plan" ]]; then
-		note "PRIMARY_PREPARE_DIAGNOSTIC_PLAN=$prepare_plan"
+		# Plan JSON can include private device paths and unrelated host swap.
+		note "PRIMARY_PREPARE_DIAGNOSTIC_PLAN=available"
 	else
 		note "PRIMARY_PREPARE_DIAGNOSTIC_PLAN=unavailable"
 	fi

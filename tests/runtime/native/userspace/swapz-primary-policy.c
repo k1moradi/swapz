@@ -2664,6 +2664,95 @@ static void write_package_test_artifact(const char *path, const char *bytes)
 	assert(close(fd) == 0);
 }
 
+
+/* Exercise the same production gate helpers that preparation calls, using
+ * synthetic records only: no /proc mutations, block opens, or swap syscalls. */
+static void test_primary_preparation_refusal_helpers(void)
+{
+	struct swapz_primary_qualification qualification = {0};
+	struct swapz_primary_qualification original_qualification;
+	struct swapz_primary_swap_entry entries[2] = {0};
+	struct swapz_primary_swap_entry original_entries[2];
+	struct swapz_primary_mount_facts mount_facts = {0};
+	struct swapz_primary_mount_facts original_mount_facts;
+	dev_t resolved_devices[2] = {0};
+	unsigned char resolved_is_block[2] = {0};
+	char formatter_hash[65];
+	char module_hash[65];
+	char oracle_hash[65];
+	char original_entries_inventory[] =
+		"Filename Type Size Used Priority\\n";
+	size_t entry_count = 17U;
+	dev_t target_device = makedev(8U, 4U);
+
+	memset(qualification.formatter_sha256, 'a', 64U);
+	memset(qualification.module_sha256, 'b', 64U);
+	memset(qualification.oracle_sha256, 'c', 64U);
+	original_qualification = qualification;
+	memcpy(formatter_hash, qualification.formatter_sha256,
+	       sizeof(formatter_hash));
+	memcpy(module_hash, qualification.module_sha256, sizeof(module_hash));
+	memcpy(oracle_hash, qualification.oracle_sha256, sizeof(oracle_hash));
+	assert(swapz_primary_qualification_artifacts_match(
+		&qualification, formatter_hash, module_hash, oracle_hash));
+	formatter_hash[0] = 'd';
+	assert(!swapz_primary_qualification_artifacts_match(
+		&qualification, formatter_hash, module_hash, oracle_hash));
+	formatter_hash[0] = 'a';
+	module_hash[0] = 'd';
+	assert(!swapz_primary_qualification_artifacts_match(
+		&qualification, formatter_hash, module_hash, oracle_hash));
+	module_hash[0] = 'b';
+	oracle_hash[0] = 'd';
+	assert(!swapz_primary_qualification_artifacts_match(
+		&qualification, formatter_hash, module_hash, oracle_hash));
+	assert(!memcmp(&qualification, &original_qualification,
+		       sizeof(qualification)));
+
+	/* A missing /proc/swaps header is never evidence of quiescence. */
+	memset(entries, 0xa5, sizeof(entries));
+	memcpy(original_entries, entries, sizeof(entries));
+	assert(swapz_primary_parse_swaps("", entries, 2U, &entry_count) < 0);
+	assert(entry_count == 17U);
+	assert(!memcmp(entries, original_entries, sizeof(entries)));
+	assert(swapz_primary_parse_swaps(original_entries_inventory, entries,
+		2U, &entry_count) == 0 && entry_count == 0U);
+
+	memset(entries, 0, sizeof(entries));
+	strcpy(entries[0].path, "/fixture/unrelated-swapfile");
+	strcpy(entries[0].type, "file");
+	entries[0].size_kib = 1024U;
+	strcpy(entries[1].path, "/fixture/active-swapfile");
+	strcpy(entries[1].type, "file");
+	entries[1].size_kib = 2048U;
+	resolved_devices[0] = makedev(259U, 1U);
+	resolved_devices[1] = target_device;
+	memcpy(original_entries, entries, sizeof(entries));
+	errno = 0;
+	assert(swapz_primary_swap_inventory_target_is_quiescent(
+		entries, resolved_devices, resolved_is_block, 2U,
+		target_device, SWAPZ_PRIMARY_SWAP_SIZE_KIB) < 0);
+	assert(errno == EBUSY);
+	assert(!memcmp(entries, original_entries, sizeof(entries)));
+	assert(resolved_devices[0] == makedev(259U, 1U));
+	assert(resolved_devices[1] == target_device);
+	assert(resolved_is_block[0] == 0U && resolved_is_block[1] == 0U);
+
+	/* Parent mounts are rejected regardless of target-partition aliases. */
+	assert(swapz_primary_parse_mountinfo(
+		"36 25 259:0 / / rw - ext4 /dev/root rw\\n"
+		"37 36 8:0 / /fixture/parent rw - ext4 /fixture/parent rw\\n",
+		target_device, makedev(8U, 0U), &mount_facts) == 0);
+	assert(mount_facts.root_mount_seen);
+	assert(mount_facts.target_mounted);
+	original_mount_facts = mount_facts;
+	assert(swapz_primary_parse_mountinfo(
+		"broken kernel mount inventory\\n",
+		target_device, makedev(8U, 0U), &mount_facts) < 0);
+	assert(!memcmp(&mount_facts, &original_mount_facts,
+		       sizeof(mount_facts)));
+}
+
 static void test_package_transaction_process_death_guard(void)
 {
 	static const char journal_record[] =
@@ -2922,6 +3011,7 @@ int main(void)
 	test_primary_qualification_report_store();
 	test_primary_qualification_live_reader_disabled_in_rootless();
 	test_orphan_ready_claim_reconciliation();
+	test_primary_preparation_refusal_helpers();
 	test_package_transaction_process_death_guard();
 	assert(home && home[0] == '/');
 	assert(snprintf(base_template, sizeof(base_template),
