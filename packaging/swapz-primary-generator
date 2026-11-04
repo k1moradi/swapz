@@ -113,8 +113,10 @@ if [ -d "$mapper_dropin_dir" ]; then
 	fi
 	if [ -e "$old_mapper_dropin" ]; then
 		[ -f "$old_mapper_dropin" ] || fail 1 cleanup generator-output invalid-mapper-dropin mapper-active-job
-		if rm -f -- "$old_mapper_dropin"; then :; else
-			fail "$?" cleanup generator-output remove-old-mapper-dropin mapper-active-job
+		# Keep the old inode owned in private staging until the new file is
+		# published; an immediate unlink could recycle it on daemon-reload.
+		if mv -fT -- "$old_mapper_dropin" "$stage_dir/previous-mapper.conf"; then :; else
+			fail "$?" cleanup generator-output stage-old-mapper-dropin mapper-active-job
 		fi
 	fi
 elif [ -e "$mapper_dropin_dir" ]; then

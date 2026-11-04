@@ -674,7 +674,10 @@ produce a target-specific drop-in. On every generator invocation, publish
 an early-priority mapper-unit mask before consulting the protected selector or
 publishing target-specific units. The mask must remain effective throughout
 staging and cleanup so an enabled mapper cannot acquire an incomplete or stale
-dependency graph. Validate bounded manager output, refuse duplicate generated
+dependency graph. For daemon-reload regeneration, move the prior owned mapper drop-in
+into private staging until its replacement is published; a newly published
+unit must not reuse a just-unlinked file identity. Validate bounded manager
+output, refuse duplicate generated
 unit identities and symlink-substituted output paths, and remove only
 generator-owned stale drop-ins from a previously selected PARTUUID. Publish the
 complete selected graph before releasing the mask; any validation, command,

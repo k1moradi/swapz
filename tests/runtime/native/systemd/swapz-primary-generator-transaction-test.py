@@ -123,12 +123,17 @@ class GeneratorPublicationTest(unittest.TestCase):
 
     def test_valid_selected_ordering_exclusive_raw_conflict_and_repeat(self) -> None:
         device, raw = identities(SELECTED)
+        previous_inode: int | None = None
         for _ in range(2):
             result = self.run_generator()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stderr, "")
             self.assertFalse(self.mask().exists())
             self.assertFalse(self.mask().is_symlink())
+            current_inode = self.mapper_dropin().stat().st_ino
+            if previous_inode is not None:
+                self.assertNotEqual(previous_inode, current_inode)
+            previous_inode = current_inode
             self.assertEqual(self.mapper_dropin().read_text(),
                 "[Unit]\n" + f"Requires={device}\nAfter={device}\n"
                 + f"Conflicts={raw}\nBefore={raw}\n"
