@@ -229,17 +229,58 @@ cpu_workers=$((online_cpus * 2))
 (( cpu_workers > 32 )) && cpu_workers=32
 (( cpu_workers < 2 )) && cpu_workers=2
 
+# Missing, duplicate, or malformed counters are not zero OOM/PSI evidence.
+# The caller inherits status 2 (BLOCKED) rather than silently passing.
 event_value() {
     local name=$1
-    awk -v key="$name" '$1 == key { print $2; found=1 } END { if (!found) print 0 }'         "$CGROUP/memory.events"
+    local value
+    if ! value="$(awk -v key="$name" '
+        $1 == key {
+            if (NF != 2 || $2 !~ /^(0|[1-9][0-9]*)$/ ||
+                ++seen != 1)
+                invalid = 1
+            else
+                counter = $2
+        }
+        END {
+            if (invalid || seen != 1)
+                exit 1
+            print counter
+        }
+    ' "$CGROUP/memory.events" 2>/dev/null)"; then
+        printf 'BLOCKED: ID36 memory.events counter %s missing or malformed\n' "$name" >&2
+        return 2
+    fi
+    printf '%s\n' "$value"
 }
 cpu_some_total() {
-    awk '$1 == "some" {
-        for (i = 2; i <= NF; ++i)
-            if ($i ~ /^total=/) {
-                split($i, value, "="); print value[2]; found=1
+    local value
+    if ! value="$(awk '
+        $1 == "some" {
+            if (++seen != 1)
+                invalid = 1
+            for (i = 2; i <= NF; ++i) {
+                if ($i ~ /^total=/) {
+                    if (++totals != 1)
+                        invalid = 1
+                    candidate = substr($i, 7)
+                    if (candidate !~ /^(0|[1-9][0-9]*)$/)
+                        invalid = 1
+                    else
+                        total = candidate
+                }
             }
-    } END { if (!found) print 0 }' "$CGROUP/cpu.pressure"
+        }
+        END {
+            if (invalid || seen != 1 || totals != 1)
+                exit 1
+            print total
+        }
+    ' "$CGROUP/cpu.pressure" 2>/dev/null)"; then
+        printf '%s\n' 'BLOCKED: ID36 cpu.pressure some total missing or malformed' >&2
+        return 2
+    fi
+    printf '%s\n' "$value"
 }
 
 oom_start="$(event_value oom)"

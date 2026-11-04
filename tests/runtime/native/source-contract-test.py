@@ -5595,6 +5595,67 @@ int main(void)
                 with self.subTest(bad=bad[-55:]):
                     self.assertNotEqual(observe(bad).returncode, 0)
 
+
+    def test_id36_memory_events_and_cpu_psi_require_real_counters(self):
+        """Missing OOM or PSI cannot masquerade as a healthy zero reading."""
+        import subprocess
+        import tempfile
+
+        pressure = (ROOT / "tests/tools/qualify-resource-pressure.sh").read_text()
+        start = pressure.index("event_value() {")
+        end = pressure.index("\n}\n", pressure.index("cpu_some_total() {")) + 2
+        reader = pressure[start:end]
+        command = ("set -euo pipefail\nCGROUP=$1\n" + reader +
+                   "\nif [[ $2 == event ]]; then event_value \"$3\"; "
+                   "else cpu_some_total; fi\n")
+        with tempfile.TemporaryDirectory(prefix="swapz-id36-events-") as folder:
+            cgroup = Path(folder)
+            events = cgroup / "memory.events"
+            psi = cgroup / "cpu.pressure"
+            healthy = (
+                "low 0\nhigh 7\nmax 0\noom 0\noom_kill 0\n"
+                "oom_group_kill 0\n"
+            )
+            cpu_healthy = (
+                "some avg10=0.00 avg60=0.00 avg300=0.00 total=25\n"
+                "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+            )
+
+            def read(kind, key="oom"):
+                return subprocess.run(
+                    ["bash", "-c", command, "_", str(cgroup), kind, key],
+                    capture_output=True, text=True, timeout=5)
+
+            events.write_text(healthy)
+            psi.write_text(cpu_healthy)
+            self.assertEqual(read("event", "high").stdout.strip(), "7")
+            self.assertEqual(read("event", "oom").stdout.strip(), "0")
+            self.assertEqual(read("psi").stdout.strip(), "25")
+            for invalid in (
+                healthy.replace("oom 0\n", ""),
+                healthy + "oom 0\n",
+                healthy.replace("oom 0", "oom -1"),
+                healthy.replace("oom 0", "oom 00"),
+                healthy.replace("oom 0", "oom 0 bytes"),
+            ):
+                with self.subTest(events=invalid[-32:]):
+                    events.write_text(invalid)
+                    result = read("event", "oom")
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("BLOCKED:", result.stderr)
+            events.write_text(healthy)
+            for invalid in (
+                cpu_healthy.replace("total=25", "avg10=0.00"),
+                cpu_healthy.replace("total=25", "total=bad"),
+                cpu_healthy.replace("total=25", "total=25 total=25"),
+                cpu_healthy.replace("some ", "full ", 1),
+            ):
+                with self.subTest(psi=invalid[:45]):
+                    psi.write_text(invalid)
+                    result = read("psi")
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("BLOCKED:", result.stderr)
+
     def test_id36_resource_pressure_is_bounded_and_owned(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         pressure = (ROOT / "tests/tools/qualify-resource-pressure.sh").read_text()
