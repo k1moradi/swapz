@@ -5616,6 +5616,11 @@ int main(void)
             ):
                 with self.subTest(bad=bad[-55:]):
                     self.assertNotEqual(observe(bad).returncode, 0)
+            path.unlink()
+            unavailable = subprocess.run(
+                ["bash", "-c", command, "_", str(path)],
+                capture_output=True, text=True, timeout=5)
+            self.assertNotEqual(unavailable.returncode, 0)
 
         cgroup_start = pressure.index("read_cgroup_root_memory_inventory() {")
         cgroup_end = pressure.index("\n}\n", cgroup_start) + 2
@@ -5681,6 +5686,22 @@ int main(void)
                     (root / "memory.current").write_text(current)
                     self.assertNotEqual(cgroup_inventory().returncode, 0)
 
+            u64_max = (1 << 64) - 1
+            (root / "memory.max").write_text(str(u64_max) + "\n")
+            (root / "memory.current").write_text(
+                str(u64_max - 2 * 1024**3) + "\n")
+            result = cgroup_inventory()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(result.stdout.strip().endswith("sufficient"))
+
+            for maximum, current in (
+                    (str(u64_max + 1) + "\n", "0\n"),
+                    ("max\n", str(u64_max + 1) + "\n")):
+                with self.subTest(maximum=maximum, current=current):
+                    (root / "memory.max").write_text(maximum)
+                    (root / "memory.current").write_text(current)
+                    self.assertNotEqual(cgroup_inventory().returncode, 0)
+
             (root / "memory.max").write_text("max\n")
             (root / "memory.current").write_text("1" * 21 + "\n")
             self.assertNotEqual(cgroup_inventory().returncode, 0)
@@ -5730,6 +5751,7 @@ int main(void)
                 healthy.replace("oom 0", "oom -1"),
                 healthy.replace("oom 0", "oom 00"),
                 healthy.replace("oom 0", "oom 0 bytes"),
+                healthy.replace("oom 0", "oom 1000000000000000000"),
             ):
                 with self.subTest(events=invalid[-32:]):
                     events.write_text(invalid)
@@ -5742,6 +5764,7 @@ int main(void)
                 cpu_healthy.replace("total=25", "total=bad"),
                 cpu_healthy.replace("total=25", "total=25 total=25"),
                 cpu_healthy.replace("some ", "full ", 1),
+                cpu_healthy.replace("total=25", "total=1000000000000000000"),
             ):
                 with self.subTest(psi=invalid[:45]):
                     psi.write_text(invalid)

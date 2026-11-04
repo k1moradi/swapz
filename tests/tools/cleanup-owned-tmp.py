@@ -94,8 +94,8 @@ def owned_complete(directory: int, owner_uid: int, expected_mount: str) -> bool:
         os.kill(process_id, 0)
     except ProcessLookupError:
         return True
-    except PermissionError:
-        pass  # Not proven dead; preserve it.
+    except (OverflowError, PermissionError):
+        return False  # Unobservable or malformed PID is not deletion proof.
     return False
 
 

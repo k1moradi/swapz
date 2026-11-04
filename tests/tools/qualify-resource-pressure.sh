@@ -153,29 +153,37 @@ read_cgroup_root_memory_inventory() {
     [[ -e $memory_max_path && -e $memory_current_path ]] || return 1
     memory_max="$(cat "$memory_max_path" 2>/dev/null)" || return 1
     memory_current="$(cat "$memory_current_path" 2>/dev/null)" || return 1
-    if [[ $memory_max != max &&
-          ! $memory_max =~ ^(0|[1-9][0-9]*)$ ]]; then
-        return 1
-    fi
-    [[ $memory_current =~ ^(0|[1-9][0-9]*)$ &&
-       ${#memory_current} -le 20 ]] || return 1
-    if [[ $memory_max == max ]]; then
-        headroom_status=unbounded
-    else
-        # awk numeric values are floating point: near 2^53 an insufficient
-        # finite-parent margin can round up to a false PASS. Compare exactly.
-        [[ $memory_max =~ ^[0-9]{1,20}$ &&
-           $memory_current =~ ^[0-9]{1,20}$ ]] || return 1
-        headroom_status="$(python3 -B - "$memory_max" "$memory_current" \
-            "$MIN_AVAILABLE_BYTES" <<'PY'
+    # cgroup byte counters are unsigned 64-bit values. Validate that range
+    # exactly; digit-count checks alone admit malformed 20-digit values above
+    # U64_MAX. Python also avoids Bash/awk signed or floating-point overflow.
+    headroom_status="$(python3 -I -B - "$memory_max" "$memory_current" \
+        "$MIN_AVAILABLE_BYTES" <<'PY'
+import re
 import sys
-maximum, current, required = (int(value) for value in sys.argv[1:])
-if current > maximum:
-    sys.exit(1)
-print("sufficient" if maximum - current >= required else "insufficient")
+
+maximum_token, current_token, required_token = sys.argv[1:]
+canonical = re.compile(r"(?:0|[1-9][0-9]*)\\Z")
+u64_max = (1 << 64) - 1
+
+def parse_u64(token):
+    if canonical.fullmatch(token) is None:
+        raise SystemExit(1)
+    value = int(token)
+    if value > u64_max:
+        raise SystemExit(1)
+    return value
+
+current = parse_u64(current_token)
+required = parse_u64(required_token)
+if maximum_token == "max":
+    print("unbounded")
+else:
+    maximum = parse_u64(maximum_token)
+    if current > maximum:
+        raise SystemExit(1)
+    print("sufficient" if maximum - current >= required else "insufficient")
 PY
-        )" || return 1
-    fi
+    )" || return 1
     printf '%s %s %s\n' "$memory_max" "$memory_current" "$headroom_status"
 }
 
@@ -288,7 +296,7 @@ event_value() {
     if ! value="$(awk -v key="$name" '
         $1 == key {
             if (NF != 2 || $2 !~ /^(0|[1-9][0-9]*)$/ ||
-                ++seen != 1)
+                length($2) > 18 || ++seen != 1)
                 invalid = 1
             else
                 counter = $2
@@ -315,7 +323,8 @@ cpu_some_total() {
                     if (++totals != 1)
                         invalid = 1
                     candidate = substr($i, 7)
-                    if (candidate !~ /^(0|[1-9][0-9]*)$/)
+                    if (candidate !~ /^(0|[1-9][0-9]*)$/ ||
+                        length(candidate) > 18)
                         invalid = 1
                     else
                         total = candidate

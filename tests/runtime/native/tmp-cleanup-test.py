@@ -187,6 +187,11 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
             (owned / marker).write_text("not a valid identity\n")
         self.assertEqual(self.run_cleanup().returncode, 0)
         self.assertTrue(owned.exists())
+        oversized_pid = f"pid={'9' * 30}\nsource_sha={self.source_sha}\n"
+        for marker in (".swapz-benchmark-owner", ".swapz-benchmark-complete"):
+            (owned / marker).write_text(oversized_pid)
+        self.assertEqual(self.run_cleanup().returncode, 0)
+        self.assertTrue(owned.exists())
 
 
 if __name__ == "__main__":
