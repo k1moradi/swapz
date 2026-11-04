@@ -2451,5 +2451,38 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                         source_sha, report_path, Path(directory) / "sbin/swapzctl")
 
 
+    def test_fresh_cgroup_must_not_hide_oom_in_initial_baseline(self):
+        cgroup = Path("/synthetic/dedicated-real-swap-cgroup")
+        for counter in ("oom", "oom_kill"):
+            with self.subTest(counter=counter):
+                events = {"oom": 0, "oom_kill": 0}
+                events[counter] = 1
+                with mock.patch.object(
+                        qualify, "_cgroup_create", return_value=cgroup), \
+                        mock.patch.object(
+                            qualify, "_memory_events", return_value=events), \
+                        mock.patch.object(qualify, "_remove_cgroup") as remove:
+                    with self.assertRaisesRegex(
+                            qualify.QualificationFailure,
+                            "fresh dedicated oracle cgroup already recorded OOM events"):
+                        qualify._run_workload(
+                            {}, {}, ORACLE, 384, 128, 384, 60)
+                    remove.assert_called_once_with(cgroup)
+
+                with mock.patch.object(
+                        qualify, "_mem_available_mib", return_value=4096), \
+                        mock.patch.object(
+                            qualify, "_cgroup_create", return_value=cgroup), \
+                        mock.patch.object(qualify, "_read_uint", return_value=0), \
+                        mock.patch.object(
+                            qualify, "_memory_events", return_value=events), \
+                        mock.patch.object(qualify, "_remove_cgroup") as remove:
+                    with self.assertRaisesRegex(
+                            qualify.Blocked, "fresh preflight cgroup has preexisting OOM events"):
+                        qualify.preflight_workload_environment(384, 128, 384)
+                    remove.assert_called_once_with(cgroup)
+
+
+
 if __name__ == "__main__":
     unittest.main()
