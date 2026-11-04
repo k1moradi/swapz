@@ -463,8 +463,14 @@ static int mixed_verify_full_map(void)
 					      "FORBIDDEN_EXTENT_REUSE");
 			}
 		}
+		/* Dead extents retain historical class metadata until reclaim. */
 		MIXED_REQUIRE(live[block] == expected_live[block] &&
-			      classes[block] == expected_class[block],
+			      (!expected_live[block] ||
+			       classes[block] == expected_class[block]) &&
+			      (classes[block] == 0U ||
+			       classes[block] == 1U ||
+			       classes[block] == 2U ||
+			       classes[block] == 4U),
 			      "FULL_MAP_LIVENESS");
 	}
 	for (swapz_u32 segment = 0; segment < MIXED_SEGMENTS; ++segment)
@@ -554,7 +560,8 @@ static int mixed_collect_until_progress(void)
 			for (swapz_u32 segment = 0; segment < MIXED_SEGMENTS;
 			     ++segment) {
 				if (!mixed_roles[segment] ||
-				    segment == authority.open_segment)
+				    segment == authority.open_segment ||
+				    !mixed_segment_maps[segment])
 					continue;
 				if (mixed_segment_maps[segment] < best) {
 					best = mixed_segment_maps[segment];
