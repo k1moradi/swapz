@@ -1419,6 +1419,7 @@ class RuntimeHealthTests(unittest.TestCase):
             ("error=0", "error=-0"),
             ("error=0", "error=2147483648"),
             ("error=0", "error=-2147483649"),
+            ("error=0", "error=12junk"),
             ("error=0", "error=not-a-number"),
         ):
             with self.subTest(malformed_value=malformed_value):

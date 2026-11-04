@@ -92,25 +92,33 @@ canonical_unsigned()
 
 canonical_status_error()
 {
-	case "$1" in
+	status_error=$1
+	case "$status_error" in
 	0)
 		return 0
 		;;
-	-[1-9]|-[1-9][0-9]*)
-		magnitude=${1#-}
+	-*)
+		magnitude=${status_error#-}
 		limit=2147483648
 		;;
-	[1-9]|[1-9][0-9]*)
-		magnitude=$1
+	*)
+		magnitude=$status_error
 		limit=2147483647
 		;;
-	*)
-		return 1
-		;;
 	esac
-	canonical_unsigned "$magnitude" || return 1
+	case "$magnitude" in
+	[1-9]*) ;;
+	*) return 1 ;;
+	esac
+	[ "${#magnitude}" -le 10 ] || return 1
+	remaining_digits=$magnitude
+	while [ -n "$remaining_digits" ]; do
+		case "$remaining_digits" in
+		[0-9]*) remaining_digits=${remaining_digits#?} ;;
+		*) return 1 ;;
+		esac
+	done
 	[ "${#magnitude}" -lt 10 ] && return 0
-	[ "${#magnitude}" -eq 10 ] || return 1
 	[ "$magnitude" -le "$limit" ]
 }
 
