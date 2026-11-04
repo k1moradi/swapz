@@ -32,6 +32,10 @@ RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
+# CAP_SYS_ADMIN is needed for DM status ioctls, so explicitly prevent mount
+# operations from undoing the monitor's read-only filesystem namespace.
+SystemCallFilter=~@mount
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=swap.target
