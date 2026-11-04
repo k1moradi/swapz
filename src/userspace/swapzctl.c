@@ -38,7 +38,7 @@
 #define SWAPZ_FORMAT_PROC_LINE_BYTES 8192U
 #define SWAPZ_FORMAT_PROC_MAX_BYTES (16U * 1024U * 1024U)
 #define SWAPZ_FORMAT_PROC_MAX_ROWS 65536U
-#define SWAPZ_FORMAT_PROC_MAX_PID_TABLES 262144U
+#define SWAPZ_FORMAT_PROC_MAX_PID_TABLES (4U * 1024U * 1024U)
 #define SWAPZ_FORMAT_PARENT_MODEL_BYTES 128U
 
 static void usage(FILE *out)
@@ -1340,41 +1340,78 @@ static int format_mountinfo_path_valid(const char *begin, const char *end)
 	return 1;
 }
 
-/* Reject ambiguous optional propagation metadata, not legitimate mounts. */
-static int format_mountinfo_optional_valid(const char *begin, const char *end)
+/* Known mountinfo propagation fields are unique; unknown fields are extensible. */
+static int format_mountinfo_optional_valid(const char *begin, const char *end,
+					   unsigned int *seen_fields)
 {
-	static const char *const prefixes[] = {
-		"shared:", "master:", "propagate_from:",
+	static const struct {
+		const char *name;
+		unsigned int bit;
+	} numeric_fields[] = {
+		{ "shared", 1U << 0 },
+		{ "master", 1U << 1 },
+		{ "propagate_from", 1U << 2 },
 	};
+	const size_t length = (size_t)(end - begin);
 	size_t index;
 
-	if ((size_t)(end - begin) == sizeof("unbindable") - 1U &&
-	    !memcmp(begin, "unbindable", sizeof("unbindable") - 1U))
+	if (!begin || !end || !seen_fields || begin >= end)
+		return 0;
+	if (length == sizeof("unbindable") - 1U &&
+	    !memcmp(begin, "unbindable", sizeof("unbindable") - 1U)) {
+		const unsigned int bit = 1U << 3;
+
+		if (*seen_fields & bit)
+			return 0;
+		*seen_fields |= bit;
 		return 1;
-	for (index = 0; index < sizeof(prefixes) / sizeof(prefixes[0]);
+	}
+	if (length > sizeof("unbindable") - 1U &&
+	    !memcmp(begin, "unbindable:", sizeof("unbindable:") - 1U))
+		return 0;
+
+	for (index = 0; index < sizeof(numeric_fields) / sizeof(numeric_fields[0]);
 	     ++index) {
-		const size_t prefix_length = strlen(prefixes[index]);
+		const size_t name_length = strlen(numeric_fields[index].name);
 		const char *number_end;
 		unsigned long long mount_identifier;
 
-		if ((size_t)(end - begin) > prefix_length &&
-		    !memcmp(begin, prefixes[index], prefix_length))
-			return parse_unsigned_decimal(begin + prefix_length,
-					      (unsigned long long)INT_MAX,
-					      &number_end, &mount_identifier) == 0 &&
-			       number_end == end && mount_identifier != 0;
-		/* A known numeric tag without its required colon/value is malformed. */
-		if ((size_t)(end - begin) == prefix_length - 1U &&
-		    !memcmp(begin, prefixes[index], prefix_length - 1U))
+		if (length == name_length &&
+		    !memcmp(begin, numeric_fields[index].name, name_length))
 			return 0;
+		if (length <= name_length || begin[name_length] != ':' ||
+		    memcmp(begin, numeric_fields[index].name, name_length))
+			continue;
+		if ((*seen_fields & numeric_fields[index].bit) ||
+		    parse_unsigned_decimal(begin + name_length + 1U,
+					      (unsigned long long)INT_MAX,
+					      &number_end, &mount_identifier) < 0 ||
+		    number_end != end || !mount_identifier)
+			return 0;
+		if (numeric_fields[index].bit == (1U << 2) &&
+		    !(*seen_fields & (1U << 1)))
+			return 0;
+		*seen_fields |= numeric_fields[index].bit;
+		return 1;
 	}
-	if ((size_t)(end - begin) > sizeof("unbindable") - 1U &&
-	    !memcmp(begin, "unbindable:", sizeof("unbindable:") - 1U))
-		return 0;
+
 	/*
-	 * mountinfo is extensible. Linux explicitly requires parsers to ignore
-	 * unrecognized optional fields so future unrelated mounts remain readable.
+	 * mountinfo is extensible. Linux requires parsers to ignore fields they do
+	 * not recognize so a future unrelated mount does not become ambiguity.
 	 */
+	return 1;
+}
+
+static int format_mountinfo_rw_options_valid(const char *begin,
+					     const char *end)
+{
+	const size_t length = (size_t)(end - begin);
+
+	if (!begin || !end || length < 2U)
+		return 0;
+	if ((memcmp(begin, "ro", 2U) && memcmp(begin, "rw", 2U)) ||
+	    (length > 2U && begin[2] != ','))
+		return 0;
 	return 1;
 }
 
@@ -1385,6 +1422,7 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 	unsigned int mounted_major = 0U;
 	unsigned int mounted_minor = 0U;
 	unsigned int field = 0U;
+	unsigned int optional_fields = 0U;
 
 	if (!line || !device)
 		return -1;
@@ -1430,8 +1468,12 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 			 * always the escaped absolute path that must validate here.
 			 */
 			return -1;
+		} else if (field == 5U &&
+			   !format_mountinfo_rw_options_valid(cursor, token_end)) {
+			return -1;
 		} else if (field >= 6U &&
-			   !format_mountinfo_optional_valid(cursor, token_end)) {
+			   !format_mountinfo_optional_valid(cursor, token_end,
+						    &optional_fields)) {
 			return -1;
 		}
 		++field;
@@ -1441,15 +1483,21 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 	if (field < 6U)
 		return -1;
 	cursor = separator + 3U;
-	/* Filesystem type, source and superblock options are also required. */
+	/* Filesystem type, source and ro/rw-prefixed superblock options are required. */
 	for (field = 0U; field < 3U; ++field) {
+		const char *token_begin;
+
 		while (*cursor == ' ' || *cursor == '\t')
 			++cursor;
 		if (!*cursor || *cursor == '\n')
 			return -1;
+		token_begin = cursor;
 		while (*cursor && *cursor != ' ' && *cursor != '\t' &&
 		       *cursor != '\n')
 			++cursor;
+		if (field == 2U &&
+		    !format_mountinfo_rw_options_valid(token_begin, cursor))
+			return -1;
 	}
 	while (*cursor == ' ' || *cursor == '\t')
 		++cursor;
