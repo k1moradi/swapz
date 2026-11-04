@@ -4114,11 +4114,15 @@ bypass that limitation. An incomplete physical-probe restoration must refuse
 partition ownership release until the saved state reaches durable COMPLETE.
 
 Saved physical recovery evidence must require literal JSON
-`swap_was_active: true`, a positive integer `swap_size_kib`, and an integer
-`swap_priority` before inspecting/removing a mapper, writing the partition,
-or claiming that original swap restoration is complete. The original trial
-always starts from an active partition; a missing, false, truthy non-boolean,
-or malformed original-swap field is not permission to skip `swapon`.
+`swap_was_active: true`, a positive integer `swap_size_kib` no larger than
+the saved partition byte geometry expressed in KiB, and an integer
+`swap_priority` within Linux's signed-short priority range before
+inspecting/removing a mapper, writing the partition, or claiming that original
+swap restoration is complete. Type-correct but impossible capacity or priority
+values are malformed evidence, not deferred post-`swapon` validation. The
+original trial always starts from an active partition; a missing, false, truthy
+non-boolean, or malformed original-swap field is not permission to skip
+`swapon`.
 Reject it before device access with a bounded field-specific
 expected/observed diagnostic, leave the durable recovery stage and active
 ownership/one-use records untouched, and require manual recovery. Standalone

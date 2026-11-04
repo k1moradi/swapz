@@ -525,6 +525,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "recovery_original_swap_priority expected=integer observed=missing"),
             ("boolean_priority", "swap_priority", True,
              "recovery_original_swap_priority expected=integer observed=invalid"),
+            ("oversize_capacity", "swap_size_kib", "oversize_capacity",
+             "recovery_original_swap_size_kib expected=within_saved_device "
+             "observed=exceeds_saved_device"),
+            ("priority_above_kernel_range", "swap_priority", 32768,
+             "recovery_original_swap_priority expected=-32768..32767 "
+             "observed=out_of_range"),
+            ("priority_below_kernel_range", "swap_priority", -32769,
+             "recovery_original_swap_priority expected=-32768..32767 "
+             "observed=out_of_range"),
         )
         for case, field, value, diagnostic in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
@@ -532,6 +541,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 state, backup = self.make_recovery_state(state_dir)
                 if value is None:
                     state.pop(field)
+                elif value == "oversize_capacity":
+                    state[field] = state["size_bytes"] // 1024 + 1
                 else:
                     state[field] = value
                 state_path = state_dir / probe.STATE_NAME

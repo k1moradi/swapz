@@ -48,6 +48,10 @@ VERBAL_APPROVAL_TEXT = (
     "or recovery uncertainty voids this approval and requires the run to stop."
 )
 MAX_RECORDED_OUTPUT_CHARS = 4096
+# Linux stores swap_info_struct.prio as a signed short. Reject impossible
+# persisted values before recovery can touch the selected partition.
+LINUX_SWAP_PRIORITY_MIN = -(1 << 15)
+LINUX_SWAP_PRIORITY_MAX = (1 << 15) - 1
 # The swapz DM status ABI contains many named counters. Preserve a bounded
 # complete status line rather than certifying a clipped prefix as healthy.
 MAX_STATUS_OUTPUT_CHARS = 32768
@@ -1781,11 +1785,29 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             "recovery_original_swap_size_kib expected=positive_integer "
             f"observed={observed}; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
+    saved_size_bytes = state.get("size_bytes")
+    if type(saved_size_bytes) is not int or saved_size_bytes <= 0:
+        observed = "missing" if "size_bytes" not in state else "invalid"
+        raise ProbeError(
+            "recovery_saved_device_size_bytes expected=positive_integer "
+            f"observed={observed}; restoration_stage=not_attempted "
+            "ownership_marker_action=not_attempted; manual recovery required")
+    if state["swap_size_kib"] > saved_size_bytes // 1024:
+        raise ProbeError(
+            "recovery_original_swap_size_kib expected=within_saved_device "
+            "observed=exceeds_saved_device; restoration_stage=not_attempted "
+            "ownership_marker_action=not_attempted; manual recovery required")
     if type(state.get("swap_priority")) is not int:
         observed = "missing" if "swap_priority" not in state else "invalid"
         raise ProbeError(
             "recovery_original_swap_priority expected=integer "
             f"observed={observed}; restoration_stage=not_attempted "
+            "ownership_marker_action=not_attempted; manual recovery required")
+    if not LINUX_SWAP_PRIORITY_MIN <= state["swap_priority"] <= \
+            LINUX_SWAP_PRIORITY_MAX:
+        raise ProbeError(
+            "recovery_original_swap_priority expected=-32768..32767 "
+            "observed=out_of_range; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
     if state.get("module_ownership") not in {
             "NOT_STARTED", "MODULE_PENDING", "MODULE_OWNED"}:
