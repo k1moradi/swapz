@@ -1993,6 +1993,20 @@ exec "{flock_binary}" "$@"
         self.assertFalse(transaction.exists())
         self.assert_installed_exact()
 
+    def test_recover_malformed_committed_journal_still_quarantines_activation(self):
+        transaction = self.kill_at_durable_phase("install", "committed")
+        state_path = transaction / "state.json"
+        state = json.loads(state_path.read_text())
+        state["phase"] = "not-a-package-phase"
+        state_path.write_text(
+            json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
+
+        refused = self.invoke("recover")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("recovery snapshot verification failed", refused.stderr)
+        self.assertTrue(transaction.exists())
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+
     def test_recover_partial_initial_install_and_compressed_module(self):
         transaction = self.kill_at_durable_phase("install", "source-created")
         blocked = self.invoke("install")
