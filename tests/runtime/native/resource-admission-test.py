@@ -299,11 +299,53 @@ sample_host_memory_admission
             "BLOCKED: ID36 owned-RAM pair prerequisite after prewarm:",
             source)
         self.assertIn(
+            'if pair_blocked_is_prerequisite "$pair_blocked_reason"; then',
+            source)
+        self.assertIn(
             "FAIL: ID36 owned-RAM pair failed: %s",
             source)
         self.assertIn(
             "BLOCKED: ID36 pressure helper could not enter isolated cgroup",
             source)
+
+    def test_post_prewarm_blocked_diagnostics_are_classified_explicitly(self):
+        helper = shell_function(QUALIFIER, "pair_blocked_is_prerequisite")
+        script = helper + 'pair_blocked_is_prerequisite "$1"\n'
+        for reason in (
+                "kernel LZ4 compressor unavailable",
+                "shared immutable replay plan missing or outside owned build root",
+                "retain all remaining resources for read-only investigation"):
+            with self.subTest(reason=reason):
+                result = self.run_shell(script, reason)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+        for reason in (
+                "swapz module insertion rejected",
+                "swapz target registration missing",
+                "pair verification rejected",
+                "loaded target ordinary LZ4 policy is not fixed at acceleration 1",
+                "diagnostic details withheld for privacy"):
+            with self.subTest(reason=reason):
+                result = self.run_shell(script, reason)
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_bootstrap_helpers_are_guarded_without_external_dirname(self):
+        qualifier = QUALIFIER.read_text(encoding="utf-8")
+        preflight = PREFLIGHT.read_text(encoding="utf-8")
+        self.assertNotIn('dirname -- "${BASH_SOURCE[0]}"', qualifier)
+        self.assertNotIn('dirname -- "${BASH_SOURCE[0]}"', preflight)
+        self.assertIn(
+            "BLOCKED: ID36 owned temporary-cleanup helper unavailable",
+            qualifier)
+        self.assertIn(
+            'if ! source "$cleanup_helper"; then',
+            qualifier)
+        self.assertIn(
+            'source "$cleanup_helper" ||',
+            preflight)
+        self.assertIn(
+            "owned temporary-cleanup helper unavailable",
+            preflight)
 
     def test_cleanup_helper_error_is_propagated_without_touching_tmp(self):
         # Override timeout and id inside an isolated process. The original
