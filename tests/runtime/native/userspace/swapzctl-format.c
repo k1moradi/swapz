@@ -114,7 +114,7 @@ static const char *admission_route(const char *path, char mapped[PATH_MAX])
 	int size;
 
 	if (!admission_fixture.enabled ||
-	    (strcmp(path, "/proc") &&
+	    (strcmp(path, "/proc") && strcmp(path, "/sys") &&
 	     strncmp(path, "/proc/", 6U) &&
 	     strncmp(path, "/sys/", 5U)))
 		return path;

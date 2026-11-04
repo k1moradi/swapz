@@ -3758,7 +3758,9 @@ major zero must remain forbidden for a configured physical partition or parent.
 Rootless formatter tests must also call the production `swapzctl format`
 CLI and its default callback chain through synthetic proc/sysfs and fake
 open/ioctl/read/write seams, not only a canned callback errno or a direct
-identity-helper assertion. The fixture must verify the exact prewrite refusal
+identity-helper assertion. Synthetic path routing must cover the exact
+`/proc` and `/sys` roots as well as their descendants; fixture setup must
+never fall through to host namespace directories. The fixture must verify the exact prewrite refusal
 phase, specific errno, observed identity category and unmodified mock block
 zero for PARTUUID drift, changed parent, foreign-mounted parent, active
 swapfile, unreadable foreign mount namespace, vanished PID mount table with
