@@ -409,7 +409,7 @@ def _serve_admission(server: socket.socket,
     if parent_rejected:
         # A parent-owned source refusal is BLOCKED even when the child exits 1.
         return 2
-    if result == 0 and passed_phases != expected_phases:
+    if not passed_phases or (result == 0 and passed_phases != expected_phases):
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
             "privileged_child_skipped_source_admission",

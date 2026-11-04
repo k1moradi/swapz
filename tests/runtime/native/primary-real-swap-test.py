@@ -1414,6 +1414,40 @@ class PrimaryRealSwapContracts(unittest.TestCase):
              for line in stream.output.getvalue().splitlines()],
             ["PASS", "PASS", "PASS", "BLOCKED"])
 
+    def test_missing_initial_parent_admission_blocks_even_on_child_failure(self):
+        # A failed child cannot qualify or FAIL physical work before the first
+        # authenticated source-admission phase has succeeded.
+        class EarlyEofStream:
+            def readline(self, _limit):
+                return b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+        connection = mock.MagicMock()
+        connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+        connection.makefile.return_value = EarlyEofStream()
+        server = mock.Mock()
+        server.accept.return_value = (connection, None)
+        child = mock.Mock()
+        child.poll.return_value = 1
+        child.wait.return_value = 1
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = parent._serve_admission(
+                server, child, "a" * 40, "/usr/bin/git", "d" * 64,
+                {path: "c" * 64
+                 for path in parent.PHYSICAL_CONTROL_INPUT_PATHS},
+                "8" * 64, 2)
+        self.assertEqual(result, 2)
+        self.assertIn(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+            "privileged_child_skipped_source_admission", stderr.getvalue())
+        child.wait.assert_called_once_with(timeout=45)
+
     def test_parent_bounds_abnormal_child_teardown_after_admission(self):
         # A child that disconnects after initial admission must not hang the
         # unprivileged parent indefinitely or erase a termination error.
