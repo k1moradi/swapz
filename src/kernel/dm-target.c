@@ -184,7 +184,7 @@ MODULE_PARM_DESC(work_conserving_hand_records,
 static bool swapz_allow_physical_backing;
 module_param_named(allow_physical_backing, swapz_allow_physical_backing, bool, 0444);
 MODULE_PARM_DESC(allow_physical_backing,
-		 "Allow explicitly formatted non-null_blk backing; default off");
+		 "Allow explicitly formatted header-backed storage; default off");
 
 static bool swapz_physical_backing_arch_supported(void)
 {
@@ -1833,7 +1833,8 @@ static int swapz_dm_io(struct dm_io_request *req,
 #endif
 
 static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
-					      u64 device_bytes)
+					      u64 device_bytes,
+					      bool *magic_present)
 {
 	struct dm_io_region region;
 	struct dm_io_request req = {
@@ -1852,6 +1853,8 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 	u8 *block;
 	int error;
 
+	if (magic_present)
+		*magic_present = false;
 	block = kzalloc(SWAPZ_SUPERBLOCK_BYTES, GFP_KERNEL);
 	if (!block)
 		return -ENOMEM;
@@ -1862,6 +1865,8 @@ static int swapz_validate_physical_superblock(struct swapz_dm *ctx,
 	error = swapz_dm_io(&req, &region, &error_bits);
 	if (!error && error_bits)
 		error = -EIO;
+	if (!error && magic_present)
+		*magic_present = swapz_sb_magic_matches(block);
 	if (!error && !swapz_sb_valid(block, device_bytes))
 		error = -EPERM;
 	kfree(block);
@@ -8716,8 +8721,43 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	device_bytes = (u64)bdev_nr_sectors(ctx->backing->bdev) << SECTOR_SHIFT;
 	ctx->backing_device_bytes = device_bytes;
 	if (is_nullb) {
-		ctx->data_start_block = 0;
-		ctx->physical_backing = false;
+		bool superblock_magic_present = false;
+
+		/*
+		 * Ordinary null_blk tests remain unformatted and use the full
+		 * device. The primary-lifecycle rehearsal writes a real SWAPZ
+		 * authorization header first; when present, keep physical block 0
+		 * reserved so mapper mkswap cannot overwrite that transaction
+		 * identity. A malformed SWAPZ header must fail closed rather than
+		 * silently fall back to the unformatted test layout.
+		 */
+		error = swapz_validate_physical_superblock(
+			ctx, device_bytes, &superblock_magic_present);
+		if (error &&
+		    (error != -EPERM || superblock_magic_present)) {
+			ti->error = "Null_blk has an unreadable or invalid SWAPZ header";
+			goto fail;
+		}
+		if (!error) {
+			if (!swapz_allow_physical_backing) {
+				ti->error =
+					"Header-backed null_blk requires allow_physical_backing=1";
+				error = -EOPNOTSUPP;
+				goto fail;
+			}
+			if (flush_fail_nth || write_fail_nth || codec_fault_owner ||
+			    read_fail_nth) {
+				ti->error =
+					"Fault injection is forbidden on header-backed storage";
+				error = -EINVAL;
+				goto fail;
+			}
+			ctx->data_start_block = 1U;
+			ctx->physical_backing = true;
+		} else {
+			ctx->data_start_block = 0;
+			ctx->physical_backing = false;
+		}
 	} else {
 		if (!swapz_physical_backing_arch_supported()) {
 			ti->error = "Physical backing is qualified only on x86_64";
@@ -8735,7 +8775,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			error = -EINVAL;
 			goto fail;
 		}
-		error = swapz_validate_physical_superblock(ctx, device_bytes);
+		error = swapz_validate_physical_superblock(
+			ctx, device_bytes, NULL);
 		if (error) {
 			ti->error = "Physical backing lacks a valid matching SWAPZ superblock";
 			goto fail;

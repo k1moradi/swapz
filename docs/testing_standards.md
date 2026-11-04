@@ -4443,8 +4443,17 @@ Remove the temporary rule after null_blk teardown and require its alias to be
 gone. If publication fails, capture the exact fixture rule, relevant udev
 properties, and udev's event-rule diagnostic before cleanup. Initialize only
 that RAM partition using the portable plain `mkswap <partition>` form; do not
-pass `--no-discard`, which is not an `mkswap` option. Compile a noninstalled
-exact-source
+pass `--no-discard`, which is not an `mkswap` option.
+The primary-lifecycle fixture has a valid SWAPZ header before creating its
+mapper. `dm_swapz` must recognize that header on the owned null_blk, require
+`allow_physical_backing=1`, and reserve physical block zero exactly as it does
+for other header-backed storage. This keeps mapper `mkswap` writes out of the
+transaction identity header; an invalid header with SWAPZ magic must fail
+closed, while an unformatted null_blk remains in the full-device test mode.
+The start/stop rehearsal therefore verifies both exact Linux swap activation
+and preservation of the backing header.
+
+Compile a noninstalled exact-source
 `swapzctl` under a root-owned private prefix, and generate a private
 parser-valid qualification record bound to the exact test binary/module/oracle
 hashes, live host identity, and running kernel release. The production coordinator
