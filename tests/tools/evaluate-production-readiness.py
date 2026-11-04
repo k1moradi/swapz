@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+FROZEN_ACCEPTANCE_MANIFEST = ROOT / "docs/production-acceptance.json"
 REAL_SWAP_HELPER = ROOT / "tests/tools/qualify-primary-real-swap.py"
 REAL_SWAP_ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
 PHYSICAL_CAMPAIGN_SEALER = (
@@ -109,7 +110,9 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise EvidenceError(f"duplicate JSON key: {key}")
+            raise EvidenceError(
+                f"duplicate JSON key: {key[:80]!r}"
+                f"{' (truncated)' if len(key) > 80 else ''}")
         result[key] = value
     return result
 
@@ -437,6 +440,18 @@ def validate_acceptance_policy(
     if (type(memory_limit) is not int or
             not 0 < memory_limit <= RAM_TRACE_VALIDATOR["MAX_UINT64"]):
         raise EvidenceError("missing positive production RAM limit")
+    # The word FROZEN in an input is not authority to replace the tracked
+    # acceptance manifest. Compare exact JSON types/values, retaining the
+    # supplied bytes for cross-artifact SHA binding.
+    try:
+        frozen_policy, _ = load_json_strict(FROZEN_ACCEPTANCE_MANIFEST)
+    except (OSError, EvidenceError) as exc:
+        raise EvidenceError(
+            "tracked frozen production acceptance manifest is unavailable") from exc
+    if not _same_json_value(policy, frozen_policy):
+        raise EvidenceError(
+            "production acceptance policy differs from tracked frozen manifest: "
+            "metric=acceptance_manifest required=exact_typed_frozen_values")
     return sha256_bytes(raw), memory_limit
 
 
@@ -771,6 +786,28 @@ def validate_physical_campaign_evidence(
                 RAM_TRACE_VALIDATOR["validate_metadata_ram_host_binding"](
                     capacity_and_ram.get("metadata_ram_trace"),
                     capacity_and_ram.get("metadata_ram_host_binding"))
+                # Seal time must follow the host-after snapshot; an older
+                # seal cannot authenticate a later loaded-host capture.
+                sealed_at = campaign.get("sealed_at_utc")
+                host_after = capacity_and_ram[
+                    "metadata_ram_host_binding"]["host_after_captured_at_utc"]
+                if not isinstance(sealed_at, str) or not sealed_at.endswith(
+                        ("Z", "+00:00")):
+                    raise ValueError(
+                        "metric=sealed_at_utc required=UTC_after_host_capture")
+                try:
+                    sealed_time = datetime.datetime.fromisoformat(
+                        sealed_at.replace("Z", "+00:00"))
+                    captured_time = datetime.datetime.fromisoformat(
+                        host_after.replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise ValueError(
+                        "metric=sealed_at_utc required=valid_UTC_after_host_capture"
+                    ) from exc
+                if (sealed_time.utcoffset() != datetime.timedelta(0) or
+                        sealed_time < captured_time):
+                    raise ValueError(
+                        "metric=sealed_at_utc required=not_before_host_after_capture")
             except ValueError as exc:
                 reject(f"sealed campaign RAM trace is invalid: {exc}")
 
@@ -1458,6 +1495,14 @@ def evaluate_release(
                     "teardown_recovery_samples": summary["recovery_samples"],
                     "teardown_recovery_span_ns": summary["recovery_span_ns"],
                 })
+
+    if memory_measurement["status"] == "NOT_MEASURED":
+        block_code(
+            "maximum_capacity_and_ram: loaded-host peak unavailable; "
+            "metric=metadata_and_target_peak_ram_bytes observed=unavailable "
+            f"limit={peak_ram_limit} "
+            "required=sealed source/boot/artifact-bound constructor, steady, "
+            "GC and verified teardown host samples")
 
     physical = pass_record("sustained_physical_performance")
     require_target("sustained_physical_performance", physical)
