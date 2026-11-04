@@ -1291,5 +1291,102 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("bash tests/tools/test-rootless.sh", ci)
         self.assertNotIn("make verify", ci)
 
+
+class CiFailureDiagnosticContract(unittest.TestCase):
+    """Synthetic rootless diagnostics must never misrepresent CI outcomes."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = ROOT / "tests/tools/product_goals.py"
+        spec = importlib.util.spec_from_file_location("ci_product_goals", path)
+        cls.diagnostics = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.diagnostics)
+
+    def test_first_causal_error_and_failure_categories(self):
+        examples = (
+            ("native-rootless",
+             "src/kernel/codec.c:42:3: error: invalid operand\n"
+             "make: *** [test-all] Error 1\n",
+             2, "NATIVE_COMPILE", "codec.c:42"),
+            ("runtime",
+             "FAIL: test_range (NativeCase)\nTraceback\n"
+             "AssertionError: expected safe offset\nFAILED (failures=1)\n",
+             1, "RUNTIME_ASSERTION", "AssertionError: expected safe offset"),
+            ("rootless",
+             "BLOCKED: Operation not permitted when opening device\n",
+             1, "HOST_PERMISSION", "Operation not permitted"),
+            ("make-interface",
+             "SOURCE_CONTRACT_MISMATCH: source sha differs\n",
+             1, "SOURCE_CONTRACT", "SOURCE_CONTRACT_MISMATCH"),
+            ("setup",
+             "E: Failed to fetch archive from mirror\n",
+             100, "INFRASTRUCTURE", "Failed to fetch"),
+            ("rootless", "Terminated\n", 143,
+             "CANCELLATION", "execution interrupted"),
+            ("setup", "", 124, "INFRASTRUCTURE", "timed out"),
+        )
+        for suite, log, exit_code, category, evidence in examples:
+            with self.subTest(suite=suite, category=category):
+                result = self.diagnostics.diagnose_ci_failure(
+                    log.splitlines(), exit_code, suite)
+                self.assertNotEqual(result["status"], "PASS")
+                self.assertEqual(result["category"], category)
+                self.assertIn(evidence, result["reason"])
+                self.assertIn("prerequisite", result)
+        failed = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: test_range (NativeCase)",
+             "AssertionError: expected safe offset",
+             "FAILED (failures=1)"], 1, "runtime")
+        self.assertEqual(failed["test"], "NativeCase.test_range")
+        self.assertIn("AssertionError:", failed["first_error"])
+
+    def test_ci_runner_is_quiet_on_success_and_redacts_failure(self):
+        import json
+        import os
+
+        module = ROOT / "tests/tools/product_goals.py"
+        source = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+            text=True, check=True).stdout.strip()
+        environment = os.environ.copy()
+        environment["GITHUB_SHA"] = source
+        environment["GITHUB_JOB"] = "synthetic"
+        command = ["python3", "-B", str(module), "ci-run", "--suite",
+                   "synthetic", "--", "python3", "-c"]
+        log = ROOT / "build/ci-logs/synthetic.log"
+        log.unlink(missing_ok=True)
+        try:
+            successful = subprocess.run(
+                command + ["print('no success transcript')"], cwd=ROOT,
+                env=environment, capture_output=True, text=True, timeout=12)
+            self.assertEqual(successful.returncode, 0, successful.stderr)
+            self.assertEqual(successful.stdout, "")
+            self.assertFalse(log.exists())
+            failed = subprocess.run(
+                command + [
+                    "import sys; sys.stderr.write("
+                    "'AssertionError: token=privatevalue\\n'); sys.exit(3)"],
+                cwd=ROOT, env=environment, capture_output=True,
+                text=True, timeout=12)
+            self.assertEqual(failed.returncode, 3)
+            self.assertIn("SWAPZ_CI_FAILURE=", failed.stdout)
+            payload = json.loads(failed.stdout.split("SWAPZ_CI_FAILURE=", 1)[1])
+            self.assertEqual(payload["tested_sha"], source)
+            self.assertEqual(payload["status"], "FAIL")
+            self.assertEqual(payload["category"], "RUNTIME_ASSERTION")
+            self.assertEqual(payload["job"], "synthetic")
+            self.assertTrue(log.exists())
+            self.assertNotIn("privatevalue", log.read_text())
+            self.assertNotIn("privatevalue", failed.stdout)
+            environment["GITHUB_SHA"] = "0" * 40
+            mismatch = subprocess.run(
+                command + ["print('must not execute')"], cwd=ROOT,
+                env=environment, capture_output=True, text=True, timeout=12)
+            self.assertNotEqual(mismatch.returncode, 0)
+            self.assertIn("SOURCE_CONTRACT", mismatch.stdout)
+        finally:
+            log.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()

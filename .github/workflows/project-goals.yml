@@ -6,41 +6,74 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: project-goals-${{ github.ref }}
+  group: project-goals-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 env:
   PYTHONPYCACHEPREFIX: ${{ github.workspace }}/build/python-cache
 jobs:
-  native-test-and-policy:
+  native-rootless:
+    name: Native rootless ${{ github.sha }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 18
+    env:
+      SWAPZ_CI_ARTIFACT_NAME: project-goals-native-rootless-${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
       - name: Configure the reusable build root
         run: mkdir -p build/tests/native build/tests/model build/python-cache
-      - name: Install native test prerequisites
+      - name: Install native prerequisites on GitHub-hosted runner
         run: |
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev
-      # Run the same package fixture independently so an unrelated source or
-      # benchmark failure cannot hide a transactional install regression.
-      - name: Hermetic package transaction and module trust regressions
-        run: |
-          set -euo pipefail
-          bash -n packaging/package-dkms.sh packaging/sign-module.sh
-          python3 -B tests/runtime/native/package-dkms-test.py -v
+          python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c 'sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev'
       - name: Build and execute production C/C++ tests
         run: |
-          set -euo pipefail
-          bash tests/tools/test-rootless.sh
-          test -x build/tests/native/lower-write-aggregation
-          test -x build/tests/native/mapping-authority
+          python3 -B tests/tools/product_goals.py ci-run --suite native-rootless -- bash tests/tools/test-rootless.sh
+          python3 -B tests/tools/product_goals.py ci-run --suite native-artifacts -- bash -c 'test -x build/tests/native/lower-write-aggregation || { echo "SOURCE_CONTRACT_MISMATCH: missing lower-write-aggregation"; exit 1; }; test -x build/tests/native/mapping-authority || { echo "SOURCE_CONTRACT_MISMATCH: missing mapping-authority"; exit 1; }'
+      - name: Verify build tidiness
+        shell: bash
+        run: |
+          cat > build/ci-build-policy.sh <<'SWAPZ_CI_SCRIPT'
+          set -Eeuo pipefail
+          trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
+          if find src tests -type f \( -name '*.ko' -o -name '*.o' -o -name '*.mod.o' \) | grep -q .; then
+            echo 'FAIL: generated native output outside build/'
+            exit 1
+          fi
+          git diff --check
+          test -x build/tests/native/codec-roundtrip
+          SWAPZ_CI_SCRIPT
+          python3 -B tests/tools/product_goals.py ci-run --suite build-policy -- bash build/ci-build-policy.sh
+      - name: Retain bounded sanitized failing-suite logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-goals-native-rootless-${{ github.sha }}
+          path: build/ci-logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  make-contract:
+    name: Make interface ${{ github.sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SWAPZ_CI_ARTIFACT_NAME: project-goals-make-contract-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Configure the reusable build root
+        run: mkdir -p build/tests/native build/tests/model build/python-cache
+      - name: Install native prerequisites on GitHub-hosted runner
+        run: |
+          python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c 'sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev'
       - name: Enforce the Make API and mandatory test discovery
         run: |
-          set -euo pipefail
-          python3 -B tests/runtime/native/make-interface-test.py -v
+          cat > build/ci-make-policy.sh <<'SWAPZ_CI_SCRIPT'
+          set -Eeuo pipefail
+          trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
+          python3 -B tests/tools/product_goals.py ci-run --suite make-interface -- python3 -B tests/runtime/native/make-interface-test.py -v
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq '.PHONY: all install uninstall test fast_test' Makefile
           grep -Fq '@+python3 -B tests/tools/run-tests.py --kdir' Makefile
@@ -60,10 +93,69 @@ jobs:
             echo 'FAIL: make test must not prompt or provision directly'
             exit 1
           fi
+          SWAPZ_CI_SCRIPT
+          python3 -B tests/tools/product_goals.py ci-run --suite make-policy -- bash build/ci-make-policy.sh
+      - name: Retain bounded sanitized failing-suite logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-goals-make-contract-${{ github.sha }}
+          path: build/ci-logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  focused-rootless:
+    name: Rootless ${{ matrix.suite }} ${{ github.sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: source-contract
+            script: tests/runtime/native/source-contract-test.py
+          - suite: primary-lifecycle-audit
+            script: tests/runtime/native/primary-lifecycle-audit-test.py
+          - suite: production-readiness
+            script: tests/runtime/native/production-readiness-test.py
+    env:
+      SWAPZ_CI_ARTIFACT_NAME: project-goals-focused-rootless-${{ matrix.suite }}-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Configure the reusable build root
+        run: mkdir -p build/tests/native build/tests/model build/python-cache
+      - name: Run independently observable rootless safety regression
+        run: |
+          python3 -B tests/tools/product_goals.py ci-run --suite '${{ matrix.suite }}' -- python3 -B '${{ matrix.script }}' -v
+      - name: Retain bounded sanitized failing-suite logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-goals-focused-rootless-${{ matrix.suite }}-${{ github.sha }}
+          path: build/ci-logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  repository-policy:
+    name: Repository policy ${{ github.sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SWAPZ_CI_ARTIFACT_NAME: project-goals-repository-policy-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Configure the reusable build root
+        run: mkdir -p build/tests/native build/tests/model build/python-cache
       - name: Enforce active product layout and naming
         shell: bash
         run: |
-          set -euo pipefail
+          cat > build/ci-layout-policy.sh <<'SWAPZ_CI_SCRIPT'
+          set -Eeuo pipefail
+          trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
           test -s src/kernel/VERSION
           test -s src/kernel/dm-target.c
           test -s src/userspace/swapzctl.c
@@ -77,11 +169,14 @@ jobs:
             echo 'FAIL: versioned implementation name remains outside documentation'
             exit 1
           fi
-          echo "ACTIVE_SWAPZ_LAYOUT_AND_NAMING_PASS"
+          SWAPZ_CI_SCRIPT
+          python3 -B tests/tools/product_goals.py ci-run --suite layout-policy -- bash build/ci-layout-policy.sh
       - name: Enforce documentation and test-code placement
         shell: bash
         run: |
-          set -euo pipefail
+          cat > build/ci-documentation-policy.sh <<'SWAPZ_CI_SCRIPT'
+          set -Eeuo pipefail
+          trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
           required=(docs/README.md docs/VISION.md docs/ROADMAP.md docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
           for file in "${required[@]}"; do
             test -s "$file" || { echo "FAIL: missing documentation $file"; exit 1; }
@@ -108,11 +203,14 @@ jobs:
           fi
           test -s tests/tools/request-plateau.py
           python3 -B tests/tools/request-plateau.py --bandwidth 20 --sizes 4,8             --latencies 1 --ratios 1 | grep -Fq 'first_plateau_kib=8'
-          echo "DOCUMENT_TEST_SOURCE_PLACEMENT_PASS"
+          SWAPZ_CI_SCRIPT
+          python3 -B tests/tools/product_goals.py ci-run --suite documentation-policy -- bash build/ci-documentation-policy.sh
       - name: Require standards co-change for implementation work
         shell: bash
         run: |
-          set -euo pipefail
+          cat > build/ci-standards-policy.sh <<'SWAPZ_CI_SCRIPT'
+          set -Eeuo pipefail
+          trap 'printf "SOURCE_CONTRACT_MISMATCH: check failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
           standards=(docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
           changed="$(git diff --name-only HEAD^ HEAD)"
           if printf '%s\n' "$changed" | grep -Eq '^(src/|tests/|packaging/|\.github/workflows/|Makefile$|dkms\.conf$)'; then
@@ -122,15 +220,45 @@ jobs:
             fi
           fi
           test "$(git branch --show-current)" = main
-          echo "STANDARDS_COCHANGE_PASS"
-      - name: Verify build tidiness
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          SWAPZ_CI_SCRIPT
+          python3 -B tests/tools/product_goals.py ci-run --suite standards-policy -- bash build/ci-standards-policy.sh
+      - name: Retain bounded sanitized failing-suite logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-goals-repository-policy-${{ github.sha }}
+          path: build/ci-logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  project-goals-conclusion:
+    name: Exact-SHA CI result ${{ github.sha }}
+    if: always()
+    needs: [native-rootless, make-contract, focused-rootless, repository-policy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    env:
+      NATIVE_RESULT: ${{ needs.native-rootless.result }}
+      MAKE_RESULT: ${{ needs.make-contract.result }}
+      FOCUSED_RESULT: ${{ needs.focused-rootless.result }}
+      POLICY_RESULT: ${{ needs.repository-policy.result }}
+    steps:
+      - name: Reject failed, skipped, or cancelled prerequisite jobs
         shell: bash
         run: |
           set -euo pipefail
-          if find src tests -type f \( -name '*.ko' -o -name '*.o' -o -name '*.mod.o' \) | grep -q .; then
-            echo 'FAIL: generated native output outside build/'
+          failures=0
+          for job in NATIVE MAKE FOCUSED POLICY; do
+            result_variable="${job}_RESULT"
+            result="${!result_variable}"
+            if [[ "$result" != success ]]; then
+              printf '::error title=CI_NOT_QUALIFIED::job=%s result=%s tested_sha=%s logs=https://github.com/k1moradi/swapz/actions/runs/%s\n' "$job" "$result" "$GITHUB_SHA" "$GITHUB_RUN_ID"
+              failures=1
+            fi
+          done
+          if (( failures )); then
+            echo "FAIL: exact-SHA CI did not complete successfully; skipped and cancelled are not PASS"
             exit 1
           fi
-          git diff --check
-          test -x build/tests/native/codec-roundtrip
-          echo "BUILD_TIDINESS_PASS"
+          printf 'EXACT_SHA_ROOTLESS_CI_COMPLETE=%s\n' "$GITHUB_SHA"

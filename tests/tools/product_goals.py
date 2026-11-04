@@ -243,3 +243,217 @@ def scorecard(points):
                      "lower_write_requests_saved_pct": saved_requests,
                      "status": status})
     return rows
+
+
+# CI diagnostics are observational; they do not qualify a device or replace
+# the official, sequential make test command.
+def _ci_safe_line(line):
+    """Redact credentials and private roots before retaining any output."""
+    import os
+    import re
+    from pathlib import Path
+
+    line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
+    for name, replacement in (("GITHUB_WORKSPACE", "<workspace>"),
+                              ("RUNNER_TEMP", "<runner-temp>"),
+                              ("HOME", "<home>")):
+        directory = os.environ.get(name)
+        if directory and directory != "/":
+            line = line.replace(directory, replacement)
+    line = line.replace(str(Path(__file__).resolve().parents[2]), "<workspace>")
+    line = re.sub(
+        r"(?i)\b((?:authorization:\s*(?:bearer|basic)\s+)|"
+        r"(?:(?:access[_-]?)?token|password|secret|api[_-]?key|"
+        r"private[_-]?key)\s*[:=]\s*)[^\s]+",
+        r"\1<redacted>", line)
+    line = re.sub(r"\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}",
+                  "<redacted>", line)
+    line = re.sub(r"(?<!\w)/(?:tmp|var/tmp)/[^\s\x27\x22:]+",
+                  "<temporary-path>", line)
+    return re.sub(r"[\x00-\x1f\x7f]", " ", line).strip()[:320]
+
+
+def diagnose_ci_failure(lines, exit_code, suite):
+    """Extract the first causal error, not the final generic failure count."""
+    import re
+
+    first_error = None
+    category = None
+    fallback = None
+    failing_test = None
+    contract_suite = any(name in suite for name in
+                         ("contract", "policy", "interface", "layout"))
+    for line in lines:
+        safe_line = _ci_safe_line(line)
+        if not safe_line:
+            continue
+        match = re.search(
+            r"(?:FAIL|ERROR):\s+(test_[A-Za-z0-9_]+)\s+\(([^)]+)\)",
+            safe_line)
+        if match and failing_test is None:
+            failing_test = match.group(2) + "." + match.group(1)
+        if fallback is None and re.search(
+                r"(?i)\b(?:FAIL|ERROR|BLOCKED):|make(?:\[\d+\])?: \*\*\*|FAILED \(",
+                safe_line):
+            fallback = safe_line
+        if first_error is not None:
+            continue
+        if re.search(r"(?i)operation not permitted|permission denied|"
+                     r"insufficient permissions|BLOCKED_LOADED_QUALIFICATION|"
+                     r"sudo: .*password", safe_line):
+            category = "HOST_PERMISSION"
+        elif re.search(
+                r"(?i)(?:\.[ch](?::\d+){1,2}|\.cpp(?::\d+){1,2}|"
+                r"cc1(?:plus)?):\s*(?:fatal )?error:|"
+                r"undefined reference to|linker command failed", safe_line):
+            category = "NATIVE_COMPILE"
+        elif re.search(
+                r"(?i)no space left on device|temporary failure resolving|"
+                r"could not resolve host|failed to fetch|"
+                r"network is unreachable|connection timed out|"
+                r"unable to locate package|runner image", safe_line):
+            category = "INFRASTRUCTURE"
+        elif re.search(
+                r"(?i)source.sha.*mismatch|source.contract.mismatch|"
+                r"contract violation|standards.cochange|"
+                r"SOURCE_CONTRACT_MISMATCH", safe_line):
+            category = "SOURCE_CONTRACT"
+        elif re.search(r"AssertionError:|^E\s+AssertionError|"
+                       r"^FAIL:(?!\s+test_)\s+|^BLOCKED:\s+", safe_line):
+            category = ("SOURCE_CONTRACT" if contract_suite
+                        else "RUNTIME_ASSERTION")
+        if category:
+            first_error = safe_line
+
+    cancelled = exit_code in (130, 143, -2, -15)
+    if cancelled:
+        status, category = "CANCELLED", "CANCELLATION"
+    else:
+        status = "FAIL"
+        category = category or (
+            "INFRASTRUCTURE" if exit_code in (124, 127) else
+            "SOURCE_CONTRACT" if contract_suite else "UNKNOWN_FAILURE")
+    reason = (first_error or fallback or
+              "command exited without a recognizable causal diagnostic")
+    if cancelled:
+        reason = "execution interrupted; no qualification result"
+    elif exit_code == 124:
+        reason = "command timed out; no qualification result"
+    return {
+        "status": status, "category": category,
+        "test": failing_test or suite, "first_error": first_error or fallback or reason,
+        "reason": reason, "exit_code": exit_code,
+        "prerequisite": {
+            "NATIVE_COMPILE": "hosted Ubuntu compiler, headers, liblz4",
+            "HOST_PERMISSION": "unprivileged host filesystem/capability access",
+            "INFRASTRUCTURE": "hosted runner, network, disk and tooling",
+            "CANCELLATION": "uninterrupted exact-SHA GitHub Actions run",
+            "SOURCE_CONTRACT": "direct source, Make and policy consistency",
+            "RUNTIME_ASSERTION": "rootless runtime fixture and assertions",
+        }.get(category, "inspect the retained failure log"),
+    }
+
+
+def _ci_retain_log(record, destination):
+    """Save a bounded, sanitized head, first errors and tail on failure only."""
+    import re
+    from collections import deque
+
+    record.seek(0)
+    beginning, recent, errors = [], deque(maxlen=96), []
+    first_bytes = 0
+    for raw_line in iter(lambda: record.readline(4096), b""):
+        line = _ci_safe_line(raw_line.decode("utf-8", errors="replace"))
+        if not line:
+            continue
+        if first_bytes < 12000:
+            beginning.append(line)
+            first_bytes += len(line) + 1
+        recent.append(line)
+        if len(errors) < 16 and re.search(
+                r"(?i)error:|assertionerror|FAIL:|BLOCKED:|"
+                r"permission denied|operation not permitted|"
+                r"source.contract.mismatch", line):
+            errors.append(line)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as output:
+        for label, lines in (("FIRST", beginning), ("FIRST ERRORS", errors),
+                             ("LAST", recent)):
+            output.write("=== " + label + " (sanitized, bounded) ===\n")
+            for line in lines:
+                output.write(line + "\n")
+
+
+def _ci_run(argv):
+    """Run one rootless CI command, printing only actionable failures."""
+    import argparse
+    import os
+    from pathlib import Path
+    import re
+    import subprocess
+    import tempfile
+
+    parser = argparse.ArgumentParser(description="CI-only rootless diagnostics")
+    parser.add_argument("--suite", required=True)
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    arguments = parser.parse_args(argv)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", arguments.suite):
+        parser.error("invalid suite identifier")
+    command = arguments.command
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        parser.error("missing command")
+
+    root = Path(__file__).resolve().parents[2]
+    tested_sha = os.environ.get("GITHUB_SHA", "")
+    job = os.environ.get("GITHUB_JOB", "local-synthetic")
+    actual_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
+        text=True, check=False).stdout.strip()
+    matches_head = (re.fullmatch(r"[0-9a-f]{40}", tested_sha) is not None
+                    and actual_sha == tested_sha)
+    artifact = os.environ.get(
+        "SWAPZ_CI_ARTIFACT_NAME",
+        f"project-goals-{job}-{arguments.suite}-{tested_sha}")
+    destination = root / "build/ci-logs" / f"{arguments.suite}.log"
+    with tempfile.TemporaryFile() as record:
+        if not matches_head:
+            record.write(b"SOURCE_CONTRACT_MISMATCH: HEAD differs from GITHUB_SHA\n")
+            return_code = 1
+        else:
+            try:
+                return_code = subprocess.run(
+                    command, cwd=root, stdout=record,
+                    stderr=subprocess.STDOUT, check=False).returncode
+            except OSError as error:
+                record.write(("INFRASTRUCTURE: cannot start test: " +
+                              _ci_safe_line(str(error)) + "\n").encode())
+                return_code = 127
+        if return_code == 0:
+            return 0
+        record.seek(0)
+        result = diagnose_ci_failure(
+            (line.decode("utf-8", errors="replace")
+             for line in iter(lambda: record.readline(4096), b"")),
+            return_code, arguments.suite)
+        result.update({
+            "schema": "swapz-ci-diagnostic-v1", "tested_sha": tested_sha,
+            "job": job, "suite": arguments.suite, "artifact": artifact,
+            "log": f"build/ci-logs/{arguments.suite}.log",
+            "run_url": ("https://github.com/k1moradi/swapz/actions/runs/" +
+                        os.environ.get("GITHUB_RUN_ID", "unknown")),
+        })
+        _ci_retain_log(record, destination)
+        message = result["first_error"].replace("%", "%25").replace(
+            "\r", "%0D").replace("\n", "%0A")
+        print(f"::error title={result['category']} {arguments.suite}::{message}")
+        print("SWAPZ_CI_FAILURE=" + json.dumps(result, sort_keys=True))
+        return return_code if return_code > 0 else 1
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2 or sys.argv[1] != "ci-run":
+        raise SystemExit("CI-only tool: expected ci-run")
+    raise SystemExit(_ci_run(sys.argv[2:]))
