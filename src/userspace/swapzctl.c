@@ -991,7 +991,7 @@ changed:
 static int status_report_list_problem(const char *state,
 				      const struct status_problem *problem)
 {
-	fprintf(stderr, "swapzctl status: %s: field '%s'; expected %s; observed %s\n",
+	fprintf(stderr, "swapzctl status: %s: DM_LIST_DEVICES field '%s'; expected %s; observed %s\n",
 		state, problem->field, problem->expected, problem->observed);
 	errno = !strcmp(state, "UNAVAILABLE") ? EAGAIN : EPROTO;
 	return 1;

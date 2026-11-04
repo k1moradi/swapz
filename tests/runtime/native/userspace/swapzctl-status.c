@@ -1081,15 +1081,58 @@ static int fake_list_devices_ioctl(void *context, unsigned char **reply,
 	return 0;
 }
 
+/*
+ * Fake DM_TABLE_STATUS with the exact initially enumerated name, device and
+ * generation. The production parser and generation binding must both pass.
+ */
+struct fake_status_snapshot_reader {
+	uint32_t event_number;
+	unsigned int calls;
+};
+
+static int fake_read_status_observation_ioctl(
+	void *context, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
+{
+	struct fake_status_snapshot_reader *reader = context;
+	const char *const target_types[] = { "swapz" };
+	const char *const target_statuses[] = { fixture_valid_status };
+	unsigned char *buffer = malloc(2048U);
+	struct dm_ioctl header;
+	size_t reply_size;
+	int result;
+
+	assert(buffer);
+	reply_size = make_dm_multi_fixture(buffer, 2048U, target_types,
+					   target_statuses, NULL, 1, expected_device);
+	memcpy(&header, buffer, sizeof(header));
+	memset(header.name, 0, sizeof(header.name));
+	assert(strlen(name) < sizeof(header.name));
+	memcpy(header.name, name, strlen(name) + 1U);
+	header.event_nr = reader->event_number;
+	memcpy(buffer, &header, sizeof(header));
+	++reader->calls;
+	memset(observation, 0, sizeof(*observation));
+	observation->reply = buffer;
+	result = parse_dm_status_observation(buffer, reply_size, name,
+					     expected_device, observation,
+					     problem, problem_target);
+	if (result >= 0 &&
+	    status_validate_list_generation(observation, reader->event_number,
+					    problem, problem_target) < 0)
+		return -1;
+	return result;
+}
+
 /* Each initially listed mapping yields two unchanged fake DM_TABLE_STATUS replies. */
 static int fake_device_status_ioctl(void *context, const char *name,
 				    uint64_t device_id, uint32_t event_number,
 				    struct status_ready_report *report)
 {
 	struct fake_inventory_ioctl *fixture = context;
-	const char *const stable[] = { fixture_valid_status };
-	struct status_reader_fixture observations = {
-		.statuses = stable, .count = 1
+	struct fake_status_snapshot_reader observations = {
+		.event_number = event_number
 	};
 	int result;
 
@@ -1099,7 +1142,7 @@ static int fake_device_status_ioctl(void *context, const char *name,
 	assert(device_id == (uint64_t)fixture->devices_observed + 1U);
 	assert(event_number == (fixture->devices_observed ? 9U : 7U));
 	result = report_device_status_with_reader(&observations,
-			read_fixture_observation, name, device_id, report);
+			fake_read_status_observation_ioctl, name, device_id, report);
 	fixture->status_reads += (unsigned int)observations.calls;
 	++fixture->devices_observed;
 	return result;
@@ -1159,7 +1202,7 @@ static void test_final_inventory_fake_ioctl_observation_gap(void)
 		assert(fixture.list_reads == 2U);
 		assert(fixture.devices_observed == 2U);
 		assert(fixture.status_reads == 4U);
-		assert(report.count == 4U);
+		assert(report.count == 2U);
 		if (fixture.change == FAKE_INVENTORY_STABLE) {
 			assert(result == 0);
 			assert(strstr(output, "compressed ratio (SWZ extents)"));
