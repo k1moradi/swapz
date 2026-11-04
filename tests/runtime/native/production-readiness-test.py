@@ -245,6 +245,37 @@ def campaign_artifact(name, byte):
     }
 
 
+def sampled_metadata_ram_trace(peak_ram_bytes=900000000):
+    # Rootless fixture only. Real RAM must come from the serialized loaded host.
+    phases = (
+        ("baseline", 0, 0),
+        ("initialization", 400000000, 600000000),
+        ("steady", 650000000, 850000000),
+        ("gc", peak_ram_bytes, 870000000),
+        ("teardown", 870000000, 0),
+    )
+    samples = []
+    for phase, *values in phases:
+        for value in values:
+            index = len(samples) + 1
+            samples.append({
+                "phase": phase,
+                "monotonic_ns": index * 1000000000,
+                "timestamp_utc": f"2026-11-03T00:00:{index:02d}Z",
+                "ram_bytes": value,
+            })
+    return {
+        "schema": "swapz-metadata-ram-samples-v1",
+        "capture": "serialized-loaded-host",
+        "scope": "target-owned-resident-bytes-including-page-tables",
+        "source_sha": SOURCE,
+        "mapper_uuid": "SWAPZ-PRIMARY-" + "f" * 32,
+        "host_boot_id": "11111111-1111-4111-8111-111111111111",
+        "sampling_interval_ns": 1000000000,
+        "samples": samples,
+    }
+
+
 def physical_campaign_evidence(policy_raw):
     return {
         "schema": "swapz-performance-campaign-evidence-v1",
@@ -280,6 +311,8 @@ def physical_campaign_evidence(policy_raw):
             "logical_pages": 27080192,
             "logical_capacity_bytes": 110920466432,
             "peak_ram_bytes": 900000000,
+            "mapper_uuid": "SWAPZ-PRIMARY-" + "f" * 32,
+            "metadata_ram_trace": sampled_metadata_ram_trace(),
         },
         "host_stability": {
             "status": "STABLE",
@@ -316,6 +349,12 @@ def physical_campaign_evidence(policy_raw):
                 "name": EVALUATOR.PHYSICAL_CAMPAIGN_SEALER.name,
                 "sha256": hashlib.sha256(
                     EVALUATOR.PHYSICAL_CAMPAIGN_SEALER.read_bytes()
+                ).hexdigest(),
+            },
+            "metadata_ram_validator": {
+                "name": EVALUATOR.METADATA_RAM_VALIDATOR.name,
+                "sha256": hashlib.sha256(
+                    EVALUATOR.METADATA_RAM_VALIDATOR.read_bytes()
                 ).hexdigest(),
             },
         },
