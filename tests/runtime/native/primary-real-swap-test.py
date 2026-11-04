@@ -1794,9 +1794,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         child = mock.Mock()
         child.poll.return_value = None
         child.wait.return_value = 1
+        diagnostics = io.StringIO()
 
         with mock.patch.object(
-                    parent, "_stop_unadmitted_child") as stop_child:
+                    parent, "_stop_unadmitted_child") as stop_child, \
+                contextlib.redirect_stderr(diagnostics):
             result = parent._serve_admission(
                 server, child, "a" * 40, "/usr/bin/git", "b" * 64,
                 {
@@ -1804,7 +1806,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     for item in parent.PHYSICAL_CONTROL_INPUT_PATHS
                 },
                 "8" * 64, 2)
-        self.assertEqual(result, 1)
+        self.assertEqual(result, 2)
+        self.assertIn(
+            "BLOCKED_PRIMARY_REAL_SWAP_PARENT=source admission request is malformed",
+            diagnostics.getvalue())
         stop_child.assert_called_once_with(child)
 
     def test_default_control_path_uses_installed_package_layout(self):
