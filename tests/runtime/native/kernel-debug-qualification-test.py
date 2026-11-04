@@ -330,6 +330,8 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertEqual(blocked.returncode, 2, blocked.stdout + blocked.stderr)
         runtime_before.write_text(
             self.runtime_snapshot(required), encoding="utf-8")
+        runtime_after.write_text(
+            self.runtime_snapshot(required), encoding="utf-8")
         missing_module = subprocess.run(
             common, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, check=False)
@@ -478,7 +480,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
                       qualification.inspect_module_provenance(module)["error"])
         module.write_bytes(b"synthetic module, never loaded")
         with mock.patch.object(qualification.shutil, "which", return_value=None):
-            self.assertIn("modinfo unavailable",
+            self.assertIn("tool unavailable: modinfo",
                           qualification.inspect_module_provenance(module)["error"])
         with mock.patch.object(qualification.shutil, "which", return_value="/usr/bin/tool"), \
              mock.patch.object(qualification.subprocess, "run") as runner:
