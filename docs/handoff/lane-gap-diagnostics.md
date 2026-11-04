@@ -1,4 +1,12 @@
-# Work order: lower-lane gap attribution (ROADMAP ID178)
+# Historical work order: lower-lane gap attribution (ROADMAP ID178)
+
+**Archived implementation brief, not a current assignment or qualification.**
+The ID178 accounting invariants and reporting interface now live in the
+[current coding standard](../coding_standards.md#lower-lane-gap-attribution-id178)
+and [testing standard](../testing_standards.md#lower-lane-gap-attribution-native-and-replay-qualification-id178);
+use those and [current decisions](../ROADMAP.md) before changing source.
+Commands and the final deletion instruction below are historical, not a
+request to delete this retained evidence.
 
 Implementer: external agent. Reviewer: lead developer. Owner runs loaded tests.
 
