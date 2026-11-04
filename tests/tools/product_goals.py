@@ -338,8 +338,10 @@ def _ci_failure_category(line, contract_suite):
         return "HOST_PERMISSION"
     if re.search(
             r"(?i)AssertionError:|^E\s+AssertionError|"
-            r"(?:[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)|"
-            r"SystemExit|(?:subprocess\.)?TimeoutExpired):|"
+            r"(?:RuntimeError|ValueError|TypeError|KeyError|IndexError|"
+            r"AttributeError|OSError|TimeoutError|FileNotFoundError|"
+            r"(?:subprocess\.)?(?:CalledProcessError|TimeoutExpired)|"
+            r"SystemExit):|"
             r"AddressSanitizer|UndefinedBehaviorSanitizer|runtime error:|"
             r"Assertion .* failed|Aborted(?: \(core dumped\))?|SIGABRT|"
             r"terminate called after throwing|"
