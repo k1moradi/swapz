@@ -3090,17 +3090,18 @@ class PairReplayContract(unittest.TestCase):
         mapper_uuid = "SWAPZ-PRIMARY-" + "f" * 32
 
         def ram_trace(peak=8192):
-            baseline_available = 16 * 1024 * 1024
+            self.assertEqual(peak % 1024, 0)
+            baseline_available_kib = 16 * 1024
             samples = []
             phases = (
                 ("baseline", [0] * 10, False),
-                ("initialization", [2048, 4096], True),
-                ("steady", [6144, peak], True),
-                ("gc", [peak, 6144], True),
-                ("teardown", [6144] + [0] * 21, None),
+                ("initialization", [2, 4], True),
+                ("steady", [6, peak // 1024], True),
+                ("gc", [peak // 1024, 6], True),
+                ("teardown", [6] + [0] * 21, None),
             )
-            for phase, deltas, mapper_state in phases:
-                for phase_index, delta in enumerate(deltas):
+            for phase, deltas_kib, mapper_state in phases:
+                for phase_index, delta_kib in enumerate(deltas_kib):
                     index = len(samples) + 1
                     seconds, tenths = divmod(index, 10)
                     present = (
@@ -3111,11 +3112,12 @@ class PairReplayContract(unittest.TestCase):
                         "monotonic_ns": index * 100_000_000,
                         "timestamp_utc":
                             f"2026-11-03T00:00:{seconds:02d}.{tenths}Z",
-                        "mem_available_bytes": baseline_available - delta,
-                        "s_unreclaim_bytes":
-                            1024 * 1024 + (delta if present else 0),
-                        "vmalloc_used_bytes":
-                            2 * 1024 * 1024 + (delta if present else 0),
+                        "mem_available_kib":
+                            baseline_available_kib - delta_kib,
+                        "s_unreclaim_kib":
+                            1024 + (delta_kib if present else 0),
+                        "vmalloc_used_kib":
+                            2048 + (delta_kib if present else 0),
                         "mapper_present": present,
                     })
             return {
@@ -3127,6 +3129,7 @@ class PairReplayContract(unittest.TestCase):
                 "host_boot_id":
                     "11111111-1111-4111-8111-111111111111",
                 "sampling_interval_ns": 100_000_000,
+                "meminfo_unit": "kB",
                 "samples": samples,
             }
 
@@ -3229,7 +3232,7 @@ class PairReplayContract(unittest.TestCase):
 
         def corrupt_recovery(item):
             for sample in item["samples"][-10:]:
-                sample["mem_available_bytes"] -= 100 * 1024
+                sample["mem_available_kib"] -= 100
 
         corruptions = (
             lambda item: item["samples"].pop(),
@@ -3240,9 +3243,7 @@ class PairReplayContract(unittest.TestCase):
             lambda item: item.update(source_sha="b" * 40),
             lambda item: item["samples"][12].update(mapper_present=False),
             lambda item: item.update(scope="target-owned-estimate"),
-            lambda item: item["samples"][12].update(
-                mem_available_bytes=(
-                    item["samples"][12]["mem_available_bytes"] // 1024)),
+            lambda item: item.update(meminfo_unit="bytes"),
             lambda item: item.update(sampling_interval_ns=1_000_000_000),
             corrupt_recovery,
         )
