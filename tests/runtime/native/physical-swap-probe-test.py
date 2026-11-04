@@ -2588,8 +2588,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         probe, "_active_swap_for",
                         side_effect=AssertionError(
                             "holder/mount blocker must stop before swap claim")):
-                with self.assertRaisesRegex(probe.ProbeError, expected):
+                with self.assertRaisesRegex(probe.ProbeError, expected) as blocked:
                     probe._require_campaign_target_quiescent(target)
+                if holders:
+                    self.assertIn("observed=holder_count_1", str(blocked.exception))
+                    self.assertNotIn(holders[0], str(blocked.exception))
 
     def test_campaign_exact_partuuid_path_rejects_stale_card_identity(self):
         with self.assertRaisesRegex(
@@ -2689,8 +2692,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(
                     probe.ProbeError,
                     "campaign_card_identity expected='a{64}' "
-                    "observed='b{64}'.*replacement-card"):
+                    "observed='b{64}'") as blocked:
                 probe._require_campaign_target_quiescent(target)
+            self.assertNotIn("replacement-card", str(blocked.exception))
 
 
     def test_campaign_alias_and_identity_errors_hide_private_paths(self):
@@ -2728,6 +2732,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "observed='warning'", failure)
         self.assertNotIn("secret-wwid", failure)
         self.assertNotIn("/private/disk", failure)
+        unavailable = {
+            "available": False,
+            "error": "secret-wwid stored at /private/disk",
+        }
+        failure = probe._kernel_diagnostics_error(unavailable)
+        self.assertEqual(
+            failure, "kernel_trace expected=available observed=unavailable")
+        self.assertNotIn("secret-wwid", failure)
 
     def test_campaign_plan_source_trace_and_lower_evidence_fail_closed(self):
         target, source_sha, evidence, lower, inventory, diagnostics = (
@@ -2851,8 +2863,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_run", return_value=completed):
             with self.assertRaisesRegex(
                     probe.ProbeError,
-                    "mapper_provenance expected=no_swapz_namespace"):
+                    "mapper_provenance expected=no_swapz_namespace "
+                    "observed=name_namespace_collision") as blocked:
                 probe._module_mapper_preflight()
+            self.assertNotIn("SWAPZ-FOREIGN", str(blocked.exception))
 
     def test_module_and_kernel_preflight_block_before_review_or_device_write(self):
         target, evidence = self.physical_preparation_fixture()
