@@ -38,6 +38,28 @@ GitHub; no second report copy is generated.
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the release-metadata source. Kbuild generates the version header; DKMS and userspace resolve the same value.
 
+### Kernel-version compatibility evidence
+
+There is no project-approved minimum or maximum Linux kernel release and no
+promised kernel-version support interval. The GitHub-hosted production-C
+workflow compiles W=1, W=2 and the normal module on x86_64 and ARM64 against
+one runner-selected Ubuntu 24.04 HWE `-generic` header per architecture.
+The highest installed `linux-headers-*-generic` release is selected after
+installing `linux-headers-generic-hwe-24.04`; it is not pinned, and may change
+with the runner package repository. The workflow reports the selected header
+release, runner architecture, compiler, source SHA, target-source Git blob,
+module hash and vermagic. A successful job does **not** cover the oldest
+supported kernel, every intermediate kernel, or a future upgrade: none of
+those version boundaries is currently defined.
+
+These CI builds are compile-only evidence, not DKMS registration, a
+successfully loaded module, real-host Secure Boot acceptance, boot validation
+or swap correctness. A kernel update still requires matching headers, new
+exact-kernel qualification through `make test` on the actual host and an
+explicit qualified install; `AUTOINSTALL="no"` remains in force. A defined
+kernel compatibility range and its oldest/current compile matrix require a
+separate project policy decision before they can be claimed.
+
 ## Root Make API
 
 Exactly five commands are public:

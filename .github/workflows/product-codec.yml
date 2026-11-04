@@ -69,26 +69,96 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -1)"
-          test -n "$KDIR"
-          echo "SOURCE_SHA=$(git rev-parse HEAD)"
-          echo "TARGET_BLOB=$(git rev-parse HEAD:src/kernel/dm-target.c)"
-          make -C src/kernel KDIR="$KDIR" W=1 -j2 all
-          test -s build/kernel/w1/dm-swapz.ko
-          sha256sum build/kernel/w1/dm-swapz.ko
-          make -C src/kernel KDIR="$KDIR" W=2 -j2 all
-          test -s build/kernel/w2/dm-swapz.ko
-          sha256sum build/kernel/w2/dm-swapz.ko
+          phase="header-selection"
+          trap 'status=$?; printf "::error::COMPILE_ONLY_FAILED phase=%s exit=%s\n" "$phase" "$status" >&2' ERR
+          # Rolling runner HWE headers are not a minimum/maximum kernel support claim.
+          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -n 1)"
+          if [[ -z "$KDIR" || ! -f "$KDIR/include/config/kernel.release" ]]; then
+            echo "No usable runner-installed generic kernel headers" >&2
+            false
+          fi
+          header_release="$(cat "$KDIR/include/config/kernel.release")"
+          if [[ "${KDIR##*/}" != "linux-headers-$header_release" ]]; then
+            echo "Header directory and kernel.release disagree" >&2
+            false
+          fi
+          runner_arch="$(uname -m)"
+          case "${{ matrix.arch }}:$runner_arch" in
+            x86_64:x86_64|arm64:aarch64) ;;
+            *) echo "Matrix architecture and runner architecture disagree" >&2; false ;;
+          esac
+          compiler_version="$(gcc -dumpfullversion -dumpversion)"
+          source_sha="$(git rev-parse HEAD)"
+          target_blob="$(git rev-parse HEAD:src/kernel/dm-target.c)"
+          echo "KERNEL_VERSION_RANGE=UNSPECIFIED (runner-selected HWE headers only)"
+          echo "KERNEL_HEADERS=${KDIR##*/}"
+          echo "KERNEL_RELEASE=$header_release"
+          echo "ARCHITECTURE=$runner_arch"
+          echo "COMPILER=gcc $compiler_version"
+          echo "SOURCE_SHA=$source_sha"
+          echo "TARGET_BLOB=$target_blob"
+
+          build_log="$(mktemp)"
+          trap 'rm -f "$build_log"' EXIT
+          show_build_failure() {
+            local total_lines first_error_line first_line last_line
+            total_lines="$(wc -l < "$build_log")"
+            if (( total_lines == 0 )); then
+              echo "No compiler output captured" >&2
+              return
+            fi
+            first_error_line="$(grep -n -m1 -E '(^|[[:space:]])(fatal )?error:|warning:|Error [0-9]+|^make.*\*\*\*' "$build_log" | cut -d: -f1 || true)"
+            if (( total_lines <= 160 )); then
+              first_line=1
+              last_line="$total_lines"
+            elif [[ -n "$first_error_line" ]]; then
+              first_line=$((first_error_line > 12 ? first_error_line - 12 : 1))
+              last_line=$((first_line + 159))
+            else
+              first_line=$((total_lines - 159))
+              last_line="$total_lines"
+            fi
+            printf 'BUILD_FAILURE_LOG lines=%s-%s of %s (first diagnostic when available)\n' \
+              "$first_line" "$last_line" "$total_lines" >&2
+            sed -n "${first_line},${last_line}p" "$build_log" |
+              sed -e "s#${GITHUB_WORKSPACE}#[workspace]#g" \
+                  -e "s#${RUNNER_TEMP}#[runner-temp]#g" >&2
+          }
+          compile_variant() {
+            local variant="$1" artifact="$2"
+            shift 2
+            phase="$variant"
+            if ! make -s -C src/kernel KDIR="$KDIR" -j2 "$@" all >"$build_log" 2>&1; then
+              show_build_failure
+              return 1
+            fi
+            if grep -Eq '(^|[[:space:]])warning:' "$build_log"; then
+              echo "Compiler warning in $variant build" >&2
+              show_build_failure
+              return 1
+            fi
+            if [[ ! -s "$artifact" ]]; then
+              echo "Missing module artifact for $variant" >&2
+              return 1
+            fi
+            sha256sum "$artifact"
+          }
+          compile_variant W=1 build/kernel/w1/dm-swapz.ko W=1
+          compile_variant W=2 build/kernel/w2/dm-swapz.ko W=2
           # A normal build is deliberately separate from warning variants:
           # it remains the only artifact eligible for owned-RAM loading.
-          make -C src/kernel KDIR="$KDIR" -j2 all
-          test -s build/kernel/experimental/dm-swapz.ko
-          sha256sum build/kernel/experimental/dm-swapz.ko
+          compile_variant normal build/kernel/experimental/dm-swapz.ko
+          phase="manifest"
           echo "COMPILE_ONLY_NO_MODULE_INSERTION"
           mkdir -p build/deploy
           {
-            echo "git_head=$(git rev-parse HEAD)"
-            echo "kernel_headers=$KDIR"
+            echo "git_head=$source_sha"
+            echo "target_blob=$target_blob"
+            echo "kernel_headers=${KDIR##*/}"
+            echo "kernel_release=$header_release"
+            echo "architecture=$runner_arch"
+            echo "compiler=gcc $compiler_version"
+            echo "kernel_version_range=UNSPECIFIED"
             echo "version=$(cat src/kernel/VERSION)"
             sha256sum build/kernel/experimental/dm-swapz.ko
             modinfo -F vermagic build/kernel/experimental/dm-swapz.ko
