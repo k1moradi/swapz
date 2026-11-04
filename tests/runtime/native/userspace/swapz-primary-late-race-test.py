@@ -127,7 +127,7 @@ enum fixture_scenario {
     FIXTURE_HOLDER_INITIAL, FIXTURE_UNRELATED_SWAPFILE,
     FIXTURE_WRONG_MOUNT_DEVICE, FIXTURE_REMOTE_OVERSIZED,
     FIXTURE_LOCAL_OVERSIZED, FIXTURE_PID_INVENTORY_EACCES,
-    FIXTURE_SYMLINK_MOUNTINFO, FIXTURE_SCENARIO_COUNT
+    FIXTURE_SYMLINK_MOUNTINFO, FIXTURE_WRONG_TARGET_OPEN, FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
     "safe control", "selected mount late", "selected parent mount late",
@@ -143,7 +143,8 @@ static const char *const scenario_names[] = {
     "root initially on selected parent", "holder initially active",
     "unrelated /swapfile late", "wrong-device mount alias late",
     "oversized remote mountinfo late", "oversized local mountinfo late",
-    "unreadable PID inventory late", "symlink mountinfo late"
+    "unreadable PID inventory late", "symlink mountinfo late",
+    "checked target opener reports wrong device"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -580,6 +581,9 @@ static int fixture_target_open(void)
 {
     if (scenario == FIXTURE_HOLDER_INITIAL)
         return fixture_admission_error(EBUSY);
+    /* A changed selected-device identity must stop before header write. */
+    if (scenario == FIXTURE_WRONG_TARGET_OPEN)
+        return fixture_admission_error(ESTALE);
     return 99;
 }
 static int fixture_intent(void)
@@ -719,6 +723,7 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_PARENT_SUBSTITUTED:
     case FIXTURE_ROOT_SUBSTITUTED:
     case FIXTURE_ROOT_ON_SELECTED_PARENT:
+    case FIXTURE_WRONG_TARGET_OPEN:
         expected_error = ESTALE;
         break;
     case FIXTURE_ROOT_INITIAL:
@@ -762,6 +767,7 @@ static int check_case(enum fixture_scenario candidate)
               candidate == FIXTURE_SWAPS_INITIAL ||
               candidate == FIXTURE_ROOT_INITIAL ||
               candidate == FIXTURE_HOLDER_INITIAL ||
+              candidate == FIXTURE_WRONG_TARGET_OPEN ||
               candidate == FIXTURE_PARENT_SUBSTITUTED ||
               candidate == FIXTURE_HOLDER_LATE) ?
                  prewrite_reads != 0U : prewrite_reads != 1U)) {
