@@ -238,37 +238,38 @@ They establish earlier decisions, not a qualification of current `main`.
 The owned-RAM matrix remains useful for kernel scheduling/correctness, but it is
 not a model of the dedicated SD card's flash controller, queueing, erase/program
 behavior or long-duration service. The current standing authorization in
-\`AGENT_CONTEXT.md\` permits bounded work on the positively identified selected
+`AGENT_CONTEXT.md` permits bounded work on the positively identified selected
 card; physical work is still scheduled exclusively by the host/Codex owner and
-must not overlap another card user. A RAM \`null_blk\` result is never promoted to
+must not overlap another card user. A RAM `null_blk` result is never promoted to
 physical evidence.
 
 The existing benchmark surfaces have the following evidence boundaries:
 
 | Requirement | Existing short replay / loaded matrix | Physical qualification addition |
 |---|---|---|
-| Actual swap-in-sensitive reads | No. \`io-replay.py\` is a block-path replay; its packed-read phase is direct block I/O and explicitly does not claim a cold first pass. | \`anonymous-swap.py\` faults deterministic anonymous pages under a bounded cgroup, requires workload-specific swap occupancy, then byte-verifies timed rereads with the admitted swap device as the sole active swap. |
+| Actual swap-in-sensitive reads | No. `io-replay.py` is a block-path replay; its packed-read phase is direct block I/O and explicitly does not claim a cold first pass. | `anonymous-swap.py` faults deterministic anonymous pages under a bounded cgroup, requires workload-specific swap occupancy, then byte-verifies timed rereads with the admitted swap device as the sole active swap. |
 | Anonymous-page swap activity | Representative fixtures emulate page bytes only; they never activate swap. | Three raw/swapz anonymous-swap pairs exercise real Linux swap-out/swap-in. |
-| Compressible / incompressible / representative content | \`medium\`, \`entropy\`, \`balanced\`, and private owner-sampled representative fixtures exist. | Physical helpers bind the exact fixture SHA and metadata; filenames do not establish a content class. The v2 amendment adds a five-pair entropy-fill/entropy-churn cohort whose gate is non-regression, not compression savings. |
+| Compressible / incompressible / representative content | `medium`, `entropy`, `balanced`, and private owner-sampled representative fixtures exist. | Physical helpers bind the exact fixture SHA and metadata; filenames do not establish a content class. The v2 amendment adds a five-pair entropy-fill/entropy-churn cohort whose gate is non-regression, not compression savings. |
 | Low queue depth | QD1 controls exist on RAM models. | The v2 amendment adds a five-pair QD1 balanced physical service cohort. QD8 results are not used to infer QD1 latency, serialization or synchronous-overhead behavior. |
 | Sustained queues | Persistent QD1/4/8/32 write workers exist on RAM models. | Physical mixed workers are persistent and bounded; the long run uses QD16. |
-| High logical occupancy | The ordinary replay pre-fills only a small working range and its Python oracle scales with logical pages. | \`sustained-replay.py\` maps the source-derived maximum logical capacity, fills 90%, and keeps oracle state O(queue depth + fixture pages), not O(logical capacity). |
+| High logical occupancy | The ordinary replay pre-fills only a small working range and its Python oracle scales with logical pages. | `sustained-replay.py` maps the source-derived maximum logical capacity, fills 90%, and keeps oracle state O(queue depth + fixture pages), not O(logical capacity). |
 | Repeated overwrites / GC relocation | The 4096-page loaded GC pressure oracle proves bounded synthetic correctness. | A one-hour 80%-hot-region churn phase requires positive GC victims/relocated pages, repeated segment programming, zero no-headroom skips and byte-exact final recovery. |
 | Cold reads | Ordinary packed-read evidence is not a cold-cache claim. | An untouched filled tail is sampled before the final full-volume verification; its latency and independent lower READ accounting are separate from the churn interval. |
 | Concurrent mixed activity | Mixed synthetic QD traces exist. | The physical service and sustained workloads use deterministic lane-owned writes with concurrent verified reads. |
 
 ### Prospective dedicated-SD acceptance contract
 
-Thresholds are fixed in \`tests/runtime/benchmark/qualification.py\` before any
-confirmation run. Changing a threshold creates a new protocol; results from the
-old and new protocols are not pooled. The private helper is an implementation
-detail, not a second supported test command.
+The frozen v1 thresholds live in `docs/production-acceptance.json`; the
+prospective v2 amendment is pinned separately below. The evaluator in
+`tests/runtime/benchmark/qualification.py` enforces those policies. Any
+criteria change requires a new protocol, with old and new results kept
+separate; a private helper is not another supported test command.
 
-\`docs/production-acceptance.json\` remains the frozen v1 authority and is not
+`docs/production-acceptance.json` remains the frozen v1 authority and is not
 modified by new physical results. The prospectively frozen v2 extension lives
-in \`tests/runtime/benchmark/physical-qualification-amendment-v2.json\`; it is
+in `tests/runtime/benchmark/physical-qualification-amendment-v2.json`; it is
 bound to the v1 manifest Git blob
-\`3a422599dee32e64811545441de7525b9479f782\`. The amendment was issued before
+`3a422599dee32e64811545441de7525b9479f782`. The amendment was issued before
 any v2 confirmatory result. Its own amendment Git blob
 `eac574fd204932e630e8bb45dca66b67c135a779` is pinned in the evaluator;
 an in-place criteria change must fail and be published as a new protocol.
@@ -339,17 +340,17 @@ read rounds per arm. The worker alternates deterministic compressible and
 incompressible anonymous pages in an exact 1 GiB working set under a 512 MiB
 cgroup memory.max; memory.swap.max must be unlimited or cover the remaining
 512 MiB. Each round requires at least 128 MiB of
-workload-specific \`VmSwap\`/cgroup swap plus at least that much usage on the sole
+workload-specific `VmSwap`/cgroup swap plus at least that much usage on the sole
 admitted swap device before timed rereads can count as swap-in evidence. Each
-timed reread round must independently produce positive \`pswpin\`, positive
-cgroup-v2 \`memory.stat:pgmajfault\`, positive READ bytes on the exact admitted
+timed reread round must independently produce positive `pswpin`, positive
+cgroup-v2 `memory.stat:pgmajfault`, positive READ bytes on the exact admitted
 logical swap target, and positive READ bytes on its backing disk. The swapz arm
-also pins the exact DM UUID, verifies a single \`swapz\` table target and its sole
+also pins the exact DM UUID, verifies a single `swapz` table target and its sole
 lower device. Swap occupancy without these independent service deltas is not
 swap-in evidence. The fault-latency sample times a one-byte first touch of each
 anonymous page; deterministic page generation and the subsequent 4096-byte
 Python copy/byte comparison are timed separately so interpreter verification
-work is not mislabeled as page-fault service. \`pswpout\`, cgroup swap/current
+work is not mislabeled as page-fault service. `pswpout`, cgroup swap/current
 state and cgroup event deltas are retained for attribution. The worker requires
 an initially empty admitted swap device, a private cgroup without foreign
 processes/descendant cgroups, a clean HEAD == origin/main at the exact source
@@ -366,7 +367,7 @@ requires no holder, mount or active-swap alias. The swapz arm requires a fresh
 empty mapper whose sole holder/slave relationship is the same partition. Both
 arms use the exact manager maximum logical capacity, fixture hashes, content
 profiles, queue geometry and deterministic operation recipe. Independent
-parent-device \`/sys/block/<disk>/stat\` deltas bracket only the measured phase;
+parent-device `/sys/block/<disk>/stat` deltas bracket only the measured phase;
 lower WRITE bytes/requests are normalized by completed useful writes for the
 hour-long throughput comparison.
 
@@ -438,18 +439,18 @@ Block-service, cold-read, sustained-minute and anonymous-swap evidence persists
 the nonzero histogram bins plus exact sample count and maximum. The evaluator
 reconstructs every acceptance-critical p50/p95/p99 from those bins; editable
 percentile summaries cannot independently promote a result. The swapz scheduler samples
-\`/proc/meminfo\` every 100 ms from a one-second target-absent pre-create
+`/proc/meminfo` every 100 ms from a one-second target-absent pre-create
 baseline through mapper creation, the sustained workload, ordinary mapper
 teardown and at least two seconds with the exact mapper UUID observed absent.
-The trace keeps the kernel-reported \`MemAvailable\`, \`SUnreclaim\` and
-\`VmallocUsed\` KiB integers plus UTC/monotonic timestamps and
+The trace keeps the kernel-reported `MemAvailable`, `SUnreclaim` and
+`VmallocUsed` KiB integers plus UTC/monotonic timestamps and
 mapper-presence state. The qualifying peak is derived as median(pre-create
-\`MemAvailable\`) minus the minimum \`MemAvailable\` from initialization start
+`MemAvailable`) minus the minimum `MemAvailable` from initialization start
 through the last mapper-present teardown sample, so pre-publication constructor
 allocations remain charged; the final target-absent second must recover to the
 baseline envelope.
 RAM samples labeled GC must overlap sustained telemetry intervals whose
-exported \`gc_wall_ns\`, \`gc_victims\` or \`gc_pages\` counter advanced.
+exported `gc_wall_ns`, `gc_victims` or `gc_pages` counter advanced.
 The same host sampler surrounds the raw control so unrelated host drift is
 visible. This is a whole-host upper-bound
 observation, not exact per-allocation attribution; compiled array-size evidence
@@ -461,7 +462,7 @@ parsing fails closed if that Linux metric is unavailable. Measurement-boundary
 VmHWM growth is retained as a diagnostic, but setup-time allocations within the
 replay remain charged to the gate.
 
-CPU attribution has explicit boundaries. \`measured_cpu_seconds_per_useful_byte\`
+CPU attribution has explicit boundaries. `measured_cpu_seconds_per_useful_byte`
 is replay/workload-process user+system CPU plus swapz worker CPU exported by the
 target where available; it is **not** whole-swapz CPU. Block softirq, unrelated
 kernel workers and other host work are not charged to that process/worker sum.
@@ -480,7 +481,7 @@ diagnostics must be considered when correlating minute-level GC events with
 service drift.
 
 A 200 ms quiet window immediately before and after each arm must have busy
-fraction <=25%, CPU PSI \`some\` <=5% and steal <=1%; timed-arm steal must also be
+fraction <=25%, CPU PSI `some` <=5% and steal <=1%; timed-arm steal must also be
 <=1%. Across each five-pair service cohort, raw useful-WRITE max/min spread must be
 <=10%. A noisy, missing-counter, failed or excluded sample is retained with its
 reason and is never automatically retried. Fewer than all prospectively fixed
@@ -557,7 +558,7 @@ zero oracle mismatches and no >10-second interval without forward progress.
 The anonymous cohort requires every pair to keep swap-in p95/p99 <=1.25x raw,
 useful read service >=0.80x raw, normalized lower WRITE bytes/requests <=0.90x
 raw, measured attributed CPU/useful-byte <=1.50x raw, the 128 MiB swap-occupancy
-floor, positive per-round \`pswpin\`/cgroup-major-fault/exact-target-READ/backing-
+floor, positive per-round `pswpin`/cgroup-major-fault/exact-target-READ/backing-
 READ evidence and zero byte-oracle mismatches.
 
 **Physical campaign orchestration contract (not a current-host PASS):** shared
