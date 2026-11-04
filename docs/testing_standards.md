@@ -1425,10 +1425,15 @@ protection and fail closed if it cannot be established. A filename never proves
 a content class.
 
 The synthetic anonymous-page generator must reject invalid page counts before
-allocating its schedule, refuse liblz4 measurements of non-4096-byte pages,
-and reread each written page against the deterministic seed/index/profile
-recipe and whole-fixture SHA-256 before writing its sidecar. Truncated, extra
-or changed records and mismatched metadata are failures, not qualification.
+allocating its schedule, accept only unsigned 64-bit integer seeds, and keep
+fixture page indices within 0..65535. Valid seed/index/profile recipes remain
+byte-identical. It must refuse liblz4 measurements of non-4096-byte pages and
+reread each written page against the deterministic recipe and whole-fixture
+SHA-256 before writing its sidecar. The reread must reconstruct the complete
+manifest, including measured liblz4 buckets and byte accounting, and compare
+JSON value types exactly; Python bool/int or float/int equality must never make
+mistyped metadata acceptable. Truncated, extra or changed records and any
+workload-metadata mismatch are failures, not qualification.
 The anonymous-swap worker independently compares every 4096-byte page on
 every admitted reread; failed comparisons report the phase, page index and
 expected/observed digests and cleanup outcome. PASS is written only after

@@ -17,9 +17,49 @@ from pathlib import Path
 
 PAGE = 4096
 CAP = 3568
+MAX_PAGES = 65536
+UINT64_MAX = (1 << 64) - 1
+DEFINITION = "synthetic anonymous-memory-style, not sampled Linux swap"
+COMPRESSION = "liblz4 LZ4_compress_fast(src=4096, max_dst=3568, accel=1)"
 PROFILES = ("zero", "heap", "text", "cow", "raster", "mixed", "medium",
             "delta64", "entropy")
 DEFAULT_WEIGHTS = "zero=8,heap=32,text=20,cow=12,raster=15,mixed=8,entropy=5"
+
+
+def require_seed(seed):
+    if type(seed) is not int or not 0 <= seed <= UINT64_MAX:
+        raise ValueError("fixture seed must be an unsigned 64-bit integer")
+
+
+def parse_seed(text):
+    # Bound lexical work before int() accepts an arbitrarily long hexadecimal
+    # seed. 160 characters still covers every underscore-separated uint64 form.
+    if not isinstance(text, str) or len(text) > 160:
+        raise argparse.ArgumentTypeError(
+            "--seed must be an unsigned 64-bit integer")
+    try:
+        seed = int(text, 0)
+        require_seed(seed)
+    except (ValueError, TypeError) as exc:
+        raise argparse.ArgumentTypeError(
+            "--seed must be an unsigned 64-bit integer") from exc
+    return seed
+
+
+def exact_json_value(observed, expected):
+    if type(observed) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return (
+            observed.keys() == expected.keys() and
+            all(exact_json_value(observed[key], value)
+                for key, value in expected.items()))
+    if isinstance(expected, list):
+        return (
+            len(observed) == len(expected) and
+            all(exact_json_value(left, right)
+                for left, right in zip(observed, expected)))
+    return observed == expected
 
 
 def deterministic_bytes(seed, index, domain, n):
@@ -28,6 +68,11 @@ def deterministic_bytes(seed, index, domain, n):
 
 
 def page_bytes(seed, index, profile):
+    require_seed(seed)
+    if type(index) is not int or not 0 <= index < MAX_PAGES:
+        raise ValueError("fixture page index must be in 0..65535")
+    if profile not in PROFILES:
+        raise ValueError("invalid fixture profile")
     raw = deterministic_bytes(seed, index, profile, PAGE)
     b = bytearray(PAGE)
     if profile == "zero":
@@ -112,7 +157,8 @@ def parse_weights(text):
 def schedule(seed, count, weights):
     # Guard direct callers too: main's --pages check must not be the only
     # barrier before the count-sized schedule allocation.
-    if type(count) is not int or not 1 <= count <= 65536:
+    require_seed(seed)
+    if type(count) is not int or not 1 <= count <= MAX_PAGES:
         raise ValueError("fixture pages must be in 1..65536")
     if (not isinstance(weights, dict) or not weights or
             any(name not in PROFILES or type(weight) is not int or weight < 0
@@ -172,56 +218,100 @@ def classify(size):
     return "3073_3568"
 
 
+def new_measurement():
+    return {
+        "counts": Counter(),
+        "histogram": Counter(),
+        "profile_histogram": {name: Counter() for name in PROFILES},
+        "total_compressed": 0,
+        "min_compressed": None,
+        "max_compressed": None,
+    }
+
+
+def record_measurement(measurement, profile, size):
+    bucket = classify(size)
+    measurement["counts"][profile] += 1
+    measurement["histogram"][bucket] += 1
+    measurement["profile_histogram"][profile][bucket] += 1
+    if size:
+        measurement["total_compressed"] += size
+        current_minimum = measurement["min_compressed"]
+        current_maximum = measurement["max_compressed"]
+        measurement["min_compressed"] = (
+            size if current_minimum is None else min(current_minimum, size))
+        measurement["max_compressed"] = (
+            size if current_maximum is None else max(current_maximum, size))
+
+
+def build_manifest(seed, count, weights, measurement, fixture_sha256):
+    histogram = measurement["histogram"]
+    return {
+        "definition": DEFINITION,
+        "seed": seed, "pages": count, "page_bytes": PAGE,
+        "compression": COMPRESSION,
+        "requested_profile_weights": weights,
+        "profile_pages": dict(measurement["counts"]),
+        "lz4_size_buckets": dict(histogram),
+        "profile_lz4_buckets": {
+            name: dict(buckets)
+            for name, buckets in measurement["profile_histogram"].items()},
+        "lz4_accepted_payload_bytes": measurement["total_compressed"],
+        "lz4_min_accepted_payload_bytes": measurement["min_compressed"],
+        "lz4_max_accepted_payload_bytes": measurement["max_compressed"],
+        "raw_pages": histogram["raw"],
+        "raw_page_bytes": histogram["raw"] * PAGE,
+        "fixture_sha256": fixture_sha256,
+    }
+
+
 def generate(seed, count, weights, compress):
     names = schedule(seed, count, weights)
     payload = bytearray()
-    counts = Counter()
-    histogram = Counter()
-    profile_histogram = {name: Counter() for name in PROFILES}
-    total_compressed = 0
-    min_compressed = None
-    max_compressed = None
+    measurement = new_measurement()
     for index, name in enumerate(names):
         page = page_bytes(seed, index, name)
         if len(page) != PAGE:
             raise RuntimeError("fixture output is not exactly 4096 bytes")
-        size = measure(compress, page)
-        bucket = classify(size)
+        record_measurement(measurement, name, measure(compress, page))
         payload.extend(page)
-        counts[name] += 1
-        histogram[bucket] += 1
-        profile_histogram[name][bucket] += 1
-        if size:
-            total_compressed += size
-            min_compressed = size if min_compressed is None else min(min_compressed, size)
-            max_compressed = size if max_compressed is None else max(max_compressed, size)
-    result = {
-        "definition": "synthetic anonymous-memory-style, not sampled Linux swap",
-        "seed": seed, "pages": count, "page_bytes": PAGE,
-        "compression": "liblz4 LZ4_compress_fast(src=4096, max_dst=3568, accel=1)",
-        "requested_profile_weights": weights,
-        "profile_pages": dict(counts),
-        "lz4_size_buckets": dict(histogram),
-        "profile_lz4_buckets": {k: dict(v) for k, v in profile_histogram.items()},
-        "lz4_accepted_payload_bytes": total_compressed,
-        "lz4_min_accepted_payload_bytes": min_compressed,
-        "lz4_max_accepted_payload_bytes": max_compressed,
-        "raw_pages": histogram["raw"],
-        "raw_page_bytes": histogram["raw"] * PAGE,
-        "fixture_sha256": hashlib.sha256(payload).hexdigest(),
-    }
+    result = build_manifest(
+        seed, count, weights, measurement, hashlib.sha256(payload).hexdigest())
     return bytes(payload), result
 
 
-def verify_fixture(path, manifest):
+def verify_fixture(path, manifest, compress=None):
     """Independently reread every generated record before accepting the fixture."""
-    names = schedule(
-        manifest["seed"], manifest["pages"], manifest["requested_profile_weights"])
-    if (manifest.get("page_bytes") != PAGE or
-            manifest.get("profile_pages") != dict(Counter(names))):
+    if not isinstance(manifest, dict):
         raise ValueError("phase=verify cause=workload-metadata-mismatch")
+    for field, expected in (
+            ("definition", DEFINITION), ("page_bytes", PAGE),
+            ("compression", COMPRESSION)):
+        if field not in manifest or not exact_json_value(manifest[field], expected):
+            raise ValueError(
+                f"phase=verify metadata_field={field} "
+                "cause=workload-metadata-mismatch")
+    try:
+        seed = manifest["seed"]
+        count = manifest["pages"]
+        weights = manifest["requested_profile_weights"]
+    except KeyError as exc:
+        raise ValueError(
+            f"phase=verify metadata_field={exc.args[0]} "
+            "cause=workload-metadata-mismatch") from exc
+
+    names = schedule(seed, count, weights)
+    expected_profiles = dict(Counter(names))
+    if ("profile_pages" not in manifest or
+            not exact_json_value(manifest["profile_pages"], expected_profiles)):
+        raise ValueError(
+            "phase=verify metadata_field=profile_pages "
+            "cause=workload-metadata-mismatch")
+    if compress is None:
+        compress = lz4_compressor()
 
     observed_digest = hashlib.sha256()
+    measurement = new_measurement()
     with path.open("rb") as fixture:
         for index, profile in enumerate(names):
             observed = fixture.read(PAGE)
@@ -229,41 +319,53 @@ def verify_fixture(path, manifest):
                 raise ValueError(
                     f"phase=verify record={index} expected_size={PAGE} "
                     f"observed_size={len(observed)} cause=truncated-record")
-            expected = page_bytes(manifest["seed"], index, profile)
+            expected = page_bytes(seed, index, profile)
             if observed != expected:
                 raise ValueError(
                     f"phase=verify record={index} expected_sha256="
                     f"{hashlib.sha256(expected).hexdigest()} observed_sha256="
                     f"{hashlib.sha256(observed).hexdigest()} cause=page-hash-mismatch")
             observed_digest.update(observed)
+            record_measurement(
+                measurement, profile, measure(compress, observed))
         if fixture.read(1):
             raise ValueError(
                 f"phase=verify record={len(names)} expected_size=0 "
                 "observed_size=nonzero cause=trailing-record")
-    if observed_digest.hexdigest() != manifest.get("fixture_sha256"):
+
+    expected_manifest = build_manifest(
+        seed, count, weights, measurement, observed_digest.hexdigest())
+    if not exact_json_value(manifest, expected_manifest):
+        fields = set(manifest) | set(expected_manifest)
+        mismatch = next(
+            (field for field in sorted(fields)
+             if field not in manifest or field not in expected_manifest or
+             not exact_json_value(
+                 manifest.get(field), expected_manifest.get(field))),
+            "unknown")
         raise ValueError(
-            "phase=verify expected_sha256=" + str(manifest.get("fixture_sha256")) +
-            " observed_sha256=" + observed_digest.hexdigest() +
-            " cause=fixture-hash-mismatch")
+            f"phase=verify metadata_field={mismatch} "
+            "cause=workload-metadata-mismatch")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output-prefix", type=Path, required=True)
     ap.add_argument("--pages", type=int, default=1024)
-    ap.add_argument("--seed", type=lambda s: int(s, 0), default=0x51A0A9)
+    ap.add_argument("--seed", type=parse_seed, default=0x51A0A9)
     ap.add_argument("--weights", default=DEFAULT_WEIGHTS)
     args = ap.parse_args()
-    if not 1 <= args.pages <= 65536:
+    if not 1 <= args.pages <= MAX_PAGES:
         ap.error("--pages must be in 1..65536")
     weights = parse_weights(args.weights)
-    content, manifest = generate(args.seed, args.pages, weights,
-                                 lz4_compressor())
+    compressor = lz4_compressor()
+    content, manifest = generate(
+        args.seed, args.pages, weights, compressor)
     args.output_prefix.parent.mkdir(parents=True, exist_ok=True)
     fixture_path = args.output_prefix.with_suffix(".bin")
     if fixture_path.write_bytes(content) != len(content):
         raise ValueError("phase=write cause=short-fixture-write")
-    verify_fixture(fixture_path, manifest)
+    verify_fixture(fixture_path, manifest, compressor)
     metadata_text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     metadata_path = args.output_prefix.with_suffix(".json")
     if (metadata_path.write_text(metadata_text) != len(metadata_text) or
