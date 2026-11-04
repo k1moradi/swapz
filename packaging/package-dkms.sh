@@ -723,12 +723,12 @@ if final.exists() or final.is_symlink():
             or set(previous) != set(state)
             or previous.get("phase") not in allowed_phases
             or previous_bytes != (json.dumps(previous, sort_keys=True,
-                                             separators=(",", ":")) + "\\n").encode()):
+                                             separators=(",", ":")) + "\n").encode()):
         raise SystemExit("noncanonical previous package journal")
     for field in ("schema", "version", "kernel_release", "backup_files"):
         if previous.get(field) != state[field]:
             raise SystemExit(f"package rollback snapshot changed: {field}")
-state_bytes = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\\n").encode()
+state_bytes = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
 if len(state_bytes) > 1024 * 1024:
     raise SystemExit("package journal exceeds size bound")
 temporary_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
@@ -825,7 +825,7 @@ if (not isinstance(state, dict) or set(state) != {
         "schema", "phase", "version", "kernel_release", "backup_files"}
         or state.get("phase") not in allowed_phases
         or encoded_state != (json.dumps(state, sort_keys=True,
-                                        separators=(",", ":")) + "\\n").encode()):
+                                        separators=(",", ":")) + "\n").encode()):
     raise SystemExit("noncanonical package rollback journal")
 if (state.get("schema") != f"swapz-package-{operation}-v1"
         or state.get("version") != version
