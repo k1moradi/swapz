@@ -232,6 +232,10 @@ validate_arm_file()
 			prefix = keys[NR] "="
 			if (index($0, prefix) != 1 || length($0) <= length(prefix))
 				invalid = 1
+			# Every arm field is ASCII printable; do not let shell command
+			# substitution discard embedded NUL or other control bytes.
+			if ($0 ~ /[^[:print:]]/)
+				invalid = 1
 			if (NR == 4 && ($0 !~ /^armed_epoch=[1-9][0-9]*$/ || length($0) > 30))
 				invalid = 1
 		}
