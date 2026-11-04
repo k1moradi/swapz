@@ -38,6 +38,23 @@ ExecStopPost=-@SWAPZ_SBINDIR@/swapz-primary-runtime-health stop-observe
 TimeoutStartSec=120s
 TimeoutStopSec=120s
 UMask=0077
+# Lifecycle operations make direct DM ioctls, finit_module and swapon/swapoff.
+# Keep CAP_SYS_ADMIN/CAP_SYS_MODULE and /dev available; these exclusions only
+# remove unrelated privileges, rather than guessing an untested allowlist.
+CapabilityBoundingSet=~CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_SYS_BOOT CAP_SYS_TIME CAP_SYSLOG CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_BPF CAP_PERFMON CAP_CHECKPOINT_RESTORE
+NoNewPrivileges=yes
+# Full (rather than strict) intentionally keeps /run/lock/swapz, /run/swapz,
+# udev coordination and durable /var/lib/swapz recovery writable for the owner.
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+# A lifecycle transaction may inspect an incomplete package journal but must
+# not repair or remove it; the package installer owns journal completion.
+ReadOnlyPaths=-/var/lib/swapz-package-transactions
 
 [Install]
 WantedBy=swap.target
