@@ -951,9 +951,24 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
     capacity_and_ram = campaign_capacity_and_ram(
         pair_records, target_identity["device_bytes"], source_sha,
         metadata_ram_trace)
-    if capacity_and_ram is not None and not metadata_ram_trace_within_host_window(
-            capacity_and_ram, before, after):
-        capacity_and_ram = None
+    if capacity_and_ram is not None:
+        host_binding = {
+            "host_boot_id": before["kernel"]["boot_id"],
+            "host_before_captured_at_utc": before["captured_at_utc"],
+            "host_after_captured_at_utc": after["captured_at_utc"],
+            "memory_total_bytes": before["memory"]["total_bytes"],
+        }
+        if not metadata_ram_trace_within_host_window(
+                capacity_and_ram, before, after):
+            capacity_and_ram = None
+        else:
+            try:
+                RAM_VALIDATOR["validate_metadata_ram_host_binding"](
+                    capacity_and_ram["metadata_ram_trace"], host_binding)
+            except ValueError:
+                capacity_and_ram = None
+            else:
+                capacity_and_ram["metadata_ram_host_binding"] = host_binding
     summary_status = summary.get("status")
     admitted_boot_id = before["kernel"]["boot_id"]
     arm_boot_consistent = all(
