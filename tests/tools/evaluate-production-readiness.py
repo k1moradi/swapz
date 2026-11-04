@@ -734,7 +734,7 @@ def validate_physical_campaign_evidence(
             "logical_capacity_bytes")
         peak_ram_bytes = capacity_and_ram.get("peak_ram_bytes")
         if (
-                page_bytes != 4096 or
+                type(page_bytes) is not int or page_bytes != 4096 or
                 type(logical_pages) is not int or logical_pages <= 0 or
                 type(logical_capacity_bytes) is not int or
                 logical_capacity_bytes <= 0 or
@@ -1203,7 +1203,8 @@ def evaluate_release(
               KERNEL_RELEASE_RE.fullmatch(owner_kernel_release) and
               release_kernel != owner_kernel_release):
             block_code("release host kernel does not match owner qualification")
-        if release_host.get("page_size_bytes") != 4096:
+        page_size_bytes = release_host.get("page_size_bytes")
+        if type(page_size_bytes) is not int or page_size_bytes != 4096:
             block_code("release host page size is unsupported")
 
     repository = evidence.get("repository")
