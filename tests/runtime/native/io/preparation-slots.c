@@ -904,6 +904,337 @@ static int test_concurrent_reuse(void)
 	return 0;
 }
 
+/*
+ * Deterministic final-reference handoff across two uses of slot 63. A
+ * canceled consumer may put first while its producer still owns the slot;
+ * alternatively a completed producer puts first and the consumer puts last.
+ * Barriers control ownership epochs, not payload publication ordering: the
+ * actual production terminal CAS and acquire read are used in each epoch.
+ * Generation stamps are an oracle, not an added kernel slot-generation API.
+ */
+enum { HANDOFF_SLOT = 63, HANDOFF_REPEATS = 24 };
+
+struct generation_handoff {
+	atomic64_t free_mask;
+	atomic_t state;
+	_Atomic unsigned int references;
+	_Atomic unsigned int generation;
+	_Atomic unsigned int owner_generation;
+	_Atomic unsigned int final_puts[2];
+	_Atomic unsigned int completions[2];
+	_Atomic unsigned int publications[2];
+	_Atomic int failed;
+	pthread_barrier_t start;
+	pthread_barrier_t first_put;
+	pthread_barrier_t blocked_retry;
+	pthread_barrier_t final_put;
+	pthread_barrier_t reused;
+	pthread_barrier_t finished;
+	unsigned int old_generation;
+	unsigned int new_generation;
+	int old_codec_result;
+	int new_codec_result;
+	int producer_first;
+	uint64_t metadata;
+};
+
+static void generation_handoff_fail(struct generation_handoff *handoff,
+				    const char *transition, int expected,
+				    int observed)
+{
+	if (!atomic_exchange_explicit(&handoff->failed, 1,
+					      memory_order_relaxed)) {
+		unsigned int owner = atomic_load_explicit(&handoff->owner_generation,
+							 memory_order_relaxed);
+		int expected_terminal = owner == handoff->old_generation ?
+			swapz_preparation_codec_result_state(handoff->old_codec_result) :
+			owner == handoff->new_generation ?
+			swapz_preparation_codec_result_state(handoff->new_codec_result) :
+			SWAPZ_PREPARATION_EMPTY;
+
+		fprintf(stderr, "preparation-handoff slot=%u old_gen=%u new_gen=%u "
+			"owner=%u refs=%u transition=%s expected=%d observed=%d "
+			"terminal_expected=%d terminal_observed=%d\n",
+			HANDOFF_SLOT, handoff->old_generation, handoff->new_generation,
+			owner, atomic_load_explicit(&handoff->references,
+						 memory_order_relaxed),
+			transition, expected, observed, expected_terminal,
+			swapz_preparation_read_state(&handoff->state));
+	}
+}
+
+static uint64_t generation_metadata(unsigned int generation, int codec_result)
+{
+	return UINT64_C(0x6c39e1b700000000) ^
+		((uint64_t)generation << 16) ^ (uint32_t)codec_result;
+}
+
+/* Test-side model of refcount_dec_and_test() followed by the real slot return. */
+static int generation_handoff_put(struct generation_handoff *handoff,
+				  unsigned int expected_generation)
+{
+	unsigned int references;
+	unsigned int generation = atomic_load_explicit(&handoff->generation,
+							 memory_order_acquire);
+	unsigned int epoch;
+
+	if (generation != expected_generation)
+		return -ESTALE;
+	if (generation == handoff->old_generation)
+		epoch = 0;
+	else if (generation == handoff->new_generation)
+		epoch = 1;
+	else
+		return -ESTALE;
+	references = atomic_load_explicit(&handoff->references,
+						 memory_order_relaxed);
+	for (;;) {
+		if (!references)
+			return -ESTALE;
+		if (atomic_compare_exchange_weak_explicit(&handoff->references,
+				&references, references - 1U,
+				memory_order_acq_rel, memory_order_relaxed))
+			break;
+	}
+	if (references != 1U)
+		return 0;
+	if (atomic_fetch_add_explicit(&handoff->final_puts[epoch], 1,
+					memory_order_relaxed) != 0)
+		generation_handoff_fail(handoff, "duplicate-final-put",
+						 SWAPZ_PREPARATION_EMPTY,
+						 swapz_preparation_read_state(&handoff->state));
+	atomic_store_explicit(&handoff->owner_generation, 0,
+			      memory_order_relaxed);
+	atomic_store_explicit(&handoff->state.value, SWAPZ_PREPARATION_EMPTY,
+			      memory_order_relaxed);
+	swapz_preparation_release_slot(&handoff->free_mask, HANDOFF_SLOT);
+	return 1;
+}
+
+static void generation_handoff_publish(struct generation_handoff *handoff,
+				       unsigned int epoch, int codec_result)
+{
+	int previous_state;
+	unsigned int generation = epoch == 0 ? handoff->old_generation :
+						  handoff->new_generation;
+
+	handoff->metadata = generation_metadata(generation, codec_result);
+	previous_state = swapz_preparation_publish_codec_result(&handoff->state,
+								 codec_result);
+	if (previous_state != SWAPZ_PREPARATION_PREPARING)
+		generation_handoff_fail(handoff, "publish-preparing-to-terminal",
+						 SWAPZ_PREPARATION_PREPARING,
+						 previous_state);
+	else
+		(void)atomic_fetch_add_explicit(&handoff->publications[epoch], 1,
+							memory_order_relaxed);
+}
+
+static void generation_handoff_consume(struct generation_handoff *handoff,
+				       unsigned int epoch, int codec_result)
+{
+	unsigned int generation = epoch == 0 ? handoff->old_generation :
+						  handoff->new_generation;
+	int expected_state = swapz_preparation_codec_result_state(codec_result);
+	int observed_state = swapz_preparation_read_state(&handoff->state);
+
+	if (observed_state != expected_state ||
+	    handoff->metadata != generation_metadata(generation, codec_result) ||
+	    atomic_load_explicit(&handoff->owner_generation,
+				 memory_order_relaxed) != generation) {
+		generation_handoff_fail(handoff, "acquire-terminal-and-metadata",
+						 expected_state, observed_state);
+		return;
+	}
+	if (atomic_fetch_add_explicit(&handoff->completions[epoch], 1,
+						memory_order_relaxed) != 0)
+		generation_handoff_fail(handoff, "duplicate-upper-completion",
+						 expected_state, observed_state);
+}
+
+static void *generation_old_producer(void *opaque)
+{
+	struct generation_handoff *handoff = opaque;
+	int expected_final = handoff->producer_first ? 0 : 1;
+
+	(void)pthread_barrier_wait(&handoff->start);
+	if (handoff->producer_first) {
+		generation_handoff_publish(handoff, 0, handoff->old_codec_result);
+		if (generation_handoff_put(handoff, handoff->old_generation) != 0)
+			generation_handoff_fail(handoff, "producer-first-put", 0, -1);
+	}
+	(void)pthread_barrier_wait(&handoff->first_put);
+	(void)pthread_barrier_wait(&handoff->blocked_retry);
+	if (!handoff->producer_first) {
+		generation_handoff_publish(handoff, 0, handoff->old_codec_result);
+		if (generation_handoff_put(handoff, handoff->old_generation) !=
+		    expected_final)
+			generation_handoff_fail(handoff, "producer-final-put", 1, -1);
+	}
+	(void)pthread_barrier_wait(&handoff->final_put);
+	(void)pthread_barrier_wait(&handoff->reused);
+	(void)pthread_barrier_wait(&handoff->finished);
+	return NULL;
+}
+
+static void *generation_reclaimer(void *opaque)
+{
+	struct generation_handoff *handoff = opaque;
+	int slot;
+
+	(void)pthread_barrier_wait(&handoff->start);
+	(void)pthread_barrier_wait(&handoff->first_put);
+	/* Exactly one old reference remains, regardless of which owner put first. */
+	slot = swapz_preparation_claim_slot(&handoff->free_mask);
+	if (slot != -1)
+		generation_handoff_fail(handoff, "premature-retry-claim", -1, slot);
+	(void)pthread_barrier_wait(&handoff->blocked_retry);
+	(void)pthread_barrier_wait(&handoff->final_put);
+	slot = swapz_preparation_claim_slot(&handoff->free_mask);
+	if (slot != HANDOFF_SLOT) {
+		generation_handoff_fail(handoff, "reclaim-after-final-put",
+						 HANDOFF_SLOT, slot);
+	} else {
+		atomic_store_explicit(&handoff->references, 2,
+				      memory_order_relaxed);
+		atomic_store_explicit(&handoff->generation,
+				      handoff->new_generation,
+				      memory_order_relaxed);
+		atomic_store_explicit(&handoff->owner_generation,
+				      handoff->new_generation,
+				      memory_order_relaxed);
+		atomic_store_explicit(&handoff->state.value,
+				      SWAPZ_PREPARATION_PREPARING,
+				      memory_order_relaxed);
+		generation_handoff_publish(handoff, 1, handoff->new_codec_result);
+		if (generation_handoff_put(handoff, handoff->new_generation) != 0)
+			generation_handoff_fail(handoff, "new-producer-put", 0, -1);
+	}
+	(void)pthread_barrier_wait(&handoff->reused);
+	(void)pthread_barrier_wait(&handoff->finished);
+	return NULL;
+}
+
+static int test_generation_handoff_after_cancel_or_completion(void)
+{
+	static const int old_results[] = { 2048, 0, -EIO };
+	static const int new_results[] = { -EIO, 2048, 0 };
+	unsigned int iteration, case_index, order;
+
+	for (order = 0; order < 2U; ++order) {
+		for (case_index = 0; case_index < 3U; ++case_index) {
+			for (iteration = 0; iteration < HANDOFF_REPEATS; ++iteration) {
+				struct generation_handoff handoff = { 0 };
+				pthread_t producer, reclaimer;
+				unsigned int epoch;
+				int slot;
+
+				handoff.producer_first = (int)order;
+				handoff.old_generation = iteration * 2U + 1U;
+				handoff.new_generation = handoff.old_generation + 1U;
+				handoff.old_codec_result = old_results[case_index];
+				handoff.new_codec_result = new_results[case_index];
+				atomic_init(&handoff.free_mask.value, (s64)(1ULL << HANDOFF_SLOT));
+				atomic_init(&handoff.state.value, SWAPZ_PREPARATION_EMPTY);
+				atomic_init(&handoff.references, 2);
+				atomic_init(&handoff.generation, handoff.old_generation);
+				atomic_init(&handoff.owner_generation, handoff.old_generation);
+				atomic_init(&handoff.failed, 0);
+				for (epoch = 0; epoch < 2U; ++epoch) {
+					atomic_init(&handoff.final_puts[epoch], 0);
+					atomic_init(&handoff.completions[epoch], 0);
+					atomic_init(&handoff.publications[epoch], 0);
+				}
+				slot = swapz_preparation_claim_slot(&handoff.free_mask);
+				CHECK(slot == HANDOFF_SLOT);
+				atomic_store_explicit(&handoff.state.value,
+						      SWAPZ_PREPARATION_PREPARING,
+						      memory_order_relaxed);
+				CHECK(pthread_barrier_init(&handoff.start, NULL, 3) == 0);
+				CHECK(pthread_barrier_init(&handoff.first_put, NULL, 3) == 0);
+				CHECK(pthread_barrier_init(&handoff.blocked_retry, NULL, 3) == 0);
+				CHECK(pthread_barrier_init(&handoff.final_put, NULL, 3) == 0);
+				CHECK(pthread_barrier_init(&handoff.reused, NULL, 3) == 0);
+				CHECK(pthread_barrier_init(&handoff.finished, NULL, 3) == 0);
+				CHECK(pthread_create(&producer, NULL,
+						 generation_old_producer, &handoff) == 0);
+				CHECK(pthread_create(&reclaimer, NULL,
+						 generation_reclaimer, &handoff) == 0);
+
+				(void)pthread_barrier_wait(&handoff.start);
+				if (!handoff.producer_first) {
+					/* Cancellation ACK never adopts speculative payload. */
+					if (atomic_fetch_add_explicit(&handoff.completions[0],
+									1, memory_order_relaxed))
+						generation_handoff_fail(&handoff,
+							"duplicate-cancel-completion", 0, -1);
+					if (generation_handoff_put(&handoff,
+							   handoff.old_generation) != 0)
+						generation_handoff_fail(&handoff,
+							"cancel-first-put", 0, -1);
+				}
+				(void)pthread_barrier_wait(&handoff.first_put);
+				if (atomic_load_explicit(&handoff.references,
+							 memory_order_relaxed) != 1U ||
+				    (uint64_t)atomic64_read(&handoff.free_mask) != 0)
+					generation_handoff_fail(&handoff,
+						"first-put-retains-ownership", 0,
+						swapz_preparation_read_state(&handoff.state));
+				(void)pthread_barrier_wait(&handoff.blocked_retry);
+				if (handoff.producer_first) {
+					generation_handoff_consume(&handoff, 0,
+								   handoff.old_codec_result);
+					if (generation_handoff_put(&handoff,
+							   handoff.old_generation) != 1)
+						generation_handoff_fail(&handoff,
+							"consumer-final-put", 1, -1);
+				}
+				(void)pthread_barrier_wait(&handoff.final_put);
+				(void)pthread_barrier_wait(&handoff.reused);
+				/* A late put from the old generation must not take B's ref. */
+				if (generation_handoff_put(&handoff,
+							   handoff.old_generation) != -ESTALE ||
+				    atomic_load_explicit(&handoff.references,
+							 memory_order_relaxed) != 1U)
+					generation_handoff_fail(&handoff,
+						"stale-generation-put", -ESTALE, 0);
+				slot = swapz_preparation_claim_slot(&handoff.free_mask);
+				if (slot != -1)
+					generation_handoff_fail(&handoff,
+							"retry-before-new-consumer-put", -1, slot);
+				generation_handoff_consume(&handoff, 1,
+								   handoff.new_codec_result);
+				if (generation_handoff_put(&handoff,
+							   handoff.new_generation) != 1)
+					generation_handoff_fail(&handoff,
+							"new-consumer-final-put", 1, -1);
+				(void)pthread_barrier_wait(&handoff.finished);
+				CHECK(pthread_join(producer, NULL) == 0);
+				CHECK(pthread_join(reclaimer, NULL) == 0);
+				CHECK(pthread_barrier_destroy(&handoff.start) == 0);
+				CHECK(pthread_barrier_destroy(&handoff.first_put) == 0);
+				CHECK(pthread_barrier_destroy(&handoff.blocked_retry) == 0);
+				CHECK(pthread_barrier_destroy(&handoff.final_put) == 0);
+				CHECK(pthread_barrier_destroy(&handoff.reused) == 0);
+				CHECK(pthread_barrier_destroy(&handoff.finished) == 0);
+				CHECK(!atomic_load_explicit(&handoff.failed, memory_order_relaxed));
+				for (epoch = 0; epoch < 2U; ++epoch) {
+					CHECK(atomic_load(&handoff.final_puts[epoch]) == 1U);
+					CHECK(atomic_load(&handoff.completions[epoch]) == 1U);
+					CHECK(atomic_load(&handoff.publications[epoch]) == 1U);
+				}
+				CHECK(atomic_load(&handoff.references) == 0U);
+				CHECK(atomic_load(&handoff.owner_generation) == 0U);
+				CHECK(swapz_preparation_read_state(&handoff.state) ==
+				      SWAPZ_PREPARATION_EMPTY);
+				CHECK((uint64_t)atomic64_read(&handoff.free_mask) ==
+				      (1ULL << HANDOFF_SLOT));
+			}
+		}
+	}
+	return 0;
+}
+
 int main(void)
 {
 	CHECK(!test_representation_race());
@@ -914,6 +1245,7 @@ int main(void)
 	CHECK(!test_capacity_high_bit_and_reuse());
 	CHECK(!test_two_producers_reclaim_only_after_final_consumer());
 	CHECK(!test_concurrent_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=8");
+	CHECK(!test_generation_handoff_after_cancel_or_completion());
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=9");
 	return 0;
 }
