@@ -1191,6 +1191,8 @@ class BootVerifierTests(unittest.TestCase):
                               "expected_module_source_sha=" + "f" * 40),
             valid_arm.replace("expected_module_source_clean=1",
                               "expected_module_source_clean=0"),
+            valid_arm.replace("expected_target_serial=", "expected_target_serial=\x00"),
+            valid_arm.replace("expected_target_transport=", "expected_target_transport=\r"),
             valid_arm.replace("expected_target_size_bytes=",
                               "duplicate=1\nexpected_target_size_bytes="),
             valid_arm.replace(f"expected_partuuid={PARTUUID}\n", ""),
