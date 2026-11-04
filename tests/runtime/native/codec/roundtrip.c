@@ -22,6 +22,7 @@
 
 static uint8_t extent[SWAPZ_MAX_EXTENT_BYTES];
 static uint8_t payload[SWAPZ_MAX_COMPRESSED];
+static uint8_t metadata_only[SWAPZ_BLOCK_BYTES];
 _Alignas(64) static uint8_t misaligned_extent[SWAPZ_BLOCK_BYTES + 1U];
 _Alignas(64) static uint8_t misaligned_payload[SWAPZ_MAX_COMPRESSED + 1U];
 
@@ -47,6 +48,31 @@ static swapz_u32 reference_crc32c(const swapz_u8 *bytes, swapz_u32 length)
 			state = (state >> 1) ^ (0x82f63b78U & (0U - (state & 1U)));
 	}
 	return ~state;
+}
+
+static swapz_u16 reference_load_le16(const void *source)
+{
+	const uint8_t *bytes = source;
+
+	return (swapz_u16)bytes[0] | ((swapz_u16)bytes[1] << 8);
+}
+
+static void reference_store_le16(void *destination, swapz_u16 value)
+{
+	uint8_t *bytes = destination;
+
+	bytes[0] = (uint8_t)value;
+	bytes[1] = (uint8_t)(value >> 8);
+}
+
+static void reference_store_le32(void *destination, swapz_u32 value)
+{
+	uint8_t *bytes = destination;
+
+	bytes[0] = (uint8_t)value;
+	bytes[1] = (uint8_t)(value >> 8);
+	bytes[2] = (uint8_t)(value >> 16);
+	bytes[3] = (uint8_t)(value >> 24);
 }
 
 static int test_crc_known_vector(void)
@@ -146,15 +172,15 @@ static int test_delta64_record_encoding(void)
  * encoding check, not the CRC, is what rejects the extent. */
 static void reseal_metadata(uint8_t *bytes, swapz_u8 records)
 {
-	swapz_u32 zero = 0, crc;
+	swapz_u32 crc;
 	size_t end = sizeof(struct swapz_header) +
 		(size_t)records * sizeof(struct swapz_record);
+	uint8_t *crc_bytes = bytes +
+		offsetof(struct swapz_header, metadata_crc32c_le);
 
-	memcpy(bytes + offsetof(struct swapz_header, metadata_crc32c_le),
-	       &zero, sizeof(zero));
+	reference_store_le32(crc_bytes, 0);
 	crc = swapz_crc32c_bytes(bytes, (swapz_u32)end);
-	memcpy(bytes + offsetof(struct swapz_header, metadata_crc32c_le),
-	       &crc, sizeof(crc));
+	reference_store_le32(crc_bytes, crc);
 }
 
 static int test_delta64_shuf8_record_encoding(void)
@@ -173,7 +199,7 @@ static int test_delta64_shuf8_record_encoding(void)
 	CHECK(swapz_append_prehashed_encoded(&b, 11, 6, payload, 1200, crc,
 					    SWAPZ_ENCODING_DELTA64_SHUF8) == 0);
 	CHECK(swapz_seal(&b) == 0);
-	memcpy(&raw, extent + length_at, sizeof(raw));
+	raw = reference_load_le16(extent + length_at);
 	CHECK(raw == (1200U | SWAPZ_RECORD_DELTA64_FLAG | SWAPZ_RECORD_SHUF8_FLAG));
 	CHECK(swapz_validate(extent, 4096) == 0);
 	CHECK(swapz_lookup(extent, 4096, 0, &d, &p) == 0);
@@ -184,7 +210,7 @@ static int test_delta64_shuf8_record_encoding(void)
 
 	/* Lone bit 14 (shuffle without delta64) is reserved: fail closed. */
 	raw = (swapz_u16)(1200U | SWAPZ_RECORD_SHUF8_FLAG);
-	memcpy(extent + length_at, &raw, sizeof(raw));
+	reference_store_le16(extent + length_at, raw);
 	reseal_metadata(extent, 1);
 	CHECK(swapz_validate_metadata_crc(extent, 4096) == 0);
 	CHECK(swapz_validate(extent, 4096) == -EUCLEAN);
@@ -522,11 +548,7 @@ static int test_metadata_and_format_guards(void)
 	memcpy(&second, extent + sizeof(header) + sizeof(first), sizeof(second));
 	second.logical_page_le = first.logical_page_le;
 	memcpy(extent + sizeof(header) + sizeof(first), &second, sizeof(second));
-	header.metadata_crc32c_le = 0;
-	memcpy(extent, &header, sizeof(header));
-	header.metadata_crc32c_le = swapz_crc32c_bytes(
-		extent, sizeof(header) + 3 * sizeof(first));
-	memcpy(extent, &header, sizeof(header));
+	reseal_metadata(extent, 3);
 	CHECK(swapz_validate(extent, 8192) == -EUCLEAN); /* duplicate page */
 
 	CHECK(swapz_begin(&b, extent, 8192, 31) == 0);
@@ -537,13 +559,12 @@ static int test_metadata_and_format_guards(void)
 	CHECK(swapz_seal(&b) == 0);
 	memcpy(&header, extent, sizeof(header));
 	memcpy(&second, extent + sizeof(header) + sizeof(first), sizeof(second));
-	second.payload_offset_le++; /* noncanonical, gap/overlap */
+	reference_store_le16(&second.payload_offset_le,
+			     (swapz_u16)(reference_load_le16(
+				     &second.payload_offset_le) + 1U));
+	/* Noncanonical gap/overlap with an otherwise valid metadata CRC. */
 	memcpy(extent + sizeof(header) + sizeof(first), &second, sizeof(second));
-	header.metadata_crc32c_le = 0;
-	memcpy(extent, &header, sizeof(header));
-	header.metadata_crc32c_le = swapz_crc32c_bytes(
-		extent, sizeof(header) + 3 * sizeof(first));
-	memcpy(extent, &header, sizeof(header));
+	reseal_metadata(extent, 3);
 	CHECK(swapz_validate(extent, 8192) == -EUCLEAN);
 	return 0;
 }
@@ -567,10 +588,12 @@ static int test_authenticated_descriptor_semantic_guards(void)
 				   SWAPZ_ENCODING_DELTA64_SHUF8) == 0);
 	CHECK(swapz_seal(&builder) == 0);
 	memcpy(&record, record_bytes, sizeof(record));
-	record.payload_offset_le = 0;
-	record.payload_length_le = 1U | SWAPZ_RECORD_DELTA64_FLAG |
-		SWAPZ_RECORD_SHUF8_FLAG;
-	record.payload_crc32c_le = reference_crc32c(extent, 1);
+	reference_store_le16(&record.payload_offset_le, 0);
+	reference_store_le16(&record.payload_length_le,
+			     1U | SWAPZ_RECORD_DELTA64_FLAG |
+			     SWAPZ_RECORD_SHUF8_FLAG);
+	reference_store_le32(&record.payload_crc32c_le,
+			     reference_crc32c(extent, 1));
 	memcpy(record_bytes, &record, sizeof(record));
 	reseal_metadata(extent, 1);
 	CHECK(swapz_validate_metadata_crc(extent, SWAPZ_BLOCK_BYTES) == 0);
@@ -602,6 +625,29 @@ static int test_authenticated_descriptor_semantic_guards(void)
 	return 0;
 }
 
+static int test_metadata_only_validated_descriptor_lookup(void)
+{
+	struct swapz_builder builder;
+	struct swapz_decoded decoded;
+
+	set_payload(128, 29);
+	CHECK(swapz_begin(&builder, extent, SWAPZ_MAX_EXTENT_BYTES, 107) == 0);
+	CHECK(swapz_append_encoded(&builder, 44, 11, payload, 128,
+				   SWAPZ_ENCODING_LZ4) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(swapz_validate(extent, SWAPZ_MAX_EXTENT_BYTES) == 0);
+	memcpy(metadata_only, extent, sizeof(metadata_only));
+	CHECK(swapz_validate_metadata_crc(metadata_only,
+					 SWAPZ_MAX_EXTENT_BYTES) == 0);
+	CHECK(swapz_lookup_validated_descriptor(
+		      metadata_only, SWAPZ_MAX_EXTENT_BYTES, 0, &decoded, NULL) == 0);
+	CHECK(decoded.logical_page == 44 && decoded.generation == 11);
+	CHECK(decoded.payload_length == 128);
+	CHECK(decoded.payload_offset > sizeof(metadata_only));
+	CHECK(decoded.encoding == SWAPZ_ENCODING_LZ4);
+	return 0;
+}
+
 int main(void)
 {
 	int tests = 0;
@@ -624,6 +670,7 @@ int main(void)
 	CHECK(test_read_spans() == 0); tests++;
 	CHECK(test_metadata_and_format_guards() == 0); tests++;
 	CHECK(test_authenticated_descriptor_semantic_guards() == 0); tests++;
+	CHECK(test_metadata_only_validated_descriptor_lookup() == 0); tests++;
 	printf("SWAPZ_EXACT_PRODUCTION_C_TESTS_PASS=%d\n", tests);
 	return 0;
 }
