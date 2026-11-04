@@ -1468,12 +1468,12 @@ printf -v mapper_node_dev '%d:%d' "0x$mapper_major_hex" "0x$mapper_minor_hex"
 active_mapper_entries="$(mapper_swap_entry_count)" ||
 	fail "cannot resolve every /proc/swaps device identity after start"
 [[ "$active_mapper_entries" == 1 ]] ||
+	fail "manager-created mapper is not the unique active swap identity"
 assert_lifecycle_state "$RUN_ID" ACTIVE null ||
 	fail "start did not persist exact durable ACTIVE transaction"
 assert_owned_transaction_records 1 ||
 	fail "start did not retain canonical run-bound consumed/active ownership"
 assert_unrelated_host_swap_identity "normal start"
-	fail "manager-created mapper is not the unique active swap identity"
 active_backing_header_sha256="$(block0_sha256 "$PARTITION")" ||
 	fail "cannot hash run-bound SWZ backing header before stop"
 
