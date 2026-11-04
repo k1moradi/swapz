@@ -23,6 +23,7 @@
  */
 static char fixture_proc_root[PATH_MAX];
 static int fixture_mount_open_error;
+static int fixture_self_mount_open_error;
 static int fixture_inventory_error;
 static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
@@ -70,6 +71,10 @@ static int fixture_open(const char *path, int flags, ...)
 		errno = fixture_mount_open_error;
 		return -1;
 	}
+	if (!strcmp(path, "/proc/self/mountinfo") && fixture_self_mount_open_error) {
+		errno = fixture_self_mount_open_error;
+		return -1;
+	}
 	fd = open(fixture_path(path, converted), flags, mode);
 	if (fd >= 0 && fixture_other_mountinfo(path))
 		fixture_mount_fd = fd;
@@ -93,6 +98,10 @@ static int fixture_openat(int directory_fd, const char *path, int flags, ...)
 	}
 	if (fixture_other_mountinfo(path) && fixture_mount_open_error) {
 		errno = fixture_mount_open_error;
+		return -1;
+	}
+	if (!strcmp(path, "/proc/self/mountinfo") && fixture_self_mount_open_error) {
+		errno = fixture_self_mount_open_error;
 		return -1;
 	}
 	fd = openat(directory_fd, fixture_path(path, converted), flags, mode);
@@ -125,6 +134,10 @@ static FILE *fixture_fopen(const char *path, const char *mode)
 
 	if (fixture_other_mountinfo(path) && fixture_mount_open_error) {
 		errno = fixture_mount_open_error;
+		return NULL;
+	}
+	if (!strcmp(path, "/proc/self/mountinfo") && fixture_self_mount_open_error) {
+		errno = fixture_self_mount_open_error;
 		return NULL;
 	}
 	return fopen(fixture_path(path, converted), mode);
@@ -205,6 +218,26 @@ static void fixture_file(const char *relative, const char *contents)
 	assert(fclose(stream) == 0);
 }
 
+/* Exceed the production per-table cap with bounded, fixed-size writes. */
+static void fixture_oversized_file(const char *relative)
+{
+	char path[PATH_MAX];
+	char buffer[256];
+	FILE *stream;
+	size_t index;
+	int length = snprintf(path, sizeof(path), "%s/%s",
+			      fixture_proc_root, relative);
+
+	assert(length > 0 && (size_t)length < sizeof(path));
+	stream = fopen(path, "wb");
+	assert(stream != NULL);
+	memset(buffer, 'X', sizeof(buffer));
+	for (index = 0; index <= SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES /
+				     sizeof(buffer); ++index)
+		assert(fwrite(buffer, 1U, sizeof(buffer), stream) == sizeof(buffer));
+	assert(fclose(stream) == 0);
+}
+
 static void fixture_unlink(const char *relative)
 {
 	char path[PATH_MAX];
@@ -218,6 +251,7 @@ static void fixture_unlink(const char *relative)
 static void fixture_reset(void)
 {
 	fixture_mount_open_error = 0;
+	fixture_self_mount_open_error = 0;
 	fixture_inventory_error = 0;
 	fixture_namespace_stat_error = 0;
 	fixture_mount_read_error = 0;
@@ -273,13 +307,13 @@ static int fixture_remove_entry(const char *path, const struct stat *info,
 
 static void test_active_swapfile_gate(void)
 {
-	static const char swapfile_path[] = "/synthetic-selected-swapfile";
+	static const char swapfile_path[] = "/swapfile";
 	int active;
 
 	fixture_reset();
 	fixture_file("swaps",
 		     "Filename Type Size Used Priority\n"
-		     "/synthetic-selected-swapfile file 8192 1 -2\n");
+		     "/swapfile file 8192 1 -2\n");
 	fixture_regular_swap_path = swapfile_path;
 
 	/* Unrelated host swapfiles remain permitted. */
@@ -332,7 +366,7 @@ static void test_active_swapfile_gate(void)
 	/* /proc/swaps type and stat mode must agree before identity is trusted. */
 	fixture_file("swaps",
 		     "Filename Type Size Used Priority\n"
-		     "/synthetic-selected-swapfile partition 8192 1 -2\n");
+		     "/swapfile partition 8192 1 -2\n");
 	active = swapz_primary_swap_device_active(makedev(8U, 0U));
 	if (active >= 0) {
 		fprintf(stderr,
@@ -342,7 +376,7 @@ static void test_active_swapfile_gate(void)
 	}
 	fixture_file("swaps",
 		     "Filename Type Size Used Priority\n"
-		     "/synthetic-selected-swapfile unknown 8192 1 -2\n");
+		     "/swapfile unknown 8192 1 -2\n");
 	active = swapz_primary_swap_device_active(makedev(8U, 0U));
 	if (active >= 0) {
 		fprintf(stderr,
@@ -414,6 +448,11 @@ int main(void)
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:2 / /other rw - ext4 /dev/sda2 rw\n");
 	expect_mount_admission("unrelated sibling", 1);
+	/* An apparent /dev/sda1 source with a different major:minor is not ours. */
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
+		     "37 36 8:2 / /selected rw - ext4 /dev/sda1 rw\n");
+	expect_mount_admission("wrong-device alias", 1);
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
@@ -422,6 +461,16 @@ int main(void)
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
 	expect_mount_admission("selected parent in another namespace", 0);
+	fixture_reset();
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"
+		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
+	expect_mount_admission("selected partition mounted locally", 0);
+	fixture_reset();
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"
+		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
+	expect_mount_admission("selected parent mounted locally", 0);
 
 	fixture_reset();
 	fixture_file("self/mountinfo", "malformed\n");
@@ -435,6 +484,37 @@ int main(void)
 	fixture_reset();
 	fixture_file("3031/mountinfo", "");
 	expect_mount_admission("empty remote mount table", 0);
+	fixture_reset();
+	fixture_oversized_file("3031/mountinfo");
+	expect_mount_admission("oversized remote mount table", 0);
+	if (errno != EOVERFLOW) {
+		fprintf(stderr, "FAIL: remote overflow errno=%d\n", errno);
+		++fixture_failures;
+	}
+	fixture_reset();
+	fixture_oversized_file("self/mountinfo");
+	expect_mount_admission("oversized local mount table", 0);
+	if (errno != EOVERFLOW) {
+		fprintf(stderr, "FAIL: local overflow errno=%d\n", errno);
+		++fixture_failures;
+	}
+	fixture_reset();
+	fixture_self_mount_open_error = EACCES;
+	expect_mount_admission("unreadable local mount table", 0);
+	if (errno != EACCES) {
+		fprintf(stderr, "FAIL: unreadable local errno=%d\n", errno);
+		++fixture_failures;
+	}
+	fixture_reset();
+	fixture_unlink("self/mountinfo");
+	assert(snprintf(path, sizeof(path), "%s/self/mountinfo", fixture_proc_root) > 0);
+	assert(symlink("../3031/mountinfo", path) == 0);
+	expect_mount_admission("no-follow local mountinfo symlink", 0);
+	if (errno != ELOOP) {
+		fprintf(stderr, "FAIL: symlink mountinfo errno=%d\n", errno);
+		++fixture_failures;
+	}
+	fixture_unlink("self/mountinfo");
 	fixture_reset();
 	fixture_mount_read_error = EIO;
 	expect_mount_admission("opened remote table read error", 0);
