@@ -235,6 +235,19 @@ static int test_engine_extent_geometry_before_lower_read(void)
 	CHECK(swapz_engine_read_page(&engine, logical, compressed,
 		sizeof(compressed), &payload_length) == -ESTALE);
 	CHECK(invalid_extent_read_calls == 0);
+	/*
+	 * A cache lookup used to shift 1U by this corrupt u8 extent count
+	 * before its common validator ran. With UBSan, the old behavior is a
+	 * deterministic runtime error, not merely a rejected lower read.
+	 */
+	engine.read_extent_lru_clock = 1;
+	CHECK(swapz_engine_required_read_range_cached(&engine, &logical, 1,
+		0, 32, &first_block, &blocks) == -EINVAL);
+	CHECK(swapz_engine_required_read_range_cached(&engine, &logical, 1,
+		SWAPZ_SEGMENT_BLOCKS - 1U, 2,
+		&first_block, &blocks) == -EINVAL);
+	engine.read_extent_lru_clock = 0;
+	CHECK(invalid_extent_read_calls == 0);
 	/* Preserve the valid boundary: two blocks ending at media end. */
 	maps[0].extent_blocks = 2;
 	maps[0].start_block = PHYSICAL - 2U;

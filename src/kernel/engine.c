@@ -1044,7 +1044,17 @@ int swapz_engine_required_read_range_cached(
 	swapz_u8 resident = 0;
 	int cache_slot = -1, metadata_slot = -1;
 
-	if (!engine)
+	/*
+	 * Validate the complete extent BEFORE cache-mask shifts or metadata
+	 * lookups. A corrupt u8 extent count can otherwise shift by >= 32 before
+	 * required_read_range_resident() gets a chance to reject the map.
+	 */
+	if (!engine || !engine->authority ||
+	    (extent_blocks != 1U && extent_blocks != 2U && extent_blocks != 4U) ||
+	    start_block >= engine->authority->physical_blocks ||
+	    extent_blocks > engine->authority->physical_blocks - start_block ||
+	    start_block % SWAPZ_SEGMENT_BLOCKS + extent_blocks >
+		SWAPZ_SEGMENT_BLOCKS)
 		return -EINVAL;
 	if (engine->read_cache_valid &&
 	    engine->read_cached_start_block == start_block &&
