@@ -1893,7 +1893,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 {
 	struct swapz_decoded peek;
 	struct swapz_map observed;
-	const swapz_u8 *stored, *metadata, *unused_payload;
+	const swapz_u8 *stored, *metadata;
 	swapz_u32 bytes, first, last, start, count, block;
 	swapz_u32 expected_sequence;
 	swapz_u32 payload_first, payload_last;
@@ -2004,7 +2004,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	if (metadata_already_validated)
 		error = swapz_lookup_validated_descriptor(
 			metadata, bytes, swapz_map_record_index(&observed),
-			&peek, &unused_payload);
+			&peek, NULL);
 	else
 		error = swapz_peek(metadata, bytes,
 				  swapz_map_record_index(&observed), &peek);
