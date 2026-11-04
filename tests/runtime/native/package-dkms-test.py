@@ -2010,6 +2010,8 @@ exec "{flock_binary}" "$@"
             "SWAPZ_FAKE_DKMS_OTHER_KERNEL": "6.13.0-standby"})
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("other-kernel", refused.stderr)
+        self.assertIn("rollback not attempted", refused.stderr)
+        self.assertNotIn(str(self.home), refused.stderr)
         self.assertTrue(transaction.exists())
         self.assertEqual(
             (self.prefix / "sbin/swapzctl").read_bytes(), original_cli)
@@ -2112,6 +2114,7 @@ exec "{flock_binary}" "$@"
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("recovery previous package rollback failed",
                       failed.stderr)
+        self.assertIn("rollback incomplete", failed.stderr)
         self.assertTrue(transaction.exists())
         self.assertFalse((self.prefix / "sbin/swapzctl").exists())
         recovered = self.invoke("recover")
