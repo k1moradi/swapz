@@ -76,7 +76,18 @@ struct mock_format_context {
 	unsigned int write_calls;
 	unsigned int sync_calls;
 	unsigned int close_calls;
+	/* Borrowed fixture paths and inventory bytes; tests retain ownership. */
+	const char *synthetic_proc_root;
+	const char *synthetic_swap_inventory;
+	const char *late_swap_inventory;
+	const char *replacement_path;
+	const char *retired_path;
+	int inventory_errno;
+	unsigned int replacement_calls;
 };
+
+static int mock_inventory_verify(struct mock_format_context *context,
+				 int final_gate);
 
 static struct format_expectation authorized_expectation(void)
 {
@@ -119,7 +130,7 @@ static int mock_preopen_verify(void *opaque, const char *path,
 		errno = context->preopen_error;
 		return -1;
 	}
-	return 0;
+	return mock_inventory_verify(context, 0);
 }
 
 static int mock_open_device(void *opaque, const char *path)
@@ -151,7 +162,7 @@ static int mock_verify_opened(void *opaque, int fd, const char *path,
 		errno = error;
 		return -1;
 	}
-	return 0;
+	return mock_inventory_verify(context, context->verify_calls >= 2U);
 }
 
 static int mock_read_header(void *opaque, int fd,
@@ -166,6 +177,20 @@ static int mock_read_header(void *opaque, int fd,
 		return -1;
 	}
 	memcpy(block, context->media, sizeof(context->media));
+	/* Replace the original path after inventory, before the final gate. */
+	if (context->replacement_path) {
+		int replacement_fd;
+
+		assert(context->retired_path);
+		assert(rename(context->replacement_path,
+			      context->retired_path) == 0);
+		replacement_fd = open(context->replacement_path,
+				      O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+		assert(replacement_fd >= 0);
+		assert(close(replacement_fd) == 0);
+		context->replacement_path = NULL;
+		context->replacement_calls++;
+	}
 	return 0;
 }
 
@@ -786,6 +811,60 @@ static FILE *test_inventory_binary_stream(const void *bytes, size_t length)
 	return stream;
 }
 
+
+/*
+ * Inject production proc parsers into mock formatter gates. These ordinary
+ * files represent namespace evidence; the mock write only changes memory.
+ */
+static int mock_inventory_verify(struct mock_format_context *context,
+				 int final_gate)
+{
+	const dev_t selected_device = makedev(8U, 1U);
+	const dev_t parent_device = makedev(8U, 0U);
+	const char *swap_table = final_gate && context->late_swap_inventory ?
+		context->late_swap_inventory : context->synthetic_swap_inventory;
+	FILE *stream;
+	int result;
+	int saved_errno;
+
+	if (context->synthetic_proc_root &&
+	    format_mount_inventory_clear_from_proc(context->synthetic_proc_root,
+						    selected_device, parent_device) < 0)
+		goto failed;
+	if (!swap_table)
+		return 0;
+	stream = test_inventory_binary_stream(swap_table, strlen(swap_table));
+	result = format_swap_inventory_stream_clear(stream, selected_device,
+						    parent_device);
+	saved_errno = errno;
+	assert(fclose(stream) == 0);
+	if (result < 0) {
+		errno = saved_errno;
+		goto failed;
+	}
+	return 0;
+
+failed:
+	context->inventory_errno = errno;
+	return -1;
+}
+
+static void test_mock_admission_refusal(const char *proc_root,
+				      const char *swap_table, int expected_error)
+{
+	struct format_expectation expected = authorized_expectation();
+	struct mock_format_context context = {
+		.synthetic_proc_root = proc_root,
+		.synthetic_swap_inventory = swap_table,
+	};
+	struct format_runtime_ops ops = mock_ops(&context);
+
+	assert(format_device_with_ops("/synthetic/card", &expected, &ops) == 2);
+	assert(context.inventory_errno == expected_error);
+	assert(context.open_calls == 0U);
+	assert(context.write_calls == 0U);
+}
+
 static void test_mountinfo_adversarial_inventory(void)
 {
 	static const char unrelated[] =
@@ -1096,6 +1175,165 @@ static void test_swap_adversarial_inventory(void)
 	assert(errno == EPROTO);
 	assert(close(fd) == 0);
 	assert(unlink(file_path) == 0);
+}
+
+
+/*
+ * Fake /proc mount tables represent other namespaces without unshare,
+ * swapon, mounts or device nodes. Each uncertain condition must refuse
+ * before the only mocked formatter write callback.
+ */
+static void test_namespace_swap_ambiguity_never_writes(void)
+{
+	static const char swap_header[] =
+		"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
+	static const char sibling_mount[] =
+		"37 25 8:2 / /sibling rw future:opaque - ext4 /dev/sibling rw\n";
+	static const char *const busy_mounts[] = {
+		"37 25 8:1 / /selected rw - ext4 /dev/selected rw\n",
+		"37 25 8:0 / /parent rw - ext4 /dev/parent rw\n",
+	};
+	struct format_expectation expected = authorized_expectation();
+	char proc_root[] = "/tmp/swapzctl-foreign-proc-XXXXXX";
+	char swap_path[] = "/tmp/swapzctl-foreign-swap-XXXXXX";
+	char retired_path[PATH_MAX];
+	char late_retired_path[PATH_MAX];
+	char inventory[PATH_MAX + 128U];
+	char duplicate[2U * PATH_MAX + 128U];
+	char path[PATH_MAX];
+	struct stat original_info;
+	struct stat replacement_info;
+	struct stat retired_info;
+	int file_descriptor;
+	int length;
+
+	assert(mkdtemp(proc_root));
+	test_mountinfo_fixture_path(path, proc_root, "self");
+	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "3031");
+	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "3031/ns");
+	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_write(proc_root, "3031/ns/mnt", "namespace\n");
+	test_mountinfo_fixture_write(proc_root, "self/mountinfo",
+		"36 25 0:20 / /proc rw unknown:opaque - proc proc rw\n");
+
+	for (size_t index = 0;
+	     index < sizeof(busy_mounts) / sizeof(busy_mounts[0]); ++index) {
+		test_mountinfo_fixture_write(proc_root, "3031/mountinfo",
+					     busy_mounts[index]);
+		test_mock_admission_refusal(proc_root, swap_header, EBUSY);
+	}
+
+	/* Unknown optional fields are legal, and unrelated sibling mounts clear. */
+	test_mountinfo_fixture_write(proc_root, "3031/mountinfo", sibling_mount);
+	{
+		struct mock_format_context context = {
+			.synthetic_proc_root = proc_root,
+			.synthetic_swap_inventory = swap_header,
+		};
+		struct format_runtime_ops ops = mock_ops(&context);
+
+		assert(format_device_with_ops("/synthetic/card", &expected,
+					      &ops) == 0);
+		assert(context.write_calls == 1U); /* In-memory callback only. */
+	}
+
+	/* Missing live /proc/PID/mountinfo and malformed rows fail closed. */
+	test_mountinfo_fixture_path(path, proc_root, "3031/mountinfo");
+	assert(unlink(path) == 0);
+	test_mock_admission_refusal(proc_root, swap_header, ENOENT);
+	test_mountinfo_fixture_write(proc_root, "3031/mountinfo",
+		"37 25 8:2 / /sibling rw - ext4 /dev/sibling\n");
+	test_mock_admission_refusal(proc_root, swap_header, EPROTO);
+	test_mountinfo_fixture_write(proc_root, "3031/mountinfo", sibling_mount);
+
+	/*
+	 * Foreign namespace: kernel still refers to inode A, but the reported
+	 * pathname now resolves locally to inode B on the same local filesystem.
+	 */
+	file_descriptor = mkstemp(swap_path);
+	assert(file_descriptor >= 0);
+	assert(fstat(file_descriptor, &original_info) == 0);
+	assert(close(file_descriptor) == 0);
+	length = snprintf(retired_path, sizeof(retired_path), "%s.old", swap_path);
+	assert(length > 0 && (size_t)length < sizeof(retired_path));
+	assert(rename(swap_path, retired_path) == 0);
+	file_descriptor = open(swap_path,
+			       O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+	assert(file_descriptor >= 0);
+	assert(fstat(file_descriptor, &replacement_info) == 0);
+	assert(close(file_descriptor) == 0);
+	assert(replacement_info.st_dev == original_info.st_dev);
+	assert(replacement_info.st_ino != original_info.st_ino);
+	length = snprintf(inventory, sizeof(inventory),
+			  "%s%s file 1 0 -2\n", swap_header, swap_path);
+	assert(length > 0 && (size_t)length < sizeof(inventory));
+	test_mock_admission_refusal(proc_root, inventory, EOPNOTSUPP);
+
+	/* Missing file, final-component symlink, and inode alias also refuse. */
+	assert(unlink(swap_path) == 0);
+	test_mock_admission_refusal(proc_root, inventory, EOPNOTSUPP);
+	assert(symlink(retired_path, swap_path) == 0);
+	test_mock_admission_refusal(proc_root, inventory, EOPNOTSUPP);
+	assert(unlink(swap_path) == 0);
+	assert(link(retired_path, swap_path) == 0);
+	length = snprintf(duplicate, sizeof(duplicate),
+			  "%s%s file 1 0 -2\n%s file 1 0 -3\n",
+			  swap_header, swap_path, retired_path);
+	assert(length > 0 && (size_t)length < sizeof(duplicate));
+	test_mock_admission_refusal(proc_root, duplicate, EOPNOTSUPP);
+	assert(unlink(swap_path) == 0);
+
+	/* An initially empty snapshot may become busy before final write gate. */
+	file_descriptor = open(swap_path,
+			       O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
+	assert(file_descriptor >= 0);
+	assert(fstat(file_descriptor, &original_info) == 0);
+	assert(close(file_descriptor) == 0);
+	length = snprintf(late_retired_path, sizeof(late_retired_path),
+			  "%s.late", swap_path);
+	assert(length > 0 && (size_t)length < sizeof(late_retired_path));
+	{
+		struct mock_format_context context = {
+			.synthetic_proc_root = proc_root,
+			.synthetic_swap_inventory = swap_header,
+			.late_swap_inventory = inventory,
+			.replacement_path = swap_path,
+			.retired_path = late_retired_path,
+		};
+		struct format_runtime_ops ops = mock_ops(&context);
+
+		assert(format_device_with_ops("/synthetic/card", &expected,
+					      &ops) == 2);
+		assert(context.preopen_calls == 1U);
+		assert(context.verify_calls == 2U);
+		assert(context.read_calls == 1U);
+		assert(context.replacement_calls == 1U);
+		assert(context.inventory_errno == EOPNOTSUPP);
+		assert(context.write_calls == 0U);
+	}
+	assert(lstat(swap_path, &replacement_info) == 0);
+	assert(lstat(late_retired_path, &retired_info) == 0);
+	assert(replacement_info.st_ino != original_info.st_ino);
+	assert(retired_info.st_ino == original_info.st_ino);
+
+	assert(unlink(swap_path) == 0);
+	assert(unlink(late_retired_path) == 0);
+	assert(unlink(retired_path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "3031/mountinfo");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "3031/ns/mnt");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "3031/ns");
+	assert(rmdir(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "3031");
+	assert(rmdir(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "self/mountinfo");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "self");
+	assert(rmdir(path) == 0);
+	assert(rmdir(proc_root) == 0);
 }
 
 static void test_formatter_path_admission(void)
@@ -1519,6 +1757,7 @@ int main(void)
 	test_mounts_in_other_namespaces_refuse_formatting();
 	test_swap_inventory_requires_complete_kernel_table();
 	test_swap_adversarial_inventory();
+	test_namespace_swap_ambiguity_never_writes();
 	test_formatter_path_admission();
 	test_superblock_validation_and_reserved_bytes();
 	test_unbound_cli_is_blocked_before_io();
