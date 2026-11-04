@@ -7482,14 +7482,20 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 acquired_context)),
             {"fail"},
             "post-acquisition failures must converge on the common unwind")
-        publications = list(re.finditer(
-            r"(?:WRITE_ONCE\(\s*ctx->accepting\s*,\s*true\s*\)|"
-            r"ctx->accepting\s*=\s*true\s*;)",
+        accepting_writes = list(re.finditer(
+            r"(?:WRITE_ONCE\(\s*ctx->accepting\s*,\s*([^\)]+)\)|"
+            r"ctx->accepting\s*=\s*([^;]+);)",
             constructor))
         self.assertEqual(
-            len(publications), 1,
-            "constructor must publish acceptance exactly once")
-        success = publications[0].start()
+            len(accepting_writes), 1,
+            "constructor must write acceptance exactly once")
+        accepting_value = next(
+            group.strip() for group in accepting_writes[0].groups()
+            if group is not None)
+        self.assertEqual(
+            accepting_value, "true",
+            "constructor acceptance may become true only at final publication")
+        success = accepting_writes[0].start()
         self.assertLess(constructor.index("dm_set_target_max_io_len("),
                         success)
         self.assertLess(
@@ -7551,12 +7557,15 @@ class CapacityMemoryAccountingContracts(unittest.TestCase):
                 constructor, destruction.replace(
                     "destroy_workqueue(ctx->preparation_workqueue);",
                     "/* missing worker teardown */", 1))
-        with self.assertRaises(AssertionError):
-            self.audit_partial_constructor_ownership(
-                constructor.replace(
-                    "error = dm_get_device(",
-                    "ctx->accepting = true;\n\terror = dm_get_device(", 1),
-                destruction)
+        for early_value in ("true", "1"):
+            with self.subTest(early_accepting=early_value):
+                with self.assertRaises(AssertionError):
+                    self.audit_partial_constructor_ownership(
+                        constructor.replace(
+                            "error = dm_get_device(",
+                            f"ctx->accepting = {early_value};\n\t"
+                            "error = dm_get_device(", 1),
+                        destruction)
         with self.assertRaises(AssertionError):
             self.audit_partial_constructor_ownership(
                 constructor.replace(
