@@ -3224,6 +3224,26 @@ class PairReplayContract(unittest.TestCase):
                 sealed = evidence.seal_campaign(
                     source_sha, before_path, after_path,
                     summary_path, [pair_path])
+                ram_trace_path = root / "metadata-ram-trace.json"
+                canonical_ram_trace = (
+                    json.dumps(trace, indent=2, sort_keys=True) + "\n").encode()
+                ram_trace_path.write_bytes(canonical_ram_trace)
+                sealed_with_ram_trace = evidence.seal_campaign(
+                    source_sha, before_path, after_path,
+                    summary_path, [pair_path], ram_trace_path)
+                self.assertEqual(
+                    sealed_with_ram_trace["artifacts"][
+                        "metadata_ram_trace"]["sha256"],
+                    hashlib.sha256(canonical_ram_trace).hexdigest())
+                self.assertEqual(
+                    sealed_with_ram_trace["artifacts"][
+                        "metadata_ram_trace"]["size_bytes"],
+                    len(canonical_ram_trace))
+                ram_trace_path.write_text(json.dumps(trace))
+                with self.assertRaisesRegex(ValueError, "not canonical"):
+                    evidence.seal_campaign(
+                        source_sha, before_path, after_path,
+                        summary_path, [pair_path], ram_trace_path)
             self.assertEqual(sealed["record_count"], 1)
             self.assertEqual(sealed["campaign_status"], "FAIL_OR_INCOMPLETE")
             self.assertIsNone(sealed["capacity_and_ram"])
