@@ -232,6 +232,8 @@ validate_arm_file()
 			prefix = keys[NR] "="
 			if (index($0, prefix) != 1 || length($0) <= length(prefix))
 				invalid = 1
+			if (NR == 4 && ($0 !~ /^armed_epoch=[1-9][0-9]*$/ || length($0) > 30))
+				invalid = 1
 		}
 		END { if (invalid || NR != count) exit 1 }
 	' "$arm_file"
@@ -753,6 +755,7 @@ observe_boot()
 	expected_target_removable=unavailable
 	expected_module_sha=unavailable
 	expected_source_sha=unavailable
+	expected_source_clean=unavailable
 	cold_boot_observed=no
 	observation_expected=0
 
@@ -768,6 +771,7 @@ observe_boot()
 		expected_target_removable=$(arm_field expected_target_removable 2>/dev/null || printf 'unavailable')
 		expected_module_sha=$(arm_field expected_module_sha256 2>/dev/null || printf 'unavailable')
 		expected_source_sha=$(arm_field expected_module_source_sha 2>/dev/null || printf 'unavailable')
+		expected_source_clean=$(arm_field expected_module_source_clean 2>/dev/null || printf 'unavailable')
 		if valid_boot_id "$boot_id" 2>/dev/null && valid_boot_id "$armed_boot_id" 2>/dev/null; then
 			if [ "$boot_id" != "$armed_boot_id" ]; then
 				cold_boot_observed=yes
@@ -847,6 +851,7 @@ observe_boot()
 		if [ "$observation_expected" -eq 1 ]; then
 			[ "$module_sha256" = "$expected_module_sha" ] || append_failure installed_module_hash_mismatch
 			[ "$module_source_sha" = "$expected_source_sha" ] || append_failure installed_module_source_mismatch
+			[ "$expected_source_clean" = 1 ] && [ "$module_source_clean" = "$expected_source_clean" ] || append_failure installed_module_clean_provenance_mismatch
 		fi
 	else
 		if [ "$observation_expected" -eq 1 ]; then append_failure installed_module_unavailable; else append_incomplete installed_module_unavailable; fi
@@ -861,6 +866,7 @@ observe_boot()
 		if [ "$observation_expected" -eq 1 ]; then
 			[ "$loaded_module_source_sha" = "$expected_source_sha" ] || append_failure loaded_module_source_mismatch
 			[ "$loaded_module_source_clean" = 1 ] || append_failure loaded_module_not_clean
+			[ "$loaded_module_source_clean" = "$expected_source_clean" ] || append_failure loaded_module_clean_provenance_mismatch
 		fi
 	else
 		loaded_module_source_sha=unavailable
