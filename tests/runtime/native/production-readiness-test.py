@@ -36,6 +36,14 @@ def acceptance_policy():
 
 
 def encoded(value):
+    # Qualification consumes the frozen file's canonical bytes, not an
+    # equivalent reserialization with a different artifact digest.
+    if (isinstance(value, dict) and
+            value.get("schema") == "swapz-production-acceptance-v1"):
+        frozen_raw = (
+            ROOT / "docs/production-acceptance.json").read_bytes()
+        if EVALUATOR._same_json_value(value, json.loads(frozen_raw)):
+            return frozen_raw
     return (json.dumps(
         value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -2102,6 +2110,18 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 '"physical_qualification":{}}\n')
             with self.assertRaises(EVALUATOR.EvidenceError):
                 EVALUATOR.load_json_strict(path)
+
+    def test_reformatted_frozen_policy_is_not_canonical_evidence(self):
+        policy = acceptance_policy()
+        serialized_copy = (
+            json.dumps(policy, sort_keys=True, separators=(",", ":")) +
+            "\n").encode()
+        self.assertNotEqual(
+            serialized_copy,
+            (ROOT / "docs/production-acceptance.json").read_bytes())
+        with self.assertRaisesRegex(
+                EVALUATOR.EvidenceError, "exact_typed_frozen_bytes"):
+            EVALUATOR.validate_acceptance_policy(policy, serialized_copy)
 
     def test_self_declared_frozen_policy_cannot_raise_host_ram_limit(self):
         policy = acceptance_policy()
