@@ -156,6 +156,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_FAKE_REMOVE_RETAIN_SUFFIX="",
             SWAPZ_FAKE_REMOVE_KEEP_STATE="0",
             SWAPZ_FAKE_DKMS_STATUS_OVERRIDE="",
+            SWAPZ_FAKE_DKMS_OTHER_KERNEL="",
             SWAPZ_TEST_DKMS_VERSION=VERSION,
             SWAPZ_FAKE_STATUS_FAIL_AFTER_BUILDS="0",
             SWAPZ_TEST_FAIL_TRANSACTION_PHASE="never",
@@ -241,6 +242,15 @@ case "$cmd" in
     elif [[ -f "$SWAPZ_DKMS_STATE" ]]; then
       printf 'swapz/%s, %s, x86_64: installed\n' \
         "$SWAPZ_TEST_DKMS_VERSION" "$SWAPZ_TEST_KERNEL_RELEASE"
+    fi
+    # Real DKMS -k hides registrations for other installed kernels.
+    # Model both the filtered and all-kernels status queries explicitly.
+    if [[ -n "${SWAPZ_FAKE_DKMS_OTHER_KERNEL:-}" ]]; then
+      case " $* " in
+        *" -k "*) ;;
+        *) printf 'swapz/%s, %s, x86_64: installed\n' \
+             "$SWAPZ_TEST_DKMS_VERSION" "$SWAPZ_FAKE_DKMS_OTHER_KERNEL" ;;
+      esac
     fi
     ;;
   add) printf 'added\n' > "$SWAPZ_DKMS_STATE" ;;
@@ -1828,10 +1838,7 @@ exec "{flock_binary}" "$@"
             cwd=self.repo_root, env=environment, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
-            # An upgrade publishes and revalidates substantially more state
-            # than a first install. Keep the crash checkpoint bounded, but
-            # allow a slower rootless sandbox to reach the durable phase.
-            deadline = time.monotonic() + 20
+            deadline = time.monotonic() + 8
             while time.monotonic() < deadline and not ready.exists():
                 if process.poll() is not None:
                     stdout, stderr = process.communicate(timeout=8)
@@ -1939,6 +1946,232 @@ exec "{flock_binary}" "$@"
         self.assertTrue((transaction / "state.json").exists())
         blocked = self.invoke("uninstall")
         self.assertIn("incomplete package transaction retained", blocked.stderr)
+
+    def test_recover_committed_install_and_uninstall_after_sigkill(self):
+        committed_install = self.kill_at_durable_phase("install", "committed")
+        self.assertTrue(committed_install.exists())
+        self.assert_installed_exact()
+        self.assertIn("incomplete package transaction retained",
+                      self.invoke("uninstall").stderr)
+        restored = self.invoke("recover")
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assert_installed_exact()
+        self.assertFalse(committed_install.exists())
+        self.assertEqual(self.invoke("recover").returncode, 0)
+
+        committed_uninstall = self.kill_at_durable_phase(
+            "uninstall", "committed")
+        self.assert_absent()
+        finished = self.invoke("recover")
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        self.assert_absent()
+        self.assertFalse(committed_uninstall.exists())
+        self.assertEqual(self.invoke("recover").returncode, 0)
+        self.assertEqual(self.invoke("install").returncode, 0)
+
+    def test_recover_partial_initial_install_and_compressed_module(self):
+        transaction = self.kill_at_durable_phase("install", "source-created")
+        blocked = self.invoke("install")
+        self.assertIn("incomplete package transaction retained", blocked.stderr)
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(transaction.exists())
+        self.assertEqual(self.invoke("recover").returncode, 0)
+
+        compressed = self.kill_at_durable_phase(
+            "install", "dkms-installed",
+            {"SWAPZ_FAKE_DKMS_MODULE_SUFFIX": ".zst"})
+        self.assertTrue(Path(str(self.installed_module) + ".zst").exists())
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(Path(str(self.installed_module) + ".zst").exists())
+        self.assertFalse(compressed.exists())
+
+    def test_recover_interrupted_upgrade_restores_original_provenance(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        original_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        original_module = self.installed_module.read_bytes()
+        self.module.write_bytes(b"new-qualified-upgrade-image\n")
+        self.write_report()
+        transaction = self.kill_at_durable_phase(
+            "install", "package-files-published")
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertEqual((self.prefix / "sbin/swapzctl").read_bytes(),
+                         original_cli)
+        self.assertEqual(self.installed_module.read_bytes(), original_module)
+        self.assertFalse(transaction.exists())
+        self.assertEqual(self.invoke("recover").returncode, 0)
+        upgraded = self.invoke("install")
+        self.assertEqual(upgraded.returncode, 0, upgraded.stderr)
+        self.assert_installed_exact()
+
+    def test_recover_interrupted_uninstall_retries_partial_backend_failure(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase(
+            "uninstall", "dkms-removed")
+        failed = self.invoke("recover", {"SWAPZ_FAKE_FAIL_AT": "build"})
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("recovery previous package rollback failed",
+                      failed.stderr)
+        self.assertTrue(transaction.exists())
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
+        self.assertFalse(transaction.exists())
+        self.assertEqual(self.invoke("recover").returncode, 0)
+
+    def test_recover_sigkill_mid_upgrade_rollback_is_idempotent(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        original_cli = (self.prefix / "sbin/swapzctl").read_bytes()
+        original_module = self.installed_module.read_bytes()
+        self.module.write_bytes(b"new-qualified-upgrade-image\n")
+        self.write_report()
+        transaction = self.kill_at_durable_phase(
+            "install", "rollback-cli-restored",
+            {"SWAPZ_TEST_INSTALL_FAIL_AFTER": "dkms-removed"})
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertEqual((self.prefix / "sbin/swapzctl").read_bytes(),
+                         original_cli)
+        self.assertEqual(self.installed_module.read_bytes(), original_module)
+        self.assertFalse(transaction.exists())
+        self.assertEqual(self.invoke("recover").returncode, 0)
+
+    def test_recover_rejects_rehashed_wrong_provenance_and_symlink(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase(
+            "uninstall", "dkms-removed")
+        owner = transaction / "backup/source/.swapz-owned"
+        owner.write_text("swapz:foreign\n")
+        state_file = transaction / "state.json"
+        state = json.loads(state_file.read_text())
+        for entry in state["backup_files"]:
+            if entry["path"] == "source/.swapz-owned":
+                entry["sha256"] = sha256(owner)
+                entry["size"] = owner.stat().st_size
+                break
+        else:
+            self.fail("journal is missing source ownership marker")
+        state_file.write_text(
+            json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
+        rejected = self.invoke("recover")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("recovery source, destination or binary provenance invalid",
+                      rejected.stderr)
+        self.assertTrue(transaction.exists())
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+
+        # A symlinked journal temp is never followed or removed in recovery.
+        temp_file = transaction / "state.json.tmp"
+        target = self.home / "outside-recovery"
+        target.write_text("untouched\n")
+        temp_file.symlink_to(target)
+        rejected = self.invoke("recover")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("symlinked package transaction entry", rejected.stderr)
+        self.assertEqual(target.read_text(), "untouched\n")
+        self.assertTrue(transaction.exists())
+
+    def test_recover_rejects_unsafe_orphan_cli_and_cleans_verified_one(self):
+        transaction = self.kill_at_durable_phase("install", "publishing-cli")
+        orphan = self.prefix / "sbin/.swapzctl.publish.$"
+        orphan.write_bytes(self.cli.read_bytes())
+        orphan.chmod(0o755)
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_absent()
+        self.assertFalse(orphan.exists())
+        self.assertFalse(transaction.exists())
+
+        transaction = self.kill_at_durable_phase("install", "publishing-cli")
+        outside = self.home / "foreign-file"
+        outside.write_text("untouched\n")
+        orphan.symlink_to(outside)
+        refused = self.invoke("recover")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("temporary CLI provenance", refused.stderr)
+        self.assertEqual(outside.read_text(), "untouched\n")
+        self.assertTrue(transaction.exists())
+
+    def test_recover_io_failures_retain_record_and_allow_exact_retry(self):
+        # Four independent failure classes, without a cross-product of phases.
+        for injected_error in ("enospc", "eio", "rename", "fsync"):
+            with self.subTest(injected_error=injected_error):
+                transaction = self.kill_at_durable_phase(
+                    "install", "source-created")
+                failed = self.invoke("recover", {
+                    "SWAPZ_TEST_RECOVERY_IO_FAILURE": injected_error})
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("recovery", failed.stderr)
+                self.assertTrue((transaction / "state.json").exists())
+                self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+                retry = self.invoke("recover")
+                self.assertEqual(retry.returncode, 0, retry.stderr)
+                self.assert_absent()
+                self.assertFalse(transaction.exists())
+                self.assertEqual(self.invoke("recover").returncode, 0)
+
+    def test_multikernel_dkms_and_compressed_variants_block_all_removals(self):
+        other_kernel = "6.13.0-other"
+        # Even a first install must not adopt a foreign DKMS registration.
+        first = self.invoke("install", {
+            "SWAPZ_FAKE_DKMS_OTHER_KERNEL": other_kernel})
+        self.assertNotEqual(first.returncode, 0)
+        self.assertIn("other-kernel", first.stderr)
+        self.assert_absent()
+
+        self.assertEqual(self.invoke("install").returncode, 0)
+        self.module.write_bytes(b"new-qualified-upgrade-image\n")
+        self.write_report()
+        before = self.dkms_log.read_text().splitlines().count("remove")
+        for action in ("install", "uninstall"):
+            with self.subTest(action=action):
+                refused = self.invoke(action, {
+                    "SWAPZ_FAKE_DKMS_OTHER_KERNEL": other_kernel})
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn("other-kernel", refused.stderr)
+                self.assertEqual(
+                    self.dkms_log.read_text().splitlines().count("remove"),
+                    before)
+                self.assertTrue((self.prefix / "sbin/swapzctl").exists())
+
+        other_directory = (
+            self.home / "lib/modules" / other_kernel / "updates/dkms")
+        other_directory.mkdir(parents=True)
+        for suffix in ("", ".gz", ".xz", ".zst"):
+            with self.subTest(suffix=suffix):
+                image = other_directory / ("dm-swapz.ko" + suffix)
+                image.write_bytes(b"other-kernel-image\n")
+                refused = self.invoke("uninstall")
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn("other-kernel DKMS module variants",
+                              refused.stderr)
+                self.assertTrue(image.exists())
+                self.assertEqual(
+                    self.dkms_log.read_text().splitlines().count("remove"),
+                    before)
+                image.unlink()
+
+    def test_recover_rejects_other_kernel_without_deleting_registration(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase(
+            "uninstall", "activation-files-removed")
+        other_kernel = "6.13.0-standby"
+        before = self.dkms_log.read_text().splitlines().count("remove")
+        blocked = self.invoke("recover", {
+            "SWAPZ_FAKE_DKMS_OTHER_KERNEL": other_kernel})
+        self.assertNotEqual(blocked.returncode, 0)
+        self.assertIn("other-kernel", blocked.stderr)
+        self.assertEqual(
+            self.dkms_log.read_text().splitlines().count("remove"), before)
+        self.assertTrue(transaction.exists())
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assert_installed_exact()
 
     def test_dkms_config_tracks_changed_canonical_version(self):
         other = self.home / "synthetic-release"
