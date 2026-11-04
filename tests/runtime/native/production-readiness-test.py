@@ -253,7 +253,7 @@ def sampled_metadata_ram_trace(peak_ram_bytes=900 * 1024 * 1024):
     baseline_s_unreclaim_kib = 100 * 1024
     baseline_vmalloc_kib = 200 * 1024
     phase_values = (
-        ("baseline", [0] * 10, False),
+        ("baseline", [0] * 11, False),
         ("initialization", [200 * 1024, 400 * 1024], True),
         ("steady", [600 * 1024, 800 * 1024], True),
         ("gc", [peak_ram_bytes // 1024, 850 * 1024], True),
@@ -1091,7 +1091,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "early_teardown": lambda capacity: capacity["metadata_ram_trace"][
                 "samples"].pop(),
             "sample_peak_disagrees": lambda capacity: capacity[
-                "metadata_ram_trace"]["samples"][14].update(
+                "metadata_ram_trace"]["samples"][15].update(
                     mem_available_kib=(
                         8 * 1024 * 1024 - 900 * 1024 - 1)),
             "source_mismatch": lambda capacity: capacity[
