@@ -84,10 +84,25 @@ append_reason()
 
 canonical_unsigned()
 {
-	case "$1" in
-	0|[1-9]|[1-9][0-9]*) [ "${#1}" -le 18 ] ;;
-	*) return 1 ;;
+	unsigned_value=$1
+	case "$unsigned_value" in
+	0)
+		return 0
+		;;
+	[1-9]*) ;;
+	*)
+		return 1
+		;;
 	esac
+	[ "${#unsigned_value}" -le 18 ] || return 1
+	remaining_unsigned_digits=$unsigned_value
+	while [ -n "$remaining_unsigned_digits" ]; do
+		case "$remaining_unsigned_digits" in
+		[0-9]*) remaining_unsigned_digits=${remaining_unsigned_digits#?} ;;
+		*) return 1 ;;
+		esac
+	done
+	return 0
 }
 
 canonical_status_error()
@@ -722,7 +737,7 @@ observe_runtime()
 			done
 			for token_name in flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
 				eval "value=\$$token_name"
-				[ "$value" = unavailable ] || canonical_unsigned "${value#-}" || append_reason observation_reasons dm_status_counter_invalid
+				[ "$value" = unavailable ] || canonical_unsigned "$value" || append_reason observation_reasons dm_status_counter_invalid
 			done
 			# Missing or malformed terminal-state telemetry is incomplete
 			# evidence, not proof that the target entered a failure state.

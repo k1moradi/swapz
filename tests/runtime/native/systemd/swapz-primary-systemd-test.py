@@ -1453,6 +1453,26 @@ class RuntimeHealthTests(unittest.TestCase):
                 self.assertIn("failures=first_terminal_error", terminal_error.stderr)
                 self.assertIn(f"first_error={valid_error}", terminal_error.stderr)
 
+    def test_malformed_unsigned_status_counter_is_degraded(self) -> None:
+        base_status = (
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0 window_gc_pressure=0"
+        )
+        for malformed_flush in ("flush_err=-1", "flush_err=12junk"):
+            with self.subTest(malformed_flush=malformed_flush):
+                env = self.env.copy()
+                env["MOCK_DM_STATUS"] = base_status.replace(
+                    "flush_err=0", malformed_flush
+                )
+                result = self.run_helper("once", env)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
+                self.assertIn("dm_status_counter_invalid", result.stderr)
+
     def test_monitoring_error_is_degraded_not_a_destructive_action(self) -> None:
         env = self.env.copy()
         env["MOCK_DM_STATUS_UNAVAILABLE"] = "1"
