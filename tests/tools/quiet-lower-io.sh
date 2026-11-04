@@ -115,8 +115,8 @@ swapz_capture_quiescent_io() {
     local interval_seconds="$4" initial_status final_status initial_identity
     local final_identity baseline_identity="" baseline_header="" baseline_width=0
     local initial_header="" attempt counter_key counter_index sleep_rc mismatch_reason
-    local -a initial_lower=() final_lower=()
-    local -A initial_values=() final_values=()
+    local -a initial_lower=() final_lower=() previous_final_lower=()
+    local -A initial_values=() final_values=() previous_final_values=()
     local -a monotonic_status_fields=(logical_write logical_read physical_write
         physical_write_reqs physical_read physical_read_reqs
         upper_write_completed_ok upper_write_completed_err endio_write_forced_err)
@@ -167,6 +167,16 @@ swapz_capture_quiescent_io() {
             return 1
         fi
         baseline_header="$initial_header"
+        # An unstable prior window cannot be followed by an apparent stable
+        # window after counters have wrapped or reset between observations.
+        if (( attempt > 1 )); then
+            for counter_key in "${monotonic_status_fields[@]}"; do
+                if (( initial_values[$counter_key] < previous_final_values[$counter_key] )); then
+                    swapz_quiet_unavailable initial-status counter-regression-or-wrap "$attempt" "$maximum_attempts"
+                    return 1
+                fi
+            done
+        fi
         swapz_quiet_observe_lower "$lower_stats_file" initial_lower ||
             { swapz_quiet_unavailable initial-lower "$SWAPZ_QUIET_PARSE_REASON" "$attempt" "$maximum_attempts"; return 1; }
         SWAPZ_QUIET_RETAINED_LOWER_BEFORE=("${initial_lower[@]}")
@@ -178,6 +188,14 @@ swapz_capture_quiescent_io() {
         if (( baseline_width != 17 )); then
             swapz_quiet_unavailable initial-lower incomplete-lower-stat-prerequisite "$attempt" "$maximum_attempts"
             return 1
+        fi
+        if (( attempt > 1 )); then
+            for ((counter_index=0; counter_index<baseline_width; ++counter_index)); do
+                if (( counter_index != 8 && initial_lower[counter_index] < previous_final_lower[counter_index] )); then
+                    swapz_quiet_unavailable initial-lower counter-regression-or-wrap "$attempt" "$maximum_attempts"
+                    return 1
+                fi
+            done
         fi
 
         if sleep "$interval_seconds"; then :; else
@@ -239,6 +257,10 @@ swapz_capture_quiescent_io() {
             SWAPZ_QUIET_RETAINED_IDENTITY_AFTER=""
             return 0
         fi
+        previous_final_lower=("${final_lower[@]}")
+        for counter_key in "${monotonic_status_fields[@]}"; do
+            previous_final_values["$counter_key"]="${final_values[$counter_key]}"
+        done
         mismatch_reason=unstable-target-status
         [[ "$initial_status" == "$final_status" ]] && mismatch_reason=unstable-lower-counter
     done

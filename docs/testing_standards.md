@@ -1101,8 +1101,8 @@ required health/attribution counters and its terminal field, unchanged target
 geometry and mapping UUID/device/event identity, and two matching canonical
 17-field backing block-stat records. Validate all numeric tokens and signed
 Bash arithmetic bounds before comparison; reject malformed, duplicate,
-noncanonical, overflowing, regressing or wrapping counters and changing record
-width or identity. Shorter 11/15-field block-stat layouts omit optional
+noncanonical, overflowing, regressing or wrapping counters within a pair or
+across retries, and changing record width or identity. Shorter 11/15-field block-stat layouts omit optional
 discard/flush evidence and are UNAVAILABLE, not zero lower I/O. A failed
 command/read, incomplete status, missing prerequisite, interval timeout or
 exhausted finite attempts must report one concise phase/reason/attempt-count

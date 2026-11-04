@@ -67,6 +67,9 @@ dmsetup() {
             (( calls == 2 )) && printf '%s\n' '4 0 32 0 0 0 0 0 0 0 0 0 0 0 0 0 0' > "$STAT" ;;
         lower_wrap)
             (( calls == 2 )) && printf '%s\n' '1 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0' > "$STAT" ;;
+        lower_wrap_between_attempts)
+            (( calls == 2 )) && printf '%s\n' '4 0 32 0 0 0 0 0 0 0 0 0 0 0 0 0 0' > "$STAT"
+            (( calls == 3 )) && printf '%s\n' '3 0 24 0 0 0 0 0 0 0 0 0 0 0 0 0 0' > "$STAT" ;;
         width_change)
             (( calls == 2 )) && printf '%s\n' "$LOWER_15" > "$STAT" ;;
         width_change_later)
@@ -77,6 +80,9 @@ dmsetup() {
         target_busy|identity_switch_later) physical_read="$calls" ;;
         target_once) (( calls >= 2 )) && physical_read=1 ;;
         target_wrap) (( calls == 1 )) && physical_read=19 || physical_read=2 ;;
+        target_wrap_between_attempts)
+            (( calls == 2 )) && physical_read=7
+            (( calls >= 3 )) && physical_read=2 ;;
         leading_zero_status) physical_read=01 ;;
         negative_status) physical_read=-1 ;;
         overflow_status) physical_read=9223372036854775808 ;;
@@ -167,6 +173,10 @@ reset_case target_wrap
 expect_unavailable target-counter counter-regression-or-wrap initial+final
 reset_case lower_wrap
 expect_unavailable lower-counter counter-regression-or-wrap initial+final
+reset_case target_wrap_between_attempts
+expect_unavailable initial-status counter-regression-or-wrap initial
+reset_case lower_wrap_between_attempts
+expect_unavailable initial-lower counter-regression-or-wrap initial
 reset_case width_change
 expect_unavailable final-lower lower-counter-width-changed initial+final
 reset_case width_change_later
