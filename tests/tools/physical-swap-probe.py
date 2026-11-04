@@ -153,7 +153,9 @@ def block_identity(path):
     try:
         info = os.stat(path)
     except OSError as exc:
-        raise ProbeError(f"cannot stat selected block device: {exc}") from exc
+        raise ProbeError(
+            f"selected_block_stat expected=statable observed=errno_{exc.errno}"
+        ) from exc
     if not stat.S_ISBLK(info.st_mode):
         raise ProbeError("selected path is not a block device")
     return os.major(info.st_rdev), os.minor(info.st_rdev)
@@ -257,8 +259,13 @@ def _partition_identity(device):
         # Filesystem UUID links disappear when the original swap header is
         # replaced. The partition-table UUID must survive that transition.
         by_partuuid = Path("/dev/disk/by-partuuid") / normalized_partuuid
-        if block_identity(by_partuuid) != block_identity(device):
-            raise ProbeError("PARTUUID link does not identify the selected partition")
+        expected_device_identity = block_identity(device)
+        linked_device_identity = block_identity(by_partuuid)
+        if linked_device_identity != expected_device_identity:
+            raise ProbeError(
+                "partuuid_link_major_minor "
+                f"expected={expected_device_identity[0]}:{expected_device_identity[1]} "
+                f"observed={linked_device_identity[0]}:{linked_device_identity[1]}")
         return normalized_partuuid, size
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise ProbeError("cannot verify stable partition identity") from exc
@@ -307,19 +314,32 @@ def _physical_parent_identity(major, minor):
         parent_identity = (parent / "dev").read_text().strip()
         if not re.fullmatch(r"[0-9]+:[0-9]+", parent_identity):
             raise ProbeError(
-                f"parent_major_minor expected=number:number observed={parent_identity!r}")
-        if (not (partition / "partition").is_file()
-                or Path(f"/sys/dev/block/{parent_identity}").resolve(
-                    strict=True) != parent
-                or not (parent / "device").exists()
-                or VIRTUAL_BLOCK_PARENT_RE.fullmatch(parent.name)):
+                "parent_major_minor expected=number:number observed=malformed")
+        if not (partition / "partition").is_file():
             raise ProbeError(
-                f"parent_topology expected=one physical disk observed={parent}")
+                "parent_topology expected=one physical disk "
+                "observed=missing_partition_marker")
+        if Path(f"/sys/dev/block/{parent_identity}").resolve(
+                strict=True) != parent:
+            raise ProbeError(
+                "parent_topology expected=one physical disk "
+                "observed=parent_link_mismatch")
+        if not (parent / "device").exists():
+            raise ProbeError(
+                "parent_topology expected=one physical disk "
+                "observed=missing_parent_device")
+        if VIRTUAL_BLOCK_PARENT_RE.fullmatch(parent.name):
+            raise ProbeError(
+                "parent_topology expected=one physical disk "
+                f"observed=virtual_parent_{parent.name!r}")
         return parent_identity
+    except ProbeError:
+        raise
     except (OSError, RuntimeError) as exc:
         raise ProbeError(
-            f"parent_topology expected=one verifiable physical disk "
-            f"observed={_bounded_text(exc)}") from exc
+            "parent_topology expected=one verifiable physical disk "
+            f"observed=unreadable_sysfs errno={getattr(exc, 'errno', None)!r}"
+        ) from exc
 
 
 def _require_matching_swap_uuid(device_arg, observed_uuid):
@@ -332,8 +352,13 @@ def _require_matching_swap_uuid(device_arg, observed_uuid):
 
 
 def _verify_target_identity(target):
-    if block_identity(target["device"]) != (target["major"], target["minor"]):
-        raise ProbeError("selected block identity changed during the operation")
+    observed_identity = block_identity(target["device"])
+    expected_identity = (target["major"], target["minor"])
+    if observed_identity != expected_identity:
+        raise ProbeError(
+            "selected block identity changed during the operation: "
+            f"selected_major_minor expected={target['major']}:{target['minor']} "
+            f"observed={observed_identity[0]}:{observed_identity[1]}")
     try:
         size = int(_run([
             "blockdev", "--getsize64", target["device"],
@@ -341,7 +366,9 @@ def _verify_target_identity(target):
     except ValueError as exc:
         raise ProbeError("cannot verify selected partition size") from exc
     if size != target["size_bytes"]:
-        raise ProbeError("selected partition size changed during the operation")
+        raise ProbeError(
+            "selected partition size changed during the operation: "
+            f"size_bytes expected={target['size_bytes']} observed={size}")
     partuuid, part_size = _partition_identity(target["device"])
     if (partuuid != target["partuuid"] or part_size != target["size_bytes"]):
         raise ProbeError(
@@ -1095,7 +1122,7 @@ def _block_stat_snapshot(target):
             if not token.isascii() or not token.isdecimal():
                 raise ValueError(
                     f"lower_stat[{index}] expected=unsigned_integer "
-                    f"observed={token!r}")
+                    "observed=non_decimal")
             value = int(token)
             if value > MAX_BLOCK_COUNTER:
                 raise ValueError(
@@ -1108,7 +1135,11 @@ def _block_stat_snapshot(target):
                     f"observed={fields[index]}")
         return {"available": True, "values": fields,
                 "device_major_minor": parent, "sector_bytes": 512}
-    except (OSError, ValueError) as exc:
+    except OSError as exc:
+        return {"available": False,
+                "error": f"lower_stat_read expected=readable observed=errno_{exc.errno}",
+                "device_major_minor": parent}
+    except ValueError as exc:
         return {"available": False, "error": _bounded_text(exc),
                 "device_major_minor": parent}
 
@@ -1235,10 +1266,12 @@ def _kernel_diagnostics_error(record):
     if not isinstance(messages, str):
         return f"kernel_trace.messages expected=string observed={messages!r}"
     for line in messages.splitlines():
-        if KERNEL_FATAL_PATTERN.search(line):
+        fatal_match = KERNEL_FATAL_PATTERN.search(line)
+        if fatal_match:
+            # A kernel line can contain raw device identifiers or private paths.
             return (
                 "kernel_trace_health expected=no_swapz_failure_or_warning "
-                f"observed={_bounded_text(line)!r}")
+                f"observed={fatal_match.group(0).lower()!r}")
     return None
 
 
@@ -1348,22 +1381,25 @@ def _final_observations(results, state_dir, state, target):
     except ProbeError as exc:
         results["final_swap_row"] = None
         results["final_swap_error"] = _bounded_text(exc)
-    results["block_stats_after"] = _block_stat_snapshot(target)
+    current_block_stats = _block_stat_snapshot(target)
+    # Final observations run both before and after releasing the durable
+    # partition marker. Preserve the first unavailable sample on later retries.
+    if results.get("lower_io_evidence_gate") != "BLOCKED":
+        results["block_stats_after"] = current_block_stats
     try:
         results["lower_io_delta"] = _lower_io_delta(
-            results.get("block_stats_before"), results["block_stats_after"])
-        # Final observations run both before and after releasing the durable
-        # partition marker. Once evidence was unavailable, a later retry must
-        # not erase that blocker and fabricate an AVAILABLE final gate.
+            results.get("block_stats_before"), results.get("block_stats_after"))
         if results.get("lower_io_evidence_gate") != "BLOCKED":
             results["lower_io_evidence_gate"] = "AVAILABLE"
     except ProbeError as exc:
         results["lower_io_delta"] = None
         results["lower_io_evidence_gate"] = "BLOCKED"
         results.setdefault("lower_io_evidence_error", _bounded_text(exc))
-    results["kernel_swapz_messages"] = _kernel_swapz_messages(
+    current_kernel_messages = _kernel_swapz_messages(
         results.get("start_timestamp", "now"))
-    diagnostics = results["kernel_swapz_messages"]
+    if results.get("kernel_diagnostics_gate") != "BLOCKED":
+        results["kernel_swapz_messages"] = current_kernel_messages
+    diagnostics = results.get("kernel_swapz_messages")
     diagnostics_error = _kernel_diagnostics_error(diagnostics)
     if diagnostics_error is None:
         if results.get("kernel_diagnostics_gate") != "BLOCKED":
@@ -2310,13 +2346,17 @@ def plan(device_arg, confirm_arg, review_path=None):
 
 
 def _optional_card_identity_text(path):
+    field_name = Path(path).name
+    field = (f"card_identity_{field_name}"
+             if field_name in {"model", "serial", "wwid"} else "card_identity_field")
     try:
         value = Path(path).read_text().strip()
     except FileNotFoundError:
         return None
     except OSError as exc:
+        # Never put sysfs paths or raw device identifiers in diagnostics.
         raise ProbeError(
-            f"card_identity_field expected=readable observed={_bounded_text(exc)}"
+            f"{field} expected=readable observed=errno_{exc.errno}"
         ) from exc
     return value or None
 
@@ -2335,7 +2375,8 @@ def _campaign_card_identity(device, parent_major_minor):
         sectors_text = (parent / "size").read_text().strip()
     except (OSError, RuntimeError) as exc:
         raise ProbeError(
-            f"card_parent_topology expected=readable observed={_bounded_text(exc)}"
+            "card_parent_topology expected=readable "
+            f"observed=unreadable_sysfs errno={getattr(exc, 'errno', None)!r}"
         ) from exc
     if observed_parent != parent_major_minor:
         raise ProbeError(
@@ -2416,7 +2457,7 @@ def _require_campaign_target_quiescent(target):
         holders = _holder_names(target["major"], target["minor"])
     except OSError as exc:
         raise ProbeError(
-            f"campaign_holders expected=[] observed=unavailable:{_bounded_text(exc)}"
+            f"campaign_holders expected=[] observed=unavailable_errno_{exc.errno}"
         ) from exc
     if holders:
         raise ProbeError(
@@ -2429,7 +2470,7 @@ def _require_campaign_target_quiescent(target):
     if active is not None:
         raise ProbeError(
             "campaign_active_swap expected=absent observed="
-            f"path={active.get('path')!r},size_kib={active.get('size_kib')!r},"
+            f"kind={active.get('kind')!r},size_kib={active.get('size_kib')!r},"
             f"used_kib={active.get('used_kib')!r},"
             f"priority={active.get('priority')!r}")
 
@@ -2442,7 +2483,11 @@ def inspect_campaign_target(device_arg, confirm_arg, expected_partuuid):
     prefix = "/dev/disk/by-partuuid/"
     if not device_arg.startswith(prefix):
         raise ProbeError(
-            "campaign device must use /dev/disk/by-partuuid/<exact-PARTUUID>")
+            "campaign_device_path expected=by_partuuid_alias observed=other_prefix")
+    if device_arg != prefix + Path(device_arg).name:
+        raise ProbeError(
+            "campaign_device_path expected=exact_by_partuuid_alias "
+            "observed=noncanonical_alias")
     selected_partuuid = Path(device_arg).name.lower()
     if selected_partuuid != expected_partuuid:
         raise ProbeError(
@@ -2452,7 +2497,8 @@ def inspect_campaign_target(device_arg, confirm_arg, expected_partuuid):
         device = str(Path(device_arg).resolve(strict=True))
     except (OSError, RuntimeError) as exc:
         raise ProbeError(
-            f"campaign_device_path expected=resolvable observed={_bounded_text(exc)}"
+            "campaign_device_path expected=resolvable "
+            f"observed=unresolvable_errno_{getattr(exc, 'errno', None)!r}"
         ) from exc
     major, minor = block_identity(device)
     try:
@@ -2528,9 +2574,20 @@ def campaign_plan(device_arg, confirm_arg, expected_partuuid, source_sha):
             f"observed_head={evidence.get('head')!r},"
             f"qualified={evidence.get('source_sha')!r}")
     live_artifacts = _artifact_digests()
-    if live_artifacts != evidence.get("artifact_digests"):
+    qualified_artifacts = evidence.get("artifact_digests")
+    artifact_names = {name for name, _, _ in PHYSICAL_ARTIFACTS}
+    if (not isinstance(live_artifacts, dict) or
+            not isinstance(qualified_artifacts, dict) or
+            set(live_artifacts) != artifact_names or
+            set(qualified_artifacts) != artifact_names):
         raise ProbeError(
-            "campaign_artifacts expected=qualified_bytes observed=mismatch")
+            "campaign_artifacts.keys expected=exact_qualified_artifact_set "
+            "observed=missing_or_extra")
+    for artifact_name, _, _ in PHYSICAL_ARTIFACTS:
+        if live_artifacts[artifact_name] != qualified_artifacts[artifact_name]:
+            raise ProbeError(
+                f"campaign_artifacts.{artifact_name} "
+                "expected=qualified_sha256 observed=changed_sha256")
     # The network/source checks above may take time. Re-prove target/module and
     # lower-counter continuity immediately before reporting read-only readiness.
     _require_campaign_target_quiescent(target)

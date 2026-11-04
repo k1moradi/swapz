@@ -2125,6 +2125,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             (partition / "partition").write_text("1\n")
             (disk / "dev").write_text("8:16\n")
             (disk / "device").mkdir()
+            # A real SD parent can be removable; identity must still match.
+            (disk / "removable").write_text("1\n")
             original_resolve = probe.Path.resolve
 
             def resolve(path, *args, **kwargs):
@@ -2144,9 +2146,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe._physical_parent_identity(8, 17)
                 (disk / "dev").write_text("8:16\n")
                 (disk / "device").rmdir()
-                with self.assertRaisesRegex(probe.ProbeError,
-                                            "parent_topology"):
+                with self.assertRaisesRegex(
+                        probe.ProbeError,
+                        "parent_topology expected=one physical disk "
+                        "observed=missing_parent_device") as blocked:
                     probe._physical_parent_identity(8, 17)
+                self.assertNotIn(directory, str(blocked.exception))
 
     def test_virtual_parent_name_is_not_physical_topology(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2185,7 +2190,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                   "partuuid": "deadbeef-01", "size_bytes": 16 << 20}
         with mock.patch.object(probe, "block_identity", return_value=(8, 18)):
             with self.assertRaisesRegex(
-                    probe.ProbeError, "block identity changed"):
+                    probe.ProbeError,
+                    "block identity changed.*selected_major_minor "
+                    "expected=8:17 observed=8:18"):
                 probe._verify_target_identity(target)
         with mock.patch.object(probe, "block_identity",
                                return_value=(8, 17)), \
@@ -2489,7 +2496,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn("first stat missing", result["lower_io_evidence_error"])
         self.assertEqual(result["kernel_diagnostics_gate"], "BLOCKED")
         self.assertIn("complete", result["kernel_diagnostics_error"])
-        self.assertIsNotNone(result["lower_io_delta"])
+        self.assertIsNone(result["lower_io_delta"])
+        self.assertEqual(result["block_stats_after"], unavailable)
+        self.assertEqual(result["kernel_swapz_messages"], truncated)
 
     def test_kernel_diagnostics_rejects_failure_warning_and_unusable_trace(self):
         base = {
@@ -2544,8 +2553,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value=active):
             with self.assertRaisesRegex(
                     probe.ProbeError,
-                    "campaign_active_swap expected=absent.*used_kib=0"):
+                    "campaign_active_swap expected=absent.*used_kib=0") as blocked:
                 probe._require_campaign_target_quiescent(target)
+            self.assertNotIn(active["path"], str(blocked.exception))
 
     def test_campaign_quiescence_rejects_holder_and_mount(self):
         target = {
@@ -2682,6 +2692,43 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "observed='b{64}'.*replacement-card"):
                 probe._require_campaign_target_quiescent(target)
 
+
+    def test_campaign_alias_and_identity_errors_hide_private_paths(self):
+        for alias in (
+                "/dev/disk/by-partuuid/../by-partuuid/deadbeef-01",
+                "/dev/disk/by-partuuid/other/deadbeef-01"):
+            with self.subTest(alias=alias), self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "campaign_device_path expected=exact_by_partuuid_alias "
+                    "observed=noncanonical_alias") as blocked:
+                probe.inspect_campaign_target(alias, alias, "deadbeef-01")
+            self.assertNotIn(alias, str(blocked.exception))
+
+        # Permission errors may include sysfs paths and raw identifier text.
+        private = Path("/private/session/serial")
+        denied = PermissionError(13, "secret-serial-contents", str(private))
+        with mock.patch.object(probe.Path, "read_text", side_effect=denied):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "card_identity_serial expected=readable observed=errno_13"
+                    ) as blocked:
+                probe._optional_card_identity_text(private)
+        self.assertNotIn("secret-serial-contents", str(blocked.exception))
+        self.assertNotIn(str(private), str(blocked.exception))
+
+    def test_warning_rejection_does_not_echo_private_kernel_line(self):
+        trace = {
+            "available": True, "time_filter_applied": True,
+            "truncated": False,
+            "messages": "swapz WARNING: WWID=secret-wwid /private/disk",
+        }
+        failure = probe._kernel_diagnostics_error(trace)
+        self.assertIn(
+            "kernel_trace_health expected=no_swapz_failure_or_warning "
+            "observed='warning'", failure)
+        self.assertNotIn("secret-wwid", failure)
+        self.assertNotIn("/private/disk", failure)
+
     def test_campaign_plan_source_trace_and_lower_evidence_fail_closed(self):
         target, source_sha, evidence, lower, inventory, diagnostics = (
             self.campaign_preflight_fixture())
@@ -2696,6 +2743,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             ("missing-lower", {
                 "lower": {"available": False, "error": "stat missing"},
             }, "campaign_lower_io_before.*stat missing"),
+            ("changed-artifact", {
+                "artifact_digests": {
+                    **evidence["artifact_digests"],
+                    "module_sha256": "f" * 64,
+                },
+            }, "campaign_artifacts.module_sha256 "
+               "expected=qualified_sha256 observed=changed_sha256"),
         )
         for name, changes, expected in cases:
             with self.subTest(name=name):
@@ -2720,7 +2774,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                             return_value=source_evidence), \
                         mock.patch.object(
                             probe, "_artifact_digests",
-                            return_value=evidence["artifact_digests"]), \
+                            return_value=changes.get(
+                                "artifact_digests", evidence["artifact_digests"])), \
                         mock.patch.object(
                             probe, "_require_campaign_target_quiescent"):
                     with self.assertRaisesRegex(probe.ProbeError, expected):
