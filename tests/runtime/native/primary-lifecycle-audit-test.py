@@ -20,6 +20,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 PRIMARY_SOURCE = ROOT / "src/userspace/swapz-primary.c"
+SWAPZCTL_SOURCE = ROOT / "src/userspace/swapzctl.c"
 PACKAGE_DKMS = ROOT / "packaging/package-dkms.sh"
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
 ROOT_MAKEFILE = ROOT / "Makefile"
@@ -1129,6 +1130,17 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         )
         self.assertIn(invocation, runner)
 
+    def test_public_swapzctl_primary_dispatch_reaches_admission_interface(self):
+        control = SWAPZCTL_SOURCE.read_text(encoding="utf-8")
+        main = c_function_body(control, "main", code_only=False)
+        selector = '!strcmp(argv[1], "primary")'
+        dispatch = 'return swapz_primary_command(argc - 2, argv + 2);'
+
+        self.assertIn(selector, main)
+        self.assertEqual(main.count("swapz_primary_command("), 1)
+        self.assertIn(dispatch, main)
+        self.assertLess(main.index(selector), main.index(dispatch))
+
 
 class PackageCrashToPrimaryAdmissionTest(unittest.TestCase):
     """SIGKILL a real rootless package transaction, then call primary's C API.
@@ -1202,6 +1214,12 @@ class PackageCrashToPrimaryAdmissionTest(unittest.TestCase):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         headers = (ROOT / "src/userspace/swapz-primary.h").read_text(
             encoding="utf-8")
+        lock_name_match = re.search(
+            r'(?m)^#define\s+SWAPZ_PRIMARY_MUTATION_LOCK_NAME\s+'
+            r'("(?:\\.|[^"\\])*")\s*$', source)
+        if lock_name_match is None:
+            raise AssertionError("missing production mutation-lock name macro")
+        mutation_lock_name = lock_name_match.group(1)
         symbols = (
             "swapz_primary_mutation_lock_at",
             "swapz_primary_mutation_lock",
@@ -1277,7 +1295,7 @@ class PackageCrashToPrimaryAdmissionTest(unittest.TestCase):
 #include <unistd.h>
 #define SWAPZ_PRIMARY_PARTUUID_LENGTH {constants["SWAPZ_PRIMARY_PARTUUID_LENGTH"]}
 #define SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX {constants["SWAPZ_PRIMARY_SYSTEMD_UNIT_NAME_MAX"]}
-#define SWAPZ_PRIMARY_MUTATION_LOCK_NAME "package.lock"
+#define SWAPZ_PRIMARY_MUTATION_LOCK_NAME {mutation_lock_name}
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY getenv("SWAPZ_TEST_LOCK_DIRECTORY")
 #define SWAPZ_PRIMARY_PACKAGE_TRANSACTION_DIRECTORY getenv("SWAPZ_TEST_PACKAGE_TRANSACTIONS")
 {mutating_action_enum}
