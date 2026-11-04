@@ -66,7 +66,7 @@ grep -qw cpu "$CGROUP_ROOT/cgroup.subtree_control" || {
     exit 2
 }
 [[ -r $PRESSURE_SCRIPT && -r $PAIR ]] || {
-    printf '%s\n' 'BLOCKED: ID36 helper files unavailable' >&2
+    printf '%s\n' 'BLOCKED: ID36 required owned RAM pair or pressure helper unavailable; restore readable checkout helpers before qualification' >&2
     exit 2
 }
 
@@ -76,7 +76,7 @@ printf '%s\n' 'START_ID36_RESOURCE_PRESSURE=admission'
 
 swapz_clear_tmp_before_memory_check || {
     printf '%s\n' \
-        'BLOCKED: cannot safely clean completed swapz scratch before ID36 memory admission' >&2
+        'BLOCKED: ID36 completed-owned /tmp cleanup refused; verify session completion proofs, ownership, mounts and helper availability (no broad cleanup attempted)' >&2
     exit 2
 }
 printf '%s\n' 'ID36_TMP_CLEANUP=completed-owned-only'
@@ -395,7 +395,6 @@ PAIR_PID=$!
 for _ in {1..600}; do
     [[ -s $PAIR_READY ]] && break
     kill -0 "$PAIR_PID" 2>/dev/null || {
-        cat "$PAIR_LOG" >&2
         printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before null_blk prewarm barrier' >&2
         exit 1
     }
@@ -433,7 +432,6 @@ PRESSURE_PID=$!
 for _ in {1..800}; do
     [[ -s $READY ]] && break
     kill -0 "$PRESSURE_PID" 2>/dev/null || {
-        cat "$PRESSURE_LOG" >&2
         printf '%s\n' 'FAIL: ID36 pressure helper exited before readiness' >&2
         exit 1
     }
@@ -460,6 +458,10 @@ pressure_current="$(cat "$CGROUP/memory.current" 2>/dev/null)" || {
 }
 oom_ready="$(event_value oom)"
 oom_kill_ready="$(event_value oom_kill)"
+if (( oom_ready < oom_start || oom_kill_ready < oom_kill_start )); then
+    printf '%s\n' 'BLOCKED: ID36 memory.events OOM counters decreased across startup samples; require stable canonical cgroup telemetry' >&2
+    exit 2
+fi
 (( oom_ready == oom_start && oom_kill_ready == oom_kill_start )) || {
     printf 'FAIL: ID36 pressure startup encountered OOM events oom:%s oom_kill:%s\n' \
         "$((oom_ready - oom_start))" "$((oom_kill_ready - oom_kill_start))" >&2
@@ -503,7 +505,6 @@ printf 'START_ID36_RESOURCE_PRESSURE=memory_high:%s memory_max:%s pressure_mib:%
 for _ in {1..800}; do
     [[ -s $PRESSURE_ACTIVE ]] && break
     kill -0 "$PRESSURE_PID" 2>/dev/null || {
-        cat "$PRESSURE_LOG" >&2
         printf '%s\n' 'FAIL: ID36 pressure helper exited during staged activation' >&2
         exit 1
     }
@@ -517,6 +518,11 @@ done
 high_active="$(event_value high)"
 oom_active="$(event_value oom)"
 oom_kill_active="$(event_value oom_kill)"
+if (( high_active < high_before || oom_active < oom_before ||
+      oom_kill_active < oom_kill_before )); then
+    printf '%s\n' 'BLOCKED: ID36 memory.events counters decreased during the staged ramp; require stable canonical cgroup telemetry' >&2
+    exit 2
+fi
 (( high_active > high_before )) || {
     printf '%s\n' 'FAIL: ID36 controlled pressure ramp did not trigger memory.high' >&2
     exit 1
@@ -542,12 +548,29 @@ high_after="$(event_value high)"
 oom_after="$(event_value oom)"
 oom_kill_after="$(event_value oom_kill)"
 cpu_some_after="$(cpu_some_total)"
-peak_bytes="$(cat "$CGROUP/memory.peak" 2>/dev/null || printf '%s' "$pressure_current")"
-current_after="$(cat "$CGROUP/memory.current" 2>/dev/null || printf '%s' 0)"
+peak_bytes="$(cat "$CGROUP/memory.peak" 2>/dev/null)" || {
+    printf '%s\n' 'BLOCKED: ID36 memory.peak unreadable; require kernel cgroup peak telemetry' >&2
+    exit 2
+}
+current_after="$(cat "$CGROUP/memory.current" 2>/dev/null)" || {
+    printf '%s\n' 'BLOCKED: ID36 memory.current unreadable after pair; restore cgroup memory telemetry' >&2
+    exit 2
+}
+if [[ ! $peak_bytes =~ ^(0|[1-9][0-9]*)$ ||
+      ! $current_after =~ ^(0|[1-9][0-9]*)$ ||
+      ${#peak_bytes} -gt 18 || ${#current_after} -gt 18 ]]; then
+    printf '%s\n' 'BLOCKED: ID36 memory.peak/current malformed or outside safe signed arithmetic range; restore canonical byte telemetry' >&2
+    exit 2
+fi
 last_phase="$(grep -E '^BENCH_IO_PHASE=(off|swapz):(prefill|mixed|packed_read)$' "$PAIR_LOG" |
     tail -n 1 | cut -d= -f2- || true)"
 [[ -n $last_phase ]] || last_phase=none
 
+if (( high_after < high_before || oom_after < oom_before ||
+      oom_kill_after < oom_kill_before || cpu_some_after < cpu_some_before )); then
+    printf '%s\n' 'BLOCKED: ID36 memory.events or cpu.pressure counters decreased across replay samples; require stable canonical OOM/PSI telemetry' >&2
+    exit 2
+fi
 high_delta=$((high_after - high_before))
 oom_delta=$((oom_after - oom_before))
 oom_kill_delta=$((oom_kill_after - oom_kill_before))
