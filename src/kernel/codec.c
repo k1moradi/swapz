@@ -478,14 +478,15 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 	swapz_u32 metadata_end;
 	swapz_u8 record_count;
 
-	if (!bytes || !out || !payload || !swapz_valid_extent_bytes(bytes_total)) {
+	if (!bytes || !out || !swapz_valid_extent_bytes(bytes_total)) {
 		if (out)
 			*out = (struct swapz_decoded){ 0 };
 		if (payload)
 			*payload = NULL;
 		return -EINVAL;
 	}
-	*payload = NULL;
+	if (payload)
+		*payload = NULL;
 	record_count = swapz_get_record_count(bytes);
 	if (!record_count || record_count > SWAPZ_MAX_RECORDS ||
 	    index >= record_count) {
@@ -506,7 +507,8 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 		*out = (struct swapz_decoded){ 0 };
 		return -EUCLEAN;
 	}
-	*payload = (const swapz_u8 *)bytes + out->payload_offset;
+	if (payload)
+		*payload = (const swapz_u8 *)bytes + out->payload_offset;
 	return 0;
 }
 
