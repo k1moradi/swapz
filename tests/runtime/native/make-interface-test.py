@@ -1340,6 +1340,29 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertEqual(failed["test"], "NativeCase.test_range")
         self.assertIn("AssertionError:", failed["first_error"])
 
+    def test_expected_negative_permission_is_not_the_causal_failure(self):
+        negative_fixture = [
+            "swapzctl format: REFUSED: pre-open identity: Permission denied",
+            "FAIL: test_runtime_boundary (NativeFixture)",
+            "AssertionError: wrong tail guard",
+            "FAILED (failures=1)",
+        ]
+        result = self.diagnostics.diagnose_ci_failure(
+            negative_fixture, 1, "native-rootless")
+        self.assertEqual(result["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(result["test"],
+                         "NativeFixture.test_runtime_boundary")
+        self.assertEqual(result["first_error"],
+                         "AssertionError: wrong tail guard")
+
+    def test_skips_and_cancellation_cannot_pass_workflow_aggregation(self):
+        workflow = (ROOT / ".github/workflows/project-goals.yml").read_text()
+        self.assertIn("if: always()", workflow)
+        self.assertIn('if [[ "$result" != success ]]; then', workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("github.run_id", workflow)
+        self.assertIn("fail-fast: false", workflow)
+
     def test_ci_runner_is_quiet_on_success_and_redacts_failure(self):
         import json
         import os
