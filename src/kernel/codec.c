@@ -246,7 +246,7 @@ static int swapz_append_crc(struct swapz_builder *builder,
 			    swapz_u32 logical_page, swapz_u32 generation,
 			    const void *payload, swapz_u16 length,
 			    swapz_u32 payload_crc32c, swapz_u8 encoding,
-			    int logical_page_unique)
+			    int logical_page_unique, int calculate_payload_crc)
 {
 	struct swapz_record record;
 	swapz_u32 logical_page_le;
@@ -277,6 +277,10 @@ static int swapz_append_crc(struct swapz_builder *builder,
 				return -EEXIST;
 
 	offset = builder->payload_start - length;
+	/* No rejected append may inspect the caller's payload: enforce limits,
+	 * space and identity before the one and only CRC read. */
+	if (calculate_payload_crc)
+		payload_crc32c = swapz_crc32c_bytes(payload, length);
 	record = (struct swapz_record){
 		.logical_page_le = logical_page_le,
 		.generation_le = swapz_le32(generation),
@@ -298,7 +302,7 @@ int swapz_append_prehashed(struct swapz_builder *builder,
 			   swapz_u32 payload_crc32c)
 {
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, payload_crc32c, SWAPZ_ENCODING_LZ4, 0);
+				length, payload_crc32c, SWAPZ_ENCODING_LZ4, 0, 0);
 }
 
 int swapz_append_prehashed_encoded(struct swapz_builder *builder,
@@ -307,7 +311,7 @@ int swapz_append_prehashed_encoded(struct swapz_builder *builder,
 				   swapz_u32 payload_crc32c, swapz_u8 encoding)
 {
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, payload_crc32c, encoding, 0);
+				length, payload_crc32c, encoding, 0, 0);
 }
 
 int swapz_append_prehashed_encoded_unique(struct swapz_builder *builder,
@@ -316,7 +320,7 @@ int swapz_append_prehashed_encoded_unique(struct swapz_builder *builder,
 				   swapz_u32 payload_crc32c, swapz_u8 encoding)
 {
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, payload_crc32c, encoding, 1);
+				length, payload_crc32c, encoding, 1, 0);
 }
 
 static int swapz_append_encoded_checked(struct swapz_builder *builder,
@@ -325,14 +329,9 @@ static int swapz_append_encoded_checked(struct swapz_builder *builder,
 				       const void *payload, swapz_u16 length,
 				       swapz_u8 encoding, int logical_page_unique)
 {
-	if (!builder || !builder->bytes || builder->sealed ||
-	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
-	    !generation || !swapz_encoding_valid(encoding) ||
-	    swapz_payload_overlaps_extent(builder, payload, length))
-		return -EINVAL;
+	/* The shared append path checks every rejection before calculating CRC. */
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, swapz_crc32c_bytes(payload, length),
-				encoding, logical_page_unique);
+				length, 0U, encoding, logical_page_unique, 1);
 }
 
 int swapz_append_encoded(struct swapz_builder *builder,
@@ -357,21 +356,11 @@ int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 		 swapz_u32 generation, const void *payload, swapz_u16 length)
 {
 	/*
-	 * Validate every field that can reject the call before inspecting the
-	 * payload. In particular, an oversized length may describe more bytes than
-	 * the caller actually owns; hashing first would read beyond that buffer.
-	 * swapz_append_crc() retains the authoritative validation for prehashed
-	 * callers and rechecks these cheap invariants before mutation.
+	 * The shared writer checks length, overlap, capacity and duplicate IDs
+	 * before reading payload bytes. A rejected append never needs a CRC.
 	 */
-	if (!builder || !builder->bytes || builder->sealed ||
-	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
-	    !generation ||
-	    swapz_payload_overlaps_extent(builder, payload, length))
-		return -EINVAL;
-
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, swapz_crc32c_bytes(payload, length),
-				SWAPZ_ENCODING_LZ4, 0);
+				length, 0U, SWAPZ_ENCODING_LZ4, 0, 1);
 }
 
 int swapz_seal(struct swapz_builder *builder)

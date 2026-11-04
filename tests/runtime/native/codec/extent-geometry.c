@@ -41,6 +41,7 @@ struct study {
 	uint64_t cold_blocks_sum;
 	uint64_t cold_pages;
 	uint64_t seq_4m_requests;
+	uint64_t segment_crossings;
 	uint32_t cursor;
 	uint32_t next_extent_id;
 	uint32_t run_start;
@@ -196,6 +197,9 @@ static uint32_t place_extent(struct study *s, const struct geometry *g,
 	} else if (start > s->cursor) {
 		s->waste_blocks += start - s->cursor;
 	}
+	/* Every proposed physical class must fit inside one 1MiB segment. */
+	if (start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
+		s->segment_crossings++;
 	s->cursor = start + blocks;
 	s->physical_blocks += blocks;
 
@@ -386,9 +390,16 @@ int main(void)
 	struct study studies[sizeof(geometries) / sizeof(geometries[0])];
 	size_t i;
 
-	for (i = 0; i < sizeof(geometries) / sizeof(geometries[0]); ++i)
+	for (i = 0; i < sizeof(geometries) / sizeof(geometries[0]); ++i) {
 		if (run_geometry(&geometries[i], &studies[i]))
 			return 1;
+		if (studies[i].segment_crossings) {
+			fprintf(stderr, "SWAPZ_GEOMETRY_SEGMENT_CROSSING class=%s "
+				"count=%" PRIu64 "\n", geometries[i].name,
+				studies[i].segment_crossings);
+			return 1;
+		}
+	}
 
 	printf("SWAPZ_EXTENT_GEOMETRY_EVIDENCE={\"scope\":"
 	       "\"OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY\","
