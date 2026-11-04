@@ -73,15 +73,13 @@ def selected_host_report(report, sha, profile=None):
         return False
     backends = {row.get("name") for row in report.get("evidence", {}).get(
         "predictor", {}).get("backend_benchmarks", []) or []}
-    stages = report.get("stages", [])
     return sha in profile["report_shas"] and \
-        report.get("overall") == "PASS" and \
+        report_passed_all_stages(report) and \
         host_matches(report, profile["online_cpus"], "avx512") and \
         all((arm.get("host_cpu") or {}).get("online_cpus") == profile["online_cpus"]
             for session in report.get("benchmarks", {}).get("sessions", [])
             for arm in (session.get("arms") or {}).values()) and \
-        {"scalar", "sse2", "avx2", "avx512"}.issubset(backends) and \
-        len(stages) == 5 and all(stage.get("status") == "PASS" for stage in stages)
+        {"scalar", "sse2", "avx2", "avx512"}.issubset(backends)
 
 
 def validate_host_registry(registry):
@@ -280,11 +278,12 @@ def collect(profile=None, computer=None, host_registry=None):
     identity = ("Explicit audited report allowlist for host digest " + profile["host_id_sha256"] +
                 "; legacy reports without a host match stay separate."
                 if profile else "NEON/seven-CPU VM cohort; old reports lack an immutable VM ID.")
+    # Only registry-approved legacy reports contribute to the published count.
+    legacy_count = sum(row["host_identity_basis"] == "owner-confirmed legacy report SHA"
+                       for row in reports) if legacy_entry is not None else 0
     if computer is not None:
         title = (legacy_entry.get("label") if legacy_entry else None) or (
             computer["architecture"] + " · host " + computer["id_sha256"][:12])
-        legacy_count = sum(row["host_identity_basis"] == "owner-confirmed legacy report SHA"
-                           for row in reports)
         identity = "Exact OS installation identity and architecture."
         if legacy_count == 1:
             identity += (" Includes 1 user-confirmed legacy report by immutable SHA; its report file "
@@ -292,8 +291,6 @@ def collect(profile=None, computer=None, host_registry=None):
         elif legacy_count:
             identity += (f" Includes {legacy_count} user-confirmed legacy reports by immutable SHA; "
                          "their report files lack host_identity and are explicitly marked in history.json.")
-    else:
-        legacy_count = 0
     legacy_candidates = []
     if computer is not None:
         assigned_shas = {sha for entry in (host_registry or {}).get("hosts", [])
@@ -319,11 +316,6 @@ def collect(profile=None, computer=None, host_registry=None):
             not item["matched_exact_reports"][0]["kernel_matches"],
             -len(item["matched_exact_reports"][0]["shared_backends"]),
             item["date"], item["report_sha"]))
-    if legacy_entry is not None:
-        legacy_count = sum(row["host_identity_basis"] == "owner-confirmed legacy report SHA"
-                           for row in reports)
-    else:
-        legacy_count = 0
     return {"reports": reports, "points": points, "excluded": dict(excluded),
             "title": title, "host_profile": legacy_entry or profile,
             "owner_confirmed_legacy_reports": legacy_count,
