@@ -286,7 +286,9 @@ case "$*" in
         fi
         ;;
     "deps -o devno swapz-demo-aaaaaaaaaaaaaaaa")
-        if [[ $SWAPZ_FIXTURE_CASE == dependency_devno_mismatch ]]; then
+        if [[ $SWAPZ_FIXTURE_CASE == dependency_probe_failure ]]; then
+            exit 98
+        elif [[ $SWAPZ_FIXTURE_CASE == dependency_devno_mismatch ]]; then
             printf '1 dependencies : (240, 8)\n'
         elif [[ $SWAPZ_FIXTURE_CASE == foreign_dependency &&
                 -f "$SWAPZ_FIXTURE_ROOT/dependency-count" &&
@@ -368,7 +370,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|changed_mapper_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|changed_mapper_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -407,7 +409,7 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|changed_mapper_token|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
+        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|changed_mapper_token|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
             setup_owned_lower
             setup_mapper_node
             if [[ $case_name == missing_sysfs_proof ]]; then
@@ -647,6 +649,7 @@ run_case missing_sysfs_proof owned_resource_proof BLOCKED unavailable
 run_case mismatched_devno owned_resource_proof BLOCKED unavailable
 run_case mismatched_index owned_resource_proof BLOCKED unavailable
 run_case dependency_devno_mismatch owned_resource_proof BLOCKED unavailable
+run_case dependency_probe_failure mapper_dependency BLOCKED unavailable
 run_case partitioned_lower owned_resource_proof BLOCKED unavailable
 run_case foreign_holder owned_resource_proof BLOCKED unavailable
 run_case foreign_dependency owned_resource_proof BLOCKED unavailable
@@ -660,4 +663,4 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 48 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 49 isolated preflight fixtures'

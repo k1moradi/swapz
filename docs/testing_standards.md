@@ -612,7 +612,9 @@ removal, and every other retained synthetic power attribute stays on. A
 post-snapshot same-name replacement must have a demonstrably different
 inode and yield an attributed power-off refusal. A failing final cleanup
 must preserve both its numeric status and the powered-off retained state.
-Changing the mapper UUID after the first snapshot must block removal. Neither path may invoke unowned module
+Changing the mapper UUID after the first snapshot must block removal. A failed
+dependency-name or dependency-device-number probe must also block before any
+mapper removal. Neither path may invoke unowned module
 unload or inferred-PID signaling; an unexpected internal command failure is
 FAIL, not a benign ownership BLOCKED. The final fixture PASS marker must report
 the number of `run_case` preflight fixtures actually executed; the separate
@@ -675,8 +677,8 @@ fixture must prove the original path-only false admission and exercise a real
 benchmark-shaped owned proof with distinct mapper/lower tokens, changed configfs
 inode, missing sysfs proof, mismatched configfs index and
 dependency/sysfs/rdev identities, partitioned-lower and foreign-holder refusal,
-changed/foreign mapper
-dependencies, namespace refusal, ambiguous module ownership and cleanup failure
+failed/changed/foreign mapper
+dependency observations, namespace refusal, ambiguous module ownership and cleanup failure
 against only synthetic files and stubs. This
 unit evidence never substitutes for authorized loaded testing. Source-contract
 and Make-interface checks must pin UUID-targeted mapper removal and refusal of
