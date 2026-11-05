@@ -63,14 +63,16 @@ verify_prepare_failure_diagnostic() {
 			raw-target-swap-inventory|target-physical-parent-identity|\
 			target-recovery-parent-separation|cross-namespace-mount-inventory|\
 			target-mounted-in-visible-namespace|root-device-parent-identity|\
-			target-root-device-parent-separation|\
+			shared-root-parent-authorization-record|\
 			repeated-raw-target-swap-inventory|\
 			repeated-target-physical-parent-identity|\
 			repeated-target-recovery-parent-separation|\
 			repeated-cross-namespace-mount-inventory|\
 			repeated-target-mounted-in-visible-namespace|\
-			repeated-root-device-parent-identity|\
-			repeated-target-root-parent-separation|physical-parent-swap-inventory|\
+			repeated-root-device-parent-identity|repeated-root-parent-identity|\
+			repeated-shared-root-parent-authorization|\
+			final-root-parent-identity-revalidation|\
+			final-shared-root-parent-authorization|physical-parent-swap-inventory|\
 			module-mapper-inventory|unexpected-module-or-mapper-present|\
 			final-raw-target-swap-inventory|final-preclaim-identity-revalidation|\
 			final-physical-parent-swap-inventory|run-id-and-header-construction|\

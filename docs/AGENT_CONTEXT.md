@@ -108,9 +108,50 @@ This standing authorization does **not** weaken:
 - correctness, data-integrity, GC and lifecycle acceptance criteria.
 
 Historical `/dev/sda4` one-use approvals and issue-76 trial records remain
-immutable evidence for the older computer. Their approval mechanics are not the
-current authorization model and must not block work on the dedicated
-`/dev/sda1` card.
+immutable evidence for the earlier computer. They are neither the host-scope
+record below nor authorization for this machine. The dedicated `/dev/sda1`
+authority above remains unchanged.
+
+## Separate Lubuntu host scope for `/dev/sda4`
+
+The owner separately authorizes the second Lubuntu computer to use only its
+`/dev/sda4` partition as a possible swapz target. This partition shares the
+SanDisk USB parent with that computer's root (`/dev/sda3`), boot and EFI
+partitions. This is a different host authority from the dedicated-card
+authorization above. Never transfer a device number, PARTUUID, geometry,
+parent identity or qualification result between the two computers.
+
+The same-root-parent policy may be admitted only by a root-owned mode-0600
+`/etc/swapz/primary-root-parent-scope` record inside a root-owned,
+non-group/world-writable `/etc/swapz` directory. The exact two-line record is
+`schema=swapz-primary-shared-root-v1` and `scope_sha256=<lowercase sha256>`.
+Its digest binds a combined hash of this host's DMI product UUID and
+`/etc/machine-id`, the live root partition, selected target PARTUUID and
+partition number, both partitions' device numbers/start/size/type/table
+identity, parent device number and size, a hash of stable parent
+serial/WWN/vendor/model identity, and a hash of the complete non-overlapping
+partition-table layout. Including the hardware UUID prevents the bootable USB
+disk's machine-id alone from carrying this authorization to another computer.
+The manager re-collects and compares these facts through sysfs, root-owned
+udev data, and an opened, geometry- and PARTUUID-checked target descriptor at
+admission and immediately before the first raw target write. It reports only
+bounded status and error categories;
+it never prints the host machine-id, serial/WWN, record contents or raw
+identity fields as diagnostics. The read-only plan may print the single
+SHA-256 scope fingerprint needed to provision the exact record. That is a
+non-secret binding value, not permission; the manager never creates or
+replaces the record. Missing, malformed, replaced or mismatched records
+preserve the default same-parent refusal.
+
+This host-scope record does not authorize the parent disk or any sibling
+partition, and it does not by itself qualify, prepare, start or install
+swapz. All source, artifact, loaded, physical data-integrity, lifecycle,
+recovery and deployment gates remain mandatory. The target/recovery-parent
+separation gate is absolute: the durable recovery filesystem must be
+persistent and on a different physical parent from `/dev/sda4`. The current
+`/var/lib/swapz/physical-recovery` storage is on the same USB parent, so this
+host remains BLOCKED for target mutation until suitable independent persistent
+recovery storage is available. No fallback swap area is required or implied.
 
 No fallback swap is required. Do not create or modify unrelated storage merely
 to provide fallback. If the authorized card is unavailable or cannot be proven

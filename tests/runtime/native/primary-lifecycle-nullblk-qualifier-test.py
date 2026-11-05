@@ -313,18 +313,26 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "target-recovery-parent-separation",
             "target-mounted-in-visible-namespace",
             "root-device-parent-identity",
-            "target-root-device-parent-separation",
             "repeated-target-physical-parent-identity",
             "repeated-target-recovery-parent-separation",
             "repeated-target-mounted-in-visible-namespace",
             "repeated-root-device-parent-identity",
-            "repeated-target-root-parent-separation",
         ):
             with self.subTest(phase=phase):
                 index = prepare.index('failure_phase = "' + phase + '";')
                 self.assertLess(index, owner_claim)
                 gate = prepare[index:prepare.index("goto out;", index)]
                 self.assertIn("errno = EPERM;", gate)
+
+        for phase in (
+            "repeated-root-parent-identity",
+            "final-root-parent-identity-revalidation",
+        ):
+            with self.subTest(phase=phase):
+                index = prepare.index('failure_phase = "' + phase + '";')
+                self.assertLess(index, owner_claim)
+                gate = prepare[index:prepare.index("goto out;", index)]
+                self.assertIn("errno = ESTALE;", gate)
 
         for phase, helper in (
             ("qualification-report-read", "swapz_primary_read_qualification_report"),
@@ -344,6 +352,34 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         for mutation in ("swapon(", "swapoff(", "swapz_primary_dm_create_mapper(",
                          "swapz_primary_write_header_checked_fd("):
             self.assertNotIn(mutation, prepare)
+
+    def test_shared_root_exception_is_bound_at_prepare_and_last_write_boundary(self):
+        prepare = self.primary[
+            self.primary.index("static int swapz_primary_prepare_metadata("):
+            self.primary.index("static int swapz_primary_unload_owned_module(",
+                               self.primary.index("static int swapz_primary_prepare_metadata("))]
+        start = self.primary[
+            self.primary.index("static int swapz_primary_start_prepared("):
+            self.primary.index("static int swapz_primary_state_recoverable(",
+                               self.primary.index("static int swapz_primary_start_prepared("))]
+        self.assertIn("target_parent == root_parent", prepare)
+        self.assertGreaterEqual(
+            prepare.count("swapz_primary_shared_root_scope_record_live("), 3)
+        self.assertIn("target_parent == makedev(recovery_parent_major", prepare)
+        self.assertIn("failure_expected = \"exact-host-root-target-parent-layout-record\"",
+                      prepare)
+        self.assertIn("failure_observed = \"missing-mismatched-or-unverifiable\"",
+                      prepare)
+        self.assertIn("repeated-shared-root-parent-authorization", prepare)
+        self.assertIn("final-shared-root-parent-authorization", prepare)
+        self.assertIn("target_parent == makedev(recovery_parent_major", start)
+        self.assertGreaterEqual(
+            start.count("swapz_primary_shared_root_scope_record_live("), 2)
+        prewrite = start.index('failure_phase = "prewrite-shared-root-parent-authorization";')
+        target_write = start.index("swapz_primary_write_header_checked_fd(")
+        self.assertLess(prewrite, target_write)
+        self.assertRegex(
+            start, r"target_fd,\s*rechecked_root_scope_sha256")
 
     def test_prepare_preclaim_revalidation_has_distinct_failure_phases(self):
         prepare = self.primary[

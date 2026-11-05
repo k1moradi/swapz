@@ -109,6 +109,297 @@ static void test_execution_record_is_boot_source_and_target_bound(void)
 		"111111112222-3333-4444-555555555555"));
 }
 
+static struct swapz_primary_shared_root_scope make_shared_root_scope(void)
+{
+	struct swapz_primary_shared_root_scope scope = {0};
+
+	memset(scope.host_identity_sha256, 'a', 64U);
+	scope.host_identity_sha256[64] = '\0';
+	scope.root.device_major = 8U;
+	scope.root.device_minor = 3U;
+	scope.root.partition_number = 3U;
+	scope.root.start_sectors = 1100000ULL;
+	scope.root.size_sectors = 100000ULL;
+	scope.root.size_bytes = scope.root.size_sectors * 512ULL;
+	strcpy(scope.root.partuuid, "7fb9401d-03");
+	strcpy(scope.root.parttype, "0x83");
+	strcpy(scope.root.partscheme, "dos");
+	strcpy(scope.root.part_table_uuid, "7fb9401d");
+	strcpy(scope.root.part_table_type, "dos");
+	scope.target.device_major = 8U;
+	scope.target.device_minor = 4U;
+	scope.target.partition_number = 4U;
+	scope.target.start_sectors = 1300000ULL;
+	scope.target.size_sectors = 65536ULL;
+	scope.target.size_bytes = scope.target.size_sectors * 512ULL;
+	strcpy(scope.target.partuuid, "7fb9401d-04");
+	strcpy(scope.target.parttype, "0x82");
+	strcpy(scope.target.partscheme, "dos");
+	strcpy(scope.target.part_table_uuid, "7fb9401d");
+	strcpy(scope.target.part_table_type, "dos");
+	scope.parent_major = 8U;
+	scope.parent_minor = 0U;
+	scope.parent_size_sectors = 4000000ULL;
+	memset(scope.parent_identity_sha256, 'c', 64U);
+	scope.parent_identity_sha256[64] = '\0';
+	memset(scope.partition_layout_sha256, 'd', 64U);
+	scope.partition_layout_sha256[64] = '\0';
+	return scope;
+}
+
+static void test_shared_root_scope_requires_physical_host_uuid(void)
+{
+	char normalized[37];
+	static const char uppercase_uuid[] =
+		"00112233-4455-6677-8899-AABBCCDDEEFF";
+	static const char zero_uuid[] =
+		"00000000-0000-0000-0000-000000000000";
+	static const char malformed_uuid[] =
+		"00112233_4455-6677-8899-aabbccddeeff";
+
+	assert(swapz_primary_host_uuid_normalize(
+		uppercase_uuid, sizeof(uppercase_uuid) - 1U, normalized) == 0);
+	assert(!strcmp(normalized, "00112233-4455-6677-8899-aabbccddeeff"));
+	assert(swapz_primary_host_uuid_normalize(
+		zero_uuid, sizeof(zero_uuid) - 1U, normalized) < 0);
+	assert(swapz_primary_host_uuid_normalize(
+		malformed_uuid, sizeof(malformed_uuid) - 1U, normalized) < 0);
+	assert(swapz_primary_host_uuid_normalize(
+		uppercase_uuid, sizeof(uppercase_uuid) - 2U, normalized) < 0);
+}
+
+static void assert_shared_root_record_rejects_scope(
+	const char *record, size_t record_length,
+	const struct swapz_primary_shared_root_scope *scope)
+{
+	char digest[65];
+
+	if (swapz_primary_shared_root_scope_sha256(scope, digest) < 0)
+		return;
+	assert(!swapz_primary_shared_root_scope_record_matches(
+		record, record_length, digest));
+}
+
+static void test_shared_root_scope_authorization_is_exact_and_recovery_separate(void)
+{
+	struct swapz_primary_shared_root_scope scope = make_shared_root_scope();
+	char digest[65];
+	char record[SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_BYTES];
+	int length;
+	dev_t shared_parent = makedev(8U, 0U);
+	dev_t separate_recovery_parent = makedev(259U, 0U);
+
+	assert(swapz_primary_partition_scope_valid(&scope.root));
+	assert(swapz_primary_partition_scope_valid(&scope.target));
+	assert(swapz_primary_valid_sha256(scope.host_identity_sha256));
+	assert(swapz_primary_valid_sha256(scope.parent_identity_sha256));
+	assert(swapz_primary_valid_sha256(scope.partition_layout_sha256));
+	test_shared_root_scope_requires_physical_host_uuid();
+	assert(swapz_primary_shared_root_scope_sha256(&scope, digest) == 0);
+	length = snprintf(record, sizeof(record),
+			  "schema=swapz-primary-shared-root-v1\n"
+			  "scope_sha256=%s\n", digest);
+	assert(length > 0 && (size_t)length < sizeof(record));
+	assert(swapz_primary_shared_root_scope_record_matches(
+		record, (size_t)length, digest));
+	assert(swapz_primary_shared_root_parent_relationship_valid(
+		shared_parent, shared_parent));
+	assert(swapz_primary_recovery_parent_separation_valid(
+		shared_parent, separate_recovery_parent));
+
+	/* Host, root, target, device, geometry, parent and layout are all bound. */
+	scope.host_identity_sha256[0] = 'e';
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.root.partuuid[0] = 'e';
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.root.partition_number++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.root.start_sectors++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.root.size_sectors++;
+	scope.root.size_bytes += 512ULL;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.root.device_minor++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.target.partuuid[0] = 'e';
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.target.device_minor++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.target.start_sectors++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.target.partition_number++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.target.partuuid[10] = '5';
+	assert(swapz_primary_shared_root_scope_sha256(&scope, digest) < 0);
+	scope = make_shared_root_scope();
+	strcpy(scope.target.parttype, "0x100");
+	assert(swapz_primary_shared_root_scope_sha256(&scope, digest) < 0);
+	scope = make_shared_root_scope();
+	strcpy(scope.target.part_table_uuid, "7fb9401e");
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.target.size_bytes += 512ULL;
+	assert(swapz_primary_shared_root_scope_sha256(&scope, digest) < 0);
+	scope = make_shared_root_scope();
+	scope.parent_identity_sha256[0] = 'e';
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.parent_major++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.parent_minor++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.parent_size_sectors++;
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+	scope = make_shared_root_scope();
+	scope.partition_layout_sha256[0] = 'e';
+	assert_shared_root_record_rejects_scope(record, (size_t)length, &scope);
+
+	scope = make_shared_root_scope();
+	assert(!swapz_primary_recovery_parent_separation_valid(
+		shared_parent, shared_parent));
+	assert(errno == EPERM);
+	assert(!swapz_primary_recovery_parent_separation_valid(
+		shared_parent, 0));
+	assert(errno == EPERM);
+	assert(!swapz_primary_shared_root_parent_relationship_valid(
+		makedev(8U, 16U), shared_parent));
+	assert(errno == EPERM);
+	assert(!swapz_primary_shared_root_parent_relationship_valid(
+		shared_parent, makedev(8U, 16U)));
+	assert(errno == EPERM);
+	assert(!swapz_primary_shared_root_scope_record_matches(
+		"schema=swapz-primary-shared-root-v1\n", 36U, digest));
+
+	assert(!swapz_primary_shared_root_scope_record_matches(
+		record, (size_t)length - 1U, digest));
+	assert(!swapz_primary_shared_root_scope_record_matches(
+		"schema=swapz-primary-shared-root-v1\n"
+		"scope_sha256=invalid\n", 56U, digest));
+	{
+		char ambiguous[256];
+		int ambiguous_length = snprintf(
+			ambiguous, sizeof(ambiguous),
+			"schema=swapz-primary-shared-root-v1\n"
+			"scope_sha256=%s\n"
+			"scope_sha256=%s\n", digest, digest);
+
+		assert(ambiguous_length > 0 &&
+		       (size_t)ambiguous_length < sizeof(ambiguous));
+		assert(!swapz_primary_shared_root_scope_record_matches(
+			ambiguous, (size_t)ambiguous_length, digest));
+	}
+}
+
+static void test_shared_root_scope_rejects_overlapping_partition_layout(void)
+{
+	struct swapz_primary_shared_root_scope scope = make_shared_root_scope();
+	struct swapz_primary_partition_scope partitions[3] = {0};
+
+	partitions[0] = scope.root;
+	partitions[1] = scope.target;
+	partitions[2] = scope.root;
+	partitions[2].device_major = 8U;
+	partitions[2].device_minor = 2U;
+	partitions[2].partition_number = 2U;
+	partitions[2].start_sectors = 2048ULL;
+	partitions[2].size_sectors = 100000ULL;
+	partitions[2].size_bytes = partitions[2].size_sectors * 512ULL;
+	strcpy(partitions[2].partuuid, "7fb9401d-02");
+	strcpy(partitions[2].parttype, "0x83");
+	strcpy(partitions[2].partscheme, "dos");
+	strcpy(partitions[2].part_table_uuid, "7fb9401d");
+	strcpy(partitions[2].part_table_type, "dos");
+	assert(swapz_primary_partition_scope_layout_valid(
+		partitions, 3U, scope.parent_size_sectors, &scope.root,
+		&scope.target));
+	partitions[1].start_sectors =
+		partitions[0].start_sectors + partitions[0].size_sectors - 1ULL;
+	assert(!swapz_primary_partition_scope_layout_valid(
+		partitions, 3U, scope.parent_size_sectors, &scope.root,
+		&scope.target));
+	partitions[1] = scope.target;
+	partitions[1].start_sectors = scope.parent_size_sectors -
+		partitions[1].size_sectors + 1ULL;
+	assert(!swapz_primary_partition_scope_layout_valid(
+		partitions, 3U, scope.parent_size_sectors, &scope.root,
+		&scope.target));
+}
+
+static void test_shared_root_scope_record_requires_private_regular_file(void)
+{
+	struct swapz_primary_shared_root_scope scope = make_shared_root_scope();
+	char directory[] = "/tmp/swapz-root-scope-XXXXXX";
+	char digest[65];
+	char record[SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_BYTES];
+	int length;
+	int directory_fd;
+	int record_fd;
+
+	assert(swapz_primary_shared_root_scope_sha256(&scope, digest) == 0);
+	length = snprintf(record, sizeof(record),
+			  "schema=swapz-primary-shared-root-v1\n"
+			  "scope_sha256=%s\n", digest);
+	assert(length > 0 && (size_t)length < sizeof(record));
+	assert(mkdtemp(directory));
+	directory_fd = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	assert(directory_fd >= 0);
+	record_fd = openat(directory_fd,
+			   SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME,
+			   O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	assert(record_fd >= 0);
+	assert(write(record_fd, record, (size_t)length) == length);
+	assert(close(record_fd) == 0);
+	assert(swapz_primary_shared_root_scope_record_read_at(
+		directory_fd, geteuid(), digest) == 0);
+	assert(swapz_primary_shared_root_scope_record_read_at(
+		directory_fd, geteuid() == 0U ? 1U : 0U, digest) < 0);
+	assert(errno == EPERM);
+	assert(fchmodat(directory_fd, SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME,
+			0640, 0) == 0);
+	assert(swapz_primary_shared_root_scope_record_read_at(
+		directory_fd, geteuid(), digest) < 0);
+	assert(errno == EPERM);
+	assert(fchmodat(directory_fd, SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME,
+			0600, 0) == 0);
+	assert(linkat(directory_fd, SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME,
+		      directory_fd, "scope-hardlink", 0) == 0);
+	assert(swapz_primary_shared_root_scope_record_read_at(
+		directory_fd, geteuid(), digest) < 0);
+	assert(errno == EPERM);
+	assert(unlinkat(directory_fd, "scope-hardlink", 0) == 0);
+	assert(fchmod(directory_fd, 0720) == 0);
+	assert(swapz_primary_shared_root_scope_record_read_at(
+		directory_fd, geteuid(), digest) < 0);
+	assert(errno == EPERM);
+	assert(fchmod(directory_fd, 0700) == 0);
+	assert(unlinkat(directory_fd, SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME,
+			0) == 0);
+	assert(symlinkat("missing", directory_fd,
+			 SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME) == 0);
+	assert(swapz_primary_shared_root_scope_record_read_at(
+		directory_fd, geteuid(), digest) < 0);
+	assert(errno == ELOOP);
+	assert(unlinkat(directory_fd, SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME,
+			0) == 0);
+	assert(swapz_primary_shared_root_scope_record_read_at(
+		directory_fd, geteuid(), digest) < 0);
+	assert(errno == ENOENT);
+	assert(close(directory_fd) == 0);
+	assert(rmdir(directory) == 0);
+}
+
 static void test_partuuid_validation_and_normalization(void)
 {
 	static const char *const invalid_partuuids[] = {
@@ -3272,6 +3563,9 @@ int main(void)
 	assert(swapz_primary_command(1, start) == 2);
 	assert(swapz_primary_command(1, stop) == 2);
 	assert(swapz_primary_command(1, recover) == 2);
+	test_shared_root_scope_authorization_is_exact_and_recovery_separate();
+	test_shared_root_scope_rejects_overlapping_partition_layout();
+	test_shared_root_scope_record_requires_private_regular_file();
 	puts("PASS: primary swap inventory, capacity, durable stage transitions, owner claims and disabled lifecycle gate");
 	return 0;
 }

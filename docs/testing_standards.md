@@ -231,15 +231,38 @@ approval or unavailable remote blocks before the next durable transaction/card
 mutation or prevents the final PASS. The unprivileged parent itself performs no
 swap, Device Mapper, module, block-device or primary lifecycle mutation. Current qualification
 provenance; a frozen production acceptance manifest; the protected PARTUUID
-selector; exact partition size and device number; the exact removable USB
-parent and its sole selected partition; explicit
-`root_same_physical_disk_as_target=false` and
-`recovery_same_physical_disk_as_target=false`; no unresolved primary
-transaction, mapper, module, or raw swap alias resolving to either the selected
-partition or its physical parent disk; any unresolvable active block-swap
-identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel diagnostics; and working cgroup-v2 memory,
-swap, PSI, OOM, and zswap controls. A missing storage-separation fact is
-BLOCKED, not equivalent to false.
+selector; exact partition size and device number; and the selected partition's
+verified parent topology. The default requires
+`root_same_physical_disk_as_target=false`. A separately owner-authorized host
+may cross that root-parent gate only with the exact root-owned mode-0600
+`/etc/swapz/primary-root-parent-scope` record bound to a combined hash of the
+hardware DMI product UUID and live `/etc/machine-id`, root and target partition
+identities/geometries, stable parent identity, and complete non-overlapping
+partition-table layout. The hardware UUID prevents an authorization record
+from following only the bootable USB disk to another computer. Re-read all
+scope facts through the opened target descriptor immediately before the first
+target write. Missing, malformed, stale or ambiguous authorization remains BLOCKED;
+never emit raw host, serial/WWN or record fields in refusal diagnostics. The
+read-only plan may show only the non-secret SHA-256 scope fingerprint needed
+for an administrator to provision the exact root-owned record; it does not
+grant authority and must remain BLOCKED when recovery separation fails. This
+narrowly scoped admission exception does not alter any frozen
+production-acceptance manifest or qualify the target. The recovery store must
+still be persistent and on a different physical parent:
+`recovery_same_physical_disk_as_target=false` remains absolute. No unresolved
+primary transaction, mapper, module, or raw swap alias resolving to either the
+selected partition or its physical parent disk; any unresolvable active
+block-swap identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel
+diagnostics; and working cgroup-v2 memory, swap, PSI, OOM, and zswap controls.
+A missing storage-separation fact is BLOCKED, not equivalent to false.
+
+Rootless shared-root authorization controls must reject absent or malformed
+records; wrong host, root partition, target PARTUUID/partition number/device
+number/geometry, parent identity or partition-table layout; replaced devices;
+overlapping or out-of-parent partitions; and target/recovery-parent equality.
+A positive exact record fixture may test the policy predicate only. It does
+not create a live authorization, waive source/artifact qualification, or
+permit physical mutation or production activation.
 
 Rootless selector qualification must reproduce replacement after the first
 lstat and after opening the descriptor, symlink and hard-link refusal, file

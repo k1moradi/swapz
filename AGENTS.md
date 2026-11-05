@@ -47,10 +47,16 @@ and report BLOCKED**. Do not silently switch workflows.
 
 Read and follow `docs/AGENT_CONTEXT.md`, `docs/VISION.md`, and
 `docs/README.md`; consult relevant sections of coding/testing standards.
-The standing owner authorization is limited to the positively identified
-dedicated SD card. Never mutate unrelated storage or intentionally reboot,
-crash, or panic the host. No VM or fallback swap requirement. Keep the
-documentation working set within the project's 64K-token budget.
+The first host's standing owner authorization remains limited to its
+positively identified dedicated SD card. A separate owner-authorized Lubuntu
+host may select only its independently identified `/dev/sda4` partition after
+the exact root-owned host-scope record and all runtime identity gates described
+in `docs/AGENT_CONTEXT.md` pass. This exception never authorizes the parent
+disk or sibling partitions and never relaxes target/recovery physical-parent
+separation. A scope record alone does not qualify or enable production swap.
+Never mutate unrelated storage or intentionally reboot, crash, or panic the
+host. No VM or fallback swap is required. Keep the documentation working set
+within the project's 64K-token budget.
 
 The current documentation and this file override legacy branching/PR
 examples in historical records. Any agent discovering a new branch or PR

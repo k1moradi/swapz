@@ -189,14 +189,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 "cross-namespace-mount-inventory",
                 "target-mounted-in-visible-namespace",
                 "root-device-parent-identity",
-                "target-root-device-parent-separation",
+                "shared-root-parent-authorization-record",
                 "repeated-raw-target-swap-inventory",
                 "repeated-target-physical-parent-identity",
                 "repeated-target-recovery-parent-separation",
                 "repeated-cross-namespace-mount-inventory",
                 "repeated-target-mounted-in-visible-namespace",
                 "repeated-root-device-parent-identity",
-                "repeated-target-root-parent-separation",
+                "repeated-root-parent-identity",
+                "repeated-shared-root-parent-authorization",
+                "final-root-parent-identity-revalidation",
+                "final-shared-root-parent-authorization",
                 "physical-parent-swap-inventory", "module-mapper-inventory",
                 "unexpected-module-or-mapper-present",
                 "final-raw-target-swap-inventory", "partition-owner-claim",
@@ -213,6 +216,28 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(
             prepare.index('"PRIMARY_PREPARE=FAILED'),
             prepare.index("errno = saved_errno"))
+
+    def test_shared_root_fingerprint_is_readable_before_recovery_gate(self):
+        scope = source_body(
+            "swapz_primary_shared_root_scope_record_live", PRIMARY)
+        plan = source_body("swapz_primary_read_only_plan", PRIMARY)
+        self.assertLess(
+            scope.index("memcpy(scope_sha256, scope_digest"),
+            scope.index("swapz_primary_recovery_parent_separation_valid"))
+        self.assertIn("shared_root_parent_scope_fingerprint", plan)
+        self.assertIn("blocked_recovery_same_parent", plan)
+
+    def test_shared_root_host_binding_includes_physical_machine_identity(self):
+        host_identity = source_body(
+            "swapz_primary_live_host_identity_sha256", PRIMARY)
+        normalize_uuid = source_body(
+            "swapz_primary_host_uuid_normalize", PRIMARY)
+        self.assertIn("/sys/class/dmi/id/product_uuid", host_identity)
+        self.assertIn("/etc/machine-id", host_identity)
+        self.assertIn("swapz-host-v2", host_identity)
+        self.assertIn("swapz_primary_host_uuid_normalize", host_identity)
+        self.assertIn("length != 36U", normalize_uuid)
+        self.assertIn("!nonzero", normalize_uuid)
 
     def test_native_make_stage_keeps_analyzer_contract_discovered(self):
         relative_path = (

@@ -30,7 +30,22 @@ startup/shutdown integration and an automatic cold-boot acceptance harness.
 Detailed completion criteria and repository/documentation operating rules are
 canonical in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Historical `/dev/sda4` trial records are archived in
 [handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md);
-they document the older computer and do not authorize current operations.
+they do not supply the separate host-bound authorization below.
+
+### Separate host-bound `/dev/sda4` policy
+
+The owner has separately authorized a second Lubuntu computer to consider only
+its PARTUUID-selected `/dev/sda4`, which shares a USB parent with root, boot
+and EFI. The first host's dedicated `/dev/sda1` authorization is unchanged.
+The shared-root parent gate remains closed by default and can pass only with
+the exact root-owned host-scope record and fresh descriptor-bound topology
+checks described in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). This record is an
+admission exception only: it does not change frozen production acceptance or
+qualify/activate swapz. Target/recovery-parent separation stays absolute. The
+currently observed recovery directory is on the same parent as this `/dev/sda4`
+target, so target mutation remains blocked until independent persistent
+recovery storage is available. The record and rootless policy tests must land
+before any physical admission work; they do not authorize a live swap trial.
 
 The primary manager reads one protected PARTUUID selector from
 `/etc/swapz/primary-target`; source code must not pin a path, device number or

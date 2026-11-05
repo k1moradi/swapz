@@ -200,6 +200,11 @@ _Static_assert(SWAPZ_BLOCK_BYTES % 512U == 0U,
 #define SWAPZ_PRIMARY_SWAP_ROWS_MAX 32U
 #define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
 #define SWAPZ_PRIMARY_HASH_FILE_MAX_BYTES (64ULL * 1024ULL * 1024ULL)
+#define SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME \
+	"primary-root-parent-scope"
+#define SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_BYTES 128U
+#define SWAPZ_PRIMARY_PARTITION_FACTS_MAX 256U
+#define SWAPZ_PRIMARY_PARTITION_CANONICAL_BYTES 512U
 #define SWAPZ_PRIMARY_DM_CONTROL_PATH "/dev/mapper/control"
 #define SWAPZ_PRIMARY_DM_BUFFER_BYTES 4096U
 #define SWAPZ_PRIMARY_MAPPER_NODE_RETRY_ATTEMPTS 100U
@@ -216,6 +221,51 @@ struct swapz_primary_swap_entry {
 	uint64_t used_kib;
 	int priority;
 };
+
+/* Bind the exception to partitions and the verified parent, never a pathname. */
+struct swapz_primary_partition_scope {
+	uint32_t device_major;
+	uint32_t device_minor;
+	uint32_t partition_number;
+	uint64_t start_sectors;
+	uint64_t size_sectors;
+	uint64_t size_bytes;
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char parttype[64];
+	char partscheme[16];
+	char part_table_uuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char part_table_type[16];
+};
+
+struct swapz_primary_shared_root_scope {
+	char host_identity_sha256[65];
+	struct swapz_primary_partition_scope root;
+	struct swapz_primary_partition_scope target;
+	uint32_t parent_major;
+	uint32_t parent_minor;
+	uint64_t parent_size_sectors;
+	char parent_identity_sha256[65];
+	char partition_layout_sha256[65];
+};
+
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+struct swapz_primary_udev_scope_properties {
+	char serial[1024];
+	char wwn[1024];
+	char vendor[256];
+	char model[1024];
+	char device_type[32];
+	char table_uuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char table_type[16];
+	char entry_scheme[16];
+	char entry_uuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char entry_type[64];
+	char entry_number[32];
+	char entry_offset[32];
+	char entry_size[32];
+	char entry_disk[32];
+};
+#endif
 
 static const char *const swapz_primary_stage_names[] = {
 	[SWAPZ_PRIMARY_STAGE_READY] = "READY",
@@ -5273,6 +5323,420 @@ static int swapz_primary_valid_sha256(const char *digest)
 	return 1;
 }
 
+static int swapz_primary_lower_hex_span(const char *value, size_t length)
+{
+	size_t index;
+
+	if (!value || !length)
+		return 0;
+	for (index = 0; index < length; ++index) {
+		unsigned char byte = (unsigned char)value[index];
+
+		if (!((byte >= '0' && byte <= '9') ||
+		      (byte >= 'a' && byte <= 'f')))
+			return 0;
+	}
+	return 1;
+}
+
+static int swapz_primary_lower_uuid36(const char *value)
+{
+	size_t index;
+
+	if (!value || strlen(value) != 36U)
+		return 0;
+	for (index = 0; index < 36U; ++index) {
+		if (index == 8U || index == 13U || index == 18U || index == 23U) {
+			if (value[index] != '-')
+				return 0;
+		} else if (!((value[index] >= '0' && value[index] <= '9') ||
+			     (value[index] >= 'a' && value[index] <= 'f'))) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int swapz_primary_host_uuid_normalize(
+	const char *value, size_t length, char normalized[37])
+{
+	size_t index;
+	int nonzero = 0;
+
+	if (!value || !normalized || length != 36U) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (index = 0; index < 36U; ++index) {
+		unsigned char byte = (unsigned char)value[index];
+
+		if (index == 8U || index == 13U || index == 18U || index == 23U) {
+			if (byte != '-') {
+				errno = EINVAL;
+				return -1;
+			}
+			normalized[index] = '-';
+			continue;
+		}
+		if (!isxdigit(byte)) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (byte != '0')
+			nonzero = 1;
+		normalized[index] = (char)tolower(byte);
+	}
+	normalized[36] = '\0';
+	if (!nonzero) {
+		memset(normalized, 0, 37U);
+		errno = EINVAL;
+		return -1;
+	}
+	return 0;
+}
+
+static unsigned int swapz_primary_lower_hex_nibble(char byte)
+{
+	if (byte >= '0' && byte <= '9')
+		return (unsigned int)(byte - '0');
+	return (unsigned int)(byte - 'a' + 10);
+}
+
+static int swapz_primary_dos_partuuid_valid(const char *value,
+					    uint32_t partition_number)
+{
+	unsigned int observed;
+
+	if (!value || strlen(value) != 11U || value[8] != '-' ||
+	    !swapz_primary_lower_hex_span(value, 8U) ||
+	    !swapz_primary_lower_hex_span(value + 9U, 2U) ||
+	    !partition_number || partition_number > 255U)
+		return 0;
+	observed = swapz_primary_lower_hex_nibble(value[9]) * 16U +
+		swapz_primary_lower_hex_nibble(value[10]);
+	return observed == partition_number;
+}
+
+static int swapz_primary_partition_scope_valid(
+	const struct swapz_primary_partition_scope *partition)
+{
+	dev_t device;
+	char normalized_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char normalized_table_uuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	size_t type_length;
+	int type_valid;
+
+	if (!partition || !partition->device_major ||
+	    !partition->partition_number || !partition->size_sectors ||
+	    partition->start_sectors > UINT64_MAX - partition->size_sectors ||
+	    partition->size_sectors > UINT64_MAX / 512ULL ||
+	    partition->size_bytes != partition->size_sectors * 512ULL ||
+	    swapz_primary_partuuid_normalize(
+		    partition->partuuid, normalized_partuuid) < 0 ||
+	    strcmp(partition->partuuid, normalized_partuuid) ||
+	    (strcmp(partition->partscheme, "dos") &&
+	     strcmp(partition->partscheme, "gpt")) ||
+	    strcmp(partition->part_table_type, partition->partscheme) ||
+	    !partition->parttype[0] ||
+	    (strnlen(partition->parttype, sizeof(partition->parttype)) >=
+	     sizeof(partition->parttype)) ||
+	    swapz_primary_partuuid_normalize(
+		    partition->part_table_uuid, normalized_table_uuid) < 0 ||
+	    strcmp(partition->part_table_uuid, normalized_table_uuid))
+		return 0;
+	type_length = strlen(partition->parttype);
+	if (!strcmp(partition->partscheme, "dos")) {
+		type_valid = type_length == 4U &&
+			!strncmp(partition->parttype, "0x", 2U) &&
+			swapz_primary_lower_hex_span(
+				partition->parttype + 2U, 2U) &&
+			swapz_primary_lower_hex_span(
+				partition->part_table_uuid, 8U) &&
+			swapz_primary_dos_partuuid_valid(
+				partition->partuuid,
+				partition->partition_number);
+	} else {
+		type_valid = swapz_primary_lower_uuid36(partition->parttype) &&
+			swapz_primary_lower_uuid36(partition->part_table_uuid) &&
+			swapz_primary_lower_uuid36(partition->partuuid);
+	}
+	if (!type_valid)
+		return 0;
+	device = makedev(partition->device_major, partition->device_minor);
+	return major(device) == partition->device_major &&
+	       minor(device) == partition->device_minor;
+}
+
+static int swapz_primary_partition_scope_layout_valid(
+	const struct swapz_primary_partition_scope *partitions, size_t count,
+	uint64_t parent_size_sectors,
+	const struct swapz_primary_partition_scope *root,
+	const struct swapz_primary_partition_scope *target)
+{
+	size_t left;
+	size_t right;
+	int root_seen = 0;
+	int target_seen = 0;
+
+	if (!partitions || !count || count > SWAPZ_PRIMARY_PARTITION_FACTS_MAX ||
+	    !parent_size_sectors ||
+	    !swapz_primary_partition_scope_valid(root) ||
+	    !swapz_primary_partition_scope_valid(target))
+		return 0;
+	for (left = 0; left < count; ++left) {
+		uint64_t left_end;
+
+		if (!swapz_primary_partition_scope_valid(&partitions[left]))
+			return 0;
+		left_end = partitions[left].start_sectors +
+			   partitions[left].size_sectors;
+		if (left_end > parent_size_sectors)
+			return 0;
+		if (partitions[left].device_major == root->device_major &&
+		    partitions[left].device_minor == root->device_minor &&
+		    partitions[left].partition_number == root->partition_number &&
+		    partitions[left].start_sectors == root->start_sectors &&
+		    partitions[left].size_sectors == root->size_sectors &&
+		    !strcmp(partitions[left].partuuid, root->partuuid) &&
+		    !strcmp(partitions[left].parttype, root->parttype) &&
+		    !strcmp(partitions[left].partscheme, root->partscheme) &&
+		    !strcmp(partitions[left].part_table_uuid,
+			    root->part_table_uuid))
+			root_seen = 1;
+		if (partitions[left].device_major == target->device_major &&
+		    partitions[left].device_minor == target->device_minor &&
+		    partitions[left].partition_number == target->partition_number &&
+		    partitions[left].start_sectors == target->start_sectors &&
+		    partitions[left].size_sectors == target->size_sectors &&
+		    !strcmp(partitions[left].partuuid, target->partuuid) &&
+		    !strcmp(partitions[left].parttype, target->parttype) &&
+		    !strcmp(partitions[left].partscheme, target->partscheme) &&
+		    !strcmp(partitions[left].part_table_uuid,
+			    target->part_table_uuid))
+			target_seen = 1;
+		for (right = left + 1U; right < count; ++right) {
+			uint64_t right_end;
+
+			if (!swapz_primary_partition_scope_valid(
+				    &partitions[right]) ||
+			    partitions[left].partition_number ==
+				    partitions[right].partition_number ||
+			    (partitions[left].device_major ==
+				     partitions[right].device_major &&
+			     partitions[left].device_minor ==
+				     partitions[right].device_minor) ||
+			    !strcmp(partitions[left].partuuid,
+				    partitions[right].partuuid) ||
+			    strcmp(partitions[left].partscheme,
+				   partitions[right].partscheme) ||
+			    strcmp(partitions[left].part_table_uuid,
+				   partitions[right].part_table_uuid) ||
+			    strcmp(partitions[left].part_table_type,
+				   partitions[right].part_table_type))
+				return 0;
+			right_end = partitions[right].start_sectors +
+				    partitions[right].size_sectors;
+			if (right_end > parent_size_sectors)
+				return 0;
+			if (partitions[left].start_sectors < right_end &&
+			    partitions[right].start_sectors < left_end)
+				return 0;
+		}
+	}
+	if (!root_seen || !target_seen ||
+	    (root->device_major == target->device_major &&
+	     root->device_minor == target->device_minor) ||
+	    (root->start_sectors + root->size_sectors > target->start_sectors &&
+	     target->start_sectors + target->size_sectors > root->start_sectors))
+		return 0;
+	return 1;
+}
+
+static int swapz_primary_shared_root_scope_sha256(
+	const struct swapz_primary_shared_root_scope *scope, char digest[65])
+{
+	char canonical[1024];
+	int length;
+
+	if (!scope || !digest ||
+	    !swapz_primary_valid_sha256(scope->host_identity_sha256) ||
+	    !swapz_primary_partition_scope_valid(&scope->root) ||
+	    !swapz_primary_partition_scope_valid(&scope->target) ||
+	    (scope->root.device_major == scope->target.device_major &&
+	     scope->root.device_minor == scope->target.device_minor) ||
+	    (scope->root.start_sectors + scope->root.size_sectors >
+	     scope->target.start_sectors &&
+	     scope->target.start_sectors + scope->target.size_sectors >
+	     scope->root.start_sectors) ||
+	    !scope->parent_major || !scope->parent_size_sectors ||
+	    !swapz_primary_valid_sha256(scope->parent_identity_sha256) ||
+	    !swapz_primary_valid_sha256(scope->partition_layout_sha256)) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(
+		canonical, sizeof(canonical),
+		"swapz-primary-shared-root-scope-v1\n"
+		"host=%s\n"
+		"root=%u:%u,%s,%u,%llu,%llu,%llu,%s,%s,%s,%s\n"
+		"target=%u:%u,%s,%u,%llu,%llu,%llu,%s,%s,%s,%s\n"
+		"parent=%u:%u,%llu,%s\n"
+		"layout=%s\n",
+		scope->host_identity_sha256,
+		scope->root.device_major, scope->root.device_minor,
+		scope->root.partuuid, scope->root.partition_number,
+		(unsigned long long)scope->root.start_sectors,
+		(unsigned long long)scope->root.size_sectors,
+		(unsigned long long)scope->root.size_bytes,
+		scope->root.parttype,
+		scope->root.partscheme, scope->root.part_table_uuid,
+		scope->root.part_table_type,
+		scope->target.device_major, scope->target.device_minor,
+		scope->target.partuuid, scope->target.partition_number,
+		(unsigned long long)scope->target.start_sectors,
+		(unsigned long long)scope->target.size_sectors,
+		(unsigned long long)scope->target.size_bytes,
+		scope->target.parttype,
+		scope->target.partscheme, scope->target.part_table_uuid,
+		scope->target.part_table_type,
+		scope->parent_major, scope->parent_minor,
+		(unsigned long long)scope->parent_size_sectors,
+		scope->parent_identity_sha256,
+		scope->partition_layout_sha256);
+	if (length <= 0 || (size_t)length >= sizeof(canonical)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	return swapz_primary_sha256((const unsigned char *)canonical,
+				    (size_t)length, digest);
+}
+
+static int swapz_primary_shared_root_scope_record_matches(
+	const char *record, size_t length, const char expected_scope_sha256[65])
+{
+	char expected[SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_BYTES];
+	int expected_length;
+
+	if (!record || !length || memchr(record, '\0', length) ||
+	    !swapz_primary_valid_sha256(expected_scope_sha256))
+		return 0;
+	expected_length = snprintf(
+		expected, sizeof(expected),
+		"schema=swapz-primary-shared-root-v1\n"
+		"scope_sha256=%s\n", expected_scope_sha256);
+	return expected_length > 0 &&
+	       (size_t)expected_length < sizeof(expected) &&
+	       length == (size_t)expected_length &&
+	       !memcmp(record, expected, (size_t)expected_length);
+}
+
+/* The exception covers root/target sharing only; recovery stays independent. */
+static int swapz_primary_shared_root_parent_relationship_valid(
+	dev_t target_parent, dev_t root_parent)
+{
+	if (!target_parent || target_parent != root_parent) {
+		errno = EPERM;
+		return 0;
+	}
+	return 1;
+}
+
+static int swapz_primary_recovery_parent_separation_valid(
+	dev_t target_parent, dev_t recovery_parent)
+{
+	if (!target_parent || !recovery_parent ||
+	    target_parent == recovery_parent) {
+		errno = EPERM;
+		return 0;
+	}
+	return 1;
+}
+
+static int swapz_primary_shared_root_scope_record_read_at(
+	int config_fd, uid_t expected_owner,
+	const char expected_scope_sha256[65])
+{
+	struct stat directory_info;
+	struct stat before;
+	struct stat after;
+	char record[SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_BYTES];
+	size_t used = 0;
+	int fd = -1;
+	int result = -1;
+	int saved_errno = 0;
+
+	if (config_fd < 0 ||
+	    !swapz_primary_valid_sha256(expected_scope_sha256)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (fstat(config_fd, &directory_info) < 0)
+		return -1;
+	if (!S_ISDIR(directory_info.st_mode) ||
+	    directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0022U)) {
+		errno = EPERM;
+		return -1;
+	}
+	fd = openat(config_fd, SWAPZ_PRIMARY_ROOT_PARENT_SCOPE_RECORD_NAME,
+		    O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &before) < 0)
+		goto out;
+	if (!S_ISREG(before.st_mode) || before.st_uid != expected_owner ||
+	    (before.st_mode & 07777U) != 0600U || before.st_nlink != 1U ||
+	    before.st_size <= 0 ||
+	    (uint64_t)before.st_size >= sizeof(record)) {
+		errno = EPERM;
+		goto out;
+	}
+	while (used < sizeof(record)) {
+		ssize_t count = read(fd, record + used, sizeof(record) - used);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0)
+			goto out;
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (used == sizeof(record)) {
+		errno = EOVERFLOW;
+		goto out;
+	}
+	if (fstat(fd, &after) < 0)
+		goto out;
+	if (before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
+	    before.st_uid != after.st_uid || before.st_gid != after.st_gid ||
+	    before.st_mode != after.st_mode || before.st_nlink != after.st_nlink ||
+	    before.st_size != after.st_size ||
+	    before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
+	    before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
+	    before.st_ctim.tv_sec != after.st_ctim.tv_sec ||
+	    before.st_ctim.tv_nsec != after.st_ctim.tv_nsec ||
+	    used != (size_t)before.st_size) {
+		errno = ESTALE;
+		goto out;
+	}
+	if (!swapz_primary_shared_root_scope_record_matches(
+		    record, used, expected_scope_sha256)) {
+		errno = EPERM;
+		goto out;
+	}
+	result = 0;
+out:
+	saved_errno = errno;
+	if (close(fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	memset(record, 0, sizeof(record));
+	errno = saved_errno;
+	return result;
+}
+
 static int swapz_primary_manifest_name(const char *run_id, char *name,
 					       size_t capacity)
 {
@@ -6487,6 +6951,10 @@ static int swapz_primary_running_kernel_matches_qualification(
 #endif
 
 
+/*
+ * Bind hardware as well as OS identity: the bootable root disk can move to a
+ * different computer with its /etc/machine-id intact.
+ */
 static int swapz_primary_live_host_identity_sha256(char digest[65])
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -6494,21 +6962,95 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 	errno = ENODEV;
 	return -1;
 #else
-	static const unsigned char prefix[] = "swapz-host";
-	unsigned char identity[sizeof(prefix) + 32U];
+	static const unsigned char prefix[] = "swapz-host-v2";
+	unsigned char identity[sizeof(prefix) + 36U + 32U];
 	char machine_id[64];
+	char product_uuid_record[40];
+	char product_uuid[37];
 	struct stat before;
 	struct stat after;
+	struct stat dmi_before;
+	struct stat dmi_after;
 	struct utsname system;
 	size_t length = 0;
+	size_t dmi_length = 0;
 	size_t i;
 	int machine_id_nonzero = 0;
-	int fd;
+	int fd = -1;
+	int dmi_fd = -1;
+	int result;
+	int saved_errno;
 
 	if (!digest) {
 		errno = EINVAL;
 		return -1;
 	}
+	dmi_fd = open("/sys/class/dmi/id/product_uuid",
+		      O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+	if (dmi_fd < 0)
+		return -1;
+	if (fstat(dmi_fd, &dmi_before) < 0) {
+		saved_errno = errno;
+		(void)close(dmi_fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISREG(dmi_before.st_mode) || dmi_before.st_uid != 0 ||
+	    dmi_before.st_nlink != 1U || (dmi_before.st_mode & 0022U)) {
+		(void)close(dmi_fd);
+		errno = EPERM;
+		return -1;
+	}
+	while (dmi_length < sizeof(product_uuid_record)) {
+		ssize_t count = read(dmi_fd, product_uuid_record + dmi_length,
+				     sizeof(product_uuid_record) - dmi_length);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			saved_errno = errno;
+			(void)close(dmi_fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		dmi_length += (size_t)count;
+	}
+	if (dmi_length == sizeof(product_uuid_record)) {
+		(void)close(dmi_fd);
+		errno = EOVERFLOW;
+		return -1;
+	}
+	if (fstat(dmi_fd, &dmi_after) < 0) {
+		saved_errno = errno;
+		(void)close(dmi_fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (close(dmi_fd) < 0)
+		return -1;
+	if (dmi_before.st_dev != dmi_after.st_dev ||
+	    dmi_before.st_ino != dmi_after.st_ino ||
+	    dmi_before.st_mode != dmi_after.st_mode ||
+	    dmi_before.st_uid != dmi_after.st_uid ||
+	    dmi_before.st_gid != dmi_after.st_gid ||
+	    dmi_before.st_nlink != dmi_after.st_nlink ||
+	    dmi_before.st_size != dmi_after.st_size ||
+	    dmi_before.st_mtim.tv_sec != dmi_after.st_mtim.tv_sec ||
+	    dmi_before.st_mtim.tv_nsec != dmi_after.st_mtim.tv_nsec ||
+	    dmi_before.st_ctim.tv_sec != dmi_after.st_ctim.tv_sec ||
+	    dmi_before.st_ctim.tv_nsec != dmi_after.st_ctim.tv_nsec ||
+	    (dmi_length == 37U && product_uuid_record[36] != '\n') ||
+	    (dmi_length != 36U && dmi_length != 37U)) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (dmi_length == 37U)
+		--dmi_length;
+	if (swapz_primary_host_uuid_normalize(
+		    product_uuid_record, dmi_length, product_uuid) < 0)
+		return -1;
 	fd = open("/etc/machine-id", O_RDONLY | O_CLOEXEC | O_NOFOLLOW |
 		  O_NONBLOCK);
 	if (fd < 0)
@@ -6579,6 +7121,8 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 		errno = EINVAL;
 		return -1;
 	}
+	memcpy(identity, prefix, sizeof(prefix));
+	memcpy(identity + sizeof(prefix), product_uuid, 36U);
 	for (i = 0; i < 32U; ++i) {
 		unsigned char byte = (unsigned char)machine_id[i];
 
@@ -6588,16 +7132,911 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 		}
 		if (byte != '0')
 			machine_id_nonzero = 1;
-		identity[sizeof(prefix) + i] = (unsigned char)tolower(byte);
+		identity[sizeof(prefix) + 36U + i] =
+			(unsigned char)tolower(byte);
 	}
 	if (!machine_id_nonzero) {
 		errno = EINVAL;
 		return -1;
 	}
-	memcpy(identity, prefix, sizeof(prefix));
-	return swapz_primary_sha256(identity, sizeof(identity), digest);
+	result = swapz_primary_sha256(identity, sizeof(identity), digest);
+	saved_errno = errno;
+	memset(identity, 0, sizeof(identity));
+	memset(machine_id, 0, sizeof(machine_id));
+	memset(product_uuid_record, 0, sizeof(product_uuid_record));
+	memset(product_uuid, 0, sizeof(product_uuid));
+	errno = saved_errno;
+	return result;
 #endif
 }
+
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
+static int swapz_primary_udev_scope_properties_read(
+	dev_t device, int partition,
+	struct swapz_primary_udev_scope_properties *properties)
+{
+	struct stat before;
+	struct stat after;
+	char path[128];
+	char record[16384];
+	size_t used = 0;
+	int fd = -1;
+	unsigned int seen = 0U;
+	int length;
+	int result = -1;
+	int saved_errno = 0;
+
+	if (!device || !properties) {
+		errno = EINVAL;
+		return -1;
+	}
+	memset(properties, 0, sizeof(*properties));
+	length = snprintf(path, sizeof(path), "/run/udev/data/b%u:%u",
+			  major(device), minor(device));
+	if (length <= 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &before) < 0)
+		goto out;
+	if (!S_ISREG(before.st_mode) || before.st_uid != 0 ||
+	    (before.st_mode & 0022U) || before.st_nlink != 1U ||
+	    before.st_size <= 0 ||
+	    (uint64_t)before.st_size >= sizeof(record)) {
+		errno = EPERM;
+		goto out;
+	}
+	while (used < sizeof(record)) {
+		ssize_t count = read(fd, record + used, sizeof(record) - used);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0)
+			goto out;
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (used == sizeof(record)) {
+		errno = EOVERFLOW;
+		goto out;
+	}
+	if (fstat(fd, &after) < 0)
+		goto out;
+	if (before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
+	    before.st_uid != after.st_uid || before.st_gid != after.st_gid ||
+	    before.st_mode != after.st_mode ||
+	    before.st_nlink != after.st_nlink || before.st_size != after.st_size ||
+	    before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
+	    before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
+	    before.st_ctim.tv_sec != after.st_ctim.tv_sec ||
+	    before.st_ctim.tv_nsec != after.st_ctim.tv_nsec ||
+	    used != (size_t)before.st_size || memchr(record, '\0', used)) {
+		errno = ESTALE;
+		goto out;
+	}
+	{
+		const char *cursor = record;
+		const char *end = record + used;
+
+		while (cursor < end) {
+			const char *line_end = memchr(cursor, '\n',
+						       (size_t)(end - cursor));
+			size_t line_length = line_end ?
+				(size_t)(line_end - cursor) :
+				(size_t)(end - cursor);
+			const char *equals;
+			size_t key_length;
+			const char *value;
+			size_t value_length;
+			char *destination = NULL;
+			size_t capacity = 0U;
+			unsigned int bit = 0U;
+
+			if (line_length < 3U || cursor[0] != 'E' ||
+			    cursor[1] != ':' || !(equals = memchr(cursor + 2U, '=',
+							    line_length - 2U)))
+				goto next_line;
+			key_length = (size_t)(equals - (cursor + 2U));
+			value = equals + 1;
+			value_length = line_length - (size_t)(value - cursor);
+#define SWAPZ_UDEV_PROPERTY(name, field, flag) \
+			if (key_length == sizeof(name) - 1U && \
+			    !memcmp(cursor + 2U, name, key_length)) { \
+				destination = properties->field; \
+				capacity = sizeof(properties->field); \
+				bit = flag; \
+			}
+			SWAPZ_UDEV_PROPERTY("ID_SERIAL", serial, 1U)
+			else SWAPZ_UDEV_PROPERTY("ID_WWN", wwn, 2U)
+			else SWAPZ_UDEV_PROPERTY("ID_VENDOR", vendor, 4U)
+			else SWAPZ_UDEV_PROPERTY("ID_MODEL", model, 8U)
+			else SWAPZ_UDEV_PROPERTY("ID_TYPE", device_type, 16U)
+			else SWAPZ_UDEV_PROPERTY("ID_PART_TABLE_UUID", table_uuid, 32U)
+			else SWAPZ_UDEV_PROPERTY("ID_PART_TABLE_TYPE", table_type, 64U)
+			else if (partition) {
+				SWAPZ_UDEV_PROPERTY("ID_PART_ENTRY_SCHEME", entry_scheme, 128U)
+				else SWAPZ_UDEV_PROPERTY("ID_PART_ENTRY_UUID", entry_uuid, 256U)
+				else SWAPZ_UDEV_PROPERTY("ID_PART_ENTRY_TYPE", entry_type, 512U)
+				else SWAPZ_UDEV_PROPERTY("ID_PART_ENTRY_NUMBER", entry_number, 1024U)
+				else SWAPZ_UDEV_PROPERTY("ID_PART_ENTRY_OFFSET", entry_offset, 2048U)
+				else SWAPZ_UDEV_PROPERTY("ID_PART_ENTRY_SIZE", entry_size, 4096U)
+				else SWAPZ_UDEV_PROPERTY("ID_PART_ENTRY_DISK", entry_disk, 8192U)
+			}
+#undef SWAPZ_UDEV_PROPERTY
+			if (destination) {
+				if ((seen & bit) || !value_length ||
+				    value_length >= capacity) {
+					errno = EBADMSG;
+					goto out;
+				}
+				memcpy(destination, value, value_length);
+				destination[value_length] = '\0';
+				seen |= bit;
+			}
+next_line:
+			if (!line_end)
+				break;
+			cursor = line_end + 1U;
+		}
+	}
+	if (partition) {
+		const unsigned int required = 32U | 64U | 128U | 256U | 512U |
+				      1024U | 2048U | 4096U | 8192U;
+
+		if ((seen & required) != required ||
+		    (seen & 16U) == 0U || strcmp(properties->device_type, "disk")) {
+			errno = ENODATA;
+			goto out;
+		}
+	} else if (!(seen & 1U) && !(seen & 2U)) {
+		errno = ENODATA;
+		goto out;
+	}
+	result = 0;
+out:
+	saved_errno = errno;
+	if (fd >= 0 && close(fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	memset(record, 0, sizeof(record));
+	if (result < 0)
+		memset(properties, 0, sizeof(*properties));
+	errno = saved_errno;
+	return result;
+}
+
+static int swapz_primary_read_partition_sysfs_partuuid(
+	const char *sysfs_path,
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
+{
+	char path[PATH_MAX];
+	char record[4096];
+	char observed[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U] = {0};
+	size_t used = 0;
+	int fd;
+
+	if (!sysfs_path || !partuuid ||
+	    swapz_primary_path_format(path, sizeof(path), "%s/uevent",
+				      sysfs_path) < 0)
+		return -1;
+	fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	if (fd < 0)
+		return -1;
+	while (used < sizeof(record)) {
+		ssize_t count = read(fd, record + used, sizeof(record) - used);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0) {
+			int saved_errno = errno;
+
+			(void)close(fd);
+			errno = saved_errno;
+			return -1;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	if (close(fd) < 0)
+		return -1;
+	if (used == sizeof(record) || memchr(record, '\0', used)) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	{
+		const char *cursor = record;
+		const char *end = record + used;
+		unsigned int found = 0U;
+
+		while (cursor < end) {
+			const char *line_end = memchr(cursor, '\n',
+						       (size_t)(end - cursor));
+			size_t line_length = line_end ?
+				(size_t)(line_end - cursor) :
+				(size_t)(end - cursor);
+			static const char prefix[] = "PARTUUID=";
+
+			if (line_length >= sizeof(prefix) - 1U &&
+			    !memcmp(cursor, prefix, sizeof(prefix) - 1U)) {
+				size_t value_length = line_length -
+					(sizeof(prefix) - 1U);
+
+				if (found || !value_length ||
+				    value_length > SWAPZ_PRIMARY_PARTUUID_LENGTH) {
+					errno = EBADMSG;
+					return -1;
+				}
+				memcpy(observed, cursor + sizeof(prefix) - 1U,
+				       value_length);
+				observed[value_length] = '\0';
+				found = 1U;
+			}
+			if (!line_end)
+				break;
+			cursor = line_end + 1U;
+		}
+		if (!found || swapz_primary_partuuid_normalize(
+			      observed, partuuid) < 0)
+			return -1;
+	}
+	return 0;
+}
+
+static int swapz_primary_read_partition_scope_path(
+	const char *sysfs_path, struct swapz_primary_partition_scope *partition)
+{
+	char path[PATH_MAX];
+	char text[64];
+	char parent_path[PATH_MAX];
+	char sysfs_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char normalized_entry_uuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	struct swapz_primary_udev_scope_properties properties = {0};
+	dev_t device;
+	dev_t parent_device;
+	dev_t observed_parent_device;
+	uint64_t partition_number;
+	uint64_t observed_number;
+	uint64_t observed_offset;
+	uint64_t observed_size;
+
+	if (!sysfs_path || !partition) {
+		errno = EINVAL;
+		return -1;
+	}
+	memset(partition, 0, sizeof(*partition));
+	if (swapz_primary_path_format(path, sizeof(path), "%s/partition",
+				      sysfs_path) < 0 ||
+	    swapz_primary_read_sysfs_text(path, text, sizeof(text)) < 0 ||
+	    swapz_primary_parse_u64(text, &partition_number) < 0 ||
+	    !partition_number || partition_number > UINT32_MAX)
+		return -1;
+	partition->partition_number = (uint32_t)partition_number;
+	if (swapz_primary_path_format(path, sizeof(path), "%s/start",
+				      sysfs_path) < 0 ||
+	    swapz_primary_read_sysfs_text(path, text, sizeof(text)) < 0 ||
+	    swapz_primary_parse_u64(text, &partition->start_sectors) < 0 ||
+	    swapz_primary_path_format(path, sizeof(path), "%s/size",
+				      sysfs_path) < 0 ||
+	    swapz_primary_read_sysfs_text(path, text, sizeof(text)) < 0 ||
+	    swapz_primary_parse_u64(text, &partition->size_sectors) < 0 ||
+	    swapz_primary_path_format(path, sizeof(path), "%s/dev",
+				      sysfs_path) < 0 ||
+	    swapz_primary_sysfs_dev_number(path, &device) < 0)
+		return -1;
+	partition->device_major = major(device);
+	partition->device_minor = minor(device);
+	if (swapz_primary_read_partition_sysfs_partuuid(
+		    sysfs_path, sysfs_partuuid) < 0)
+		return -1;
+	if (partition->size_sectors > UINT64_MAX / 512ULL) {
+		errno = EOVERFLOW;
+		return -1;
+	}
+	partition->size_bytes = partition->size_sectors * 512ULL;
+	if (swapz_primary_path_format(parent_path, sizeof(parent_path), "%s",
+				      sysfs_path) < 0)
+		return -1;
+	{
+		char *slash = strrchr(parent_path, '/');
+
+		if (!slash || slash == parent_path) {
+			errno = ENODEV;
+			return -1;
+		}
+		*slash = '\0';
+	}
+	if (swapz_primary_path_format(path, sizeof(path), "%s/dev",
+				      parent_path) < 0 ||
+	    swapz_primary_sysfs_dev_number(path, &parent_device) < 0 ||
+	    swapz_primary_udev_scope_properties_read(device, 1,
+						     &properties) < 0 ||
+	    swapz_primary_partuuid_normalize(
+		    properties.entry_uuid, normalized_entry_uuid) < 0 ||
+	    swapz_primary_parse_u64(properties.entry_number,
+				     &observed_number) < 0 ||
+	    swapz_primary_parse_u64(properties.entry_offset,
+				     &observed_offset) < 0 ||
+	    swapz_primary_parse_u64(properties.entry_size,
+				     &observed_size) < 0) {
+		memset(&properties, 0, sizeof(properties));
+		return -1;
+	}
+	if (strcmp(properties.entry_scheme, properties.table_type) ||
+	    strcmp(normalized_entry_uuid, sysfs_partuuid) ||
+	    observed_number != partition->partition_number ||
+	    observed_offset != partition->start_sectors ||
+	    observed_size != partition->size_sectors ||
+	    swapz_primary_parse_dev_number(properties.entry_disk,
+				       &observed_parent_device) < 0 ||
+	    parent_device != observed_parent_device) {
+		errno = ESTALE;
+		memset(&properties, 0, sizeof(properties));
+		return -1;
+	}
+	memcpy(partition->partuuid, normalized_entry_uuid,
+	       sizeof(partition->partuuid));
+	if (partition->size_sectors > UINT64_MAX / 512ULL) {
+		memset(&properties, 0, sizeof(properties));
+		errno = EOVERFLOW;
+		return -1;
+	}
+	partition->size_bytes = partition->size_sectors * 512ULL;
+	strcpy(partition->parttype, properties.entry_type);
+	strcpy(partition->partscheme, properties.entry_scheme);
+	strcpy(partition->part_table_uuid, properties.table_uuid);
+	strcpy(partition->part_table_type, properties.table_type);
+	memset(&properties, 0, sizeof(properties));
+	if (!swapz_primary_partition_scope_valid(partition)) {
+		errno = EBADMSG;
+		return -1;
+	}
+	return 0;
+}
+
+static int swapz_primary_partition_scope_device(
+	dev_t expected_device, struct swapz_primary_partition_scope *partition,
+	char sysfs_path[PATH_MAX], int verify_opened_device)
+{
+	char link_path[128];
+	struct stat opened;
+	uint64_t bytes = 0;
+	int fd = -1;
+	int length;
+	int saved_errno;
+
+	if (!expected_device || !partition || !sysfs_path) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(link_path, sizeof(link_path),
+			  "/sys/dev/block/%u:%u", major(expected_device),
+			  minor(expected_device));
+	if (length <= 0 || (size_t)length >= sizeof(link_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (!realpath(link_path, sysfs_path))
+		return -1;
+	if (strncmp(sysfs_path, "/sys/devices/",
+		    sizeof("/sys/devices/") - 1U)) {
+		errno = EXDEV;
+		return -1;
+	}
+	if (swapz_primary_read_partition_scope_path(sysfs_path, partition) < 0)
+		return -1;
+	if (makedev(partition->device_major, partition->device_minor) !=
+	    expected_device) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (!verify_opened_device)
+		return 0;
+	length = snprintf(link_path, sizeof(link_path), "/dev/block/%u:%u",
+			  major(expected_device), minor(expected_device));
+	if (length <= 0 || (size_t)length >= sizeof(link_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	fd = open(link_path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	if (fstat(fd, &opened) < 0) {
+		saved_errno = errno;
+		(void)close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (!S_ISBLK(opened.st_mode) || opened.st_rdev != expected_device) {
+		(void)close(fd);
+		errno = ESTALE;
+		return -1;
+	}
+	if (ioctl(fd, BLKGETSIZE64, &bytes) < 0) {
+		saved_errno = errno;
+		(void)close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (bytes != partition->size_bytes) {
+		(void)close(fd);
+		errno = ESTALE;
+		return -1;
+	}
+	if (swapz_primary_sysfs_partuuid_matches(
+		expected_device, partition->partuuid) < 0) {
+		saved_errno = errno;
+		(void)close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	if (close(fd) < 0)
+		return -1;
+	return 0;
+}
+
+static int swapz_primary_udev_parent_identity_sha256(
+	dev_t parent_device, const char *parent_sysfs_path,
+	uint64_t parent_size_sectors, char digest[65],
+	char table_uuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U],
+	char table_type[16])
+{
+	struct swapz_primary_udev_scope_properties properties = {0};
+	struct stat opened;
+	char canonical[4096];
+	char device_path[128];
+	uint64_t opened_bytes = 0;
+	int parent_fd = -1;
+	int path_length;
+	int saved_errno;
+	int length;
+
+	if (!parent_device || !parent_sysfs_path || !parent_size_sectors ||
+	    !digest || !table_uuid || !table_type ||
+	    swapz_primary_udev_scope_properties_read(
+		    parent_device, 0, &properties) < 0)
+		return -1;
+	if (parent_size_sectors > UINT64_MAX / 512ULL) {
+		memset(&properties, 0, sizeof(properties));
+		errno = EOVERFLOW;
+		return -1;
+	}
+	path_length = snprintf(device_path, sizeof(device_path),
+			       "/dev/block/%u:%u", major(parent_device),
+			       minor(parent_device));
+	if (path_length <= 0 || (size_t)path_length >= sizeof(device_path)) {
+		memset(&properties, 0, sizeof(properties));
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	parent_fd = open(device_path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (parent_fd < 0) {
+		memset(&properties, 0, sizeof(properties));
+		return -1;
+	}
+	if (fstat(parent_fd, &opened) < 0)
+		goto parent_fd_error;
+	if (!S_ISBLK(opened.st_mode) || opened.st_rdev != parent_device) {
+		errno = ESTALE;
+		goto parent_fd_error;
+	}
+	if (ioctl(parent_fd, BLKGETSIZE64, &opened_bytes) < 0)
+		goto parent_fd_error;
+	if (opened_bytes != parent_size_sectors * 512ULL) {
+		errno = ESTALE;
+		goto parent_fd_error;
+	}
+	if (close(parent_fd) < 0) {
+		saved_errno = errno;
+		memset(&properties, 0, sizeof(properties));
+		errno = saved_errno;
+		return -1;
+	}
+	parent_fd = -1;
+	if (strcmp(properties.device_type, "disk") ||
+	    !properties.table_uuid[0] ||
+	    (strcmp(properties.table_type, "dos") &&
+	     strcmp(properties.table_type, "gpt"))) {
+		memset(&properties, 0, sizeof(properties));
+		errno = ESTALE;
+		return -1;
+	}
+	length = snprintf(canonical, sizeof(canonical),
+			   "parent=%u:%u\nsize=%llu\nserial=%s\nwwn=%s\n"
+			   "vendor=%s\nmodel=%s\ntable_uuid=%s\n"
+			   "table_type=%s\n",
+			   major(parent_device), minor(parent_device),
+			   (unsigned long long)parent_size_sectors,
+			   properties.serial, properties.wwn,
+			   properties.vendor, properties.model,
+			   properties.table_uuid, properties.table_type);
+	if (length <= 0 || (size_t)length >= sizeof(canonical)) {
+		memset(&properties, 0, sizeof(properties));
+		errno = EOVERFLOW;
+		return -1;
+	}
+	if (swapz_primary_sha256((const unsigned char *)canonical,
+				(size_t)length, digest) < 0) {
+		memset(&properties, 0, sizeof(properties));
+		memset(canonical, 0, sizeof(canonical));
+		return -1;
+	}
+	memcpy(table_uuid, properties.table_uuid,
+	       sizeof(properties.table_uuid));
+	memcpy(table_type, properties.table_type, sizeof(properties.table_type));
+	memset(&properties, 0, sizeof(properties));
+	memset(canonical, 0, sizeof(canonical));
+	return 0;
+
+parent_fd_error:
+	saved_errno = errno;
+	if (close(parent_fd) < 0 && !saved_errno)
+		saved_errno = errno;
+	memset(&properties, 0, sizeof(properties));
+	errno = saved_errno ? saved_errno : EIO;
+	return -1;
+}
+
+static int swapz_primary_partition_scope_order(
+	const void *left_pointer, const void *right_pointer)
+{
+	const struct swapz_primary_partition_scope *left = left_pointer;
+	const struct swapz_primary_partition_scope *right = right_pointer;
+
+	if (left->partition_number < right->partition_number)
+		return -1;
+	if (left->partition_number > right->partition_number)
+		return 1;
+	return 0;
+}
+
+static int swapz_primary_partition_layout_sha256(
+	const char *parent_sysfs_path, uint64_t parent_size_sectors,
+	const struct swapz_primary_partition_scope *root,
+	const struct swapz_primary_partition_scope *target,
+	char digest[65])
+{
+	struct swapz_primary_partition_scope *partitions = NULL;
+	DIR *directory = NULL;
+	struct dirent *entry;
+	char *canonical = NULL;
+	size_t count = 0;
+	size_t used = 0;
+	int result = -1;
+	int saved_errno = 0;
+
+	if (!parent_sysfs_path || !parent_size_sectors || !root || !target ||
+	    !digest) {
+		errno = EINVAL;
+		return -1;
+	}
+	partitions = calloc(SWAPZ_PRIMARY_PARTITION_FACTS_MAX,
+			    sizeof(*partitions));
+	canonical = calloc(SWAPZ_PRIMARY_PARTITION_FACTS_MAX,
+			   SWAPZ_PRIMARY_PARTITION_CANONICAL_BYTES);
+	if (!partitions || !canonical)
+		goto out;
+	directory = opendir(parent_sysfs_path);
+	if (!directory)
+		goto out;
+	for (;;) {
+		char child_path[PATH_MAX];
+		char partition_path[PATH_MAX];
+		struct stat partition_info;
+
+		errno = 0;
+		entry = readdir(directory);
+		if (!entry) {
+			if (errno)
+				goto out;
+			break;
+		}
+		if (!strcmp(entry->d_name, ".") ||
+		    !strcmp(entry->d_name, ".."))
+			continue;
+		if (swapz_primary_path_format(child_path, sizeof(child_path),
+					      "%s/%s", parent_sysfs_path,
+					      entry->d_name) < 0 ||
+		    swapz_primary_path_format(partition_path,
+					      sizeof(partition_path),
+					      "%s/partition", child_path) < 0)
+			goto out;
+		if (lstat(partition_path, &partition_info) < 0) {
+			if (errno == ENOENT)
+				continue;
+			goto out;
+		}
+		if (!S_ISREG(partition_info.st_mode) ||
+		    count == SWAPZ_PRIMARY_PARTITION_FACTS_MAX ||
+		    swapz_primary_read_partition_scope_path(
+			    child_path, &partitions[count]) < 0)
+			goto out;
+		++count;
+	}
+	if (!count) {
+		(void)closedir(directory);
+		directory = NULL;
+		errno = ENODATA;
+		goto out;
+	}
+	if (closedir(directory) < 0) {
+		directory = NULL;
+		goto out;
+	}
+	directory = NULL;
+	qsort(partitions, count, sizeof(*partitions),
+	      swapz_primary_partition_scope_order);
+	if (!swapz_primary_partition_scope_layout_valid(
+		    partitions, count, parent_size_sectors, root, target)) {
+		errno = EBADMSG;
+		goto out;
+	}
+	for (size_t index = 0; index < count; ++index) {
+		int length = snprintf(
+			canonical + used,
+			SWAPZ_PRIMARY_PARTITION_FACTS_MAX *
+				SWAPZ_PRIMARY_PARTITION_CANONICAL_BYTES - used,
+			"%u:%u,%u,%llu,%llu,%s,%s,%s,%s,%s\n",
+			partitions[index].device_major,
+			partitions[index].device_minor,
+			partitions[index].partition_number,
+			(unsigned long long)partitions[index].start_sectors,
+			(unsigned long long)partitions[index].size_sectors,
+			partitions[index].partuuid, partitions[index].parttype,
+			partitions[index].partscheme,
+			partitions[index].part_table_uuid,
+			partitions[index].part_table_type);
+
+		if (length <= 0 ||
+		    (size_t)length >= SWAPZ_PRIMARY_PARTITION_FACTS_MAX *
+				SWAPZ_PRIMARY_PARTITION_CANONICAL_BYTES - used) {
+			errno = EOVERFLOW;
+			goto out;
+		}
+		used += (size_t)length;
+	}
+	if (swapz_primary_sha256((const unsigned char *)canonical, used,
+				 digest) < 0)
+		goto out;
+	result = 0;
+out:
+	saved_errno = errno;
+	if (directory && closedir(directory) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (partitions) {
+		memset(partitions, 0,
+		       SWAPZ_PRIMARY_PARTITION_FACTS_MAX * sizeof(*partitions));
+		free(partitions);
+	}
+	if (canonical) {
+		memset(canonical, 0, SWAPZ_PRIMARY_PARTITION_FACTS_MAX *
+			       SWAPZ_PRIMARY_PARTITION_CANONICAL_BYTES);
+		free(canonical);
+	}
+	errno = saved_errno;
+	return result;
+}
+
+static int swapz_primary_shared_root_scope_collect(
+	const struct swapz_primary_target *target, dev_t root_device,
+	dev_t expected_target_parent, dev_t expected_root_parent,
+	int target_fd, struct swapz_primary_shared_root_scope *scope)
+{
+	struct swapz_primary_partition_scope root = {0};
+	struct swapz_primary_partition_scope target_partition = {0};
+	char root_sysfs_path[PATH_MAX];
+	char target_sysfs_path[PATH_MAX];
+	char root_parent_path[PATH_MAX];
+	char target_parent_path[PATH_MAX];
+	char parent_identity_sha256[65];
+	char host_identity_sha256[65];
+	char layout_sha256[65];
+	char parent_table_uuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	char parent_table_type[16];
+	char path[PATH_MAX];
+	char text[64];
+	dev_t root_parent;
+	dev_t target_parent;
+	uint64_t parent_size_sectors;
+	struct stat opened;
+	uint64_t opened_size = 0;
+	int length;
+
+	if (!target || !scope || !swapz_primary_target_valid(target) ||
+	    !root_device || !expected_target_parent ||
+	    expected_target_parent != expected_root_parent) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (swapz_primary_partition_scope_device(
+		    root_device, &root, root_sysfs_path, 1) < 0 ||
+	    swapz_primary_partition_scope_device(
+		    makedev(target->device_major, target->device_minor),
+		    &target_partition, target_sysfs_path, 1) < 0)
+		return -1;
+	if (strcmp(target_partition.partuuid, target->partuuid) ||
+	    target_partition.size_bytes != target->device_bytes) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (target_fd >= 0) {
+		dev_t expected_device = makedev(target->device_major,
+						target->device_minor);
+
+		if (fstat(target_fd, &opened) < 0)
+			return -1;
+		if (!S_ISBLK(opened.st_mode) || opened.st_rdev != expected_device) {
+			errno = ESTALE;
+			return -1;
+		}
+		if (ioctl(target_fd, BLKGETSIZE64, &opened_size) < 0)
+			return -1;
+		if (opened_size != target->device_bytes) {
+			errno = ESTALE;
+			return -1;
+		}
+		if (swapz_primary_sysfs_partuuid_matches(
+			    opened.st_rdev, target->partuuid) < 0)
+			return -1;
+	}
+	length = snprintf(root_parent_path, sizeof(root_parent_path), "%s",
+			  root_sysfs_path);
+	if (length <= 0 || (size_t)length >= sizeof(root_parent_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	length = snprintf(target_parent_path, sizeof(target_parent_path), "%s",
+			  target_sysfs_path);
+	if (length <= 0 || (size_t)length >= sizeof(target_parent_path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	{
+		char *slash = strrchr(root_parent_path, '/');
+		char *target_slash = strrchr(target_parent_path, '/');
+
+		if (!slash || !target_slash || slash == root_parent_path ||
+		    target_slash == target_parent_path) {
+			errno = ENODEV;
+			return -1;
+		}
+		*slash = '\0';
+		*target_slash = '\0';
+	}
+	if (strcmp(root_parent_path, target_parent_path) ||
+	    swapz_primary_path_format(path, sizeof(path), "%s/partition",
+				      target_parent_path) < 0) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (lstat(path, &(struct stat){0}) == 0) {
+		errno = ENODEV;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	if (swapz_primary_path_format(path, sizeof(path), "%s/dev",
+				      target_parent_path) < 0 ||
+	    swapz_primary_sysfs_dev_number(path, &target_parent) < 0)
+		return -1;
+	if (target_parent != expected_target_parent) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (swapz_primary_path_format(path, sizeof(path), "%s/size",
+				      target_parent_path) < 0 ||
+	    swapz_primary_read_sysfs_text(path, text, sizeof(text)) < 0 ||
+	    swapz_primary_parse_u64(text, &parent_size_sectors) < 0)
+		return -1;
+	if (!parent_size_sectors) {
+		errno = ENODATA;
+		return -1;
+	}
+	if (swapz_primary_path_format(path, sizeof(path), "%s/dev",
+				      root_parent_path) < 0 ||
+	    swapz_primary_sysfs_dev_number(path, &root_parent) < 0)
+		return -1;
+	if (root_parent != expected_root_parent) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (swapz_primary_udev_parent_identity_sha256(
+		    target_parent, target_parent_path, parent_size_sectors,
+		    parent_identity_sha256, parent_table_uuid,
+		    parent_table_type) < 0 ||
+	    swapz_primary_partition_layout_sha256(
+		    target_parent_path, parent_size_sectors, &root,
+		    &target_partition, layout_sha256) < 0 ||
+	    swapz_primary_live_host_identity_sha256(host_identity_sha256) < 0)
+		return -1;
+	if (strcmp(root.part_table_uuid, parent_table_uuid) ||
+	    strcmp(target_partition.part_table_uuid, parent_table_uuid) ||
+	    strcmp(root.part_table_type, parent_table_type) ||
+	    strcmp(target_partition.part_table_type, parent_table_type)) {
+		errno = ESTALE;
+		return -1;
+	}
+	memset(scope, 0, sizeof(*scope));
+	memcpy(scope->host_identity_sha256, host_identity_sha256,
+	       sizeof(scope->host_identity_sha256));
+	scope->root = root;
+	scope->target = target_partition;
+	scope->parent_major = major(target_parent);
+	scope->parent_minor = minor(target_parent);
+	scope->parent_size_sectors = parent_size_sectors;
+	memcpy(scope->parent_identity_sha256, parent_identity_sha256,
+	       sizeof(scope->parent_identity_sha256));
+	memcpy(scope->partition_layout_sha256, layout_sha256,
+	       sizeof(scope->partition_layout_sha256));
+	memset(host_identity_sha256, 0, sizeof(host_identity_sha256));
+	memset(parent_identity_sha256, 0, sizeof(parent_identity_sha256));
+	memset(layout_sha256, 0, sizeof(layout_sha256));
+	memset(parent_table_uuid, 0, sizeof(parent_table_uuid));
+	memset(parent_table_type, 0, sizeof(parent_table_type));
+	return 0;
+}
+
+static int swapz_primary_shared_root_scope_record_live(
+	const struct swapz_primary_target *target, dev_t root_device,
+	dev_t target_parent, dev_t root_parent, dev_t recovery_parent,
+	int target_fd, char scope_sha256[65])
+{
+	struct swapz_primary_shared_root_scope scope = {0};
+	struct stat directory_info;
+	char scope_digest[65];
+	int directory_fd = -1;
+	int result = -1;
+	int saved_errno;
+
+	if (!scope_sha256) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_shared_root_parent_relationship_valid(
+		target_parent, root_parent))
+		return -1;
+	if (swapz_primary_shared_root_scope_collect(
+		    target, root_device, target_parent, root_parent, target_fd,
+		    &scope) < 0 ||
+	    swapz_primary_shared_root_scope_sha256(&scope, scope_digest) < 0)
+		goto out;
+	memcpy(scope_sha256, scope_digest, sizeof(scope_digest));
+	if (!swapz_primary_recovery_parent_separation_valid(
+		    target_parent, recovery_parent))
+		goto out;
+	directory_fd = open(SWAPZ_PRIMARY_CONFIG_BASE,
+			    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (directory_fd < 0)
+		goto out;
+	if (fstat(directory_fd, &directory_info) < 0 ||
+	    !S_ISDIR(directory_info.st_mode) || directory_info.st_uid != 0 ||
+	    (directory_info.st_mode & 0022U)) {
+		errno = EPERM;
+		goto out;
+	}
+	if (swapz_primary_shared_root_scope_record_read_at(
+		    directory_fd, 0U, scope_digest) < 0)
+		goto out;
+	result = 0;
+out:
+	saved_errno = errno;
+	if (directory_fd >= 0 && close(directory_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	memset(&scope, 0, sizeof(scope));
+	memset(scope_digest, 0, sizeof(scope_digest));
+	errno = saved_errno;
+	return result;
+}
+#endif
 
 static int swapz_primary_read_qualification_report(
 	struct swapz_primary_qualification *qualification)
@@ -9243,6 +10682,8 @@ static int swapz_primary_prepare_metadata(
 	char live_module_sha256[65];
 	char live_oracle_sha256[65];
 	char original_header_sha256[65];
+	char shared_root_scope_sha256[65] = {0};
+	char rechecked_root_scope_sha256[65] = {0};
 	char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U] = {0};
 	uint64_t device_bytes = 0;
 	dev_t target_parent = 0;
@@ -9263,6 +10704,9 @@ static int swapz_primary_prepare_metadata(
 	int recovery_fd = -1;
 	int lock_fd = -1;
 	int claimed = 0;
+	int shared_root_parent_required = 0;
+	const char *failure_expected = NULL;
+	const char *failure_observed = NULL;
 	int result = -1;
 	int saved_errno;
 	const char *failure_phase = "identity-admission";
@@ -9375,6 +10819,8 @@ static int swapz_primary_prepare_metadata(
 	if (target_parent == makedev(recovery_parent_major,
 				      recovery_parent_minor)) {
 		failure_phase = "target-recovery-parent-separation";
+		failure_expected = "separate-physical-recovery-parent";
+		failure_observed = "same-physical-parent";
 		errno = EPERM;
 		goto out;
 	}
@@ -9393,10 +10839,18 @@ static int swapz_primary_prepare_metadata(
 		errno = EPERM;
 		goto out;
 	}
-	if (target_parent == root_parent) {
-		failure_phase = "target-root-device-parent-separation";
-		errno = EPERM;
-		goto out;
+	shared_root_parent_required = target_parent == root_parent;
+	if (shared_root_parent_required) {
+		failure_phase = "shared-root-parent-authorization-record";
+		if (swapz_primary_shared_root_scope_record_live(
+			    &target, mount_facts.root_device, target_parent,
+			    root_parent,
+			    makedev(recovery_parent_major, recovery_parent_minor),
+			    -1, shared_root_scope_sha256) < 0) {
+			failure_expected = "exact-host-root-target-parent-layout-record";
+			failure_observed = "missing-mismatched-or-unverifiable";
+			goto out;
+		}
 	}
 	failure_phase = "repeated-raw-target-swap-inventory";
 	if (swapz_primary_original_swap_is_quiescent() < 0)
@@ -9410,6 +10864,8 @@ static int swapz_primary_prepare_metadata(
 	if (target_parent == makedev(recovery_parent_major,
 				      recovery_parent_minor)) {
 		failure_phase = "repeated-target-recovery-parent-separation";
+		failure_expected = "separate-physical-recovery-parent";
+		failure_observed = "same-physical-parent";
 		errno = EPERM;
 		goto out;
 	}
@@ -9428,10 +10884,29 @@ static int swapz_primary_prepare_metadata(
 		errno = EPERM;
 		goto out;
 	}
-	if (target_parent == root_parent) {
-		failure_phase = "repeated-target-root-parent-separation";
-		errno = EPERM;
+	if ((target_parent == root_parent) != shared_root_parent_required) {
+		failure_phase = "repeated-root-parent-identity";
+		errno = ESTALE;
 		goto out;
+	}
+	if (shared_root_parent_required) {
+		failure_phase = "repeated-shared-root-parent-authorization";
+		if (swapz_primary_shared_root_scope_record_live(
+			    &target, mount_facts.root_device, target_parent,
+			    root_parent,
+			    makedev(recovery_parent_major, recovery_parent_minor),
+			    -1, rechecked_root_scope_sha256) < 0) {
+			failure_expected = "unchanged-authorized-root-parent-scope";
+			failure_observed = "missing-mismatched-or-changed";
+			goto out;
+		}
+		if (strcmp(shared_root_scope_sha256,
+			   rechecked_root_scope_sha256)) {
+			errno = ESTALE;
+			failure_expected = "unchanged-authorized-root-parent-scope";
+			failure_observed = "scope-changed";
+			goto out;
+		}
 	}
 	{
 		failure_phase = "physical-parent-swap-inventory";
@@ -9474,6 +10949,8 @@ static int swapz_primary_prepare_metadata(
 		dev_t verified_root_parent = 0;
 
 		failure_phase = "final-preclaim-identity-revalidation";
+		failure_expected = "unchanged-target-root-recovery-layout";
+		failure_observed = "identity-changed-or-unverifiable";
 		if (swapz_primary_target_preflight(
 			    target.partuuid, &verified_target,
 			    &verified_device_bytes, &verified_swap_header,
@@ -9516,6 +10993,39 @@ static int swapz_primary_prepare_metadata(
 		    verified_recovery_parent_minor != recovery_parent_minor) {
 			errno = ESTALE;
 			goto out;
+		}
+		failure_expected = NULL;
+		failure_observed = NULL;
+		if ((verified_target_parent == verified_root_parent) !=
+		    shared_root_parent_required) {
+			failure_phase = "final-root-parent-identity-revalidation";
+			failure_expected = "unchanged-root-target-parent-relationship";
+			failure_observed = "parent-relationship-changed";
+			errno = ESTALE;
+			goto out;
+		}
+		if (shared_root_parent_required) {
+			failure_phase = "final-shared-root-parent-authorization";
+			if (swapz_primary_shared_root_scope_record_live(
+				    &verified_target, verified_mount_facts.root_device,
+				    verified_target_parent, verified_root_parent,
+				    makedev(verified_recovery_parent_major,
+					    verified_recovery_parent_minor),
+				    -1, rechecked_root_scope_sha256) < 0) {
+				failure_expected =
+					"unchanged-authorized-root-parent-scope";
+				failure_observed =
+					"missing-mismatched-or-changed";
+				goto out;
+			}
+			if (strcmp(shared_root_scope_sha256,
+				   rechecked_root_scope_sha256)) {
+				errno = ESTALE;
+				failure_expected =
+					"unchanged-authorized-root-parent-scope";
+				failure_observed = "scope-changed";
+				goto out;
+			}
 		}
 		failure_phase = "final-physical-parent-swap-inventory";
 		{
@@ -9613,6 +11123,12 @@ static int swapz_primary_prepare_metadata(
 			"PRIMARY_PREPARE=FAILED phase=%s errno=%d error=%s "
 			"claim=none\n",
 			failure_phase, saved_errno, strerror(saved_errno));
+	if (result < 0 && failure_expected && failure_observed)
+		fprintf(stderr,
+			"PRIMARY_PREPARE=ADMISSION_DETAIL phase=%s expected=%s "
+			"observed=%s errno=%d claim=%s target_unchanged=true\n",
+			failure_phase, failure_expected, failure_observed,
+			saved_errno, claimed ? "retained" : "none");
 	if (result < 0)
 		errno = saved_errno;
 	return result;
@@ -9737,6 +11253,8 @@ static int swapz_primary_start_prepared(void)
 	char live_swapzctl_sha256[65];
 	char live_module_sha256[65];
 	char live_oracle_sha256[65];
+	char shared_root_scope_sha256[65] = {0};
+	char rechecked_root_scope_sha256[65] = {0};
 	size_t state_length = 0;
 	dev_t target_parent = 0;
 	dev_t root_parent = 0;
@@ -9757,6 +11275,9 @@ static int swapz_primary_start_prepared(void)
 	int mapper_resumed_by_call = 0;
 	int swap_activated_by_call = 0;
 	int target_swap_active;
+	int shared_root_parent_required = 0;
+	const char *failure_expected = NULL;
+	const char *failure_observed = NULL;
 	int recovery_fd = -1;
 	int lock_fd = -1;
 	int target_fd = -1;
@@ -9830,18 +11351,45 @@ static int swapz_primary_start_prepared(void)
 		errno = EPERM;
 		goto out;
 	}
+	failure_phase = "target-physical-parent-identity";
 	if (!swapz_primary_recovery_source_chain(
-		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent) ||
-	    target_parent == makedev(recovery_parent_major,
-				      recovery_parent_minor) ||
-	    swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0 ||
-	    mount_facts.target_mounted ||
-	    !swapz_primary_recovery_source_chain(
-		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
-		    &root_parent) ||
-	    target_parent == root_parent) {
+		    "/sys", SWAPZ_PRIMARY_TARGET_DEVICE, 0, &target_parent)) {
 		errno = EPERM;
 		goto out;
+	}
+	if (target_parent == makedev(recovery_parent_major,
+				      recovery_parent_minor)) {
+		failure_phase = "target-recovery-parent-separation";
+		failure_expected = "separate-physical-recovery-parent";
+		failure_observed = "same-physical-parent";
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "cross-namespace-mount-inventory";
+	if (swapz_primary_read_mount_facts(&mount_facts, target_parent) < 0 ||
+	    mount_facts.target_mounted) {
+		errno = EPERM;
+		goto out;
+	}
+	failure_phase = "root-device-parent-identity";
+	if (!swapz_primary_recovery_source_chain(
+		    "/sys", mount_facts.root_device, SWAPZ_PRIMARY_TARGET_DEVICE,
+		    &root_parent)) {
+		errno = EPERM;
+		goto out;
+	}
+	shared_root_parent_required = target_parent == root_parent;
+	if (shared_root_parent_required) {
+		failure_phase = "shared-root-parent-authorization-record";
+		if (swapz_primary_shared_root_scope_record_live(
+			    &target, mount_facts.root_device, target_parent,
+			    root_parent,
+			    makedev(recovery_parent_major, recovery_parent_minor),
+			    -1, shared_root_scope_sha256) < 0) {
+			failure_expected = "exact-host-root-target-parent-layout-record";
+			failure_observed = "missing-mismatched-or-unverifiable";
+			goto out;
+		}
 	}
 	if (swapz_primary_read_module_mapper_inventory(
 		    &module_loaded, &mapper_present) < 0 ||
@@ -9927,6 +11475,37 @@ static int swapz_primary_start_prepared(void)
 			errno = ESTALE;
 			goto out;
 		}
+		if ((prewrite_target_parent == prewrite_root_parent) !=
+		    shared_root_parent_required) {
+			failure_phase = "prewrite-root-parent-identity";
+			failure_expected = "unchanged-root-target-parent-relationship";
+			failure_observed = "parent-relationship-changed";
+			errno = ESTALE;
+			goto out;
+		}
+		if (shared_root_parent_required) {
+			failure_phase = "prewrite-shared-root-parent-authorization";
+			if (swapz_primary_shared_root_scope_record_live(
+				    &target, prewrite_mount_facts.root_device,
+				    prewrite_target_parent, prewrite_root_parent,
+				    makedev(recovery_parent_major,
+					    recovery_parent_minor), target_fd,
+				    rechecked_root_scope_sha256) < 0) {
+				failure_expected =
+					"exact-opened-target-and-unchanged-root-scope";
+				failure_observed =
+					"missing-mismatched-or-unverifiable";
+				goto out;
+			}
+			if (strcmp(shared_root_scope_sha256,
+				   rechecked_root_scope_sha256)) {
+				errno = ESTALE;
+				failure_expected =
+					"unchanged-authorized-root-parent-scope";
+				failure_observed = "scope-changed";
+				goto out;
+			}
+		}
 		active = swapz_primary_swap_device_active(prewrite_target_parent);
 		if (active != 0) {
 			if (active > 0)
@@ -9994,6 +11573,14 @@ out:
 		fprintf(stderr,
 			"PRIMARY_START=FAILED phase=%s errno=%d error=%s\n",
 			failure_phase, saved_errno, strerror(saved_errno));
+	if (result < 0 && failure_expected && failure_observed)
+		fprintf(stderr,
+			"PRIMARY_START=ADMISSION_DETAIL phase=%s expected=%s "
+			"observed=%s errno=%d retained_state=%s "
+			"target_unchanged=true\n",
+			failure_phase, failure_expected, failure_observed,
+			saved_errno, starting_persisted ?
+				"STARTING_PENDING_RECOVERY_UPDATE" : "READY");
 	if (result < 0 && starting_persisted && recovery_fd >= 0 &&
 	    lock_fd >= 0) {
 		int failure_errno = saved_errno;
@@ -10503,6 +12090,10 @@ static int swapz_primary_read_only_plan(void)
 	int recovery_same_physical_disk = 0;
 	int root_mount_source_chain_checked = 0;
 	int root_same_physical_disk = 0;
+	int shared_root_parent_exception_required = 0;
+	int shared_root_parent_exception_errno = 0;
+	const char *shared_root_parent_exception_status = "not_required";
+	char shared_root_scope_sha256[65] = "unavailable";
 	int dm_swapz_module_loaded = 0;
 	int swapz_mapper_present = 0;
 	char module_build_source_sha[SWAPZ_PRIMARY_SOURCE_SHA_LENGTH + 8U] =
@@ -10595,6 +12186,43 @@ static int swapz_primary_read_only_plan(void)
 			&root_physical_parent);
 	root_same_physical_disk = root_mount_source_chain_checked &&
 		root_physical_parent == target_physical_parent;
+	shared_root_parent_exception_required = root_same_physical_disk;
+	if (shared_root_parent_exception_required) {
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+		shared_root_parent_exception_status = "unavailable_in_rootless_test";
+#else
+		int scope_record_result = -1;
+		int scope_errno = ENODATA;
+
+		if (target_device_preflight && mount_inventory_read &&
+		    recovery_source_chain_checked) {
+			scope_record_result =
+				swapz_primary_shared_root_scope_record_live(
+					&target, mount_facts.root_device,
+					target_physical_parent, root_physical_parent,
+					makedev(recovery_physical_parent_major,
+						recovery_physical_parent_minor), -1,
+					shared_root_scope_sha256);
+			if (scope_record_result < 0)
+				scope_errno = errno ? errno : ENODATA;
+		}
+		if (scope_record_result == 0) {
+			shared_root_parent_exception_status = "valid";
+		} else {
+			shared_root_parent_exception_errno = scope_errno;
+			if (recovery_same_physical_disk &&
+			    swapz_primary_valid_sha256(shared_root_scope_sha256))
+				shared_root_parent_exception_status =
+					"blocked_recovery_same_parent";
+			else
+				shared_root_parent_exception_status =
+					scope_errno == ENOENT ? "missing" :
+					"invalid_or_unverifiable";
+		}
+#endif
+	} else if (!root_mount_source_chain_checked) {
+		shared_root_parent_exception_status = "root_identity_unavailable";
+	}
 
 	if (swaps_valid) {
 		for (i = 0; i < swap_count; ++i) {
@@ -10669,6 +12297,10 @@ static int swapz_primary_read_only_plan(void)
 	       "\"root_mount_device_minor\":%u,"
 	       "\"root_mount_source_chain_checked\":%s,"
 	       "\"root_same_physical_disk_as_target\":%s,"
+	       "\"shared_root_parent_exception_required\":%s,"
+	       "\"shared_root_parent_exception_status\":\"%s\","
+	       "\"shared_root_parent_exception_errno\":%d,"
+	       "\"shared_root_parent_scope_fingerprint\":\"%s\","
 	       "\"swap_inventory_read\":%s,"
 	       "\"active_swap_entries\":%llu,"
 	       "\"target_swap_entries\":%llu,"
@@ -10734,6 +12366,10 @@ static int swapz_primary_read_only_plan(void)
 	       minor(mount_facts.root_device),
 	       root_mount_source_chain_checked ? "true" : "false",
 	       root_same_physical_disk ? "true" : "false",
+	       shared_root_parent_exception_required ? "true" : "false",
+	       shared_root_parent_exception_status,
+	       shared_root_parent_exception_errno,
+	       shared_root_scope_sha256,
 	       swaps_valid ? "true" : "false",
 	       (unsigned long long)swap_count,
 	       (unsigned long long)target_count,
