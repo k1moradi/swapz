@@ -2361,14 +2361,39 @@ def failure_context(output, *, loaded=True, default_phase=None):
             if match:
                 primary_lifecycle_command_failure = match.groups()
 
-    unittest_failure = None
+unittest_failure = None
     if not loaded:
+        # Stage 2 is an aggregate transcript. A passing earlier suite may emit
+        # synthetic FAIL/ERROR text, so a rootless failure marker owns the
+        # failing-suite boundary. Use its classified test when available; if
+        # it says test=unavailable, do not guess a unittest cause from earlier
+        # transcript lines.
+        rootless_failure_marker_seen = False
+        rootless_reported_test = None
+        rootless_marker_re = re.compile(
+            r"FAIL: rootless phase=[A-Za-z0-9 ._:+-]{1,96} "
+            r"subtest=(?:unavailable|[a-z0-9-]{1,64}) "
+            r"test=(unavailable|test_[A-Za-z0-9_]{1,96}) "
+            r"exit=[0-9]{1,3} reason=[a-z0-9_]{1,64} "
+            r"phase_s=[0-9]+ stage_s=[0-9]+ line=[0-9]+ "
+            r"log=(?:unavailable|build/tests/rootless-failure\\."
+            r"[A-Za-z0-9]{8}/diagnostic[.]log)")
         for line in output.splitlines():
-            match = re.match(
-                r"^(?:FAIL|ERROR): (test_[A-Za-z0-9_]+) \(",
-                line.strip())
-            if match and unittest_failure is None:
-                unittest_failure = match.group(1)
+            match = rootless_marker_re.fullmatch(line.strip())
+            if match:
+                rootless_failure_marker_seen = True
+                rootless_reported_test = match.group(1)
+        if rootless_failure_marker_seen:
+            if rootless_reported_test != "unavailable":
+                unittest_failure = rootless_reported_test
+        else:
+            for line in output.splitlines():
+                match = re.match(
+                    r"^(?:FAIL|ERROR): (test_[A-Za-z0-9_]+) \\(",
+                    line.strip())
+                if match:
+                    unittest_failure = match.group(1)
+                    break
 
     native_diagnostic = None
     if not loaded:

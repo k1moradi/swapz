@@ -868,8 +868,12 @@ assertion before the bounded private log is finalized. Classification
 must stop at the first detailed unittest failure block so a later subtest cannot
 replace the first failing checkpoint. Retain its allowlisted unittest test name
 and first assertion or exception privately, even when teardown adds a later
-failure. The official native-stage diagnostic also selects the first unittest
-failure name rather than the final teardown name. The public marker may expose only an
+failure. The official native-stage diagnostic binds unittest identity to the failing
+rootless marker: when that marker carries an allowlisted test name, that name
+wins over earlier suite output and later teardown; when it carries
+`test=unavailable`, earlier transcript `FAIL:`/`ERROR:` lines must not be
+guessed as the cause. A directly invoked, unwrapped unittest may still use its
+first detailed failure block. The public marker may expose only an
 allowlisted `phase='[a-z0-9-]+'` value and classify that first private failure
 as `unittest_timeout`, `unittest_assertion`, `unittest_error`, or the
 generic nonzero reason. Exit 124 remains ambiguous unless that first private

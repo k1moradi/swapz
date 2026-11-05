@@ -3381,6 +3381,51 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(phase, "Native and rootless contracts")
         self.assertEqual(reason, "Unit test failed: test_fixture_schema")
 
+    def test_rootless_failure_marker_binds_unittest_to_failing_phase(self):
+        earlier_expected = (
+            "FAIL: test_expected_negative "
+            "(__main__.EarlierFixture.test_expected_negative)\\n"
+        )
+        classified = (
+            earlier_expected
+            + "FAIL: test_oracle_first "
+            "(__main__.PrimaryRealSwapContracts.test_oracle_first)\\n"
+            + "ERROR: test_teardown "
+            "(__main__.PrimaryRealSwapContracts.test_teardown)\\n"
+            + "FAIL: rootless phase=primary-real-swap-test.py "
+            "subtest=unavailable test=test_oracle_first exit=37 "
+            "reason=unittest_assertion phase_s=1 stage_s=2 line=332 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\\n"
+            + "Failed during: tests/runtime/native/primary-real-swap-test.py\\n"
+            + "Reason: exit=37 reason=unittest_assertion subtest=unavailable "
+            "phase_wall_s=1 stage_wall_s=2 line=332 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\\n"
+        )
+        phase, reason = runner.failure_context(
+            classified, loaded=False,
+            default_phase="Native and rootless contracts")
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertIn("Unit test failed: test_oracle_first", reason)
+        self.assertNotIn("test_expected_negative", reason)
+        self.assertNotIn("test_teardown", reason)
+
+        marker_only = (
+            earlier_expected
+            + "FAIL: rootless phase=C syntax: physical lifecycle seam "
+            "subtest=unavailable test=unavailable exit=1 "
+            "reason=nonzero_exit phase_s=1 stage_s=2 line=389 "
+            "log=unavailable\\n"
+            + "Failed during: C syntax: physical lifecycle seam\\n"
+            + "Reason: exit=1 reason=nonzero_exit subtest=unavailable "
+            "phase_wall_s=1 stage_wall_s=2 line=389 log=unavailable\\n"
+        )
+        phase, reason = runner.failure_context(
+            marker_only, loaded=False,
+            default_phase="Native and rootless contracts")
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertNotIn("test_expected_negative", reason)
+        self.assertIn("C syntax: physical lifecycle seam", reason)
+
     def test_randomized_native_failure_reports_safe_source_and_line(self):
         phase, reason = runner.failure_context(
             "FAIL: randomized-authority.c:188 expression=result == 0\n",
