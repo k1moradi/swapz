@@ -5485,7 +5485,12 @@ regressions must also assert that diagnostics never suggest `swapoff` or
 unowned swap deactivation in either a prepublication refusal or a
 postpublication UNCERTAIN result; the diagnostic must instead require
 read-only ownership investigation and defer state changes to a separately
-authenticated owner.
+authenticated owner. Formatter admission diagnostics must identify the
+selected proof class, expected condition, sanitized observed identity/evidence
+class, operation, phase/stage, originating errno and safe next action. When an
+active swap row first appears after publication, the captured diagnostic must
+contain the single postpublication UNCERTAIN classification and must not also
+emit a context-free REFUSED classification.
 
 This establishes a rootless observed-snapshot safety invariant, not exclusive
 kernel ownership or a bound against swapon racing between the final inventory

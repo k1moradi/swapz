@@ -3257,12 +3257,6 @@ static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
 		return -1;
 	if (format_swap_inventory_stream_clear(stream, device, parent_device) < 0) {
 		saved_errno = errno;
-		if (saved_errno == EOPNOTSUPP)
-			/* Active swap backing ownership cannot be inferred from its path. */
-			fputs("swapzctl format: REFUSED: /proc/swaps has an active "
-			      "entry without a verifiable kernel backing identity; "
-			      "investigate ownership read-only; only a separately "
-			      "authenticated owner may change active swap\n", stderr);
 		(void)fclose(stream);
 		errno = saved_errno;
 		return -1;
@@ -3329,6 +3323,7 @@ enum format_admission_stage {
 struct format_admission_problem {
 	enum format_admission_stage stage;
 	const char *expected;
+	const char *observed;
 };
 
 static void format_admission_problem_set(
@@ -3339,6 +3334,14 @@ static void format_admission_problem_set(
 		return;
 	problem->stage = stage;
 	problem->expected = expected;
+	problem->observed = "not-proven";
+}
+
+static void format_admission_problem_observed(
+	struct format_admission_problem *problem, const char *observed)
+{
+	if (problem)
+		problem->observed = observed;
 }
 
 static const char *format_admission_stage_name(enum format_admission_stage stage)
@@ -3357,6 +3360,22 @@ static const char *format_admission_stage_name(enum format_admission_stage stage
 	}
 }
 
+static const char *format_admission_proof_name(enum format_admission_stage stage)
+{
+	switch (stage) {
+	case FORMAT_ADMISSION_IDENTITY:
+		return "selected path, descriptor, PARTUUID and geometry identity";
+	case FORMAT_ADMISSION_DESCRIPTOR_MODE:
+		return "opened descriptor read-only state";
+	case FORMAT_ADMISSION_TOPOLOGY:
+		return "live removable USB parent topology";
+	case FORMAT_ADMISSION_INVENTORY:
+		return "complete mount-namespace and swap inventory";
+	default:
+		return "internal admission evidence";
+	}
+}
+
 static int format_preopen_verify(
 	const char *path, const struct format_expectation *expected,
 	struct format_admission_problem *problem)
@@ -3371,20 +3390,28 @@ static int format_preopen_verify(
 		problem, FORMAT_ADMISSION_IDENTITY,
 		"path and PARTUUID alias match the expected root-owned block identity");
 	if (!path || !expected) {
+		format_admission_problem_observed(problem, "invalid-admission-input");
 		errno = EINVAL;
 		return -1;
 	}
 	expected_device = makedev(expected->device_major, expected->device_minor);
 	expected_parent = makedev(expected->parent_major, expected->parent_minor);
-	if (lstat(path, &path_info) < 0 ||
-	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0)
+	if (lstat(path, &path_info) < 0) {
+		format_admission_problem_observed(problem, "selected-path-unavailable");
 		return -1;
+	}
+	if (format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0) {
+		format_admission_problem_observed(problem, "partuuid-alias-unavailable");
+		return -1;
+	}
 	if (!S_ISBLK(path_info.st_mode) || !S_ISBLK(partuuid_info.st_mode) ||
 	    path_info.st_uid != 0 || partuuid_info.st_uid != 0 ||
 	    (path_info.st_mode & S_IWOTH) ||
 	    (partuuid_info.st_mode & S_IWOTH) ||
 	    path_info.st_rdev != expected_device ||
 	    partuuid_info.st_rdev != expected_device) {
+		format_admission_problem_observed(
+			problem, "path-or-partuuid-alias-identity-mismatch");
 		errno = ESTALE;
 		return -1;
 	}
@@ -3392,17 +3419,25 @@ static int format_preopen_verify(
 	format_admission_problem_set(
 		problem, FORMAT_ADMISSION_IDENTITY,
 		"sysfs PARTUUID matches the expected partition identity");
-	if (format_sysfs_partuuid_matches(expected_device, expected->partuuid) < 0)
+	if (format_sysfs_partuuid_matches(expected_device, expected->partuuid) < 0) {
+		format_admission_problem_observed(
+			problem, "sysfs-partuuid-unavailable-or-mismatched");
 		return -1;
+	}
 
 	format_admission_problem_set(
 		problem, FORMAT_ADMISSION_TOPOLOGY,
 		"expected removable USB parent is the sole partition parent with "
 		"empty holders and slaves");
 	if (format_verify_parent_topology(expected_device, expected,
-					  &parent_device) < 0)
+					  &parent_device) < 0) {
+		format_admission_problem_observed(
+			problem, "removable-parent-topology-unavailable-or-mismatched");
 		return -1;
+	}
 	if (parent_device != expected_parent) {
+		format_admission_problem_observed(
+			problem, "parent-device-identity-mismatch");
 		errno = ESTALE;
 		return -1;
 	}
@@ -3411,9 +3446,18 @@ static int format_preopen_verify(
 		problem, FORMAT_ADMISSION_INVENTORY,
 		"selected partition and parent are absent from mount namespaces and "
 		"/proc/swaps");
-	if (format_mount_inventory_clear(expected_device, expected_parent) < 0 ||
-	    format_swap_inventory_clear(expected_device, expected_parent) < 0)
+	if (format_mount_inventory_clear(expected_device, expected_parent) < 0) {
+		format_admission_problem_observed(
+			problem, "mount-inventory-conflict-or-unavailable");
 		return -1;
+	}
+	if (format_swap_inventory_clear(expected_device, expected_parent) < 0) {
+		format_admission_problem_observed(
+			problem, errno == EOPNOTSUPP ?
+				"active-swap-backing-identity-and-owner-unverifiable" :
+				"swap-inventory-unavailable-malformed-or-close-failed");
+		return -1;
+	}
 	return 0;
 }
 
@@ -3434,15 +3478,29 @@ static int format_opened_verify(
 		"path, PARTUUID alias, opened descriptor inode and geometry match "
 		"the expected root-owned block identity");
 	if (fd < 0 || !path || !expected) {
+		format_admission_problem_observed(problem, "invalid-admission-input");
 		errno = EINVAL;
 		return -1;
 	}
 	expected_parent = makedev(expected->parent_major, expected->parent_minor);
-	if (lstat(path, &path_info) < 0 ||
-	    fstat(fd, &opened_info) < 0 ||
-	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0 ||
-	    ioctl(fd, BLKGETSIZE64, &opened_bytes) < 0)
+	if (lstat(path, &path_info) < 0) {
+		format_admission_problem_observed(problem, "selected-path-unavailable");
 		return -1;
+	}
+	if (fstat(fd, &opened_info) < 0) {
+		format_admission_problem_observed(
+			problem, "opened-descriptor-metadata-unavailable");
+		return -1;
+	}
+	if (format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0) {
+		format_admission_problem_observed(problem, "partuuid-alias-unavailable");
+		return -1;
+	}
+	if (ioctl(fd, BLKGETSIZE64, &opened_bytes) < 0) {
+		format_admission_problem_observed(
+			problem, "opened-device-geometry-unavailable");
+		return -1;
+	}
 	/*
 	 * Validate all opened/path identity fields before consulting topology.
 	 * Passing expected_parent here deliberately defers only the live parent
@@ -3451,6 +3509,8 @@ static int format_opened_verify(
 	if (!format_identity_values_match(expected, &path_info, &opened_info,
 					  &partuuid_info, opened_bytes,
 					  expected_parent)) {
+		format_admission_problem_observed(
+			problem, "opened-path-alias-or-geometry-identity-mismatch");
 		errno = ESTALE;
 		return -1;
 	}
@@ -3458,9 +3518,14 @@ static int format_opened_verify(
 	format_admission_problem_set(
 		problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
 		"opened block device reports BLKROGET == 0");
-	if (ioctl(fd, BLKROGET, &opened_read_only) < 0)
+	if (ioctl(fd, BLKROGET, &opened_read_only) < 0) {
+		format_admission_problem_observed(
+			problem, "opened-read-only-state-unavailable");
 		return -1;
+	}
 	if (opened_read_only) {
+		format_admission_problem_observed(
+			problem, "opened-descriptor-read-only");
 		errno = EROFS;
 		return -1;
 	}
@@ -3470,9 +3535,14 @@ static int format_opened_verify(
 		"expected removable USB parent is the sole partition parent with "
 		"empty holders and slaves");
 	if (format_verify_parent_topology(opened_info.st_rdev, expected,
-					  &parent_device) < 0)
+					  &parent_device) < 0) {
+		format_admission_problem_observed(
+			problem, "removable-parent-topology-unavailable-or-mismatched");
 		return -1;
+	}
 	if (parent_device != expected_parent) {
+		format_admission_problem_observed(
+			problem, "parent-device-identity-mismatch");
 		errno = ESTALE;
 		return -1;
 	}
@@ -3481,16 +3551,28 @@ static int format_opened_verify(
 		problem, FORMAT_ADMISSION_IDENTITY,
 		"sysfs PARTUUID matches the expected opened block identity");
 	if (format_sysfs_partuuid_matches(opened_info.st_rdev,
-					 expected->partuuid) < 0)
+					 expected->partuuid) < 0) {
+		format_admission_problem_observed(
+			problem, "sysfs-partuuid-unavailable-or-mismatched");
 		return -1;
+	}
 
 	format_admission_problem_set(
 		problem, FORMAT_ADMISSION_INVENTORY,
 		"selected partition and parent are absent from mount namespaces and "
 		"/proc/swaps");
-	if (format_mount_inventory_clear(opened_info.st_rdev, parent_device) < 0 ||
-	    format_swap_inventory_clear(opened_info.st_rdev, parent_device) < 0)
+	if (format_mount_inventory_clear(opened_info.st_rdev, parent_device) < 0) {
+		format_admission_problem_observed(
+			problem, "mount-inventory-conflict-or-unavailable");
 		return -1;
+	}
+	if (format_swap_inventory_clear(opened_info.st_rdev, parent_device) < 0) {
+		format_admission_problem_observed(
+			problem, errno == EOPNOTSUPP ?
+				"active-swap-backing-identity-and-owner-unverifiable" :
+				"swap-inventory-unavailable-malformed-or-close-failed");
+		return -1;
+	}
 	return 0;
 }
 
@@ -3649,21 +3731,60 @@ static void format_report_failure(const char *summary, const char *failed_stage,
 			    "attempted");
 }
 
-static void format_report_admission_refusal(
-	const char *summary, const struct format_admission_problem *problem,
-	int original_errno)
+static int format_admission_has_unverifiable_active_swap(
+	const struct format_admission_problem *problem, int original_errno)
 {
-	format_report_refusal(summary, format_admission_stage_name(problem->stage),
-			      problem->expected, original_errno);
+	return problem && problem->observed &&
+	       problem->stage == FORMAT_ADMISSION_INVENTORY &&
+	       original_errno == EOPNOTSUPP &&
+	       !strcmp(problem->observed,
+		       "active-swap-backing-identity-and-owner-unverifiable");
+}
+
+static void format_report_admission_error(
+	const char *classification, const char *summary, const char *operation,
+	const struct format_admission_problem *problem, int original_errno,
+	const char *next_action)
+{
+	fprintf(stderr,
+		"swapzctl format: %s%s: stage=%s; proof=%s; expected=%s; "
+		"observed=%s; operation=%s; errno=%d (%s); action=%s\n",
+		classification, summary,
+		format_admission_stage_name(problem->stage),
+		format_admission_proof_name(problem->stage), problem->expected,
+		problem->observed, operation, original_errno,
+		strerror(original_errno), next_action);
+	errno = original_errno;
+}
+
+static void format_report_admission_refusal(
+	const char *summary, const char *operation,
+	const struct format_admission_problem *problem, int original_errno)
+{
+	const char *next_action =
+		format_admission_has_unverifiable_active_swap(problem, original_errno) ?
+		"inspect active swap inventory and ownership read-only; no header "
+		"write; only a separately authenticated owner may change active swap" :
+		"inspect the failed stage read-only; no header write";
+
+	format_report_admission_error("REFUSED: ", summary, operation, problem,
+				      original_errno, next_action);
 }
 
 static void format_report_admission_uncertain(
-	const char *summary, const struct format_admission_problem *problem,
-	int original_errno)
+	const char *summary, const char *operation,
+	const struct format_admission_problem *problem, int original_errno)
 {
-	format_report_uncertain(summary,
-				format_admission_stage_name(problem->stage),
-				problem->expected, original_errno);
+	const char *next_action =
+		format_admission_has_unverifiable_active_swap(problem, original_errno) ?
+		"RECOVERY REQUIRED before retry; inspect header and active swap "
+		"ownership read-only; only a separately authenticated owner may "
+		"change active swap" :
+		"RECOVERY REQUIRED before retry; inspect header and target identity "
+		"read-only";
+
+	format_report_admission_error("UNCERTAIN: ", summary, operation, problem,
+				      original_errno, next_action);
 }
 
 static int format_authorized_opened_verify(
@@ -3674,8 +3795,11 @@ static int format_authorized_opened_verify(
 	format_admission_problem_set(
 		problem, FORMAT_ADMISSION_IDENTITY,
 		"protected target selector PARTUUID matches the expected partition");
-	if (ops->authorized_target_verify(ops->context, expected) < 0)
+	if (ops->authorized_target_verify(ops->context, expected) < 0) {
+		format_admission_problem_observed(
+			problem, "protected-selector-unavailable-or-mismatched");
 		return -1;
+	}
 	return ops->verify_opened(ops->context, fd, path, expected, problem);
 }
 
@@ -3688,6 +3812,7 @@ static int format_device_with_ops(
 	struct format_admission_problem admission_problem = {
 		.stage = FORMAT_ADMISSION_IDENTITY,
 		.expected = "valid formatter admission state",
+		.observed = "not-proven",
 	};
 	int already_formatted = 0;
 	int publication_attempted = 0;
@@ -3704,21 +3829,25 @@ static int format_device_with_ops(
 		errno = EINVAL;
 		return 1;
 	}
+	format_admission_problem_set(
+		&admission_problem, FORMAT_ADMISSION_IDENTITY,
+		"protected target selector PARTUUID matches the expected partition");
 	if (ops->authorized_target_verify(ops->context, expected) < 0) {
 		saved_errno = errno;
-		format_report_refusal(
+		format_admission_problem_observed(
+			&admission_problem,
+			"protected-selector-unavailable-or-mismatched");
+		format_report_admission_refusal(
 			"protected target selector does not authorize this partition",
-			"identity",
-			"protected target selector PARTUUID matches the expected partition",
-			saved_errno);
+			"target selection", &admission_problem, saved_errno);
 		return 2;
 	}
 	if (ops->preopen_verify(ops->context, path, expected,
 				&admission_problem) < 0) {
 		saved_errno = errno;
 		format_report_admission_refusal(
-			"pre-open admission is not proven", &admission_problem,
-			saved_errno);
+			"pre-open admission is not proven", "pre-open target admission",
+			&admission_problem, saved_errno);
 		return 2;
 	}
 	fd = ops->open_device(ops->context, path);
@@ -3736,7 +3865,8 @@ static int format_device_with_ops(
 		saved_errno = errno;
 		format_report_admission_refusal(
 			"opened-descriptor admission is not proven",
-			&admission_problem, saved_errno);
+			"opened-descriptor admission", &admission_problem,
+			saved_errno);
 		result = 2;
 		goto close_error;
 	}
@@ -3754,7 +3884,8 @@ static int format_device_with_ops(
 			format_report_admission_refusal(
 				"target admission changed while recognizing "
 				"existing SWZ header",
-				&admission_problem, saved_errno);
+				"existing-header recognition", &admission_problem,
+				saved_errno);
 			result = 2;
 			goto close_error;
 		}
@@ -3809,7 +3940,7 @@ static int format_device_with_ops(
 		saved_errno = errno;
 		format_report_admission_refusal(
 			"target identity changed before header write",
-			&admission_problem, saved_errno);
+			"header publication", &admission_problem, saved_errno);
 		result = 2;
 		goto close_error;
 	}
@@ -3861,7 +3992,8 @@ static int format_device_with_ops(
 		saved_errno = errno;
 		format_report_admission_uncertain(
 			"target admission became uncertain after header write",
-			&admission_problem, saved_errno);
+			"post-publication verification", &admission_problem,
+			saved_errno);
 		result = 3;
 		goto close_error;
 	}
@@ -3887,7 +4019,8 @@ static int format_device_with_ops(
 		saved_errno = errno;
 		format_report_admission_uncertain(
 			"target admission changed after header verification",
-			&admission_problem, saved_errno);
+			"post-publication verification", &admission_problem,
+			saved_errno);
 		result = 3;
 		goto close_error;
 	}

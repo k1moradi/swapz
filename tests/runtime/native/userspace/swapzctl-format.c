@@ -131,6 +131,7 @@ enum admission_change {
 	ADMISSION_ALIAS_CHANGED,
 	ADMISSION_PATH_SYMLINK,
 	ADMISSION_PATH_INODE_CHANGED,
+	ADMISSION_PATH_VIEW_CHANGED,
 	ADMISSION_PATH_REGULAR_CHANGED,
 	ADMISSION_OPENED_RO_QUERY_FAILED,
 	ADMISSION_OPENED_READ_ONLY,
@@ -151,7 +152,12 @@ static struct {
 	unsigned char block_zero[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned long long geometry_bytes;
 	dev_t alias_device;
+	dev_t path_filesystem_device;
 	ino_t path_inode;
+	dev_t observed_path_filesystem_device;
+	ino_t observed_path_inode;
+	dev_t observed_opened_filesystem_device;
+	ino_t observed_opened_inode;
 	enum admission_change change;
 	unsigned int opens, reads, writes, syncs, closes;
 	unsigned int partition_path_stats;
@@ -284,6 +290,10 @@ static void admission_after_first_read(void)
 	case ADMISSION_PATH_INODE_CHANGED:
 		++admission_fixture.path_inode;
 		break;
+	case ADMISSION_PATH_VIEW_CHANGED:
+		admission_fixture.path_filesystem_device = makedev(0U, 8U);
+		admission_fixture.path_inode = 18U;
+		break;
 	case ADMISSION_PATH_REGULAR_CHANGED:
 		++admission_fixture.path_inode;
 		admission_fixture.path_is_regular = 1;
@@ -305,13 +315,20 @@ static void admission_after_first_read(void)
 		test_fopen_denied_path = "/proc/swaps";
 }
 
-static struct stat admission_block_stat(dev_t device, ino_t inode)
+static struct stat admission_block_stat_on_filesystem(
+	dev_t filesystem_device, dev_t device, ino_t inode)
 {
 	const struct stat info = {
 		.st_mode = S_IFBLK | 0600, .st_uid = 0,
-		.st_dev = makedev(0U, 7U), .st_rdev = device, .st_ino = inode,
+		.st_dev = filesystem_device, .st_rdev = device, .st_ino = inode,
 	};
 	return info;
+}
+
+static struct stat admission_block_stat(dev_t device, ino_t inode)
+{
+	return admission_block_stat_on_filesystem(
+		makedev(0U, 7U), device, inode);
 }
 
 static int admission_stat(const char *path, struct stat *info)
@@ -350,8 +367,18 @@ static int admission_lstat(const char *path, struct stat *info)
 			admission_observe_identity("path-symlink-substitution");
 		else if (admission_fixture.change == ADMISSION_PATH_INODE_CHANGED)
 			admission_observe_identity("same-dev_t-new-inode");
-		*info = admission_block_stat(makedev(8U, 1U),
-					    admission_fixture.path_inode);
+		else if (admission_fixture.change == ADMISSION_PATH_VIEW_CHANGED &&
+			 admission_fixture.reads)
+			admission_observe_identity(
+				"current-mount-view-path-substitution");
+		*info = admission_block_stat_on_filesystem(
+			admission_fixture.path_filesystem_device,
+			makedev(8U, 1U), admission_fixture.path_inode);
+		if (admission_fixture.reads) {
+			admission_fixture.observed_path_filesystem_device =
+				info->st_dev;
+			admission_fixture.observed_path_inode = info->st_ino;
+		}
 		if (admission_fixture.path_is_symlink)
 			info->st_mode = S_IFLNK | 0777;
 		else if (admission_fixture.path_is_regular) {
@@ -373,6 +400,11 @@ static int admission_fstat(int fd, struct stat *info)
 {
 	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
 		*info = admission_block_stat(makedev(8U, 1U), 17U);
+		if (admission_fixture.reads) {
+			admission_fixture.observed_opened_filesystem_device =
+				info->st_dev;
+			admission_fixture.observed_opened_inode = info->st_ino;
+		}
 		return 0;
 	}
 	return fstat(fd, info);
@@ -576,6 +608,7 @@ static void admission_start(enum admission_change change)
 	admission_fixture.change = change;
 	admission_fixture.geometry_bytes = 124787884032ULL;
 	admission_fixture.alias_device = makedev(8U, 1U);
+	admission_fixture.path_filesystem_device = makedev(0U, 7U);
 	admission_fixture.path_inode = 17U;
 	admission_fixture.descriptor_mode = O_RDWR;
 	for (size_t index = 0; index < sizeof(dirs) / sizeof(dirs[0]); ++index)
@@ -777,6 +810,9 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		  "identity", "opened descriptor inode and geometry match" },
 		{ ADMISSION_PATH_INODE_CHANGED, "same-dev_t-new-inode", ESTALE,
 		  "identity", "opened descriptor inode and geometry match" },
+		{ ADMISSION_PATH_VIEW_CHANGED,
+		  "current-mount-view-path-substitution", ESTALE,
+		  "identity", "opened descriptor inode and geometry match" },
 		{ ADMISSION_PATH_REGULAR_CHANGED,
 		  "path-terminal-regular-replacement", ESTALE,
 		  "identity", "opened descriptor inode and geometry match" },
@@ -821,6 +857,9 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 				    "header write") ||
 			    !strstr(report, stage_field) ||
 			    !strstr(report, cases[index].expected_condition) ||
+			    !strstr(report, "proof=") ||
+			    !strstr(report, "observed=") ||
+			    !strstr(report, "operation=header publication") ||
 			    !strstr(report, errno_field) ||
 			    !strstr(report, "action=") ||
 			    !strstr(report, strerror(cases[index].expected_errno)) ||
@@ -828,6 +867,13 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 			    strcmp(admission_fixture.observed_identity,
 				   cases[index].observed_identity) ||
 			    admission_fixture.observed_identity_calls != 1U ||
+			    (cases[index].change == ADMISSION_PATH_VIEW_CHANGED &&
+			     (admission_fixture.observed_path_filesystem_device !=
+				      makedev(0U, 8U) ||
+			      admission_fixture.observed_path_inode != 18U ||
+			      admission_fixture.observed_opened_filesystem_device !=
+				      makedev(0U, 7U) ||
+			      admission_fixture.observed_opened_inode != 17U)) ||
 			    strstr(report, ADMISSION_DEVICE) ||
 			    admission_fixture.opens != 1U ||
 			    admission_fixture.reads != 1U ||
@@ -943,10 +989,13 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 	static const char expected_inventory_condition[] =
 		"expected=selected partition and parent are absent from mount "
 		"namespaces and /proc/swaps";
-	static const char expected_refusal_action[] =
+	static const char generic_refusal_action[] =
 		"action=inspect the failed stage read-only; no header write";
-	static const char active_entry_warning[] =
-		"active entry without a verifiable kernel backing identity";
+	static const char active_refusal_action[] =
+		"action=inspect active swap inventory and ownership read-only; "
+		"no header write; only a separately authenticated owner may change active swap";
+	static const char active_entry_observation[] =
+		"observed=active-swap-backing-identity-and-owner-unverifiable";
 	static const char authorized_owner_warning[] =
 		"only a separately authenticated owner may change active swap";
 
@@ -958,6 +1007,9 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		const char *expected_summary = cases[index].late ?
 			"REFUSED: target identity changed before header write" :
 			"REFUSED: pre-open admission is not proven";
+		const char *expected_action =
+			cases[index].expected_errno == EOPNOTSUPP ?
+				active_refusal_action : generic_refusal_action;
 		unsigned int previous_pwrite_calls;
 		unsigned int expected_inventory_checks = cases[index].late ? 3U : 1U;
 		unsigned int expected_open_calls = cases[index].late ? 1U : 0U;
@@ -992,14 +1044,19 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		    !strstr(report, "stage=inventory") ||
 		    !strstr(report, expected_inventory_condition) ||
 		    !strstr(report, errno_field) ||
-		    !strstr(report, expected_refusal_action) ||
+		    !strstr(report, expected_action) ||
 		    !strstr(report, strerror(cases[index].expected_errno)) ||
 		    (cases[index].expected_errno == EOPNOTSUPP &&
-		     (!strstr(report, active_entry_warning) ||
+		     (!strstr(report, active_entry_observation) ||
 		      !strstr(report, authorized_owner_warning))) ||
 		    (cases[index].expected_errno != EOPNOTSUPP &&
-		     (strstr(report, active_entry_warning) ||
+		     (strstr(report, active_entry_observation) ||
 		      strstr(report, authorized_owner_warning))) ||
+		    !strstr(report,
+			    "proof=complete mount-namespace and swap inventory") ||
+		    !strstr(report, cases[index].late ?
+				    "operation=header publication" :
+				    "operation=pre-open target admission") ||
 		    strstr(report, "swapoff") ||
 		    strstr(report, "deactivate active swap") ||
 		    strstr(report, ADMISSION_DEVICE) ||
@@ -1073,8 +1130,9 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
 	block_zero_modified = memcmp(admission_fixture.block_zero, original_block,
 				     sizeof(original_block)) != 0;
 	active_inventory_reported =
-		strstr(report, "active entry without a verifiable kernel "
-		       "backing identity") != NULL;
+		strstr(report,
+		       "observed=active-swap-backing-identity-and-owner-unverifiable") !=
+		NULL;
 	if (active_inventory_reported && observed_errno == EOPNOTSUPP &&
 	    admission_fixture.swap_inventory_checks == 4U)
 		observed_inventory_class =
@@ -1088,8 +1146,13 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
 	    !strstr(report, "UNCERTAIN: target admission became uncertain "
 		    "after header write") ||
 	    !strstr(report, "stage=inventory") ||
+	    !strstr(report,
+		    "proof=complete mount-namespace and swap inventory") ||
 	    !active_inventory_reported ||
-	    !strstr(report, "only a separately authenticated owner may change active swap") ||
+	    !strstr(report, "operation=post-publication verification") ||
+	    !strstr(report,
+		    "only a separately authenticated owner may change active swap") ||
+	    strstr(report, "REFUSED:") ||
 	    strstr(report, "swapoff") ||
 	    strstr(report, "deactivate active swap") ||
 	    !strstr(report, errno_field) ||
