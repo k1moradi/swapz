@@ -572,14 +572,20 @@ static int test_submitter_active_gate_and_lane_drain(void)
 }
 
 
+
 /*
- * Force cancellation either before or after a worker terminal CAS. The worker
- * holds a prepared-page reference until its last access, while the ordered BIO
- * owner holds the other. Drain joins both completion paths; only final-put may
- * clear the state and return slot 63. The next claimant must not see an old
- * terminal state or bytes from a prior failed preparation. Scheduling barriers
- * are deliberately before publication, not a replacement for state/result
- * release/acquire edges. This is a finite C11 model, not an LKMM proof.
+ * Force terminal failure either before or after a worker terminal publication.
+ * The worker holds a prepared-page reference until its last access, while the
+ * ordered BIO owner holds the other. Drain joins both completion paths; only
+ * final-put may clear the state and return slot 63. The next claimant must not
+ * see an old terminal state or bytes from a prior failed preparation.
+ *
+ * READY is charged before publication, matching production reservoir
+ * accounting. A terminal owner retires unconsumed READY to CONSUMED and drops
+ * that charge exactly once; an early PREPARING cancellation becomes CANCELLED,
+ * and a later non-error worker result rolls its speculative charge back when
+ * publication loses. Scheduling barriers force order but do not replace the
+ * state/result release-acquire edges. This is a finite C11 model, not LKMM.
  */
 #define CANCELLATION_ROUNDS 384U
 struct cancellation_lifetime_handoff {
@@ -595,18 +601,43 @@ struct cancellation_lifetime_handoff {
 	_Atomic unsigned int drain_done;
 	_Atomic unsigned int failures;
 	_Atomic int result_ready;
-	_Atomic int terminal_error;
 	_Atomic int previous_state;
+	_Atomic int ready_charges;
 	pthread_barrier_t start;
 	pthread_barrier_t snapshot_taken;
 	pthread_barrier_t allow_result;
 	pthread_barrier_t allow_worker_put;
 	pthread_barrier_t recycled;
 	int codec_result;
+	int result_length;
 	unsigned int generation;
+	unsigned int prepared_generation;
 	unsigned char raw_snapshot[RAW_SNAPSHOT_BYTES];
 	unsigned char prepared_bytes[RAW_SNAPSHOT_BYTES];
 };
+
+static int cancellation_precedes_result(unsigned int iteration)
+{
+	return iteration % 6U >= 3U;
+}
+
+static int cancellation_worker_puts_first(unsigned int iteration)
+{
+	const unsigned int case_index = iteration % 6U;
+
+	return case_index == 1U || case_index == 2U;
+}
+
+static const char *cancellation_terminal_owner(unsigned int iteration)
+{
+	return cancellation_precedes_result(iteration) ?
+		"ordered-cancel" : "worker-publish";
+}
+
+static const char *cancellation_final_owner(unsigned int iteration)
+{
+	return cancellation_worker_puts_first(iteration) ? "ordered" : "worker";
+}
 
 static void cancellation_expect(struct cancellation_lifetime_handoff *handoff,
 		unsigned int iteration, const char *phase,
@@ -617,12 +648,13 @@ static void cancellation_expect(struct cancellation_lifetime_handoff *handoff,
 	if (passed)
 		return;
 	fprintf(stderr, "preparation-lifetime iteration=%u phase=%s "
-		"refs=%u->%u slot_mask=0x%llx slot_state=%d "
+		"refs=%u->%u slot_mask=0x%llx slot_state=%d ready_charge=%d "
 		"expected_terminal_owner=%s expected_final_owner=%s "
 		"actual_transition=%d: %s\n", iteration, phase,
 		refs_before, refs_after,
 		(unsigned long long)atomic64_read(&handoff->free_mask),
 		swapz_preparation_read_state(&handoff->state),
+		atomic_load_explicit(&handoff->ready_charges, memory_order_relaxed),
 		expected_terminal_owner, expected_final_owner,
 		actual_transition, condition);
 	atomic_fetch_add_explicit(&handoff->failures, 1, memory_order_relaxed);
@@ -660,10 +692,9 @@ static void *cancelled_preparation_worker(void *opaque)
 	unsigned int iteration;
 
 	for (iteration = 0; iteration < CANCELLATION_ROUNDS; ++iteration) {
-		const int cancelled = (iteration % 6U) >= 3U;
-		const char *terminal_owner = cancelled ? "ordered-cancel" :
-			"worker-publish";
-		const char *final_owner = cancelled ? "worker" : "ordered";
+		const int cancel_first = cancellation_precedes_result(iteration);
+		const char *terminal_owner = cancellation_terminal_owner(iteration);
+		const char *final_owner = cancellation_final_owner(iteration);
 		unsigned int byte, refs_before;
 		int previous_state;
 
@@ -673,31 +704,46 @@ static void *cancelled_preparation_worker(void *opaque)
 				(unsigned char)(handoff->generation + byte);
 		(void)pthread_barrier_wait(&handoff->snapshot_taken);
 		(void)pthread_barrier_wait(&handoff->allow_result);
+
 		refs_before = atomic_load_explicit(&handoff->references,
 			memory_order_relaxed);
 		CANCELLATION_CHECK(handoff, iteration, "worker-before-result",
 			terminal_owner, final_owner, refs_before, refs_before, -1,
-			refs_before == (cancelled ? 1U : 2U));
-		/* All payload writes precede the terminal CAS or late-result release. */
-		for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
-			handoff->prepared_bytes[byte] =
-				(unsigned char)(handoff->generation ^ byte ^ 0x5aU);
-		if (handoff->codec_result < 0)
-			atomic_store_explicit(&handoff->terminal_error,
-				handoff->codec_result, memory_order_release);
+			refs_before == (cancel_first ? 1U : 2U));
+
+		handoff->result_length = handoff->codec_result;
+		if (handoff->result_length > 0) {
+			handoff->prepared_generation = handoff->generation;
+			for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
+				handoff->prepared_bytes[byte] =
+					(unsigned char)(handoff->generation ^ byte ^ 0x5aU);
+		}
+		if (handoff->result_length >= 0)
+			atomic_fetch_add_explicit(&handoff->ready_charges, 1,
+				memory_order_relaxed);
+
 		previous_state = swapz_preparation_publish_codec_result(
-			&handoff->state, handoff->codec_result);
+			&handoff->state, handoff->result_length);
 		atomic_store_explicit(&handoff->previous_state, previous_state,
 			memory_order_relaxed);
-		if (previous_state == SWAPZ_PREPARATION_PREPARING)
+		if (previous_state == SWAPZ_PREPARATION_PREPARING) {
 			atomic_fetch_add_explicit(&handoff->terminal_publications, 1,
 				memory_order_relaxed);
+		} else if (handoff->result_length >= 0) {
+			CANCELLATION_CHECK(handoff, iteration, "worker-ready-rollback",
+				terminal_owner, final_owner, refs_before, refs_before,
+				previous_state,
+				atomic_fetch_sub_explicit(&handoff->ready_charges, 1,
+					memory_order_relaxed) == 1);
+		}
 		atomic_fetch_add_explicit(&handoff->result_attempts, 1,
 			memory_order_relaxed);
 		CANCELLATION_CHECK(handoff, iteration, "worker-result-cas",
 			terminal_owner, final_owner, refs_before, refs_before,
-			previous_state, previous_state == (cancelled ?
-			SWAPZ_PREPARATION_RAW_SELECTED : SWAPZ_PREPARATION_PREPARING));
+			previous_state, previous_state == (cancel_first ?
+				SWAPZ_PREPARATION_CANCELLED :
+				SWAPZ_PREPARATION_PREPARING));
+
 		atomic_store_explicit(&handoff->result_ready, 1,
 			memory_order_release);
 		(void)pthread_barrier_wait(&handoff->allow_worker_put);
@@ -705,8 +751,10 @@ static void *cancelled_preparation_worker(void *opaque)
 			terminal_owner, final_owner);
 		CANCELLATION_CHECK(handoff, iteration, "worker-put-owner",
 			terminal_owner, final_owner, refs_before, refs_before - 1U,
-			previous_state, refs_before == (cancelled ? 1U : 2U));
-		/* No descriptor or payload access is permitted after this release. */
+			previous_state,
+			refs_before == (cancellation_worker_puts_first(iteration) ?
+				2U : 1U));
+		/* No descriptor, state or payload access is permitted after this put. */
 		atomic_store_explicit(&handoff->worker_done, iteration + 1U,
 			memory_order_release);
 		(void)pthread_barrier_wait(&handoff->recycled);
@@ -721,13 +769,10 @@ static void *drain_cancelled_preparations(void *opaque)
 
 	for (iteration = 0; iteration < CANCELLATION_ROUNDS; ++iteration) {
 		const unsigned int epoch = iteration + 1U;
-		const char *terminal_owner = iteration % 6U >= 3U ?
-			"ordered-cancel" : "worker-publish";
-		const char *final_owner = iteration % 6U >= 3U ?
-			"worker" : "ordered";
+		const char *terminal_owner = cancellation_terminal_owner(iteration);
+		const char *final_owner = cancellation_final_owner(iteration);
 		unsigned int references;
 
-		/* Both ordered completion and workqueue completion must be joined. */
 		while (atomic_load_explicit(&handoff->owner_done,
 				memory_order_acquire) < epoch ||
 		       atomic_load_explicit(&handoff->worker_done,
@@ -738,7 +783,12 @@ static void *drain_cancelled_preparations(void *opaque)
 		CANCELLATION_CHECK(handoff, iteration, "drain-joined",
 			terminal_owner, final_owner, references, references, -1,
 			references == 0 &&
-			(uint64_t)atomic64_read(&handoff->free_mask) == (1ULL << 63));
+			atomic_load_explicit(&handoff->ready_charges,
+				memory_order_relaxed) == 0 &&
+			(uint64_t)atomic64_read(&handoff->free_mask) ==
+				(1ULL << 63) &&
+			swapz_preparation_read_state(&handoff->state) ==
+				SWAPZ_PREPARATION_EMPTY);
 		atomic_store_explicit(&handoff->drain_done, epoch,
 			memory_order_release);
 		(void)pthread_barrier_wait(&handoff->recycled);
@@ -765,8 +815,8 @@ static int test_cancellation_terminal_drain_and_slot_reuse(void)
 	atomic_init(&handoff.drain_done, 0);
 	atomic_init(&handoff.failures, 0);
 	atomic_init(&handoff.result_ready, 0);
-	atomic_init(&handoff.terminal_error, 0);
 	atomic_init(&handoff.previous_state, SWAPZ_PREPARATION_EMPTY);
+	atomic_init(&handoff.ready_charges, 0);
 	CHECK(pthread_barrier_init(&handoff.start, NULL, 2) == 0);
 	CHECK(pthread_barrier_init(&handoff.snapshot_taken, NULL, 2) == 0);
 	CHECK(pthread_barrier_init(&handoff.allow_result, NULL, 2) == 0);
@@ -778,14 +828,15 @@ static int test_cancellation_terminal_drain_and_slot_reuse(void)
 		&handoff) == 0);
 
 	for (iteration = 0; iteration < CANCELLATION_ROUNDS; ++iteration) {
-		const int cancelled = iteration % 6U >= 3U;
-		const int codec_result = results[iteration %
-			(sizeof(results) / sizeof(results[0]))];
-		const char *terminal_owner = cancelled ? "ordered-cancel" :
-			"worker-publish";
-		const char *final_owner = cancelled ? "worker" : "ordered";
+		const int cancel_first = cancellation_precedes_result(iteration);
+		const int worker_first_put =
+			cancellation_worker_puts_first(iteration);
+		const int codec_result =
+			results[iteration % (sizeof(results) / sizeof(results[0]))];
+		const char *terminal_owner = cancellation_terminal_owner(iteration);
+		const char *final_owner = cancellation_final_owner(iteration);
 		unsigned int byte, refs_before;
-		int observed_state;
+		int observed_state, retired_state;
 
 		CANCELLATION_CHECK(&handoff, iteration, "claim-old-slot",
 			terminal_owner, final_owner, 0, 0, -1,
@@ -797,80 +848,130 @@ static int test_cancellation_terminal_drain_and_slot_reuse(void)
 		atomic_store_explicit(&handoff.state.value,
 			SWAPZ_PREPARATION_PREPARING, memory_order_relaxed);
 		atomic_store_explicit(&handoff.result_ready, 0, memory_order_relaxed);
-		atomic_store_explicit(&handoff.terminal_error, 0, memory_order_relaxed);
 		handoff.codec_result = codec_result;
+		handoff.result_length = 0x7fffffff;
 		handoff.generation = iteration;
+		handoff.prepared_generation = ~0U;
+
 		(void)pthread_barrier_wait(&handoff.start);
 		(void)pthread_barrier_wait(&handoff.snapshot_taken);
 		for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
 			CANCELLATION_CHECK(&handoff, iteration, "snapshot",
 				terminal_owner, final_owner, 2, 2, -1,
 				handoff.raw_snapshot[byte] ==
-				(unsigned char)(iteration + byte));
-		if (cancelled) {
-			observed_state = swapz_preparation_select_raw(&handoff.state);
-			if (observed_state == SWAPZ_PREPARATION_RAW_SELECTED)
-				atomic_fetch_add_explicit(&handoff.cancellation_claims,
-					1, memory_order_relaxed);
-			CANCELLATION_CHECK(&handoff, iteration, "ordered-cancel-cas",
-				terminal_owner, final_owner, 2, 2, observed_state,
-				observed_state == SWAPZ_PREPARATION_RAW_SELECTED);
-			CANCELLATION_CHECK(&handoff, iteration, "cancel-before-result",
-				terminal_owner, final_owner, 2, 2, observed_state,
-				!atomic_load_explicit(&handoff.result_ready,
-					memory_order_relaxed));
+					(unsigned char)(iteration + byte));
+
+		if (cancel_first) {
+			retired_state = swapz_preparation_retire(&handoff.state);
+			if (retired_state == SWAPZ_PREPARATION_CANCELLED)
+				atomic_fetch_add_explicit(&handoff.cancellation_claims, 1,
+					memory_order_relaxed);
+			CANCELLATION_CHECK(&handoff, iteration,
+				"ordered-cancel-before-result", terminal_owner,
+				final_owner, 2, 2, retired_state,
+				retired_state == SWAPZ_PREPARATION_CANCELLED &&
+				swapz_preparation_read_state(&handoff.state) ==
+					SWAPZ_PREPARATION_CANCELLED);
 			refs_before = cancellation_put(&handoff, iteration,
 				"ordered-put-first", terminal_owner, final_owner);
 			CANCELLATION_CHECK(&handoff, iteration, "ordered-put-first",
-				terminal_owner, final_owner, refs_before, refs_before - 1U,
-				observed_state, refs_before == 2U);
+				terminal_owner, final_owner, refs_before,
+				refs_before - 1U, retired_state, refs_before == 2U);
 			atomic_store_explicit(&handoff.owner_done, iteration + 1U,
 				memory_order_release);
-			CANCELLATION_CHECK(&handoff, iteration, "cancelled-not-reusable",
-				terminal_owner, final_owner, 2, 1, observed_state,
+			CANCELLATION_CHECK(&handoff, iteration,
+				"cancelled-not-reusable", terminal_owner, final_owner,
+				2, 1, retired_state,
 				swapz_preparation_claim_slot(&handoff.free_mask) == -1 &&
 				atomic_load_explicit(&handoff.drain_done,
 					memory_order_relaxed) == iteration);
 		}
+
 		(void)pthread_barrier_wait(&handoff.allow_result);
-		if (cancelled) {
-			/* Only atomic audit fields may be inspected after the owner put. */
+		if (cancel_first) {
 			while (!atomic_load_explicit(&handoff.result_ready,
 					memory_order_acquire))
 				sched_yield();
 			observed_state = atomic_load_explicit(&handoff.previous_state,
 				memory_order_relaxed);
-			CANCELLATION_CHECK(&handoff, iteration, "late-result",
-				terminal_owner, final_owner, 1, 1, observed_state,
-				observed_state == SWAPZ_PREPARATION_RAW_SELECTED &&
+			CANCELLATION_CHECK(&handoff, iteration,
+				"late-result-after-cancel", terminal_owner, final_owner,
+				1, 1, observed_state,
+				observed_state == SWAPZ_PREPARATION_CANCELLED &&
+				swapz_preparation_read_state(&handoff.state) ==
+					SWAPZ_PREPARATION_CANCELLED &&
+				atomic_load_explicit(&handoff.ready_charges,
+					memory_order_relaxed) == 0 &&
 				atomic_load_explicit(&handoff.references,
 					memory_order_relaxed) == 1 &&
 				atomic64_read(&handoff.free_mask) == 0);
 		} else {
-			/* First payload read follows the real state acquire, not a barrier. */
 			do {
-				observed_state = swapz_preparation_read_state(&handoff.state);
+				observed_state =
+					swapz_preparation_read_state(&handoff.state);
 				if (observed_state == SWAPZ_PREPARATION_PREPARING)
 					sched_yield();
 			} while (observed_state == SWAPZ_PREPARATION_PREPARING);
-			CANCELLATION_CHECK(&handoff, iteration, "ready-acquire",
-				terminal_owner, final_owner, 2, 2, observed_state,
-				observed_state == swapz_preparation_codec_result_state(codec_result));
-			for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
-				CANCELLATION_CHECK(&handoff, iteration, "ready-payload",
-					terminal_owner, final_owner, 2, 2, observed_state,
-					handoff.prepared_bytes[byte] ==
-					(unsigned char)(iteration ^ byte ^ 0x5aU));
-			if (codec_result < 0)
-				CANCELLATION_CHECK(&handoff, iteration, "ready-error",
-					terminal_owner, final_owner, 2, 2, observed_state,
-					atomic_load_explicit(&handoff.terminal_error,
-						memory_order_relaxed) == codec_result);
+			CANCELLATION_CHECK(&handoff, iteration,
+				"worker-terminal-acquire", terminal_owner, final_owner,
+				2, 2, observed_state,
+				observed_state ==
+					swapz_preparation_codec_result_state(codec_result) &&
+				handoff.result_length == codec_result);
+			if (codec_result > 0) {
+				CANCELLATION_CHECK(&handoff, iteration,
+					"worker-ready-generation", terminal_owner,
+					final_owner, 2, 2, observed_state,
+					handoff.prepared_generation == iteration);
+				for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
+					CANCELLATION_CHECK(&handoff, iteration,
+						"worker-ready-payload", terminal_owner,
+						final_owner, 2, 2, observed_state,
+						handoff.prepared_bytes[byte] ==
+							(unsigned char)(iteration ^ byte ^
+									0x5aU));
+			}
+			if (codec_result >= 0)
+				CANCELLATION_CHECK(&handoff, iteration,
+					"ready-charge-before-retire", terminal_owner,
+					final_owner, 2, 2, observed_state,
+					atomic_load_explicit(&handoff.ready_charges,
+						memory_order_relaxed) == 1);
+
+			if (!worker_first_put) {
+				retired_state =
+					swapz_preparation_retire(&handoff.state);
+				CANCELLATION_CHECK(&handoff, iteration,
+					"ordered-retire-ready-before-worker-put",
+					terminal_owner, final_owner, 2, 2,
+					retired_state,
+					retired_state ==
+						swapz_preparation_codec_result_state(codec_result) &&
+					retired_state != SWAPZ_PREPARATION_ERROR &&
+					swapz_preparation_read_state(&handoff.state) ==
+						SWAPZ_PREPARATION_CONSUMED);
+				CANCELLATION_CHECK(&handoff, iteration,
+					"ready-charge-retired", terminal_owner,
+					final_owner, 2, 2, retired_state,
+					atomic_fetch_sub_explicit(
+						&handoff.ready_charges, 1,
+						memory_order_relaxed) == 1);
+				refs_before = cancellation_put(&handoff, iteration,
+					"ordered-put-first", terminal_owner,
+					final_owner);
+				CANCELLATION_CHECK(&handoff, iteration,
+					"ordered-put-first", terminal_owner,
+					final_owner, refs_before, refs_before - 1U,
+					retired_state, refs_before == 2U);
+				atomic_store_explicit(&handoff.owner_done,
+					iteration + 1U, memory_order_release);
+			}
 		}
+
 		(void)pthread_barrier_wait(&handoff.allow_worker_put);
-		if (!cancelled) {
+		if (!cancel_first && worker_first_put) {
 			while (atomic_load_explicit(&handoff.worker_done,
-				memory_order_acquire) != iteration + 1U)
+					memory_order_acquire) != iteration + 1U)
 				sched_yield();
 			CANCELLATION_CHECK(&handoff, iteration, "worker-put-first",
 				terminal_owner, final_owner, 2, 1, observed_state,
@@ -879,16 +980,42 @@ static int test_cancellation_terminal_drain_and_slot_reuse(void)
 				atomic64_read(&handoff.free_mask) == 0 &&
 				atomic_load_explicit(&handoff.drain_done,
 					memory_order_relaxed) == iteration);
+
+			retired_state = swapz_preparation_retire(&handoff.state);
+			if (codec_result >= 0) {
+				CANCELLATION_CHECK(&handoff, iteration,
+					"ordered-retire-ready-after-worker-put",
+					terminal_owner, final_owner, 1, 1,
+					retired_state,
+					retired_state ==
+						swapz_preparation_codec_result_state(codec_result) &&
+					swapz_preparation_read_state(&handoff.state) ==
+						SWAPZ_PREPARATION_CONSUMED);
+				CANCELLATION_CHECK(&handoff, iteration,
+					"ready-charge-retired", terminal_owner,
+					final_owner, 1, 1, retired_state,
+					atomic_fetch_sub_explicit(
+						&handoff.ready_charges, 1,
+						memory_order_relaxed) == 1);
+			} else {
+				CANCELLATION_CHECK(&handoff, iteration,
+					"ordered-retire-error", terminal_owner,
+					final_owner, 1, 1, retired_state,
+					retired_state == SWAPZ_PREPARATION_ERROR &&
+					swapz_preparation_read_state(&handoff.state) ==
+						SWAPZ_PREPARATION_ERROR);
+			}
 			refs_before = cancellation_put(&handoff, iteration,
 				"ordered-final-put", terminal_owner, final_owner);
 			CANCELLATION_CHECK(&handoff, iteration, "ordered-final-put",
-				terminal_owner, final_owner, refs_before, refs_before - 1U,
-				observed_state, refs_before == 1U);
+				terminal_owner, final_owner, refs_before,
+				refs_before - 1U, retired_state, refs_before == 1U);
 			atomic_store_explicit(&handoff.owner_done, iteration + 1U,
 				memory_order_release);
 		}
+
 		while (atomic_load_explicit(&handoff.drain_done,
-			memory_order_acquire) != iteration + 1U)
+				memory_order_acquire) != iteration + 1U)
 			sched_yield();
 		CANCELLATION_CHECK(&handoff, iteration, "drained-final-put",
 			terminal_owner, final_owner, 1, 0, observed_state,
@@ -896,7 +1023,10 @@ static int test_cancellation_terminal_drain_and_slot_reuse(void)
 				memory_order_relaxed) == 0 &&
 			atomic_load_explicit(&handoff.final_puts,
 				memory_order_relaxed) == iteration + 1U &&
-			swapz_preparation_read_state(&handoff.state) == SWAPZ_PREPARATION_EMPTY);
+			atomic_load_explicit(&handoff.ready_charges,
+				memory_order_relaxed) == 0 &&
+			swapz_preparation_read_state(&handoff.state) ==
+				SWAPZ_PREPARATION_EMPTY);
 		CANCELLATION_CHECK(&handoff, iteration, "drained-terminal-once",
 			terminal_owner, final_owner, 1, 0, observed_state,
 			atomic_load_explicit(&handoff.result_attempts,
@@ -905,20 +1035,24 @@ static int test_cancellation_terminal_drain_and_slot_reuse(void)
 				memory_order_relaxed) +
 			atomic_load_explicit(&handoff.cancellation_claims,
 				memory_order_relaxed) == iteration + 1U);
-		/* Reclaim after drain, poison old payload, and forbid old worker writes. */
+
 		CANCELLATION_CHECK(&handoff, iteration, "reclaim-after-drain",
 			terminal_owner, final_owner, 0, 0, observed_state,
 			swapz_preparation_claim_slot(&handoff.free_mask) == 63);
 		for (byte = 0; byte < RAW_SNAPSHOT_BYTES; ++byte)
 			handoff.prepared_bytes[byte] = 0xa5U;
+		handoff.prepared_generation = ~0U;
+		handoff.result_length = 0x7fffffff;
 		CANCELLATION_CHECK(&handoff, iteration, "no-stale-publisher",
 			terminal_owner, final_owner, 0, 0, observed_state,
 			atomic_load_explicit(&handoff.result_attempts,
 				memory_order_relaxed) == iteration + 1U &&
-			swapz_preparation_read_state(&handoff.state) == SWAPZ_PREPARATION_EMPTY);
+			swapz_preparation_read_state(&handoff.state) ==
+				SWAPZ_PREPARATION_EMPTY);
 		swapz_preparation_release_slot(&handoff.free_mask, 63);
 		(void)pthread_barrier_wait(&handoff.recycled);
 	}
+
 	CHECK(pthread_join(worker, NULL) == 0);
 	CHECK(pthread_join(drainer, NULL) == 0);
 	CHECK(pthread_barrier_destroy(&handoff.start) == 0);

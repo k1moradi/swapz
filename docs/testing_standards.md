@@ -4445,20 +4445,29 @@ substitute for loaded target, suspend/drain, completion-work and lower-I/O
 fault qualification.
 
 The cancellation/lifetime continuation runs 384 three-party handoffs with
-bounded synchronization barriers. It forces worker-first READY_COMPRESSED,
-READY_RAW and exact ERROR (ordered completion is final-put), plus ordered
-RAW_SELECTED cancellation before delayed compressed, no-fit and negative codec
-results (worker is final-put). Every epoch asserts one winning terminal claim,
-one worker result attempt, one final reference release, no pre-drain slot claim,
-and slot-63 reuse only after both ordered and preparation completions. The
-ordered owner checks payload only while it owns its reference: READY/ERROR
-bytes follow the production state acquire, whereas cancellation reads only
-atomic audit fields after its put. Reclaim poisons the old prepared bytes and
-checks there is no late publisher before the next generation. On failure,
-report the phase, reference transition, slot state/mask, expected terminal and
-final owner, and actual CAS transition; never print page payload bytes.
-These finite C11 schedules remain supporting evidence, not loaded KCSAN,
-lockdep, or proof of kernel execution under suspend/drain.
+bounded synchronization barriers. It follows the production terminal-failure
+states rather than treating RAW selection as cancellation. Worker-first cases
+publish READY_COMPRESSED, READY_RAW and exact ERROR. The compressed READY is
+retired to CONSUMED before the worker put, READY_RAW is retired after the worker
+put, and ERROR remains ERROR until the ordered final-put. Cancellation-first
+cases retire PREPARING to CANCELLED before delayed compressed, no-fit RAW and
+negative codec results; each late worker publication must observe CANCELLED and
+the worker is final-put. Non-error workers model the production ready-reservoir
+charge before publication: a CANCELLED loser rolls it back, while a READY result
+is charged exactly once until terminal retirement consumes it. Every epoch
+asserts one PREPARING terminal claimant, one worker result attempt, one final
+reference release, zero ready charge at drain, no pre-drain slot claim, and
+slot-63 reuse only after both ordered and preparation completions. Ordinary
+result metadata and compressed bytes are read only after the production state
+acquire while the ordered owner still holds its reference; after an early
+cancellation put, that owner observes only atomic audit fields. Reclaim poisons
+old result metadata and bytes so the next compressed generation cannot validate
+stale payload, and checks that no late publisher runs after the last release.
+On failure, report the worker/completion phase, reference transition, slot
+state/mask, ready charge, expected terminal/final owner and actual transition;
+never print page payload bytes. These finite C11 schedules remain supporting
+evidence, not loaded KCSAN, lockdep, or proof of kernel execution under
+suspend/drain.
 
 
 The submitter-path continuation adds 256 deterministic handoffs that model its
