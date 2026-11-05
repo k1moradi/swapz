@@ -6508,6 +6508,12 @@ qualification, and an enabled host with unavailable certificate/signature
 verification must fail closed. Verification must parse the appended Linux
 module-signature trailer and cryptographically verify the detached PKCS#7/CMS
 signature over the exact module payload against the configured certificate.
+The trailer sanity check must match the kernel's `mod_check_sig()` contract:
+PKCS#7 id type, zero algorithm/hash/signer/key-id/reserved-pad parameter bytes,
+and a bounded positive signature length. A cryptographically valid CMS payload
+with any kernel-rejected nonzero parameter byte is malformed and must not
+qualify. The real-CMS rootless regression must mutate every such trailer field
+independently and prove refusal; marker text alone is never signature proof.
 Embedded CMS signer certificates must be excluded from signer resolution
 (OpenSSL `-nointern`): `-certfile` alone does not force verification against
 that exact configured and enrolled certificate.
@@ -6524,8 +6530,14 @@ empty success output, or arbitrary nonzero status may qualify enrollment.
 The rootless signing regression must also model `sudo kmodsign` replacing the
 module inode with a root-owned output, require restoration to the invoking
 build user's uid/gid after cryptographic verification (including a later
-already-signed invocation), and verify that `--verify` remains ownership-read-
-only.
+already-signed invocation), verify that `--verify` remains ownership-read-
+only, and inject a failed signature-generation command while proving the
+unsigned module bytes remain unchanged and no private-key path/content reaches
+diagnostics. Failure diagnostics must identify the true phase (including
+`phase=certificate_enrollment`, `phase=detached_signature`,
+`phase=module_vermagic`, or `phase=signature_generation` as applicable) and
+retain the original producer/command status rather than broadly treating a
+nonzero result as equivalent evidence.
 `modinfo` signer or `sig_key` metadata is diagnostic only and must never
 substitute for cryptographic verification. Packaging may report cryptographic
 validity plus enrollment, but it must not claim that the target kernel

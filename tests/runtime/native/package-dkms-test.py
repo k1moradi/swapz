@@ -727,8 +727,12 @@ exec "{flock_binary}" "$@"
                 "SWAPZ_FAKE_SECURE_BOOT": "enabled",
                 "SWAPZ_FAKE_SIGNATURE_VALID": "0",
             })
-        self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(
+            result.returncode, 0,
+            "phase=detached_signature producer_status=47 command_status=0")
         self.assertIn("not cryptographically valid", result.stderr)
+        self.assertIn("phase=detached_signature", result.stderr)
+        self.assertIn("command_status=47", result.stderr)
         self.assert_absent()
 
         result = self.invoke(
@@ -739,8 +743,12 @@ exec "{flock_binary}" "$@"
 
         result = self.invoke(
             "install", {"SWAPZ_FAKE_VERMAGIC": "other-kernel"})
-        self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(
+            result.returncode, 0,
+            "phase=module_vermagic producer_status=0 command_status=0")
         self.assertIn("does not match the running kernel", result.stderr)
+        self.assertIn("phase=module_vermagic", result.stderr)
+        self.assertIn("command_status=0", result.stderr)
         self.assert_absent()
 
     def test_secure_boot_verifies_real_detached_cms_payload(self):
@@ -796,9 +804,11 @@ exec "{flock_binary}" "$@"
         signature_bytes = signature.read_bytes()
         signature_header = bytes((0, 0, 2, 0, 0, 0, 0, 0))
         signature_header += len(signature_bytes).to_bytes(4, "big")
+        module_signature_marker = b"~Module signature appended~\n"
         signed_module.write_bytes(
             payload.read_bytes() + signature_bytes + signature_header +
-            b"~Module signature appended~\n")
+            module_signature_marker)
+        canonical_signed_module = signed_module.read_bytes()
 
         verify_env = dict(
             os.environ,
@@ -828,6 +838,50 @@ exec "{flock_binary}" "$@"
         # Detached CMS verification is not proof that the running kernel will
         # accept a module under its active Secure Boot policy.
         self.assertIn("kernel acceptance is not claimed", verified.stdout)
+
+        signed_module.write_bytes(payload.read_bytes())
+        unsigned = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=verify_env, capture_output=True, text=True)
+        self.assertEqual(
+            unsigned.returncode, 2,
+            "phase=detached_signature command_status="
+            f"{unsigned.returncode} unsigned module was accepted")
+        self.assertIn("qualified module is unsigned", unsigned.stderr)
+        self.assertIn("phase=detached_signature", unsigned.stderr)
+        signed_module.write_bytes(canonical_signed_module)
+
+        header_offset = (
+            len(canonical_signed_module) - len(module_signature_marker) - 12)
+        malformed_header_fields = (
+            ("algo", 0), ("hash", 1), ("id_type", 2),
+            ("signer_len", 3), ("key_id_len", 4),
+            ("pad0", 5), ("pad1", 6), ("pad2", 7),
+        )
+        for field_name, field_offset in malformed_header_fields:
+            with self.subTest(
+                    phase="detached_signature", field=field_name):
+                malformed_module = bytearray(canonical_signed_module)
+                malformed_module[header_offset + field_offset] = (
+                    3 if field_name == "id_type" else 1)
+                signed_module.write_bytes(malformed_module)
+                malformed_result = subprocess.run(
+                    ["bash", str(ROOT / "packaging/sign-module.sh"),
+                     "--verify", str(signed_module)],
+                    cwd=ROOT, env=verify_env,
+                    capture_output=True, text=True)
+                self.assertEqual(
+                    malformed_result.returncode, 2,
+                    "phase=detached_signature field="
+                    f"{field_name} command_status="
+                    f"{malformed_result.returncode} kernel-malformed "
+                    "module signature metadata was accepted")
+                self.assertIn(
+                    "malformed signing metadata", malformed_result.stderr)
+                self.assertIn(
+                    "phase=detached_signature", malformed_result.stderr)
+        signed_module.write_bytes(canonical_signed_module)
 
         # kmodsign may replace the output inode while running through sudo.
         # The Makefile must still be able to chmod the built artifact, both
@@ -866,6 +920,8 @@ exec "{flock_binary}" "$@"
             "#!/bin/sh\n"
             "[ \"$#\" -eq 4 ] && [ \"$1\" = sha512 ] || exit 96\n"
             "printf '%s\\n' called >> \"$SWAPZ_TEST_KMODSIGN_LOG\"\n"
+            "status=\"${SWAPZ_TEST_KMODSIGN_STATUS:-0}\"\n"
+            "[ \"$status\" -eq 0 ] || exit \"$status\"\n"
             "cp -- \"$SWAPZ_TEST_SIGNED_TEMPLATE\" \"$4\"\n")
         kmodsign_mock.chmod(0o755)
 
@@ -922,6 +978,29 @@ exec "{flock_binary}" "$@"
                       sudo_log.read_text())
         self.assertEqual(kmodsign_log.read_text().splitlines(), ["called"])
 
+        failed_build_module = self.home / "failed-signature-module.ko"
+        failed_build_module.write_bytes(payload.read_bytes())
+        failed_sign_env = dict(
+            sign_env, SWAPZ_TEST_KMODSIGN_STATUS="73")
+        signature_generation_failed = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             str(failed_build_module)],
+            cwd=ROOT, env=failed_sign_env,
+            capture_output=True, text=True)
+        self.assertEqual(
+            signature_generation_failed.returncode, 2,
+            "phase=signature_generation producer_status=73 command_status="
+            f"{signature_generation_failed.returncode}")
+        self.assertEqual(failed_build_module.read_bytes(), payload.read_bytes())
+        self.assertEqual(
+            kmodsign_log.read_text().splitlines(), ["called", "called"])
+        self.assertIn("kmodsign failed", signature_generation_failed.stderr)
+        self.assertIn(
+            "phase=signature_generation", signature_generation_failed.stderr)
+        self.assertIn("command_status=73", signature_generation_failed.stderr)
+        self.assertNotIn(str(private_key),
+                         signature_generation_failed.stderr)
+
         def verify_with_mokutil(*, cert=certificate_der, status="1",
                                 stdout=None, stderr="", path=crypto_bin,
                                 isolated_path=False, extra_env=None):
@@ -946,9 +1025,14 @@ exec "{flock_binary}" "$@"
 
         not_enrolled = verify_with_mokutil(
             status="0", stdout=f"{certificate_der} is not enrolled")
-        self.assertEqual(not_enrolled.returncode, 2)
+        self.assertEqual(
+            not_enrolled.returncode, 2,
+            "phase=certificate_enrollment producer_status=0 command_status="
+            f"{not_enrolled.returncode}")
         self.assertIn("not enrolled or enrollment could not be verified",
                       not_enrolled.stderr)
+        self.assertIn("phase=certificate_enrollment", not_enrolled.stderr)
+        self.assertIn("command_status=0", not_enrolled.stderr)
 
         silent_success = verify_with_mokutil(status="0", stdout="")
         self.assertEqual(silent_success.returncode, 2)
