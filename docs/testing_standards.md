@@ -860,7 +860,9 @@ are removed immediately. On failure, retain a bounded 64-KiB excerpt of the firs
 failure block plus at most 188 KiB of trailing stderr, followed by bounded
 attribution metadata. This fits the existing 256-KiB capture budget and keeps
 the first traceback even when unrelated progress stderr displaces it from the
-tail. Classification
+tail. The excerpt matcher must recognize both the package and primary-real-swap
+unittest classes; matching only one class can discard the other suite's first
+assertion before the bounded private log is finalized. Classification
 must stop at the first detailed unittest failure block so a later subtest cannot
 replace the first failing checkpoint. Retain its allowlisted unittest test name
 and first assertion or exception privately, even when teardown adds a later

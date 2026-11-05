@@ -192,7 +192,7 @@ report_rootless_failure() {
       # Keep the first unittest traceback even when large progress output
       # pushes it outside the tail. Bound this excerpt and the trailing bytes.
       if LC_ALL=C awk -v limit=65536 '
-           /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.PackageLifecycle\.test_[A-Za-z0-9_]+\)/ && !seen { seen=1 }
+           /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts)\.test_[A-Za-z0-9_]+\)/ && !seen { seen=1 }
            seen {
              if ($0 == "======================================================================") exit
              line = $0 "\n"
