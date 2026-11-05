@@ -589,6 +589,617 @@ int main(int argc, char **argv)
                             "safe_next_action=read-only-inspect-recovery-state",
                             result.stderr,
                         )
+                        self.assertIn(
+                            "persistence_boundary=state-rename-close-directory-fsync "
+                            "durable=UNCERTAIN mapper=UNCERTAIN swap=UNCERTAIN",
+                            result.stderr,
+                        )
+
+
+
+            # Mutation negative control: the executable harness must notice
+            # a helper that wrongly substitutes a later errno for the first.
+            original_source = source.read_text(encoding="utf-8")
+            self.assertEqual(original_source.count(
+                "errno = primary_errno;\n\treturn primary_errno;"), 1)
+            mutated_source = fixture / "recovery-errno-mutant.c"
+            mutated_binary = fixture / "recovery-errno-mutant"
+            mutated_source.write_text(
+                original_source.replace(
+                    "errno = primary_errno;\n\treturn primary_errno;",
+                    "errno = EINVAL;\n\treturn EINVAL;", 1),
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra",
+                    "-Werror", "-Wpedantic", str(mutated_source),
+                    "-o", str(mutated_binary),
+                ],
+                cwd=ROOT,
+                check=True,
+            )
+            mutant_state = fixture / "mutant-state"
+            mutant_state.write_text("STARTING\n", encoding="ascii")
+            mutant = subprocess.run(
+                [
+                    str(mutated_binary), "START", str(errno.EIO),
+                    str(errno.ENOSPC), "0", str(mutant_state),
+                ],
+                cwd=ROOT, capture_output=True, text=True,
+                check=False, timeout=5,
+            )
+            self.assertEqual(mutant.returncode, 0, mutant.stderr)
+            self.assertNotEqual(
+                mutant.stdout,
+                f"preserved={errno.EIO} errno={errno.EIO} attempts=1\n",
+            )
+
+    def test_state_replace_observes_rename_before_directory_fsync(self):
+        """Inject failures into the real source-extracted record writer."""
+        start = self.primary.index("int swapz_primary_replace_record_at(")
+        end = self.primary.index(
+            "\nint swapz_primary_claim_partition_owner_at(", start)
+        writer = self.primary[start:end]
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
+static int failure_mode;
+
+static int swapz_primary_valid_run_id(const char *value)
+{
+    return value != NULL && strlen(value) == 32U;
+}
+
+static int injected_fsync(int fd)
+{
+    struct stat info;
+
+    if (fstat(fd, &info) < 0)
+        return -1;
+    if ((failure_mode == 1 && S_ISREG(info.st_mode)) ||
+        (failure_mode == 2 && S_ISDIR(info.st_mode))) {
+        errno = failure_mode == 1 ? ENOSPC : EIO;
+        return -1;
+    }
+    return fsync(fd);
+}
+#define fsync injected_fsync
+"""
+        suffix = r"""
+int main(int argc, char **argv)
+{
+    int directory_fd;
+    int result;
+    int operation_errno;
+
+    if (argc != 3)
+        return 64;
+    failure_mode = atoi(argv[2]);
+    directory_fd = open(argv[1], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (directory_fd < 0)
+        return 65;
+    errno = 0;
+    result = swapz_primary_replace_record_at(
+        directory_fd, "primary-state.json",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "replacement\n", getuid());
+    operation_errno = errno;
+    if (close(directory_fd) < 0)
+        return 66;
+    printf("result=%d errno=%d\n", result, operation_errno);
+    return 0;
+}
+"""
+        with TemporaryDirectory(prefix="swapz-primary-record-boundary-") as temp:
+            fixture = Path(temp)
+            source = fixture / "record-boundary.c"
+            binary = fixture / "record-boundary"
+            source.write_text(prefix + writer + suffix, encoding="utf-8")
+            compiler = [
+                "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+                "-Wpedantic", str(source), "-o", str(binary),
+            ]
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            for scenario, mode, expected_bytes, expected_result in (
+                ("before-rename", 1, "original\n",
+                 f"result=-1 errno={errno.ENOSPC}\n"),
+                ("after-rename-before-directory-fsync", 2, "replacement\n",
+                 f"result=-1 errno={errno.EIO}\n"),
+                ("durable-replacement", 0, "replacement\n", None),
+            ):
+                with self.subTest(scenario=scenario):
+                    state = fixture / "primary-state.json"
+                    state.write_text("original\n", encoding="ascii")
+                    state.chmod(0o600)
+                    result = subprocess.run(
+                        [str(binary), str(fixture), str(mode)],
+                        capture_output=True, text=True, timeout=5,
+                        check=False, cwd=ROOT,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(state.read_text(encoding="ascii"),
+                                     expected_bytes)
+                    if expected_result is None:
+                        self.assertTrue(result.stdout.startswith("result=0 "))
+                    else:
+                        self.assertEqual(result.stdout, expected_result)
+                    self.assertEqual(result.stderr, "")
+
+            # A writer that publishes success before its directory fsync must
+            # fail this fixture even when the renamed bytes are already visible.
+            self.assertIn("return fsync(recovery_fd);", writer)
+            premature = writer.replace(
+                "return fsync(recovery_fd);", "return 0;", 1)
+            self.assertNotEqual(premature, writer)
+            source.write_text(prefix + premature + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            state = fixture / "primary-state.json"
+            state.write_text("original\n", encoding="ascii")
+            state.chmod(0o600)
+            mutant = subprocess.run(
+                [str(binary), str(fixture), "2"],
+                capture_output=True, text=True, timeout=5,
+                check=False, cwd=ROOT,
+            )
+            self.assertEqual(mutant.returncode, 0, mutant.stderr)
+            self.assertTrue(mutant.stdout.startswith("result=0 "))
+            self.assertNotEqual(
+                mutant.stdout, f"result=-1 errno={errno.EIO}\n")
+
+    def test_completed_owner_release_retries_directory_durability(self):
+        """A missing marker is not proof that the prior unlink was durable."""
+        begin = self.primary.index(
+            "if (current.stage == SWAPZ_PRIMARY_STAGE_COMPLETE) {",
+            self.primary.index(
+                "static int swapz_primary_reconcile_metadata_claim_at("))
+        end = self.primary.index(
+            "\n\tif (current.has_recovery_previous_stage)", begin)
+        guard = self.primary[begin:end]
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define SWAPZ_PRIMARY_STAGE_COMPLETE 7
+struct synthetic_state {
+    int stage;
+    const char *run_id;
+};
+static int inject_directory_sync_failure;
+static int sync_attempts;
+static int release_attempts;
+
+static int injected_fsync(int fd)
+{
+    ++sync_attempts;
+    if (inject_directory_sync_failure) {
+        errno = EIO;
+        return -1;
+    }
+    return fsync(fd);
+}
+#define fsync injected_fsync
+
+static int swapz_primary_release_partition_owner_at(
+    int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
+{
+    (void)lock_fd;
+    (void)run_id;
+    (void)expected_owner;
+    ++release_attempts;
+    return unlinkat(recovery_fd, "partition.active", 0);
+}
+static int reconcile_complete(int recovery_fd, int active_present)
+{
+    struct synthetic_state current = {
+        SWAPZ_PRIMARY_STAGE_COMPLETE, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    };
+    const int lock_fd = 7;
+    const uid_t expected_owner = getuid();
+"""
+        suffix = r"""
+    return -77;
+}
+int main(int argc, char **argv)
+{
+    int recovery_fd;
+    int active_present;
+    int result;
+    int saved_errno;
+    struct stat info;
+
+    if (argc != 3)
+        return 64;
+    inject_directory_sync_failure = atoi(argv[2]);
+    recovery_fd = open(argv[1], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (recovery_fd < 0)
+        return 65;
+    active_present = fstatat(recovery_fd, "partition.active", &info,
+                             AT_SYMLINK_NOFOLLOW) == 0;
+    errno = 0;
+    result = reconcile_complete(recovery_fd, active_present);
+    saved_errno = errno;
+    if (close(recovery_fd) < 0)
+        return 66;
+    printf("result=%d errno=%d syncs=%d releases=%d\n",
+           result, saved_errno, sync_attempts, release_attempts);
+    return 0;
+}
+"""
+        with TemporaryDirectory(prefix="swapz-primary-owner-durability-") as temp:
+            fixture = Path(temp)
+            source = fixture / "owner-durability.c"
+            binary = fixture / "owner-durability"
+            compiler = [
+                "cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+                "-Wpedantic", str(source), "-o", str(binary),
+            ]
+            source.write_text(prefix + guard + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            marker = fixture / "partition.active"
+            for mode, marker_present, expected in (
+                (1, False,
+                 f"result=-1 errno={errno.EIO} syncs=1 releases=0\n"),
+                (0, False, "result=0 errno=0 syncs=1 releases=0\n"),
+                (0, True, "result=0 errno=0 syncs=0 releases=1\n"),
+            ):
+                with self.subTest(mode=mode, marker=marker_present):
+                    marker.unlink(missing_ok=True)
+                    if marker_present:
+                        marker.write_text("synthetic\n", encoding="ascii")
+                    outcome = subprocess.run(
+                        [str(binary), str(fixture), str(mode)],
+                        capture_output=True, text=True, timeout=5,
+                        check=False, cwd=ROOT,
+                    )
+                    self.assertEqual(outcome.returncode, 0, outcome.stderr)
+                    self.assertEqual(outcome.stdout, expected)
+                    self.assertEqual(marker.exists(), False)
+            # Negative control: skipping the fsync publishes success in an
+            # ambiguous owner-release window and must trip the expected verdict.
+            self.assertIn("return fsync(recovery_fd);", guard)
+            premature = guard.replace(
+                "return fsync(recovery_fd);", "return 0;", 1)
+            source.write_text(prefix + premature + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            mutant = subprocess.run(
+                [str(binary), str(fixture), "1"],
+                capture_output=True, text=True, timeout=5, check=False,
+                cwd=ROOT,
+            )
+            self.assertEqual(mutant.returncode, 0, mutant.stderr)
+            self.assertTrue(mutant.stdout.startswith("result=0 "))
+            self.assertNotIn("syncs=1", mutant.stdout)
+
+    def test_definite_swapoff_blocks_mapper_removal_in_stop_and_recover(self):
+        """Exercise source-extracted coordinator ordering without host syscalls."""
+        functions = (
+            ("STOP", "static int swapz_primary_stop_active(",
+             "static int swapz_primary_recover(", "stop-mapper-removed"),
+            ("RECOVER", "static int swapz_primary_recover(",
+             "static int swapz_primary_read_only_plan(",
+             "recover-mapper-removed"),
+        )
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <stdio.h>
+#include <sys/types.h>
+
+struct synthetic_manifest { int unused; };
+static int mapper_attempts;
+static int swapoff_attempts;
+static int injected_swapoff(int recovery_fd, int lock_fd,
+                            const struct synthetic_manifest *manifest,
+                            int *deactivated_by_call)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)manifest;
+    *deactivated_by_call = 0;
+    ++swapoff_attempts;
+    errno = EBUSY;
+    return -1;
+}
+static int injected_remove(int recovery_fd, int lock_fd,
+                           const struct synthetic_manifest *manifest,
+                           int *removed_by_call)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)manifest;
+    ++mapper_attempts;
+    *removed_by_call = 1;
+    return 0;
+}
+#define swapz_primary_deactivate_mapper_swap injected_swapoff
+#define swapz_primary_dm_remove_mapper injected_remove
+#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) ((void)0)
+static int execute_transaction(void)
+{
+    const int recovery_fd = 7;
+    const int lock_fd = 8;
+    struct synthetic_manifest manifest = {0};
+    int swap_deactivated_by_call = 0;
+    int mapper_removed_by_call = 0;
+    const char *failure_phase = "admission";
+    int result = -1;
+"""
+        suffix = r"""
+    result = 0;
+out:
+    printf("result=%d errno=%d swapoff=%d mapper=%d phase=%s\n",
+           result, errno, swapoff_attempts, mapper_attempts, failure_phase);
+    return result;
+}
+int main(void) { return execute_transaction() < 0 ? 0 : 1; }
+"""
+        for operation, begin, end, final_phase in functions:
+            with self.subTest(operation=operation):
+                start = self.primary.index(begin)
+                body = self.primary[start:self.primary.index(end, start)]
+                begin_step = body.index('failure_phase = "swapoff";')
+                end_step = body.index(
+                    f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{final_phase}");',
+                    begin_step)
+                snippet = body[begin_step:end_step]
+                with TemporaryDirectory(
+                        prefix="swapz-primary-swapoff-gate-") as temp:
+                    fixture = Path(temp)
+                    source = fixture / "swapoff-gate.c"
+                    binary = fixture / "swapoff-gate"
+                    compiler = [
+                        "cc", "-std=c11", "-O2", "-Wall", "-Wextra",
+                        "-Werror", "-Wpedantic", str(source), "-o",
+                        str(binary),
+                    ]
+                    source.write_text(prefix + snippet + suffix,
+                                      encoding="utf-8")
+                    subprocess.run(compiler, check=True, cwd=ROOT)
+                    outcome = subprocess.run(
+                        [str(binary)], capture_output=True, text=True,
+                        check=False, timeout=5, cwd=ROOT,
+                    )
+                    self.assertEqual(outcome.returncode, 0, outcome.stderr)
+                    self.assertEqual(
+                        outcome.stdout,
+                        f"result=-1 errno={errno.EBUSY} swapoff=1 "
+                        "mapper=0 phase=swapoff\n",
+                    )
+                    # Mutating the stop gate must expose a DM removal attempt.
+                    mutated = snippet.replace(
+                        "&swap_deactivated_by_call) < 0)",
+                        "&swap_deactivated_by_call) < 0 && 0)", 1)
+                    self.assertNotEqual(snippet, mutated)
+                    source.write_text(prefix + mutated + suffix,
+                                      encoding="utf-8")
+                    subprocess.run(compiler, check=True, cwd=ROOT)
+                    mutant = subprocess.run(
+                        [str(binary)], capture_output=True, text=True,
+                        check=False, timeout=5, cwd=ROOT,
+                    )
+                    self.assertNotEqual(mutant.stdout, outcome.stdout)
+                    self.assertIn("mapper=1", mutant.stdout)
+
+
+    def test_owner_release_failure_and_stale_run_leave_recoverable_evidence(self):
+        """Exercise the actual owner-release body against synthetic files."""
+        begin = self.primary.index(
+            "int swapz_primary_release_partition_owner_at(")
+        end = self.primary.index(
+            "\nint swapz_primary_partition_lock_acquire(", begin)
+        release = self.primary[begin:end]
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
+#define SWAPZ_PRIMARY_PARTITION_NAME_BYTES 128U
+#define SWAPZ_PRIMARY_STAGE_COMPLETE 7
+#define SWAPZ_PRIMARY_PARTUUID (swapz_primary_selected_target.partuuid)
+struct swapz_primary_state { int stage; char run_id[33]; };
+static struct { char partuuid[37]; } swapz_primary_selected_target = {
+    "synthetic"
+};
+static int injected_failure_mode;
+
+static int swapz_primary_valid_run_id(const char *run_id)
+{
+    return run_id && strlen(run_id) == 32U;
+}
+static int swapz_primary_state_lock_valid(
+    int recovery_fd, int lock_fd, uid_t expected_owner)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)expected_owner;
+    return 1;
+}
+static int swapz_primary_owner_claim_matches_at(
+    int recovery_fd, const char *run_id, uid_t expected_owner)
+{
+    char marker[64];
+    ssize_t length;
+    int fd;
+
+    (void)expected_owner;
+    fd = openat(recovery_fd, "partition-synthetic.active",
+                O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0)
+        return 0;
+    length = read(fd, marker, sizeof(marker));
+    if (close(fd) < 0 || length != 33 ||
+        memcmp(marker, run_id, 32U) != 0 || marker[32] != '\n') {
+        errno = EPERM;
+        return 0;
+    }
+    return 1;
+}
+static int swapz_primary_record_read_at(
+    int recovery_fd, const char *name, uid_t expected_owner,
+    char *record, size_t capacity, size_t *length, struct stat *identity)
+{
+    int fd;
+    ssize_t count;
+    int saved_errno;
+
+    (void)expected_owner;
+    fd = openat(recovery_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0)
+        return -1;
+    if (identity && fstat(fd, identity) < 0) {
+        saved_errno = errno;
+        (void)close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+    count = read(fd, record, capacity - 1U);
+    saved_errno = errno;
+    if (close(fd) < 0 && count >= 0)
+        return -1;
+    if (count < 0) {
+        errno = saved_errno;
+        return -1;
+    }
+    record[count] = '\0';
+    *length = (size_t)count;
+    return 0;
+}
+static int swapz_primary_state_parse(
+    const char *record, size_t length, struct swapz_primary_state *state)
+{
+    const char *prefix = "COMPLETE:";
+    const size_t prefix_length = 9U;
+
+    if (length != prefix_length + 32U + 1U ||
+        memcmp(record, prefix, prefix_length) != 0 ||
+        record[length - 1U] != '\n')
+        return -1;
+    memcpy(state->run_id, record + prefix_length, 32U);
+    state->run_id[32] = '\0';
+    state->stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+    return 0;
+}
+static int injected_unlinkat(int directory_fd, const char *name, int flags)
+{
+    if (injected_failure_mode == 1) {
+        errno = EACCES;
+        return -1;
+    }
+    return unlinkat(directory_fd, name, flags);
+}
+static int injected_fsync(int fd)
+{
+    if (injected_failure_mode == 2) {
+        errno = EIO;
+        return -1;
+    }
+    return fsync(fd);
+}
+#define unlinkat injected_unlinkat
+#define fsync injected_fsync
+"""
+        suffix = r"""
+int main(int argc, char **argv)
+{
+    int recovery_fd;
+    int result;
+    int saved_errno;
+
+    if (argc != 4)
+        return 64;
+    injected_failure_mode = atoi(argv[2]);
+    recovery_fd = open(argv[1], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (recovery_fd < 0)
+        return 65;
+    errno = 0;
+    result = swapz_primary_release_partition_owner_at(
+        recovery_fd, 7, argv[3], getuid());
+    saved_errno = errno;
+    if (close(recovery_fd) < 0)
+        return 66;
+    printf("result=%d errno=%d\n", result, saved_errno);
+    return 0;
+}
+"""
+        run_a = "a" * 32
+        run_b = "b" * 32
+        with TemporaryDirectory(prefix="swapz-primary-release-synthetic-") as temp:
+            fixture = Path(temp)
+            source = fixture / "release.c"
+            binary = fixture / "release"
+            compiler = [
+                "cc", "-std=c11", "-O2", "-Wall", "-Wextra",
+                "-Werror", "-Wpedantic", str(source), "-o", str(binary),
+            ]
+            source.write_text(prefix + release + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            state = fixture / "primary-state.json"
+            marker = fixture / "partition-synthetic.active"
+            for scenario, failure_mode, owner_run, active_run, expected_errno, removed in (
+                ("unlink-failed", 1, run_a, run_a, errno.EACCES, False),
+                ("fsync-failed-after-unlink", 2, run_a, run_a, errno.EIO, True),
+                ("stale-run-A-after-B", 0, run_a, run_b, errno.EPERM, False),
+                ("released", 0, run_a, run_a, None, True),
+            ):
+                with self.subTest(scenario=scenario):
+                    original = f"COMPLETE:{active_run}\n"
+                    state.write_text(original, encoding="ascii")
+                    state.chmod(0o600)
+                    marker.write_text(f"{active_run}\n", encoding="ascii")
+                    marker.chmod(0o600)
+                    outcome = subprocess.run(
+                        [str(binary), str(fixture), str(failure_mode), owner_run],
+                        capture_output=True, text=True, timeout=5,
+                        check=False, cwd=ROOT,
+                    )
+                    self.assertEqual(outcome.returncode, 0, outcome.stderr)
+                    if expected_errno is not None:
+                        self.assertEqual(
+                            outcome.stdout,
+                            f"result=-1 errno={expected_errno}\n")
+                    else:
+                        self.assertTrue(outcome.stdout.startswith("result=0 "))
+                    self.assertEqual(marker.exists(), not removed)
+                    self.assertEqual(state.read_text(encoding="ascii"), original)
+                    self.assertEqual(outcome.stderr, "")
+
+            # Mutant proves the post-unlink fsync failure cannot be treated
+            # as a completed owner release merely because the marker vanished.
+            original_guard = ("if (fsync(recovery_fd) < 0)\n"
+                              "\t\treturn -1;")
+            self.assertIn(original_guard, release)
+            premature = release.replace(
+                original_guard, "(void)fsync(recovery_fd);", 1)
+            source.write_text(prefix + premature + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            state.write_text(f"COMPLETE:{run_a}\n", encoding="ascii")
+            marker.write_text(f"{run_a}\n", encoding="ascii")
+            mutant = subprocess.run(
+                [str(binary), str(fixture), "2", run_a],
+                capture_output=True, text=True, timeout=5, check=False,
+                cwd=ROOT,
+            )
+            self.assertEqual(mutant.returncode, 0, mutant.stderr)
+            self.assertTrue(mutant.stdout.startswith("result=0 "))
+            self.assertFalse(marker.exists())
 
     def test_start_stop_recover_share_errno_preserving_recovery_epilogue(self):
         function_ranges = (

@@ -5486,12 +5486,18 @@ static int swapz_primary_reconcile_metadata_claim_at(
 		}
 	}
 	if (current.stage == SWAPZ_PRIMARY_STAGE_COMPLETE) {
-		if (active_present &&
-		    swapz_primary_release_partition_owner_at(
-			    recovery_fd, lock_fd, current.run_id,
-			    expected_owner) < 0)
-			return -1;
-		return 0;
+		if (active_present)
+			return swapz_primary_release_partition_owner_at(
+				recovery_fd, lock_fd, current.run_id,
+				expected_owner);
+		/*
+		 * A prior unlink may be visible despite a failed directory fsync.
+		 * Retry the durability boundary under the partition lock before
+		 * allowing a new owner to claim this completed transaction.
+		 * The lock serializes cooperative owners; only recovery_fd is
+		 * borrowed and no file descriptor ownership transfers here.
+		 */
+		return fsync(recovery_fd);
 	}
 	if (current.has_recovery_previous_stage) {
 		errno = EBUSY;
@@ -6430,7 +6436,9 @@ static int swapz_primary_require_recovery_preserving_errno(
 			"original_errno=%d recovery_errno=%d "
 			"retained_resource=transaction-evidence "
 			"disposition=BLOCKED "
-			"safe_next_action=read-only-inspect-recovery-state\n",
+			"safe_next_action=read-only-inspect-recovery-state "
+			"persistence_boundary=state-rename-close-directory-fsync "
+			"durable=UNCERTAIN mapper=UNCERTAIN swap=UNCERTAIN\n",
 			operation, primary_errno, recovery_errno);
 	}
 	errno = primary_errno;
@@ -11674,6 +11682,7 @@ static int swapz_primary_start_prepared(void)
 	}
 	starting_state = state;
 	starting_state.stage = SWAPZ_PRIMARY_STAGE_STARTING;
+	failure_phase = "state-starting";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &starting_state, 0) < 0)
 		goto out;
@@ -11814,8 +11823,24 @@ out:
 	saved_errno = errno ? errno : EIO;
 	if (result < 0)
 		fprintf(stderr,
-			"PRIMARY_START=FAILED phase=%s errno=%d error=%s\n",
-			failure_phase, saved_errno, strerror(saved_errno));
+			"PRIMARY_START=FAILED phase=%s errno=%d error=%s "
+			"original_errno=%d persistence_boundary=%s "
+			"durable=%s mapper=%s swap=%s\n",
+			failure_phase, saved_errno, strerror(saved_errno),
+			saved_errno,
+			!strcmp(failure_phase, "state-starting") ||
+			!strcmp(failure_phase, "state-active") ?
+				"state-rename-close-directory-fsync" : "none",
+			!strcmp(failure_phase, "state-starting") ||
+			!strcmp(failure_phase, "state-active") ?
+				"UNCERTAIN" :
+				(starting_persisted ? "OBSERVED" : "UNOBSERVED"),
+			mapper_created_by_call ||
+			!strcmp(failure_phase, "mapper-create") ?
+				"UNCERTAIN" : "UNOBSERVED",
+			swap_activated_by_call ||
+			!strcmp(failure_phase, "swapon") ?
+				"UNCERTAIN" : "UNOBSERVED");
 	if (result < 0 && failure_expected && failure_observed)
 		fprintf(stderr,
 			"PRIMARY_START=ADMISSION_DETAIL phase=%s expected=%s "
@@ -11950,6 +11975,7 @@ static int swapz_primary_stop_active(void)
 	}
 	stopping_state = state;
 	stopping_state.stage = SWAPZ_PRIMARY_STAGE_STOPPING;
+	failure_phase = "state-stopping";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &stopping_state, 0) < 0)
 		goto out;
@@ -12014,8 +12040,31 @@ out:
 	saved_errno = errno ? errno : EIO;
 	if (result < 0)
 		fprintf(stderr,
-			"PRIMARY_STOP=FAILED phase=%s errno=%d error=%s\n",
-			failure_phase, saved_errno, strerror(saved_errno));
+			"PRIMARY_STOP=FAILED phase=%s errno=%d error=%s "
+			"original_errno=%d persistence_boundary=%s "
+			"durable=%s mapper=%s swap=%s\n",
+			failure_phase, saved_errno, strerror(saved_errno),
+			saved_errno,
+			!strcmp(failure_phase, "owner-release") ?
+				"owner-unlink-directory-fsync" :
+				(!strcmp(failure_phase, "state-stopping") ||
+				 !strcmp(failure_phase, "state-restored") ||
+				 !strcmp(failure_phase, "state-complete") ?
+				 "state-rename-close-directory-fsync" : "none"),
+			complete_persisted ? "OBSERVED" :
+				(!strcmp(failure_phase, "state-stopping") ||
+				 !strcmp(failure_phase, "state-restored") ||
+				 !strcmp(failure_phase, "state-complete") ?
+				 "UNCERTAIN" :
+				 (stopping_persisted ? "OBSERVED" : "UNOBSERVED")),
+			mapper_removed_by_call ? "OBSERVED" :
+				(!strcmp(failure_phase, "mapper-remove") ||
+				 module_unloaded_by_call ?
+				 "UNCERTAIN" : "UNOBSERVED"),
+			swap_deactivated_by_call ? "OBSERVED" :
+				(!strcmp(failure_phase, "swapoff") ||
+				 mapper_removed_by_call ?
+				 "UNCERTAIN" : "UNOBSERVED"));
 	if (result < 0 && stopping_persisted && !complete_persisted &&
 	    recovery_fd >= 0 && lock_fd >= 0)
 		saved_errno = swapz_primary_require_recovery_preserving_errno(
@@ -12226,8 +12275,33 @@ out:
 	saved_errno = errno ? errno : EIO;
 	if (result < 0)
 		fprintf(stderr,
-			"PRIMARY_RECOVER=FAILED phase=%s errno=%d error=%s\n",
-			failure_phase, saved_errno, strerror(saved_errno));
+			"PRIMARY_RECOVER=FAILED phase=%s errno=%d error=%s "
+			"original_errno=%d persistence_boundary=%s "
+			"durable=%s mapper=%s swap=%s\n",
+			failure_phase, saved_errno, strerror(saved_errno),
+			saved_errno,
+			!strcmp(failure_phase, "owner-release") ?
+				"owner-unlink-directory-fsync" :
+				(!strcmp(failure_phase, "state-normalize") ||
+				 !strcmp(failure_phase, "state-recovering") ||
+				 !strcmp(failure_phase, "state-restored") ||
+				 !strcmp(failure_phase, "state-complete") ?
+				 "state-rename-close-directory-fsync" : "none"),
+			complete_persisted ? "OBSERVED" :
+				(!strcmp(failure_phase, "state-normalize") ||
+				 !strcmp(failure_phase, "state-recovering") ||
+				 !strcmp(failure_phase, "state-restored") ||
+				 !strcmp(failure_phase, "state-complete") ?
+				 "UNCERTAIN" :
+				 (recovering_persisted ? "OBSERVED" : "UNOBSERVED")),
+			mapper_removed_by_call ? "OBSERVED" :
+				(!strcmp(failure_phase, "mapper-remove") ||
+				 module_unloaded_by_call ?
+				 "UNCERTAIN" : "UNOBSERVED"),
+			swap_deactivated_by_call ? "OBSERVED" :
+				(!strcmp(failure_phase, "swapoff") ||
+				 mapper_removed_by_call ?
+				 "UNCERTAIN" : "UNOBSERVED"));
 	if (result < 0 && recovering_persisted && !complete_persisted &&
 	    recovery_fd >= 0 && lock_fd >= 0)
 		saved_errno = swapz_primary_require_recovery_preserving_errno(

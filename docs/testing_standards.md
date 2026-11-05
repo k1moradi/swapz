@@ -80,6 +80,30 @@ cases preserve the original numeric errno, report the secondary recovery errno
 for failed persistence, and reject failure-path ACTIVE/COMPLETE reporting.
 Synthetic file fsync does not establish production directory durability,
 mapper state or kernel swap state.
+
+A failed owner-marker unlink or release-directory fsync never qualifies STOP or
+RECOVER as COMPLETE, even when an in-process directory read finds no active
+marker. Under the per-partition mutation lock, a subsequent metadata-only
+reconciliation of COMPLETE with no marker must retry recovery-directory fsync;
+failure blocks the next owner claim and retains the consumed run record.
+The retry does not itself assert kernel swap or mapper cleanup, which the
+completed durable transaction must have established before marker release.
+Run identity and protected path values must not enter public refusal logs.
+
+Rootless lifecycle evidence must source-extract the production record writer
+and assert three distinct results using synthetic mode-0700 directories:
+pre-rename file-fsync failure leaves original state bytes and original errno;
+post-rename/pre-directory-fsync failure returns its errno even though new bytes
+are observable (durability remains UNCERTAIN); and successful fsync permits
+publication. A separate source-extracted COMPLETE-owner reconciliation must
+block a new claim if its retry fsync fails, with an explicit skip-fsync mutant
+that proves premature success would be caught. STOP/RECOVER source-extracted
+swapoff gates must demonstrate a definite injected EBUSY prevents any mapper
+removal call, with a bypass mutant proving the oracle is sensitive. Lifecycle
+refusals must name the operation, first numeric errno, recovery-state errno
+when it also fails, the persistence boundary and honest durable/mapper/swap
+observability (OBSERVED, UNOBSERVED or UNCERTAIN). Source-extracted fixtures
+must never execute privileged swap, mapper or device operations.
 Lifecycle source-order audits must follow the shared helper to its state-write
 dependency instead of requiring the persistence call to appear inline in each
 coordinator body. Audit the ordinary preprocessed executable function bodies,
