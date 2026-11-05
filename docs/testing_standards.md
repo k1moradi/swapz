@@ -7353,8 +7353,10 @@ manifest is synthetic logic evidence only and remains BLOCKED. A missing or
 premature seal, contradictory qualification target, stale source, malformed
 audit identity/counts, BLOCKED/UNAVAILABLE evidence or incomplete failure
 witness likewise remains BLOCKED. Failure authentication also requires a
-STABLE host with all recorded stability checks true, empty failed-checks and
-quiescent admitted-device boundaries before and after the campaign. The
+STABLE host with the producer's exact current stability-check field set, every
+check true and empty failed-checks. Both admitted-device boundaries must carry
+the exact current major:minor/swap/mount/holder/quiescence fields, bind the
+qualification lower device, and prove empty swap/mount/holder inventories. The
 source/target/policy/digest-bound release receipt must be current and its
 observation timestamp must not predate the campaign seal; a stale or
 identity-mismatched receipt is BLOCKED even when the retained campaign contains

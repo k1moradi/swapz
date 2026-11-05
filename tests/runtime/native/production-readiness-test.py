@@ -537,16 +537,20 @@ def physical_campaign_evidence(policy_raw):
         "host_stability": {
             "status": "STABLE",
             "checks": {
-                "source_sha": True,
-                "source_tree_sha": True,
-                "admitted_device_quiescent_before": True,
-                "admitted_device_quiescent_after": True,
+                check: True
+                for check in EVALUATOR.PHYSICAL_HOST_STABILITY_CHECKS
             },
             "failed_checks": [],
         },
         "admitted_device_boundary": {
-            "before": {"quiescent": True},
-            "after": {"quiescent": True},
+            phase: {
+                "major_minor": "8:1",
+                "swap_rows": [],
+                "mount_rows": [],
+                "holders": [],
+                "quiescent": True,
+            }
+            for phase in ("before", "after")
         },
         "policy": {
             "acceptance_manifest": {
@@ -3481,7 +3485,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 ("wrong-lower-device", "qualification_target_binding"),
                 ("missing-expected-target", "qualification_target_binding"),
                 ("changed-host", "host_stability"),
-                ("nonquiescent-boundary", "admitted_device_boundary")):
+                ("missing-host-check", "host_stability"),
+                ("nonquiescent-boundary", "admitted_device_boundary"),
+                ("missing-boundary-field", "admitted_device_boundary")):
             with self.subTest(mutation=mutation):
                 campaign = failed_campaign()
                 binding = campaign["qualification_target_binding"]
@@ -3499,9 +3505,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     campaign["host_stability"].update(
                         status="CHANGED", failed_checks=["source_sha"])
                     campaign["host_stability"]["checks"]["source_sha"] = False
-                else:
+                elif mutation == "missing-host-check":
+                    campaign["host_stability"]["checks"].pop("module_state")
+                elif mutation == "nonquiescent-boundary":
                     campaign["admitted_device_boundary"]["before"][
                         "quiescent"] = False
+                else:
+                    campaign["admitted_device_boundary"]["before"].pop(
+                        "swap_rows")
                 result = evaluate(policy=policy, campaign=campaign)
                 self.assertEqual(result["release_verdict"], "BLOCKED")
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
@@ -3524,6 +3535,29 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(complete["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(complete["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(complete["release_verdict"], "BLOCKED")
+
+    def test_physical_host_and_boundary_witnesses_are_complete(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        mutations = (
+            ("missing-host-check", lambda campaign:
+             campaign["host_stability"]["checks"].pop("module_state")),
+            ("missing-boundary-field", lambda campaign:
+             campaign["admitted_device_boundary"]["before"].pop("holders")),
+            ("wrong-boundary-device", lambda campaign:
+             campaign["admitted_device_boundary"]["after"].__setitem__(
+                 "major_minor", "8:2")),
+        )
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                campaign = physical_campaign_evidence(policy_raw)
+                mutate(campaign)
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertEqual(
+                    result["METADATA_RAM_MEASUREMENT"]["status"],
+                    "NOT_MEASURED")
 
     def test_physical_fail_receipt_must_bind_and_follow_seal(self):
         policy = acceptance_policy()

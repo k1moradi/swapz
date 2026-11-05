@@ -108,6 +108,22 @@ PHYSICAL_AUDIT_FIRST_FAILURE_KEYS = {
 PHYSICAL_AUDIT_COHORT_COUNT_KEYS = {
     "required_pairs", "attempted_pairs", "accepted_pairs",
 }
+PHYSICAL_HOST_STABILITY_CHECKS = {
+    "source_sha", "source_tree_sha", "kernel_release", "kernel_machine",
+    "kernel_version", "kernel_node", "kernel_boot_id",
+    "capture_monotonic_increasing", "kernel_uptime_non_decreasing",
+    "device_major_minor", "device_size_bytes", "device_parent_major_minor",
+    "device_partuuid", "device_serial", "device_wwid", "physical_disk",
+    "device_model", "device_transport", "device_scheduler", "device_queue",
+    "admitted_device_quiescent_before", "admitted_device_quiescent_after",
+    "cpu_model_names", "configured_cpus", "online_cpus", "affinity_cpus",
+    "cpu_governors", "cpu_frequency_drivers", "cpu_scaling_min",
+    "cpu_scaling_max", "memory_total_bytes", "mount_inventory",
+    "swap_inventory", "module_state",
+}
+PHYSICAL_DEVICE_BOUNDARY_KEYS = {
+    "major_minor", "swap_rows", "mount_rows", "holders", "quiescent",
+}
 COLD_BOOT_REPORT_KEYS = {
     "schema", "status", "cold_boot_observed", "boot_id", "armed_boot_id",
     "kernel_release", "selected_partuuid", "selected_target_major_minor",
@@ -508,6 +524,37 @@ def _valid_campaign_artifact(value: Any) -> bool:
         0 < value["size_bytes"] <= RAM_TRACE_VALIDATOR["MAX_UINT64"] and
         isinstance(value.get("sha256"), str) and
         bool(SHA256_RE.fullmatch(value["sha256"]))
+    )
+
+
+def _physical_host_stability_is_valid(value: Any) -> bool:
+    """Require the complete current sealer host-stability witness."""
+    if not isinstance(value, dict) or set(value) != {
+            "status", "checks", "failed_checks"}:
+        return False
+    checks = value.get("checks")
+    return (
+        value.get("status") == "STABLE" and
+        isinstance(checks, dict) and
+        set(checks) == PHYSICAL_HOST_STABILITY_CHECKS and
+        all(check is True for check in checks.values()) and
+        value.get("failed_checks") == []
+    )
+
+
+def _physical_device_boundary_is_quiescent(
+        value: Any, expected_lower_major_minor: Any) -> bool:
+    """Require the complete current sealer quiescent target boundary."""
+    return (
+        isinstance(value, dict) and
+        set(value) == PHYSICAL_DEVICE_BOUNDARY_KEYS and
+        isinstance(expected_lower_major_minor, str) and
+        MAJOR_MINOR_RE.fullmatch(expected_lower_major_minor) is not None and
+        value.get("major_minor") == expected_lower_major_minor and
+        value.get("swap_rows") == [] and
+        value.get("mount_rows") == [] and
+        value.get("holders") == [] and
+        value.get("quiescent") is True
     )
 
 
@@ -1502,6 +1549,10 @@ def validate_physical_campaign_evidence(
     if not matches_serialized:
         reject("sealed campaign object differs from artifact bytes")
     campaign = serialized_campaign
+    if _parse_utc_evidence_time(campaign.get("sealed_at_utc")) is None:
+        reject(
+            "sealed campaign seal timestamp is invalid: "
+            "metric=sealed_at_utc required=canonical_UTC")
     campaign_source_sha = campaign.get("source_sha")
     if campaign_source_sha != source_sha:
         if (
@@ -1645,29 +1696,28 @@ def validate_physical_campaign_evidence(
                 reject(f"sealed campaign RAM trace is invalid: {exc}")
 
     stability = campaign.get("host_stability")
-    if not isinstance(stability, dict) or stability.get("status") != "STABLE":
-        reject("sealed campaign host stability is not STABLE")
-    else:
-        checks = stability.get("checks")
-        failed = stability.get("failed_checks")
-        if (
-                not isinstance(checks, dict) or not checks or
-                any(value is not True for value in checks.values())):
-            reject("sealed campaign host stability checks are incomplete")
-        if failed != []:
-            reject("sealed campaign host stability records failed checks")
+    if not _physical_host_stability_is_valid(stability):
+        reject(
+            "sealed campaign host stability is not STABLE or complete")
 
+    expected_lower_major_minor = None
+    if isinstance(target_binding, dict):
+        boundary_expected = target_binding.get("expected")
+        if isinstance(boundary_expected, dict):
+            expected_lower_major_minor = boundary_expected.get(
+                "lower_major_minor")
     boundaries = campaign.get("admitted_device_boundary")
-    if not isinstance(boundaries, dict):
+    if (
+            not isinstance(boundaries, dict) or
+            set(boundaries) != {"before", "after"}):
         reject("sealed campaign admitted-device boundary is missing")
     else:
         for phase in ("before", "after"):
-            boundary = boundaries.get(phase)
-            if (
-                    not isinstance(boundary, dict) or
-                    boundary.get("quiescent") is not True):
+            if not _physical_device_boundary_is_quiescent(
+                    boundaries.get(phase), expected_lower_major_minor):
                 reject(
-                    f"sealed campaign target was not quiescent {phase} campaign")
+                    f"sealed campaign target was not quiescent {phase} campaign "
+                    "with complete lower-device inventory")
 
     policy = campaign.get("policy")
     if not isinstance(policy, dict):
@@ -1976,26 +2026,17 @@ def _physical_campaign_failure_is_proven(
             not _same_json_value(target_binding.get("observed"), expected)):
         return False
 
-    stability = record.get("host_stability")
-    stability_checks = (
-        stability.get("checks") if isinstance(stability, dict) else None)
-    if (
-            not isinstance(stability, dict) or
-            stability.get("status") != "STABLE" or
-            not isinstance(stability_checks, dict) or
-            not stability_checks or
-            any(value is not True for value in stability_checks.values()) or
-            stability.get("failed_checks") != []):
+    if not _physical_host_stability_is_valid(record.get("host_stability")):
         return False
     boundaries = record.get("admitted_device_boundary")
-    if not isinstance(boundaries, dict):
+    expected_lower_major_minor = expected.get("lower_major_minor")
+    if (
+            not isinstance(boundaries, dict) or
+            set(boundaries) != {"before", "after"} or
+            any(not _physical_device_boundary_is_quiescent(
+                    boundaries.get(phase), expected_lower_major_minor)
+                for phase in ("before", "after"))):
         return False
-    for phase in ("before", "after"):
-        boundary = boundaries.get(phase)
-        if (
-                not isinstance(boundary, dict) or
-                boundary.get("quiescent") is not True):
-            return False
 
     audit = record.get("physical_evidence_audit")
     artifacts = record.get("artifacts")
