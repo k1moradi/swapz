@@ -6449,19 +6449,26 @@ control must continue through data completion and the FUA gate far enough to
 demonstrate a forbidden successful upper ACK, rather than stop merely because a
 failed preflush allowed data submission. Their finite faults are not
 loaded-kernel, device-cache, KASAN or physical-media evidence.
-A terminal cancellation is different from ordinary DM suspend: an already
-submitted lower WRITE retains its callback owner until it completes, and a
-drain cannot synthesize success or release that owner early. Bounded native
-flush schedules must retain the first synchronous preflush errno over a later
-protocol-invalid unowned callback, observe that an unsupported FUA completes
-its synchronous lower-flush call without a premature upper ACK or generation
-publication, and elect an owned lower callback error ahead of a generic
-teardown cancellation errno. Repeat drain and fresh upper retry must not issue
-additional lower I/O on a terminally failed target. On failure, report phase,
-original lower errno, expected/observed ACK errno, publication/generation
-counts and outstanding lower/upper completion owners. These rootless models
-do not claim an asynchronous FUA BIO, a loaded callback race or real-media
-cache persistence.
+Ordinary DM suspend/drain does not synthesize a cancellation errno for accepted
+BIOs. A PREFLUSH boundary first joins every older detached lower WRITE; if that
+callback fails, its lower errno prevents the lower preflush from being issued.
+Once PREFLUSH itself is issued, no older lower callback owner remains, so a
+failed preflush followed by an older callback failure is not a production
+schedule and rootless fixtures must not fabricate it. Required FUA is
+synchronous and detached asynchronous writes do not carry FUA. Delayed-FUA
+coverage must observe the synchronous lower flush while that call is still
+outstanding and prove no ACK or generation publication occurs before its
+return. For a non-FUA detached WRITE, drain may overlap the final callback; the
+callback elects its lower errno before publishing completion, while an
+independent terminal failure uses the same first-failure latch as production.
+If the callback wins that election, later failures cannot replace its errno.
+If another terminal failure wins first, the current run may still report its
+own later lower callback errno, while a fresh upper retry observes the already
+latched target errno. Repeat drain and retry must not issue additional lower
+I/O. On failure, report phase, original lower errno, expected/observed ACK
+errno, publication/generation counts and outstanding lower/upper completion
+owners. These rootless models do not claim a loaded callback race or
+real-media cache persistence.
 Mandatory Python qualification suites must remain syntactically valid; a path that exists but cannot execute does not satisfy discovery coverage.
 
 
