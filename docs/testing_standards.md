@@ -3519,7 +3519,10 @@ authoritative generations and numeric errno. This does not claim loaded
 callback-once or post-release callback evidence.
 
 Source contracts for the immutable-run split must assert semantic ownership,
-not retired helper names. The prepare function may test whether a synchronous
+not retired helper names. Representation-authentication source checks must
+require both capture of the authoritative RAW/compressed bit at pause and its
+comparison with caller-owned run metadata in whole-run authentication before
+replay. The prepare function may test whether a synchronous
 write callback is configured, but it must not invoke that callback. Lower I/O
 submission remains in the synchronous wrapper until the target-side async
 candidate is enabled; transaction replay and publish timing belong to the new

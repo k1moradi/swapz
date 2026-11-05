@@ -2402,6 +2402,9 @@ int main(void) {
                         complete.index("swapz_finish("))
         self.assertIn("swapz_bulk_abort(e, run, 0)", complete)
         self.assertIn("a->batch_raw[snapshot_index] = raw", pause)
+        self.assertIn(
+            "a->batch_raw[snapshot_index] != raw_entries[index]",
+            authority)
         self.assertIn("a->batch_pending++", pause)
         self.assertIn("a->batch_replaying = 1", resume)
         self.assertIn("ctx->engine.bulk_writes", body("swapz_status"))
