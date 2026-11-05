@@ -382,7 +382,7 @@ exec "$SWAPZ_REAL_RM" "$@"
             "boundary=owned_process_group expected=empty "
             "observed=descendant_alive child_exit=7 errno=9 "
             "owned_cleanup=failed", evidence)
-        self.assertIn("unittest_kind=ERROR\\n", evidence)
+        self.assertIn("unittest_kind=ERROR\n", evidence)
         self.assertNotIn("AFTER_PACKAGE", result.stdout)
 
     def test_primary_oversized_stderr_keeps_first_traceback(self):

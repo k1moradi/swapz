@@ -211,8 +211,11 @@ The normal rootless runner must register
 immediately after the primary real-swap contracts and before the terminal oracle
 contracts. Its live-process negative controls run without sudo or device writes;
 first-failure attribution and bounded private stderr must be retained through
-the shared rootless reporter. A passing regression reports only synthetic
-subprocess-ownership safety, never approval for physical admission.
+the shared rootless reporter. Its synthetic error control must retain the
+original child exit/errno, expected versus observed process-group state, and
+cleanup outcome in a mode-0600 private diagnostic, with only redacted bounded
+failure attribution in public summaries. A passing regression reports only
+synthetic subprocess-ownership safety, never approval for physical admission.
 
 The current wire schema carries source, helper and control-input identity but
 no independently authenticated exact message sender, physical qualification
