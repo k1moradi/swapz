@@ -69,10 +69,14 @@ recovery-state write failure for START, STOP and RECOVER; source ordering must
 bind all three failure epilogues to that helper before any success publication.
 Lifecycle source-order audits must follow the shared helper to its state-write
 dependency instead of requiring the persistence call to appear inline in each
-coordinator body. They must still verify that each operation-specific epilogue
-invokes the helper only after capturing the first errno and before publishing
-success. Isolated START, STOP and RECOVER source mutants must reject both
-omitted recovery persistence and premature ACTIVE/COMPLETE reporting.
+coordinator body. Audit the ordinary preprocessed executable function bodies,
+so comments, diagnostics and inactive preprocessor branches cannot satisfy the
+contract. Each operation-specific epilogue must invoke the helper only after
+capturing the first errno and before publishing success, and the helper must
+issue exactly one executable recovery-state persistence attempt. Isolated
+START, STOP and RECOVER source mutants must reject omitted or
+preprocessor-disabled recovery persistence and premature ACTIVE/COMPLETE
+reporting.
 Because `SWAPZ_PRIMARY_ROOTLESS_TEST` compiles out those privileged lifecycle
 callers, keep the production-only static helper out of that build's translation
 unit while continuing to compile its actual body in the isolated errno fixture;

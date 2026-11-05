@@ -60,6 +60,22 @@ def c_function_body(source: str, symbol: str, *, code_only: bool = True) -> str:
     raise AssertionError("unclosed production function " + symbol)
 
 
+def c_preprocessed_function_body(source: str, symbol: str,
+                                 *, code_only: bool = True) -> str:
+    """Return one ordinary-build C body after honoring local conditionals."""
+    raw_body = c_function_body(source, symbol, code_only=False)
+    synthetic_source = f"int {symbol}(void) {{\n{raw_body}\n}}\n"
+    result = subprocess.run(
+        ["cc", "-std=c11", "-E", "-P", "-x", "c", "-"],
+        cwd=ROOT, input=synthetic_source, text=True, encoding="utf-8",
+        errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        check=False)
+    if result.returncode:
+        raise AssertionError(
+            "function preprocessor failed for " + symbol + ":\n" +
+            result.stderr)
+    return c_function_body(result.stdout, symbol, code_only=code_only)
+
 def c_primary_function_names(source: str) -> tuple[str, ...]:
     """Return production primary function symbols without trusting comments."""
     parsed_source = _c_code_only(source)
@@ -823,14 +839,17 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
 
     def assert_lifecycle_failure_epilogues(self, source: str):
         """Trace the single fail-closed errno helper from all three epilogues."""
-        helper_code = c_function_body(
+        helper_code = c_preprocessed_function_body(
             source, "swapz_primary_require_recovery_preserving_errno")
-        helper_raw = c_function_body(
+        helper_raw = c_preprocessed_function_body(
             source, "swapz_primary_require_recovery_preserving_errno",
             code_only=False)
         self.assertRegex(
             helper_code,
             r"\bif\s*\(\s*swapz_primary_state_require_recovery_at\s*\(")
+        self.assertEqual(
+            helper_code.count("swapz_primary_state_require_recovery_at("), 1,
+            "recovery helper must persist RECOVERY_REQUIRED exactly once")
         self.assertIn("const int primary_errno = original_errno ? original_errno : EIO;",
                       helper_code)
         self.assertIn("const int recovery_errno = errno ? errno : EIO;",
@@ -847,8 +866,9 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
                  "stopping_persisted", "COMPLETE"),
                 ("swapz_primary_recover", "RECOVER",
                  "recovering_persisted", "COMPLETE")):
-            body_code = c_function_body(source, symbol)
-            body_raw = c_function_body(source, symbol, code_only=False)
+            body_code = c_preprocessed_function_body(source, symbol)
+            body_raw = c_preprocessed_function_body(
+                source, symbol, code_only=False)
             epilogue_start = body_code.rfind("\nout:\n")
             self.assertGreaterEqual(
                 epilogue_start, 0, f"{operation}: missing failure epilogue")
@@ -951,10 +971,13 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
 
         # Each isolated source mutant must fail the actual production-linked
         # guard, not a behavioral mock or a comment/string-only assertion.
-        for symbol, operation, success_stage in (
-                ("swapz_primary_start_prepared", "START", "ACTIVE"),
-                ("swapz_primary_stop_active", "STOP", "COMPLETE"),
-                ("swapz_primary_recover", "RECOVER", "COMPLETE")):
+        for symbol, operation, persisted, success_stage in (
+                ("swapz_primary_start_prepared", "START",
+                 "starting_persisted", "ACTIVE"),
+                ("swapz_primary_stop_active", "STOP",
+                 "stopping_persisted", "COMPLETE"),
+                ("swapz_primary_recover", "RECOVER",
+                 "recovering_persisted", "COMPLETE")):
             body = c_function_body(source, symbol, code_only=False)
             omitted = re.sub(
                 r"saved_errno\s*=\s*"
@@ -965,6 +988,29 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     self.assert_lifecycle_failure_epilogues(
                         source.replace(body, omitted, 1))
+            persisted_condition = re.escape(persisted)
+            if operation != "START":
+                persisted_condition += r"\s*&&\s*!complete_persisted"
+            recovery_guard = re.search(
+                r"if\s*\(\s*result\s*<\s*0\s*&&\s*" +
+                persisted_condition +
+                r"\s*&&\s*recovery_fd\s*>=\s*0\s*&&\s*"
+                r"lock_fd\s*>=\s*0\s*\)\s*"
+                r"saved_errno\s*=\s*"
+                r"swapz_primary_require_recovery_preserving_errno\s*"
+                r"\([^;]*\);",
+                body)
+            self.assertIsNotNone(recovery_guard)
+            disabled = (
+                body[:recovery_guard.start()] + "#if 0\n" +
+                recovery_guard.group(0) + "\n#endif" +
+                body[recovery_guard.end():])
+            with self.subTest(
+                    operation=operation,
+                    mutation="preprocessor-disabled-recovery"):
+                with self.assertRaises(AssertionError):
+                    self.assert_lifecycle_failure_epilogues(
+                        source.replace(body, disabled, 1))
 
             publication = re.search(
                 rf'if\s*\(result == 0\)\s*printf\s*\(\s*'
