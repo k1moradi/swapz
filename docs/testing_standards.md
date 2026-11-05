@@ -7349,11 +7349,17 @@ The audit qualification status and campaign qualification status must both be
 manifest is synthetic logic evidence only and remains BLOCKED. A missing or
 premature seal, contradictory qualification target, stale source, malformed
 audit identity/counts, BLOCKED/UNAVAILABLE evidence or incomplete failure
-witness likewise remains BLOCKED. Type-malformed nested audit witnesses,
-cohort counts and pair identifiers must fail closed as BLOCKED without raising.
-Failure diagnostics identify the earliest seal/target/audit gate, expected
-versus observed source/target, the campaign digest and relevant pair count, and
-why FAIL versus BLOCKED was selected.
+witness likewise remains BLOCKED. Failure authentication also requires a
+STABLE host with all recorded stability checks true, empty failed-checks and
+quiescent admitted-device boundaries before and after the campaign. The
+source/target/policy/digest-bound release receipt must be current and its
+observation timestamp must not predate the campaign seal; a stale or
+identity-mismatched receipt is BLOCKED even when the retained campaign contains
+a valid-looking FAIL. Type-malformed nested audit witnesses, cohort counts and
+pair identifiers must fail closed as BLOCKED without raising. Failure
+diagnostics identify the earliest receipt/seal/target/host/audit gate, expected
+versus observed receipt and campaign source/target identities, the campaign
+digest and relevant pair count, and why FAIL versus BLOCKED was selected.
 The existing five-argument private campaign-validator call remains supported
 for structural/measurement-only callers and loads tracked policy authority,
 but it does not establish release completeness. `evaluate_release` supplies

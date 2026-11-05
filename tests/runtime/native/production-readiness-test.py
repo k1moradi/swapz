@@ -3479,7 +3479,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 ("seal-before-host-capture", "sealed_at_utc"),
                 ("wrong-observed-target", "qualification_target_binding"),
                 ("wrong-lower-device", "qualification_target_binding"),
-                ("missing-expected-target", "qualification_target_binding")):
+                ("missing-expected-target", "qualification_target_binding"),
+                ("changed-host", "host_stability"),
+                ("nonquiescent-boundary", "admitted_device_boundary")):
             with self.subTest(mutation=mutation):
                 campaign = failed_campaign()
                 binding = campaign["qualification_target_binding"]
@@ -3491,8 +3493,15 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     binding["observed"]["physical_partuuid"] = "ffffffff-01"
                 elif mutation == "wrong-lower-device":
                     binding["observed"]["lower_major_minor"] = "8:2"
-                else:
+                elif mutation == "missing-expected-target":
                     binding.pop("expected")
+                elif mutation == "changed-host":
+                    campaign["host_stability"].update(
+                        status="CHANGED", failed_checks=["source_sha"])
+                    campaign["host_stability"]["checks"]["source_sha"] = False
+                else:
+                    campaign["admitted_device_boundary"]["before"][
+                        "quiescent"] = False
                 result = evaluate(policy=policy, campaign=campaign)
                 self.assertEqual(result["release_verdict"], "BLOCKED")
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
@@ -3515,6 +3524,47 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(complete["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(complete["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(complete["release_verdict"], "BLOCKED")
+
+    def test_physical_fail_receipt_must_bind_and_follow_seal(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+
+        def evidence_for(campaign):
+            return current_evidence(
+                encoded(owner_report()), policy_raw,
+                campaign_raw=encoded(campaign))
+
+        stale_campaign = physical_campaign_failure_evidence(policy_raw)
+        stale_evidence = evidence_for(stale_campaign)
+        stale_receipt = stale_evidence["release_evidence"][
+            "sustained_physical_performance"]
+        stale_receipt["observed_at_utc"] = "2026-11-03T00:00:10Z"
+        stale_result = evaluate(
+            policy=policy, campaign=stale_campaign, evidence=stale_evidence)
+        self.assertEqual(stale_result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "first_failed_phase=campaign_receipt_chronology" in blocker and
+            f"required_receipt_source_sha={SOURCE}" in blocker and
+            f"observed_receipt_source_sha={SOURCE}" in blocker and
+            "verdict=BLOCKED" in blocker
+            for blocker in stale_result["code_blockers"]),
+            stale_result["code_blockers"])
+
+        mismatched_campaign = physical_campaign_failure_evidence(policy_raw)
+        mismatched_evidence = evidence_for(mismatched_campaign)
+        mismatched_evidence["release_evidence"][
+            "sustained_physical_performance"]["source_sha"] = "b" * 40
+        mismatched_result = evaluate(
+            policy=policy, campaign=mismatched_campaign,
+            evidence=mismatched_evidence)
+        self.assertEqual(mismatched_result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "first_failed_phase=campaign_receipt_binding" in blocker and
+            f"required_receipt_source_sha={SOURCE}" in blocker and
+            f"observed_receipt_source_sha={'b' * 40}" in blocker and
+            "verdict=BLOCKED" in blocker
+            for blocker in mismatched_result["code_blockers"]),
+            mismatched_result["code_blockers"])
 
     def test_synthetic_physical_audit_fail_without_pair_witness_is_blocked(self):
         policy = acceptance_policy()

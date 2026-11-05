@@ -1976,6 +1976,27 @@ def _physical_campaign_failure_is_proven(
             not _same_json_value(target_binding.get("observed"), expected)):
         return False
 
+    stability = record.get("host_stability")
+    stability_checks = (
+        stability.get("checks") if isinstance(stability, dict) else None)
+    if (
+            not isinstance(stability, dict) or
+            stability.get("status") != "STABLE" or
+            not isinstance(stability_checks, dict) or
+            not stability_checks or
+            any(value is not True for value in stability_checks.values()) or
+            stability.get("failed_checks") != []):
+        return False
+    boundaries = record.get("admitted_device_boundary")
+    if not isinstance(boundaries, dict):
+        return False
+    for phase in ("before", "after"):
+        boundary = boundaries.get(phase)
+        if (
+                not isinstance(boundary, dict) or
+                boundary.get("quiescent") is not True):
+            return False
+
     audit = record.get("physical_evidence_audit")
     artifacts = record.get("artifacts")
     pairs = artifacts.get("pairs") if isinstance(artifacts, dict) else None
@@ -2883,33 +2904,59 @@ def evaluate_release(
     campaign_sealed_at = None
     campaign_sealed_time = None
     physical_campaign_failure_proven = False
+    physical_campaign_failure_receipt_issue = None
     physical_campaign_receipt = release.get("sustained_physical_performance")
+    receipt_source = (
+        physical_campaign_receipt.get("source_sha")
+        if isinstance(physical_campaign_receipt, dict) else None)
+    receipt_target = (
+        _normalize_target(physical_campaign_receipt.get("target"))
+        if isinstance(physical_campaign_receipt, dict) else None)
+    receipt_observed_at = (
+        physical_campaign_receipt.get("observed_at_utc")
+        if isinstance(physical_campaign_receipt, dict) else None)
+    receipt_binding_valid = (
+        isinstance(physical_campaign_receipt, dict) and
+        physical_campaign_receipt.get("status") in (
+            "PASS", "FAIL", "BLOCKED") and
+        physical_campaign_receipt.get("current") is True and
+        receipt_source == source_sha and
+        _valid_observed_at_utc(receipt_observed_at) and
+        target is not None and receipt_target == target and
+        policy_sha256 is not None and
+        physical_campaign_receipt.get("policy_sha256") == policy_sha256 and
+        physical_campaign_evidence is not None and
+        physical_campaign_evidence_raw is not None and
+        physical_campaign_receipt.get("evidence_sha256") ==
+        sha256_bytes(physical_campaign_evidence_raw))
     if (
-            isinstance(physical_campaign_receipt, dict) and
-            physical_campaign_receipt.get("status") in (
-                "PASS", "FAIL", "BLOCKED") and
-            physical_campaign_receipt.get("current") is True and
-            physical_campaign_receipt.get("source_sha") == source_sha and
-            _valid_observed_at_utc(
-                physical_campaign_receipt.get("observed_at_utc")) and
-            target is not None and
-            _normalize_target(physical_campaign_receipt.get("target")) ==
-            target and
-            policy_sha256 is not None and
-            physical_campaign_receipt.get("policy_sha256") ==
-            policy_sha256 and
             physical_campaign_evidence is not None and
-            physical_campaign_evidence_raw is not None and
-            physical_campaign_receipt.get("evidence_sha256") ==
-            sha256_bytes(physical_campaign_evidence_raw)):
-        physical_campaign_failure_proven = (
-            _physical_campaign_failure_is_proven(
-                physical_campaign_evidence, physical_campaign_evidence_raw,
-                source_sha, policy, policy_sha256, target))
-        if physical_campaign_failure_proven:
-            block_code(
-                "sustained_physical_performance: exact-source campaign "
-                "contains producer-proven FAIL execution evidence")
+            physical_campaign_evidence_raw is not None):
+        if not receipt_binding_valid:
+            physical_campaign_failure_receipt_issue = (
+                "campaign_receipt_binding")
+        else:
+            receipt_time = _parse_utc_evidence_time(receipt_observed_at)
+            failure_sealed_at = (
+                physical_campaign_evidence.get("sealed_at_utc")
+                if isinstance(physical_campaign_evidence, dict) else None)
+            failure_sealed_time = _parse_utc_evidence_time(failure_sealed_at)
+            if (
+                    failure_sealed_time is not None and
+                    receipt_time is not None and
+                    receipt_time < failure_sealed_time):
+                physical_campaign_failure_receipt_issue = (
+                    "campaign_receipt_chronology")
+            else:
+                physical_campaign_failure_proven = (
+                    _physical_campaign_failure_is_proven(
+                        physical_campaign_evidence,
+                        physical_campaign_evidence_raw,
+                        source_sha, policy, policy_sha256, target))
+                if physical_campaign_failure_proven:
+                    block_code(
+                        "sustained_physical_performance: exact-source campaign "
+                        "contains producer-proven FAIL execution evidence")
     if (physical_campaign_evidence is not None and
             physical_campaign_evidence_raw is not None):
         # Capacity/RAM is an independent measured gate. Release-performance
@@ -2954,12 +3001,18 @@ def evaluate_release(
                     "size_bytes": observed_binding.get("physical_device_bytes"),
                 }) if isinstance(observed_binding, dict) else None)
             failed_phase = (
-                "qualification_target_binding"
+                physical_campaign_failure_receipt_issue
+                if physical_campaign_failure_receipt_issue is not None
+                else "qualification_target_binding"
                 if any(issue.startswith(
                     "sealed campaign qualification target")
                     for issue in campaign_issues)
                 else "sealed_at_utc"
                 if any("sealed_at_utc" in issue for issue in campaign_issues)
+                else "host_stability"
+                if any("host stability" in issue for issue in campaign_issues)
+                else "admitted_device_boundary"
+                if any("not quiescent" in issue for issue in campaign_issues)
                 else "physical_evidence_audit"
                 if (
                     (isinstance(audit, dict) and
@@ -2987,6 +3040,15 @@ def evaluate_release(
                 f"required_target={target if target is not None else 'invalid'} "
                 f"observed_qualification_target="
                 f"{observed_binding_target if observed_binding_target is not None else 'invalid'} "
+                f"required_receipt_source_sha={source_sha} "
+                f"observed_receipt_source_sha="
+                f"{receipt_source if _valid_source(receipt_source) else 'invalid'} "
+                f"required_receipt_target="
+                f"{target if target is not None else 'invalid'} "
+                f"observed_receipt_target="
+                f"{receipt_target if receipt_target is not None else 'invalid'} "
+                f"observed_receipt_at_utc="
+                f"{receipt_observed_at if _valid_observed_at_utc(receipt_observed_at) else 'invalid'} "
                 f"verdict={'FAIL' if physical_campaign_failure_proven else 'BLOCKED'} "
                 f"reason={'authenticated_producer_failure' if physical_campaign_failure_proven else 'missing_or_contradictory_campaign_proof'}")
         if isinstance(physical_campaign_evidence, dict):
