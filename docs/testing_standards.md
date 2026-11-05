@@ -3758,6 +3758,11 @@ names and unlink only that snapshot; a canonical name injected after inventory
 must remain present and force the final rmdir refusal. A session-signal refusal
 retains both created resources; after successful cgroup removal, session-only
 refusal retains only the private session.
+A final `rmdir` failure on an otherwise emptied private session, or a
+same-name directory replacement after successful final removal, is a
+session-only refusal. Rootless fixtures must independently inject both, verify
+the original exit and first refusal phase, retain only the remaining session,
+and prohibit synthetic ID36 PASS evidence.
 
 Rootless contracts must lint both the pressure helper and shell wrapper, and the
 loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`

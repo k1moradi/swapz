@@ -454,6 +454,41 @@ rmdir() {
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
+    def test_private_session_replacement_after_final_rmdir_is_retained(self):
+        # A successful rmdir does not authorize a new session at the old path.
+        # The pinned descriptor keeps the original identity distinguishable.
+        preamble = '''
+rmdir() {
+    if [[ $1 == "$CGROUP" ]]; then
+        if [[ -f $CGROUP/cgroup.procs && ! -s $CGROUP/cgroup.procs ]]; then
+            command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+            command rmdir -- "$CGROUP"
+        else
+            return 1
+        fi
+    elif [[ $1 == "$SESSION" ]]; then
+        command rmdir -- "$SESSION" || return 1
+        command mkdir -- "$SESSION"
+    else
+        command rmdir "$@"
+    fi
+}
+'''
+        result = self.execute(preamble=preamble)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertEqual(tuple(self.session.iterdir()), ())
+        self.assertIn("phase:session-post-rmdir", result.stderr)
+        self.assertIn("observed:stale", result.stderr)
+        self.assertIn("original_exit:0", result.stderr)
+        self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertNotIn("retained_cleanup:child-cgroup-and-private-session",
+                         result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
     def test_interrupted_session_unlink_keeps_original_failure_and_evidence(self):
         # Model an interrupted unlink after one known file was removed.
         # Earlier FAIL wins, and the remaining session is still quarantined.
