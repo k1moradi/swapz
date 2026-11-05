@@ -3619,6 +3619,39 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             for blocker in result["code_blockers"]),
             result["code_blockers"])
 
+    def test_physical_fail_accepted_count_must_match_retained_pairs(self):
+        policy = acceptance_policy()
+        campaign = physical_campaign_failure_evidence(encoded(policy))
+        audit = campaign["physical_evidence_audit"]
+        count = audit["cohort_pair_counts"]["sd-service-balanced"]
+        witness = next(
+            row for row in campaign["artifacts"]["pairs"]
+            if row["workload"] == "sd-service-balanced" and
+            row["pair_index"] == 1)
+        self.assertEqual(count["accepted_pairs"], 4)
+        self.assertEqual(
+            (witness["status"], witness["excluded"]), ("EXCLUDED", True))
+
+        # An audit scalar cannot count the retained EXCLUDED failure witness as
+        # accepted and still authenticate a release FAIL.
+        count["accepted_pairs"] = count["attempted_pairs"]
+        artifact_digest = hashlib.sha256(encoded(campaign)).hexdigest()
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "first_failed_phase=physical_evidence_audit" in blocker and
+            f"required_source_sha={SOURCE}" in blocker and
+            f"observed_source_sha={SOURCE}" in blocker and
+            f"required_artifact_sha256={artifact_digest}" in blocker and
+            f"observed_artifact_sha256={artifact_digest}" in blocker and
+            f"required_target=('{TARGET['partuuid']}', {TARGET['size_bytes']})"
+            in blocker and
+            "verdict=BLOCKED" in blocker and
+            "reason=missing_or_contradictory_campaign_proof" in blocker
+            for blocker in result["code_blockers"]),
+            result["code_blockers"])
+
     def test_physical_audit_pass_requires_current_identity_and_pair_counts(self):
         policy = acceptance_policy()
         policy_raw = encoded(policy)
