@@ -38,10 +38,13 @@ KERNEL_RELEASE = "test-debug-kernel"
 BOOT_ID = qualification.DEFAULT_BOOT_ID.read_text(encoding="utf-8").strip()
 MODULE_BYTES = b"synthetic module, never loaded"
 MODULE_SHA256 = hashlib.sha256(MODULE_BYTES).hexdigest()
+RUN_TOKEN = "0123456789abcdef"
 GOOD_LOG = f"""
 SOURCE_HEAD={SOURCE_SHA}
 RUNNING_KERNEL={KERNEL_RELEASE}
 MODULE_SHA256={MODULE_SHA256}  /repo/build/kernel/experimental/dm-swapz.ko
+OWNED_CONFIG=/sys/kernel/config/nullb/nullb-swapz-{RUN_TOKEN} UUID=SWAPZ-TEST-{RUN_TOKEN}
+OWNED_RAM_LOWER=/dev/nullb7 CONFIG=/sys/kernel/config/nullb/nullb-swapz-{RUN_TOKEN} DISK=nullb7 DEVICE=251:7 UUID=SWAPZ-TEST-{RUN_TOKEN}
 PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0
 PASS_LOADED_COMPOUND_BIO=written_pages:384 verified_pages:384 segs_gt1:2 segs_max:3 nonzero_off:1 compound_pages:128 copy_fallbacks:1 failed:0
 PASS_LOADED_LIVE_GC=victims:2 rotations:2 pages:64 read_bytes:262144 write_bytes:131072 read_reqs:64 write_reqs:32 distinct:3 victim_min:1 victim_max:2 last:1->2 discards:2 discard_sectors:4096 discard_unsupported:0 discard_failed:0 verified_pages:4096
@@ -245,6 +248,15 @@ class KernelDebugQualificationTests(unittest.TestCase):
         reordered_records[3], reordered_records[4] = (
             reordered_records[4], reordered_records[3])
         private_detail = "/private/owner/teardown-evidence"
+        other_run_token = "fedcba9876543210"
+        owned_lower = next(
+            line for line in lines if line.startswith("OWNED_RAM_LOWER="))
+        foreign_owned_lower = owned_lower.replace(RUN_TOKEN, other_run_token)
+        without_owned_lower = "\n".join(
+            line for line in lines
+            if not line.startswith("OWNED_RAM_LOWER=")) + "\n"
+        duplicated_owned_lower = GOOD_LOG.replace(
+            owned_lower, owned_lower + "\n" + owned_lower)
         cases = (
             (GOOD_LOG.rstrip("\n"), "field=terminal newline"),
             (stitched_execution, "observed=reordered or combined-session markers"),
@@ -260,6 +272,14 @@ class KernelDebugQualificationTests(unittest.TestCase):
              "observed=unknown failure marker"),
             (GOOD_LOG + f"TEARDOWN_FAILED={private_detail}\n",
              "field=terminal tail"),
+            (GOOD_LOG.replace(owned_lower, foreign_owned_lower),
+             "observed=different owned run identities"),
+            (without_owned_lower, "observed=missing marker"),
+            (duplicated_owned_lower, "observed=duplicate markers"),
+            (GOOD_LOG.replace(
+                "OWNED_CONFIG=/sys/kernel/config/nullb/",
+                "OWNED_CONFIG=/invalid/nullb/", 1),
+             "observed=malformed marker"),
             (GOOD_LOG + GOOD_LOG, "duplicate"),
         )
         for execution, explanation in cases:
@@ -276,6 +296,17 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertIn(f"source=SOURCE_HEAD:{SOURCE_SHA}", reason)
         self.assertIn(f"artifact=MODULE_SHA256:{MODULE_SHA256}", reason)
         self.assertIn("next:", reason)
+
+        status, reason = self.verify(execution=GOOD_LOG.replace(
+            boot_marker, f"FAIL byte-exact synthetic mismatch\n{boot_marker}"))
+        self.assertEqual(status, "FAIL")
+        self.assertIn("helper defect", reason)
+        self.assertNotIn("byte-exact synthetic mismatch", reason)
+
+        status, reason = self.verify(execution=GOOD_LOG.rstrip("\n"))
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn(f"source=SOURCE_HEAD:{SOURCE_SHA}", reason)
+        self.assertIn(f"artifact=MODULE_SHA256:{MODULE_SHA256}", reason)
 
     def test_execution_boot_marker_producer_rootless(self) -> None:
         """Execute the real boot reader and EXIT cleanup without host devices."""
@@ -1425,6 +1456,14 @@ exit 0
         self.assertEqual(source.count('note "RUNNING_KERNEL=$(uname -r)"'), 1)
         self.assertEqual(
             source.count('note "MODULE_SHA256=$(sha256sum "$MODULE")"'), 1)
+        self.assertEqual(
+            source.count('note "OWNED_CONFIG=$CONFIG UUID=$UUID"'), 1)
+        self.assertEqual(
+            source.count(
+                'note "OWNED_RAM_LOWER=$LOWER CONFIG=$CONFIG DISK=$DISK '
+                'DEVICE=$DEVNO UUID=$UUID"'),
+            1,
+        )
         labels = (
             "PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP",
             "PASS_LOADED_COMPOUND_BIO",

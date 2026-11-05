@@ -779,7 +779,7 @@ def verify_owned_run(
     execution_lines = execution.splitlines() if execution is not None else []
     explicit_failures = [
         line.strip() for line in execution_lines
-        if re.match(r"^[ \t]*FAIL(?::|_)", line)
+        if re.match(r"^[ \t]*FAIL(?=$|[:_ \t])", line)
     ]
     if explicit_failures:
         return "FAIL", (
@@ -886,13 +886,6 @@ def verify_owned_run(
         return "BLOCKED", "validated source SHA is malformed (expected 40 hex digits)"
     if execution is None:
         return "BLOCKED", "owned execution log missing or unreadable"
-    # The producer publishes its terminal BOOT_ID/PASS pair with printf.
-    # A complete-looking PASS without the final newline may be a torn log.
-    if not execution.endswith("\n"):
-        return "BLOCKED", (
-            "execution field=terminal newline phase=publication "
-            "expected=complete newline-terminated log observed=truncated "
-            "or unterminated; next: recapture one complete owned session")
     if kernel_release is None:
         return "BLOCKED", "running kernel release unavailable for evidence binding"
 
@@ -976,6 +969,16 @@ def verify_owned_run(
         return "BLOCKED", "malformed MODULE_SHA256 run marker"
     executed_module_sha256 = module_hash_match.group(1)
 
+    # The producer publishes its terminal BOOT_ID/PASS pair with printf.
+    # A complete-looking PASS without the final newline may be a torn log.
+    if not execution.endswith("\n"):
+        return "BLOCKED", (
+            "execution field=terminal newline phase=publication "
+            "expected=complete newline-terminated log observed=truncated "
+            "or unterminated; "
+            f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
+            f"{executed_module_sha256}; next: recapture one complete owned session")
+
     # Preserve the helper's explicit FAIL precedence above. An unrecognized
     # outcome/control marker is ambiguous evidence, never a clean teardown.
     # Do not inspect arbitrary stderr payloads or echo them in the result.
@@ -994,6 +997,63 @@ def verify_owned_run(
             f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
             f"{executed_module_sha256}; next: inspect teardown and recapture "
             "one complete owned session")
+
+    # Bind the body to the producer's random per-run null_blk identity. The
+    # source/module/boot tuple can legitimately repeat across separate runs;
+    # the owned token cannot be silently mixed without making the transcript
+    # ambiguous.
+    owned_config_markers = [
+        line for line in execution_lines if line.startswith("OWNED_CONFIG=")
+    ]
+    owned_lower_markers = [
+        line for line in execution_lines if line.startswith("OWNED_RAM_LOWER=")
+    ]
+    if len(owned_config_markers) != 1 or len(owned_lower_markers) != 1:
+        observed_identity = (
+            "missing marker"
+            if not owned_config_markers or not owned_lower_markers
+            else "duplicate markers"
+        )
+        return "BLOCKED", (
+            "execution field=owned run identity phase=owned_setup "
+            "expected=one OWNED_CONFIG/OWNED_RAM_LOWER pair with one "
+            f"SWAPZ-TEST token observed={observed_identity}; "
+            f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
+            f"{executed_module_sha256}; next: recapture one complete owned session")
+    owned_config_match = re.fullmatch(
+        r"OWNED_CONFIG=(/sys/kernel/config/nullb/nullb-swapz-([0-9a-f]{16})) "
+        r"UUID=SWAPZ-TEST-([0-9a-f]{16})",
+        owned_config_markers[0],
+    )
+    owned_lower_match = re.fullmatch(
+        r"OWNED_RAM_LOWER=/dev/(\S+) "
+        r"CONFIG=(/sys/kernel/config/nullb/nullb-swapz-([0-9a-f]{16})) "
+        r"DISK=(\S+) DEVICE=([0-9]+:[0-9]+) "
+        r"UUID=SWAPZ-TEST-([0-9a-f]{16})",
+        owned_lower_markers[0],
+    )
+    if owned_config_match is None or owned_lower_match is None:
+        observed_identity = "malformed marker"
+    else:
+        config_path, config_token, config_uuid_token = owned_config_match.groups()
+        (lower_disk, lower_config_path, lower_token, reported_disk,
+         _device, lower_uuid_token) = owned_lower_match.groups()
+        identity_matches = (
+            config_token == config_uuid_token == lower_token == lower_uuid_token
+            and config_path == lower_config_path
+            and lower_disk == reported_disk
+        )
+        observed_identity = "matching run identity" if identity_matches else (
+            "different owned run identities"
+        )
+    if observed_identity != "matching run identity":
+        return "BLOCKED", (
+            "execution field=owned run identity phase=owned_setup "
+            "expected=one consistent nullb-swapz/SWAPZ-TEST identity "
+            f"observed={observed_identity}; "
+            f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
+            f"{executed_module_sha256}; next: discard mixed evidence and "
+            "recapture one complete owned session")
 
     record_positions: list[int] = []
     for record in REQUIRED_RECORDS:
@@ -1017,6 +1077,8 @@ def verify_owned_run(
         execution_lines.index(source_markers[0]),
         execution_lines.index(kernel_markers[0]),
         execution_lines.index(module_hash_markers[0]),
+        execution_lines.index(owned_config_markers[0]),
+        execution_lines.index(owned_lower_markers[0]),
         *record_positions[:-1],
         execution_lines.index(boot_markers[0]),
         record_positions[-1],
@@ -1027,8 +1089,9 @@ def verify_owned_run(
             publication_positions[-2] + 1 != terminal_position):
         return "BLOCKED", (
             "execution field=marker order phase=publication "
-            "expected=SOURCE_HEAD/RUNNING_KERNEL/MODULE_SHA256, ordered "
-            "loaded records, terminal BOOT_ID/PASS pair "
+            "expected=SOURCE_HEAD/RUNNING_KERNEL/MODULE_SHA256, "
+            "OWNED_CONFIG/OWNED_RAM_LOWER, ordered loaded records, "
+            "terminal BOOT_ID/PASS pair "
             "observed=reordered or combined-session markers; "
             f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
             f"{executed_module_sha256}; next: capture one intact owned run")

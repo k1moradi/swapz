@@ -6768,12 +6768,19 @@ write failure reports `phase=evidence_commit` with partial retained evidence.
 Failed publication never prints the private session path, while successful runs
 retain the existing `EVIDENCE=...` locator after the terminal pair commits.
 The rootless verifier requires a newline-complete owned execution log with
-exactly one source/kernel/module binding in producer order and all required
-loaded records in their real execution order. Only the published terminal
+exactly one source/kernel/module binding in producer order, exactly one
+consistent producer-owned `nullb-swapz-<token>` / `SWAPZ-TEST-<token>`
+identity across `OWNED_CONFIG` and `OWNED_RAM_LOWER`, and all required
+loaded records in their real execution order. Distinct owned tokens are
+combined-run evidence and block qualification without exposing their values.
+Known helper/oracle `FAIL` records are failures whether the marker uses a
+colon, underscore or whitespace separator; unfamiliar FAILURE/ERROR/ABORTED-like
+records remain ambiguous and block rather than being promoted to FAIL.
+Only the published terminal
 `BOOT_ID` immediately followed by the exact clean-teardown `PASS:` record
 may close the run; an optional single `EVIDENCE=.../session.log` locator may
 follow it. Reordered or interleaved records, early or duplicated terminal
-claims, trailing unknown output, and unrecognized FAIL/ERROR/ABORTED-like
+claims, trailing unknown output, and unrecognized FAILURE/ERROR/ABORTED-like
 control markers block qualification with bounded source/module identities,
 the evidence field, phase, safe observed category and recapture action.
 An execution log's source/hash/boot markers are evidence consistency checks,
