@@ -5796,6 +5796,16 @@ report publication ownership failure, rollback incompleteness and the
 verified retained mask. Treat the no-follow mask replacement and EXIT-trap
 postconditions as independent checks after a first genuine command failure:
 zero-status cleanup is never enough to establish absence of stale paths.
+A failing generator must reverify the early `/dev/null` mapper mask after the
+EXIT trap has finished all cleanup mutations, not only before cleanup starts.
+Inject secondary cleanup commands that return nonzero after unlink or report
+success without unlinking, then substitute a foreign early mapper-unit symlink.
+An independently staged mask replacement must recover even when the direct
+no-follow link command falsely reports success. Preserve foreign targets and
+unconsumed owned inodes, retain the verified mask, and report original command
+status, secondary cleanup and mask-repair statuses, observed staging survivors,
+and rollback completeness without logging selector bytes. Include a failure
+before any selected-target drop-in has been published.
 
 These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another

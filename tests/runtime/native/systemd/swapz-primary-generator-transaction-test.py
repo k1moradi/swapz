@@ -737,6 +737,114 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
         self.assertEqual(outside.read_text(encoding="ascii"), "preserve-foreign-target")
 
+    def test_exit_trap_repairs_mask_after_failed_publication_and_cleanup(self) -> None:
+        foreign = self.root / "foreign-mapper-unit"
+        foreign.write_text("preserve-foreign-mapper", encoding="ascii")
+        rename = self.commands / "mv"
+        rename.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *50-selected-target.conf)
+                /usr/bin/mv "$@" || exit $?
+                exit 71 ;;
+            esac
+            exec /usr/bin/mv "$@"
+            """).lstrip("\n"), encoding="ascii")
+        rename.chmod(0o755)
+        removal = self.commands / "rm"
+        removal.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *50-swapz-timeout.conf)
+                if [ "$MOCK_CLEANUP_MODE" = after-error ]; then
+                    /usr/bin/rm "$@" || exit $?
+                fi
+                /usr/bin/rm -f -- "$MOCK_MASK" || exit $?
+                /usr/bin/ln -s "$MOCK_FOREIGN" "$MOCK_MASK" || exit $?
+                [ "$MOCK_CLEANUP_MODE" != after-error ] || exit 97
+                exit 0 ;;
+            esac
+            exec /usr/bin/rm "$@"
+            """).lstrip("\n"), encoding="ascii")
+        removal.chmod(0o755)
+        replacement = self.commands / "ln"
+        replacement.write_text(
+            '#!/bin/sh\ncase "$*" in *-sfnT*) exit 0 ;; esac\n'
+            'exec /usr/bin/ln "$@"\n',
+            encoding="ascii",
+        )
+        replacement.chmod(0o755)
+
+        for mode, survivor, cleanup_status, outcome in (
+            ("false-success", "owned-inode-retained", 0, "incomplete"),
+            ("after-error", "absent", 97, "complete"),
+        ):
+            with self.subTest(mode=mode):
+                result = self.run_generator(
+                    MOCK_CLEANUP_MODE=mode,
+                    MOCK_MASK=str(self.mask()),
+                    MOCK_FOREIGN=str(foreign),
+                )
+                self.assertEqual(result.returncode, 71, result.stderr)
+                self.assertIn("phase=publication", result.stderr)
+                self.assertIn("validation=publish-mapper-dropin", result.stderr)
+                self.assertIn("phase=rollback expected=owned-dropins-absent", result.stderr)
+                self.assertIn(f"observed_device={survivor}", result.stderr)
+                self.assertIn(f"original_status=71 cleanup_status={cleanup_status}", result.stderr)
+                self.assertIn("mask_repair_first_status=1", result.stderr)
+                self.assertIn("mask_restore_status=0", result.stderr)
+                self.assertIn(f"rollback={outcome}", result.stderr)
+                self.assertEqual(os.readlink(self.mask()), "/dev/null")
+                self.assertFalse(self.mapper_dropin().exists())
+                self.assertEqual(self.device_dropin(SELECTED).exists(), survivor != "absent")
+                self.assertEqual(foreign.read_text(encoding="ascii"), "preserve-foreign-mapper")
+                self.assertNotIn(SELECTED, result.stderr)
+                self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+                self.device_dropin(SELECTED).unlink(missing_ok=True)
+
+    def test_exit_trap_rechecks_mask_after_false_success_stage_cleanup(self) -> None:
+        foreign = self.root / "foreign-mapper-unit"
+        foreign.write_text("preserve-foreign-mapper", encoding="ascii")
+        removal = self.commands / "rm"
+        removal.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *".swapz-primary-generator."*)
+                /usr/bin/rm -f -- "$MOCK_MASK" || exit $?
+                /usr/bin/ln -s "$MOCK_FOREIGN" "$MOCK_MASK" || exit $?
+                # Success is false: private staging has not been removed.
+                exit 0 ;;
+            esac
+            exec /usr/bin/rm "$@"
+            """).lstrip("\n"), encoding="ascii")
+        removal.chmod(0o755)
+        replacement = self.commands / "ln"
+        replacement.write_text(
+            '#!/bin/sh\ncase "$*" in *-sfnT*) exit 0 ;; esac\n'
+            'exec /usr/bin/ln "$@"\n',
+            encoding="ascii",
+        )
+        replacement.chmod(0o755)
+
+        result = self.run_generator(
+            MOCK_STATUS="39", MOCK_MASK=str(self.mask()), MOCK_FOREIGN=str(foreign),
+        )
+        self.assertEqual(result.returncode, 39, result.stderr)
+        self.assertIn("phase=selection", result.stderr)
+        self.assertIn("phase=rollback expected=owned-dropins-absent", result.stderr)
+        self.assertIn("original_status=39 cleanup_status=0", result.stderr)
+        self.assertIn("observed_stage=retained", result.stderr)
+        self.assertIn("mask_repair_first_status=1", result.stderr)
+        self.assertIn("mask_restore_status=0", result.stderr)
+        self.assertIn("rollback=incomplete action=retain-mask-and-refuse-activation",
+                      result.stderr)
+        self.assertEqual(os.readlink(self.mask()), "/dev/null")
+        self.assertEqual(foreign.read_text(encoding="ascii"), "preserve-foreign-mapper")
+        self.assertFalse(self.mapper_dropin().exists())
+        self.assertFalse(self.device_dropin(SELECTED).exists())
+        self.assertEqual(len(list(self.normal.glob(".swapz-primary-generator.*"))), 1)
+        self.assertNotIn(SELECTED, result.stderr)
+
     def test_exit_trap_observes_cleanup_postconditions_not_command_status(self) -> None:
         rename = self.commands / "mv"
         rename.write_text(textwrap.dedent(r"""
