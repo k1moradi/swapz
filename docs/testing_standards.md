@@ -188,6 +188,18 @@ and the child verifies both. Reordered phases remain BLOCKED. These observations
 do not prevent arbitrary code changes by a hostile root operator or guarantee
 that a Git ref cannot move after the final source observation.
 
+The rootless source-parent ownership regression must additionally observe a live
+launched child PID and stable /proc start time, reject the same child once
+exited, and demonstrate that an inherited connected Unix descriptor can carry
+bytes from a different subprocess without changing SO_PEERCRED. This is a
+negative control for exact message-sender proof, not a simulated root-UID
+impersonation or physical admission. After launch, listener setup failure,
+malformed/duplicated private messages and exhausted termination grace must
+preserve the first refusal, use bounded terminate/kill/wait, reap the owned
+Popen child and never print private request bytes. A repeated initial nonce
+must never grant or reuse approval; these controls do not establish target,
+reader, or sudo-descendant teardown on the physical host.
+
 The current wire schema carries source, helper and control-input identity but
 no independently authenticated exact message sender, physical qualification
 run, selected-card/reader target, or required boundary evidence. Consequently

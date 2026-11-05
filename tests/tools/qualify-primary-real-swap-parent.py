@@ -428,8 +428,9 @@ def _serve_admission(server: socket.socket,
         failure = Blocked("source admission oracle digest is malformed")
         _stop_unadmitted_child_preserving(child, failure)
         raise failure
-    server.settimeout(30)
     try:
+        # Listener setup is post-launch too; failure must reclaim the child.
+        server.settimeout(30)
         connection, _address = server.accept()
     except socket.timeout as exc:
         failure = Blocked(

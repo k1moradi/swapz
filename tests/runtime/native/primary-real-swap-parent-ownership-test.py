@@ -7,7 +7,10 @@ import io
 import json
 import os
 from pathlib import Path
+import select
+import signal
 import socket
+import subprocess
 import struct
 import sys
 import unittest
@@ -180,6 +183,175 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         self.assertEqual(process_id, os.getpid())
         self.assertEqual(peer_uid, os.geteuid())
 
+
+    @unittest.skipIf(os.geteuid() == 0, "rootless process proof requires non-root")
+    def test_live_owned_subprocess_lineage_and_exited_run_refusal(self):
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        try:
+            observed = parent._owned_peer_process_lineage(
+                child, child.pid, "initial")
+            self.assertEqual(observed[0][0], child.pid)
+            self.assertEqual(observed[0][1], os.getpid())
+            self.assertGreater(observed[0][2], 0)
+            self.assertEqual(
+                parent._owned_peer_process_lineage(child, child.pid, "initial"),
+                observed)
+            child.terminate()
+            child.wait(timeout=5)
+            with self.assertRaisesRegex(
+                    parent.Blocked, "observed=launched_child_exited"):
+                parent._owned_peer_process_lineage(child, child.pid, "initial")
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+
+    @unittest.skipIf(os.geteuid() == 0, "rootless socket proof requires non-root")
+    def test_shared_socket_descriptor_does_not_authenticate_message_writer(self):
+        # This models an inherited/shared fd, not forged UID-0 credentials.
+        # SO_PEERCRED names the socketpair creator after a different PID writes.
+        connector, receiver = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        with connector, receiver:
+            credential_size = struct.calcsize("3i")
+            credentials_before = receiver.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, credential_size)
+            writer = subprocess.Popen(
+                [sys.executable, "-I", "-c",
+                 "import socket,sys; "
+                 "socket.socket(fileno=int(sys.argv[1])).sendall(b'foreign-writer')",
+                 str(connector.fileno())],
+                pass_fds=(connector.fileno(),),
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            try:
+                receiver.settimeout(5)
+                self.assertEqual(receiver.recv(32), b"foreign-writer")
+                self.assertEqual(writer.wait(timeout=5), 0)
+            finally:
+                if writer.poll() is None:
+                    writer.kill()
+                writer.wait(timeout=5)
+            credentials_after = receiver.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, credential_size)
+            authenticated_pid, authenticated_uid, _gid = struct.unpack(
+                "3i", credentials_after)
+            self.assertEqual(credentials_after, credentials_before)
+            self.assertEqual(authenticated_pid, os.getpid())
+            self.assertEqual(authenticated_uid, os.geteuid())
+            self.assertNotEqual(authenticated_pid, writer.pid)
+
+    @unittest.skipIf(os.geteuid() == 0, "rootless cleanup proof requires non-root")
+    def test_closed_listener_reaps_owned_subprocess_without_admission(self):
+        # Closing the listener after launch makes settimeout fail with EBADF.
+        # The original exception must survive successful bounded child cleanup.
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.close()
+        try:
+            with self.assertRaisesRegex(
+                    parent.Blocked,
+                    "source admission socket failed before privileged peer admission"):
+                parent._serve_admission(
+                    listener, child, self.SOURCE, "/usr/bin/git",
+                    self.ORACLE_DIGEST, self.source_hashes,
+                    self.HELPER_DIGEST, 2)
+            self.assertIsNotNone(child.poll())
+            self.assertIsInstance(child.wait(timeout=5), int)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+
+    @unittest.skipIf(os.geteuid() == 0, "rootless cleanup proof requires non-root")
+    def test_malformed_private_message_reaps_real_child_and_redacts_payload(self):
+        # The fake UID-0 credential only isolates parser/cleanup behavior; it
+        # does not simulate privileged peer authentication on a live socket.
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        private_marker = "private-channel-content-must-not-escape"
+        stream = self.Stream([])
+        stream.input = io.BytesIO(
+            ('{"private":"' + private_marker + '","private":"duplicate"}\n'
+             ).encode("ascii"))
+        connection = mock.MagicMock()
+        connection.getsockopt.return_value = struct.pack("3i", child.pid, 0, 0)
+        connection.makefile.return_value = stream
+        server = mock.Mock()
+        server.accept.return_value = connection, None
+        diagnostics = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(diagnostics), mock.patch.object(
+                    parent, "_check_git_source") as check:
+                result = parent._serve_admission(
+                    server, child, self.SOURCE, "/usr/bin/git",
+                    self.ORACLE_DIGEST, self.source_hashes,
+                    self.HELPER_DIGEST, 2)
+            self.assertEqual(result, 2)
+            self.assertFalse(stream.responses())
+            self.assertIsNotNone(child.poll())
+            self.assertIn("source admission request is malformed",
+                          diagnostics.getvalue())
+            self.assertIn("owned_cleanup=complete", diagnostics.getvalue())
+            self.assertNotIn(private_marker, diagnostics.getvalue())
+            check.assert_not_called()
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+
+    @unittest.skipIf(os.geteuid() == 0, "rootless cleanup proof requires non-root")
+    def test_bounded_kill_fallback_reaps_actual_sigterm_resistant_child(self):
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c",
+             "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+             "print('ready',flush=True); time.sleep(60)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL)
+        real_wait = child.wait
+        observed_timeouts = []
+
+        def bounded_wait(*, timeout):
+            observed_timeouts.append(timeout)
+            if timeout == 10:
+                # Force the timeout edge without making the rootless suite
+                # spend ten seconds waiting for the ignored SIGTERM.
+                raise subprocess.TimeoutExpired(child.args, timeout)
+            return real_wait(timeout=timeout)
+
+        try:
+            self.assertTrue(select.select([child.stdout], [], [], 5)[0])
+            self.assertEqual(child.stdout.readline(), b"ready\n")
+            with mock.patch.object(child, "wait", side_effect=bounded_wait):
+                parent._stop_unadmitted_child(child)
+            self.assertEqual(observed_timeouts, [10, 5])
+            self.assertEqual(child.returncode, -signal.SIGKILL)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            real_wait(timeout=5)
+            child.stdout.close()
+
+    def test_replayed_initial_nonce_cannot_reuse_source_observation(self):
+        repeated = self.request("initial", "1" * 32)
+        result, responses, diagnostics, _child, check = self.run_exchange(
+            os.getpid(), [repeated, repeated])
+        self.assertEqual(result, 2)
+        self.assertEqual(len(responses), 1)
+        self.assertEqual(responses[0]["phase"], "initial")
+        self.assertEqual(responses[0]["nonce"], repeated["nonce"])
+        self.assertEqual(responses[0]["status"], "BLOCKED")
+        self.assertEqual(responses[0]["reason"],
+                         "physical_admission_identity_missing")
+        self.assertIn("authorization=BLOCKED", diagnostics)
+        self.assertEqual(check.call_count, 1)
 
 if __name__ == "__main__":
     unittest.main()
