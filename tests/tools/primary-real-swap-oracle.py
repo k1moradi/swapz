@@ -192,7 +192,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
             page_mismatches != 0 or byte_mismatches != 0 or
             actual_digest != expected_hex)
         result = 1 if comparison_failed else 0
-    except (OSError, RuntimeError, MemoryError, KeyboardInterrupt) as exc:
+    except (OSError, ValueError, RuntimeError, MemoryError, KeyboardInterrupt) as exc:
         original_error = exc
         result = 1
     finally:
@@ -207,7 +207,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
     if cleanup_error is None and verification_record is not None:
         try:
             _emit("ORACLE_VERIFIED=", verification_record)
-        except (OSError, RuntimeError, KeyboardInterrupt) as exc:
+        except (OSError, ValueError, RuntimeError, KeyboardInterrupt) as exc:
             report_error = exc
             result = 1
     if original_error is not None:

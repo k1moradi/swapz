@@ -419,6 +419,9 @@ retain the original reporting errno and exit nonzero despite successful unmap.
 The report-write failure fixture must assert Python's concrete exception
 subclass for the injected errno (for example, `BrokenPipeError` for errno 32)
 instead of assuming every `OSError` construction retains the base class name.
+Closed Python text streams raise `ValueError` rather than `BrokenPipeError`;
+the fill and terminal evidence publishers must retain a structured nonzero
+failure with complete cleanup evidence, never an uncaught traceback.
 The parent must reject reordered records, any duplicate or truncated bytes
 remaining after the one accepted VERIFIED record, nonzero child exit, and
 inconsistent full page/byte mismatch totals or capped mismatch samples before
