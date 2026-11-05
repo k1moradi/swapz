@@ -1158,10 +1158,13 @@ alignment, invalid count/offset/length arithmetic, missing name/type/INFO NULs,
 forward/overlapping/looping record links, truncated or unterminated UUID metadata,
 event-generation drift and INFO failure after an earlier mapping is staged.
 Malformed observations must terminate with bounded memory and no partial numeric
-CLI output or fabricated all-clear; diagnostic assertion failures identify the
-record/phase, expected wire bounds, observed offset/length and original errno
-without dumping payload bytes. Preserve valid zero-target and saturated-padding
-conservatism. This synthetic evidence is not an atomic live-kernel snapshot.
+CLI output or fabricated all-clear. Impossible counts, including the configured
+maximum with an undersized payload, must fail before target-array allocation.
+Diagnostic assertion failures identify the record/phase, expected wire bounds,
+native-width observed offset/length, parser expectation/observation and original
+errno without dumping payload bytes. Preserve valid zero-target and
+saturated-padding conservatism. This synthetic evidence is not an atomic
+live-kernel snapshot.
 
 The status implementation must require two consecutive identical relevant
 snapshots before printing a ratio. The compressed-only result is available only
