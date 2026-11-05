@@ -1965,6 +1965,15 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn("discard_epoch", DM)
         self.assertNotIn("discard_count", DM)
         self.assertNotIn("discard_serial", DM)
+        authority_preflight = source_body(
+            "swapz_prevalidate_discard_range", AUTH)
+        authority_discard = source_body("swapz_discard_page", AUTH)
+        for discard_path in (discard, authority_preflight, authority_discard):
+            for forbidden in (
+                    "swapz_lower_read", "swapz_engine_read_page",
+                    "swapz_read_authoritative", "swapz_decompress",
+                    "alloc_page", "kmalloc", "kzalloc", "kvcalloc"):
+                self.assertNotIn(forbidden, discard_path)
 
     def test_discard_preflight_extent_bounds_exercises_production_c(self):
         """A corrupt later extent cannot partially discard an earlier page."""

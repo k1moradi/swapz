@@ -733,6 +733,256 @@ cleanup:
 	return result;
 }
 
+
+struct swapz_discard_scaling_measurement {
+	swapz_u32 discard_pages;
+	swapz_u32 dead_segment_transitions;
+	uint64_t full_map_scans;
+	uint64_t mappings_examined;
+	uint64_t cpu_ns;
+};
+
+static int prepare_manual_discard_authority(
+	struct swapz_authority *authority, struct swapz_map *test_maps,
+	swapz_u16 *test_live, swapz_u8 *test_classes, swapz_u8 *test_roles,
+	swapz_u32 *test_mapped_pages, swapz_u32 logical_pages,
+	swapz_u32 physical_blocks, swapz_u32 valid_pages)
+{
+	swapz_u32 logical;
+	swapz_u32 segments = physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+
+	CHECK(valid_pages <= logical_pages);
+	CHECK(swapz_authority_init(authority, test_maps, test_live,
+				   test_classes, logical_pages,
+				   physical_blocks) == 0);
+	CHECK(swapz_enable_segment_rotation(authority, test_roles,
+					    segments) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(authority,
+						   test_mapped_pages,
+						   segments) == 0);
+	for (logical = 0; logical < valid_pages; ++logical) {
+		test_maps[logical] = (struct swapz_map) {
+			.start_block = logical,
+			.generation = 1U,
+			.payload_length = SWAPZ_BLOCK_BYTES,
+			.extent_blocks = 1U,
+			.raw = 1U,
+			.valid = 1U,
+		};
+		test_live[logical] = 1U;
+		test_classes[logical] = 1U;
+		test_mapped_pages[logical / SWAPZ_SEGMENT_BLOCKS]++;
+	}
+	/*
+	 * These maps model already-published cold swap pages. No allocation cursor
+	 * is active while DISCARD runs, so every populated segment is closed and
+	 * a final-map removal exercises the production authoritative proof.
+	 */
+	authority->open_segment = ~(swapz_u32)0;
+	return 0;
+}
+
+static int measure_dense_discard_scaling(
+	swapz_u32 discard_pages, struct swapz_discard_scaling_measurement *result)
+{
+	enum {
+		DENSE_LOGICAL_PAGES = 100001U,
+		DENSE_PHYSICAL_BLOCKS = 131072U,
+		DENSE_SEGMENTS = DENSE_PHYSICAL_BLOCKS / SWAPZ_SEGMENT_BLOCKS,
+	};
+	struct swapz_authority authority;
+	struct swapz_map *test_maps = NULL;
+	swapz_u16 *test_live = NULL;
+	swapz_u8 *test_classes = NULL, *test_roles = NULL;
+	swapz_u32 *test_mapped_pages = NULL;
+	swapz_u32 logical, dead_segments;
+	uint64_t cpu_start, cpu_end;
+	int status = 1;
+
+#define REQUIRE_DENSE(condition) do { if (!(condition)) { \
+	fprintf(stderr, "%s:%d: FAIL dense discard pages=%u: %s\n", \
+		__FILE__, __LINE__, discard_pages, #condition); \
+	goto cleanup; \
+} } while (0)
+
+	REQUIRE_DENSE(result && discard_pages &&
+		      discard_pages < DENSE_LOGICAL_PAGES);
+	test_maps = calloc(DENSE_LOGICAL_PAGES, sizeof(*test_maps));
+	test_live = calloc(DENSE_PHYSICAL_BLOCKS, sizeof(*test_live));
+	test_classes = calloc(DENSE_PHYSICAL_BLOCKS, sizeof(*test_classes));
+	test_roles = calloc(DENSE_SEGMENTS, sizeof(*test_roles));
+	test_mapped_pages = calloc(DENSE_SEGMENTS, sizeof(*test_mapped_pages));
+	REQUIRE_DENSE(test_maps && test_live && test_classes &&
+		      test_roles && test_mapped_pages);
+	REQUIRE_DENSE(prepare_manual_discard_authority(
+		      &authority, test_maps, test_live, test_classes,
+		      test_roles, test_mapped_pages, DENSE_LOGICAL_PAGES,
+		      DENSE_PHYSICAL_BLOCKS, DENSE_LOGICAL_PAGES) == 0);
+
+	cpu_start = thread_cpu_ns();
+	REQUIRE_DENSE(cpu_start);
+	REQUIRE_DENSE(swapz_prevalidate_discard_range(
+		      &authority, 0U, discard_pages) == 0);
+	for (logical = 0; logical < discard_pages; ++logical)
+		REQUIRE_DENSE(swapz_discard_page(&authority, logical) == 0);
+	cpu_end = thread_cpu_ns();
+	REQUIRE_DENSE(cpu_end >= cpu_start);
+
+	dead_segments = discard_pages / SWAPZ_SEGMENT_BLOCKS;
+	for (logical = 0; logical < discard_pages; ++logical)
+		REQUIRE_DENSE(!test_maps[logical].valid &&
+			      test_maps[logical].generation == 2U &&
+			      !test_live[logical]);
+	REQUIRE_DENSE(test_maps[discard_pages].valid &&
+		      test_maps[discard_pages].generation == 1U &&
+		      test_live[discard_pages] == 1U);
+	for (logical = 0; logical < dead_segments; ++logical)
+		REQUIRE_DENSE(!test_mapped_pages[logical]);
+	{
+		swapz_u32 partial_start =
+			dead_segments * SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 initial_partial =
+			DENSE_LOGICAL_PAGES - partial_start;
+		swapz_u32 removed_partial =
+			discard_pages - partial_start;
+
+		if (initial_partial > SWAPZ_SEGMENT_BLOCKS)
+			initial_partial = SWAPZ_SEGMENT_BLOCKS;
+		REQUIRE_DENSE(test_mapped_pages[dead_segments] ==
+			      initial_partial - removed_partial);
+	}
+
+	result->discard_pages = discard_pages;
+	result->dead_segment_transitions = dead_segments;
+	/* One range-wide preflight proof plus one proof for every closed segment
+	 * whose final mapping is committed by swapz_discard_page(). */
+	result->full_map_scans = 1ULL + dead_segments;
+	result->mappings_examined =
+		result->full_map_scans * DENSE_LOGICAL_PAGES;
+	result->cpu_ns = cpu_end - cpu_start;
+	status = 0;
+cleanup:
+	free(test_mapped_pages);
+	free(test_roles);
+	free(test_classes);
+	free(test_live);
+	free(test_maps);
+#undef REQUIRE_DENSE
+	return status;
+}
+
+static int measure_sparse_discard_scaling(
+	swapz_u32 discard_pages, struct swapz_discard_scaling_measurement *result)
+{
+	enum {
+		SPARSE_LOGICAL_PAGES = 4096U,
+		SPARSE_PHYSICAL_BLOCKS = 8192U,
+		SPARSE_SEGMENTS = SPARSE_PHYSICAL_BLOCKS / SWAPZ_SEGMENT_BLOCKS,
+	};
+	struct swapz_authority authority;
+	struct swapz_map *test_maps = NULL;
+	swapz_u16 *test_live = NULL;
+	swapz_u8 *test_classes = NULL, *test_roles = NULL;
+	swapz_u32 *test_mapped_pages = NULL;
+	swapz_u32 iteration;
+	uint64_t cpu_start, cpu_end;
+	int status = 1;
+
+#define REQUIRE_SPARSE(condition) do { if (!(condition)) { \
+	fprintf(stderr, "%s:%d: FAIL sparse discard pages=%u: %s\n", \
+		__FILE__, __LINE__, discard_pages, #condition); \
+	goto cleanup; \
+} } while (0)
+
+	REQUIRE_SPARSE(result && discard_pages);
+	test_maps = calloc(SPARSE_LOGICAL_PAGES, sizeof(*test_maps));
+	test_live = calloc(SPARSE_PHYSICAL_BLOCKS, sizeof(*test_live));
+	test_classes = calloc(SPARSE_PHYSICAL_BLOCKS, sizeof(*test_classes));
+	test_roles = calloc(SPARSE_SEGMENTS, sizeof(*test_roles));
+	test_mapped_pages = calloc(SPARSE_SEGMENTS, sizeof(*test_mapped_pages));
+	REQUIRE_SPARSE(test_maps && test_live && test_classes &&
+		       test_roles && test_mapped_pages);
+	REQUIRE_SPARSE(prepare_manual_discard_authority(
+		       &authority, test_maps, test_live, test_classes,
+		       test_roles, test_mapped_pages, SPARSE_LOGICAL_PAGES,
+		       SPARSE_PHYSICAL_BLOCKS, 1U) == 0);
+
+	cpu_start = thread_cpu_ns();
+	REQUIRE_SPARSE(cpu_start);
+	for (iteration = 0; iteration < discard_pages; ++iteration) {
+		REQUIRE_SPARSE(swapz_prevalidate_discard_range(
+			       &authority, 0U, 1U) == 0);
+		REQUIRE_SPARSE(swapz_discard_page(&authority, 0U) == 0);
+		REQUIRE_SPARSE(!test_maps[0].valid && !test_live[0] &&
+			       !test_mapped_pages[0]);
+		if (iteration + 1U != discard_pages) {
+			/*
+			 * Test-only rearm isolates repeated final-map proof cost.
+			 * Correct production slot reuse/generation publication remains
+			 * covered by the authority/raw/GC suites.
+			 */
+			test_maps[0].valid = 1U;
+			test_live[0] = 1U;
+			test_mapped_pages[0] = 1U;
+		}
+	}
+	cpu_end = thread_cpu_ns();
+	REQUIRE_SPARSE(cpu_end >= cpu_start);
+
+	result->discard_pages = discard_pages;
+	result->dead_segment_transitions = discard_pages;
+	/* Each one-page upper range runs its range proof, then the final-map proof. */
+	result->full_map_scans = 2ULL * discard_pages;
+	result->mappings_examined =
+		result->full_map_scans * SPARSE_LOGICAL_PAGES;
+	result->cpu_ns = cpu_end - cpu_start;
+	status = 0;
+cleanup:
+	free(test_mapped_pages);
+	free(test_roles);
+	free(test_classes);
+	free(test_live);
+	free(test_maps);
+#undef REQUIRE_SPARSE
+	return status;
+}
+
+static void print_discard_scaling_evidence(
+	const char *pattern, swapz_u32 logical_pages,
+	const struct swapz_discard_scaling_measurement *result)
+{
+	printf("SWAPZ_DISCARD_SCALING_EVIDENCE={"
+	       "\"scope\":\"OFFLINE_NATIVE_PRODUCTION_AUTHORITY\","
+	       "\"pattern\":\"%s\",\"logical_pages\":%u,"
+	       "\"discard_pages\":%u,\"dead_segment_transitions\":%u,"
+	       "\"complete_table_verification_scans\":%" PRIu64 ","
+	       "\"logical_mappings_examined\":%" PRIu64 ","
+	       "\"thread_cpu_ns\":%" PRIu64 ","
+	       "\"operation_allocations\":0,\"lower_read_bytes\":0,"
+	       "\"decompression_calls\":0}\n",
+	       pattern, logical_pages, result->discard_pages,
+	       result->dead_segment_transitions, result->full_map_scans,
+	       result->mappings_examined, result->cpu_ns);
+}
+
+static int measure_discard_scaling(void)
+{
+	struct swapz_discard_scaling_measurement dense_1000 = {0};
+	struct swapz_discard_scaling_measurement dense_100000 = {0};
+	struct swapz_discard_scaling_measurement sparse_1000 = {0};
+	struct swapz_discard_scaling_measurement sparse_100000 = {0};
+
+	CHECK(measure_dense_discard_scaling(1000U, &dense_1000) == 0);
+	CHECK(measure_dense_discard_scaling(100000U, &dense_100000) == 0);
+	CHECK(measure_sparse_discard_scaling(1000U, &sparse_1000) == 0);
+	CHECK(measure_sparse_discard_scaling(100000U, &sparse_100000) == 0);
+	print_discard_scaling_evidence("dense", 100001U, &dense_1000);
+	print_discard_scaling_evidence("dense", 100001U, &dense_100000);
+	print_discard_scaling_evidence("sparse-final-map", 4096U, &sparse_1000);
+	print_discard_scaling_evidence("sparse-final-map", 4096U, &sparse_100000);
+	return 0;
+}
+
 int main(void)
 {
 	swapz_u8 raw_page[SWAPZ_BLOCK_BYTES];
@@ -920,6 +1170,8 @@ int main(void)
 		       unique_append_ns / APPEND_ROUNDS);
 		printf("PASS: authority finish and discard throughput microbenchmark\n");
 	}
+	/* Allocation-free upper-DISCARD authority work, with no lower I/O. */
+	CHECK(measure_discard_scaling() == 0);
 	/* Actual production-C authority path; measured separately from GC I/O. */
 	CHECK(measure_production_claim_proof(262144U) == 0);
 	CHECK(measure_production_claim_proof(1048576U) == 0);
