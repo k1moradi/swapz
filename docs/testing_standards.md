@@ -720,8 +720,9 @@ index-named null_blk device. A fully populated but unclaimed device remains
 BLOCKED; duplicate configfs index claims, incomplete attributes, dual sysfs
 names for a reused index, a second holder and a substituted sole-holder link
 must identify the first missing ownership proof without touching devices.
-These negative controls must reject every synthetic ownership token, fixture
-path and unsafe unload/remove/delete/power-off recommendation from diagnostics.
+These negative controls must reject every synthetic ownership token or device
+identity, fixture path and unsafe unload/remove/delete/power-off recommendation
+from diagnostics.
 The fully populated unclaimed case must also prove its complete fake configfs,
 sysfs, block-node and holder inventory remains unchanged. The pair must return BLOCKED for absent creation
 authority, retain both original objects and their memory-backed attributes,

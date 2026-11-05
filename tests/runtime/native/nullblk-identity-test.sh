@@ -365,11 +365,22 @@ assert_private_safe_refusal() {
        "$output" != *"$LOWER_TOKEN"* &&
        "$output" != *"nullb-swapz-"* &&
        "$output" != *"swapz-demo-"* &&
+       "$output" != *"SWAPZ-TEST-"* &&
+       "$output" != *"240:7"* &&
+       "$output" != *"240:8"* &&
+       "$output" != *"253:0"* &&
+       "$output" != *"253:1"* &&
+       "$output" != *"254:9"* &&
+       "$output" != *"dm-0"* &&
+       "$output" != *"dm-9"* &&
+       "$output" != *"nullb7"* &&
        "$output" != *"rmmod"* &&
        "$output" != *"unload"* &&
        "$output" != *"remove"* &&
        "$output" != *"delete"* &&
-       "$output" != *"power off"* ]] ||
+       "$output" != *"power off"* &&
+       "$output" != *"power-off"* &&
+       "$output" != *"power_off"* ]] ||
         die "$case_name disclosed a private identity or recommended unsafe cleanup"
 }
 run_case() {
