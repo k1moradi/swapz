@@ -50,6 +50,7 @@ if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
 fi
 arm_file=$report_base/armed.env
 runtime_enable_file=$runtime_base/primary-execution.env
+runtime_consumed_file=$runtime_base/.primary-execution.observed.env
 mapper_swap_unit='dev-mapper-swapz\x2dprimary.swap'
 mapper_service=swapz-primary-mapper.service
 mapper_path=$dev_root/mapper/swapz-primary
@@ -224,6 +225,14 @@ revoke_runtime_authorization()
 		fi
 		return 1
 	fi
+	if rm -f -- "$runtime_consumed_file" 2>/dev/null; then
+		:
+	else
+		authorization_revoke_exit_status=$?
+		authorization_revoke_phase=token_revoke_consumed_unlink
+		authorization_revoke_reason=unlink_failed
+		return 1
+	fi
 	if sync -f "$runtime_base" 2>/dev/null; then
 		return 0
 	else
@@ -243,8 +252,61 @@ clear_runtime_authorization()
 
 report_observation_revocation_failure()
 {
-	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s observed=authorization_revocation_failed evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s observed=authorization_cleanup_failed evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
 		"$authorization_revoke_phase" "$authorization_revoke_exit_status" "$authorization_revoke_reason" >&2
+}
+
+report_observation_claim_failure()
+{
+	printf 'swapz-primary-boot-verify: phase=%s exit_status=%s reason=%s observed=authorization_claim_failed evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
+		"$authorization_claim_phase" "$authorization_claim_exit_status" "$authorization_claim_reason" >&2
+}
+
+claim_runtime_authorization()
+{
+	observation_runtime_authorization_claimed=0
+	authorization_claim_command_failed=0
+	authorization_claim_phase=token_claim_presence
+	authorization_claim_exit_status=0
+	authorization_claim_reason=authorization_missing
+
+	if (secure_runtime_directory) >/dev/null 2>&1; then
+		:
+	else
+		authorization_claim_command_failed=1
+		authorization_claim_exit_status=$?
+		authorization_claim_phase=token_claim_runtime_directory
+		authorization_claim_reason=runtime_directory_unavailable_or_unsafe
+		return 1
+	fi
+
+	# The canonical pathname is activation authority. Move it out of that
+	# pathname before any slow evidence collection so observation itself closes
+	# the reuse window. The claimed pathname is never accepted by swapzctl.
+	if [ ! -e "$runtime_enable_file" ] && [ ! -L "$runtime_enable_file" ]; then
+		return 1
+	fi
+	if mv -fT -- "$runtime_enable_file" "$runtime_consumed_file" 2>/dev/null; then
+		observation_runtime_authorization_claimed=1
+	else
+		authorization_claim_command_failed=1
+		authorization_claim_exit_status=$?
+		authorization_claim_phase=token_claim_rename
+		authorization_claim_reason=rename_failed
+		# If the atomic claim cannot complete, immediately revoke/invalidate the
+		# canonical token before returning to observation classification.
+		revoke_runtime_authorization >/dev/null 2>&1 || :
+		return 1
+	fi
+	if sync -f "$runtime_base" 2>/dev/null; then
+		return 0
+	else
+		authorization_claim_command_failed=1
+		authorization_claim_exit_status=$?
+		authorization_claim_phase=token_claim_sync
+		authorization_claim_reason=durability_sync_failed
+		return 1
+	fi
 }
 
 interrupted_observation()
@@ -561,14 +623,15 @@ passive_swap_unit_guard()
 
 valid_runtime_preflight_authorization()
 {
-	# Report files are observations, not authority. Require the preflight
-	# token consumed by swapzctl, bound to this boot and current target.
-	[ -f "$runtime_enable_file" ] && [ ! -L "$runtime_enable_file" ] || return 1
-	[ "$(stat -c '%u' -- "$runtime_enable_file")" = "$expected_uid" ] &&
-		[ "$(stat -c '%a' -- "$runtime_enable_file")" = 600 ] &&
-		[ "$(stat -c '%h' -- "$runtime_enable_file")" = 1 ] &&
-		[ "$(stat -c '%s' -- "$runtime_enable_file")" -le 512 ] || return 1
-	[ "$(cat -- "$runtime_enable_file")" = "$(printf \
+	authorization_file=$1
+	# Report files are observations, not authority. Validate only the token
+	# atomically claimed away from swapzctl's canonical authorization pathname.
+	[ -f "$authorization_file" ] && [ ! -L "$authorization_file" ] || return 1
+	[ "$(stat -c '%u' -- "$authorization_file")" = "$expected_uid" ] &&
+		[ "$(stat -c '%a' -- "$authorization_file")" = 600 ] &&
+		[ "$(stat -c '%h' -- "$authorization_file")" = 1 ] &&
+		[ "$(stat -c '%s' -- "$authorization_file")" -le 512 ] || return 1
+	[ "$(cat -- "$authorization_file")" = "$(printf \
 		'schema=swapz-primary-execution-v2\nboot_id=%s\nsource_sha=%s\npartuuid=%s\ntarget_device=%s\ntarget_size_bytes=%s' \
 		"$boot_id" "$expected_source_sha" "$selected_partuuid" \
 		"$target_major_minor" "$target_size_bytes")" ]
@@ -975,6 +1038,13 @@ status_token()
 
 observe_boot()
 {
+	# Atomically consume activation authority before inspecting persistent
+	# evidence or performing any observation that may block, time out, or be
+	# interrupted. Persistent-report validation may fail after authority is gone.
+	claim_runtime_authorization || :
+	if [ "$authorization_claim_command_failed" -eq 1 ]; then
+		report_observation_claim_failure
+	fi
 	secure_report_directory
 	boot_id=$(current_boot_id 2>/dev/null || true)
 	if ! valid_boot_id "$boot_id" 2>/dev/null; then
@@ -1063,6 +1133,11 @@ observe_boot()
 		fi
 	fi
 
+	if [ "$authorization_claim_command_failed" -eq 1 ] &&
+	   [ "$observation_expected" -ne 1 ]; then
+		append_incomplete runtime_preflight_authorization_claim_failed
+	fi
+
 	if [ "$observation_expected" -eq 1 ]; then
 		# Missing recovery storage is not an invitation to select a new disk.
 		if [ ! -d "$recovery_base" ] || [ -L "$recovery_base" ]; then
@@ -1072,8 +1147,14 @@ observe_boot()
 			append_failure recovery_filesystem_mismatch
 		fi
 		# Do not mistake a forged post-boot report for an authorized start.
-		if ! valid_runtime_preflight_authorization; then
+		# The observer validates the claimed token only after its canonical
+		# activation pathname has already been removed.
+		if [ "$observation_runtime_authorization_claimed" -ne 1 ] ||
+		   ! valid_runtime_preflight_authorization "$runtime_consumed_file"; then
 			append_failure runtime_preflight_authorization_missing_or_invalid
+		fi
+		if [ "$authorization_claim_command_failed" -eq 1 ]; then
+			append_failure runtime_preflight_authorization_claim_failed
 		fi
 		if ! passive_swap_unit_guard; then
 			append_failure passive_swap_unit_enabled_or_uninspectable
@@ -1463,12 +1544,13 @@ SWAPS
 	fi
 	rm -f -- "$journal_raw"
 
-	# Revocation is part of acceptance, not a best-effort EXIT side effect.
-	# Preserve the observation reasons and persist FAIL on cleanup failure.
+	# The canonical activation pathname was consumed before evidence collection.
+	# Final cleanup removes the non-authoritative claimed token and rechecks that
+	# no canonical token appeared while observation was in progress.
 	if revoke_runtime_authorization; then
-		observation_runtime_authorization_revoked=1
+		observation_runtime_authorization_cleaned=1
 	else
-		append_failure runtime_preflight_authorization_revocation_failed
+		append_failure runtime_preflight_authorization_cleanup_failed
 		report_observation_revocation_failure
 	fi
 
@@ -1571,11 +1653,14 @@ case "$mode" in
 arm) arm_harness ;;
 preflight) preflight_boot ;;
 observe)
-	# Unexpected persistence aborts must also revoke volatile authority.
-	# Preserve the original exit code when fallback cleanup succeeds.
-	# This observer never deactivates swap or removes an active mapper.
-	observation_runtime_authorization_revoked=0
-	trap 'observation_exit_status=$?; if [ "$observation_runtime_authorization_revoked" -eq 0 ]; then if ! revoke_runtime_authorization; then report_observation_revocation_failure; exit 1; fi; fi; exit "$observation_exit_status"' EXIT
+	# Unexpected persistence aborts must also remove any claimed token and
+	# recheck the canonical authorization pathname. Preserve the original exit
+	# code when fallback cleanup succeeds. This observer never deactivates swap
+	# or removes an active mapper.
+	observation_runtime_authorization_cleaned=0
+	observation_runtime_authorization_claimed=0
+	authorization_claim_command_failed=0
+	trap 'observation_exit_status=$?; if [ "$observation_runtime_authorization_cleaned" -eq 0 ]; then if ! revoke_runtime_authorization; then report_observation_revocation_failure; exit 1; fi; fi; exit "$observation_exit_status"' EXIT
 	trap 'interrupted_observation 129' HUP
 	trap 'interrupted_observation 130' INT
 	trap 'interrupted_observation 143' TERM

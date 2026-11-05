@@ -6494,17 +6494,26 @@ directive that a surviving generator fragment also augments, attribute the
 missing contribution to the replacing unit rather than the generator.
 systemd-analyze verify contributes syntax/dependency evidence when available;
 its absence is INCOMPLETE, not PASS, and its success is not proof of runtime
-sandbox support. The boot observer must revoke the single-use preflight
-authorization after PASS, FAIL or INCOMPLETE; armed observations with a
-missing, duplicated or mismatched token must FAIL rather than pass.
-An observer interrupted by HUP/INT/TERM must explicitly exit through its
-authorization cleanup (an EXIT-only trap is insufficient for POSIX sh), report
-the signal exit status and unknown retention of partial evidence, and never
-claim PASS. If unlink fails, safely invalidate a still-owned regular 0600
-single-link token without following substituted symlinks; preserve the original
-unlink error and refuse PASS even if invalidation is impossible. An active
-oneshot mapper requires SubState=exited and the passive active .swap requires
-SubState=active; unknown substates are INCOMPLETE and contradictions FAIL.
+sandbox support. The boot observer must atomically claim the single-use preflight authorization
+out of swapzctl's canonical runtime pathname before any slow evidence
+collection; it validates only that non-authoritative claimed file. A successful
+claim must therefore remove the canonical pathname before observation proceeds;
+every terminal path must leave that canonical authorization non-authoritative
+after PASS, FAIL or INCOMPLETE, and after an interrupted attempt. Armed
+observations with a missing, duplicated or mismatched claimed token must FAIL
+rather than pass. A claim rename or directory-sync failure preserves the
+original command exit status, refuses PASS, and immediately falls back to
+canonical revocation/invalidation. Final cleanup removes the claimed secret and
+rechecks the canonical pathname; failure to remove the claimed file is FAIL but
+cannot make that noncanonical file activation authority. An observer interrupted
+by HUP/INT/TERM must explicitly exit through this cleanup (an EXIT-only trap is
+insufficient for POSIX sh), report the signal exit status and unknown retention
+of partial evidence, and never claim PASS. A failed canonical unlink may safely
+invalidate a still-owned regular 0600 single-link token without following
+substituted symlinks; preserve the original unlink error and refuse PASS even if
+invalidation is impossible. An active oneshot mapper requires SubState=exited
+and the passive active .swap requires SubState=active; unknown substates are
+INCOMPLETE and contradictions FAIL.
 Each malformed kernel-status observation must reissue its own token, then
 verify that non-PASS handling revoked it.
 

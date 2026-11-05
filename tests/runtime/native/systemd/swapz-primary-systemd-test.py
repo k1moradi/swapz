@@ -504,6 +504,28 @@ class UnitSandboxContractTests(unittest.TestCase):
             passive_swap=read_text(PRIMARY_SWAP),
         )
 
+    def test_observer_claim_path_is_not_native_activation_authority(self) -> None:
+        primary_manager = read_text(PRIMARY_MANAGER_SOURCE)
+        verifier_helper = read_text(BOOT_VERIFY)
+
+        # The native gate accepts exactly the canonical record name and mode.
+        # The observer's claimed file is deliberately outside that namespace,
+        # so retaining it after a cleanup fault cannot authorize another start.
+        self.assertIn(
+            '#define SWAPZ_PRIMARY_EXECUTION_RECORD_NAME "primary-execution.env"',
+            primary_manager,
+        )
+        self.assertIn(
+            "openat(directory_fd, SWAPZ_PRIMARY_EXECUTION_RECORD_NAME",
+            primary_manager,
+        )
+        self.assertIn("(before.st_mode & 0777U) != 0600U", primary_manager)
+        self.assertNotIn(".primary-execution.observed.env", primary_manager)
+        self.assertIn(
+            "runtime_consumed_file=$runtime_base/.primary-execution.observed.env",
+            verifier_helper,
+        )
+
     def test_sandbox_matches_native_visibility_and_module_evidence(self) -> None:
         primary_manager = read_text(PRIMARY_MANAGER_SOURCE)
         verifier_helper = read_text(BOOT_VERIFY)
@@ -1782,14 +1804,15 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").exists())
         self.assertEqual(observed.stderr, "")
 
-    def test_observation_unlink_failure_never_publishes_pass_and_can_retry(self) -> None:
+    def test_observation_claimed_token_cleanup_failure_never_restores_authority(self) -> None:
         self.arm_then_reboot()
         authorization = self.report / "runtime" / "primary-execution.env"
+        consumed = self.report / "runtime" / ".primary-execution.observed.env"
         write_executable(
             self.bin / "rm",
             "#!/bin/sh\n"
             'if [ "${MOCK_REVOKE_UNLINK_EXIT:-0}" != 0 ] && '
-            '[ "${3##*/}" = primary-execution.env ]; then\n'
+            '[ "${3##*/}" = .primary-execution.observed.env ]; then\n'
             '    exit "$MOCK_REVOKE_UNLINK_EXIT"\n'
             "fi\n"
             'exec /usr/bin/rm "$@"\n',
@@ -1799,53 +1822,67 @@ class BootVerifierTests(unittest.TestCase):
         failed = self.run_verifier("observe", env=failing_env)
         self.assertEqual(failed.returncode, 1, failed.stderr)
         self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", failed.stdout)
-        self.assertIn("phase=token_revoke_unlink exit_status=73 reason=unlink_failed",
-                      failed.stderr)
+        self.assertIn(
+            "phase=token_revoke_consumed_unlink exit_status=73 reason=unlink_failed",
+            failed.stderr,
+        )
         self.assertNotIn(str(authorization), failed.stderr)
         report = (self.report / "latest.env").read_text(encoding="utf-8")
         self.assertIn("status=FAIL", report)
-        self.assertIn("runtime_preflight_authorization_revocation_failed", report)
-        self.assertTrue(authorization.is_file())
-        self.assertEqual(
-            authorization.stat().st_mode & 0o777, 0,
-            "failed unlink must invalidate a retained execution token",
-        )
+        self.assertIn("runtime_preflight_authorization_cleanup_failed", report)
+        self.assertFalse(authorization.exists())
+        self.assertTrue(consumed.is_file())
+        self.assertEqual(consumed.stat().st_mode & 0o777, 0o600)
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").is_file())
 
-        # The operator must reissue authority through preflight for a retry.
+        # A retained claimed file is not activation authority. Preflight clears
+        # it before minting a fresh canonical token for an explicit retry.
         preflight = self.run_verifier("preflight")
         self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        self.assertFalse(consumed.exists())
+        self.assertTrue(authorization.is_file())
         retried = self.run_verifier("observe")
         self.assertEqual(retried.returncode, 0, retried.stderr)
         self.assertFalse(authorization.exists())
+        self.assertFalse(consumed.exists())
         self.assertIn("status=PASS", (self.report / "latest.env").read_text())
 
-    def test_observation_sync_failure_refuses_pass_and_retains_evidence(self) -> None:
+    def test_observation_claim_sync_failure_refuses_pass_without_reusable_token(self) -> None:
         self.arm_then_reboot()
         authorization = self.report / "runtime" / "primary-execution.env"
+        consumed = self.report / "runtime" / ".primary-execution.observed.env"
+        sync_failed = self.root / "claim-sync-failed"
         write_executable(
             self.bin / "sync",
             "#!/bin/sh\n"
-            'if [ "${MOCK_REVOKE_SYNC_EXIT:-0}" != 0 ] && '
+            'if [ "${MOCK_CLAIM_SYNC_EXIT:-0}" != 0 ] && '
             '[ "$1" = -f ] && '
-            '[ "$2" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime" ]; then\n'
-            '    exit "$MOCK_REVOKE_SYNC_EXIT"\n'
+            '[ "$2" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime" ] && '
+            '[ ! -e "$MOCK_CLAIM_SYNC_FAILED" ]; then\n'
+            '    : > "$MOCK_CLAIM_SYNC_FAILED"\n'
+            '    exit "$MOCK_CLAIM_SYNC_EXIT"\n'
             "fi\n"
             'exec /usr/bin/sync "$@"\n',
         )
         failing_env = self.env.copy()
-        failing_env["MOCK_REVOKE_SYNC_EXIT"] = "74"
+        failing_env["MOCK_CLAIM_SYNC_EXIT"] = "74"
+        failing_env["MOCK_CLAIM_SYNC_FAILED"] = str(sync_failed)
         failed = self.run_verifier("observe", env=failing_env)
         self.assertEqual(failed.returncode, 1, failed.stderr)
         self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", failed.stdout)
-        self.assertIn("phase=token_revoke_sync exit_status=74 reason=durability_sync_failed",
-                      failed.stderr)
+        self.assertIn(
+            "phase=token_claim_sync exit_status=74 reason=durability_sync_failed "
+            "observed=authorization_claim_failed",
+            failed.stderr,
+        )
         self.assertNotIn(str(authorization), failed.stderr)
+        self.assertTrue(sync_failed.is_file())
         self.assertFalse(authorization.exists())
-        self.assertIn("status=FAIL", (self.report / "latest.env").read_text())
-        self.assertIn("runtime_preflight_authorization_revocation_failed",
-                      (self.report / "latest.env").read_text())
+        self.assertFalse(consumed.exists())
+        report = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("status=FAIL", report)
+        self.assertIn("runtime_preflight_authorization_claim_failed", report)
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
 
     def test_unexpected_observation_abort_revokes_preflight_authority(self) -> None:
@@ -1873,6 +1910,8 @@ class BootVerifierTests(unittest.TestCase):
         write_executable(
             self.bin / "journalctl",
             "#!/bin/sh\n"
+            '[ ! -e "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/primary-execution.env" ] || exit 91\n'
+            '[ -f "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/.primary-execution.observed.env" ] || exit 92\n'
             'printf "started\\n" > "$MOCK_OBSERVE_JOURNAL_STARTED"\n'
             "exec sleep 15\n",
         )
@@ -1899,6 +1938,9 @@ class BootVerifierTests(unittest.TestCase):
                 stderr,
             )
             self.assertFalse(authorization.exists())
+            self.assertFalse(
+                (self.report / "runtime" / ".primary-execution.observed.env").exists()
+            )
         finally:
             if verifier.poll() is None:
                 os.killpg(verifier.pid, signal.SIGKILL)
@@ -1913,6 +1955,89 @@ class BootVerifierTests(unittest.TestCase):
             (self.report / "latest.env").read_text(encoding="utf-8"),
         )
 
+    def test_observation_claim_rename_failure_revokes_canonical_token(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        consumed = self.report / "runtime" / ".primary-execution.observed.env"
+        write_executable(
+            self.bin / "mv",
+            "#!/bin/sh\n"
+            'if [ "${3##*/}" = primary-execution.env ] && '
+            '[ "${4##*/}" = .primary-execution.observed.env ]; then\n'
+            "    exit 75\n"
+            "fi\n"
+            'exec /usr/bin/mv "$@"\n',
+        )
+        failed = self.run_verifier("observe")
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", failed.stdout)
+        self.assertIn(
+            "phase=token_claim_rename exit_status=75 reason=rename_failed "
+            "observed=authorization_claim_failed",
+            failed.stderr,
+        )
+        self.assertFalse(authorization.exists())
+        self.assertFalse(consumed.exists())
+        report = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("runtime_preflight_authorization_missing_or_invalid", report)
+        self.assertIn("runtime_preflight_authorization_claim_failed", report)
+
+    def test_claim_and_unlink_failure_invalidates_canonical_authority(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        consumed = self.report / "runtime" / ".primary-execution.observed.env"
+        write_executable(
+            self.bin / "mv",
+            "#!/bin/sh\n"
+            'if [ "${MOCK_CLAIM_RENAME_EXIT:-0}" != 0 ] && '
+            '[ "${3##*/}" = primary-execution.env ] && '
+            '[ "${4##*/}" = .primary-execution.observed.env ]; then\n'
+            '    exit "$MOCK_CLAIM_RENAME_EXIT"\n'
+            "fi\n"
+            'exec /usr/bin/mv "$@"\n',
+        )
+        write_executable(
+            self.bin / "rm",
+            "#!/bin/sh\n"
+            'if [ "${MOCK_CANONICAL_UNLINK_EXIT:-0}" != 0 ] && '
+            '[ "${3##*/}" = primary-execution.env ]; then\n'
+            '    exit "$MOCK_CANONICAL_UNLINK_EXIT"\n'
+            "fi\n"
+            'exec /usr/bin/rm "$@"\n',
+        )
+        env = self.env.copy()
+        env["MOCK_CLAIM_RENAME_EXIT"] = "75"
+        env["MOCK_CANONICAL_UNLINK_EXIT"] = "73"
+        failed = self.run_verifier("observe", env=env)
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", failed.stdout)
+        self.assertIn(
+            "phase=token_claim_rename exit_status=75 reason=rename_failed "
+            "observed=authorization_claim_failed",
+            failed.stderr,
+        )
+        self.assertIn(
+            "phase=token_revoke_unlink exit_status=73 reason=unlink_failed "
+            "observed=authorization_cleanup_failed",
+            failed.stderr,
+        )
+        self.assertTrue(authorization.is_file())
+        self.assertEqual(
+            authorization.stat().st_mode & 0o777, 0,
+            "canonical token remained manager-eligible after claim and unlink failure",
+        )
+        self.assertFalse(consumed.exists())
+        report = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("runtime_preflight_authorization_missing_or_invalid", report)
+        self.assertIn("runtime_preflight_authorization_claim_failed", report)
+        self.assertIn("runtime_preflight_authorization_cleanup_failed", report)
+
+        # An explicit new preflight clears the invalid canonical file before
+        # minting fresh authority; the mode-000 file is never reused.
+        preflight = self.run_verifier("preflight")
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        self.assertEqual(authorization.stat().st_mode & 0o777, 0o600)
+
     def test_revocation_failure_keeps_abort_cleanup_retry_armed(self) -> None:
         self.arm_then_reboot()
         authorization = self.report / "runtime" / "primary-execution.env"
@@ -1920,7 +2045,7 @@ class BootVerifierTests(unittest.TestCase):
         write_executable(
             self.bin / "rm",
             "#!/bin/sh\n"
-            'if [ "$3" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/primary-execution.env" ] && '
+            'if [ "$3" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/.primary-execution.observed.env" ] && '
             '[ ! -e "$MOCK_REVOKE_FIRST_FAILURE_MARKER" ]; then\n'
             '    : > "$MOCK_REVOKE_FIRST_FAILURE_MARKER"\n'
             "    exit 73\n"
@@ -1940,13 +2065,19 @@ class BootVerifierTests(unittest.TestCase):
         aborted = self.run_verifier("observe", env=env)
         self.assertEqual(aborted.returncode, 1, aborted.stderr)
         self.assertTrue(first_failure_marker.is_file())
-        self.assertIn("phase=token_revoke_unlink exit_status=73 reason=unlink_failed",
-                      aborted.stderr)
+        self.assertIn(
+            "phase=token_revoke_consumed_unlink exit_status=73 reason=unlink_failed",
+            aborted.stderr,
+        )
         self.assertIn("cannot create boot report", aborted.stderr)
         self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", aborted.stdout)
         self.assertFalse(
             authorization.exists(),
-            "EXIT cleanup did not retry a failed revocation before aborting",
+            "claimed authorization unexpectedly returned to the canonical path",
+        )
+        self.assertFalse(
+            (self.report / "runtime" / ".primary-execution.observed.env").exists(),
+            "EXIT cleanup did not retry claimed-token cleanup before aborting",
         )
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").is_file())
@@ -2169,6 +2300,9 @@ class BootVerifierTests(unittest.TestCase):
         self.assertFalse(
             authorization.exists(),
             "FAIL: successful observer retained reusable preflight authorization",
+        )
+        self.assertFalse(
+            (self.report / "runtime" / ".primary-execution.observed.env").exists()
         )
         repeat = self.run_verifier("observe")
         self.assertEqual(repeat.returncode, 1, repeat.stderr)
@@ -2477,10 +2611,17 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("status=INCOMPLETE", (self.report / "latest.env").read_text())
 
     def test_unsafe_report_directory_mode_is_not_repaired_by_verifier(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        self.assertTrue(authorization.is_file())
         self.report.chmod(0o755)
         result = self.run_verifier("observe")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.report.stat().st_mode & 0o777, 0o755)
+        self.assertFalse(authorization.exists())
+        self.assertFalse(
+            (self.report / "runtime" / ".primary-execution.observed.env").exists()
+        )
 
     def test_empty_systemd_properties_are_incomplete_observations(self) -> None:
         self.arm_then_reboot()
@@ -2585,7 +2726,12 @@ class BootVerifierTests(unittest.TestCase):
 
     def assert_activation_revoked(self) -> None:
         """No failed admission or observation may retain execution authority."""
-        self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
+        for name in ("primary-execution.env", ".primary-execution.observed.env"):
+            path = self.report / "runtime" / name
+            self.assertFalse(
+                path.exists() or path.is_symlink(),
+                f"runtime authorization artifact was retained: {name}",
+            )
 
 
     def test_interrupted_arming_cannot_leave_authority_or_arm_record(self) -> None:
