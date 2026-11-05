@@ -315,9 +315,10 @@ cleanup()
 		{ [ "$published_mapper" -eq 1 ] || [ "$published_device" -eq 1 ] ||
 			[ "$cleanup_mask_was_missing" -eq 1 ]; }; then
 		# A zero command status never proves unlink or private-stage cleanup.
-		if [ -L "$mapper_dropin_dir" ]; then
+		if [ "$published_mapper" -eq 1 ] && [ -L "$mapper_dropin_dir" ]; then
 			cleanup_observed_mapper=foreign-directory
-		elif [ ! -d "$mapper_dropin_dir" ] || [ ! -x "$mapper_dropin_dir" ]; then
+		elif [ "$published_mapper" -eq 1 ] &&
+			{ [ ! -d "$mapper_dropin_dir" ] || [ ! -x "$mapper_dropin_dir" ]; }; then
 			cleanup_observed_mapper=directory-unverifiable
 		elif [ -e "$mapper_dropin" ] || [ -L "$mapper_dropin" ]; then
 			[ "$cleanup_observed_mapper" != absent ] ||
@@ -325,9 +326,10 @@ cleanup()
 		else
 			cleanup_observed_mapper=absent
 		fi
-		if [ -L "$device_dropin_dir" ]; then
+		if [ "$published_device" -eq 1 ] && [ -L "$device_dropin_dir" ]; then
 			cleanup_observed_device=foreign-directory
-		elif [ ! -d "$device_dropin_dir" ] || [ ! -x "$device_dropin_dir" ]; then
+		elif [ "$published_device" -eq 1 ] &&
+			{ [ ! -d "$device_dropin_dir" ] || [ ! -x "$device_dropin_dir" ]; }; then
 			cleanup_observed_device=directory-unverifiable
 		elif [ -e "$device_dropin" ] || [ -L "$device_dropin" ]; then
 			[ "$cleanup_observed_device" != absent ] ||
