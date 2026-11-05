@@ -3701,6 +3701,16 @@ the enclosing ID36 helper. An outer timeout or uncertain live mapping still
 quarantines rather than forcing removal; unattended cleanup must be separately
 confirmed by loaded owner evidence.
 
+The rootless ID36 cleanup-ownership fixture executes extracted production
+helpers against synthetic cgroup and private-session files, never real cgroups.
+When simulating a reaped readiness child, keep its previously admitted pair PID
+in the fixture: a different PID is foreign membership rather than stale.
+Assert that late arrivals cannot authorize either direct-child signaling or
+cgroup.kill, delayed departures require a fresh empty snapshot, and any
+refusal describes the actually retained resources and earliest failure.
+A session-signal refusal retains both created resources; after successful
+cgroup removal, session-only refusal retains only the private session.
+
 Rootless contracts must lint both the pressure helper and shell wrapper, and the
 loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
 marker. Missing cgroup-v2 controllers, insufficient host safety headroom,

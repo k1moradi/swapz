@@ -178,6 +178,8 @@ rmdir() {
 sleep 0.3 >/dev/null 2>&1 &
 PAIR_PID=$!
 PAIR_PROCESS_IDENTITY="$(capture_direct_child_identity "$PAIR_PID")"
+# Preserve the admitted readiness identity after reaping.
+pair_cgroup_pid="$PAIR_PID"
 wait "$PAIR_PID"
 printf '%s\\n' "$PAIR_PID" > "$CGROUP/cgroup.procs"
 '''
@@ -330,6 +332,8 @@ ln -s "${SESSION%/*}/foreign-target" "$STOP"
         result = self.execute(preamble=preamble)
         self.assert_retained(result, "stale")
         self.assertIn("phase:session-signal", result.stderr)
+        self.assertIn("retained_cleanup:child-cgroup-and-private-session",
+                      result.stderr)
         self.assertEqual(target.read_text(encoding="ascii"), "secret\n")
         self.assertEqual((self.session / "foreign.keep").read_text(encoding="ascii"),
                          "foreign\n")
