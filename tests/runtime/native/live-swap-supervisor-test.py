@@ -1319,9 +1319,46 @@ class LiveSwapSupervisorTests(unittest.TestCase):
 
             rejected = dict(results, run_id="e" * 32)
             with self.assertRaisesRegex(supervisor.LiveSwapError,
-                                        "source/run identity"):
+                                        "source/run identity") as caught:
                 supervisor._run_pressure_phase(
                     Path(directory), dict(state), rejected, ops)
+            rejected_message = str(caught.exception)
+            self.assertIn(
+                f"expected_pages={supervisor.PRESSURE_PAGES}",
+                rejected_message)
+            self.assertIn("observed_pages=UNVERIFIED", rejected_message)
+            self.assertIn("observed_bytes=UNVERIFIED", rejected_message)
+            self.assertIn("retained=LIVE_SWAP_ACTIVE", rejected_message)
+
+            preverify_ops = FakeOps()
+            preverify_ops.pressure_workload = mock.Mock(
+                side_effect=supervisor.SafeStop(
+                    "memory_pressure",
+                    "phase=pressure_guard original=SafeStop errno=None "
+                    "category=memory_pressure admission=PSI_some"))
+            preverify_results = {
+                "run_id": RUN_ID, "head": HEAD,
+                "qualified_source": supervisor.QUALIFIED_SOURCE,
+                "helper_sha256": "a" * 64,
+                "artifact_digests":
+                    dict(supervisor.EXPECTED_ARTIFACTS),
+            }
+            with self.assertRaises(supervisor.SafeStop) as caught:
+                supervisor._run_pressure_phase(
+                    Path(directory), dict(state), preverify_results,
+                    preverify_ops)
+            preverify_message = str(caught.exception)
+            self.assertEqual(caught.exception.reason, "memory_pressure")
+            self.assertIn("admission=PSI_some", preverify_message)
+            self.assertIn(
+                f"expected_pages={supervisor.PRESSURE_PAGES}",
+                preverify_message)
+            self.assertIn("observed_pages=UNVERIFIED", preverify_message)
+            self.assertIn(
+                f"expected_bytes={supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES}",
+                preverify_message)
+            self.assertIn("observed_bytes=UNVERIFIED", preverify_message)
+            self.assertIn("retained=LIVE_SWAP_ACTIVE", preverify_message)
 
     def test_pressure_guard_stops_on_rising_psi_and_cgroup_exhaustion(self):
         ops = FakeOps()

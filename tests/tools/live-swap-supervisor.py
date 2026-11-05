@@ -2147,6 +2147,20 @@ def _remove_empty_cgroup(cgroup):
             "pressure cgroup could not be removed; manual review") from exc
 
 
+def _pressure_unverified_detail(state):
+    return (
+        f"expected_pages={PRESSURE_PAGES} observed_pages=UNVERIFIED "
+        f"expected_bytes={PRESSURE_PAGES * PAGE_BYTES} "
+        f"observed_bytes=UNVERIFIED retained={state.get('stage')}")
+
+
+def _pressure_error_with_unverified_detail(error, state):
+    text = _bounded(error)
+    if "expected_pages=" in text and "expected_bytes=" in text:
+        return text
+    return f"{text}; {_pressure_unverified_detail(state)}"
+
+
 def _run_pressure_phase(state_dir, state, results, ops):
     """Require source-bound byte counts, zero OOM and proven teardown."""
     run_id = state.get("run_id")
@@ -2166,7 +2180,10 @@ def _run_pressure_phase(state_dir, state, results, ops):
             results.get("helper_sha256") != helper_sha256 or \
             artifacts != EXPECTED_ARTIFACTS or \
             results.get("artifact_digests") != artifacts:
-        raise LiveSwapError("phase=pressure_admission source/run identity mismatch")
+        raise LiveSwapError(
+            "phase=pressure_admission original=identity_mismatch errno=None "
+            "admission=source/run "
+            f"{_pressure_unverified_detail(state)}")
     cgroup_name = f"swapz-live-{secrets.token_hex(8)}"
     state["pressure_cgroup"] = cgroup_name
     _save_state(state_dir, state)
@@ -2190,14 +2207,21 @@ def _run_pressure_phase(state_dir, state, results, ops):
             stop_requested=ops.stop_requested,
             timeout=PRESSURE_TIMEOUT_SECONDS)
     except (SafeStop, LiveSwapError) as exc:
+        detailed_error = _pressure_error_with_unverified_detail(exc, state)
         phase.update(status="SAFE_STOP" if isinstance(exc, SafeStop) else "FAIL",
-                     error=_bounded(exc),
+                     error=detailed_error,
                      peak_mapper_used_kib=progress["peak_mapper_used_kib"],
                      guard_samples=progress["guard_samples"])
         _save_results(state_dir, results)
-        raise
+        if isinstance(exc, SafeStop):
+            exc.args = (detailed_error,)
+            raise
+        raise LiveSwapError(detailed_error) from exc
     if not isinstance(outcome, dict):
-        raise LiveSwapError("phase=pressure_workload missing child outcome")
+        raise LiveSwapError(
+            "phase=pressure_workload original=missing_outcome errno=None "
+            "admission=memory/PSI/cgroup "
+            f"{_pressure_unverified_detail(state)}")
     child = _parse_pressure_child_output(outcome.get("stdout", ""))
     memory_events = outcome.get("memory_events")
     memory_events = memory_events if isinstance(memory_events, dict) else {}

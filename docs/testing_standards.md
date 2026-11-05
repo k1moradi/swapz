@@ -5168,7 +5168,9 @@ guard stop must survive a simultaneous pipe, memory-counter, cgroup-removal,
 mapping-close or later mapper-cleanup failure. Errors identify the original
 phase/errno or exit, memory/PSI category, expected/observed page and byte
 verification counts, and whether the child, cgroup or mapper recovery state is
-retained, without dumping page bytes or private paths. The trial cannot
+retained, without dumping page bytes or private paths. When failure occurs before
+an oracle report exists, print the frozen expected page/byte counts and the
+observed values as `UNVERIFIED` rather than omitting the comparison. The trial cannot
 publish PASS on missing/reordered observation indices or regressing kernel
 and lower-device counters.
 Child reports with unknown JSON keys, additional records or nonfinite timing
