@@ -1906,6 +1906,59 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 				"unexpected_authority_change");
 		return 1;
 	}
+
+	/*
+	 * A positive stale score is the complementary cumulative-accounting
+	 * corruption. The range would remove both real shared references, so an
+	 * exact GC score must reach zero before any logical generation can move.
+	 */
+	test_gc_live_bytes[0] += 2U;
+	memcpy(gc_live_before, test_gc_live_bytes, sizeof(gc_live_before));
+	error = swapz_prevalidate_discard_range(
+		&test_authority, 0U, test_logical_pages);
+	state_retained =
+		!memcmp(maps_before, test_maps, sizeof(maps_before)) &&
+		!memcmp(live_before, test_live, sizeof(live_before)) &&
+		!memcmp(classes_before, test_classes, sizeof(classes_before)) &&
+		!memcmp(roles_before, test_roles, sizeof(roles_before)) &&
+		!memcmp(mapped_before, test_mapped_pages, sizeof(mapped_before)) &&
+		!memcmp(first_before, test_first_page, sizeof(first_before)) &&
+		!memcmp(last_before, test_last_page, sizeof(last_before)) &&
+		!memcmp(prev_before, test_prev_page, sizeof(prev_before)) &&
+		!memcmp(next_before, test_next_page, sizeof(next_before)) &&
+		!memcmp(gc_live_before, test_gc_live_bytes,
+			sizeof(gc_live_before)) &&
+		!memcmp(gc_io_before, test_gc_io_cost, sizeof(gc_io_before)) &&
+		!memcmp(gc_min_before, test_gc_min_blocks,
+			sizeof(gc_min_before)) &&
+		test_authority.reserve_blocks == reserve_before &&
+		test_authority.open_segment == open_segment_before &&
+		test_authority.next_block == next_block_before &&
+		test_authority.next_segment_probe == next_probe_before &&
+		test_authority.committed_blocks == committed_before &&
+		test_authority.abandoned_blocks == abandoned_before;
+	if (error != -EUCLEAN || !state_retained) {
+		unsigned int invalidations =
+			(test_maps[0].valid ? 0U : 1U) +
+			(test_maps[1].valid ? 0U : 1U);
+
+		fprintf(stderr,
+			"%s:%d: FAIL discard stale GC proof range=[0,2) "
+			"expected_generations=%u,%u observed_generations=%u,%u "
+			"expected_shared_refs=%u observed_shared_refs=%u "
+			"expected_mapped=%u observed_mapped=%u "
+			"expected_gc_live=%u observed_gc_live=%u "
+			"conflict=gc_live_bytes_surplus first_errno=%d "
+			"invalidations=%u retained_authority=%s lower_mutations=0\n",
+			__FILE__, __LINE__, maps_before[0].generation,
+			maps_before[1].generation, test_maps[0].generation,
+			test_maps[1].generation, (unsigned int)live_before[0],
+			(unsigned int)test_live[0], mapped_before[0],
+			test_mapped_pages[0], first_live_bytes + second_live_bytes,
+			gc_live_before[0], error, invalidations,
+			state_retained ? "yes" : "no");
+		return 1;
+	}
 	return 0;
 }
 

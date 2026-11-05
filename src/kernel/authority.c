@@ -2077,6 +2077,19 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 				min_live_blocks;
 		}
 		processed++;
+		/*
+		 * An empty logical segment must have empty exact GC accounting too.
+		 * A positive remainder is corruption just as an underflow is; refuse
+		 * before any generation or persistent reference change is published.
+		 */
+		if (a->segment_mapped_pages &&
+		    !a->segment_mapped_pages[segment] && gc_enabled &&
+		    (a->segment_gc_live_bytes[segment] ||
+		     a->segment_gc_io_cost[segment] ||
+		     a->segment_gc_min_live_blocks[segment])) {
+			error = -EUCLEAN;
+			break;
+		}
 		if (a->segment_mapped_pages &&
 		    !a->segment_mapped_pages[segment] &&
 		    segment != a->open_segment) {
