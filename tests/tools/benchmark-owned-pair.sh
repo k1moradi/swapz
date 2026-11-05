@@ -39,6 +39,7 @@ PACKED_READ=1
 RESOURCE_PRESSURE_SHORT=0
 ID36_PAIR_READY="${SWAPZ_ID36_PAIR_READY:-}"
 ID36_PAIR_GO="${SWAPZ_ID36_PAIR_GO:-}"
+ID36_PAIR_STOP="${SWAPZ_ID36_PAIR_STOP:-}"
 ID36_CGROUP="${SWAPZ_ID36_CGROUP:-}"
 ID36_REPLAY_TIMEOUT_SECONDS="${SWAPZ_ID36_REPLAY_TIMEOUT_SECONDS:-}"
 LOWER_MBPS=0
@@ -642,6 +643,7 @@ if (( RESOURCE_PRESSURE_SHORT )); then
     [[ -n $ID36_PAIR_READY && -n $ID36_PAIR_GO &&
        $ID36_PAIR_READY == "$id36_pair_dir/pair.ready" &&
        $ID36_PAIR_GO == "$id36_pair_dir/pair.go" &&
+       $ID36_PAIR_STOP == "$id36_pair_dir/pressure.stop" &&
        -d $id36_pair_dir && ! -L $id36_pair_dir ]] ||
         fail 'ID36 start barrier is not an owned private directory'
     [[ -n $ID36_CGROUP &&
@@ -662,12 +664,13 @@ if (( RESOURCE_PRESSURE_SHORT )); then
         fail 'ID36 pair cgroup migration was not observable'
     note "PASS_ID36_PAIR_CGROUP=pid:$$"
     printf 'pid=%s\n' "$$" > "$ID36_PAIR_READY"
-    for _ in {1..1200}; do
-        [[ -e $ID36_PAIR_GO ]] && break
-        sleep 0.05
-    done
+    # Keep the pre-pressure cgroup membership exact while the parent prepares
+    # the pressure helper. Polling with external sleep would briefly add a
+    # second PID to this cgroup and look like foreign ownership. The parent
+    # resumes this exact shell through a pidfd after verifying its identity.
+    kill -STOP "$$"
     [[ -e $ID36_PAIR_GO ]] ||
-        fail 'ID36 pressure start barrier timed out'
+        fail 'ID36 pressure barrier was cancelled before release'
 fi
 modprobe dm_mod
 if (( !LINEAR_CALIBRATION )); then

@@ -881,6 +881,53 @@ sample_host_memory_admission
         procfile.unlink()
         self.assert_blocked(self.run_shell(script, directory), "cgroup.procs")
 
+    def test_nested_pair_barrier_resumes_only_the_captured_stopped_child(self):
+        functions = "".join(
+            shell_function(QUALIFIER, name)
+            for name in (
+                "direct_owned_child_running",
+                "capture_direct_child_identity",
+                "nested_pair_identity_action",
+                "capture_nested_child_identity",
+                "wait_nested_child_stopped",
+                "signal_nested_owned_child",
+            )
+        )
+        script = functions + r'''
+tmp=$1
+ready=$tmp/ready
+go=$tmp/go
+timeout --signal=TERM --kill-after=1s 10s bash -c '
+    printf "pid=%s\n" "$$" > "$1"
+    kill -STOP "$$"
+    [[ -f $2 ]]
+' _ "$ready" "$go" &
+parent=$!
+parent_start="$(capture_direct_child_identity "$parent")" || exit 20
+for _ in {1..100}; do
+    [[ -s $ready ]] && break
+    direct_owned_child_running "$parent" || exit 21
+    sleep 0.01
+done
+child="$(awk -F= '$1 == "pid" && NF == 2 { print $2 }' "$ready")"
+child_start="$(capture_nested_child_identity "$child" "$parent" "$parent_start")" || exit 22
+wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 23
+if signal_nested_owned_child "$child" "$parent" "$parent_start" 0 18; then
+    printf '%s\n' 'wrong child start time was accepted' >&2
+    exit 24
+else
+    status=$?
+    [[ $status == 4 ]] || exit 25
+fi
+wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 26
+: > "$go"
+signal_nested_owned_child "$child" "$parent" "$parent_start" "$child_start" 18 || exit 27
+wait "$parent"
+'''
+        result = self.run_shell(script, self.root)
+        self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+        self.assertEqual(result.stderr, "")
+
     def test_foreign_pair_cgroup_member_retains_cleanup_resources(self):
         cgroup_directory = self.root / "contaminated-cgroup"
         cgroup_directory.mkdir()

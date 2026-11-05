@@ -101,6 +101,8 @@ rmdir() {
             'PRESSURE_LOG=$2/pressure.log\nPAIR_LOG=$2/pair.log\n'
             'PAIR_PID=""\nPRESSURE_PID=""\n'
             'PAIR_PROCESS_IDENTITY=""\nPRESSURE_PROCESS_IDENTITY=""\n'
+            'PAIR_CGROUP_PROCESS_PID=""\nPAIR_CGROUP_PROCESS_IDENTITY=""\n'
+            'PAIR_RESUME_UNCERTAIN=0\n'
             'SESSION_DIRECTORY_FD=""\nCGROUP_DIRECTORY_FD=""\n'
             'pair_cgroup_pid="123"\nCGROUP_WAS_CREATED=1\n'
             f'RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION={int(retain)}\n'

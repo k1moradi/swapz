@@ -384,6 +384,9 @@ PRESSURE_PID=""
 PAIR_PID=""
 PRESSURE_PROCESS_IDENTITY=""
 PAIR_PROCESS_IDENTITY=""
+PAIR_CGROUP_PROCESS_PID=""
+PAIR_CGROUP_PROCESS_IDENTITY=""
+PAIR_RESUME_UNCERTAIN=0
 CGROUP_DIRECTORY_FD=""
 CGROUP_IDENTITY=""
 PASS_EVIDENCE=""
@@ -589,6 +592,109 @@ PY
     fi
     direct_owned_child_running "$tracked_pid" || return 1
     printf '%s\n' "$identity"
+}
+
+# The ID36 pair is launched through an outer timeout, so its readiness PID is
+# a direct child of that timeout rather than of this coordinator. Bind it to
+# both the timeout's captured start time and its own start time before sending
+# SIGCONT; never signal the readiness PID by number alone.
+nested_pair_identity_action() {
+    local action="$1" child_pid="$2" parent_pid="$3"
+    local parent_start="$4" child_start="${5:-}" signal_number="${6:-0}"
+    python3 -I -B - "$action" "$child_pid" "$parent_pid" \
+        "$parent_start" "$child_start" "$signal_number" <<'PY'
+import os
+from pathlib import Path
+import signal
+import sys
+import time
+
+action, child_text, parent_text, parent_start, child_start, signal_text = sys.argv[1:]
+try:
+    child_pid = int(child_text)
+    parent_pid = int(parent_text)
+    signal_number = int(signal_text)
+    if (child_pid <= 0 or parent_pid <= 0 or
+            not parent_start.isdecimal() or parent_start == "0"):
+        raise ValueError
+except ValueError:
+    raise SystemExit(2)
+
+def read_stat(pid):
+    raw = Path(f"/proc/{pid}/stat").read_bytes()
+    closing = raw.rfind(b") ")
+    if closing < 0 or b"(" not in raw[:closing]:
+        raise ValueError
+    fields = raw[closing + 2:].split()
+    if len(fields) < 20:
+        raise ValueError
+    return fields[0], int(fields[1]), fields[19].decode("ascii")
+
+try:
+    parent_fd = os.pidfd_open(parent_pid)
+except ProcessLookupError:
+    raise SystemExit(4)
+except (AttributeError, OSError):
+    raise SystemExit(2)
+try:
+    try:
+        child_fd = os.pidfd_open(child_pid)
+    except ProcessLookupError:
+        raise SystemExit(3)
+    except (AttributeError, OSError):
+        raise SystemExit(2)
+    try:
+        deadline = time.monotonic() + 2.0
+        while True:
+            try:
+                _, _, observed_parent_start = read_stat(parent_pid)
+                state, observed_parent, observed_child_start = read_stat(child_pid)
+            except FileNotFoundError:
+                raise SystemExit(3)
+            except (OSError, ValueError, UnicodeError):
+                raise SystemExit(2)
+            if (observed_parent_start != parent_start or
+                    observed_parent != parent_pid or
+                    (child_start and observed_child_start != child_start)):
+                raise SystemExit(4)
+            if action == "capture":
+                print(observed_child_start)
+                raise SystemExit(0)
+            if action == "wait-stopped":
+                if state == b"T":
+                    raise SystemExit(0)
+                if time.monotonic() >= deadline:
+                    raise SystemExit(5)
+                time.sleep(0.01)
+                continue
+            if action == "signal":
+                if state != b"T":
+                    raise SystemExit(5)
+                try:
+                    signal.pidfd_send_signal(child_fd, signal_number)
+                except ProcessLookupError:
+                    raise SystemExit(3)
+                except (AttributeError, OSError):
+                    raise SystemExit(2)
+                raise SystemExit(0)
+            raise SystemExit(2)
+    finally:
+        os.close(child_fd)
+finally:
+    os.close(parent_fd)
+PY
+}
+
+capture_nested_child_identity() {
+    nested_pair_identity_action capture "$1" "$2" "$3"
+}
+
+wait_nested_child_stopped() {
+    nested_pair_identity_action wait-stopped "$1" "$2" "$3" "$4"
+}
+
+signal_nested_owned_child() {
+    nested_pair_identity_action signal "$1" "$2" "$3" "$4" "$5"
 }
 
 # Return 0 only after signaling the exact captured process through pidfd.
@@ -908,13 +1014,53 @@ cleanup() {
         fi
     fi
 
+    if [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
+          -n $PAIR_CGROUP_PROCESS_IDENTITY && ! $PAIR_RESUME_UNCERTAIN ]]; then
+        if wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
+                "$PAIR_PROCESS_IDENTITY" \
+                "$PAIR_CGROUP_PROCESS_IDENTITY"; then
+            if signal_nested_owned_child "$PAIR_CGROUP_PROCESS_PID" \
+                    "$PAIR_PID" "$PAIR_PROCESS_IDENTITY" \
+                    "$PAIR_CGROUP_PROCESS_IDENTITY" 18; then
+                :
+            else
+                child_cleanup_status=$?
+                # 3 means the child exited; 5 means its identity was stable
+                # but it was no longer stopped at the barrier. In either
+                # case, the tracked outer timeout still owns normal cleanup.
+                if (( child_cleanup_status != 3 && child_cleanup_status != 5 )); then
+                    PAIR_RESUME_UNCERTAIN=1
+                    report_cleanup_refusal pair-resume \
+                        "pidfd-status-$child_cleanup_status" "$original_result"
+                fi
+            fi
+        else
+            child_cleanup_status=$?
+            # Status 3 is already gone; status 5 remained alive with the
+            # captured identity but did not reach SIGSTOP. The outer timeout
+            # is still a directly tracked child and can use normal cleanup.
+            if (( child_cleanup_status != 3 && child_cleanup_status != 5 )); then
+                PAIR_RESUME_UNCERTAIN=1
+                report_cleanup_refusal pair-resume \
+                    "barrier-status-$child_cleanup_status" "$original_result"
+            fi
+        fi
+    fi
+
     if [[ -n $PAIR_PID ]]; then
-        stop_direct_owned_child "$PAIR_PID" "$PAIR_PROCESS_IDENTITY" no
-        child_cleanup_status=$?
-        if (( child_cleanup_status == 1 )); then
-            report_cleanup_refusal pair-child owned-child-still-running "$original_result"
-        elif (( child_cleanup_status == 2 )); then
-            report_cleanup_refusal pair-child owned-child-identity-unreadable "$original_result"
+        if (( PAIR_RESUME_UNCERTAIN )); then
+            # A stopped nested process whose pidfd identity cannot be proven
+            # remains quarantined; do not terminate its timeout owner and
+            # orphan a task in the private cgroup.
+            RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+        else
+            stop_direct_owned_child "$PAIR_PID" "$PAIR_PROCESS_IDENTITY" no
+            child_cleanup_status=$?
+            if (( child_cleanup_status == 1 )); then
+                report_cleanup_refusal pair-child owned-child-still-running "$original_result"
+            elif (( child_cleanup_status == 2 )); then
+                report_cleanup_refusal pair-child owned-child-identity-unreadable "$original_result"
+            fi
         fi
     fi
     if [[ -n $PRESSURE_PID ]]; then
@@ -1255,6 +1401,7 @@ read -r high_start_unused oom_start oom_kill_start <<< "$memory_events_start"
 # load, target construction, replay and teardown still run under ID36.
 SWAPZ_ID36_PAIR_READY="$PAIR_READY" \
 SWAPZ_ID36_PAIR_GO="$PAIR_GO" \
+SWAPZ_ID36_PAIR_STOP="$STOP" \
 SWAPZ_ID36_CGROUP="$CGROUP" \
 SWAPZ_ID36_REPLAY_TIMEOUT_SECONDS="$PAIR_REPLAY_TIMEOUT_SECONDS" \
     timeout --signal=TERM --kill-after=10s "${PAIR_OUTER_SECONDS}s" \
@@ -1304,6 +1451,30 @@ done
 }
 if ! pair_cgroup_pid="$(read_pair_ready_pid "$PAIR_READY")"; then
     printf '%s\n' 'BLOCKED: ID36 pair readiness PID unavailable or malformed: observed:unavailable required:one canonical PID in 1..4194304; restore the owned private readiness barrier' >&2
+    exit 2
+fi
+PAIR_CGROUP_PROCESS_PID="$pair_cgroup_pid"
+if PAIR_CGROUP_PROCESS_IDENTITY="$(capture_nested_child_identity \
+        "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
+        "$PAIR_PROCESS_IDENTITY")"; then
+    :
+else
+    nested_identity_status=$?
+    RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    PAIR_RESUME_UNCERTAIN=1
+    printf 'BLOCKED: ID36 readiness process identity unavailable before pressure: observed:identity-status-%s required:pidfd-bound child of the exact pair timeout; retained cleanup: private child cgroup and scratch retained for read-only investigation\n' \
+        "$nested_identity_status" >&2
+    exit 2
+fi
+if wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
+        "$PAIR_PROCESS_IDENTITY" "$PAIR_CGROUP_PROCESS_IDENTITY"; then
+    :
+else
+    nested_stop_status=$?
+    RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    PAIR_RESUME_UNCERTAIN=1
+    printf 'BLOCKED: ID36 readiness process did not reach its private stop barrier: observed:state-status-%s required:stopped exact child before pressure; retained cleanup: private child cgroup and scratch retained for read-only investigation\n' \
+        "$nested_stop_status" >&2
     exit 2
 fi
 verify_pair_cgroup_membership "$pair_cgroup_pid" || exit $?
@@ -1471,11 +1642,28 @@ if ! (: > "$PAIR_GO") 2>/dev/null; then
     printf '%s\n' 'BLOCKED: ID36 cannot release the owned pair barrier; require the private scratch session to remain writable' >&2
     exit 2
 fi
+if signal_nested_owned_child "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
+        "$PAIR_PROCESS_IDENTITY" "$PAIR_CGROUP_PROCESS_IDENTITY" 18; then
+    :
+else
+    nested_resume_status=$?
+    if (( nested_resume_status == 3 )); then
+        printf '%s\n' 'FAIL: ID36 owned pair exited before its exact stopped readiness process could be resumed' >&2
+        exit 1
+    fi
+    RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    PAIR_RESUME_UNCERTAIN=1
+    printf 'BLOCKED: ID36 exact readiness process could not be resumed: observed:identity-status-%s required:pidfd-bound SIGCONT after pressure activation; retained cleanup: private child cgroup and scratch retained for read-only investigation\n' \
+        "$nested_resume_status" >&2
+    exit 2
+fi
 set +e
 wait "$PAIR_PID"
 pair_rc=$?
 set -e
 PAIR_PID=""
+PAIR_CGROUP_PROCESS_PID=""
+PAIR_CGROUP_PROCESS_IDENTITY=""
 preserve_pair_failure_before_telemetry "$pair_rc" "$PAIR_LOG" || exit 1
 [[ -f $PAIR_LOG && -r $PAIR_LOG && ! -L $PAIR_LOG ]] || {
     printf '%s\n' 'BLOCKED: ID36 owned-RAM pair diagnostic telemetry unavailable after execution; preserve the private session and restore scratch readability' >&2

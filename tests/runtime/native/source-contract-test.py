@@ -6049,8 +6049,25 @@ int main(void)
         self.assertIn('PRESSURE_ACTIVE="$SESSION/pressure.active"', pressure)
         self.assertIn('PAIR_READY="$SESSION/pair.ready"', pressure)
         self.assertIn('PAIR_GO="$SESSION/pair.go"', pressure)
+        self.assertIn('PAIR_CGROUP_PROCESS_IDENTITY="$(capture_nested_child_identity', pressure)
+        self.assertIn('wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID"', pressure)
         self.assertLess(pressure.index(': > "$PRESSURE_ACTIVATE"'),
                         pressure.index(': > "$PAIR_GO"'))
+        self.assertLess(
+            pressure.index('verify_pair_cgroup_membership "$pair_cgroup_pid"'),
+            pressure.index('python3 -B "$PRESSURE_SCRIPT"'))
+        self.assertLess(pressure.index('[[ -s $PRESSURE_ACTIVE ]]'),
+                        pressure.index(': > "$PAIR_GO"'))
+        release_path = pressure.split('cpu_some_before="$(cpu_some_total)"', 1)[1]
+        self.assertLess(release_path.index(': > "$PAIR_GO"'),
+                        release_path.index('signal_nested_owned_child "$PAIR_CGROUP_PROCESS_PID"'))
+        nested_identity = pressure.split(
+            'nested_pair_identity_action() {', 1)[1].split(
+                '# Return 0 only after signaling the exact captured process', 1)[0]
+        self.assertIn('os.pidfd_open(parent_pid)', nested_identity)
+        self.assertIn('os.pidfd_open(child_pid)', nested_identity)
+        self.assertIn('signal.pidfd_send_signal(child_fd, signal_number)', nested_identity)
+        self.assertIn('child_cleanup_status != 3 && child_cleanup_status != 5', pressure)
         self.assertIn("high_active > high_before", pressure)
         self.assertIn("SWAPZ_ID36_PAIR_READY", pressure)
         self.assertIn('SWAPZ_ID36_CGROUP="$CGROUP"', pressure)
@@ -6067,8 +6084,13 @@ int main(void)
         self.assertIn("PASS_ID36_PAIR_CGROUP", benchmark)
         self.assertIn('> "$ID36_CGROUP/cgroup.procs"', benchmark)
         self.assertIn('grep -Fxq "$$" "$ID36_CGROUP/cgroup.procs"', benchmark)
+        self.assertIn('ID36_PAIR_STOP="${SWAPZ_ID36_PAIR_STOP:-}"', benchmark)
+        self.assertIn('[[ -e $ID36_PAIR_GO ]]', benchmark)
+        self.assertIn('kill -STOP "$$"', benchmark)
+        self.assertIn('ID36_PAIR_STOP == "$id36_pair_dir/pressure.stop"', benchmark)
         self.assertLess(benchmark.index("PASS_ID36_NULLBLK_PREWARM"),
                         benchmark.index('> "$ID36_CGROUP/cgroup.procs"'))
+        self.assertNotIn('for _ in {1..1200}', benchmark)
         self.assertIn("pair_cgroup_pid=", pressure)
         membership = pressure.split(
             "verify_pair_cgroup_membership() {", 1)[1].split(
@@ -6083,7 +6105,6 @@ int main(void)
             r'if\s*\(\$1\s*==\s*expected_pid\)\s*\+\+matches')
         self.assertIn('if (matches != 1)', membership)
         self.assertIn("for _ in {1..800}", pressure)
-        self.assertIn("for _ in {1..1200}", benchmark)
         self.assertIn('"${PAIR_OUTER_SECONDS}s"', pressure)
         self.assertIn(
             "run_privileged_bounded 960 tests/tools/qualify-resource-pressure.sh",

@@ -3777,6 +3777,15 @@ watchdog is not proof of a strict kernel-side I/O deadline.
 The owned pair first creates and fully faults both 64MiB memory-backed
 `null_blk` devices outside the ID36 cgroup. It then migrates its benchmark
 process into the cgroup, proves that membership, and stops at a private barrier.
+After publishing its readiness PID, the pair shell stops itself with SIGSTOP;
+this avoids polling with an external `sleep` process that would briefly join
+the cgroup and violate the exact one-PID pre-pressure invariant. The parent
+binds the nested readiness process to the captured outer-timeout identity and
+its own start time, waits until it is stopped, and verifies the exact cgroup
+membership before starting pressure. After pressure is active and the private
+release marker is written, the parent resumes only that captured process
+through its pidfd. If identity or resume state is uncertain, the pair and
+private cgroup remain quarantined for investigation.
 At this pre-pressure barrier, `cgroup.procs` must contain exactly the pair's
 canonical readiness PID and no other process; the pressure helper has not been
 launched yet. Any additional canonical PID is ownership contamination and
