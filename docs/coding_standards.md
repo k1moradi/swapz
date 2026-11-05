@@ -1547,13 +1547,16 @@ recorded numeric PID alone.
 Pin both the newly created child cgroup and private scratch directory with open
 directory descriptors, and require each descriptor identity to match the named
 path immediately after opening it. Holding that descriptor prevents same-path
-replacement from recycling the removed inode into the ownership proof. After reaping, read `cgroup.procs` through
-the pinned cgroup descriptor with bounded canonical parsing; any nonempty,
-foreign, stale, malformed, missing or unreadable inventory retains both the
-child cgroup and private session and cannot print PASS. Revalidate the named
-cgroup identity immediately before `rmdir`; an occupied or replaced group or
-failed removal likewise retains evidence. A failed initial cgroup creation
-grants no teardown ownership.
+replacement from recycling the removed inode into the ownership proof. After
+reaping, read `cgroup.procs` through the pinned cgroup descriptor with bounded
+canonical parsing. An inventory containing only previously admitted/reaped PID
+numbers is stale and grants no signal or removal authority; allow only bounded
+departure grace and require a fresh empty snapshot before proceeding. Any
+foreign, malformed, missing or unreadable observation, or any nonempty inventory
+remaining after that grace, retains both the child cgroup and private session
+and cannot print PASS. Revalidate the named cgroup identity immediately before
+`rmdir`; an occupied or replaced group or failed removal likewise retains
+evidence. A failed initial cgroup creation grants no teardown ownership.
 
 The cooperative stop marker and cleanup of known scratch entries must use the
 pinned session descriptor after confirming the named path still identifies the
