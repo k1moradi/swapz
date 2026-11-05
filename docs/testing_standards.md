@@ -1242,8 +1242,13 @@ A generic nested Make failure may disclose only the first
 source-controlled `tests/suites/Makefile` target from its own `make: ***` error
 as a `subtest` (for example, `test-mapping`). The reported Makefile line must
 resolve to a recipe line owned by that exact target in the source-controlled
-Makefile; a mismatched, stale or out-of-range line is unauthenticated. This is a
-target-level phase hint, not proof of an individual executable, Python traceback
+Makefile; a mismatched, stale or out-of-range line is unauthenticated. The
+outer CI parser must repeat that recipe-line ownership check before promoting a
+raw Make record to `first_error`; matching only the authenticated marker's
+target name is insufficient. A malformed final rootless marker also suppresses
+earlier raw unittest and Make-shaped attribution rather than falling back to
+untrusted child text. This is a target-level phase hint, not proof of an
+individual executable, Python traceback
 or native assertion category. A silent or unrecognized failure keeps
 `subtest=unavailable`. Incomplete relays or absent matching evidence retain
 `test=unavailable reason=nonzero_exit`. Python `unittest` preserves execution

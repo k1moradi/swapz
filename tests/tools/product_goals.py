@@ -307,6 +307,28 @@ def _ci_unittest_name(method_name, context):
     return context if context.endswith(suffix) else context + suffix
 
 
+def _ci_make_recipe_owner(line_number):
+    """Return the source-controlled target owning one Make recipe line."""
+    import re
+    from pathlib import Path
+
+    owner = None
+    makefile = Path(__file__).resolve().parents[1] / "suites/Makefile"
+    try:
+        with makefile.open(encoding="utf-8") as source:
+            for current_line_number, source_line in enumerate(source, 1):
+                target_match = re.match(r"^([A-Za-z0-9_.-]+):", source_line)
+                if target_match:
+                    owner = target_match.group(1)
+                if current_line_number == line_number:
+                    return owner if source_line.startswith("\t") else None
+                if current_line_number > line_number:
+                    return None
+    except OSError:
+        return None
+    return None
+
+
 def _ci_failure_category(line, contract_suite):
     """Classify one already-sanitized causal candidate, or return None."""
     import re
@@ -379,6 +401,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
     make_target = None
     first_make_failure = None
     rootless_failure = None
+    rootless_marker_seen = False
     contract_suite = any(name in suite for name in
                          ("contract", "policy", "interface", "layout"))
     # test-rootless.sh emits only the basename of its source-controlled phase.
@@ -432,6 +455,8 @@ def diagnose_ci_failure(lines, exit_code, suite):
             # The final marker owns the failing-suite boundary. An invalid
             # final marker must also revoke any earlier valid attribution.
             # Marker-shaped child output is never a causal FAIL line.
+            if suite == "native-rootless":
+                rootless_marker_seen = True
             rootless_failure = (
                 rootless_match.groupdict() if rootless_match else None)
             continue
@@ -440,11 +465,14 @@ def diagnose_ci_failure(lines, exit_code, suite):
                 and safe_line.startswith("make")):
             make_failure_match = re.fullmatch(
                 r"make(?:\[\d+\])?: \*\*\* "
-                r"\[Makefile:[0-9]+: ([a-z0-9-]{1,64})\] Error [0-9]+",
+                r"\[Makefile:([0-9]+): ([a-z0-9-]{1,64})\] Error [0-9]+",
                 safe_line)
-            if make_failure_match:
+            if (make_failure_match and
+                    _ci_make_recipe_owner(
+                        int(make_failure_match.group(1))) ==
+                    make_failure_match.group(2)):
                 first_make_failure = (
-                    safe_line, make_failure_match.group(1))
+                    safe_line, make_failure_match.group(2))
 
         if make_target is None:
             make_match = re.search(
@@ -484,6 +512,17 @@ def diagnose_ci_failure(lines, exit_code, suite):
         if rootless_failure is not None and
         rootless_failure["test"] != "unavailable" else None)
     phase = rootless_failure["phase"] if rootless_failure else suite
+    rootless_marker_invalid = (
+        suite == "native-rootless" and rootless_marker_seen and
+        rootless_failure is None)
+    if rootless_marker_invalid:
+        # Once the aggregate runner emits an invalid final marker, no raw child
+        # unittest or Make-shaped line may donate public failure identity.
+        failing_test = None
+        unittest_header = None
+        unittest_error = None
+        unittest_category = None
+        make_target = None
     if rootless_failure is not None:
         # A validated rootless marker is authoritative for unittest identity.
         # Do not let reordered detailed blocks or partial relay bytes donate a
@@ -519,7 +558,10 @@ def diagnose_ci_failure(lines, exit_code, suite):
         and re.fullmatch(r"bash syntax [A-Za-z0-9_.-]{1,64}", phase)
         is not None)
 
-    if failing_test is not None:
+    if rootless_marker_invalid:
+        causal_error = "rootless failure marker malformed or unverified"
+        category = "UNKNOWN_FAILURE"
+    elif failing_test is not None:
         causal_error = unittest_error or unittest_header
         category = unittest_category or (
             "SOURCE_CONTRACT" if contract_suite or unittest_contract_context

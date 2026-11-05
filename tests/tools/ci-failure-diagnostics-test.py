@@ -24,6 +24,25 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         cls.diagnostics = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.diagnostics)
 
+        makefile_lines = (
+            ROOT / "tests/suites/Makefile").read_text().splitlines()
+
+        def recipe_line(target):
+            target_index = next(
+                index for index, line in enumerate(makefile_lines)
+                if line.startswith(target + ":"))
+            for index in range(target_index + 1, len(makefile_lines)):
+                line = makefile_lines[index]
+                if line.startswith("\t"):
+                    return index + 1
+                if line and not line[0].isspace() and ":" in line:
+                    break
+            raise AssertionError(f"missing recipe line for {target}")
+
+        cls.mapping_recipe_line = recipe_line("test-mapping")
+        cls.gc_recipe_line = recipe_line("test-gc")
+        cls.userspace_recipe_line = recipe_line("test-userspace")
+
     def diagnose(self, log, exit_code=1, suite="native-rootless"):
         return self.diagnostics.diagnose_ci_failure(
             log.splitlines(), exit_code, suite)
@@ -81,8 +100,10 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "FAIL: test_expected (__main__.EarlierPassingCase)\n"
             "AssertionError: unrelated expected negative fixture\n"
             "mapping-authority: Assertion failed: PRIVATE_RESOURCE_IDENTIFIER\n"
-            "make[1]: *** [Makefile:154: test-mapping] Error 134\n"
-            "make[1]: *** [Makefile:160: test-userspace] Error 1\n"
+            f"make[1]: *** [Makefile:{self.mapping_recipe_line}: "
+            "test-mapping] Error 134\n"
+            f"make[1]: *** [Makefile:{self.userspace_recipe_line}: "
+            "test-userspace] Error 1\n"
             + marker, 1)
         self.assertEqual(failure["status"], "FAIL")
         self.assertEqual(failure["category"], "RUNTIME_ASSERTION")
@@ -94,7 +115,8 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertEqual(failure["rootless_reason"], "nonzero_exit")
         self.assertEqual(
             failure["first_error"],
-            "make[1]: *** [Makefile:154: test-mapping] Error 134")
+            f"make[1]: *** [Makefile:{self.mapping_recipe_line}: "
+            "test-mapping] Error 134")
         self.assertEqual(failure["observed"], failure["first_error"])
         self.assertEqual(failure["expected_contract"],
                          "test assertions and runtime contracts hold")
@@ -113,8 +135,12 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "subtest=test-mapping test=unavailable exit=2 reason=nonzero_exit "
             "phase_s=1 stage_s=2 line=476 "
             "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
-        first = "make[1]: *** [Makefile:154: test-mapping] Error 1"
-        later = "make[1]: *** [Makefile:160: test-userspace] Error 134"
+        first = (
+            f"make[1]: *** [Makefile:{self.mapping_recipe_line}: "
+            "test-mapping] Error 1")
+        later = (
+            f"make[1]: *** [Makefile:{self.userspace_recipe_line}: "
+            "test-userspace] Error 134")
         failure = self.diagnose(first + "\n" + later + "\n" + marker, 1)
         self.assertEqual(failure["category"], "UNKNOWN_FAILURE")
         self.assertEqual(failure["test"],
@@ -135,21 +161,40 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertEqual(compiled["category"], "UNKNOWN_FAILURE")
         self.assertNotIn("PRIVATE_RESOURCE_IDENTIFIER", json.dumps(compiled))
 
+        # A source recipe owned by another target cannot authenticate the
+        # marker's target even when the text itself claims test-mapping.
+        wrong_owner = (
+            f"make[1]: *** [Makefile:{self.gc_recipe_line}: "
+            "test-mapping] Error 134")
+        rejected = self.diagnose(wrong_owner + "\n" + marker, 1)
+        self.assertEqual(rejected["category"], "UNKNOWN_FAILURE")
+        self.assertIn("rootless phase=Makefile", rejected["first_error"])
+        self.assertNotIn(wrong_owner, json.dumps(rejected))
+        self.assertEqual(
+            rejected["rootless_private_log"],
+            "build/tests/rootless-failure.Abc123xy/diagnostic.log")
+
         # An unrelated target cannot donate its abort to the validated target.
         unmatched = self.diagnose(later + "\n" + marker, 1)
         self.assertEqual(unmatched["category"], "UNKNOWN_FAILURE")
         self.assertIn("rootless phase=Makefile", unmatched["first_error"])
         self.assertEqual(unmatched["child_exit_code"], 2)
 
-        # A final malformed marker invalidates earlier marker attribution.
+        # A final malformed marker invalidates earlier marker and raw child
+        # attribution, including otherwise valid Make-shaped failure text.
         stale = self.diagnose(
-            marker + "\nFAIL: rootless phase=../private "
+            first + "\n" + marker + "\nFAIL: rootless phase=../private "
             "subtest=unavailable test=unavailable exit=99 "
             "reason=nonzero_exit phase_s=1 stage_s=2 line=1 "
             "log=/tmp/private.log", 1)
         self.assertEqual(stale["phase"], "native-rootless")
+        self.assertEqual(stale["test"], "native-rootless")
+        self.assertEqual(
+            stale["first_error"],
+            "rootless failure marker malformed or unverified")
         self.assertNotIn("child_exit_code", stale)
         self.assertNotIn("rootless_private_log", stale)
+        self.assertNotIn("test-mapping", json.dumps(stale))
         self.assertNotIn("private.log", json.dumps(stale))
 
     def test_unittest_error_heading_is_not_compiler_error(self):
