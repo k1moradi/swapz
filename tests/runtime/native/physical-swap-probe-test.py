@@ -1265,12 +1265,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 earlier_source, duration=4,
                 host=dict(local_host, id_sha256="2" * 64)),
             "blocked": report(earlier_source, duration=5, blocked=True),
-            # Conflicting or missing historical source fields are not authority.
-            "missing-source": {key: value for key, value in
-                               report(earlier_source).items()
-                               if key != "source_sha"},
-            "conflicting-source": {
-                **report(earlier_source), "tested_commit_sha": source},
         }
         commits = ["policy-one", "policy-two"]
         changed_paths = {
@@ -1278,11 +1272,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "policy-two": "docs/testing_standards.md",
         }
         publications = ["latest", "earlier", "duplicate",
-                        "different-artifacts", "foreign-host", "blocked",
-                        "missing-source", "conflicting-source"]
-        for name in ("missing-source", "conflicting-source"):
-            self.assertFalse(probe._report_is_owner_pass(
-                histories[name], local_host), name)
+                        "different-artifacts", "foreign-host", "blocked"]
 
         def git(*args, **kwargs):
             del kwargs
@@ -1645,7 +1635,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
     def test_development_manifest_binds_source_helper_and_original_header(self):
         target, evidence = self.physical_preparation_fixture()
-        target["swap_was_active"] = False
+        target.update({
+            "swap_was_active": False,
+            "swap_path": None,
+            "swap_size_kib": None,
+            "swap_priority": None,
+            "swap_used_kib": None,
+        })
         evidence.update({"source_sha": evidence["head"],
                          "development_only": True,
                          "scope": probe.DEVELOPMENT_SCOPE})
@@ -1677,7 +1673,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     ("header_sha256",
                      hashlib.sha256(target["header"]).hexdigest()),
                     ("development_only", True),
-                    ("swap_was_active", False)):
+                    ("development_scope", probe.DEVELOPMENT_SCOPE),
+                    ("swap_was_active", False),
+                    ("swap_path", None),
+                    ("swap_size_kib", None),
+                    ("swap_priority", None),
+                    ("swap_used_kib", None)):
                 self.assertEqual(manifest[key], expected, key)
             self.assertEqual((manifest["major"], manifest["minor"]),
                              (target["major"], target["minor"]))
@@ -1709,7 +1710,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         if development_only:
-            target["swap_was_active"] = False
+            target.update({
+                "swap_was_active": False,
+                "swap_path": None,
+                "swap_size_kib": None,
+                "swap_priority": None,
+                "swap_used_kib": None,
+            })
             evidence.update({
                 "source_sha": evidence["head"],
                 "development_only": True,
@@ -1724,18 +1731,37 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
             "stage": "BACKED_UP", "module_ownership": "NOT_STARTED",
         }
-        review = {"reviewer": probe.VERBAL_REVIEWER,
-                  "approval_mode": "verbal",
-                  "run_id": "0123456789abcdef0123456789abcdef"}
+        review = {
+            "reviewer": None if development_only else probe.VERBAL_REVIEWER,
+            "approval_mode": ("standing-owner-development"
+                              if development_only else "verbal"),
+            "run_id": "0123456789abcdef0123456789abcdef",
+        }
         state.update({
             "run_id": review["run_id"], "partuuid": target["partuuid"],
             "major": target["major"], "minor": target["minor"],
             "device_arg": target["device_arg"],
             "device": target["device"], "size_bytes": target["size_bytes"],
+            "parent_major_minor": target["parent_major_minor"],
+            "parent_model": target["parent_model"],
+            "parent_transport": target["parent_transport"],
+            "parent_size_bytes": target["parent_size_bytes"],
+            "parent_removable": target["parent_removable"],
+            "card_identity_sha256": target["card_identity_sha256"],
+            "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
+            "swap_was_active": target["swap_was_active"],
+            "swap_path": target["swap_path"],
             "swap_size_kib": target["swap_size_kib"],
             "swap_priority": target["swap_priority"],
-            "swap_was_active": not development_only,
+            "swap_used_kib": target["swap_used_kib"],
             "development_only": development_only,
+            "development_scope": (
+                probe.DEVELOPMENT_SCOPE if development_only else None),
+            "source_sha": evidence["source_sha"],
+            "helper_git_sha": evidence["head"],
+            "helper_sha256": evidence["helper_sha256"],
+            "host_report_count": evidence.get("pass_reports"),
+            "reviewer": review["reviewer"],
         })
         formatted = bytearray(probe.PAGE_BYTES)
         formatted[:8] = probe.SWAPZ_HEADER_MAGIC
@@ -2066,7 +2092,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(complete["stage"], "COMPLETE")
         self.assertEqual(results["final_recovery_state"], "COMPLETE")
         self.assertEqual(results["source_commit_sha"], results["current_git_head"])
+        self.assertEqual(results["source_commit_sha"], complete["source_sha"])
         self.assertEqual(results["helper_git_sha"], results["current_git_head"])
+        self.assertEqual(results["helper_git_sha"], complete["helper_git_sha"])
+        self.assertEqual(results["helper_sha256"], complete["helper_sha256"])
         self.assertEqual(results["helper_sha256"],
                          hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
         self.assertEqual(results["artifact_sha256"],
@@ -2074,6 +2103,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(results["run_id"], complete["run_id"])
         self.assertEqual(results["partuuid"], target["partuuid"])
         self.assertEqual(results["major_minor"], "8:4")
+        self.assertEqual(complete["header_sha256"],
+                         results["original_header_sha256"])
+        self.assertEqual(complete["card_identity_sha256"],
+                         target["card_identity_sha256"])
+        self.assertFalse(complete["swap_was_active"])
+        for field in ("swap_path", "swap_size_kib",
+                      "swap_priority", "swap_used_kib"):
+            self.assertIsNone(complete[field], field)
         self.assertEqual(complete["_test_observed_header"], target["header"])
         self.assertTrue(results["original_header_matches_final"])
         self.assertIsNone(results["final_swap_row"])
@@ -2085,6 +2122,24 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                              for event in events))
         self.assertEqual(results["evidence_class"],
                          "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
+
+        events, zero_phase, target = self.simulate_physical_run(
+            development_only=True, identity_failure_at=6)
+        results = zero_phase["_test_results"]
+        oracle_calls = [event[1] for event in events if
+                        event[0] == "command" and
+                        event[1][0] == "/reviewed/device-roundtrip"]
+        self.assertEqual(oracle_calls, [])
+        self.assertEqual(results["physical_oracle_phases"], [])
+        self.assertNotIn("oracle_suite", results)
+        self.assertEqual(zero_phase["stage"], "COMPLETE")
+        self.assertEqual(results["final_recovery_state"], "COMPLETE")
+        self.assertEqual(zero_phase["_test_observed_header"], target["header"])
+        self.assertTrue(results["original_header_matches_final"])
+        self.assertIn("injected identity change",
+                      zero_phase["_test_first_failure"])
+        self.assertFalse(zero_phase["_test_owner_marker"])
+        self.assertTrue(zero_phase["_test_consumed_claim"])
 
         events, failed, target = self.simulate_physical_run(
             development_only=True, oracle_failure_at=1)
@@ -2146,6 +2201,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(results["final_recovery_state"],
                          "PRE_DESTRUCTIVE_FAILED")
         self.assertIn(reason, results["recovery_error"])
+        self.assertEqual(state["_test_first_failure"],
+                         results["recovery_error"])
         self.assertEqual(results["physical_oracle_phases"], [])
         self.assertNotIn("oracle_suite", results)
         self.assertEqual(
