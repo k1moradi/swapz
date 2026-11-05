@@ -6531,7 +6531,9 @@ after PASS, FAIL or INCOMPLETE, and after an interrupted attempt. Armed
 observations with a missing, duplicated or mismatched claimed token must FAIL
 rather than pass. A claim rename or directory-sync failure preserves the
 original command exit status, refuses PASS, and immediately falls back to
-canonical revocation/invalidation. Final cleanup removes the claimed secret and
+canonical revocation/invalidation. Shell failure branches must capture `$?`
+before any assignment or diagnostic preparation, and the rootless fault fixtures
+must assert the injected exit value rather than accepting a generic failure. Final cleanup removes the claimed secret and
 rechecks the canonical pathname; failure to remove the claimed file is FAIL but
 cannot make that noncanonical file activation authority. An observer interrupted
 by HUP/INT/TERM must explicitly exit through this cleanup (an EXIT-only trap is
