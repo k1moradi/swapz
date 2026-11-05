@@ -1198,8 +1198,76 @@ EOF
 # probe output, private transaction data, or unbounded journal content.
 log_observer_diagnostic()
 {
-	printf 'SWAPZ_RUNTIME_OBSERVER phase=%s expected=%s observed=%s command=%s command_status=%s identity_mismatch=%s service_state=%s next=%s check=%s\n' \
+	printf 'SWAPZ_RUNTIME_OBSERVER phase=%s expected=%s observed=%s command=%s command_status=%s identity_mismatch=%s service_state=%s next=%s check=%s retained_state=unchanged\n' \
 		"$1" "$2" "$3" "$4" "$5" "${7:-none}" "${8:-not_applicable}" "$6" "${9:-$1}" >&2
+}
+
+log_runtime_attribution()
+{
+	# Keep failure provenance separate from health classification. This helper
+	# only reports already-classified observations and never repairs host state.
+	case ",$failure_reasons,$observation_reasons," in
+	*,backing_device_unavailable,*)
+		log_observer_diagnostic selected_backing selected_partition_present missing_selected_partition path_exists 1 inspect_selected_partition_read_only none not_applicable selected_device_presence
+		;;
+	esac
+	case ",$failure_reasons,$observation_reasons," in
+	*,selected_target_identity_unavailable,*)
+		log_observer_diagnostic selected_target canonical_manager_partition_identity unproven_identity manager_target_identity 1 inspect_primary_target_and_manager_read_only none not_applicable selected_identity
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,active_transaction_identity_invalid,*)
+		log_observer_diagnostic active_transaction matching_active_state_and_partition_claim incomplete_or_stale_claim active_run_id 1 inspect_recovery_evidence_read_only bound not_applicable active_owner_claim
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_missing,*)
+		log_observer_diagnostic mapper_presence bound_primary_mapper missing_mapper path_exists 1 inspect_dmsetup_info_read_only none not_applicable mapper_device_presence
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_device_identity_invalid,*)
+		mapper_name_observation_status=0
+		[ "$mapper_dm_name" != unavailable ] || mapper_name_observation_status=1
+		log_observer_diagnostic mapper_device_identity swapz_primary_dm_name foreign_or_unavailable_dm_name sysfs_dm_name "$mapper_name_observation_status" inspect_dmsetup_info_read_only bound not_applicable mapper_dm_name
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_service_not_active,*)
+		log_observer_diagnostic mapper_service_state active_service not_active systemctl_show 0 inspect_systemctl_show_read_only none observed mapper_active_state
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,passive_swap_unit_not_active,*)
+		log_observer_diagnostic passive_swap_unit_state active_swap_unit not_active systemctl_show 0 inspect_systemctl_show_read_only none observed passive_swap_active_state
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_service_failed,*)
+		log_observer_diagnostic mapper_service_result success_result non_success_result systemctl_show 0 inspect_systemctl_show_read_only none observed mapper_result
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,passive_swap_unit_failed,*)
+		log_observer_diagnostic passive_swap_unit_result success_result non_success_result systemctl_show 0 inspect_systemctl_show_read_only none observed passive_swap_result
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,target_failed,*)
+		log_observer_diagnostic target_terminal zero_failed_latch failed_latched dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed failed
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,hibernation_resume_configuration_conflict,*)
+		log_observer_diagnostic hibernation_resume no_primary_resume_conflict unsafe_or_unverifiable_resume hibernation_config_check 1 inspect_resume_configuration_read_only none not_applicable hibernation_safety
+		;;
+	esac
+	case ",$warning_reasons," in
+	*,gc_reserve_degraded,*)
+		log_observer_diagnostic gc_reserve initial_reserve_role_count reduced_reserve_role_count dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed gc_reserve_roles
+		;;
+	esac
 }
 
 log_runtime_state()
@@ -1213,6 +1281,7 @@ log_runtime_state()
 		"$gc_reserve_segments_initial" "$gc_reserve_segments_current" "$gc_destination_advances" "$gc_stall_polls" \
 		"$mapper_active" "$mapper_sub" "$mapper_result" "$swap_unit_active" "$swap_unit_sub" "$swap_unit_result" \
 		"$kernel_error_count" >&2
+	log_runtime_attribution
 	if [ "$mapper_info_command_status" -ne 0 ]; then
 		log_observer_diagnostic mapper_info run_bound_uuid probe_failed dmsetup_info "$mapper_info_command_status" inspect_dmsetup_info_read_only
 	else
