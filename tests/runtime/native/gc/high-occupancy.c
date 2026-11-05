@@ -201,14 +201,49 @@ static int write_page(swapz_u32 logical, swapz_u32 version)
 	error = swapz_finish_raw(&a, &tx, page_bytes, 1, 0);
 	if (!error) {
 		versions[logical] = version;
-		if (churn_active)
-			expected_generations[logical]++;
+		expected_generations[logical]++;
 		foreground_writes++;
 	}
 	record_churn("foreground_raw", logical,
 		     previous_generation + (error == 0),
 		     maps[logical].generation, error);
 	return error;
+}
+
+static int verify_page_failure(const char *cause, swapz_u32 logical,
+			       int original_error, int byte_exact)
+{
+	const struct swapz_map *map = &maps[logical];
+	const swapz_u32 start_block = map->valid ?
+		map->start_block : ~(swapz_u32)0;
+	const swapz_u32 authoritative_bytes = map->valid ?
+		map->payload_length : 0U;
+	const swapz_u32 live_bytes =
+		start_block < PHYSICAL_BLOCKS && live[start_block] ?
+		(swapz_u32)classes[start_block] * SWAPZ_BLOCK_BYTES : 0U;
+	const int victim_role = a.gc_forbidden_victim < PHYSICAL_SEGMENTS ?
+		(int)roles[a.gc_forbidden_victim] : -1;
+	const int reserve_role = a.gc_destination < PHYSICAL_SEGMENTS ?
+		(int)roles[a.gc_destination] : -1;
+	const int extent_class = start_block < PHYSICAL_BLOCKS ?
+		(int)classes[start_block] : -1;
+
+	fprintf(stderr, "%s:%d FAIL GC phase=survivor_verify cause=%s"
+		" logical=%" PRIu32
+		" victim=%" PRIu32 " victim_role=%d"
+		" reserve=%" PRIu32 " reserve_role=%d class=%d"
+		" expected_generation=%" PRIu32
+		" observed_generation=%" PRIu32
+		" open=%" PRIu32 " cursor=%" PRIu32
+		" authoritative_bytes=%" PRIu32 " live_bytes=%" PRIu32
+		" original_errno=%d byte_exact=%d\n",
+		__FILE__, __LINE__, cause, logical,
+		a.gc_forbidden_victim, victim_role,
+		a.gc_destination, reserve_role, extent_class,
+		expected_generations[logical], map->generation,
+		a.open_segment, a.next_block, authoritative_bytes, live_bytes,
+		original_error, byte_exact);
+	return original_error;
 }
 
 static int verify_all_pages(void)
@@ -218,22 +253,33 @@ static int verify_all_pages(void)
 	for (logical = 0; logical < LOGICAL_PAGES; ++logical) {
 		const struct swapz_map *map = &maps[logical];
 		const swapz_u8 *stored;
+		int byte_exact, verify_error;
 
 		if (!map->valid || !map->raw || map->extent_blocks != 1 ||
 		    map->start_block >= PHYSICAL_BLOCKS)
-			return -EUCLEAN;
+			return verify_page_failure("authority_geometry", logical,
+						   -EUCLEAN, -1);
+		stored = media + (size_t)map->start_block * SWAPZ_BLOCK_BYTES;
+		make_raw_page(logical, versions[logical], expected_bytes);
+		byte_exact = memcmp(stored, expected_bytes, SWAPZ_BLOCK_BYTES) == 0;
 		/* A byte-exact CRC cannot detect an unexpected authority generation. */
-		if (churn_active && map->generation != expected_generations[logical]) {
+		if (map->generation != expected_generations[logical]) {
 			record_churn("verify_generation", logical,
 				     expected_generations[logical], map->generation,
 				     -EUCLEAN);
-			return -EUCLEAN;
+			return verify_page_failure("generation", logical, -EUCLEAN,
+						   byte_exact);
 		}
-		stored = media + (size_t)map->start_block * SWAPZ_BLOCK_BYTES;
-		make_raw_page(logical, versions[logical], expected_bytes);
-		if (memcmp(stored, expected_bytes, SWAPZ_BLOCK_BYTES) ||
-		    swapz_verify_raw(&a, logical, stored))
-			return -EBADMSG;
+		verify_error = swapz_verify_raw(&a, logical, stored);
+		if (!byte_exact || verify_error) {
+			const int error = verify_error ? verify_error : -EBADMSG;
+
+			record_churn("verify_payload", logical,
+				     expected_generations[logical], map->generation,
+				     error);
+			return verify_page_failure("payload", logical, error,
+						   byte_exact);
+		}
 	}
 	return 0;
 }
@@ -270,8 +316,7 @@ static int relocate_segment_pages(swapz_u32 victim)
 			return error;
 		gc_writes++;
 		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
-		if (churn_active)
-			expected_generations[logical]++;
+		expected_generations[logical]++;
 	}
 	return 0;
 }
@@ -651,6 +696,7 @@ static int test_last_mapped_page_partial_victim_failed_publication(void)
 		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
 		       page_bytes, SWAPZ_BLOCK_BYTES);
 		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1, 0) == 0);
+		expected_generations[logical]++;
 		gc_reads++;
 		gc_writes++;
 		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
@@ -691,6 +737,7 @@ static int test_last_mapped_page_partial_victim_failed_publication(void)
 	memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
 	       page_bytes, SWAPZ_BLOCK_BYTES);
 	CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1, 0) == 0);
+	expected_generations[last_logical]++;
 	CHECK(maps[last_logical].generation == previous.generation + 1U);
 	CHECK(swapz_gc_commit_rotation(&a, victim) == 0);
 	CHECK(!roles[victim] && roles[FOREGROUND_SEGMENTS]);
@@ -751,6 +798,7 @@ static int test_full_destination_raw_roll_forward(void)
 		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
 		       page_bytes, SWAPZ_BLOCK_BYTES);
 		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1U, 0) == 0);
+		expected_generations[logical]++;
 		gc_reads++;
 		gc_writes++;
 		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
@@ -793,6 +841,7 @@ static int test_full_destination_raw_roll_forward(void)
 		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
 		       page_bytes, SWAPZ_BLOCK_BYTES);
 		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1U, 0) == 0);
+		expected_generations[logical]++;
 		gc_reads++;
 		gc_writes++;
 		gc_bytes_relocated += SWAPZ_BLOCK_BYTES;
@@ -871,6 +920,7 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 		memcpy(media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
 		       page_bytes, SWAPZ_BLOCK_BYTES);
 		CHECK(swapz_finish_raw(&a, &transaction, page_bytes, 1U, 0) == 0);
+		expected_generations[logical]++;
 	}
 	CHECK(segment_maps[victim] == 1U);
 	CHECK(a.next_block == first_destination * SWAPZ_SEGMENT_BLOCKS +

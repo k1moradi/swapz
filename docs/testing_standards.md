@@ -917,8 +917,12 @@ cycle; a successful mapper construction or two rotations are insufficient.
 The sustained RAW oracle must independently track each logical page's expected
 mapping generation, incrementing only after a successful foreground publication
 or completed GC relocation, and compare every generation alongside byte/CRC
-readback after each rotation. A generation read from the authoritative map
-cannot serve as its own expectation. Full-destination roll-forward additionally
+readback after each rotation. The same independent generation ledger is required
+for high-occupancy failure-recovery, roll-forward and reserve-exhaustion fixtures
+that manually complete survivor relocations: byte/CRC equality alone can hide a
+stale authority generation when RAW payload bytes are unchanged. Failed, short
+or abandoned lower writes must not advance that ledger. A generation read from
+the authoritative map cannot serve as its own expectation. Full-destination roll-forward additionally
 requires a subsequent foreground publication, not just a successful role swap;
 while a GC lower write awaits replay, the fixture must first prove its
 deterministic forbidden-foreground, victim, destination, open-segment and role
