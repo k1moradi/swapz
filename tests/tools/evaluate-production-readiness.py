@@ -89,6 +89,25 @@ POLICY_TOP_LEVEL_KEYS = {
     "primary_real_swap",
     "physical_qualification",
 }
+PHYSICAL_AUDIT_KEYS = {
+    "status",
+    "diagnostics",
+    "omitted_diagnostic_count",
+    "qualification_status",
+    "first_failed_phase",
+    "first_failed_evidence",
+    "cohort_pair_counts",
+    "admitted_source_sha",
+    "admitted_target_partuuid",
+    "claim_boundary",
+    "measurement_authority",
+}
+PHYSICAL_AUDIT_FIRST_FAILURE_KEYS = {
+    "workload", "pair_index", "arm", "metric", "evidence_class",
+}
+PHYSICAL_AUDIT_COHORT_COUNT_KEYS = {
+    "required_pairs", "attempted_pairs", "accepted_pairs",
+}
 COLD_BOOT_REPORT_KEYS = {
     "schema", "status", "cold_boot_observed", "boot_id", "armed_boot_id",
     "kernel_release", "selected_partuuid", "selected_target_major_minor",
@@ -490,6 +509,163 @@ def _valid_campaign_artifact(value: Any) -> bool:
         isinstance(value.get("sha256"), str) and
         bool(SHA256_RE.fullmatch(value["sha256"]))
     )
+
+
+def _physical_audit_binding_is_valid(
+        audit: Any,
+        source_sha: str,
+        target: tuple[str, int] | None,
+        physical_policy: Any,
+        producer_workloads: dict[str, Any],
+        pairs: Any,
+        qualification_status: Any) -> bool:
+    """Bind the current producer audit to source, target and retained pairs."""
+    if (
+            not isinstance(audit, dict) or set(audit) != PHYSICAL_AUDIT_KEYS or
+            not isinstance(audit.get("diagnostics"), list) or
+            type(audit.get("omitted_diagnostic_count")) is not int or
+            audit["omitted_diagnostic_count"] < 0 or
+            audit.get("qualification_status") != qualification_status or
+            audit.get("admitted_source_sha") != source_sha or
+            target is None or
+            audit.get("admitted_target_partuuid") != target[0] or
+            not isinstance(physical_policy, dict) or
+            audit.get("claim_boundary") != physical_policy.get(
+                "claim_boundary") or
+            audit.get("measurement_authority") !=
+            "host-visible lower I/O, not NAND wear" or
+            not isinstance(pairs, list)):
+        return False
+
+    counts = audit.get("cohort_pair_counts")
+    if (
+            not isinstance(counts, dict) or
+            set(counts) != set(producer_workloads)):
+        return False
+    observed_counts = {workload: 0 for workload in producer_workloads}
+    for pair in pairs:
+        if not isinstance(pair, dict):
+            return False
+        workload = pair.get("workload")
+        if workload not in observed_counts:
+            return False
+        observed_counts[workload] += 1
+    for workload, specification in producer_workloads.items():
+        count = counts.get(workload)
+        if (
+                not isinstance(count, dict) or
+                set(count) != PHYSICAL_AUDIT_COHORT_COUNT_KEYS or
+                type(count.get("required_pairs")) is not int or
+                type(count.get("attempted_pairs")) is not int or
+                type(count.get("accepted_pairs")) is not int or
+                count["required_pairs"] != specification["pairs"] or
+                count["attempted_pairs"] != observed_counts[workload] or
+                count["accepted_pairs"] < 0 or
+                count["accepted_pairs"] > count["attempted_pairs"]):
+            return False
+    return True
+
+
+def _physical_audit_failure_witness_is_valid(
+        audit: dict[str, Any],
+        producer_workloads: dict[str, Any],
+        pairs: list[Any]) -> bool:
+    """Require the retained first FAIL to agree with the pair manifest."""
+    first_failure = audit.get("first_failed_evidence")
+    if (
+            not isinstance(first_failure, dict) or
+            set(first_failure) != PHYSICAL_AUDIT_FIRST_FAILURE_KEYS or
+            first_failure.get("evidence_class") != "FAIL"):
+        return False
+    workload = first_failure.get("workload")
+    if workload not in producer_workloads:
+        return False
+    metric = first_failure.get("metric")
+    pair_index = first_failure.get("pair_index")
+    arm = first_failure.get("arm")
+    matching_diagnostics = [
+        diagnostic for diagnostic in audit["diagnostics"]
+        if isinstance(diagnostic, dict) and
+        diagnostic.get("status") == "FAIL" and
+        diagnostic.get("metric") == metric and
+        diagnostic.get("workload") == workload and
+        diagnostic.get("pair_index") == pair_index and
+        diagnostic.get("arm") == arm
+    ]
+    if not matching_diagnostics:
+        return False
+
+    if metric == "arm.verdict":
+        phase = audit.get("first_failed_phase")
+        if (
+                type(pair_index) is not int or
+                not 1 <= pair_index <= producer_workloads[workload]["pairs"] or
+                arm not in ("raw", "swapz") or
+                not isinstance(phase, str) or
+                re.fullmatch(
+                    r"(?:arm|measure|steady|gc|teardown|publish|"
+                    r"round-[1-9][0-9]*(?:-verify)?)", phase) is None or
+                not any(diagnostic.get("producer_status") == "FAIL"
+                        for diagnostic in matching_diagnostics)):
+            return False
+        witnesses = [
+            pair for pair in pairs
+            if isinstance(pair, dict) and
+            pair.get("workload") == workload and
+            pair.get("pair_index") == pair_index
+        ]
+        witness = witnesses[0] if len(witnesses) == 1 else None
+        return (
+            isinstance(witness, dict) and
+            _valid_campaign_artifact(witness) and
+            isinstance(witness.get("pair_id"), str) and
+            bool(witness["pair_id"]) and
+            witness.get("order") ==
+            producer_workloads[workload]["counterbalanced_order"][
+                pair_index - 1] and
+            witness.get("status") == "EXCLUDED" and
+            witness.get("excluded") is True)
+
+    if metric == "qualification.decision_status":
+        count = audit["cohort_pair_counts"][workload]
+        specification = producer_workloads[workload]
+        required = specification["pairs"]
+        workload_pairs = [
+            pair for pair in pairs
+            if isinstance(pair, dict) and pair.get("workload") == workload
+        ]
+        indices = [
+            pair.get("pair_index") for pair in workload_pairs
+            if isinstance(pair, dict)]
+        pair_ids = [
+            pair.get("pair_id") for pair in workload_pairs
+            if isinstance(pair, dict)]
+        names = [
+            pair.get("name") for pair in workload_pairs
+            if isinstance(pair, dict)]
+        digests = [
+            pair.get("sha256") for pair in workload_pairs
+            if isinstance(pair, dict)]
+        return (
+            pair_index is None and arm is None and
+            audit.get("first_failed_phase") == "qualification" and
+            count["attempted_pairs"] == required and
+            count["accepted_pairs"] == required and
+            len(workload_pairs) == required and
+            sorted(indices) == list(range(1, required + 1)) and
+            len(set(pair_ids)) == required and
+            len(set(names)) == required and
+            len(set(digests)) == required and
+            all(
+                _valid_campaign_artifact(pair) and
+                isinstance(pair.get("pair_id"), str) and bool(pair["pair_id"]) and
+                pair.get("order") == specification["counterbalanced_order"][
+                    pair["pair_index"] - 1] and
+                pair.get("status") == "PASS" and
+                pair.get("excluded") is False
+                for pair in workload_pairs))
+
+    return False
 
 
 def _physical_campaign_workloads(
@@ -1345,27 +1521,14 @@ def validate_physical_campaign_evidence(
         reject(
             "sealed campaign arm boot binding mismatch: "
             "metric=arm_boot_consistent required=true_same_admitted_boot")
-    if (
+    # Campaign/performance disposition is a release-performance gate. The
+    # five-argument structural path deliberately keeps independently sealed
+    # capacity/RAM measurements available even when performance failed.
+    if release_validation and (
             campaign.get("campaign_status") != "PASS" or
             campaign.get("qualification_status") != "PASS"):
         reject("sealed campaign qualification is not PASS")
-    # The sealer's physical audit must agree with its claimed PASS; a digest
-    # authenticates the supplied bytes but not an omitted or failed audit.
     physical_audit = campaign.get("physical_evidence_audit")
-    if release_validation and (
-            not isinstance(physical_audit, dict) or
-            physical_audit.get("status") != "PASS" or
-            physical_audit.get("diagnostics") != [] or
-            type(physical_audit.get("omitted_diagnostic_count")) is not int or
-            physical_audit["omitted_diagnostic_count"] != 0 or
-            physical_audit.get("claim_boundary") !=
-            physical_policy.get("claim_boundary") or
-            physical_audit.get("measurement_authority") !=
-            "host-visible lower I/O, not NAND wear"):
-        reject(
-            "sealed campaign physical evidence audit is not a complete PASS: "
-            "metric=physical_evidence_audit required=PASS_zero_diagnostics "
-            "observed=missing_or_nonqualifying")
     if campaign.get("evaluation_protocol") != "v2":
         reject("sealed campaign did not use the required v2 protocol")
     if (
@@ -1569,6 +1732,59 @@ def validate_physical_campaign_evidence(
                     break
 
         if release_validation:
+            # The current producer audit is evidence, not a trusted summary.
+            # Bind its exact schema, admitted source/target and pair counts
+            # before either PASS or FAIL can affect release disposition.
+            audit_binding_valid = _physical_audit_binding_is_valid(
+                physical_audit, source_sha, target, physical_policy,
+                producer_workloads, pairs, campaign.get("qualification_status"))
+            audit_counts = (
+                physical_audit.get("cohort_pair_counts")
+                if isinstance(physical_audit, dict) else None)
+            audit_pass_counts = (
+                isinstance(audit_counts, dict) and
+                all(
+                    isinstance(audit_counts.get(workload), dict) and
+                    audit_counts[workload].get("attempted_pairs") ==
+                    specification["pairs"] and
+                    audit_counts[workload].get("accepted_pairs") ==
+                    specification["pairs"]
+                    for workload, specification in producer_workloads.items()))
+            if (
+                    not audit_binding_valid or
+                    physical_audit.get("status") != "PASS" or
+                    physical_audit.get("diagnostics") != [] or
+                    physical_audit.get("omitted_diagnostic_count") != 0 or
+                    physical_audit.get("first_failed_phase") is not None or
+                    physical_audit.get("first_failed_evidence") is not None or
+                    not audit_pass_counts):
+                required_pairs = sum(
+                    specification["pairs"]
+                    for specification in producer_workloads.values())
+                observed_pairs = (
+                    len(pairs) if isinstance(pairs, list) else "invalid")
+                observed_audit_source = (
+                    physical_audit.get("admitted_source_sha")
+                    if isinstance(physical_audit, dict) and
+                    _valid_source(physical_audit.get("admitted_source_sha"))
+                    else "invalid")
+                observed_audit_target = (
+                    physical_audit.get("admitted_target_partuuid")
+                    if isinstance(physical_audit, dict) and
+                    isinstance(
+                        physical_audit.get("admitted_target_partuuid"), str)
+                    else "invalid")
+                reject(
+                    "sealed campaign physical evidence audit is not a complete "
+                    "PASS: metric=physical_evidence_audit required=current_PASS "
+                    f"required_source_sha={source_sha} "
+                    f"observed_source_sha={observed_audit_source} "
+                    f"required_target_partuuid="
+                    f"{target[0] if target is not None else 'invalid'} "
+                    f"observed_target_partuuid={observed_audit_target} "
+                    f"required_pair_count={required_pairs} "
+                    f"observed_pair_count={observed_pairs}")
+
             # A matching record_count only authenticates the supplied list. The
             # independent frozen workload plan defines the complete cohort.
             # The frozen release policy requires 14 pairs, while the current
@@ -1682,6 +1898,7 @@ def _physical_campaign_failure_is_proven(
         campaign: Any,
         raw: Any,
         source_sha: str,
+        policy: dict[str, Any],
         policy_sha256: str | None,
         target: tuple[str, int] | None) -> bool:
     """Authenticate an exact-source producer audit FAIL, not incompleteness."""
@@ -1699,18 +1916,27 @@ def _physical_campaign_failure_is_proven(
             record.get("pair_source_shas") != [source_sha] or
             record.get("source_consistent") is not True or
             record.get("evaluation_protocol") != "v2" or
-            record.get("campaign_status") not in (
-                "BLOCKED_PHYSICAL_EVIDENCE", "FAIL_OR_INCOMPLETE") or
+            record.get("campaign_status") != "FAIL_OR_INCOMPLETE" or
+            record.get("qualification_status") != "FAIL_OR_INCOMPLETE" or
             target is None or
             _normalize_campaign_target(record.get("target")) != target):
         return False
-    # A producer's failed measurement cannot authenticate an unsealed or
-    # differently targeted campaign. Capacity/RAM may be independently absent
-    # on a failed run, but an included host trace must precede the seal.
+    source_tree_sha = record.get("source_tree_sha")
+    if (
+            not isinstance(source_tree_sha, str) or
+            not GIT_SHA_RE.fullmatch(source_tree_sha) or
+            record.get("arm_boot_consistent") is not True):
+        return False
+
+    # A producer's failed measurement must still be sealed after any included
+    # loaded-host RAM capture. Missing capacity/RAM is an independent gate and
+    # does not erase an otherwise authenticated performance failure.
     sealed_time = _parse_utc_evidence_time(record.get("sealed_at_utc"))
     if sealed_time is None:
         return False
     capacity_and_ram = record.get("capacity_and_ram")
+    if capacity_and_ram is not None and not isinstance(capacity_and_ram, dict):
+        return False
     if isinstance(capacity_and_ram, dict):
         host_binding = capacity_and_ram.get("metadata_ram_host_binding")
         host_after = (
@@ -1719,6 +1945,7 @@ def _physical_campaign_failure_is_proven(
         host_after_time = _parse_utc_evidence_time(host_after)
         if host_after_time is None or sealed_time < host_after_time:
             return False
+
     target_binding = record.get("qualification_target_binding")
     expected = (
         target_binding.get("expected")
@@ -1738,12 +1965,31 @@ def _physical_campaign_failure_is_proven(
         return False
 
     audit = record.get("physical_evidence_audit")
-    diagnostics = audit.get("diagnostics") if isinstance(audit, dict) else None
+    artifacts = record.get("artifacts")
+    pairs = artifacts.get("pairs") if isinstance(artifacts, dict) else None
     if (
-            not isinstance(audit, dict) or audit.get("status") != "FAIL" or
-            not isinstance(diagnostics, list) or
-            not any(isinstance(item, dict) and item.get("status") == "FAIL"
-                    for item in diagnostics)):
+            not isinstance(artifacts, dict) or
+            not _valid_campaign_artifact(artifacts.get("host_before")) or
+            not _valid_campaign_artifact(artifacts.get("host_after")) or
+            not _valid_campaign_artifact(
+                artifacts.get("qualification_summary")) or
+            not isinstance(pairs, list) or
+            type(record.get("record_count")) is not int or
+            record["record_count"] != len(pairs)):
+        return False
+    physical_policy = policy.get("physical_qualification")
+    try:
+        _, producer_workloads = _physical_campaign_workloads(policy)
+    except EvidenceError:
+        return False
+    if (
+            not _physical_audit_binding_is_valid(
+                audit, source_sha, target, physical_policy,
+                producer_workloads, pairs, record.get("qualification_status")) or
+            audit.get("status") != "FAIL" or
+            audit.get("qualification_status") != "FAIL_OR_INCOMPLETE" or
+            not _physical_audit_failure_witness_is_valid(
+                audit, producer_workloads, pairs)):
         return False
     provenance = record.get("policy")
     if not isinstance(provenance, dict) or policy_sha256 is None:
@@ -2647,7 +2893,7 @@ def evaluate_release(
         physical_campaign_failure_proven = (
             _physical_campaign_failure_is_proven(
                 physical_campaign_evidence, physical_campaign_evidence_raw,
-                source_sha, policy_sha256, target))
+                source_sha, policy, policy_sha256, target))
         if physical_campaign_failure_proven:
             block_code(
                 "sustained_physical_performance: exact-source campaign "
@@ -2703,7 +2949,12 @@ def evaluate_release(
                 else "sealed_at_utc"
                 if any("sealed_at_utc" in issue for issue in campaign_issues)
                 else "physical_evidence_audit"
-                if isinstance(audit, dict) and audit.get("status") != "PASS"
+                if (
+                    (isinstance(audit, dict) and
+                     audit.get("status") != "PASS") or
+                    any(issue.startswith(
+                        "sealed campaign physical evidence audit")
+                        for issue in campaign_issues))
                 else "campaign_validation")
             required_artifact = (
                 physical_campaign_receipt.get("evidence_sha256")

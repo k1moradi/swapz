@@ -453,6 +453,7 @@ def physical_campaign_evidence(policy_raw):
             trace, source_sha=SOURCE,
             mapper_uuid="SWAPZ-PRIMARY-" + "f" * 32,
             expected_peak_ram_bytes=900 * 1024 * 1024)
+    workload_specs = physical_workload_specs(policy_raw)
     return {
         "schema": "swapz-performance-campaign-evidence-v1",
         "sealed_at_utc": "2026-11-03T00:00:11+00:00",
@@ -466,6 +467,19 @@ def physical_campaign_evidence(policy_raw):
             "status": "PASS",
             "diagnostics": [],
             "omitted_diagnostic_count": 0,
+            "qualification_status": "PASS",
+            "first_failed_phase": None,
+            "first_failed_evidence": None,
+            "cohort_pair_counts": {
+                workload: {
+                    "required_pairs": specification["pairs"],
+                    "attempted_pairs": specification["pairs"],
+                    "accepted_pairs": specification["pairs"],
+                }
+                for workload, specification in workload_specs.items()
+            },
+            "admitted_source_sha": SOURCE,
+            "admitted_target_partuuid": TARGET["partuuid"],
             "claim_boundary": json.loads(policy_raw)[
                 "physical_qualification"]["claim_boundary"],
             "measurement_authority": "host-visible lower I/O, not NAND wear",
@@ -592,15 +606,89 @@ def physical_campaign_evidence(policy_raw):
                     "status": "PASS",
                     "excluded": False,
                 }
-                for workload, specification in
-                physical_workload_specs(policy_raw).items()
+                for workload, specification in workload_specs.items()
                 for pair_index in range(1, specification["pairs"] + 1)
             ],
         },
         "record_count": sum(
-            specification["pairs"] for specification in
-            physical_workload_specs(policy_raw).values()),
+            specification["pairs"] for specification in workload_specs.values()),
     }
+
+
+def physical_campaign_failure_evidence(policy_raw):
+    """Rootless logic control modeling a current producer terminal arm FAIL."""
+    campaign = physical_campaign_evidence(policy_raw)
+    workload = "sd-service-balanced"
+    pair_index = 1
+    arm = "swapz"
+    pair = next(
+        row for row in campaign["artifacts"]["pairs"]
+        if row["workload"] == workload and row["pair_index"] == pair_index)
+    pair.update(
+        status="EXCLUDED", excluded=True,
+        sha256=hashlib.sha256(
+            f"{workload}:{pair_index}:excluded".encode("ascii")).hexdigest())
+
+    audit = campaign["physical_evidence_audit"]
+    audit.update({
+        "status": "FAIL",
+        "diagnostics": [{
+            "status": "FAIL",
+            "metric": "arm.verdict",
+            "expected": "PASS",
+            "observed": None,
+            "workload": workload,
+            "pair_index": pair_index,
+            "arm": arm,
+            "reason": "authenticated physical producer terminal failure",
+            "producer_status": "FAIL",
+        }],
+        "qualification_status": "FAIL_OR_INCOMPLETE",
+        "first_failed_phase": "measure",
+        "first_failed_evidence": {
+            "workload": workload,
+            "pair_index": pair_index,
+            "arm": arm,
+            "metric": "arm.verdict",
+            "evidence_class": "FAIL",
+        },
+    })
+    audit["cohort_pair_counts"][workload]["accepted_pairs"] -= 1
+    campaign["campaign_status"] = "FAIL_OR_INCOMPLETE"
+    campaign["qualification_status"] = "FAIL_OR_INCOMPLETE"
+    return campaign
+
+
+def physical_campaign_decision_failure_evidence(policy_raw):
+    """Rootless logic control modeling a complete measured cohort FAIL."""
+    campaign = physical_campaign_evidence(policy_raw)
+    workload = "sd-service-balanced"
+    audit = campaign["physical_evidence_audit"]
+    audit.update({
+        "status": "FAIL",
+        "diagnostics": [{
+            "status": "FAIL",
+            "metric": "qualification.decision_status",
+            "expected": "PASS",
+            "observed": None,
+            "workload": workload,
+            "pair_index": None,
+            "arm": None,
+            "reason": "verified frozen measurements failed",
+        }],
+        "qualification_status": "FAIL_OR_INCOMPLETE",
+        "first_failed_phase": "qualification",
+        "first_failed_evidence": {
+            "workload": workload,
+            "pair_index": None,
+            "arm": None,
+            "metric": "qualification.decision_status",
+            "evidence_class": "FAIL",
+        },
+    })
+    campaign["campaign_status"] = "FAIL_OR_INCOMPLETE"
+    campaign["qualification_status"] = "FAIL_OR_INCOMPLETE"
+    return campaign
 
 
 def current_evidence(
@@ -3337,27 +3425,40 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
 
     def test_producer_proven_physical_fail_is_not_incomplete(self):
         policy = acceptance_policy()
-        for audit_status, expected in (("FAIL", "FAIL"), ("BLOCKED", "BLOCKED")):
-            with self.subTest(audit_status=audit_status):
-                campaign = physical_campaign_evidence(encoded(policy))
-                campaign["campaign_status"] = "BLOCKED_PHYSICAL_EVIDENCE"
-                campaign["physical_evidence_audit"]["status"] = audit_status
-                campaign["physical_evidence_audit"]["diagnostics"] = [{
-                    "status": audit_status,
-                    "metric": "pair.status",
-                    "expected": "PASS and excluded=false",
-                    "observed": None,
-                    "workload": "sd-service-balanced",
-                    "pair_index": 1,
-                    "arm": None,
-                    "reason": (
-                        "failed or excluded trials cannot be dropped"
-                        if audit_status == "FAIL"
-                        else "physical evidence missing or inconsistent"),
-                }]
-                result = evaluate(policy=policy, campaign=campaign)
-                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
-                self.assertEqual(result["release_verdict"], expected)
+        for campaign in (
+                physical_campaign_failure_evidence(encoded(policy)),
+                physical_campaign_decision_failure_evidence(encoded(policy))):
+            result = evaluate(policy=policy, campaign=campaign)
+            self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+            self.assertEqual(result["release_verdict"], "FAIL")
+            # A performance FAIL does not erase an independently valid sealed
+            # full-capacity/RAM measurement from the same campaign.
+            self.assertEqual(
+                result["METADATA_RAM_MEASUREMENT"]["status"],
+                "MEASURED_WITHIN_LIMIT")
+
+        blocked = physical_campaign_failure_evidence(encoded(policy))
+        blocked_audit = blocked["physical_evidence_audit"]
+        blocked_audit["status"] = "BLOCKED"
+        blocked_audit["diagnostics"][0].pop("producer_status")
+        blocked_audit["diagnostics"][0]["status"] = "BLOCKED"
+        blocked_audit["first_failed_phase"] = None
+        blocked_audit["first_failed_evidence"] = None
+        blocked_result = evaluate(policy=policy, campaign=blocked)
+        self.assertEqual(blocked_result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(blocked_result["release_verdict"], "BLOCKED")
+        self.assertEqual(
+            blocked_result["METADATA_RAM_MEASUREMENT"]["status"],
+            "MEASURED_WITHIN_LIMIT")
+
+        missing_capacity = physical_campaign_failure_evidence(encoded(policy))
+        missing_capacity["capacity_and_ram"] = None
+        missing_capacity_result = evaluate(
+            policy=policy, campaign=missing_capacity)
+        self.assertEqual(missing_capacity_result["release_verdict"], "FAIL")
+        self.assertEqual(
+            missing_capacity_result["METADATA_RAM_MEASUREMENT"]["status"],
+            "NOT_MEASURED")
 
     def test_physical_fail_requires_sealed_exact_qualification_target(self):
         # A retained FAIL is authoritative only for the sealed admitted target,
@@ -3366,22 +3467,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         policy_raw = encoded(policy)
 
         def failed_campaign():
-            campaign = physical_campaign_evidence(policy_raw)
-            campaign["campaign_status"] = "BLOCKED_PHYSICAL_EVIDENCE"
-            audit = campaign["physical_evidence_audit"]
-            audit["status"] = "FAIL"
-            audit["diagnostics"] = [{
-                "status": "FAIL",
-                "metric": "arm.verdict",
-                "expected": "PASS",
-                "observed": None,
-                "workload": "sd-service-balanced",
-                "pair_index": 1,
-                "arm": "swapz",
-                "producer_status": "FAIL",
-                "reason": "physical arm producer reported terminal failure",
-            }]
-            return campaign
+            return physical_campaign_failure_evidence(policy_raw)
 
         # Positive rootless control for a complete, coherent FAIL audit.
         self.assertEqual(
@@ -3429,6 +3515,59 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(complete["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(complete["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(complete["release_verdict"], "BLOCKED")
+
+    def test_synthetic_physical_audit_fail_without_pair_witness_is_blocked(self):
+        policy = acceptance_policy()
+        campaign = physical_campaign_failure_evidence(encoded(policy))
+        witness = next(
+            row for row in campaign["artifacts"]["pairs"]
+            if row["workload"] == "sd-service-balanced" and
+            row["pair_index"] == 1)
+        # Smallest counterexample to the previous implementation: the audit
+        # says producer FAIL, but the retained pair manifest still says PASS.
+        witness.update(status="PASS", excluded=False)
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "first_failed_phase=physical_evidence_audit" in blocker and
+            "verdict=BLOCKED" in blocker and
+            "reason=missing_or_contradictory_campaign_proof" in blocker
+            for blocker in result["code_blockers"]),
+            result["code_blockers"])
+
+    def test_physical_audit_pass_requires_current_identity_and_pair_counts(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        mutations = (
+            ("wrong-source", lambda audit: audit.__setitem__(
+                "admitted_source_sha", "b" * 40)),
+            ("wrong-target", lambda audit: audit.__setitem__(
+                "admitted_target_partuuid", "ffffffff-01")),
+            ("wrong-count", lambda audit: audit["cohort_pair_counts"][
+                "sd-service-balanced"].__setitem__("attempted_pairs", 4)),
+            ("extra-field", lambda audit: audit.__setitem__(
+                "synthetic", True)),
+        )
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                campaign = physical_campaign_evidence(policy_raw)
+                mutate(campaign["physical_evidence_audit"])
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertTrue(any(
+                    "physical evidence audit is not a complete PASS"
+                    in blocker and
+                    f"required_source_sha={SOURCE}" in blocker and
+                    f"required_target_partuuid={TARGET['partuuid']}" in blocker and
+                    "required_pair_count=" in blocker and
+                    "observed_pair_count=" in blocker
+                    for blocker in result["code_blockers"]),
+                    result["code_blockers"])
+                self.assertTrue(any(
+                    "first_failed_phase=physical_evidence_audit" in blocker
+                    for blocker in result["code_blockers"]),
+                    result["code_blockers"])
 
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()

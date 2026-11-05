@@ -7314,31 +7314,45 @@ indices, exact counterbalanced order and PASS/non-excluded disposition. The
 campaign's self-reported `record_count`, aggregate PASS status and exact JSON
 digest are necessary but do not establish missing arms or an incomplete
 workload cohort. A shortened or inconsistent campaign is BLOCKED even when its
-internal envelope and digest agree. The producer's `physical_evidence_audit`
-must independently report PASS with zero retained and omitted diagnostics and
-the frozen claim boundary; a PASS-looking campaign with an absent or failed
-audit remains BLOCKED. A source/target/policy/tool-bound campaign whose
-producer audit carries a retained FAIL diagnostic is producer-proven failed
-execution only when its exact-source, policy and artifact receipt is valid,
-its seal is a canonical UTC time not before an included host-after RAM capture,
-and the nested qualification pair target binding is a MATCH to the authorized
-partition and lower-device identity. A missing/premature seal or contradictory
-qualification target turns the claimed audit FAIL into BLOCKED, not an
-authenticated execution failure. BLOCKED/UNAVAILABLE or incomplete audit
-evidence also remains BLOCKED. The failure-authentication diagnostic identifies
-the earliest seal or target gate, expected versus observed source/target and
-artifact digest, and the reason for the FAIL/BLOCKED distinction.
+internal envelope and digest agree. The producer's `physical_evidence_audit` is itself untrusted retained
+evidence. Release evaluation requires its exact current field set, admitted
+source SHA and PARTUUID, top-level qualification-status binding, frozen claim
+boundary, measurement authority, and one exact required/attempted/accepted
+count record for every current producer workload. A PASS audit additionally
+requires zero retained/omitted diagnostics, no first failed phase/evidence and
+complete accepted counts; an older, partial, extra-field, wrong-source,
+wrong-target or count-mismatched audit remains BLOCKED even when the surrounding
+campaign claims PASS.
+
+A source/target/policy/tool-bound campaign can establish producer-proven FAIL
+only from the current audit's retained first-failure witness. The first failure
+must match a retained FAIL diagnostic and either (a) be an authenticated
+non-setup `arm.verdict` producer FAIL with the same workload/pair/arm and one
+matching EXCLUDED pair-manifest entry, or (b) be a
+`qualification.decision_status` FAIL for a complete accepted measured cohort.
+The audit qualification status and campaign qualification status must both be
+`FAIL_OR_INCOMPLETE`. A hand-edited FAIL diagnostic paired with an all-PASS
+manifest is synthetic logic evidence only and remains BLOCKED. A missing or
+premature seal, contradictory qualification target, stale source, malformed
+audit identity/counts, BLOCKED/UNAVAILABLE evidence or incomplete failure
+witness likewise remains BLOCKED. Failure diagnostics identify the earliest
+seal/target/audit gate, expected versus observed source/target, the campaign
+digest and relevant pair count, and why FAIL versus BLOCKED was selected.
 The existing five-argument private campaign-validator call remains supported
 for structural/measurement-only callers and loads tracked policy authority,
 but it does not establish release completeness. `evaluate_release` supplies
 the validated policy as the sixth argument and is the path that enforces the
 14 frozen pairs, complete current v2 producer cohort and physical-audit release
-gates. Performance-cohort incompleteness still blocks code readiness, but it
-does not erase an independently valid source/target/policy/trace-bound
-maximum-capacity/RAM measurement from the same sealed artifact; that measurement
-uses the structural/measurement validation path and retains its own
-within-limit/over-limit disposition. Missing or stale sealed campaign evidence
-is BLOCKED.
+gates. Performance-cohort incompleteness or an authenticated performance FAIL still
+blocks code readiness, but neither erases an independently valid
+source/target/policy/trace-bound maximum-capacity/RAM measurement from the same
+sealed artifact. The five-argument structural/measurement validation path
+therefore does not require campaign/qualification PASS; it still requires the
+sealed source, target, tooling, host, trace and artifact structure needed for
+the capacity/RAM measurement itself. That gate retains its own
+within-limit/over-limit disposition. Conversely, missing capacity/RAM evidence
+does not erase a separately authenticated performance FAIL. Missing or stale
+sealed campaign evidence is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
 derives maximum logical pages/bytes and measured target/metadata peak RAM from
 the accepted `sd-high-occupancy-churn` swapz arm, and a PASS campaign is invalid
