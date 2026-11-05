@@ -203,9 +203,10 @@ classify_rootless_private_make_failure() {
   local line
   local traceback_line_regex='^[[:space:]]*File "([^"]*/)?swapz-primary-late-race-test[.]py", line [0-9]+, in (compile_and_run|main|<module>)$'
   local make_error_regex='^make(\[[0-9]+\])?: \*\*\* \[[^]]+\] Error [0-9]+$'
-  local make_target_error_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:[0-9]+: test-userspace\] Error [0-9]+$'
-  # Identify only source-controlled nested Make targets, never a guessed executable.
-  local make_nested_target_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:[0-9]+: (test-(codec|predictor|mapping|gc|lower-io|userspace|replay-helper|anon-page-analyzer))\] Error [0-9]+$'
+  # Authenticate a nested target against the source-controlled recipe line.
+  local make_nested_target_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:([0-9]+): (test-(codec|predictor|mapping|gc|lower-io|userspace|replay-helper|anon-page-analyzer))\] Error [0-9]+$'
+  local make_recipe_line
+  local make_target
   local traceback_seen=0
   local compile_assertion_seen=0
   local compiler_error_seen=0
@@ -228,15 +229,35 @@ classify_rootless_private_make_failure() {
       compiler_error_seen=1
     elif [[ $line =~ $make_error_regex ]]; then
       if [[ $line =~ $make_nested_target_regex ]]; then
-        rootless_classified_subtest=${BASH_REMATCH[2]}
-      fi
-      if [[ $line =~ $make_target_error_regex ]] &&
-         (( traceback_seen && compile_assertion_seen && compiler_error_seen )); then
-        # The declaration and arbitrary source paths remain private. The exact
-        # source-controlled script name and fixed compile category are public.
-        rootless_classified_reason=native_compile
-        rootless_classified_subtest=compile
-        rootless_classified_test=swapz-primary-late-race-test.py
+        make_recipe_line=${BASH_REMATCH[2]}
+        make_target=${BASH_REMATCH[3]}
+        # Child stderr can imitate GNU Make. Promote a target only when the
+        # reported line is a recipe line actually owned by that target.
+        if LC_ALL=C awk -v expected_line="$make_recipe_line" \
+             -v expected_target="$make_target" '
+             /^[A-Za-z0-9_.-]+:/ {
+               owner = $1
+               sub(/:.*/, "", owner)
+             }
+             NR == expected_line {
+               found = 1
+               matched = ($0 ~ /^\t/ && owner == expected_target)
+               exit matched ? 0 : 1
+             }
+             END {
+               if (!found) exit 1
+             }
+           ' "$ROOT/tests/suites/Makefile" >/dev/null 2>&1; then
+          rootless_classified_subtest=$make_target
+          if [[ $make_target == test-userspace ]] &&
+             (( traceback_seen && compile_assertion_seen && compiler_error_seen )); then
+            # The declaration and arbitrary source paths remain private. The
+            # source-controlled script name and fixed compile category are public.
+            rootless_classified_reason=native_compile
+            rootless_classified_subtest=compile
+            rootless_classified_test=swapz-primary-late-race-test.py
+          fi
+        fi
       fi
       return 0
     fi

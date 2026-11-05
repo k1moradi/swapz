@@ -1131,10 +1131,14 @@ more than the normal transcript tail follows from other parallel jobs.
 A prior passing suite's expected `FAIL:` text cannot authenticate a later
 failing suite. A generic nested Make failure may disclose only the first
 source-controlled `tests/suites/Makefile` target from its own `make: ***` error
-as a `subtest` (for example, `test-mapping`). This is a target-level phase hint,
-not proof of an individual executable, Python traceback, or native assertion
-category; a silent or unrecognized failure keeps `subtest=unavailable`. Incomplete relays or absent matching evidence retain
-`test=unavailable reason=nonzero_exit`. Python `unittest` preserves execution order in verbose `... FAIL`/`... ERROR`
+as a `subtest` (for example, `test-mapping`). The reported Makefile line must
+resolve to a recipe line owned by that exact target in the source-controlled
+Makefile; a mismatched, stale or out-of-range line is unauthenticated. This is a
+target-level phase hint, not proof of an individual executable, Python traceback
+or native assertion category. A silent or unrecognized failure keeps
+`subtest=unavailable`. Incomplete relays or absent matching evidence retain
+`test=unavailable reason=nonzero_exit`. Python `unittest` preserves execution
+order in verbose `... FAIL`/`... ERROR`
 progress records but groups detailed `ERROR:` blocks ahead of `FAIL:` blocks in
 its summary. Classification must therefore bind the first failed progress record
 to its matching detailed traceback; a later teardown error must not win merely

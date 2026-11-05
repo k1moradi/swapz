@@ -162,10 +162,10 @@ Traceback (most recent call last):
     raise AssertionError(f"{c_path.name} compile failed: {compilation.stderr}")
 AssertionError: production.c compile failed:
 /private/source/production.c:4923:13: error: implicit declaration of function 'swapz_primary_shared_root_scope_record_live' PRIVATE_ONLY_TRACEBACK_PAYLOAD
-make[2]: *** [Makefile:160: test-userspace] Error 1
-make[1]: *** [Makefile:10: test-native] Error 2
-make: *** [Makefile:16: test] Error 2
 TRACEBACK
+  printf '%s\n' \
+    "make[1]: *** [Makefile:${SWAPZ_TEST_USERSPACE_RECIPE_LINE}: test-userspace] Error 1" \
+    "make: *** [Makefile:${SWAPZ_TEST_NATIVE_RECIPE_LINE}: test-native] Error 2" >&2
 }
 case "$SWAPZ_RELAY_SCENARIO" in
   pass)
@@ -189,27 +189,37 @@ case "$SWAPZ_RELAY_SCENARIO" in
     printf '%s\n' \
       'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' \
       'mapping-authority: Assertion failed: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
-      'make[1]: *** [Makefile:154: test-mapping] Error 134' \
-      'make[1]: *** [Makefile:160: test-userspace] Error 1' >&2
+      'Aborted' \
+      "make[1]: *** [Makefile:${SWAPZ_TEST_MAPPING_RECIPE_LINE}: test-mapping] Error 134" \
+      "make: *** [Makefile:${SWAPZ_TEST_NATIVE_RECIPE_LINE}: test-native] Error 2" >&2
     exit 2 ;;
   malformed_python)
     printf '%s\n' \
       'Traceback (most recent call last):' \
       'TypeError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
-      'make[1]: *** [Makefile:160: test-userspace] Error 1' >&2
+      "make[1]: *** [Makefile:${SWAPZ_TEST_USERSPACE_RECIPE_LINE}: test-userspace] Error 1" \
+      "make: *** [Makefile:${SWAPZ_TEST_NATIVE_RECIPE_LINE}: test-native] Error 2" >&2
+    exit 2 ;;
+  forged_target)
+    printf '%s\n' \
+      "make[1]: *** [Makefile:${SWAPZ_TEST_GC_RECIPE_LINE}: test-mapping] Error 134" >&2
+    exit 2 ;;
+  forged_missing_line)
+    printf '%s\n' \
+      'make[1]: *** [Makefile:0: test-mapping] Error 134' >&2
     exit 2 ;;
   silent_nonzero)
     exit 2 ;;
   first_make_failure)
     printf '%s\n' \
       'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' \
-      'make[2]: *** [Makefile:154: test-mapping] Error 1' >&2
+      "make[1]: *** [Makefile:${SWAPZ_TEST_MAPPING_RECIPE_LINE}: test-mapping] Error 1" >&2
     emit_late_race_compile_failure
     exit 2 ;;
   unrelated)
     printf '%s\n' \
       'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' \
-      'make[2]: *** [Makefile:154: test-mapping] Error 1' >&2
+      "make[1]: *** [Makefile:${SWAPZ_TEST_MAPPING_RECIPE_LINE}: test-mapping] Error 1" >&2
     exit 2 ;;
   *) exit 90 ;;
 esac
@@ -219,6 +229,40 @@ class RootlessAttribution(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         source = ROOTLESS_RUNNER.read_text()
+
+        def recipe_line(lines, target, required_text=None):
+            target_prefix = target + ":"
+            try:
+                target_index = next(
+                    index for index, line in enumerate(lines)
+                    if line.startswith(target_prefix))
+            except StopIteration as error:
+                raise AssertionError(f"missing Make target {target}") from error
+            for index in range(target_index + 1, len(lines)):
+                line = lines[index]
+                if line.startswith("\t"):
+                    if required_text is None or required_text in line:
+                        return index + 1
+                    continue
+                if line and not line[0].isspace() and ":" in line:
+                    break
+            raise AssertionError(
+                f"missing recipe line for {target} containing {required_text!r}")
+
+        suites_makefile_lines = (
+            ROOT / "tests/suites/Makefile").read_text().splitlines()
+        tests_makefile_lines = (
+            ROOT / "tests/Makefile").read_text().splitlines()
+        cls.mapping_recipe_line = recipe_line(
+            suites_makefile_lines, "test-mapping")
+        cls.gc_recipe_line = recipe_line(
+            suites_makefile_lines, "test-gc")
+        cls.userspace_recipe_line = recipe_line(
+            suites_makefile_lines, "test-userspace",
+            "swapz-primary-late-race-test.py")
+        cls.native_recipe_line = recipe_line(
+            tests_makefile_lines, "test-native")
+
         functions_begin = source.index("# Bash's built-in SECONDS attributes")
         functions_end = source.index("trap 'rootless_unexpected_error", functions_begin)
         package_begin = source.index(f"rootless_phase='{PACKAGE_PHASE}'")
@@ -262,6 +306,10 @@ class RootlessAttribution(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "sandbox"
         self.root.mkdir()
+        suites_directory = self.root / "tests/suites"
+        suites_directory.mkdir(parents=True)
+        shutil.copyfile(
+            ROOT / "tests/suites/Makefile", suites_directory / "Makefile")
         self.bin = Path(self.temp.name) / "bin"
         self.bin.mkdir()
         self.real_tee = shutil.which("tee")
@@ -307,6 +355,10 @@ class RootlessAttribution(unittest.TestCase):
             SWAPZ_FIXTURE_PYTHON=sys.executable,
             SWAPZ_REAL_TEE=self.real_tee,
             SWAPZ_REAL_RM=self.real_rm,
+            SWAPZ_TEST_MAPPING_RECIPE_LINE=str(self.mapping_recipe_line),
+            SWAPZ_TEST_GC_RECIPE_LINE=str(self.gc_recipe_line),
+            SWAPZ_TEST_USERSPACE_RECIPE_LINE=str(self.userspace_recipe_line),
+            SWAPZ_TEST_NATIVE_RECIPE_LINE=str(self.native_recipe_line),
         )
         return subprocess.run(
             ["bash", "-c", fixture], cwd=self.root, env=environment,
@@ -400,7 +452,10 @@ class RootlessAttribution(unittest.TestCase):
         log = self.assert_report(
             result, status=2, reason="nonzero_exit", subtest="test-mapping",
             stage=MAKE_PHASE)
-        self.assertIn("Assertion failed: " + PRIVATE_SENTINEL, log.read_text())
+        evidence = log.read_text()
+        self.assertIn("Assertion failed: " + PRIVATE_SENTINEL, evidence)
+        self.assertIn(
+            f"Makefile:{self.mapping_recipe_line}: test-mapping", evidence)
         marker = next(line for line in result.stderr.splitlines()
                       if line.startswith("FAIL: rootless "))
         self.assertIn("test=unavailable", marker)
@@ -415,6 +470,28 @@ class RootlessAttribution(unittest.TestCase):
             stage=MAKE_PHASE)
         self.assertIn("TypeError: " + PRIVATE_SENTINEL, log.read_text())
         self.assertIn("unittest_kind=unavailable", log.read_text())
+
+    def test_make_target_line_must_belong_to_reported_target(self):
+        result = self.invoke("forged_target", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+        evidence = log.read_text()
+        self.assertIn(
+            f"Makefile:{self.gc_recipe_line}: test-mapping", evidence)
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertIn("subtest=unavailable", marker)
+        self.assertNotIn("subtest=test-mapping", marker)
+
+    def test_make_missing_recipe_line_cannot_authenticate_target(self):
+        result = self.invoke("forged_missing_line", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+        self.assertIn(
+            "Makefile:0: test-mapping", log.read_text())
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertIn("subtest=unavailable", marker)
 
     def test_make_silent_nonzero_does_not_invent_a_cause(self):
         result = self.invoke("silent_nonzero", stage=MAKE_PHASE)
