@@ -33,6 +33,7 @@ static int fixture_mount_read_error;
 static int fixture_mount_fd = -1;
 static const char *fixture_regular_swap_path;
 static dev_t fixture_regular_swap_device;
+static char fixture_self_root[PATH_MAX] = "/";
 
 static const char *fixture_path(const char *path, char converted[PATH_MAX])
 {
@@ -216,6 +217,19 @@ static int fixture_lstat(const char *path, struct stat *info)
 	return lstat(fixture_path(path, converted), info);
 }
 
+static ssize_t fixture_readlink(const char *path, char *buffer, size_t size)
+{
+	size_t length;
+
+	if (strcmp(path, "/proc/self/root"))
+		return readlink(path, buffer, size);
+	length = strlen(fixture_self_root);
+	if (length > size)
+		length = size;
+	memcpy(buffer, fixture_self_root, length);
+	return (ssize_t)length;
+}
+
 #define open(...) fixture_open(__VA_ARGS__)
 #define openat(...) fixture_openat(__VA_ARGS__)
 #define read(...) fixture_read(__VA_ARGS__)
@@ -225,6 +239,7 @@ static int fixture_lstat(const char *path, struct stat *info)
 #define readdir(...) fixture_readdir(__VA_ARGS__)
 #define stat(...) fixture_stat(__VA_ARGS__)
 #define lstat(...) fixture_lstat(__VA_ARGS__)
+#define readlink(...) fixture_readlink(__VA_ARGS__)
 /* Keep the synthetic foreign PID distinct from the production reader's self. */
 #define getpid() ((pid_t)65535)
 #define main swapz_primary_program_main
@@ -233,6 +248,7 @@ static int fixture_lstat(const char *path, struct stat *info)
 #undef getpid
 #undef lstat
 #undef stat
+#undef readlink
 #undef readdir
 #undef opendir
 #undef fopen
@@ -285,6 +301,33 @@ static void fixture_unlink(const char *relative)
 	assert(unlink(path) == 0);
 }
 
+static void fixture_unlink_if_present(const char *relative)
+{
+	char path[PATH_MAX];
+	int length = snprintf(path, sizeof(path), "%s/%s", fixture_proc_root,
+			      relative);
+
+	assert(length > 0 && (size_t)length < sizeof(path));
+	if (unlink(path) < 0)
+		assert(errno == ENOENT);
+}
+
+static void fixture_share_mount_namespace(void)
+{
+	char self_namespace[PATH_MAX];
+	char pid_namespace[PATH_MAX];
+	int length;
+
+	fixture_unlink("3031/ns/mnt");
+	length = snprintf(self_namespace, sizeof(self_namespace),
+			  "%s/self/ns/mnt", fixture_proc_root);
+	assert(length > 0 && (size_t)length < sizeof(self_namespace));
+	length = snprintf(pid_namespace, sizeof(pid_namespace),
+			  "%s/3031/ns/mnt", fixture_proc_root);
+	assert(length > 0 && (size_t)length < sizeof(pid_namespace));
+	assert(link(self_namespace, pid_namespace) == 0);
+}
+
 static void fixture_reset(void)
 {
 	fixture_mount_open_error = 0;
@@ -298,6 +341,11 @@ static void fixture_reset(void)
 	fixture_mount_fd = -1;
 	fixture_regular_swap_path = NULL;
 	fixture_regular_swap_device = 0;
+	strcpy(fixture_self_root, "/");
+	fixture_unlink_if_present("self/ns/mnt");
+	fixture_unlink_if_present("3031/ns/mnt");
+	fixture_file("self/ns/mnt", "coordinator mount namespace\n");
+	fixture_file("3031/ns/mnt", "foreign mount namespace\n");
 	fixture_file("self/mountinfo",
 		     "36 25 259:0 / / rw - ext4 /dev/root rw\n");
 	fixture_file("3031/mountinfo",
@@ -486,6 +534,8 @@ int main(void)
 	strcpy(fixture_proc_root, proc_template);
 	assert(snprintf(path, sizeof(path), "%s/self", fixture_proc_root) > 0);
 	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/self/ns", fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031", fixture_proc_root) > 0);
 	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031/ns", fixture_proc_root) > 0);
@@ -543,6 +593,24 @@ int main(void)
 	fixture_reset();
 	fixture_file("3031/mountinfo", "");
 	expect_mount_admission("empty remote mount table", 0, EINVAL);
+	fixture_reset();
+	fixture_share_mount_namespace();
+	fixture_file("3031/mountinfo", "");
+	expect_mount_admission("same-namespace chroot with empty mount table", 1, 0);
+	fixture_reset();
+	fixture_share_mount_namespace();
+	strcpy(fixture_self_root, "/coordinator-chroot");
+	fixture_file("3031/mountinfo", "");
+	expect_mount_admission("chrooted coordinator keeps empty peer ambiguous",
+			       0, EINVAL);
+	fixture_reset();
+	fixture_share_mount_namespace();
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"
+		     "37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
+	fixture_file("3031/mountinfo", "");
+	expect_mount_admission("full-root inventory catches same-namespace mount",
+			       0, 0);
 	/* A partial final mount row must fail parsing, not hide selected 8:1. */
 	fixture_reset();
 	fixture_file("3031/mountinfo",

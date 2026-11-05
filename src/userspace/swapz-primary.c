@@ -3407,12 +3407,16 @@ static int swapz_primary_read_mount_facts(
 	struct dirent *entry;
 	char self_pid[32];
 	char path[PATH_MAX];
+	char namespace_path[PATH_MAX];
+	struct stat self_namespace_info;
+	ssize_t self_root_length;
 	size_t pid_count = 0;
 	size_t total_bytes = 0;
 	int fd;
 	int result = -1;
 	int saved_errno = 0;
 	int path_length;
+	int self_root_is_namespace_root = 0;
 	size_t bytes_read = 0;
 
 	if (!facts) {
@@ -3431,9 +3435,23 @@ static int swapz_primary_read_mount_facts(
 		*facts = combined;
 		return 0;
 	}
+	if (stat("/proc/self/ns/mnt", &self_namespace_info) < 0)
+		return -1;
+	self_root_length = readlink("/proc/self/root", path, sizeof(path) - 1U);
+	if (self_root_length >= 0 &&
+	    (size_t)self_root_length < sizeof(path) - 1U) {
+		path[self_root_length] = '\0';
+		self_root_is_namespace_root = !strcmp(path, "/");
+	}
 	/*
 	 * mountinfo is scoped to a mount namespace. Check every visible process;
 	 * a self-only check can miss the target mounted by another namespace.
+	 * When this coordinator is at the namespace root, its already-validated
+	 * table covers every mount in its namespace. A chrooted peer in that same
+	 * namespace can have an empty, process-root-filtered mountinfo file, so
+	 * skip only peers whose namespace inode matches and revalidate that identity
+	 * immediately before skipping. A chrooted coordinator cannot use this
+	 * shortcut; its peers remain subject to strict per-process parsing.
 	 * This is a bounded snapshot, so every unreadable or ambiguous table fails
 	 * closed rather than being treated as evidence that the device is unused.
 	 */
@@ -3450,6 +3468,7 @@ static int swapz_primary_read_mount_facts(
 		int open_error;
 		int namespace_error;
 		struct stat namespace_info;
+		struct stat confirmed_namespace_info;
 
 		errno = 0;
 		entry = readdir(proc_directory);
@@ -3466,6 +3485,37 @@ static int swapz_primary_read_mount_facts(
 		}
 		if (!strcmp(entry->d_name, self_pid))
 			continue;
+		path_length = snprintf(namespace_path, sizeof(namespace_path),
+				      "/proc/%s/ns/mnt", entry->d_name);
+		if (path_length <= 0 ||
+		    (size_t)path_length >= sizeof(namespace_path)) {
+			saved_errno = EOVERFLOW;
+			break;
+		}
+		if (stat(namespace_path, &namespace_info) < 0) {
+			namespace_error = errno ? errno : EIO;
+			if (namespace_error == ENOENT || namespace_error == ESRCH)
+				continue;
+			saved_errno = namespace_error;
+			break;
+		}
+		if (self_root_is_namespace_root &&
+		    namespace_info.st_dev == self_namespace_info.st_dev &&
+		    namespace_info.st_ino == self_namespace_info.st_ino) {
+			if (stat(namespace_path, &confirmed_namespace_info) < 0) {
+				namespace_error = errno ? errno : EIO;
+				if (namespace_error == ENOENT ||
+				    namespace_error == ESRCH)
+					continue;
+				saved_errno = namespace_error;
+				break;
+			}
+			if (confirmed_namespace_info.st_dev ==
+				    self_namespace_info.st_dev &&
+			    confirmed_namespace_info.st_ino ==
+				    self_namespace_info.st_ino)
+				continue;
+		}
 		path_length = snprintf(path, sizeof(path), "/proc/%s/mountinfo",
 				      entry->d_name);
 		if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
@@ -3479,13 +3529,7 @@ static int swapz_primary_read_mount_facts(
 				saved_errno = open_error;
 				break;
 			}
-			path_length = snprintf(path, sizeof(path), "/proc/%s/ns/mnt",
-					      entry->d_name);
-			if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
-				saved_errno = EOVERFLOW;
-				break;
-			}
-			if (stat(path, &namespace_info) < 0) {
+			if (stat(namespace_path, &confirmed_namespace_info) < 0) {
 				namespace_error = errno ? errno : EIO;
 				if (namespace_error == ENOENT || namespace_error == ESRCH)
 					continue;

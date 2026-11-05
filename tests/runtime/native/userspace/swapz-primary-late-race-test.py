@@ -201,6 +201,7 @@ static int fixture_admission_error(int error)
  * No privileged namespace change or host mount table is observed.
  */
 static char fixture_proc_root[PATH_MAX];
+static const char fixture_self_root[] = "/";
 static int fixture_mount_fd = -1;
 static int fixture_mount_open_error;
 static int fixture_mount_read_error;
@@ -297,6 +298,7 @@ static void fixture_reset_mount_inventory(void)
                            "36 25 259:0 / / rw - ext4 /dev/root rw\n");
     fixture_inventory_file("3031/mountinfo",
                            "36 25 259:9 / / rw - ext4 /dev/other rw\n");
+    fixture_inventory_file("self/ns/mnt", "coordinator namespace\n");
     fixture_inventory_file("3031/ns/mnt", "namespace present\n");
 }
 
@@ -469,15 +471,31 @@ static int fixture_proc_stat(const char *path, struct stat *info)
     return stat(fixture_proc_path(path, converted), info);
 }
 
+static ssize_t fixture_proc_readlink(const char *path, char *buffer,
+                                     size_t size)
+{
+    size_t length;
+
+    if (strcmp(path, "/proc/self/root"))
+        return readlink(path, buffer, size);
+    length = sizeof(fixture_self_root) - 1U;
+    if (length > size)
+        length = size;
+    memcpy(buffer, fixture_self_root, length);
+    return (ssize_t)length;
+}
+
 #define open(path,flags) fixture_proc_open(path,flags)
 #define read(fd,buffer,length) fixture_proc_read(fd,buffer,length)
 #define close(fd) fixture_proc_close(fd)
 #define opendir(path) fixture_proc_opendir(path)
 #define stat(path,info) fixture_proc_stat(path,info)
+#define readlink(path,buffer,size) fixture_proc_readlink(path,buffer,size)
 #define getpid() ((pid_t)65535)
 /* Extracted, unchanged production PID scanner and bounded mountinfo reader. */
 @@MOUNT_READER@@
 #undef getpid
+#undef readlink
 #undef stat
 #undef opendir
 #undef close
@@ -507,6 +525,9 @@ static void fixture_create_proc_root(void)
     assert(strlen(template_path) < sizeof(fixture_proc_root));
     strcpy(fixture_proc_root, template_path);
     length = snprintf(path, sizeof(path), "%s/self", fixture_proc_root);
+    assert(length > 0 && (size_t)length < sizeof(path));
+    assert(mkdir(path, 0700) == 0);
+    length = snprintf(path, sizeof(path), "%s/self/ns", fixture_proc_root);
     assert(length > 0 && (size_t)length < sizeof(path));
     assert(mkdir(path, 0700) == 0);
     length = snprintf(path, sizeof(path), "%s/3031", fixture_proc_root);

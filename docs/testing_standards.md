@@ -71,6 +71,15 @@ foreign mountinfo descriptor whose namespace disappears during a failed read.
 Only an unopened PID table with a separately proven absent mount namespace
 may be skipped for process-exit errors. Preserve the coordinator's own root
 mount identity independently from the foreign namespace's root.
+Also cover a chrooted peer whose mount-namespace device/inode matches the
+coordinator while its process-root-filtered mountinfo is empty. The coordinator
+may skip that redundant view only after its own mountinfo has a valid root row,
+`/proc/self/root` resolves exactly to `/`, and a second namespace identity
+check still matches. Its full-root table then covers every mount in that same
+namespace. An empty table in a foreign namespace remains ambiguous and must
+fail closed; a chrooted coordinator must not use the same-namespace shortcut.
+Include a regression proving the shortcut cannot hide a selected-device mount
+already present in the coordinator's table.
 
 The primary-start rootless lifecycle fixture must independently show a
 foreign-PID conflict on the initial admission and a replaced visible PID
