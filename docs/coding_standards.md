@@ -1563,9 +1563,12 @@ non-regular substitutions, and otherwise create the marker with noclobber.
 Never recursively delete the session. Before deleting any evidence, inventory
 the pinned directory and require every present entry to be one of the fixed
 ID36 names and a regular file. Any unexpected, non-regular or unreadable entry
-retains the complete session. Only then remove the fixed entries through the
-pinned descriptor and require the directory to be empty before `rmdir`; any
-path replacement or later arrival retains the remaining evidence. Cleanup
+retains the complete session. Snapshot the validated names and unlink only
+those names through the pinned descriptor; never bulk-delete canonical names
+that were absent from the snapshot. A canonical entry arriving after inventory
+must therefore survive to make the final nonrecursive `rmdir` refuse. Require
+the directory to be empty before removal; any path replacement or later arrival
+retains the remaining evidence. Cleanup
 diagnostics identify phase, required ownership, observed safe category,
 original exit status and retained obligation without paths or PID lists;
 original FAIL/signal status takes precedence over cleanup BLOCKED. A refusal

@@ -138,6 +138,8 @@ rmdir() {
         function = shell_function("classify_cleanup_session_entries")
         self.assertIn("allowed = {", function)
         self.assertIn("for name in names:", function)
+        self.assertIn("for name in sorted(names):", function)
+        self.assertIn('output_mode="${1:-category}"', function)
         self.assertIn("\nPY\n    )\"; then", function)
         self.assertTrue(function.rstrip().endswith("}"))
 
@@ -227,27 +229,38 @@ awk() {
         self.membership.symlink_to(self.root / "missing")
         self.assert_retained(self.execute(), "unreadable")
 
-    def test_post_snapshot_arrival_is_rejected_before_rmdir(self):
-        # The first parser returns 'empty'; a synthetic newcomer enters before
-        # the second parser. No group-wide signal or recursive removal follows.
-        preamble = '''
-awk() {
+    def test_process_arriving_between_membership_snapshots_is_never_signaled(self):
+        foreign = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: self.stop_foreign(foreign))
+        # Stop one positively identified Bash child first. Then make the live
+        # foreign process appear only after the first empty membership read.
+        # The signal log must contain only the owned child, never the newcomer.
+        preamble = f'''
+sleep 30 >/dev/null 2>&1 &
+PAIR_PID=$!
+PAIR_PROCESS_IDENTITY="$(capture_direct_child_identity "$PAIR_PID")"
+awk() {{
     command awk "$@"
     if [[ ! -e $SESSION/snapshot-seen ]]; then
         : > "$SESSION/snapshot-seen"
-        printf '%s\\n' 456 > "$CGROUP/cgroup.procs"
+        printf '%s\\n' {foreign.pid} > "$CGROUP/cgroup.procs"
     fi
-}
-signal_direct_owned_child() {
-    : > "$SESSION/pair.log"
-    return 2
-}
+}}
+signal_direct_owned_child() {{
+    printf '%s\\n' "$1" >> "$SESSION/pair.log"
+    command kill -TERM -- "$1"
+}}
 '''
         result = self.execute(preamble=preamble)
         self.assert_retained(result, "foreign")
         self.assertIn("phase:pre-rmdir", result.stderr)
-        self.assertFalse((self.session / "pair.log").exists(),
-                         "a new cgroup member must never be signaled")
+        self.assertIsNone(foreign.poll(), "late foreign member must survive cleanup")
+        signaled_pids = (self.session / "pair.log").read_text(
+            encoding="ascii").splitlines()
+        self.assertEqual(len(signaled_pids), 1, result.stderr)
+        self.assertNotEqual(signaled_pids[0], str(foreign.pid))
+        self.assertNotIn(str(foreign.pid), result.stderr)
 
     def test_arrival_during_rmdir_preserves_evidence(self):
         preamble = '''
@@ -368,6 +381,34 @@ ln -s "${SESSION%/*}/foreign-target" "$STOP"
         self.assertIn("retained_cleanup:private-session", result.stderr)
         self.assertNotIn("retained_cleanup:child-cgroup-and-private-session",
                          result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_known_session_entry_arriving_after_inventory_is_retained(self):
+        # The former bulk rm listed every canonical name, so this late file was
+        # created after inventory and then erased by that same rm invocation.
+        # Snapshot-only deletion must leave it for the final rmdir refusal.
+        preamble = '''
+SESSION_RM_INJECTED=0
+rm() {
+    if [[ $# -ge 2 && $1 == -f && $2 == -- &&
+          $SESSION_RM_INJECTED == 0 ]]; then
+        SESSION_RM_INJECTED=1
+        printf '%s\\n' late > "$SESSION/pair.log"
+    fi
+    command rm "$@"
+}
+'''
+        result = self.execute(preamble=preamble)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertEqual((self.session / "pair.log").read_text(encoding="ascii"),
+                         "late\n")
+        self.assertIn("phase:session-remove", result.stderr)
+        self.assertIn("observed:occupied-or-unremovable", result.stderr)
+        self.assertIn("original_exit:0", result.stderr)
+        self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
     def test_interrupted_session_unlink_keeps_original_failure_and_evidence(self):
@@ -536,6 +577,9 @@ printf '%s\n' "$signal_status"
             cleanup.index("if [[ -z ${SESSION_DIRECTORY_FD:-}"),
             cleanup.index(session_path_assignment))
         self.assertIn("classify_cleanup_session_entries", self.source)
+        self.assertIn("classify_cleanup_session_entries snapshot", cleanup)
+        self.assertIn('rm -f -- "$session_fd_path/$session_entry"', cleanup)
+        self.assertNotIn('rm -f -- "$session_fd_path/pressure.ready"', cleanup)
         self.assertIn("read_open_directory_identity", self.source)
         self.assertIn("report_cleanup_refusal", self.source)
 

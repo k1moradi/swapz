@@ -758,7 +758,8 @@ classify_cleanup_cgroup_membership() {
 }
 
 classify_cleanup_session_entries() {
-    local observation
+    local output_mode="${1:-category}" observation category
+    [[ $output_mode == category || $output_mode == snapshot ]] || return 1
     if ! observation="$(python3 -I -B - "$SESSION_DIRECTORY_FD" <<'PY'
 import os
 import stat
@@ -793,14 +794,21 @@ for name in names:
         print("unsafe")
         raise SystemExit(0)
 print("known")
+for name in sorted(names):
+    print(name)
 PY
     )"; then
         printf '%s\n' unreadable
         return 0
     fi
-    case "$observation" in
+    category="${observation%%$'\n'*}"
+    case "$category" in
         known|unexpected|unsafe|unreadable)
-            printf '%s\n' "$observation"
+            if [[ $output_mode == snapshot ]]; then
+                printf '%s\n' "$observation"
+            else
+                printf '%s\n' "$category"
+            fi
             ;;
         *)
             printf '%s\n' unreadable
@@ -842,6 +850,7 @@ report_cleanup_refusal() {
 cleanup() {
     local result=$? original_result observed initially_retained
     local current_identity child_cleanup_status session_fd_path
+    local session_entry_snapshot session_entry
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     trap - EXIT HUP INT TERM
@@ -969,16 +978,25 @@ cleanup() {
         elif [[ $current_identity != "$SESSION_IDENTITY" ]]; then
             report_cleanup_refusal session-identity stale "$original_result"
         else
-            observed="$(classify_cleanup_session_entries)"
-            if [[ $observed != known ]]; then
-                report_cleanup_refusal session-inventory "$observed" "$original_result"
-            elif ! rm -f -- "$session_fd_path/pressure.ready" \
-                    "$session_fd_path/pressure.activate" \
-                    "$session_fd_path/pressure.active" \
-                    "$session_fd_path/pressure.stop" "$session_fd_path/pair.ready" \
-                    "$session_fd_path/pair.go" "$session_fd_path/pressure.log" \
-                    "$session_fd_path/pair.log" 2>/dev/null; then
-                report_cleanup_refusal session-remove unremovable-known-entry "$original_result"
+            if ! session_entry_snapshot="$(classify_cleanup_session_entries snapshot)"; then
+                report_cleanup_refusal session-inventory unreadable "$original_result"
+            else
+                observed="${session_entry_snapshot%%$'\n'*}"
+                if [[ $observed != known ]]; then
+                    report_cleanup_refusal session-inventory "$observed" "$original_result"
+                else
+                    # Delete only names that existed in the validated snapshot.
+                    # A canonical name appearing later must survive to make the
+                    # final nonrecursive rmdir refuse rather than be erased.
+                    while IFS= read -r session_entry; do
+                        [[ $session_entry == known || -z $session_entry ]] && continue
+                        if ! rm -f -- "$session_fd_path/$session_entry" 2>/dev/null; then
+                            report_cleanup_refusal session-remove \
+                                unremovable-known-entry "$original_result"
+                            break
+                        fi
+                    done <<< "$session_entry_snapshot"
+                fi
             fi
         fi
         if (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
