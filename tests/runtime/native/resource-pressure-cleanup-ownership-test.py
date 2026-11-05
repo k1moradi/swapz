@@ -738,10 +738,9 @@ rm() {
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
-    def test_term_during_cgroup_rmdir_refusal_preserves_first_status(self):
-        # A second TERM during EXIT cleanup used to kill Bash immediately,
-        # replacing a prior failure and hiding retained cgroup/session state.
-        preamble = r'''
+    @staticmethod
+    def term_during_cgroup_rmdir_preamble() -> str:
+        return r'''
 rmdir() {
     if [[ $1 == "$CGROUP" ]]; then
         kill -TERM "$BASHPID"
@@ -750,15 +749,47 @@ rmdir() {
     command rmdir "$@"
 }
 '''
-        for original_status in (1, 143, 0):
+
+    def test_term_during_cgroup_rmdir_preserves_existing_failure(self):
+        # A secondary TERM must not replace an already failing original status.
+        preamble = self.term_during_cgroup_rmdir_preamble()
+        for original_status in (1, 143):
             with self.subTest(original_status=original_status):
-                expected_status = original_status or 143
                 result = self.execute(preamble=preamble, status=original_status)
                 self.assert_retained(
                     result, "occupied-or-unremovable",
-                    expected_status=expected_status)
+                    expected_status=original_status)
                 self.assertIn("phase:rmdir", result.stderr)
+                self.assertNotIn("phase:cleanup-signal", result.stderr)
                 self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+
+    def test_term_before_cgroup_rmdir_refusal_remains_first_cleanup_error(self):
+        # With no earlier failure, TERM occurs before the rmdir refusal and
+        # therefore owns the single public cleanup phase.
+        result = self.execute(preamble=self.term_during_cgroup_rmdir_preamble())
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertTrue(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"), "untouched\n")
+        self.assertIn("phase:cleanup-signal", result.stderr)
+        self.assertNotIn("phase:rmdir", result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertIn("ownership_proof:pinned-created-directory-identities-only",
+                      result.stderr)
+        self.assertIn("observed:signal-143", result.stderr)
+        self.assertIn("original_exit:143", result.stderr)
+        self.assertIn("resumption_action:not-required", result.stderr)
+        self.assertIn(
+            "cleanup_disposition:retained-child-cgroup-and-private-session",
+            result.stderr)
+        self.assertIn("retained_cleanup:child-cgroup-and-private-session",
+                      result.stderr)
+        self.assertIn("cleanup_refusal:rmdir-occupied-or-unremovable",
+                      result.stderr)
+        self.assertIn("next_step:read-only-review-retained-state-before-retry",
+                      result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
     def test_term_during_completed_cleanup_never_reports_pass(self):
         # Signal only the synthetic coordinator, never an unproved PID.
@@ -777,13 +808,53 @@ rmdir() {
         self.assertFalse(self.session.exists())
         self.assertIn("phase:cleanup-signal", result.stderr)
         self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
-        self.assertIn("ownership_proof:pinned-created-cgroup-and-session-identities",
+        self.assertIn("ownership_proof:pinned-created-directory-identities-only",
                       result.stderr)
+        self.assertIn("observed:signal-143", result.stderr)
         self.assertIn("original_exit:143", result.stderr)
-        self.assertIn("nested_resume:not-required", result.stderr)
+        self.assertIn("resumption_action:not-required", result.stderr)
         self.assertIn("cleanup_disposition:completed-owned", result.stderr)
         self.assertIn("retained_cleanup:none", result.stderr)
+        self.assertIn("cleanup_refusal:none", result.stderr)
         self.assertIn("next_step:review-interruption-and-rerun-ID36-after-verifying-owned-state",
+                      result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_term_before_final_session_rmdir_reports_session_only_retention(self):
+        preamble = r'''
+rmdir() {
+    if [[ $1 == "$CGROUP" ]]; then
+        if [[ -f $CGROUP/cgroup.procs && ! -s $CGROUP/cgroup.procs ]]; then
+            command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+            command rmdir -- "$CGROUP"
+        else
+            return 1
+        fi
+    elif [[ $1 == "$SESSION" ]]; then
+        kill -TERM "$BASHPID"
+        return 16
+    else
+        command rmdir "$@"
+    fi
+}
+'''
+        result = self.execute(preamble=preamble)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertEqual(tuple(self.session.iterdir()), ())
+        self.assertIn("phase:cleanup-signal", result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertIn("original_exit:143", result.stderr)
+        self.assertIn("resumption_action:not-required", result.stderr)
+        self.assertIn("cleanup_disposition:retained-private-session",
+                      result.stderr)
+        self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertIn(
+            "cleanup_refusal:session-remove-occupied-or-unremovable",
+            result.stderr)
+        self.assertIn("next_step:read-only-review-retained-state-before-retry",
                       result.stderr)
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
