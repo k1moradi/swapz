@@ -936,6 +936,23 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         diagnose("UNAVAILABLE", "host.captured_monotonic_ns",
                  "strict same-boot host before/after",
                  reason="host monotonic window unavailable or reversed")
+    # The evaluator's campaign identity is only a claim until independently
+    # matched against both admitted boundary snapshots. Isolated rootless
+    # pair audits may omit this field; a production v2 evaluator never does.
+    target_binding_consistent = True
+    if ("campaign_target_identity" in summary or
+            "campaign_target_consistent" in summary):
+        try:
+            target_binding_consistent = (
+                qualification_target_binding(summary, before)["consistent"] and
+                qualification_target_identity(before) ==
+                qualification_target_identity(after))
+        except (KeyError, TypeError, ValueError):
+            target_binding_consistent = False
+        if not target_binding_consistent:
+            diagnose("BLOCKED", "qualification.campaign_target_identity",
+                     "same admitted source-bound physical target",
+                     reason="evaluator target differs from host boundary")
     qualification_status = summary.get("status")
     if qualification_status != "PASS":
         # INCOMPLETE includes absent evidence, not necessarily a measured FAIL.
@@ -1135,7 +1152,8 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
     # earlier apparently valid failure. Preserve the original arm error/stage
     # inside its immutable artifact; do not publish arbitrary error strings.
     for workload, index, label, arm in pending_producer_failures:
-        if not valid_host_window or (workload, index) in untrusted_pair_keys:
+        if (not valid_host_window or not target_binding_consistent or
+                (workload, index) in untrusted_pair_keys):
             diagnose("BLOCKED", "arm.verdict", "authenticated terminal failure",
                      workload=workload, pair_index=index, arm=label,
                      reason="producer FAIL lacks valid physical arm identity")
@@ -1207,6 +1225,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             len(attempts) == spec["pairs"] and
             accepted_count == spec["pairs"] and
             workload not in untrusted_cohorts and valid_host_window and
+            target_binding_consistent and
             all((workload, pair_index) in pair_indices for pair_index
                 in range(1, spec["pairs"] + 1)) and
             before.get("source_sha") == after.get("source_sha"))
