@@ -4843,6 +4843,19 @@ match the exact inventory expected-condition and read-only/no-header-write
 action, and must not echo synthetic swap paths. This establishes a rootless
 observed-snapshot safety invariant, not exclusive kernel ownership or a bound
 against swapon racing between the final inventory check and header pwrite.
+A separate deterministic rootless boundary regression must inject a valid
+synthetic active row only after the third complete zero-row formatter inventory
+snapshot, during final F_GETFL. It must verify requested O_RDWR|O_EXCL flags,
+returned O_RDWR access mode, and the subsequent in-memory header pwrite/sync;
+the postpublication inventory must then report status 3 UNCERTAIN,
+stage=inventory, originating EOPNOTSUPP, and changed block zero. Its positive
+control is the existing late active-row test: activity observed at the final
+prewrite gate returns status 2 with no write or sync. This timing model cannot
+establish that real Linux BLK_EXCL permits concurrent swapon or protects the
+entire admission-to-write interval; real block-device kernel evidence remains
+NOT PROVEN. Diagnostics must expose phase, safely classified observed inventory,
+original errno, requested versus verified descriptor properties, and whether
+block zero was modified, without disclosing private paths.
 The physical-card mapper-page oracle is separate and still required.
 Each case must prove the mutated identity surface was actually
 re-read after the accepted block-zero snapshot rather than deriving the

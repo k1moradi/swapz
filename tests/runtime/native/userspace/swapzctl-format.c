@@ -992,6 +992,8 @@ static void test_real_cli_post_snapshot_swap_activity_is_not_excluded(void)
 	    !strstr(report, "UNCERTAIN: target admission became uncertain "
 		    "after header write") ||
 	    !strstr(report, "stage=inventory") ||
+	    !strstr(report, "active entry without a verifiable kernel "
+		    "backing identity") ||
 	    !strstr(report, errno_field) ||
 	    !strstr(report, "RECOVERY REQUIRED") ||
 	    strstr(report, ADMISSION_DEVICE) ||
