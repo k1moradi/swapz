@@ -96,6 +96,27 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
                 r"observed=8388609.*maximum=8388608"):
             ram.validate_metadata_ram_host_binding(trace, host)
 
+    def test_rejects_jointly_impossible_host_meminfo(self) -> None:
+        trace, host = synthetic_trace()
+        sample = trace["samples"][13]  # Active synthetic steady-state target.
+        sample["mem_available_kib"] = 7_000_000
+        sample["s_unreclaim_kib"] = 2_000_000
+        # Each field fits the 8 GiB host separately; the combination does
+        # not. The trace itself remains well formed and has the same peak.
+        self.assertEqual(self.validate_trace(trace)["peak_ram_bytes"],
+                         200_000 * 1024)
+        with self.assertRaisesRegex(
+                ValueError,
+                r"phase=steady metric=samples\[13\]\.mem_available_kib\+"
+                r"s_unreclaim_kib observed_kib=9000000 limit_kib=8388608 "
+                r"status=BLOCKED reason=contradictory_host_meminfo"):
+            ram.validate_metadata_ram_host_binding(trace, host)
+
+        # Equality is a valid physical upper bound, not an overflow.
+        sample["s_unreclaim_kib"] = (
+            HOST_TOTAL_BYTES // 1024 - sample["mem_available_kib"])
+        ram.validate_metadata_ram_host_binding(trace, host)
+
     def test_rejects_wrong_unit_and_duplicate_meminfo(self) -> None:
         trace, _ = synthetic_trace()
         trace["meminfo_unit"] = "bytes"

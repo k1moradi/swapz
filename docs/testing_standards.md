@@ -6451,7 +6451,16 @@ multiplying the integer `MemTotal` `kB` counter by 1024, so the sealed value
 must be a positive unsigned-64-bit multiple of 1024; a sub-KiB remainder is
 malformed/BLOCKED evidence, not extra measurement precision. Unreclaimable
 slab is physical RAM; `VmallocUsed` measures virtual address space and must
-not be subject to that physical bound. Reject
+not be subject to that physical bound. The same-sample `MemAvailable`
+estimate covers free/reclaimable memory, not unreclaimable slab, so the
+sum of `MemAvailable` and `SUnreclaim` must also be at most the
+independently sealed `MemTotal`. Check individual bounded integer KiB
+counters before the combined bound. A jointly impossible sample is
+BLOCKED with phase, indexed offending fields, the exact observed combined
+KiB and host limit; it is not a measured over-ceiling target failure.
+Synthetic tests must cover separately in-range counters whose sum exceeds
+the host total and equality at the host bound, without claiming physical
+RAM qualification. Reject
 a malformed or indented second required meminfo counter instead of silently
 ignoring contradictory values. Report a malformed sample's index, precise
 field and expected/observed numeric bounds without echoing arbitrary evidence

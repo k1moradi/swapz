@@ -497,6 +497,23 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
                     f"observed={_bounded_observed(value)} minimum={minimum} "
                     f"maximum={maximum_host_kib} "
                     f"memory_total_bytes={total_bytes}")
+        # MemAvailable estimates free/reclaimable RAM, not unreclaimable
+        # slab. Their same-sample claims cannot exceed physical MemTotal.
+        combined_physical_kib = (
+            sample["mem_available_kib"] + sample["s_unreclaim_kib"])
+        if combined_physical_kib > maximum_host_kib:
+            phase = sample.get("phase")
+            phase_label = (
+                phase if isinstance(phase, str) and phase in PHASES
+                else "unknown")
+            raise ValueError(
+                "metadata RAM sample contradicts host physical memory: "
+                f"phase={phase_label} "
+                f"metric=samples[{sample_index}].mem_available_kib+"
+                "s_unreclaim_kib "
+                f"observed_kib={combined_physical_kib} "
+                f"limit_kib={maximum_host_kib} status=BLOCKED "
+                "reason=contradictory_host_meminfo")
 
 
 def validate_metadata_ram_trace(
