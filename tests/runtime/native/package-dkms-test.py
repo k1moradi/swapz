@@ -467,28 +467,41 @@ esac
             self.installed_module.read_bytes(), self.module.read_bytes())
 
     def installed_package_state(self):
-        """Fingerprint all installed payloads, not just CLI and module bytes."""
-        package_entries = [self.dkms_state, self.installed_module]
+        """Fingerprint complete installed package trees used by rollback."""
+        package_entries = [self.dkms_state]
         for package_root in (
-                self.prefix, self.home / "usr/src" / ("swapz-" + VERSION)):
+                self.prefix,
+                self.home / "usr/src" / ("swapz-" + VERSION),
+                self.installed_module.parent):
+            if not package_root.exists() and not package_root.is_symlink():
+                continue
+            package_entries.append(package_root)
+            if package_root.is_symlink() or not package_root.is_dir():
+                continue
             package_entries.extend(package_root.rglob("*"))
 
         snapshot = {}
         for package_path in package_entries:
-            metadata = package_path.lstat()
-            if stat.S_ISDIR(metadata.st_mode):
+            if not package_path.exists() and not package_path.is_symlink():
                 continue
+            metadata = package_path.lstat()
             relative_name = str(package_path.relative_to(self.home))
+            common_identity = (
+                stat.S_IMODE(metadata.st_mode), metadata.st_uid,
+                metadata.st_gid, metadata.st_nlink)
             if stat.S_ISREG(metadata.st_mode):
-                identity = ("file", stat.S_IMODE(metadata.st_mode),
-                            sha256(package_path))
+                identity = ("file", *common_identity, sha256(package_path))
+            elif stat.S_ISDIR(metadata.st_mode):
+                identity = ("directory", *common_identity)
             elif stat.S_ISLNK(metadata.st_mode):
                 identity = (
-                    "symlink", stat.S_IMODE(metadata.st_mode),
+                    "symlink", *common_identity,
                     hashlib.sha256(os.fsencode(
                         os.readlink(package_path))).hexdigest())
             else:
-                identity = ("special", stat.S_IMODE(metadata.st_mode), None)
+                identity = (
+                    "special", stat.S_IFMT(metadata.st_mode),
+                    *common_identity, metadata.st_rdev)
             snapshot[relative_name] = identity
         return snapshot
 
@@ -1103,8 +1116,11 @@ exec "{flock_binary}" "$@"
         original_module = self.installed_module.read_bytes()
         runtime_health_unit = (
             self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service")
+        runtime_health_directory = runtime_health_unit.parent
         original_unit = runtime_health_unit.read_bytes()
         original_mode = stat.S_IMODE(runtime_health_unit.stat().st_mode)
+        original_directory_mode = stat.S_IMODE(
+            runtime_health_directory.stat().st_mode)
 
         # The former CLI/module-only oracle cannot detect this unit drift.
         runtime_health_unit.write_bytes(b"regressed-test-runtime-health\n")
@@ -1116,6 +1132,20 @@ exec "{flock_binary}" "$@"
         runtime_health_unit.chmod(0o600)
         self.assertNotEqual(self.installed_package_state(), original_package_state)
         runtime_health_unit.chmod(original_mode)
+
+        # Directory metadata and unexpected DKMS sibling images are package
+        # state too; the previous full-state oracle silently omitted both.
+        runtime_health_directory.chmod(
+            original_directory_mode ^ stat.S_IXOTH)
+        self.assertNotEqual(self.installed_package_state(), original_package_state)
+        runtime_health_directory.chmod(original_directory_mode)
+
+        unexpected_module = self.installed_module.with_name(
+            self.installed_module.name + ".zst")
+        unexpected_module.write_bytes(b"unexpected-module-variant\n")
+        unexpected_module.chmod(0o644)
+        self.assertNotEqual(self.installed_package_state(), original_package_state)
+        unexpected_module.unlink()
         self.assertEqual(self.installed_package_state(), original_package_state)
 
     def test_dkms_installed_status_requires_exact_version_kernel_and_one_record(self):

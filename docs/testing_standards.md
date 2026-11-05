@@ -6136,23 +6136,26 @@ refuse that durable incomplete transaction without reading or modifying host
 swap state. Sandbox artifacts must stay private to the package sandbox and
 must not replace the repository's qualification build outputs.
 For each upgrade fault-injection checkpoint, assert that the complete
-pre-upgrade installed file inventory is restored: package prefix files,
-DKMS-owned source files, exact installed module, DKMS registration marker,
-regular-file modes, and unexpected symlink/special-file entries. Retain the
-direct byte-for-byte CLI and installed-module assertions and require no
-remaining transaction journal. The checkpoints intentionally share one
-fixture to detect drift after earlier rollbacks; separate unittest methods
-still require fresh private sandboxes. A negative control must mutate a
-non-CLI systemd payload and its permissions while the original CLI and module
-remain unchanged, proving that the full-state oracle detects the change.
+pre-upgrade installed package state is restored: the package prefix tree,
+DKMS-owned source tree, current-kernel module destination tree, and DKMS
+registration marker. Compare regular-file bytes and modes, directory modes,
+owner/group and link counts, symlink targets, special-file type/device
+identity, and unexpected DKMS sibling images. Retain the direct byte-for-byte
+CLI and installed-module assertions and require no remaining transaction
+journal. The checkpoints intentionally share one fixture to detect drift after
+earlier rollbacks; separate unittest methods still require fresh private
+sandboxes. A negative control must mutate a non-CLI systemd payload and its
+permissions, package-directory metadata, and an unexpected module variant
+while the original CLI and module remain unchanged, proving that the
+full-state oracle detects each change.
 On a failing checkpoint only, retain bounded elapsed times for completed
 checkpoints and bounded child output tails in private unittest diagnostics.
-A timed-out package command must kill and reap its private process group,
-including fake DKMS descendants, before the test fixture can be cleaned up;
-the regression must prove that a descendant cannot write after the timeout.
-Timeouts must keep their original exception identity for rootless first-failure
-classification; do not change deadlines, fsync behavior or the checkpoint
-matrix to disguise slow durable storage.
+A timed-out package command must kill its private process group, including
+fake DKMS descendants, and reap the direct package shell before the test
+fixture can be cleaned up; the regression must prove that a descendant cannot
+survive to write after the timeout. Timeouts must keep their original exception
+identity for rootless first-failure classification; do not change deadlines,
+fsync behavior or the checkpoint matrix to disguise slow durable storage.
 The project-goals CI runs the same hermetic package fixture in an early
 independent step before the combined rootless gate, so unrelated test failures
 cannot mask packaging regressions. It neither replaces `make test` as the
