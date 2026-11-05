@@ -218,10 +218,15 @@ cleanup()
 		fi
 	fi
 	# Classify survivors against the pinned inode before discarding staging.
+	# An unsearchable directory is not proof that a published name is absent.
 	cleanup_observed_mapper=absent
 	cleanup_observed_device=absent
 	if [ "$published_mapper" -eq 1 ]; then
-		if [ -L "$mapper_dropin" ]; then
+		if [ -L "$mapper_dropin_dir" ]; then
+			cleanup_observed_mapper=foreign-directory
+		elif [ ! -d "$mapper_dropin_dir" ] || [ ! -x "$mapper_dropin_dir" ]; then
+			cleanup_observed_mapper=directory-unverifiable
+		elif [ -L "$mapper_dropin" ]; then
 			cleanup_observed_mapper=foreign-symlink
 		elif [ -e "$mapper_dropin" ]; then
 			if [ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ]; then
@@ -232,7 +237,11 @@ cleanup()
 		fi
 	fi
 	if [ "$published_device" -eq 1 ]; then
-		if [ -L "$device_dropin" ]; then
+		if [ -L "$device_dropin_dir" ]; then
+			cleanup_observed_device=foreign-directory
+		elif [ ! -d "$device_dropin_dir" ] || [ ! -x "$device_dropin_dir" ]; then
+			cleanup_observed_device=directory-unverifiable
+		elif [ -L "$device_dropin" ]; then
 			cleanup_observed_device=foreign-symlink
 		elif [ -e "$device_dropin" ]; then
 			if [ "$stage_dir/owned-device" -ef "$device_dropin" ]; then
@@ -306,13 +315,21 @@ cleanup()
 		{ [ "$published_mapper" -eq 1 ] || [ "$published_device" -eq 1 ] ||
 			[ "$cleanup_mask_was_missing" -eq 1 ]; }; then
 		# A zero command status never proves unlink or private-stage cleanup.
-		if [ -e "$mapper_dropin" ] || [ -L "$mapper_dropin" ]; then
+		if [ -L "$mapper_dropin_dir" ]; then
+			cleanup_observed_mapper=foreign-directory
+		elif [ ! -d "$mapper_dropin_dir" ] || [ ! -x "$mapper_dropin_dir" ]; then
+			cleanup_observed_mapper=directory-unverifiable
+		elif [ -e "$mapper_dropin" ] || [ -L "$mapper_dropin" ]; then
 			[ "$cleanup_observed_mapper" != absent ] ||
 				cleanup_observed_mapper=late-substitution
 		else
 			cleanup_observed_mapper=absent
 		fi
-		if [ -e "$device_dropin" ] || [ -L "$device_dropin" ]; then
+		if [ -L "$device_dropin_dir" ]; then
+			cleanup_observed_device=foreign-directory
+		elif [ ! -d "$device_dropin_dir" ] || [ ! -x "$device_dropin_dir" ]; then
+			cleanup_observed_device=directory-unverifiable
+		elif [ -e "$device_dropin" ] || [ -L "$device_dropin" ]; then
 			[ "$cleanup_observed_device" != absent ] ||
 				cleanup_observed_device=late-substitution
 		else
@@ -328,7 +345,9 @@ cleanup()
 			cleanup_observed_temporary_mask=retained
 		fi
 		cleanup_observed_mask=missing-or-substituted
-		if mapper_mask_is_active; then
+		if [ ! -x "$early_dir" ]; then
+			cleanup_observed_mask=directory-inaccessible
+		elif mapper_mask_is_active; then
 			cleanup_observed_mask=/dev/null
 		fi
 		cleanup_rollback=complete
@@ -746,7 +765,8 @@ fi
 if rm -f -- "$mapper_unit"; then
 	# A release wrapper can report success while substituting a published
 	# drop-in. A missing mask is not a committed, owned dependency graph.
-	if [ ! -e "$mapper_unit" ] && [ ! -L "$mapper_unit" ] &&
+	if [ -x "$early_dir" ] && [ ! -L "$early_dir" ] &&
+		[ ! -e "$mapper_unit" ] && [ ! -L "$mapper_unit" ] &&
 		[ ! -L "$mapper_dropin" ] && [ ! -L "$device_dropin" ] &&
 		[ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ] &&
 		[ "$stage_dir/owned-device" -ef "$device_dropin" ]; then
@@ -808,12 +828,15 @@ fi
 # exposing the selected identity or overwriting that status.
 cleanup "$mask_status"
 trap - EXIT
-rollback_outcome=complete
+rollback_outcome=${cleanup_rollback-incomplete}
 if [ -e "$mapper_dropin" ] || [ -L "$mapper_dropin" ] ||
 	[ -e "$device_dropin" ] || [ -L "$device_dropin" ]; then
 	rollback_outcome=incomplete
 fi
-if mapper_mask_is_active; then
+if [ ! -x "$early_dir" ]; then
+	observed_mask=early-mask-directory-inaccessible
+	rollback_outcome=incomplete
+elif mapper_mask_is_active; then
 	observed_mask=early-mask-retained
 else
 	observed_mask=early-mask-missing-or-substituted
