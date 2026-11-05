@@ -592,7 +592,15 @@ index-named null_blk device. The pair must return BLOCKED for absent creation
 authority, retain both original objects and their memory-backed attributes,
 and report only proof categories rather than private names or fixture paths.
 The unrelated device, when no dm_swapz mapping is loaded, must remain unchanged
-without a false ownership refusal. Neither path may invoke unowned module
+without a false ownership refusal. Include a matching-prefix foreign decoy
+whose suffix is not a canonical 16-hex token; it must not be adopted or
+removed. Assert that only a positively proved stale mapper reaches
+UUID-targeted removal, only an exact cleanup candidate attempts configfs
+removal, and every other retained synthetic power attribute stays on. A
+post-snapshot same-name replacement must have a demonstrably different
+inode and yield an attributed power-off refusal. A failing final cleanup
+must preserve both its numeric status and the powered-off retained state.
+Changing the mapper UUID after the first snapshot must block removal. Neither path may invoke unowned module
 unload or inferred-PID signaling; an unexpected internal command failure is
 FAIL, not a benign ownership BLOCKED. The final fixture PASS marker must report
 the number of `run_case` preflight fixtures actually executed; the separate
