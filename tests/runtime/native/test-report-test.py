@@ -3465,7 +3465,7 @@ class ReportContract(unittest.TestCase):
                             "diagnostic.log")
 
                 def fail(transcript, exit_code=1, reason="nonzero_exit",
-                         log=log_name, available=True):
+                         log=log_name, available=True, after_marker=""):
                     log_file.unlink(missing_ok=True)
                     if available:
                         log_file.write_text(
@@ -3484,7 +3484,7 @@ class ReportContract(unittest.TestCase):
                     with patch.object(
                             runner.subprocess, "run",
                             return_value=SimpleNamespace(
-                                stdout=transcript + marker,
+                                stdout=transcript + marker + after_marker,
                                 returncode=exit_code)), \
                             contextlib.redirect_stdout(io.StringIO()):
                         status = runner.run_stage(
@@ -3539,7 +3539,7 @@ class ReportContract(unittest.TestCase):
                     "subtest=unavailable test=unavailable exit=1 "
                     "reason=nonzero_exit phase_s=2 stage_s=3 "
                     "line=123 log=unavailable\n")
-                _, _, ignored = fail(output + later_marker)
+                _, _, ignored = fail(output, after_marker=later_marker)
                 self.assertNotIn("first matched tmp-cleanup", ignored)
 
                 exception = (
