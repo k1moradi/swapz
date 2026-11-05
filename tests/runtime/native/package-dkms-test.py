@@ -924,7 +924,10 @@ exec "{flock_binary}" "$@"
             "[ \"$#\" -eq 4 ] && [ \"$1\" = sha512 ] || exit 96\n"
             "printf '%s\\n' called >> \"$SWAPZ_TEST_KMODSIGN_LOG\"\n"
             "status=\"${SWAPZ_TEST_KMODSIGN_STATUS:-0}\"\n"
-            "[ \"$status\" -eq 0 ] || exit \"$status\"\n"
+            "if [ \"$status\" -ne 0 ]; then\n"
+            "  printf '%s\\n' \"$SWAPZ_TEST_KMODSIGN_PRIVATE_DIAGNOSTIC\" >&2\n"
+            "  exit \"$status\"\n"
+            "fi\n"
             "cp -- \"$SWAPZ_TEST_SIGNED_TEMPLATE\" \"$4\"\n")
         kmodsign_mock.chmod(0o755)
 
@@ -983,8 +986,11 @@ exec "{flock_binary}" "$@"
 
         failed_build_module = self.home / "failed-signature-module.ko"
         failed_build_module.write_bytes(payload.read_bytes())
+        private_diagnostic_sentinel = "PRIVATE_KEY_PATH_SENTINEL"
         failed_sign_env = dict(
-            sign_env, SWAPZ_TEST_KMODSIGN_STATUS="73")
+            sign_env, SWAPZ_TEST_KMODSIGN_STATUS="73",
+            SWAPZ_TEST_KMODSIGN_PRIVATE_DIAGNOSTIC=(
+                private_diagnostic_sentinel))
         signature_generation_failed = subprocess.run(
             ["bash", str(ROOT / "packaging/sign-module.sh"),
              str(failed_build_module)],
@@ -998,8 +1004,13 @@ exec "{flock_binary}" "$@"
         self.assertEqual(
             kmodsign_log.read_text().splitlines(), ["called", "called"])
         self.assertIn("kmodsign failed", signature_generation_failed.stderr)
-        self.assertNotIn(str(private_key),
-                         signature_generation_failed.stderr)
+        with self.subTest(
+                phase="signature_generation", diagnostic="private_material"):
+            self.assertNotIn(
+                private_diagnostic_sentinel,
+                signature_generation_failed.stderr)
+            self.assertNotIn(str(private_key),
+                             signature_generation_failed.stderr)
         with self.subTest(phase="signature_generation"):
             self.assertIn(
                 "phase=signature_generation",
