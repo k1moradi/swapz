@@ -416,6 +416,31 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                     item["status"] == "FAIL"
                     for item in audit["diagnostics"]))
 
+    def test_release_failure_witness_rejects_invented_arm_phase(self):
+        workload = "sd-service-balanced"
+        specification = QUALIFICATION.WORKLOADS[workload]
+        pair_artifact = {
+            "name": "pair.json", "size_bytes": 1, "sha256": "0" * 64,
+            "workload": workload, "pair_id": "pair-1", "pair_index": 1,
+            "order": specification["counterbalanced_order"][0],
+            "status": "EXCLUDED", "excluded": True,
+        }
+        audit = {
+            "diagnostics": [{
+                "status": "FAIL", "metric": "arm.verdict",
+                "workload": workload, "pair_index": 1, "arm": "raw",
+                "producer_status": "FAIL",
+            }],
+            "first_failed_phase": "arm",
+            "first_failed_evidence": {
+                "workload": workload, "pair_index": 1, "arm": "raw",
+                "metric": "arm.verdict", "evidence_class": "FAIL",
+            },
+        }
+        self.assertFalse(READINESS[
+            "_physical_audit_failure_witness_is_valid"](
+                audit, {workload: specification}, [pair_artifact]))
+
     def test_counterbalanced_order_and_duplicate_indices_block_audit(self):
         record = pair(1, 1100)
         record["order"] = "swapz-first"
