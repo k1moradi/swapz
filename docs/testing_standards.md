@@ -6617,7 +6617,7 @@ prove that the selected target's manifest-bound original block-zero image is
 unchanged before and after initialization. The formatter operation is valid
 only in the durable `STARTING` state. Rootless direct-C tests must validate the
 header fields and prove the privileged formatter stub is unavailable without
-target mutation. `swapon` must not request discard. Never remove an active swap
+target mutation. `swapon` must follow the released-swap-cluster DISCARD activation policy above; activation-time whole-area DISCARD remains forbidden. Never remove an active swap
 mapper or unload a module while it may contain pages. A failed mapper `swapoff`,
 uncertain mapper/module ownership, ambiguous header, or recovery uncertainty
 leaves the mapping, module and recovery evidence in place for supervised
