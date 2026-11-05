@@ -719,6 +719,43 @@ nonzero child failure, timeout-style 124, explicit shell exit, failing shell
 assertions, first-subtest extraction and private-log permissions; they are not
 substitutes for the single official `make test`.
 
+### Native CI failure evidence contract
+
+The private project-goal wrapper in `tests/tools/product_goals.py` is
+observational and fail-only; it must not alter suite discovery, execution
+order, qualification severity or the single official `make test` gate.
+On a failing exact-SHA command, its existing `swapz-ci-diagnostic-v1` record
+retains the public suite and artifact name, actual wrapper `exit_code`,
+first causal `first_error`, category and reason, and now also explicitly
+records the source-controlled `phase`, failing unittest or nested test name,
+`expected_contract` and sanitized `observed` diagnostic. A validated
+rootless failure marker may supply a separate `child_exit_code` and
+`rootless_reason`; it must **never** overwrite the outer process status.
+An OSError at child launch retains its original `launch_errno` and does
+not masquerade as a test assertion. Negative return codes identify a real
+direct-child signal; shell exit 128+signal is ambiguous, and exit 124 alone
+cannot establish a watchdog timeout.
+
+Within unittest output the first detailed failing block owns the diagnostic:
+later teardown, cleanup, parser exceptions, and make-summary errors must not
+replace its test identity or donate a later exception when its original error
+is unrecognized. Genuine first native compiler diagnostics are preserved even
+when an outer rootless marker follows. If sanitized-log retention itself fails,
+the original test exit and cause are still reported, while `log=unavailable`
+and the numeric diagnostic errno describe that secondary evidence failure.
+All promoted fields use the existing bounded sanitization and allowlisted
+rootless-marker syntax; do not promote private local log contents, command
+strings, credentials, output payload bytes, or unvalidated paths. Passing
+commands emit no extra transcript, retain no log and incur no new subprocesses.
+
+The narrow synthetic `tests/tools/ci-failure-diagnostics-test.py` regression
+covers native assertions, nested unittest/cleanup precedence, compilation
+errors, timeout-or-exit-124 ambiguity, signal versus shell exit, rootless
+child status, missing executables, redaction, unchanged artifact naming, and
+log-retention failure without privileged, device, swap or kernel operations.
+It is an internal focused fixture, not a new official qualification interface
+or an additional workflow gate.
+
 Package install, upgrade and uninstall must preserve primary recovery authority.
 An exact already-installed identity may return as a no-op, but any package
 mutation is BLOCKED while `primary-state.json` or a partition ownership marker
