@@ -281,17 +281,24 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                     for item in audit["diagnostics"]))
 
     def test_missing_producer_error_is_blocked(self):
-        record = pair(1, 1100)
-        record["status"] = "EXCLUDED"
-        record["excluded"] = True
-        record["analysis_usable"] = False
-        record["raw"]["verdict"] = "FAIL"
-        record["raw"]["stage"] = "measure"
-        audit, _ = inspect([record], summary_status="FAIL_OR_INCOMPLETE")
-        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
-        self.assertIsNone(audit["first_failed_phase"])
-        self.assertFalse(any(
-            item["status"] == "FAIL" for item in audit["diagnostics"]))
+        for failure_reason in (None, "", "   "):
+            with self.subTest(failure_reason=failure_reason):
+                record = pair(1, 1100)
+                record["status"] = "EXCLUDED"
+                record["excluded"] = True
+                record["analysis_usable"] = False
+                record["raw"]["verdict"] = "FAIL"
+                record["raw"]["stage"] = "measure"
+                if failure_reason is not None:
+                    record["raw"]["failure_reason"] = failure_reason
+                audit, _ = inspect(
+                    [record], summary_status="FAIL_OR_INCOMPLETE")
+                self.assertEqual(
+                    audit["status"], "BLOCKED", audit["diagnostics"])
+                self.assertIsNone(audit["first_failed_phase"])
+                self.assertFalse(any(
+                    item["status"] == "FAIL"
+                    for item in audit["diagnostics"]))
 
     def test_duplicate_identity_invalidates_both_failure_witnesses(self):
         def failed_pair(run_id):
