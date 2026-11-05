@@ -7,6 +7,7 @@ Maximum-capacity RAM acceptance remains a serialized loaded-host qualification.
 from __future__ import annotations
 
 import datetime
+import functools
 import re
 import struct
 from typing import Any
@@ -342,6 +343,23 @@ def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
     }
 
 
+def _mark_rejected_peak_unavailable(validation_function: Any) -> Any:
+    """Preserve the first validation failure and revoke rejected peak evidence."""
+    @functools.wraps(validation_function)
+    def validation_with_unavailable_peak(
+            *arguments: Any, **keyword_arguments: Any) -> Any:
+        try:
+            return validation_function(*arguments, **keyword_arguments)
+        except ValueError as failure:
+            if "peak_ram_bytes=unavailable" in str(failure):
+                raise
+            raise ValueError(
+                f"{failure} peak_ram_bytes=unavailable") from None
+
+    return validation_with_unavailable_peak
+
+
+@_mark_rejected_peak_unavailable
 def validate_metadata_ram_arm_binding(trace: Any, binding: Any) -> None:
     """Revalidate phase chronology against sealed sustained-arm GC evidence."""
     if not isinstance(binding, dict) or set(binding) != {
@@ -417,6 +435,7 @@ def validate_metadata_ram_arm_binding(trace: Any, binding: Any) -> None:
                 "metadata RAM GC sample lacks measured target GC activity")
 
 
+@_mark_rejected_peak_unavailable
 def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
     """Bind a serialized RAM trace to the sealed physical-host time window."""
     if not isinstance(binding, dict) or set(binding) != {
@@ -504,6 +523,7 @@ def validate_metadata_ram_host_binding(trace: Any, binding: Any) -> None:
         # invariant with SUnreclaim.
 
 
+@_mark_rejected_peak_unavailable
 def validate_metadata_ram_trace(
         trace: Any, *, source_sha: str, mapper_uuid: str,
         expected_peak_ram_bytes: int | None = None) -> dict[str, int]:

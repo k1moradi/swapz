@@ -7513,6 +7513,14 @@ incomplete trace has peak RAM unavailable, never the lower surviving minimum.
 They must not invent an exact missing-sample count from elapsed time:
 given the permitted 150 ms maximum adjacent interval, a 300 ms observed gap
 proves at least one missing observation, not exactly two.
+
+A rejected RAM trace, sustained-arm chronology or sealed-host binding
+must preserve the first failure's field/phase diagnostic and explicitly report
+`peak_ram_bytes=unavailable`, exactly once. Missing counters, incomplete
+sample counts, short baselines and unrecovered teardown must not leave a
+favorable peak implied by surviving observations. This classification does not
+relax the frozen cadence or its conservative minimum-missing-samples bound.
+
 A trace that labels itself as synthetic/rootless must not pass the loaded-host
 capture/scope declarations. Correct declaration strings alone cannot
 authenticate a capture: immutable trace hashes, exact source, host boot,

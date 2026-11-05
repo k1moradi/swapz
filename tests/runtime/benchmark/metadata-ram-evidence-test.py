@@ -289,6 +289,78 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
                 r"peak_ram_bytes=unavailable"):
             self.validate_trace(trace)
 
+    def test_invalid_trace_never_advertises_a_peak(self) -> None:
+        original, _ = synthetic_trace()
+        for defect, first_failure in (
+                ("missing_counter", "metric=samples[0].fields missing=s_unreclaim_kib"),
+                ("short_teardown", "metric=sample_count"),
+                ("source_mismatch", "metric=source_sha"),
+                ("unrecovered", "metric=MemAvailable_median_twice_kib"),
+                ("boundary_gap", "metric=monotonic_interval_ns")):
+            trace = copy.deepcopy(original)
+            if defect == "missing_counter":
+                del trace["samples"][0]["s_unreclaim_kib"]
+            elif defect == "short_teardown":
+                del trace["samples"][-1]
+            elif defect == "source_mismatch":
+                trace["source_sha"] = "b" * 40
+            elif defect == "unrecovered":
+                for sample in trace["samples"][-21:]:
+                    sample["mem_available_kib"] = 3_900_000
+            else:
+                trace["samples"][14]["monotonic_ns"] += 200_000_000
+            with self.subTest(defect=defect):
+                with self.assertRaises(ValueError) as caught:
+                    self.validate_trace(trace)
+                diagnostic = str(caught.exception)
+                self.assertIn(first_failure, diagnostic)
+                self.assertEqual(
+                    diagnostic.count("peak_ram_bytes=unavailable"), 1)
+
+    def test_short_baseline_does_not_qualify_a_peak(self) -> None:
+        trace, _ = synthetic_trace()
+        # Keep all individual intervals legal and the whole-trace average
+        # within 10%, while making the eleven baseline samples span 900 ms.
+        for sample_index, sample in enumerate(trace["samples"]):
+            adjusted_offset_ns = (
+                sample_index * ram.SAMPLING_INTERVAL_NS -
+                min(sample_index, 10) * 10_000_000)
+            sample["monotonic_ns"] = 1_000_000_000 + adjusted_offset_ns
+            timestamp = START_UTC + datetime.timedelta(
+                seconds=1, microseconds=adjusted_offset_ns // 1000)
+            sample["timestamp_utc"] = timestamp.isoformat(
+                timespec="microseconds").replace("+00:00", "Z")
+        with self.assertRaisesRegex(
+                ValueError, "metadata RAM baseline is shorter than one second"
+                ) as caught:
+            self.validate_trace(trace)
+        self.assertEqual(
+            str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
+
+    def test_invalid_host_and_arm_bindings_revoke_peak(self) -> None:
+        trace, host = synthetic_trace()
+        host["host_boot_id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        with self.assertRaisesRegex(ValueError, "metric=host_boot_id"
+                                    ) as caught:
+            ram.validate_metadata_ram_host_binding(trace, host)
+        self.assertEqual(
+            str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
+
+        arm_binding = {
+            "arm_started_monotonic_ns": 2_350_000_000,
+            "arm_finished_monotonic_ns": 2_700_000_000,
+            "gc_activity_intervals": [{
+                "start_monotonic_ns": 2_450_000_000,
+                "end_monotonic_ns": 2_650_000_000,
+                "gc_wall_ns": 1, "gc_victims": 1, "gc_pages": 1,
+            }],
+        }
+        with self.assertRaisesRegex(ValueError, "phases do not bind"
+                                    ) as caught:
+            ram.validate_metadata_ram_arm_binding(trace, arm_binding)
+        self.assertEqual(
+            str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
+
     def test_truncated_phase_and_host_window_fail_closed(self) -> None:
         trace, host = synthetic_trace()
         del trace["samples"][-1]
