@@ -437,7 +437,10 @@ that no unconsumed oracle output remains. Short reads, interruption and failed
 unmapping must not produce a complete-looking record. Failure-only diagnostics
 identify the first failure phase, fully compared versus allocated pages/bytes,
 expected-zero versus observed page/byte mismatch totals, original errno when
-present, and whether cleanup finished. An interrupt while waiting for FILL or
+present, and whether cleanup finished. If a child exits before VERIFIED, the
+parent may surface only a complete bounded structured oracle failure record;
+partial stderr and traceback/path text remain private, while the parent still
+reports the child exit and incomplete-evidence disposition. An interrupt while waiting for FILL or
 allocating must fail boundedly without a traceback or anonymous allocation.
 Later cleanup/reporting errors must not replace
 an earlier byte/digest mismatch or its counts. Diagnostic samples may contain

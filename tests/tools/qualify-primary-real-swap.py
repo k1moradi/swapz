@@ -2599,6 +2599,32 @@ def _terminate_child(process: subprocess.Popen, cgroup: Path) -> None:
         time.sleep(0.05)
 
 
+_ORACLE_FAILURE_SUMMARY_RE = re.compile(
+    r"FAIL: oracle phase=[a-z_]+ "
+    r"verified_pages=[0-9]+/[0-9]+ verified_bytes=[0-9]+/[0-9]+ "
+    r"expected_page_mismatches=0 observed_page_mismatches=[0-9]+ "
+    r"expected_byte_mismatches=0 observed_byte_mismatches=[0-9]+ "
+    r"error=[A-Za-z_][A-Za-z0-9_]* errno=(?:none|[0-9]+) "
+    r"cleanup_complete=(?:true|false)"
+)
+
+
+def _bounded_oracle_failure_summary(process: subprocess.Popen) -> str:
+    """Expose only a complete structured oracle failure, never raw stderr."""
+    if process.stderr is None:
+        return ""
+    try:
+        diagnostic = process.stderr.read(MAX_ORACLE_RECORD_BYTES + 1)
+    except (OSError, ValueError):
+        return ""
+    if len(diagnostic) > MAX_ORACLE_RECORD_BYTES:
+        diagnostic = diagnostic[:MAX_ORACLE_RECORD_BYTES]
+    for line in reversed(diagnostic.splitlines()):
+        if _ORACLE_FAILURE_SUMMARY_RE.fullmatch(line):
+            return line
+    return ""
+
+
 def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
                   guard: Callable[[], None], pending: bytearray) -> dict:
     """Consume bounded records without TextIO/select buffering races.
@@ -2633,20 +2659,41 @@ def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
             raise QualificationFailure("real-swap oracle emitted oversized unterminated record")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise QualificationFailure(f"real-swap oracle timed out waiting for {prefix}")
+            return_code = process.poll()
+            child_exit = return_code if return_code is not None else "running"
+            raise QualificationFailure(
+                f"real-swap oracle phase=terminal child_exit={child_exit} "
+                f"evidence_complete=false: timed out waiting for {prefix}")
         readable, _, _ = select.select([fd], [], [], min(0.1, remaining))
         if not readable:
-            if process.poll() is not None:
+            return_code = process.poll()
+            if return_code is not None:
+                summary = _bounded_oracle_failure_summary(process)
+                detail = f": {summary}" if summary else ""
                 raise QualificationFailure(
-                    f"real-swap oracle exited before {prefix}: rc={process.returncode}")
+                    f"real-swap oracle phase=terminal child_exit={return_code} "
+                    f"evidence_complete=false: exited before {prefix}{detail}")
             continue
         try:
             chunk = os.read(fd, MAX_ORACLE_RECORD_BYTES + 1)
         except OSError as exc:
-            raise QualificationFailure("cannot read real-swap oracle record") from exc
-        if not chunk:
+            return_code = process.poll()
+            child_exit = return_code if return_code is not None else "running"
+            original_errno = exc.errno if exc.errno is not None else "none"
             raise QualificationFailure(
-                f"real-swap oracle closed output before {prefix}: rc={process.poll()}")
+                f"real-swap oracle phase=terminal child_exit={child_exit} "
+                f"evidence_complete=false: cannot read real-swap oracle record "
+                f"errno={original_errno}") from exc
+        if not chunk:
+            return_code = process.poll()
+            child_exit = return_code if return_code is not None else "running"
+            summary = (
+                _bounded_oracle_failure_summary(process)
+                if return_code is not None else "")
+            detail = f": {summary}" if summary else ""
+            raise QualificationFailure(
+                f"real-swap oracle phase=terminal child_exit={child_exit} "
+                f"evidence_complete=false: closed output before {prefix}{detail}")
         pending.extend(chunk)
 
 
@@ -2664,13 +2711,8 @@ def _require_oracle_terminal_exit(
             "real-swap oracle phase=terminal child_exit=timeout "
             "evidence_complete=false: did not exit after byte verification") from exc
     if return_code != 0:
-        stderr = ""
-        if process.stderr is not None:
-            stderr = process.stderr.read(MAX_ORACLE_RECORD_BYTES + 1)
-            if len(stderr) > MAX_ORACLE_RECORD_BYTES:
-                stderr = stderr[:MAX_ORACLE_RECORD_BYTES] + "...[truncated]"
-            stderr = stderr.strip()
-        detail = f": {stderr}" if stderr else ""
+        summary = _bounded_oracle_failure_summary(process)
+        detail = f": {summary}" if summary else ""
         raise QualificationFailure(
             f"real-swap oracle phase=terminal child_exit={return_code} "
             f"evidence_complete=false{detail}")

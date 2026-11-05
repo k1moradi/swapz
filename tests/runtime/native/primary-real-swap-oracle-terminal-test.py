@@ -462,16 +462,24 @@ class TerminalEvidenceContracts(unittest.TestCase):
             "observed_byte_mismatches=0 error=OSError errno=5 "
             "cleanup_complete=true"
         )
+        private_traceback = (
+            "Traceback (most recent call last):\n"
+            '  File "/private/oracle.py", line 1, in <module>\n'
+        )
         with os.fdopen(read_descriptor, "rb", buffering=0) as output:
-            process = mock.Mock(stdout=output, stderr=io.StringIO(oracle_failure))
+            process = mock.Mock(
+                stdout=output,
+                stderr=io.StringIO(private_traceback + oracle_failure))
             process.wait.return_value = 7
             with self.assertRaisesRegex(
                     qualify.QualificationFailure,
                     "phase=terminal.*child_exit=7.*evidence_complete=false.*"
-                    "phase=verify.*errno=5.*cleanup_complete=true"):
+                    "phase=verify.*errno=5.*cleanup_complete=true") as caught:
                 qualify._require_oracle_terminal_exit(
                     process, qualify.time.monotonic() + 1,
                     lambda: None, bytearray())
+        self.assertNotIn("Traceback", str(caught.exception))
+        self.assertNotIn("/private/oracle.py", str(caught.exception))
 
     def test_exit_zero_and_partial_child_diagnostic_cannot_replace_verified(self):
         read_descriptor, write_descriptor = os.pipe()
@@ -485,15 +493,49 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 process.poll.return_value = 0
                 with self.assertRaisesRegex(
                         qualify.QualificationFailure,
-                        "closed output before ORACLE_VERIFIED=.*rc=0"):
+                        "phase=terminal.*child_exit=0.*evidence_complete=false.*"
+                        "closed output before ORACLE_VERIFIED") as caught:
                     qualify._oracle_event(
                         process, "ORACLE_VERIFIED=",
                         qualify.time.monotonic() + 1,
                         lambda: None, bytearray())
-                self.assertEqual(partial_diagnostic.tell(), 0)
+            self.assertNotIn(
+                "FAIL: oracle phase=verify", str(caught.exception))
+            self.assertNotIn("verified_pages=", str(caught.exception))
         finally:
             if write_descriptor >= 0:
                 os.close(write_descriptor)
+
+    def test_preverified_nonzero_exit_preserves_only_structured_summary(self):
+        read_descriptor, write_descriptor = os.pipe()
+        os.close(write_descriptor)
+        oracle_failure = (
+            "FAIL: oracle phase=verify verified_pages=1/2 "
+            "verified_bytes=4096/8192 expected_page_mismatches=0 "
+            "observed_page_mismatches=0 expected_byte_mismatches=0 "
+            "observed_byte_mismatches=0 error=InterruptedError errno=4 "
+            "cleanup_complete=false"
+        )
+        private_traceback = (
+            "Traceback (most recent call last):\n"
+            '  File "/private/oracle.py", line 1, in <module>\n'
+        )
+        with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+            process = mock.Mock(
+                stdout=output,
+                stderr=io.StringIO(private_traceback + oracle_failure))
+            process.poll.return_value = 7
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "phase=terminal.*child_exit=7.*evidence_complete=false.*"
+                    "phase=verify.*verified_pages=1/2.*verified_bytes=4096/8192.*"
+                    "errno=4.*cleanup_complete=false") as caught:
+                qualify._oracle_event(
+                    process, "ORACLE_VERIFIED=",
+                    qualify.time.monotonic() + 1,
+                    lambda: None, bytearray())
+        self.assertNotIn("Traceback", str(caught.exception))
+        self.assertNotIn("/private/oracle.py", str(caught.exception))
 
     def test_byte_exact_report_without_independent_swap_traffic_is_rejected(self):
         page_bytes = oracle.PAGE_BYTES
