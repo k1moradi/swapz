@@ -264,9 +264,12 @@ reference to a task. Comparing two `/proc/<pid>/ns/mnt` stat device/inode
 tuples identifies the observed mount namespace, not the lifetime of the PID,
 its parent, or the atomicity of its mount table. Two equal stat observations
 can span task reuse into the same namespace or an intervening namespace ABA
-transition. This reader does not own a pidfd/task handle or namespace fd;
-even a future pinned reference would not by itself freeze mounts or make
-the final inventory and mutation atomic. The rootless parent-reparent
+transition. This reader does not own a pidfd or namespace fd while
+identifying peers. A pidfd pins task identity, while a namespace fd pins the
+namespace's lifetime and identity; neither pins the task's filesystem root or
+freezes mount changes. An opened mountinfo fd pins the namespace and filesystem
+root selected at that open, but it does not pin the earlier PID/TID lookup or
+make the later inventory-to-mutation interval atomic. The rootless parent-reparent
 reproducer establishes only that an observed parent tuple may change without
 parent replacement; it does not establish a matching primary mount-reader
 path or a destructive admission. Preserve **UNPROVEN** for unclosed snapshot
