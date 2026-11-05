@@ -385,9 +385,10 @@ def diagnose_ci_failure(lines, exit_code, suite):
     rootless_pattern = re.compile(
         r"^FAIL: rootless phase=(?P<phase>[A-Za-z0-9_.: -]{1,128}) "
         r"subtest=(?P<subtest>[a-z0-9-]{1,64}|unavailable) "
-        r"test=(?P<test>test_[A-Za-z0-9_]{1,96}|unavailable) "
+        r"test=(?P<test>test_[A-Za-z0-9_]{1,96}|"
+        r"swapz-primary-late-race-test[.]py|unavailable) "
         r"exit=(?P<exit>[0-9]{1,3}) "
-        r"reason=(?P<reason>nonzero_exit|timeout_or_exit_124|"
+        r"reason=(?P<reason>nonzero_exit|native_compile|timeout_or_exit_124|"
         r"signal_or_child_exit|received_TERM|received_INT|"
         r"unittest_assertion|unittest_error|unittest_timeout|"
         r"stderr_relay_failure|stderr_relay_cleanup_failure) "
@@ -485,6 +486,12 @@ def diagnose_ci_failure(lines, exit_code, suite):
         unittest_category = None
     compile_phase = (
         phase == "Makefile native and metadata" or phase.startswith("C syntax:"))
+    rootless_native_compile = (
+        rootless_failure is not None and rootless_reason == "native_compile"
+        and child_exit_code == 2
+        and phase == "Makefile native and metadata"
+        and rootless_failure["subtest"] == "compile"
+        and rootless_failure["test"] == "swapz-primary-late-race-test.py")
     # The producer runs bash -n for this fixed phase family. A status-two
     # failure identifies that source check, not a test assertion or parser
     # detail. Syntax-loop phases never carry unittest or nested-subtest identity.
@@ -587,6 +594,13 @@ def diagnose_ci_failure(lines, exit_code, suite):
             status, category = "CANCELLED", "CANCELLATION"
             reason = (marker_reason +
                       " (runner received an interrupt; origin not proven)")
+        elif rootless_native_compile:
+            status, category = "FAIL", "NATIVE_COMPILE"
+            reason = marker_reason
+        elif rootless_reason == "native_compile":
+            status, category = "FAIL", "UNKNOWN_FAILURE"
+            reason = (marker_reason +
+                      " (native compile attribution fields did not authenticate)")
         elif rootless_reason in ("unittest_assertion", "unittest_error"):
             status = "FAIL"
             category = ("SOURCE_CONTRACT"

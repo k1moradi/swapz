@@ -37,8 +37,8 @@ begin_rootless_private_stderr_capture() {
     mktemp -d "$ROOT/build/tests/rootless-failure.XXXXXXXX" 2>/dev/null
   ) || return 0
   rootless_capture_path="$rootless_capture_directory/diagnostic.log"
-  # The captured unittests write progress and traceback to stderr. Relay those
-  # bytes unchanged while retaining one private copy for a failed run.
+  # Captured stages write diagnostics to stderr. Relay those bytes unchanged
+  # while retaining one private copy for a failed run.
   coproc ROOTLESS_STDERR_CAPTURE {
     umask 077
     # Relay diagnostics are private; never print a failed tee pathname.
@@ -187,12 +187,14 @@ classify_rootless_private_unittest_failure() {
 }
 
 # The initial Make stage can fail inside this source-extracted C fixture. Its
-# Python assertion is not a unittest progress record. Require the traceback
-# and failed test-userspace target; ignore preceding expected FAIL: lines.
+# Python assertion is not a unittest progress record. Authenticate the compile
+# traceback only if it owns the first failed Make target; earlier Make failures
+# keep first-error precedence even when another parallel job fails later.
 classify_rootless_private_make_failure() {
   local diagnostic_path=$1
   local line
   local traceback_line_regex='^[[:space:]]*File "([^"]*/)?swapz-primary-late-race-test[.]py", line [0-9]+, in (compile_and_run|main|<module>)$'
+  local make_error_regex='^make(\[[0-9]+\])?: \*\*\* \[[^]]+\] Error [0-9]+$'
   local make_target_error_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:[0-9]+: test-userspace\] Error [0-9]+$'
   local traceback_seen=0
   local compile_assertion_seen=0
@@ -214,13 +216,14 @@ classify_rootless_private_make_failure() {
       compile_assertion_seen=1
     elif (( compile_assertion_seen )) && [[ $line == *': error:'* ]]; then
       compiler_error_seen=1
-    elif [[ $line =~ $make_target_error_regex ]]; then
-      if (( traceback_seen && compile_assertion_seen && compiler_error_seen )); then
-        # Only these source-controlled tokens cross the CI boundary.
-        rootless_classified_reason=unittest_assertion
+    elif [[ $line =~ $make_error_regex ]]; then
+      if [[ $line =~ $make_target_error_regex ]] &&
+         (( traceback_seen && compile_assertion_seen && compiler_error_seen )); then
+        # The declaration and arbitrary source paths remain private. The exact
+        # source-controlled script name and fixed compile category are public.
+        rootless_classified_reason=native_compile
         rootless_classified_subtest=compile
-        rootless_classified_test=test_swapz_primary_late_race
-        rootless_classified_kind=FAIL
+        rootless_classified_test=swapz-primary-late-race-test.py
       fi
       return 0
     fi
@@ -253,8 +256,8 @@ report_rootless_failure() {
   local private_diagnostic_path=${rootless_private_diagnostic_path:-}
   local private_diagnostic_log=${rootless_private_diagnostic_log:-unavailable}
   local private_directory
-  # Ordinary failures allocate only after the failure. The captured native Make stage and
-  # unittests may already have private stderr, retained only on fail.
+  # Ordinary failures allocate only after the failure. The captured native
+  # Make stage and unittests may already have private stderr, retained only on fail.
   if [[ -z $private_diagnostic_path ]]; then
     mkdir -p "$ROOT/build/tests" >/dev/null 2>&1
     if [[ -d $ROOT/build/tests && ! -L $ROOT/build/tests ]] &&
@@ -279,14 +282,32 @@ report_rootless_failure() {
       private_diagnostic_path=
       private_diagnostic_log=unavailable
     elif (( captured_bytes > 262144 )); then
-      # Keep both ends of the execution-first unittest traceback. The suffix
-      # retains the terminal assertion/exception even if an unusually deep
-      # traceback pushes it beyond the old 64-KiB prefix.
-      if LC_ALL=C awk -v prefix_limit=32768 -v suffix_limit=32768 \
+      # Keep a bounded execution-first failure excerpt plus the transcript
+      # tail. Unittest blocks retain both ends; the generated-C fixture also
+      # pins its first compiler error so later parallel Make output cannot
+      # displace the actual declaration from private evidence.
+      if LC_ALL=C awk -v target_reason="$failure_reason" \
            -v target_kind="$failed_unittest_kind" \
            -v target_test="$failed_test" \
            -v target_subtest="$failed_subtest" '
+           BEGIN {
+             compile_mode = (target_reason == "native_compile" &&
+                             target_test == "swapz-primary-late-race-test.py" &&
+                             target_subtest == "compile")
+             if (compile_mode) {
+               prefix_limit = 24576
+               suffix_limit = 24576
+               critical_limit = 16384
+             } else {
+               prefix_limit = 32768
+               suffix_limit = 32768
+               critical_limit = 0
+             }
+           }
            function matches_target(text, pattern) {
+             if (compile_mode) {
+               return text ~ /^[[:space:]]*File "([^"]*\/)?swapz-primary-late-race-test[.]py", line [0-9]+, in (compile_and_run|main|<module>)$/
+             }
              if (target_test != "unavailable" &&
                  target_kind != "unavailable") {
                pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\." target_test "\\)"
@@ -297,6 +318,12 @@ report_rootless_failure() {
              }
              return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\.test_[A-Za-z0-9_]+\)/
            }
+           function target_ends(text) {
+             if (compile_mode) {
+               return text ~ /^make(\[[0-9]+\])?: \*\*\* \[Makefile:[0-9]+: test-userspace\] Error [0-9]+$/
+             }
+             return text == "======================================================================"
+           }
            function retain_suffix(text, excess) {
              suffix = suffix text
              excess = length(suffix) - suffix_limit
@@ -306,10 +333,13 @@ report_rootless_failure() {
              if (!seen) {
                if (!matches_target($0)) next
                seen = 1
-             } else if ($0 == "======================================================================") {
+             } else if (!compile_mode && target_ends($0)) {
                exit
              }
              line = $0 "\n"
+             if (compile_mode && critical == "" && $0 ~ /: error:/) {
+               critical = substr(line, 1, critical_limit)
+             }
              remaining = prefix_limit - written
              if (remaining > 0) {
                if (length(line) <= remaining) {
@@ -323,8 +353,9 @@ report_rootless_failure() {
              } else {
                retain_suffix(line)
              }
+             if (compile_mode && target_ends($0)) exit
            }
-           END { printf "%s", suffix }
+           END { printf "%s%s", critical, suffix }
          ' "$private_diagnostic_path" > "$private_diagnostic_path.tail" 2>/dev/null &&
          tail -c 192512 -- "$private_diagnostic_path" \
            >> "$private_diagnostic_path.tail" 2>/dev/null &&

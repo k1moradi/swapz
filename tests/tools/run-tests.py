@@ -2372,19 +2372,20 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 primary_lifecycle_command_failure = match.groups()
 
     unittest_failure = None
+    rootless_compile_failure = None
     if not loaded:
         # Stage 2 is an aggregate transcript. A passing earlier suite may emit
         # synthetic FAIL/ERROR text, so a rootless failure marker owns the
-        # failing-suite boundary. Use its classified test when available; if
-        # it says test=unavailable, do not guess a unittest cause from earlier
-        # transcript lines.
+        # failing-suite boundary. Use only an authenticated nested identity; if
+        # it says test=unavailable, do not guess from earlier transcript lines.
         rootless_failure_marker_seen = False
         rootless_reported_test = None
         rootless_marker_re = re.compile(
-            r"FAIL: rootless phase=[A-Za-z0-9 ._:+-]{1,96} "
-            r"subtest=(?:unavailable|[a-z0-9-]{1,64}) "
-            r"test=(unavailable|test_[A-Za-z0-9_]{1,96}) "
-            r"exit=[0-9]{1,3} reason=[a-z0-9_]{1,64} "
+            r"FAIL: rootless phase=([A-Za-z0-9 ._:+-]{1,96}) "
+            r"subtest=(unavailable|[a-z0-9-]{1,64}) "
+            r"test=(unavailable|test_[A-Za-z0-9_]{1,96}|"
+            r"swapz-primary-late-race-test[.]py) "
+            r"exit=([0-9]{1,3}) reason=([a-z0-9_]{1,64}) "
             r"phase_s=[0-9]+ stage_s=[0-9]+ line=[0-9]+ "
             r"log=(?:unavailable|build/tests/rootless-failure\."
             r"[A-Za-z0-9]{8}/diagnostic[.]log)")
@@ -2396,11 +2397,20 @@ def failure_context(output, *, loaded=True, default_phase=None):
             # Only the complete sanitized grammar may contribute test identity.
             rootless_failure_marker_seen = True
             rootless_reported_test = None
+            rootless_compile_failure = None
             match = rootless_marker_re.fullmatch(candidate)
             if match:
-                rootless_reported_test = match.group(1)
+                marker_phase, marker_subtest, marker_test, marker_exit, marker_reason = (
+                    match.groups())
+                rootless_reported_test = marker_test
+                if (marker_phase == "Makefile native and metadata" and
+                        marker_subtest == "compile" and marker_test ==
+                        "swapz-primary-late-race-test.py" and
+                        marker_exit == "2" and marker_reason == "native_compile"):
+                    rootless_compile_failure = marker_test
         if rootless_failure_marker_seen:
-            if rootless_reported_test != "unavailable":
+            if (rootless_compile_failure is None and
+                    rootless_reported_test != "unavailable"):
                 unittest_failure = rootless_reported_test
         else:
             for line in output.splitlines():
@@ -2439,7 +2449,9 @@ def failure_context(output, *, loaded=True, default_phase=None):
                     native_diagnostic)[:155]
                 break
 
-    if unittest_failure is not None:
+    if rootless_compile_failure is not None:
+        reason = "Native fixture compile failed: " + rootless_compile_failure
+    elif unittest_failure is not None:
         nested_phase = None
         nested_reason = None
         incremental_phase = None

@@ -1037,13 +1037,19 @@ finalized. For the initial `make -C tests test` stage, leave stdout unchanged
 and relay only stderr. Only a matching `swapz-primary-late-race-test.py`
 traceback, generated-C compile assertion, compiler `error:` line, and
 failed `test-userspace` Make target may authenticate the nested failure.
-The public marker retains the Make phase, the original Make exit 2, and fixed
-`test=test_swapz_primary_late_race subtest=compile
-reason=unittest_assertion` (the Python assertion wrapping compilation),
-not the private compiler declaration or arbitrary paths. A prior passing
-suite's expected `FAIL:` text cannot authenticate a later failing suite.
-Incomplete relays or absent matching evidence retain
-`test=unavailable reason=nonzero_exit`.  Python `unittest` preserves execution order in verbose `... FAIL`/`... ERROR`
+The first observed Make target failure owns the classification: if another
+target has already emitted a real `make: *** ... Error` record, a later
+parallel late-race failure must not replace it. The public marker retains the
+Make phase, the original Make exit 2, and fixed
+`test=swapz-primary-late-race-test.py subtest=compile
+reason=native_compile`; the outer CI envelope maps this authenticated reason
+to `NATIVE_COMPILE`. The compiler declaration and arbitrary source paths stay
+only in the private diagnostic. Oversized captures must retain a bounded
+late-race traceback excerpt plus the first compiler `error:` line even when
+more than the normal transcript tail follows from other parallel jobs.
+A prior passing suite's expected `FAIL:` text cannot authenticate a later
+failing suite. Incomplete relays or absent matching evidence retain
+`test=unavailable reason=nonzero_exit`. Python `unittest` preserves execution order in verbose `... FAIL`/`... ERROR`
 progress records but groups detailed `ERROR:` blocks ahead of `FAIL:` blocks in
 its summary. Classification must therefore bind the first failed progress record
 to its matching detailed traceback; a later teardown error must not win merely
@@ -1056,9 +1062,9 @@ wins over earlier suite output and later teardown; when it carries
 `test=unavailable`, earlier transcript `FAIL:`/`ERROR:` lines must not be
 guessed as the cause. A directly invoked, unwrapped unittest may still use its
 first detailed failure block. The final rootless failure prefix suppresses cross-suite unittest guessing and
-clears earlier marker identity; only its complete sanitized grammar may contribute classified test identity. The public marker may expose only an
-allowlisted `phase='[a-z0-9-]+'` value and classify that first private failure
-as `unittest_timeout`, `unittest_assertion`, `unittest_error`, or the
+clears earlier marker identity; only its complete sanitized grammar may contribute classified test identity. The public marker may expose only allowlisted phase/test/subtest tokens and
+classify that first private failure as `native_compile`,
+`unittest_timeout`, `unittest_assertion`, `unittest_error`, or the
 generic nonzero reason. Exit 124 remains ambiguous unless that first private
 unittest traceback itself contains `subprocess.TimeoutExpired`. Successful
 stdout/stderr bytes and exit status remain unchanged and no failure log is
@@ -1100,9 +1106,11 @@ Only the `native-rootless` wrapper may promote that marker. Its phase is the
 source-controlled basename emitted by `test-rootless.sh`: allow ordinary
 letters, digits, spaces, dot, underscore, hyphen and the colon used by C-syntax
 phases, but never a path separator. Keep the last valid marker because the
-runner emits its authoritative summary after arbitrary child output. Current
-fixed reason classes include the unittest reasons, timeout-or-exit-124,
-signal-or-child-exit, received INT/TERM, and stderr relay/relay-cleanup failure.
+runner emits its authoritative summary after arbitrary child output. Current fixed reason classes include `native_compile`, the unittest reasons,
+timeout-or-exit-124, signal-or-child-exit, received INT/TERM, and stderr
+relay/relay-cleanup failure. `native_compile` is accepted only for the exact
+Make phase, `subtest=compile`, `test=swapz-primary-late-race-test.py`, and
+child exit 2; other combinations are not authenticated as a compiler failure.
 
 An OSError at child launch retains its original `launch_errno` and sanitized
 OS error text without publishing the executable or command string. Negative
@@ -1118,10 +1126,13 @@ unittest identity because Python may print a later `ERROR:` detail before an
 earlier `FAIL:` detail. Later teardown, cleanup, parser exceptions, and
 make-summary errors must not replace that identity or donate a later exception.
 For ordinary non-rootless unittest output without such a marker, the first
-detailed failing block remains the fallback diagnostic. Genuine first native compiler diagnostics are preserved even
-when an outer rootless marker follows. For a marker-only rootless failure, an
-unrelated earlier expected `FAIL:`/`BLOCKED:` from a passing suite must not
-become the cause. A generic nonzero phase may retain a diagnostic only when it
+detailed failing block remains the fallback diagnostic. Genuine first native
+compiler diagnostics are preserved for generic compile phases even when an
+outer rootless marker follows. For the authenticated generated-C late-race
+fixture, the public envelope uses only the fixed `native_compile` marker and
+private-log pointer; it must not publish the compiler declaration or source
+path. For a marker-only rootless failure, an unrelated earlier expected
+`FAIL:`/`BLOCKED:` from a passing suite must not become the cause. A generic nonzero phase may retain a diagnostic only when it
 is tied to that source-controlled phase (or is the first native compiler error
 of its compile phase); otherwise the safe phase/reason/child-status marker is
 the observed diagnostic rather than guessing from earlier output. Relay and

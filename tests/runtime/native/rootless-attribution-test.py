@@ -17,6 +17,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
 MAKE_PHASE = "tests/Makefile native and metadata"
+LATE_RACE_TEST = "swapz-primary-late-race-test.py"
 PACKAGE_PHASE = "tests/runtime/native/package-dkms-test.py"
 PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
 OWNERSHIP_PHASE = "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
@@ -139,17 +140,8 @@ PY
 MAKE_FIXTURE = r'''
 [[ $# == 3 && $1 == -C && $2 == tests && $3 == test ]] || exit 89
 printf 'MAKE_STDOUT\n'
-case "$SWAPZ_RELAY_SCENARIO" in
-  pass)
-    printf 'MAKE_STDERR\n' >&2
-    exit 0 ;;
-  compile|oversized)
-    printf '%s\n' 'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' >&2
-    if [[ $SWAPZ_RELAY_SCENARIO == oversized ]]; then
-      head -c 307200 /dev/zero | tr '\0' 'x' >&2
-      printf '\n' >&2
-    fi
-    cat >&2 <<'TRACEBACK'
+emit_late_race_compile_failure() {
+  cat >&2 <<'TRACEBACK'
 Traceback (most recent call last):
   File "/private/checkout/tests/runtime/native/userspace/swapz-primary-late-race-test.py", line 1428, in <module>
     raise SystemExit(main())
@@ -163,6 +155,30 @@ make[2]: *** [Makefile:160: test-userspace] Error 1
 make[1]: *** [Makefile:10: test-native] Error 2
 make: *** [Makefile:16: test] Error 2
 TRACEBACK
+}
+case "$SWAPZ_RELAY_SCENARIO" in
+  pass)
+    printf 'MAKE_STDERR\n' >&2
+    exit 0 ;;
+  compile|oversized)
+    printf '%s\n' 'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' >&2
+    if [[ $SWAPZ_RELAY_SCENARIO == oversized ]]; then
+      head -c 307200 /dev/zero | tr '\0' 'x' >&2
+      printf '\n' >&2
+    fi
+    emit_late_race_compile_failure
+    if [[ $SWAPZ_RELAY_SCENARIO == oversized ]]; then
+      # Parallel Make jobs may continue emitting after the first failed target.
+      # The bounded private excerpt must still retain the compiler error.
+      head -c 307200 /dev/zero | tr '\0' 'z' >&2
+      printf '\n' >&2
+    fi
+    exit 2 ;;
+  first_make_failure)
+    printf '%s\n' \
+      'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' \
+      'make[2]: *** [Makefile:154: test-mapping] Error 1' >&2
+    emit_late_race_compile_failure
     exit 2 ;;
   unrelated)
     printf '%s\n' \
@@ -275,7 +291,8 @@ class RootlessAttribution(unittest.TestCase):
         header = next(line for line in markers if line.startswith("FAIL: rootless "))
         self.assertRegex(header,
                          rf"^FAIL: rootless phase={re.escape(Path(stage).name)} "
-                         rf"subtest={subtest} test={test} exit={status} reason={reason} "
+                         rf"subtest={re.escape(subtest)} test={re.escape(test)} "
+                         rf"exit={status} reason={reason} "
                          r"phase_s=[0-9]+ stage_s=[0-9]+ line=[0-9]+ log=")
         self.assertNotIn(PRIVATE_SENTINEL, "\n".join(markers))
         self.assertNotIn(str(self.root), "\n".join(markers))
@@ -311,8 +328,8 @@ class RootlessAttribution(unittest.TestCase):
     def test_make_compiler_failure_identifies_only_authenticated_fixture(self):
         result = self.invoke("compile", stage=MAKE_PHASE)
         log = self.assert_report(
-            result, status=2, reason="unittest_assertion", subtest="compile",
-            test="test_swapz_primary_late_race", stage=MAKE_PHASE)
+            result, status=2, reason="native_compile", subtest="compile",
+            test=LATE_RACE_TEST, stage=MAKE_PHASE)
         self.assertIn("implicit declaration of function", log.read_text())
         self.assertIn("swapz_primary_shared_root_scope_record_live", log.read_text())
         self.assertIn(PRIVATE_SENTINEL, log.read_text())
@@ -328,11 +345,23 @@ class RootlessAttribution(unittest.TestCase):
         self.assertIn("FAIL: test_expected", log.read_text())
         self.assertNotIn("AFTER_PACKAGE", result.stdout)
 
+    def test_make_first_failed_target_precedes_later_compile(self):
+        result = self.invoke("first_make_failure", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+        evidence = log.read_text()
+        self.assertLess(evidence.index("test-mapping"),
+                        evidence.index("swapz-primary-late-race-test.py"))
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertIn("test=unavailable", marker)
+        self.assertNotIn(LATE_RACE_TEST, marker)
+
     def test_make_oversized_stderr_retains_first_compiler_error(self):
         result = self.invoke("oversized", stage=MAKE_PHASE)
         log = self.assert_report(
-            result, status=2, reason="unittest_assertion", subtest="compile",
-            test="test_swapz_primary_late_race", stage=MAKE_PHASE)
+            result, status=2, reason="native_compile", subtest="compile",
+            test=LATE_RACE_TEST, stage=MAKE_PHASE)
         self.assertLessEqual(log.stat().st_size, 262144)
         self.assertIn("swapz_primary_shared_root_scope_record_live",
                       log.read_text())
@@ -360,11 +389,11 @@ class RootlessAttribution(unittest.TestCase):
         result = self.invoke("compile", stage=MAKE_PHASE)
         diagnostic = diagnostics.diagnose_ci_failure(
             result.stderr.splitlines(), result.returncode, "native-rootless")
-        self.assertEqual(diagnostic["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(diagnostic["category"], "NATIVE_COMPILE")
         self.assertEqual(diagnostic["child_exit_code"], 2)
-        self.assertEqual(diagnostic["rootless_reason"], "unittest_assertion")
+        self.assertEqual(diagnostic["rootless_reason"], "native_compile")
         self.assertEqual(diagnostic["phase"], "Makefile native and metadata")
-        self.assertEqual(diagnostic["test"], "test_swapz_primary_late_race")
+        self.assertEqual(diagnostic["test"], LATE_RACE_TEST)
         self.assertNotIn("test_expected", diagnostic["first_error"])
         self.assertNotIn(PRIVATE_SENTINEL, diagnostic["first_error"])
         self.assertNotIn("/private/", diagnostic["first_error"])
@@ -517,6 +546,40 @@ exec "$SWAPZ_REAL_RM" "$@"
         evidence = log.read_text()
         self.assertIn("AssertionError: " + PRIVATE_SENTINEL, evidence)
         self.assertIn("unittest_kind=FAIL\n", evidence)
+
+    def test_official_native_stage_reports_make_fixture_compile_safely(self):
+        reporter_spec = importlib.util.spec_from_file_location(
+            "swapz_rootless_make_compile_reporter", ROOT / "tests/tools/run-tests.py")
+        self.assertIsNotNone(reporter_spec.loader)
+        reporter = importlib.util.module_from_spec(reporter_spec)
+        reporter_spec.loader.exec_module(reporter)
+        fixture_code = (
+            "import sys\n"
+            "sys.stderr.write("
+            "'/private/source/production.c:4923:13: error: implicit declaration "
+            "of function PRIVATE_ONLY_TRACEBACK_PAYLOAD\\n'"
+            "'FAIL: rootless phase=Makefile native and metadata "
+            "subtest=compile test=swapz-primary-late-race-test.py exit=2 "
+            "reason=native_compile phase_s=1 stage_s=2 line=441 "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log\\n'"
+            "'Failed during: tests/Makefile native and metadata subtest compile\\n'"
+            "'Reason: exit=2 reason=native_compile subtest=compile "
+            "phase_wall_s=1 stage_wall_s=2 line=441 "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log\\n')\n"
+            "sys.exit(2)\n"
+        )
+        report = {"stages": []}
+        with contextlib.redirect_stdout(io.StringIO()):
+            status = reporter.run_stage(
+                "Native and rootless contracts",
+                [sys.executable, "-c", fixture_code], report)
+        self.assertEqual(status, 2)
+        diagnostic = report["stages"][0]["diagnostic"]
+        self.assertEqual(
+            diagnostic,
+            "Native fixture compile failed: swapz-primary-late-race-test.py")
+        self.assertNotIn(PRIVATE_SENTINEL, diagnostic)
+        self.assertNotIn("/private/", diagnostic)
 
     def test_official_native_stage_keeps_first_unittest_failure(self):
         reporter_spec = importlib.util.spec_from_file_location(

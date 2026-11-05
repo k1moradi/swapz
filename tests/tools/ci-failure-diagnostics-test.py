@@ -104,6 +104,35 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
                          "src/kernel/foo.c:19:3: error: incompatible pointer type")
         self.assertEqual(failure["child_exit_code"], 2)
 
+    def test_authenticated_rootless_fixture_compile_stays_private(self):
+        marker = (
+            "FAIL: rootless phase=Makefile native and metadata "
+            "subtest=compile test=swapz-primary-late-race-test.py "
+            "exit=2 reason=native_compile phase_s=1 stage_s=2 line=441 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        failure = self.diagnose(
+            "/private/source/production.c:4923:13: error: implicit declaration "
+            "of function PRIVATE_DECLARATION\n" + marker, 2)
+        self.assertEqual(failure["status"], "FAIL")
+        self.assertEqual(failure["category"], "NATIVE_COMPILE")
+        self.assertEqual(failure["phase"], "Makefile native and metadata")
+        self.assertEqual(failure["test"], "swapz-primary-late-race-test.py")
+        self.assertEqual(failure["exit_code"], 2)
+        self.assertEqual(failure["child_exit_code"], 2)
+        self.assertEqual(failure["rootless_reason"], "native_compile")
+        self.assertIn("reason=native_compile", failure["first_error"])
+        self.assertIn("swapz-primary-late-race-test.py",
+                      failure["first_error"])
+        self.assertIn("build/tests/rootless-failure.Abc123xy/diagnostic.log",
+                      failure["first_error"])
+        self.assertNotIn("PRIVATE_DECLARATION", failure["first_error"])
+        self.assertNotIn("/private/", failure["first_error"])
+
+        unauthenticated = self.diagnose(
+            marker.replace("subtest=compile", "subtest=unavailable"), 2)
+        self.assertEqual(unauthenticated["category"], "UNKNOWN_FAILURE")
+        self.assertIn("did not authenticate", unauthenticated["reason"])
+
     def test_rootless_signal_style_exit_remains_ambiguous(self):
         marker = (
             "FAIL: rootless phase=package-dkms-test.py subtest=unavailable test=unavailable "
