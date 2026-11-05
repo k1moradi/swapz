@@ -2373,6 +2373,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
 
     unittest_failure = None
     rootless_compile_failure = None
+    rootless_invalid_late_race_identity = False
     if not loaded:
         # Stage 2 is an aggregate transcript. A passing earlier suite may emit
         # synthetic FAIL/ERROR text, so a rootless failure marker owns the
@@ -2398,16 +2399,20 @@ def failure_context(output, *, loaded=True, default_phase=None):
             rootless_failure_marker_seen = True
             rootless_reported_test = None
             rootless_compile_failure = None
+            rootless_invalid_late_race_identity = False
             match = rootless_marker_re.fullmatch(candidate)
             if match:
                 marker_phase, marker_subtest, marker_test, marker_exit, marker_reason = (
                     match.groups())
-                rootless_reported_test = marker_test
-                if (marker_phase == "Makefile native and metadata" and
-                        marker_subtest == "compile" and marker_test ==
-                        "swapz-primary-late-race-test.py" and
-                        marker_exit == "2" and marker_reason == "native_compile"):
-                    rootless_compile_failure = marker_test
+                if marker_test == "swapz-primary-late-race-test.py":
+                    if (marker_phase == "Makefile native and metadata" and
+                            marker_subtest == "compile" and marker_exit == "2" and
+                            marker_reason == "native_compile"):
+                        rootless_compile_failure = marker_test
+                    else:
+                        rootless_invalid_late_race_identity = True
+                else:
+                    rootless_reported_test = marker_test
         if rootless_failure_marker_seen:
             if (rootless_compile_failure is None and
                     rootless_reported_test != "unavailable"):
@@ -2451,6 +2456,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
 
     if rootless_compile_failure is not None:
         reason = "Native fixture compile failed: " + rootless_compile_failure
+    elif rootless_invalid_late_race_identity:
+        reason = "Rootless late-race failure identity was not authenticated"
     elif unittest_failure is not None:
         nested_phase = None
         nested_reason = None

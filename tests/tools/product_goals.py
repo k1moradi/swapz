@@ -486,12 +486,20 @@ def diagnose_ci_failure(lines, exit_code, suite):
         unittest_category = None
     compile_phase = (
         phase == "Makefile native and metadata" or phase.startswith("C syntax:"))
+    rootless_late_race_identity = (
+        rootless_failure is not None and
+        rootless_failure["test"] == "swapz-primary-late-race-test.py")
     rootless_native_compile = (
-        rootless_failure is not None and rootless_reason == "native_compile"
+        rootless_late_race_identity and rootless_reason == "native_compile"
         and child_exit_code == 2
         and phase == "Makefile native and metadata"
-        and rootless_failure["subtest"] == "compile"
-        and rootless_failure["test"] == "swapz-primary-late-race-test.py")
+        and rootless_failure["subtest"] == "compile")
+    rootless_invalid_late_race_identity = (
+        rootless_late_race_identity and not rootless_native_compile)
+    if rootless_invalid_late_race_identity:
+        # The filename is public only as part of the exact authenticated
+        # generated-C compile envelope.
+        rootless_test = None
     # The producer runs bash -n for this fixed phase family. A status-two
     # failure identifies that source check, not a test assertion or parser
     # detail. Syntax-loop phases never carry unittest or nested-subtest identity.
@@ -597,6 +605,10 @@ def diagnose_ci_failure(lines, exit_code, suite):
         elif rootless_native_compile:
             status, category = "FAIL", "NATIVE_COMPILE"
             reason = marker_reason
+        elif rootless_invalid_late_race_identity:
+            status, category = "FAIL", "UNKNOWN_FAILURE"
+            reason = (marker_reason +
+                      " (late-race attribution fields did not authenticate)")
         elif rootless_reason == "native_compile":
             status, category = "FAIL", "UNKNOWN_FAILURE"
             reason = (marker_reason +

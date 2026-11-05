@@ -131,7 +131,20 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         unauthenticated = self.diagnose(
             marker.replace("subtest=compile", "subtest=unavailable"), 2)
         self.assertEqual(unauthenticated["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(unauthenticated["test"],
+                         "Makefile native and metadata")
         self.assertIn("did not authenticate", unauthenticated["reason"])
+        self.assertNotIn("swapz-primary-late-race-test.py",
+                         unauthenticated["first_error"])
+
+        wrong_reason = self.diagnose(
+            marker.replace("reason=native_compile",
+                           "reason=unittest_assertion"), 2)
+        self.assertEqual(wrong_reason["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(wrong_reason["test"], "Makefile native and metadata")
+        self.assertIn("did not authenticate", wrong_reason["reason"])
+        self.assertNotIn("swapz-primary-late-race-test.py",
+                         wrong_reason["first_error"])
 
     def test_rootless_signal_style_exit_remains_ambiguous(self):
         marker = (

@@ -581,6 +581,23 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assertNotIn(PRIVATE_SENTINEL, diagnostic)
         self.assertNotIn("/private/", diagnostic)
 
+        malformed_report = {"stages": []}
+        malformed_fixture_code = fixture_code.replace(
+            "reason=native_compile", "reason=unittest_assertion")
+        with contextlib.redirect_stdout(io.StringIO()):
+            malformed_status = reporter.run_stage(
+                "Native and rootless contracts",
+                [sys.executable, "-c", malformed_fixture_code],
+                malformed_report)
+        self.assertEqual(malformed_status, 2)
+        malformed_diagnostic = malformed_report["stages"][0]["diagnostic"]
+        self.assertEqual(
+            malformed_diagnostic,
+            "Rootless late-race failure identity was not authenticated")
+        self.assertNotIn(PRIVATE_SENTINEL, malformed_diagnostic)
+        self.assertNotIn("/private/", malformed_diagnostic)
+        self.assertNotIn(LATE_RACE_TEST, malformed_diagnostic)
+
     def test_official_native_stage_keeps_first_unittest_failure(self):
         reporter_spec = importlib.util.spec_from_file_location(
             "swapz_rootless_attribution_reporter", ROOT / "tests/tools/run-tests.py")
