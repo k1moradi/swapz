@@ -7349,8 +7349,10 @@ A source/target/policy/tool-bound campaign can establish producer-proven FAIL
 only from the current audit's retained first-failure witness. The first failure
 must match a retained FAIL diagnostic and either (a) be an authenticated
 non-setup `arm.verdict` producer FAIL with the same workload/pair/arm and one
-matching EXCLUDED pair-manifest entry with the producer-recorded non-setup
-failure phase, or (b) be a `qualification.decision_status` FAIL for a complete
+matching EXCLUDED pair-manifest entry with a producer-recorded
+measurement phase; preflight, fill, warmup, teardown and publication failures
+remain BLOCKED unusable evidence. Or (b), the witness may be a
+`qualification.decision_status` FAIL for a complete
 accepted measured cohort. Before either witness can drive release FAIL, the
 retained pair manifest must have type-strict PASS/EXCLUDED dispositions and
 unique workload pair indices, pair IDs, artifact basenames and SHA-256 digests,
@@ -8070,9 +8072,9 @@ every frozen-parent and prospective-amendment workload, including decisions
 omitted by the supplied summary. Missing decisions or short attempted/accepted
 cohorts are BLOCKED prerequisites, never automatically producer-proven FAIL.
 An excluded or evaluator-unusable pair is incomplete evidence and remains
-BLOCKED unless an independent producer or measured check proves failure. A
-authenticated terminal arm producer verdict of FAIL and a failed measured
-decision remain FAIL even when another cohort is missing. Raw-repeat spread beyond the frozen
+BLOCKED unless an independent producer or measured check proves failure. An
+authenticated terminal measurement-phase arm producer verdict of FAIL and a
+failed measured decision remain FAIL even when another cohort is missing. Raw-repeat spread beyond the frozen
 screening maximum remains BLOCKED/INCOMPLETE rather than becoming a
 producer-proven failure. The bounded audit retains the
 original qualification status and numeric expected/observed pair counts; its
