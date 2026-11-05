@@ -1386,7 +1386,9 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			 * swapz_finish() quarantines the whole allocated extent.
 			 */
 			completed = 0;
-			error = -EUCLEAN;
+			/* Preserve the first lower completion error over bad metadata. */
+			if (!error)
+				error = -EUCLEAN;
 		}
 		engine->completed_blocks += completed;
 		if (engine->verify_after_write && !error &&

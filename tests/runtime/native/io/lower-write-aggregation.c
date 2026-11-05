@@ -36,6 +36,7 @@ static unsigned int extent_calls, run_calls, read_calls;
 static unsigned int fail_on_run;
 static unsigned int partial_fail_on_run;
 static unsigned int overcomplete_fail_on_run;
+static unsigned int overcomplete_fail_on_extent;
 static unsigned int unsupported_on_run;
 static unsigned int corrupt_on_run;
 static unsigned int short_on_run;
@@ -69,9 +70,15 @@ static int write_extent(void *opaque, swapz_u32 block, swapz_u8 blocks,
 	sealed_pending_pages = 0;
 	if (block >= PHYSICAL || blocks > PHYSICAL - block)
 		return -ERANGE;
+	extent_calls++;
+	if (overcomplete_fail_on_extent &&
+	    extent_calls == overcomplete_fail_on_extent) {
+		/* The original unsupported completion outranks invalid counts. */
+		*completed = blocks + 1U;
+		return -EOPNOTSUPP;
+	}
 	memcpy(media + (size_t)block * SWAPZ_BLOCK_BYTES, src,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
-	extent_calls++;
 	lower_written_bytes += (unsigned long long)blocks * SWAPZ_BLOCK_BYTES;
 	*completed = blocks;
 	return 0;
@@ -209,6 +216,7 @@ static int setup(void)
 	e.bulk_enabled = 1;
 	extent_calls = run_calls = read_calls = 0;
 	fail_on_run = partial_fail_on_run = overcomplete_fail_on_run = 0;
+	overcomplete_fail_on_extent = 0;
 	unsupported_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
 	ownership_violation = 0;
@@ -267,6 +275,43 @@ static int test_real_aggregation_and_readback(void)
 	CHECK(e.bulk_writes == run_calls);
 	CHECK(e.bulk_padding_blocks == 0); /* default never pads IO */
 	CHECK(validate_prefix(64) == 0);
+	return 0;
+}
+
+/*
+ * The synchronous per-extent fallback retains an original lower errno when
+ * the same callback reports an impossible completion count. Zero credit and
+ * quarantine are still required; the synthetic callback writes no media.
+ */
+static int test_per_extent_overcomplete_failure_preserves_errno(void)
+{
+	swapz_u8 committed = 99;
+	const int original_lower_errno = -EOPNOTSUPP;
+	int error;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 0;
+	overcomplete_fail_on_extent = 1;
+	error = swapz_engine_write_window_batched(&e, pages, 1, &committed);
+	if (error != original_lower_errno || committed ||
+	    extent_calls != 1 || run_calls || e.completed_blocks ||
+	    !e.submitted_blocks || !a.abandoned_blocks ||
+	    a.in_flight || a.batch_pending || maps[0].valid ||
+	    maps[0].generation || published_calls || lower_written_bytes) {
+		fprintf(stderr,
+			"lower-write-aggregation scenario=per-extent-overcomplete "
+			"phase=lower-completion expected_class=original-error "
+			"observed_class=%s original_status=%d observed_status=%d "
+			"expected_completed_blocks=0 observed_completed_blocks=%u "
+			"upper_successes=%u expected_drain=quarantined "
+			"observed_drain=%s\n",
+			error == original_lower_errno ? "original-error" :
+				"replaced-or-other", original_lower_errno, error,
+			e.completed_blocks, published_calls,
+			a.in_flight || a.batch_pending ? "unresolved" :
+				a.abandoned_blocks ? "quarantined" : "not-quarantined");
+		return 1;
+	}
 	return 0;
 }
 
@@ -2131,6 +2176,7 @@ int main(void)
 	CHECK(test_immutable_run_prepare_then_complete() == 0); passed++;
 	CHECK(test_immutable_run_failure_quarantines_all() == 0); passed++;
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;
+	CHECK(test_per_extent_overcomplete_failure_preserves_errno() == 0); passed++;
 	CHECK(test_failed_run_acks_nothing() == 0); passed++;
 	CHECK(test_overwrite_failed_run_preserves_old_pages() == 0); passed++;
 	CHECK(test_publication_observer_follows_authority_publish() == 0); passed++;

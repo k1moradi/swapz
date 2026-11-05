@@ -2128,7 +2128,10 @@ counters, publication, or younger reservations; if the delivery also carries a
 lower error, retain that original error. For batched aggregation, an impossible
 completed-block count is untrusted and contributes zero completed bytes, but it
 must not replace a definitive nonzero lower errno with a synthetic integrity
-error. This guards engine replay only:
+error. The synchronous per-extent path has the same first-error precedence:
+an impossible count earns zero lower-completion credit and quarantines the
+extent, but may select `-EUCLEAN` only when the lower callback reported no
+original error. This guards engine replay only:
 duplicate dm-io callbacks, upper BIO reference release, and the lifetime of
 a reused packed buffer still require separate loaded completion qualification.
 
