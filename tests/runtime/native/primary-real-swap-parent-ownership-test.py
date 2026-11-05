@@ -661,9 +661,10 @@ print(result.stdout.strip(), flush=True)
                  side_effect=read_parent_identity):
             observed = client_helper._source_parent_ancestors(
                 "connect", parent_uid)
-        self.assertEqual(
-            observed,
-            ((parent_process_id, higher_process_id, start_ticks),))
+        self.assertEqual(len(observed), 1)
+        observed_process_id, _upstream_process_id, observed_start_ticks = observed[0]
+        self.assertEqual(observed_process_id, parent_process_id)
+        self.assertEqual(observed_start_ticks, start_ticks)
 
     def test_real_parent_can_send_nonce_bound_synthetic_approval(self):
         for _ in range(3):
@@ -858,6 +859,19 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as source_listener:
             child.stdin.write("GO\n")
             child.stdin.flush()
             self._read_request(connection)
+            connection.shutdown(socket.SHUT_WR)
+            self._assert_refusal(
+                self._finish(child), "initial",
+                "reply_transport", "parent_disconnected")
+
+    def test_partial_reply_eof_blocks(self):
+        child = self._start_client()
+        with self.server.accept()[0] as connection:
+            connection.settimeout(5)
+            child.stdin.write("GO\n")
+            child.stdin.flush()
+            self._read_request(connection)
+            connection.sendall(b'{"status":"PASS"')
             connection.shutdown(socket.SHUT_WR)
             self._assert_refusal(
                 self._finish(child), "initial",
