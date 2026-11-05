@@ -6473,6 +6473,21 @@ pins the source-contract invocation and these discovery paths so removal or
 renaming cannot silently reduce qualification coverage. `make test` remains
 the sole qualification interface; `make fast_test` remains development-only.
 
+Release-evaluator synthetic negative controls must remain rootless and model
+the evidence fields emitted by the producer rather than inventing alternate
+counters. Development-only card evidence, including a source-bound fast-test
+PASS, exact header restoration and an inactive final target, is never real-swap
+or physical-acceptance evidence and cannot backfill an incomplete five-stage
+`make test`. Real-swap no-traffic controls use `cycles[].workload` cgroup
+swap, mapper use, swapz logical/physical READ/WRITE, lower-device byte, vmstat
+swap-in/out and oracle mismatch fields. Campaign-completeness controls derive
+required pair counts from the frozen workload map; a PASS-looking sealed
+envelope with fewer required arms is incomplete proof. Stale source/artifact
+bindings and contradictory PASS/BLOCKED summaries remain non-qualifying. Any
+expected-failure reproducer for a known evaluator false-PASS is debugging
+evidence only and must be reported as an unresolved release blocker; it never
+upgrades acceptance.
+
 `docs/handoff/production-readiness.json` is observational release evidence,
 not a qualification result. Every current PASS must bind to the exact
 production source and carry the evidence appropriate to its gate: clean build

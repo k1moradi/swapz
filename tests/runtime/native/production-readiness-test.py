@@ -2591,6 +2591,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
 
 
 
+
     def test_development_only_restoration_is_not_real_swap_proof(self):
         # Cleanup success on an inactive card is not Linux swap activation.
         private_marker = "secret-private-path-and-token"
@@ -2606,6 +2607,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "target_remains_inactive": True,
             "original_header_matches_final": True,
             "final_recovery_state": "COMPLETE",
+            "development_evidence": {
+                "schema": "swapz-fast-test-development-evidence-v1",
+                "head": SOURCE,
+                "dirty": False,
+                "native_status": "PASS",
+                "fast_test_status": "PASS",
+                "loaded_preflight": {"status": "PASS", "check": "complete"},
+            },
             "private_note": private_marker,
         }
         result = evaluate(physical=development)
@@ -2616,7 +2625,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             for item in result["code_blockers"]))
         self.assertNotIn(private_marker, json.dumps(result))
 
-    def test_physical_preflight_and_restoration_cannot_override_blocked_phase(self):
+    def test_physical_preflight_restoration_cannot_override_blocked_phase(self):
         report = owner_report()
         policy = acceptance_policy()
         physical = real_swap_evidence(encoded(report), encoded(policy))
@@ -2635,10 +2644,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "real_linux_swap: persistent evidence is not COMPLETE" in item
             for item in result["code_blockers"]))
 
-    def test_fast_test_pass_without_five_stage_make_test_is_incomplete(self):
+    def test_missing_five_stage_make_test_is_incomplete(self):
         report = owner_report()
         report["stages"] = report["stages"][:2]
-        # An otherwise all-PASS summary cannot supply three absent stages.
+        # Development evidence cannot supply three absent qualification stages.
         result = evaluate(report=report)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertTrue(any(
@@ -2721,31 +2730,78 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
 
     @unittest.expectedFailure
-    def test_zero_independent_swap_traffic_cannot_qualify_real_swap(self):
-        # Known evaluator gap: nested PASS cycles have no traffic verification.
+    def test_zero_real_swap_traffic_cannot_qualify_real_swap(self):
+        # Model the producer's workload fields; zero traffic with zero byte
+        # mismatches is unavailable proof, not a real-swap PASS.
         report = owner_report()
         policy = acceptance_policy()
         physical = real_swap_evidence(encoded(report), encoded(policy))
+        zero_traffic_workload = {
+            "concurrent_workers": 2,
+            "reuse_rounds": 2,
+            "slot_reuse_proven": True,
+            "rounds": [
+                {"aggregate_verified": {"mismatches": 0}},
+                {"aggregate_verified": {"mismatches": 0}},
+            ],
+            "cgroup_swap_peak_bytes": 0,
+            "cgroup_memory_pressure_some_usec": 0,
+            "mapper_used_delta_kib": 0,
+            "swapz_logical_write_delta": 0,
+            "swapz_physical_write_delta": 0,
+            "swapz_logical_read_delta": 0,
+            "swapz_physical_read_delta": 0,
+            "lower_write_sector_delta": 0,
+            "lower_write_bytes_delta": 0,
+            "lower_read_sector_delta": 0,
+            "lower_read_bytes_delta": 0,
+            "pswpout_delta": 0,
+            "pswpin_delta": 0,
+            "oom_delta": 0,
+            "oom_kill_delta": 0,
+        }
         for cycle in physical["result"]["cycles"]:
-            cycle["byte_mismatches"] = 0
-            cycle["independent_swap_traffic_bytes"] = 0
-            cycle["mapper_io_bytes"] = 0
+            cycle["workload"] = copy.deepcopy(zero_traffic_workload)
         physical["cycles"] = copy.deepcopy(physical["result"]["cycles"])
         result = evaluate(report=report, policy=policy, physical=physical)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
 
     @unittest.expectedFailure
-    def test_known_failure_blocker_preserves_first_authoritative_phase(self):
-        # Known diagnostic gap: current generic blocker drops stage attribution.
+    def test_failure_diagnostics_preserve_phase_and_source_artifact_identity(self):
+        # Known diagnostic gap: the first authoritative failed phase and the
+        # required/observed source and artifact identities are currently lost.
         report = owner_report()
+        policy = acceptance_policy()
+        observed_source_sha = "b" * 40
+        observed_module_sha256 = "7" * 64
+        private_marker = "/private/workspace token=do-not-echo"
         report["overall"] = "FAIL"
+        report["source_sha"] = observed_source_sha
+        report["tested_commit_sha"] = observed_source_sha
+        report["qualified_artifacts"][
+            "module_sha256"] = observed_module_sha256
         report["stages"][1].update(
             status="FAIL", exit_code=1, failed_phase="native-contract",
-            diagnostic="synthetic failure")
-        result = evaluate(report=report)
-        self.assertTrue(any(
-            "native-contract" in item and "FAIL" in item
-            for item in result["code_blockers"]))
+            diagnostic=private_marker)
+        result = evaluate(report=report, policy=policy)
+        diagnostics = "\n".join(result["code_blockers"])
+        required_markers = (
+            "native-contract",
+            "FAIL",
+            "owner qualification",
+            "required",
+            "observed",
+            SOURCE,
+            observed_source_sha,
+            ARTIFACTS["module_sha256"],
+            observed_module_sha256,
+        )
+        missing = [
+            marker for marker in required_markers
+            if marker not in diagnostics
+        ]
+        self.assertEqual(missing, [], diagnostics)
+        self.assertNotIn(private_marker, diagnostics)
 
 if __name__ == "__main__":
     unittest.main()
