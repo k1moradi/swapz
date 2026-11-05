@@ -884,9 +884,9 @@ static int measure_sparse_discard_scaling(
 	swapz_u16 *test_live = NULL;
 	swapz_u8 *test_classes = NULL, *test_roles = NULL;
 	swapz_u32 *test_mapped_pages = NULL;
-	swapz_u32 iteration;
+	swapz_u32 iteration, rearm_generation;
 	uint64_t cpu_start, cpu_end;
-	int status = 1;
+	int prevalidate_result, status = 1;
 
 #define REQUIRE_SPARSE(condition) do { if (!(condition)) { \
 	fprintf(stderr, "%s:%d: FAIL sparse discard pages=%u: %s\n", \
@@ -910,18 +910,43 @@ static int measure_sparse_discard_scaling(
 	cpu_start = thread_cpu_ns();
 	REQUIRE_SPARSE(cpu_start);
 	for (iteration = 0; iteration < discard_pages; ++iteration) {
-		REQUIRE_SPARSE(swapz_prevalidate_discard_range(
-			       &authority, 0U, 1U) == 0);
+		prevalidate_result = swapz_prevalidate_discard_range(
+			&authority, 0U, 1U);
+		if (prevalidate_result) {
+			fprintf(stderr,
+				"%s:%d: FAIL sparse discard pages=%u iteration=%u "
+				"prevalidate_result=%d generation=%u map_valid=%u "
+				"start_block=%u extent_blocks=%u payload_length=%u "
+				"live=%u mapped=%u\n",
+				__FILE__, __LINE__, discard_pages, iteration,
+				prevalidate_result, test_maps[0].generation,
+				(unsigned int)test_maps[0].valid,
+				test_maps[0].start_block,
+				(unsigned int)test_maps[0].extent_blocks,
+				(unsigned int)test_maps[0].payload_length,
+				(unsigned int)test_live[0],
+				test_mapped_pages[0]);
+			goto cleanup;
+		}
 		REQUIRE_SPARSE(swapz_discard_page(&authority, 0U) == 0);
 		REQUIRE_SPARSE(!test_maps[0].valid && !test_live[0] &&
 			       !test_mapped_pages[0]);
 		if (iteration + 1U != discard_pages) {
 			/*
 			 * Test-only rearm isolates repeated final-map proof cost.
-			 * Correct production slot reuse/generation publication remains
-			 * covered by the authority/raw/GC suites.
+			 * Reconstruct the complete valid record but keep the generation
+			 * advanced by DISCARD. Correct production slot reuse/generation
+			 * publication remains covered by the authority/raw/GC suites.
 			 */
-			test_maps[0].valid = 1U;
+			rearm_generation = test_maps[0].generation;
+			test_maps[0] = (struct swapz_map) {
+				.start_block = 0U,
+				.generation = rearm_generation,
+				.payload_length = SWAPZ_BLOCK_BYTES,
+				.extent_blocks = 1U,
+				.raw = 1U,
+				.valid = 1U,
+			};
 			test_live[0] = 1U;
 			test_mapped_pages[0] = 1U;
 		}
