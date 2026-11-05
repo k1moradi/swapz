@@ -511,7 +511,9 @@ fixture must prove the original path-only false admission and exercise real
 owned proof, changed configfs inode, missing sysfs proof, mismatched rdev,
 changed/foreign mapper dependencies, namespace refusal, ambiguous module
 ownership and cleanup failure against only synthetic files and stubs. This
-unit evidence never substitutes for authorized loaded testing.
+unit evidence never substitutes for authorized loaded testing. Source-contract
+and Make-interface checks must pin UUID-targeted mapper removal and refusal of
+unowned modules and holder signals, never the obsolete destructive branches.
 
 ### Development decision loop
 

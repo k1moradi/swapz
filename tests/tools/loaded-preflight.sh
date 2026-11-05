@@ -227,10 +227,8 @@ remove_idle_module() {
 
 refcount="$(read_refcount)" || exit 1
 if [[ $refcount == 0 ]]; then
+    # The origin of an idle, already-loaded module cannot be inferred.
     remove_idle_module
-    clean_orphaned_nullb
-    note "AUTO_REMOVED_IDLE_DM_SWAPZ=1"
-    exit 0
 fi
 
 # A prior bounded qualification may have been killed while its one owned mapper
@@ -502,7 +500,8 @@ read_owned_lower_proof() {
     [[ -f /sys/block/$disk/dev && ! -L /sys/block/$disk/dev &&
        -b $lower ]] || return 1
     sysfs_devno="$(cat "/sys/block/$disk/dev" 2>/dev/null)" || return 1
-    [[ $sysfs_devno =~ ^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$ ]] || return 1
+    [[ $sysfs_devno == *:* ]] || return 1
+    is_uint "${sysfs_devno%%:*}" && is_uint "${sysfs_devno#*:}" || return 1
     node_devno="$(stat -Lc '%Hr:%Lr' "$lower" 2>/dev/null)" || return 1
     [[ $node_devno == "$sysfs_devno" ]] || return 1
     block_major="${sysfs_devno%%:*}"
@@ -655,6 +654,5 @@ exec {owned_power_fd}>&-
 assert_owned_config_proof config_remove 0
 rmdir -- "$owned_config" 2>/dev/null ||
     ownership_refuse config_remove null_blk original_config_inode rmdir_failed "$?" retain_remaining_resources
+# The remaining module still lacks independent creation provenance.
 remove_idle_module
-clean_orphaned_nullb
-note "AUTO_REMOVED_STALE_OWNED_DM_SWAPZ=1"

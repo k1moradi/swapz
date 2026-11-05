@@ -6256,20 +6256,28 @@ int main(void)
         self.assertIn('mapper_dev="$(stat -Lc', recovery)
         self.assertIn('canonical_dev="$(stat -Lc', recovery)
         self.assertIn('$mapper_dev == "$canonical_dev"', recovery)
+        # Device identity is insufficient to claim or kill holder processes.
+        self.assertNotIn('fuser -k -TERM', recovery)
+        self.assertNotIn('fuser -k -KILL', recovery)
+        self.assertIn("reboot required before make test", recovery)
+        self.assertIn("assert_owned_config_proof mapper_remove 1", recovery)
+        self.assertIn("assert_owned_mapper_proof", recovery)
+        self.assertIn("assert_owned_config_proof power_off 1", recovery)
+        self.assertIn("assert_owned_config_proof config_remove 0", recovery)
+        self.assertIn("opened_power_identity", recovery)
+        self.assertIn("original_inode_index_attributes", recovery)
+        self.assertIn("retained_state_action=", recovery)
         self.assertLess(
             recovery.index("canonical device identity changed"),
-            recovery.index('fuser -k -TERM "$mapper_node"'))
-        self.assertIn('fuser -k -TERM "$mapper_node"', recovery)
-        self.assertIn('fuser -k -KILL "$mapper_node"', recovery)
-        self.assertIn("reboot required before make test", recovery)
+            recovery.index("assert_owned_config_proof mapper_remove 1"))
         self.assertLess(
             recovery.index('[[ -n $owned_config &&'),
-            recovery.index('fuser -k -TERM "$mapper_node"'))
+            recovery.index("assert_owned_config_proof mapper_remove 1"))
         self.assertLess(
             recovery.index('lower="/dev/$lower_name"'),
-            recovery.index('fuser -k -TERM "$mapper_node"'))
-        self.assertNotIn('fuser -k -TERM "$mapper"', recovery)
-        self.assertIn('dmsetup remove --retry "$owned_map"', preflight)
+            recovery.index("assert_owned_config_proof mapper_remove 1"))
+        self.assertIn('dmsetup remove --retry "$uuid"', preflight)
+        self.assertNotIn('dmsetup remove --retry "$owned_map"', preflight)
         self.assertIn('timeout --signal=TERM --kill-after=2s 10s', preflight)
         self.assertIn("run_privileged_bounded()", loaded)
         self.assertIn(
