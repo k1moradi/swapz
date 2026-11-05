@@ -1507,6 +1507,16 @@ CPU burners against shared deadlines with owned-child TERM/KILL escalation.
 Private logs are bounded; memory samples and private paths are not exposed.
 Regression coverage must use synthetic proc/cgroup fixtures and fake workers,
 never actual host memory pressure or privileged cgroup mutation.
+Rootless ID36 admission fixtures must execute extracted production gate bodies
+against bounded synthetic observations: the exact 1 GiB MemAvailable floor and
+two-sample stability, finite/unbounded parent headroom and true-root provenance,
+missing versus unreadable CPU/memory controller delegation, absent/malformed
+OOM and CPU-PSI counters (including Boolean-like tokens and overflow), and
+changed readiness/active pressure snapshots. Refusals must name the first
+gate, its required versus observed safe state and unavailable evidence;
+pre-admission fixtures attempt no privileged cleanup and cannot emit an ID36
+PASS or impersonate loaded qualification. Exercise these without a real
+cgroup, real host /proc reads, or reducing the memory safety floor.
 
 ID36 cleanup never writes group-wide `cgroup.kill`: a membership snapshot cannot
 authenticate a process that enters before the later group-wide signal. The

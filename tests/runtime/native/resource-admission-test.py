@@ -313,6 +313,211 @@ sample_host_memory_admission
         self.assert_blocked(result, "cpu.pressure some telemetry unreadable")
         self.assertIn("observed:unavailable", result.stderr)
 
+    def test_host_inventory_changes_and_noncanonical_fields_block(self):
+        valid = meminfo(FLOOR_KIB)
+        invalid_cases = (
+            valid.replace("MemTotal:", "Unexpected:"),
+            valid + "MemFree: 1 kB\n",
+            valid.replace("Cached:         1048576 kB", "Cached:         1048576 MB"),
+            valid.replace(f"MemAvailable:   {FLOOR_KIB}",
+                          "MemAvailable:   True"),
+            valid.replace(f"MemAvailable:   {FLOOR_KIB}",
+                          "MemAvailable:   01048576"),
+            valid.replace(f"MemAvailable:   {FLOOR_KIB}",
+                          "MemAvailable:   18446744073709551616"),
+        )
+        for sample in invalid_cases:
+            with self.subTest(sample=sample[-75:]):
+                result = self.host_samples([sample])
+                self.assert_blocked(result, "MemAvailable unavailable or malformed")
+                self.assertIn(f"required:{FLOOR_KIB} kB", result.stderr)
+
+        # A first sufficient observation is not permission to skip a second
+        # readable snapshot. The synthetic source never touches host /proc.
+        for second in (invalid_cases[0], invalid_cases[-1]):
+            with self.subTest(second=second[-40:]):
+                result = self.host_samples([valid, second])
+                self.assert_blocked(result, "MemAvailable unavailable or malformed")
+                self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_controller_admission_distinguishes_absence_from_unavailability(self):
+        controller_file = self.root / "controllers"
+        helper = shell_function(QUALIFIER, "require_cgroup_word")
+        script = helper + (
+            'require_cgroup_word "$1" "$2" "$3" "$4"\n')
+        for telemetry_name, required_word in (
+                ("cgroup.controllers", "memory"),
+                ("cgroup.controllers", "cpu"),
+                ("cgroup.subtree_control", "memory"),
+                ("cgroup.subtree_control", "cpu")):
+            with self.subTest(telemetry=telemetry_name, word=required_word):
+                missing_message = f"{required_word} controller not delegated"
+                args = (controller_file, telemetry_name, required_word,
+                        missing_message)
+                controller_file.write_text("memory cpu\n", encoding="ascii")
+                self.assertEqual(self.run_shell(script, *args).returncode, 0)
+                controller_file.write_text(
+                    "cpu\n" if required_word == "memory" else "memory\n",
+                    encoding="ascii")
+                missing = self.run_shell(script, *args)
+                self.assert_blocked(missing, missing_message)
+                self.assertNotIn("telemetry unavailable", missing.stderr)
+
+                controller_file.unlink()
+                unavailable = self.run_shell(script, *args)
+                self.assert_blocked(
+                    unavailable, f"{telemetry_name} telemetry unavailable")
+                self.assertIn(f"checking {required_word}", unavailable.stderr)
+                self.assertNotIn(missing_message, unavailable.stderr)
+                controller_file.mkdir()
+                unreadable = self.run_shell(script, *args)
+                self.assert_blocked(
+                    unreadable, f"{telemetry_name} telemetry unavailable")
+                controller_file.rmdir()
+
+    def test_parent_mount_provenance_and_boolean_counters_are_not_authority(self):
+        directory = self.root / "parent-cgroup"
+        self.assertEqual(self.parent_inventory().returncode, 0)
+        mountinfo = directory / "mountinfo"
+        script = (
+            "CGROUP_ROOT=$1\nCGROUP_MOUNTINFO=$1/mountinfo\n"
+            f"MIN_AVAILABLE_BYTES={FLOOR_BYTES}\n"
+            + shell_function(QUALIFIER, "cgroup_root_exemption_proven")
+            + shell_function(QUALIFIER, "read_cgroup_root_memory_inventory")
+            + parent_gate()
+        )
+        for mount_observation in (
+                "",
+                f"7 1 0:7 /other {directory} rw - cgroup2 cgroup rw\n",
+                f"7 1 0:7 / {directory} rw - tmpfs tmpfs rw\n"):
+            with self.subTest(mount_observation=mount_observation):
+                mountinfo.write_text(mount_observation, encoding="ascii")
+                refusal = self.run_shell(script, directory)
+                self.assert_blocked(
+                    refusal, "parent cgroup memory.max and memory.current absent")
+                self.assertIn("observed:absent", refusal.stderr)
+                self.assertIn("required:finite parent controls or true cgroup v2 root",
+                              refusal.stderr)
+        mountinfo.unlink()
+        self.assert_blocked(
+            self.run_shell(script, directory),
+            "parent cgroup memory.max and memory.current absent")
+        for maximum, current in (("True", 0), ("max", "False"),
+                                 (FLOOR_BYTES, "01"), (FLOOR_BYTES, "-1")):
+            with self.subTest(maximum=maximum, current=current):
+                result = self.parent_inventory(maximum, current)
+                self.assert_blocked(result, "parent cgroup memory.max/current invalid")
+                self.assertIn("canonical u64", result.stderr)
+
+    def test_memory_events_inventory_rejects_each_missing_or_false_counter(self):
+        directory = self.root / "events"
+        directory.mkdir()
+        events_file = directory / "memory.events"
+        script = ('CGROUP=$1\n'
+                  + shell_function(QUALIFIER, "read_memory_event_inventory")
+                  + 'read_memory_event_inventory\n')
+        canonical = "high 0\noom 0\noom_kill 0\n"
+        events_file.write_text(canonical + "low 4\n", encoding="ascii")
+        admitted = self.run_shell(script, directory)
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.assertEqual(admitted.stdout, "0 0 0\n")
+        for counter in ("high", "oom", "oom_kill"):
+            with self.subTest(counter=counter):
+                missing = canonical.replace(f"{counter} 0\n", "")
+                events_file.write_text(missing, encoding="ascii")
+                result = self.run_shell(script, directory)
+                self.assert_blocked(
+                    result, f"memory.events counter {counter} missing")
+                self.assertIn("observed:missing", result.stderr)
+                for invalid_value in ("True", "01", "-1",
+                                      "18446744073709551616"):
+                    events_file.write_text(canonical.replace(
+                        f"{counter} 0\n", f"{counter} {invalid_value}\n"),
+                        encoding="ascii")
+                    result = self.run_shell(script, directory)
+                    self.assert_blocked(
+                        result, f"memory.events counter {counter} malformed")
+                    self.assertIn("expected:one canonical nonnegative counter",
+                                  result.stderr)
+        events_file.unlink()
+        result = self.run_shell(script, directory)
+        self.assert_blocked(result, "memory.events telemetry unreadable")
+        self.assertIn("expected:readable cgroup v2 high/oom/oom_kill",
+                      result.stderr)
+
+    def test_cpu_psi_rejects_absent_and_changed_uncertain_observations(self):
+        directory = self.root / "psi"
+        directory.mkdir()
+        psi_file = directory / "cpu.pressure"
+        script = ('CGROUP=$1\n'
+                  + shell_function(QUALIFIER, "cpu_some_total")
+                  + 'cpu_some_total\n')
+        valid = "some avg10=0.00 avg60=0.00 avg300=0.00 total=42\n"
+        psi_file.write_text(valid, encoding="ascii")
+        self.assertEqual(self.run_shell(script, directory).stdout, "42\n")
+        for invalid, expected in (
+                ("full avg10=0 avg60=0 avg300=0 total=42\n",
+                 "some telemetry missing"),
+                (valid + valid, "some telemetry malformed"),
+                (valid.replace("total=42", "total=True"),
+                 "some telemetry malformed"),
+                (valid.replace("total=42", "total=18446744073709551616"),
+                 "some telemetry malformed"),
+                (valid.replace("avg60=0.00", "avg60=True"),
+                 "some telemetry malformed"),
+                (valid.replace("avg300=0.00", "avg300=100.01"),
+                 "some avg300 outside percentage range")):
+            with self.subTest(observation=invalid[-65:]):
+                psi_file.write_text(invalid, encoding="ascii")
+                result = self.run_shell(script, directory)
+                self.assert_blocked(result, f"cpu.pressure {expected}")
+                self.assertIn("observed:", result.stderr)
+        psi_file.unlink()
+        missing = self.run_shell(script, directory)
+        self.assert_blocked(missing, "cpu.pressure some telemetry unreadable")
+        self.assertIn("observed:unavailable", missing.stderr)
+
+    def test_changed_ready_and_active_pressure_evidence_cannot_admit(self):
+        source = QUALIFIER.read_text(encoding="utf-8")
+        counter_guard = shell_function(QUALIFIER, "require_monotonic_counter")
+        for begin_marker, end_marker, baseline, observations in (
+                ('memory_events_ready="$(read_memory_event_inventory)" || exit 2',
+                 "# Base memory.high", "oom_start=0\noom_kill_start=0\n",
+                 (("0 0 0", 0, ""),
+                  ("0 1 0", 1, "pressure startup encountered OOM events"),
+                  ("0 0 1", 1, "pressure startup encountered OOM events"),
+                  ("0 -1 0", 2, "memory.events oom counter regressed"))),
+                ('memory_events_active="$(read_memory_event_inventory)" || exit 2',
+                 "# CPU PSI qualification", "high_before=5\noom_before=0\noom_kill_before=0\n",
+                 (("6 0 0", 0, ""),
+                  ("5 0 0", 1, "controlled pressure ramp did not trigger memory.high"),
+                  ("6 1 0", 1, "staged pressure encountered OOM events"),
+                  ("4 0 0", 2, "memory.events high counter regressed")))):
+            start = source.index(begin_marker)
+            end = source.index(end_marker, start)
+            # Execute the production gate excerpt, never its privileged
+            # children, cgroup controls, or live memory-pressure workload.
+            gate = source[start:end]
+            for observed, exit_status, reason in observations:
+                with self.subTest(gate=begin_marker, observed=observed):
+                    script = (
+                        counter_guard + baseline
+                        + 'OBSERVED_EVENTS=$1\n'
+                        + 'read_memory_event_inventory() {\n'
+                        + '    printf "%s\\n" "$OBSERVED_EVENTS"\n}\n'
+                        + gate + '\nprintf "SYNTHETIC_GATE_ADMITTED\\n"\n'
+                    )
+                    result = self.run_shell(script, observed)
+                    self.assertEqual(result.returncode, exit_status,
+                                     (result.stdout, result.stderr))
+                    if exit_status:
+                        self.assertIn(reason, result.stderr)
+                        self.assertNotIn("SYNTHETIC_GATE_ADMITTED", result.stdout)
+                        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+                    else:
+                        self.assertEqual(result.stdout, "SYNTHETIC_GATE_ADMITTED\n")
+                        self.assertEqual(result.stderr, "")
+
     def test_bounded_child_diagnostics_preserve_reason_without_private_paths(self):
         directory = self.root / "logs"
         directory.mkdir()
