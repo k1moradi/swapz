@@ -259,7 +259,7 @@ static int fixture_stat(const char *path, struct stat *info)
 		 * Capture the old shared inode for the first production stat, then
 		 * switch both namespace identity and mount table before production
 		 * performs its confirming stat. This keeps the synthetic procfs view
-		 * coherent across the modeled PID namespace transition.
+		 * coherent across the modeled process mount-namespace transition.
 		 */
 		int result = stat(fixture_path(path, converted), info);
 
@@ -735,7 +735,7 @@ static void test_controlled_mount_snapshot_timings(void)
 				    fixture_peer_mountinfo_before_peer_scan_injected);
 
 	/*
-	 * A PID changing namespaces between the two stat calls is NOT eligible
+	 * A peer changing mount namespaces between the two stat calls is NOT eligible
 	 * for the shared-namespace shortcut. The foreign table must be read.
 	 */
 	fixture_same_parent_root();
@@ -745,10 +745,10 @@ static void test_controlled_mount_snapshot_timings(void)
 		     "36 25 8:4 / / rw - ext4 /dev/root-sibling rw\n");
 	fixture_peer_mountinfo_after_namespace_change = foreign_selected_mount;
 	fixture_peer_namespace_changes_between_stats = 1;
-	expect_mount_identity_admission("PID namespace changes before confirming skip",
+	expect_mount_identity_admission("peer mount namespace changes before confirming skip",
 					root_device, target_parent, 0, 0,
 					"namespace identity/cross-namespace");
-	fixture_expect_timed_change("PID namespace changes before confirming skip",
+	fixture_expect_timed_change("peer mount namespace changes before confirming skip",
 				    fixture_peer_namespace_changed);
 
 	/* An incomplete PID inventory fails closed even after a clean peer. */
