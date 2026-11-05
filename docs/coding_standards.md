@@ -1636,7 +1636,12 @@ foreign, malformed, missing or unreadable observation, or any nonempty inventory
 remaining after that grace, retains both the child cgroup and private session
 and cannot print PASS. Revalidate the named cgroup identity immediately before
 `rmdir`; an occupied or replaced group or failed removal likewise retains
-evidence. A failed initial cgroup creation grants no teardown ownership.
+evidence. A failed initial cgroup creation grants no teardown ownership. A post-mkdir
+cgroup descriptor-open, inode-read or descriptor/name mismatch refusal must
+record its bounded setup observation, retain the created cgroup and private
+session, and publish exactly one `phase:cgroup-create` from EXIT cleanup with
+the actual original status (including signal exit 143). Do not relabel that
+first refusal as `phase:prior-admission` or try to remove an unpinned cgroup.
 
 The cooperative stop marker and cleanup of known scratch entries must use the
 pinned session descriptor after confirming the named path still identifies the

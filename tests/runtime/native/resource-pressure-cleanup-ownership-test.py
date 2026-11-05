@@ -386,6 +386,39 @@ stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
         self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"),
                          "untouched\n")
 
+    def test_partial_cgroup_pin_refusal_keeps_first_phase_and_original_exit(self):
+        # Each post-mkdir failure has a cgroup-create cause. EXIT cleanup must
+        # publish that phase once, even if the caller is interrupted by TERM.
+        for observation, original_exit in (
+                ("directory-fd-unavailable", 2),
+                ("directory-identity-unreadable", 143),
+                ("descriptor-identity-stale", 2)):
+            with self.subTest(observation=observation, original_exit=original_exit):
+                preamble = (
+                    f"CGROUP_CREATE_REFUSAL_OBSERVATION={observation}\n"
+                    "RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1\n"
+                )
+                result = self.execute(preamble=preamble, status=original_exit)
+                self.assertEqual(result.returncode, original_exit, result.stderr)
+                self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+                self.assertIn("phase:cgroup-create", result.stderr)
+                self.assertNotIn("phase:prior-admission", result.stderr)
+                self.assertIn(f"observed:{observation}", result.stderr)
+                self.assertIn(f"original_exit:{original_exit}", result.stderr)
+                self.assertIn("nested_resume:not-required", result.stderr)
+                self.assertIn("retained_cleanup:child-cgroup-and-private-session",
+                              result.stderr)
+                self.assertTrue(result.stderr.startswith(
+                    "BLOCKED:" if original_exit == 2 else "FAIL:"))
+                self.assertNotIn(str(self.root), result.stderr)
+                self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+                self.assertTrue(self.cgroup.exists())
+                self.assertTrue(self.session.exists())
+                self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"),
+                                 "untouched\n")
+                self.assertIn(f"CGROUP_CREATE_REFUSAL_OBSERVATION={observation}",
+                              self.source)
+
     def test_function_extractor_keeps_heredoc_dictionary_body(self):
         function = shell_function("classify_cleanup_session_entries")
         self.assertIn("allowed = {", function)

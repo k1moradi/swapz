@@ -4072,6 +4072,13 @@ original device/inode while post-removal path reappearance has a different
 device/inode, retain the remaining session-path obligation, and prohibit
 synthetic ID36 PASS evidence.
 
+After a post-mkdir cgroup pin or identity refusal, the rootless fixture must
+inject missing directory-fd authority, unreadable created-directory identity,
+and mismatched pinned/name identity. Each case must retain both resources,
+report only the originating `phase:cgroup-create` (not a second
+`phase:prior-admission`), keep the actual original status including 143,
+label nested resume as not required, and never signal or claim ID36 PASS.
+
 The nested-child resume cleanup guard must interpret the numeric uncertainty
 state arithmetically: zero permits an attempt only with the existing tracked
 timeout, captured readiness PID, and captured nested process identity; one

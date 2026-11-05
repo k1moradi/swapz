@@ -393,7 +393,10 @@ PASS_EVIDENCE=""
 # A foreign process in the private ID36 cgroup invalidates exclusive ownership.
 # Retain both evidence resources rather than applying group-wide cleanup.
 RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=0
+# A post-mkdir setup refusal defers its first public phase until EXIT cleanup,
+# which knows the actual original status (including a signal) and retained state.
 CGROUP_WAS_CREATED=0
+CGROUP_CREATE_REFUSAL_OBSERVATION=""
 
 # Extract at most one short fail-only reason from a private helper log. Never
 # echo paths or unbounded diagnostics from privileged children.
@@ -964,7 +967,7 @@ cleanup() {
     local result=$? original_result observed initially_retained
     local current_identity child_cleanup_status session_fd_path
     local session_entry_snapshot session_entry nested_resume_disposition
-    local cleanup_diagnostic_reported
+    local cleanup_diagnostic_reported cleanup_refusal_severity
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     # An earlier admission/ownership refusal already owns the cleanup report.
@@ -1025,7 +1028,15 @@ cleanup() {
                 -n $PAIR_CGROUP_PROCESS_IDENTITY ]]; then
             nested_resume_disposition=attempted
         fi
-        if (( original_result == 0 || original_result == 2 )); then
+        if [[ -n ${CGROUP_CREATE_REFUSAL_OBSERVATION:-} ]]; then
+            # This setup refusal owns the first phase; do not publish a second
+            # prior-admission phase when its retained resources are finalized.
+            cleanup_refusal_severity=BLOCKED
+            (( original_result == 0 || original_result == 2 )) || cleanup_refusal_severity=FAIL
+            printf '%s: ID36 created cgroup ownership refused; phase:cgroup-create required:pinned descriptor matching the created cgroup identity observed:%s original_exit:%s nested_resume:%s retained_cleanup:child-cgroup-and-private-session\n' \
+                "$cleanup_refusal_severity" "$CGROUP_CREATE_REFUSAL_OBSERVATION" \
+                "$original_result" "$nested_resume_disposition" >&2
+        elif (( original_result == 0 || original_result == 2 )); then
             printf 'BLOCKED: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s nested_resume:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" "$nested_resume_disposition" >&2
         else
             printf 'FAIL: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s nested_resume:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" "$nested_resume_disposition" >&2
@@ -1206,18 +1217,18 @@ mkdir "$CGROUP" 2>/dev/null || {
 CGROUP_WAS_CREATED=1
 if ! exec {CGROUP_DIRECTORY_FD}<"$CGROUP"; then
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
-    printf '%s\n' 'BLOCKED: ID36 created cgroup cannot be pinned; phase:cgroup-create required:open owned directory descriptor observed:unreadable retained_cleanup:child-cgroup-and-private-session' >&2
+    CGROUP_CREATE_REFUSAL_OBSERVATION=directory-fd-unavailable
     exit 2
 fi
 if ! CGROUP_IDENTITY="$(read_owned_directory_identity "$CGROUP")"; then
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
-    printf '%s\n' 'BLOCKED: ID36 created cgroup identity unreadable; phase:cgroup-create required:stable directory device/inode observed:unreadable retained_cleanup:child-cgroup-and-private-session' >&2
+    CGROUP_CREATE_REFUSAL_OBSERVATION=directory-identity-unreadable
     exit 2
 fi
 if ! cgroup_descriptor_identity="$(read_open_directory_identity "$CGROUP_DIRECTORY_FD")" ||
    [[ $cgroup_descriptor_identity != "$CGROUP_IDENTITY" ]]; then
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
-    printf '%s\n' 'BLOCKED: ID36 created cgroup changed while pinning; phase:cgroup-create required:descriptor/name identity match observed:stale retained_cleanup:child-cgroup-and-private-session' >&2
+    CGROUP_CREATE_REFUSAL_OBSERVATION=descriptor-identity-stale
     exit 2
 fi
 for control in memory.max memory.high memory.current memory.peak memory.events cpu.pressure cgroup.procs; do
