@@ -613,8 +613,11 @@ def _physical_audit_binding_is_valid(
                 (workload, pair_id) in pair_identifiers or
                 pair.get("order") != specification["counterbalanced_order"][
                     pair_index - 1] or
-                (pair.get("status"), pair.get("excluded")) not in (
-                    ("PASS", False), ("EXCLUDED", True)) or
+                not (
+                    (pair.get("status") == "PASS" and
+                     pair.get("excluded") is False) or
+                    (pair.get("status") == "EXCLUDED" and
+                     pair.get("excluded") is True)) or
                 pair["name"] in artifact_names or
                 pair["sha256"] in artifact_digests):
             return False
