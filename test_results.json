@@ -249,46 +249,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 5686,
-"legacy_dead_probe_ns": 646477,
-"legacy_score_scan_ns": 9512064,
+"incremental_select_ns": 8707,
+"legacy_dead_probe_ns": 875905,
+"legacy_score_scan_ns": 7244475,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3434,
-"relocation_list_ns": 2004,
-"relocation_scan_ns": 1298576,
+"mapped_dead_probe_ns": 3811,
+"relocation_list_ns": 2442,
+"relocation_scan_ns": 1835507,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 23219,
-"legacy_dead_probe_ns": 2837216,
-"legacy_score_scan_ns": 36195308,
+"incremental_select_ns": 24762,
+"legacy_dead_probe_ns": 3317358,
+"legacy_score_scan_ns": 28802297,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 11164,
-"relocation_list_ns": 2749,
-"relocation_scan_ns": 5792000,
+"mapped_dead_probe_ns": 12797,
+"relocation_list_ns": 2497,
+"relocation_scan_ns": 7302291,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 82687,
-"legacy_dead_probe_ns": 9877616,
-"legacy_score_scan_ns": 149253138,
+"incremental_select_ns": 79106,
+"legacy_dead_probe_ns": 9668561,
+"legacy_score_scan_ns": 144566517,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 40200,
-"relocation_list_ns": 2609,
-"relocation_scan_ns": 20288392,
+"mapped_dead_probe_ns": 42855,
+"relocation_list_ns": 2646,
+"relocation_scan_ns": 19427009,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 577943,
-"legacy_dead_probe_ns": 71630275,
-"legacy_score_scan_ns": 960575338,
+"incremental_select_ns": 362571,
+"legacy_dead_probe_ns": 43381187,
+"legacy_score_scan_ns": 623612846,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 270032,
-"relocation_list_ns": 2711,
-"relocation_scan_ns": 142876725,
+"mapped_dead_probe_ns": 173753,
+"relocation_list_ns": 1912,
+"relocation_scan_ns": 97591932,
 "segments": 105782,
 "victim_records": 256
 }
@@ -298,14 +298,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1367,
+"inverse_ns_per_page": 910,
 "name": "scalar",
-"transform_ns_per_page": 1452
+"transform_ns_per_page": 940
 },
 {
-"inverse_ns_per_page": 918,
+"inverse_ns_per_page": 985,
 "name": "sse2",
-"transform_ns_per_page": 906
+"transform_ns_per_page": 593
 }
 ],
 "classifier": {
@@ -315,9 +315,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 714,
+"ns_per_page": 343,
 "sample_pairs": 32,
-"scalar_ns_per_page": 714,
+"scalar_ns_per_page": 343,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -332,7 +332,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11188
+"wall_ns_per_page": 8429
 },
 {
 "acceleration": 2,
@@ -340,7 +340,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 10443
+"wall_ns_per_page": 7809
 },
 {
 "acceleration": 3,
@@ -348,7 +348,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10135
+"wall_ns_per_page": 7507
 },
 {
 "acceleration": 4,
@@ -356,7 +356,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10699
+"wall_ns_per_page": 7389
 }
 ],
 "negative_pages": 256,
@@ -373,9 +373,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6253,
-"modeled_wall_ns_total": 3601920,
-"ns_per_saved_block": 69267,
+"modeled_wall_ns_per_page": 5079,
+"modeled_wall_ns_total": 2925824,
+"ns_per_saved_block": 56265,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -400,29 +400,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 716,
+"baseline_ns_per_page": 796,
 "order": "baseline_first",
-"unrolled_ns_per_page": 538
+"unrolled_ns_per_page": 792
 },
 {
-"baseline_ns_per_page": 563,
+"baseline_ns_per_page": 863,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 584
+"unrolled_ns_per_page": 925
 },
 {
-"baseline_ns_per_page": 589,
+"baseline_ns_per_page": 906,
 "order": "baseline_first",
-"unrolled_ns_per_page": 528
+"unrolled_ns_per_page": 880
 },
 {
-"baseline_ns_per_page": 600,
+"baseline_ns_per_page": 971,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 510
+"unrolled_ns_per_page": 816
 },
 {
-"baseline_ns_per_page": 607,
+"baseline_ns_per_page": 854,
 "order": "baseline_first",
-"unrolled_ns_per_page": 801
+"unrolled_ns_per_page": 793
 }
 ],
 "repeats_per_arm": 64,
@@ -471,14 +471,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 70510,
+"ns_per_saved_block": 57549,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 6977,
-"routed_cpu_ns_total": 4019106,
+"routed_cpu_ns_per_page": 5695,
+"routed_cpu_ns_total": 3280343,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -526,14 +526,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 71005,
+"ns_per_saved_block": 57884,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 6780,
-"routed_cpu_ns_total": 3905328,
+"routed_cpu_ns_per_page": 5527,
+"routed_cpu_ns_total": 3183656,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -581,14 +581,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69267,
+"ns_per_saved_block": 56265,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6253,
-"routed_cpu_ns_total": 3601920,
+"routed_cpu_ns_per_page": 5079,
+"routed_cpu_ns_total": 2925824,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -636,14 +636,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69267,
+"ns_per_saved_block": 56265,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6253,
-"routed_cpu_ns_total": 3601920,
+"routed_cpu_ns_per_page": 5079,
+"routed_cpu_ns_total": 2925824,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -691,14 +691,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69267,
+"ns_per_saved_block": 56265,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6253,
-"routed_cpu_ns_total": 3601920,
+"routed_cpu_ns_per_page": 5079,
+"routed_cpu_ns_total": 2925824,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -715,17 +715,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 918,
+"inverse_ns_per_page": 985,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1367,
-"scalar_transform_ns_per_page": 1452,
-"second_lz4_ns_per_page": 11736,
+"scalar_inverse_ns_per_page": 910,
+"scalar_transform_ns_per_page": 940,
+"second_lz4_ns_per_page": 10150,
 "transform_backend": "sse2",
-"transform_ns_per_page": 906
+"transform_ns_per_page": 593
 }
 ]
 }
@@ -739,23 +739,23 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "eb9af3b895098784da81313d989983e168ecf9408b77f1b6e89570cac39a36af",
-"module_sha256": "286afd1dfba170109e6f5e06b9c718146dd2df1eafe7989ef57bf472fd6fa6c1",
+"formatter_sha256": "f5de20bd798f494dd64bc01d7f049b5335a50fac129fc6a6b123d278a3753789",
+"module_sha256": "d497e051eb40982e30cd5253c8aadfc39990c85f44c05e015fc8a1e173a5a8a0",
 "oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "132108f099f15dd610af9ffe0d049d515b9d0840",
+"source_sha": "0603d81f87119f4775c85c3d79af937f1d856795",
 "stages": [
 {
-"elapsed_s": 13.439,
+"elapsed_s": 13.688,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Native build error: implicit declaration of function ?swapz_primary_require_recovery_preserving_errno? [-Wimplicit-function-declaration]",
-"elapsed_s": 22.656,
+"diagnostic": "FAIL: rootless phase=Makefile native and metadata subtest=unavailable test=unavailable exit=2 reason=nonzero_exit phase_s=19 stage_s=19 line=475 log=build/tests/",
+"elapsed_s": 19.311,
 "exit_code": 2,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -767,5 +767,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "132108f099f15dd610af9ffe0d049d515b9d0840"
+"tested_commit_sha": "0603d81f87119f4775c85c3d79af937f1d856795"
 }
