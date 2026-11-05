@@ -8552,5 +8552,8 @@ Malformed count values (including boolean values presented as integers),
 inflated accepted-pair counts, stale source/target bindings, and absent
 current evaluator/sealer SHA-256 proofs cannot authenticate FAIL. Report the
 invalid field and expected/observed types with bounded, redacted recapture
-guidance. These are rootless verdict-logic controls only, never physical
-acceptance evidence.
+guidance. Regression fixtures must locate an authenticating diagnostic by the
+failure-witness identity rather than retained-list position, and type-strict
+count controls cover `required_pairs`, `attempted_pairs` and
+`accepted_pairs`. These are rootless verdict-logic controls only, never
+physical acceptance evidence.

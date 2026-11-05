@@ -3911,11 +3911,24 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                               diagnostics)
                 self.assertIn(f"required_source_sha={SOURCE}", diagnostics)
                 self.assertNotIn(private_marker, diagnostics)
+                self.assertNotIn(
+                    private_marker, json.dumps(authenticated, sort_keys=True))
 
                 # A first-failure claim without its retained matching diagnostic
                 # is not authenticated, even if omitted diagnostics might have
-                # contained that missing witness.
-                audit["diagnostics"].pop(0)
+                # contained that missing witness. Match the witness explicitly:
+                # diagnostic ordering is not part of the producer contract.
+                first_failure = audit["first_failed_evidence"]
+                matching_diagnostics = [
+                    diagnostic for diagnostic in audit["diagnostics"]
+                    if isinstance(diagnostic, dict) and
+                    diagnostic.get("status") == "FAIL" and
+                    all(
+                        diagnostic.get(field) == first_failure.get(field)
+                        for field in ("metric", "workload", "pair_index", "arm"))
+                ]
+                self.assertEqual(len(matching_diagnostics), 1)
+                audit["diagnostics"].remove(matching_diagnostics[0])
                 unverifiable = evaluate(policy=policy, campaign=campaign)
                 self.assertEqual(unverifiable["CODE_PRODUCTION_READY"], "BLOCKED")
                 self.assertEqual(unverifiable["release_verdict"], "BLOCKED")
@@ -3929,23 +3942,26 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
     def test_physical_audit_failure_rejects_count_and_digest_substitution(self):
         policy = acceptance_policy()
         policy_raw = encoded(policy)
+        malformed_count_faults = {
+            "boolean_required_count": ("required_pairs", False),
+            "list_attempted_count": ("attempted_pairs", []),
+            "boolean_accepted_count": ("accepted_pairs", True),
+        }
         for campaign_factory in (
                 physical_campaign_failure_evidence,
                 physical_campaign_decision_failure_evidence):
             for fault in (
-                    "boolean_accepted_count", "list_attempted_count",
-                    "inflated_accepted_count", "missing_evaluator_digest",
-                    "missing_sealer_digest", "stale_audit_source",
-                    "wrong_audit_target"):
+                    *malformed_count_faults, "inflated_accepted_count",
+                    "missing_evaluator_digest", "missing_sealer_digest",
+                    "stale_audit_source", "wrong_audit_target"):
                 with self.subTest(campaign_factory=campaign_factory.__name__,
                                   fault=fault):
                     campaign = campaign_factory(policy_raw)
                     audit = campaign["physical_evidence_audit"]
                     counts = audit["cohort_pair_counts"]["sd-service-balanced"]
-                    if fault == "boolean_accepted_count":
-                        counts["accepted_pairs"] = True
-                    elif fault == "list_attempted_count":
-                        counts["attempted_pairs"] = []
+                    if fault in malformed_count_faults:
+                        field, observed = malformed_count_faults[fault]
+                        counts[field] = copy.deepcopy(observed)
                     elif fault == "inflated_accepted_count":
                         counts["accepted_pairs"] = counts["attempted_pairs"] + 1
                     elif fault == "missing_evaluator_digest":
@@ -3960,20 +3976,19 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
                     self.assertEqual(result["release_verdict"], "BLOCKED")
                     self.assertTrue(any(
+                        f"required_source_sha={SOURCE}" in blocker and
+                        f"observed_source_sha={SOURCE}" in blocker and
                         "verdict=BLOCKED" in blocker and
                         "reason=missing_or_contradictory_campaign_proof"
                         in blocker for blocker in result["code_blockers"]),
                         result["code_blockers"])
-                    if fault in ("boolean_accepted_count", "list_attempted_count"):
-                        field, observed_type = (
-                            ("accepted_pairs", "bool")
-                            if fault == "boolean_accepted_count"
-                            else ("attempted_pairs", "list"))
+                    if fault in malformed_count_faults:
+                        field, observed = malformed_count_faults[fault]
                         self.assertTrue(any(
                             "failed_evidence_field=physical_evidence_audit."
                             f"cohort_pair_counts[].{field}" in blocker and
                             "expected_type=int" in blocker and
-                            f"observed_type={observed_type}" in blocker and
+                            f"observed_type={type(observed).__name__}" in blocker and
                             "verdict=BLOCKED" in blocker and
                             "safe_action=recapture_and_reseal_campaign" in blocker
                             for blocker in result["code_blockers"]),
