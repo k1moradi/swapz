@@ -185,6 +185,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 (base, head, "c" * 32, "mismatch"),
                 ({**base, "native_status": "PENDING"}, head, nonce,
                  "mismatch"),
+                ({**base, "native_status": None,
+                  "result_file": "PASS", "errno": "0"}, head, nonce,
+                 "mismatch"),
+                ({**base, "nonce": "d" * 32,
+                  "result_file": "PASS"}, head, nonce, "mismatch"),
+                ({**base, "fast_test_status": None,
+                  "result_file": "PASS"}, head, nonce, "other_failure"),
+                ({**base, "loaded_preflight": None,
+                  "diagnostics": {"status": "PASS"}}, head, nonce,
+                 "other_failure"),
                 ({**base, "fast_test_status": "FAIL"}, head, nonce,
                  "other_failure"),
                 ({**base, "loaded_preflight": {
@@ -208,6 +218,39 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(probe.ProbeError, "errno_"):
                 probe._read_fast_test_development_evidence(
                     path, os.getuid(), head, nonce)
+
+    def test_development_source_drift_before_fast_test_is_preemptive(self):
+        pinned_head = "a" * 40
+        changed_head = "c" * 40
+        for drift in ("local", "origin", "remote"):
+            with self.subTest(drift=drift):
+                def git(*args):
+                    if args[0] == "symbolic-ref":
+                        return "main"
+                    if args[0] == "status":
+                        return ""
+                    if args[:2] == ("rev-parse", "HEAD"):
+                        return changed_head if drift == "local" else pinned_head
+                    if args[:2] == ("rev-parse", "origin/main"):
+                        return changed_head if drift == "origin" else pinned_head
+                    self.fail(f"unexpected Git read: {args}")
+
+                with mock.patch.object(probe.platform, "machine",
+                                       return_value="x86_64"), \
+                        mock.patch.object(probe, "_require_physical_host"), \
+                        mock.patch.object(probe.os, "geteuid", return_value=0), \
+                        mock.patch.object(probe, "_git", side_effect=git), \
+                        mock.patch.object(
+                            probe, "_remote_main_sha",
+                            return_value=(changed_head if drift == "remote"
+                                          else pinned_head)), \
+                        mock.patch.object(probe.subprocess, "run") as fast_test, \
+                        mock.patch.object(probe, "_artifact_digests") as digests:
+                    with self.assertRaisesRegex(
+                            probe.ProbeError, "must match before development smoke"):
+                        probe.current_development_evidence("1" * 32)
+                fast_test.assert_not_called()
+                digests.assert_not_called()
 
     def test_development_recovery_restores_header_without_swapon(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1401,6 +1444,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               "approval_mode": "verbal"})
             for field, replacement in (
                 ("device_size_bytes", target["size_bytes"] + 4096),
+                ("device_major_minor", "8:5"),
+                ("device_partuuid", "deadbeef-05"),
+                ("helper_sha256", "f" * 64),
+                ("source_sha", "f" * 40),
+                ("formatter_sha256", "f" * 64),
+                ("module_sha256", "f" * 64),
+                ("oracle_sha256", "f" * 64),
                 ("original_header_sha256", "f" * 64),
                 ("device_uuid_path", "/dev/disk/by-uuid/substituted"),
                 ("approval_text", "approval text was modified"),
@@ -1417,7 +1467,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         probe.validate_review(review_path, evidence, target)
             for missing in ("device_size_bytes", "original_header_sha256",
                             "device_uuid_path", "run_id", "approval_text",
-                            "approval_mode", "helper_git_sha"):
+                            "approval_mode", "helper_git_sha",
+                            "helper_sha256", "formatter_sha256",
+                            "module_sha256", "oracle_sha256"):
                 with self.subTest(missing=missing):
                     changed = dict(review)
                     del changed[missing]
@@ -1588,9 +1640,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               truncated_oracle_at=None,
                               teardown_missing_gate=False,
                               teardown_not_complete=False,
-                              teardown_fabricated_lower=False):
+                              teardown_fabricated_lower=False,
+                              development_only=False,
+                              source_drift=None,
+                              helper_sha_mismatch=False,
+                              artifact_drift_before_mutation=False,
+                              recovery_failure=False):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
+        if development_only:
+            target["swap_was_active"] = False
+            evidence.update({
+                "source_sha": evidence["head"],
+                "development_only": True,
+                "scope": probe.DEVELOPMENT_SCOPE,
+            })
+        if helper_sha_mismatch:
+            evidence["helper_sha256"] = "f" * 64
         token = "1234567890abcdef"
         fault = mapper_fault or ("uuid" if wrong_mapper else None)
         state = {
@@ -1608,6 +1674,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "device": target["device"], "size_bytes": target["size_bytes"],
             "swap_size_kib": target["swap_size_kib"],
             "swap_priority": target["swap_priority"],
+            "swap_was_active": not development_only,
+            "development_only": development_only,
         })
         formatted = bytearray(probe.PAGE_BYTES)
         formatted[:8] = probe.SWAPZ_HEADER_MAGIC
@@ -1620,6 +1688,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         identity_verifications = 0
         oracle_invocations = 0
         counter_reads = 0
+        artifact_samples = 0
+
+        def checked_git(*args):
+            if args[:2] == ("rev-parse", "HEAD") and source_drift == "local":
+                return "c" * 40
+            if args[:2] == ("rev-parse", "origin/main") and source_drift == "origin":
+                return "c" * 40
+            if args[0] == "status" and source_drift == "dirty":
+                return " M tests/runtime/native/physical-swap-probe-test.py"
+            return evidence["head"] if args[0] == "rev-parse" else ""
+
+        def artifact_digests():
+            nonlocal artifact_samples
+            artifact_samples += 1
+            if artifact_drift_before_mutation and artifact_samples > 1:
+                return {**evidence["artifact_digests"], "oracle_sha256": "f" * 64}
+            return evidence["artifact_digests"]
 
         def verify_target(_target):
             nonlocal identity_verifications
@@ -1759,6 +1844,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
 
+        def checked_recovery(saved_state, saved_state_dir):
+            events.append(("recover",))
+            if recovery_failure:
+                raise probe.ProbeError("injected recovery uncertainty")
+            return remove_test_objects(saved_state, saved_state_dir)
+
         # Isolate each synthetic attempt from one-use approvals claimed earlier.
         # Otherwise, an approval-replay failure can mask a mapper-identity bug.
         # ExitStack avoids Python's limit on statically nested with-blocks.
@@ -1769,14 +1860,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe.os, "geteuid", return_value=0),
                 mock.patch.object(probe, "current_source_evidence",
                                   return_value=evidence),
-                mock.patch.object(probe, "_git", side_effect=lambda *args:
-                                  (evidence["head"] if args[0] == "rev-parse"
-                                   else "")),
+                mock.patch.object(probe, "current_development_evidence",
+                                  return_value=evidence),
+                mock.patch.object(probe,
+                                  "require_development_formatter_inventory_clear"),
+                mock.patch.object(probe.secrets, "token_hex",
+                                  return_value=review["run_id"]),
+                mock.patch.object(probe, "_git", side_effect=checked_git),
                 mock.patch.object(probe, "_remote_main_sha",
-                                  return_value=evidence["head"]),
+                                  return_value=("c" * 40 if source_drift == "remote"
+                                                else evidence["head"])),
                 mock.patch.object(probe, "inspect_target", return_value=target),
                 mock.patch.object(probe, "_artifact_digests",
-                                  return_value=evidence["artifact_digests"]),
+                                  side_effect=artifact_digests),
                 mock.patch.object(
                     probe, "_kernel_swapz_messages",
                     return_value={
@@ -1804,12 +1900,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   }),
                 mock.patch.object(probe, "_verify_target_identity",
                                   side_effect=verify_target),
-                mock.patch.object(probe, "_active_swap_for",
-                                  side_effect=[{
-                                      "used_kib": 0,
-                                      "size_kib": target["swap_size_kib"],
-                                      "priority": target["swap_priority"],
-                                  }, None]),
+                mock.patch.object(
+                    probe, "_active_swap_for",
+                    side_effect=([None, None] if development_only else [{
+                        "used_kib": 0,
+                        "size_kib": target["swap_size_kib"],
+                        "priority": target["swap_priority"],
+                    }, None])),
                 mock.patch.object(probe, "_write_block0",
                                   side_effect=lambda *_, **__:
                                   events.append(("write0",))),
@@ -1821,18 +1918,23 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   side_effect=lambda *_:
                                   events.append(("save", state["stage"]))),
                 mock.patch.object(probe, "_remove_test_objects",
-                                  side_effect=lambda saved_state, saved_dir: (
-                                      events.append(("recover",)) or
-                                      remove_test_objects(saved_state, saved_dir))),
+                                  side_effect=checked_recovery),
                 mock.patch.object(probe, "_run", side_effect=run),
             )
             with ExitStack() as active_patches:
                 for patch in patches:
                     active_patches.enter_context(patch)
+
+                def execute():
+                    probe.run_probe(
+                        target["device_arg"], target["device_arg"],
+                        None if development_only else directory,
+                        None if development_only else "/reviewed/review.json",
+                        development_only=development_only)
+
                 if teardown_not_complete:
                     with self.assertRaises(probe.ProbeError) as rejected:
-                        probe.run_probe(target["device_arg"], target["device_arg"],
-                                        directory, "/reviewed/review.json")
+                        execute()
                     self.assertEqual(
                         str(rejected.exception),
                         "partition ownership release refused: "
@@ -1846,16 +1948,62 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         oracle_failure_at is not None or \
                         missing_lower_after_at is not None or \
                         truncated_oracle_at is not None or \
-                        teardown_missing_gate or teardown_fabricated_lower:
+                        teardown_missing_gate or teardown_fabricated_lower or \
+                        source_drift is not None or helper_sha_mismatch or \
+                        artifact_drift_before_mutation or recovery_failure:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
-                            "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state"):
-                        probe.run_probe(target["device_arg"], target["device_arg"],
-                                        directory, "/reviewed/review.json")
+                            "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state|main or the bound helper changed|qualified artifacts changed"):
+                        execute()
                 else:
-                    probe.run_probe(target["device_arg"], target["device_arg"],
-                                    directory, "/reviewed/review.json")
+                    execute()
+                if (source_drift is not None or helper_sha_mismatch or
+                        artifact_drift_before_mutation or recovery_failure):
+                    state["_test_results"] = json.loads(
+                        (Path(directory) / probe.RESULTS_NAME).read_text())
         return events, state, target
+
+    def test_development_post_evidence_drift_is_pre_destructive(self):
+        # A post-fast_test source change must retain its original refusal,
+        # even when final identity checks observe an unchanged synthetic header.
+        for drift in ("local", "origin", "dirty", "remote"):
+            with self.subTest(drift=drift):
+                events, state, target = self.simulate_physical_run(
+                    development_only=True, source_drift=drift)
+                self.assert_pre_destructive_source_refusal(
+                    events, state, target, "main or the bound helper changed")
+
+        for failure, options, reason in (
+                ("helper", {"helper_sha_mismatch": True},
+                 "main or the bound helper changed"),
+                ("artifact", {"artifact_drift_before_mutation": True},
+                 "qualified artifacts changed")):
+            with self.subTest(failure=failure):
+                events, state, target = self.simulate_physical_run(
+                    development_only=True, **options)
+                self.assert_pre_destructive_source_refusal(
+                    events, state, target, reason)
+
+    def assert_pre_destructive_source_refusal(self, events, state, target, reason):
+        results = state["_test_results"]
+        self.assertEqual(state["stage"], "PRE_DESTRUCTIVE_FAILED")
+        self.assertEqual(results["final_recovery_state"],
+                         "PRE_DESTRUCTIVE_FAILED")
+        self.assertIn(reason, results["recovery_error"])
+        self.assertEqual(results["physical_oracle_phases"], [])
+        self.assertNotIn("oracle_suite", results)
+        self.assertEqual(
+            results["original_header_sha256"],
+            hashlib.sha256(target["header"]).hexdigest())
+        self.assertTrue(results["original_header_matches_final"])
+        self.assertNotIn(("write0",), events)
+        self.assertFalse(any(event[0] == "recover" for event in events))
+        commands = [event[1] for event in events if event[0] == "command"]
+        self.assertFalse(any(
+            command[0] in {"swapoff", "swapon", "insmod", "modprobe",
+                           "/reviewed/swapzctl", "/reviewed/device-roundtrip"} or
+            command[:2] == ("dmsetup", "create") for command in commands),
+            f"physical command executed after source refusal: {commands}")
 
     def test_development_artifact_mismatch_blocks_before_recovery_or_write(self):
         # A fresh development PASS cannot authorize substituted build bytes.
@@ -2023,6 +2171,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual([entry["status"] for entry in phases], ["PASS", "FAIL"])
         self.assertEqual(state["_test_results"]["final_recovery_state"],
                          "COMPLETE")
+        self.assertNotEqual(state["_test_results"].get("oracle_suite"), "PASS")
+
+    def test_completed_byte_oracle_with_uncertain_recovery_is_not_physical_pass(self):
+        # Completed synthetic mapper I/O and successful restoration are
+        # independent claims. Recovery failure must never print a smoke PASS.
+        events, state, _ = self.simulate_physical_run(recovery_failure=True)
+        results = state["_test_results"]
+        self.assertIn(("recover",), events)
+        self.assertEqual(state["stage"], "RECOVERY_REQUIRED")
+        self.assertEqual(results["final_recovery_state"], "RECOVERY_REQUIRED")
+        self.assertEqual(results["oracle_suite"], "PASS")
+        self.assertEqual(len(results["physical_oracle_phases"]), 11)
+        self.assertTrue(all(phase["status"] == "PASS"
+                            for phase in results["physical_oracle_phases"]))
+        self.assertIn("injected recovery uncertainty",
+                      results["recovery_error"])
 
     def test_partition_identity_is_rechecked_after_clear_before_formatter(self):
         events, _, _ = self.simulate_physical_run()

@@ -5101,6 +5101,20 @@ kernel swap inventory must prove the target remains inactive. Any uncertain
 state retains the durable recovery record and requires explicit recovery; do
 not force-remove anything or retry the same run.
 
+A source-drift refusal before block-zero mutation is
+`PRE_DESTRUCTIVE_FAILED`, preserving the original reason and zero executed
+oracle phases. Rootless controls must inject local HEAD, tracked origin/main
+and canonical remote main drift before the fast-test prerequisite and after
+development evidence, and verify no block-zero write, module insertion,
+mapper creation or oracle invocation. Missing admission-critical facts cannot
+be replaced by optional fast-test telemetry. Keep the final exact-SHA checks:
+no earlier source observation authorizes a later destructive boundary.
+A recovered header alone never establishes byte-oracle success. A completed
+oracle with uncertain cleanup is still `RECOVERY_REQUIRED`, not a physical
+PASS. Canonical remote main cannot be locked by a read; coordinate a brief
+publication quiet window and retry only after resynchronization with a fresh
+nonce and run ID.
+
 Rootless regressions must prove that only the exact fresh evidence outcomes
 are admitted, that a canonical inactive recovery restores the header without
 `swapon`, and that malformed inactive state fails before device inspection.
