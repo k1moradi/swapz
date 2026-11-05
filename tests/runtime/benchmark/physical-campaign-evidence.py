@@ -49,6 +49,12 @@ def unique_object(pairs):
     return result
 
 
+def identical_json_types_and_values(left, right):
+    """Prevent bool/int or float/int coercion in nested JSON provenance."""
+    return (json.dumps(left, sort_keys=True, allow_nan=False) ==
+            json.dumps(right, sort_keys=True, allow_nan=False))
+
+
 def reject_json_constant(value):
     raise ValueError(f"non-finite JSON number {value}")
 
@@ -827,11 +833,13 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
     """
     diagnostics = []
     omitted = 0
+    encountered_statuses = set()
 
     def diagnose(status, metric_name, expected, observed=None,
                  workload=None, pair_index=None, arm=None,
                  reason="physical evidence missing or inconsistent"):
         nonlocal omitted
+        encountered_statuses.add(status)
         if len(diagnostics) == MAX_EVIDENCE_DIAGNOSTICS:
             omitted += 1
             return
@@ -1069,9 +1077,9 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                              value, workload=workload, pair_index=position,
                              reason="frozen three-pair directional bound failed")
     return {
-        "status": ("PASS" if not diagnostics else
-                   "BLOCKED" if any(d["status"] == "BLOCKED" for d in diagnostics)
-                   else "FAIL" if any(d["status"] == "FAIL" for d in diagnostics)
+        "status": ("PASS" if not encountered_statuses else
+                   "BLOCKED" if "BLOCKED" in encountered_statuses
+                   else "FAIL" if "FAIL" in encountered_statuses
                    else "UNAVAILABLE"),
         "diagnostics": diagnostics, "omitted_diagnostic_count": omitted,
         "claim_boundary": QUALIFICATION["CONTRACT"]["claim_boundary"],
@@ -1149,9 +1157,11 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         acceptance_data.decode("utf-8"), object_pairs_hook=unique_object)
     local_amendment = json.loads(
         amendment_data.decode("utf-8"), object_pairs_hook=unique_object)
-    if summary.get("contract") != acceptance.get("physical_qualification"):
+    if not identical_json_types_and_values(
+            summary.get("contract"), acceptance.get("physical_qualification")):
         raise ValueError("qualification summary contract differs from frozen policy")
-    if summary.get("prospective_amendment") != local_amendment:
+    if not identical_json_types_and_values(
+            summary.get("prospective_amendment"), local_amendment):
         raise ValueError("qualification summary amendment differs from frozen policy")
 
     v1_workloads = set(
@@ -1205,7 +1215,8 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
         if summary_record is None:
             raise ValueError(f"pair is absent from evaluator summary: {path}")
         for field, value in pair.items():
-            if summary_record.get(field) != value:
+            if (field not in summary_record or
+                    not identical_json_types_and_values(summary_record[field], value)):
                 raise ValueError(
                     f"summary changed original pair field {field}: {path}")
         pair_artifacts.append({
@@ -1222,7 +1233,7 @@ def seal_campaign(source_sha: str, before_path: Path, after_path: Path,
             "campaign sealer requires every evaluator record, including failed/excluded attempts")
 
     regenerated = QUALIFICATION["evaluate"](pair_records, protocol=protocol)
-    if regenerated != summary:
+    if not identical_json_types_and_values(regenerated, summary):
         raise ValueError(
             "qualification summary does not exactly match supplied pair evidence")
 

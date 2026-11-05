@@ -6681,4 +6681,9 @@ from the raw arm. The sealer's public failure diagnostics cap at 96
 bounded numeric observations and include frozen bound, metric, workload,
 pair index and arm without copying private representative payload hashes.
 Lower-device bytes/requests are host-visible I/O, **not NAND wear**.
+Sealer provenance comparisons are type-exact at every JSON depth: a boolean
+cannot substitute for an integer arm counter or frozen numeric limit, even
+when Python would compare their values equal. The public diagnostic limit
+must not hide a higher-severity BLOCKED or FAIL classification; omitted
+entries remain counted without publishing private sample contents.
 No pending prospective-v2 amendment is applied as a retroactive replacement.

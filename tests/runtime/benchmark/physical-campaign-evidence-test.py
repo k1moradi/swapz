@@ -220,6 +220,67 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                          QUALIFICATION.CONTRACT["acceptance"]["service"][
                              "useful_write_ci_lower_min"])
 
+    def test_truncated_diagnostics_preserve_blocked_status(self):
+        # Twelve missing measured fields per arm fill the 96-entry cap before
+        # the last arm's foreign boot is visited. The classification must not
+        # depend on which diagnostics fit into the public result.
+        records = [pair(index, 1100 + 500 * index)
+                   for index in range(1, 6)]
+        for record in records:
+            for label in ("raw", "swapz"):
+                candidate = record[label]
+                for field in ("read_ops", "write_ops"):
+                    candidate.pop(field)
+                for field in ("lower_io", "throughput", "cpu",
+                              "latency", "measurement_snapshots"):
+                    candidate[field] = {}
+        records[-1]["swapz"]["arm_boot_id"] = (
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        audit, _ = inspect(records)
+        self.assertEqual(audit["status"], "BLOCKED")
+        self.assertEqual(len(audit["diagnostics"]),
+                         EVIDENCE.MAX_EVIDENCE_DIAGNOSTICS)
+        self.assertGreater(audit["omitted_diagnostic_count"], 0)
+        self.assertTrue(all(item["status"] == "UNAVAILABLE"
+                            for item in audit["diagnostics"]))
+
+    def test_distinct_evidence_failure_classifications(self):
+        baseline = pair(1, 1100)
+        missing = copy.deepcopy(baseline)
+        missing["raw"]["latency"].pop("read_p95_ns")
+        unavailable, _ = inspect([missing])
+        self.assertEqual(unavailable["status"], "UNAVAILABLE")
+        blocked = copy.deepcopy(baseline)
+        blocked["raw"]["source_sha"] = "b" * 40
+        blocked_audit, _ = inspect([blocked])
+        self.assertEqual(blocked_audit["status"], "BLOCKED")
+        problem = next(item for item in blocked_audit["diagnostics"]
+                       if item["metric"] == "arm.source_sha")
+        self.assertEqual(problem["expected"], "admitted source")
+        self.assertEqual(problem["observed"], None)
+        self.assertEqual(problem["pair_index"], 1)
+        self.assertEqual(problem["arm"], "raw")
+        self.assertIn("stale source", problem["reason"])
+        excluded = copy.deepcopy(baseline)
+        excluded["status"] = "EXCLUDED"
+        excluded["excluded"] = True
+        excluded["analysis_usable"] = False
+        failed, _ = inspect([excluded])
+        self.assertEqual(failed["status"], "FAIL")
+
+    def test_different_workload_trace_excludes_pair(self):
+        record = pair(1, 1100)
+        record["raw"]["operation_recipe_sha256"] = "a" * 64
+        record["swapz"]["operation_recipe_sha256"] = "b" * 64
+        compared = QUALIFICATION.compare_pair(
+            record["raw"], record["swapz"], record["workload"],
+            record["pair_id"], record["pair_index"], record["order"])
+        self.assertEqual(compared["status"], "EXCLUDED")
+        self.assertTrue(any(
+            "pair provenance mismatch" in reason and
+            "operation_recipe_sha256" in reason
+            for reason in compared["exclusion_reasons"]))
+
     def test_no_read_only_promotion_or_private_diagnostic(self):
         self.assertNotEqual(
             EVIDENCE.campaign_status("READY_READ_ONLY", True, True, "STABLE"),
@@ -355,7 +416,7 @@ class CapacityRamPropagation(unittest.TestCase):
         return snapshot, after
 
     def synthetic_seal(self, peak_bytes, *, include_trace=True,
-                       conflicting_host_boot=False):
+                       conflicting_host_boot=False, summary_mutation=None):
         record, trace = self.synthetic_capacity(peak_bytes)
         before, after = self.synthetic_hosts()
         if conflicting_host_boot:
@@ -381,6 +442,12 @@ class CapacityRamPropagation(unittest.TestCase):
             "campaign_target_consistent": True,
         }
 
+        # Retain the evaluator output before corrupting the serialized
+        # summary; the sealer must catch every type drift.
+        regenerated_summary = copy.deepcopy(summary)
+        if summary_mutation is not None:
+            summary_mutation(summary)
+
         with tempfile.TemporaryDirectory() as directory:
             paths = [Path(directory) / name for name in (
                 "before.json", "after.json", "summary.json",
@@ -400,11 +467,33 @@ class CapacityRamPropagation(unittest.TestCase):
                                   return_value={"status": "PASS",
                                                 "diagnostics": []}),
                 mock.patch.dict(EVIDENCE.QUALIFICATION, {
-                    "evaluate": lambda records, protocol: summary}),
+                    "evaluate": lambda records, protocol: regenerated_summary}),
             ):
                 return EVIDENCE.seal_campaign(
                     SOURCE, *paths[:3], [paths[3]],
                     paths[4] if include_trace else None)
+
+    def test_sealer_rejects_type_coerced_evaluator_summary(self):
+        # Python compares numeric 1 == True and 0 == False. These mutations
+        # previously sealed PASS while changing the original pair, frozen
+        # policy or regenerated evaluator result.
+        def change_arm_count(summary):
+            summary["records"][0]["raw"]["read_ops"] = True
+
+        def change_frozen_limit(summary):
+            summary["contract"]["acceptance"]["sustained"][
+                "gc_no_headroom_skips_max"] = False
+
+        def change_evaluator_flag(summary):
+            summary["campaign_target_consistent"] = 1
+
+        for mutation, rejected_field in (
+                (change_arm_count, "summary changed original pair field raw"),
+                (change_frozen_limit, "contract differs from frozen policy"),
+                (change_evaluator_flag, "does not exactly match supplied pair")):
+            with self.subTest(field=rejected_field):
+                with self.assertRaisesRegex(ValueError, rejected_field):
+                    self.synthetic_seal(self.LIMIT, summary_mutation=mutation)
 
     def test_sealer_preserves_measured_fail_and_blocks_unverified(self):
         campaign = self.synthetic_seal(self.LIMIT + 1024)
