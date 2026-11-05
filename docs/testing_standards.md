@@ -1397,9 +1397,22 @@ authority publication, then resume only still-authoritative victim members
 after the fault is removed. Repeated recovery must verify byte-exact contents
 and generations, must not consume a second reserve merely because the first
 attempt failed, and must prove the evacuated source becomes reusable only after
-its mapping and physical liveness reach zero. If accumulated uncertain
-reservations exhaust the owned destination, qualification forbids cursor
-rollback, live-reserve reuse or an unbounded internal retry. When the original
+its mapping and physical liveness reach zero. A separate exact-production-C
+engine-rotation regression must inject a source-read `-EIO` after one compressed
+survivor has already published into the GC destination. The failed read must
+perform no successful lower read or write, consume no destination blocks, retain
+the published prefix without a second generation increment, and preserve all
+still-authoritative source maps. Retry must use the same authenticated
+victim/destination ownership, pack the three remaining 2072-byte compressed
+survivors into exactly one two-block extent, and prove its physical start
+refcount is three (with zero interior refcount). A later foreground overwrite
+of one member must reduce that shared reference count to two while preserving
+the other two maps and their byte-exact reads. This deterministic source-linked
+result remains synthetic: loaded lower fault/recovery and whole-map reuse
+qualification are separate and must not be inferred from it.
+If accumulated uncertain reservations exhaust the owned destination,
+qualification forbids cursor rollback, live-reserve reuse or an unbounded
+internal retry. When the original
 victim has nevertheless reached zero mapping and physical liveness, one bounded
 authenticated roll-forward may make the full destination the next victim and
 reuse that independently verified-dead original victim as the next reserve

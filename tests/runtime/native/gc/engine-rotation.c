@@ -1056,7 +1056,7 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 		(destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
 	struct swapz_map original_maps[4], published_prefix;
 	swapz_u32 shared_extent_start, cursor_before;
-	unsigned int logical;
+	unsigned int logical, lower_reads_before, lower_writes_before;
 	int original_error;
 
 	CHECK(setup() == 0);
@@ -1078,10 +1078,14 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 	      destination * SWAPZ_SEGMENT_BLOCKS &&
 	      published_prefix.generation == original_maps[1U].generation + 1U);
 	CHECK(cursor_before == destination * SWAPZ_SEGMENT_BLOCKS + 1U);
+	lower_reads_before = lower_reads;
+	lower_writes_before = lower_writes;
 
 	fail_read = 1;
 	original_error = evacuate(victim);
-	if (original_error != -EIO || fail_read || !a.gc_allocation ||
+	if (original_error != -EIO || fail_read ||
+	    lower_reads != lower_reads_before ||
+	    lower_writes != lower_writes_before || !a.gc_allocation ||
 	    a.gc_forbidden_victim != victim || a.gc_destination != destination ||
 	    a.open_segment != destination || a.next_block != cursor_before ||
 	    !roles[victim] || roles[destination] ||
@@ -1097,6 +1101,8 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 			" original_errno=%d expected_errno=%d"
 			" preserved_mapping=%d expected_generation=%u"
 			" observed_generation=%u victim_role=%u destination_role=%u"
+			" expected_lower_reads=%u observed_lower_reads=%u"
+			" expected_lower_writes=%u observed_lower_writes=%u"
 			" recovery=%u disposition=retry_same_destination"
 			" safe_action=retain_prefix_and_retry_unpublished\n",
 			__FILE__, __LINE__, victim,
@@ -1109,6 +1115,8 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 			published_prefix.generation, maps[1U].generation,
 			(unsigned int)roles[victim],
 			(unsigned int)roles[destination],
+			lower_reads_before, lower_reads,
+			lower_writes_before, lower_writes,
 			(unsigned int)a.gc_allocation);
 		return 1;
 	}
@@ -1139,7 +1147,8 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 	      classes[shared_extent_start] == 2U &&
 	      !live[shared_extent_start + 1U] &&
 	      !classes[shared_extent_start + 1U] &&
-	      a.next_block == shared_extent_start + 2U);
+	      a.next_block == shared_extent_start + 2U &&
+	      lower_writes == lower_writes_before + 2U);
 	CHECK(write_one(5U) == 0);
 	CHECK(write_one(0U) == 0);
 	CHECK(live[shared_extent_start] == 2U &&
