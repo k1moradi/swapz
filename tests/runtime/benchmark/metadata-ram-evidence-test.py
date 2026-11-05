@@ -100,6 +100,107 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
                 "metadata_and_target_peak_ram_bytes_max"],
             1_342_177_280)
 
+    def test_authenticated_over_limit_is_measured_but_missing_arm_is_unavailable(self) -> None:
+        policy_path = Path(__file__).resolve().parents[3] / (
+            "docs/production-acceptance.json")
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        limit = policy["physical_qualification"]["acceptance"]["sustained"][
+            "metadata_and_target_peak_ram_bytes_max"]
+        observed_peak = limit + ram.MEMINFO_UNIT_BYTES
+
+        # Missing sustained-arm evidence is unavailable before trace-to-arm
+        # validation can authenticate any later chronology.
+        with self.assertRaisesRegex(
+                ValueError, "arm chronology is missing") as caught:
+            ram.metadata_ram_arm_binding({})
+        missing_arm_diagnostic = str(caught.exception)
+        self.assertEqual(
+            missing_arm_diagnostic.count("peak_ram_bytes=unavailable"), 1)
+        self.assertNotIn(str(observed_peak), missing_arm_diagnostic)
+
+        # A separately well-formed trace above the frozen ceiling must retain
+        # its measured peak; the validator does not turn a measured FAIL into
+        # unavailable evidence merely because the value is over policy.
+        trace, host = synthetic_trace()
+        baseline_available_kib = trace["samples"][0]["mem_available_kib"]
+        self.assertEqual(observed_peak % ram.MEMINFO_UNIT_BYTES, 0)
+        trace["samples"][15]["mem_available_kib"] = (
+            baseline_available_kib -
+            observed_peak // ram.MEMINFO_UNIT_BYTES)
+        summary = self.validate_trace(trace)
+        self.assertEqual(summary["peak_ram_bytes"], observed_peak)
+        self.assertEqual(summary["gc_peak_ram_bytes"], observed_peak)
+        self.assertGreater(summary["peak_ram_bytes"], limit)
+        ram.validate_metadata_ram_host_binding(trace, host)
+
+        arm_binding = ram.metadata_ram_arm_binding({
+            "arm_started_monotonic_ns": 2_200_000_000,
+            "arm_finished_monotonic_ns": 2_700_000_000,
+            "sustained_intervals": [{
+                "start_monotonic_ns": 2_450_000_000,
+                "end_monotonic_ns": 2_650_000_000,
+                "gc": {
+                    "gc_wall_ns": 1,
+                    "gc_victims": 1,
+                    "gc_pages": 1,
+                },
+            }],
+        })
+        ram.validate_metadata_ram_arm_binding(trace, arm_binding)
+
+    def test_cadence_boundaries_phase_peaks_and_mapper_absent_baseline(self) -> None:
+        trace, _ = synthetic_trace()
+        # Exercise both accepted adjacent-cadence boundaries without changing
+        # the first-to-last span: 50 ms into steady, then 150 ms to its peer.
+        trace["samples"][13]["monotonic_ns"] -= 50_000_000
+        timestamp = START_UTC + datetime.timedelta(
+            seconds=2, milliseconds=250)
+        trace["samples"][13]["timestamp_utc"] = timestamp.isoformat(
+            timespec="microseconds").replace("+00:00", "Z")
+        trace["samples"][11]["mem_available_kib"] = 3_700_000
+        trace["samples"][13]["mem_available_kib"] = 3_600_000
+        trace["samples"][15]["mem_available_kib"] = 3_500_000
+
+        summary = self.validate_trace(trace)
+        self.assertEqual(summary["initialization_peak_ram_bytes"],
+                         300_000 * 1024)
+        self.assertEqual(summary["steady_peak_ram_bytes"], 400_000 * 1024)
+        self.assertEqual(summary["gc_peak_ram_bytes"], 500_000 * 1024)
+        self.assertEqual(summary["peak_ram_bytes"], 500_000 * 1024)
+
+        trace, _ = synthetic_trace()
+        trace["samples"][0]["mapper_present"] = True
+        with self.assertRaisesRegex(
+                ValueError, "baseline was sampled with mapper present") as caught:
+            self.validate_trace(trace)
+        self.assertEqual(
+            str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
+
+    def test_missing_timestamp_and_short_teardown_recovery_fail_closed(self) -> None:
+        trace, _ = synthetic_trace()
+        del trace["samples"][0]["timestamp_utc"]
+        with self.assertRaisesRegex(
+                ValueError,
+                r"metric=samples\[0\]\.fields missing=timestamp_utc") as caught:
+            self.validate_trace(trace)
+        self.assertEqual(
+            str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
+
+        trace, _ = synthetic_trace()
+        # Keep every adjacent interval inside 50-150 ms and retain all 21
+        # absent samples, but shorten the absent teardown span below two seconds.
+        trace["samples"][-1]["monotonic_ns"] -= 1_000_000
+        timestamp = START_UTC + datetime.timedelta(
+            seconds=4, milliseconds=799)
+        trace["samples"][-1]["timestamp_utc"] = timestamp.isoformat(
+            timespec="microseconds").replace("+00:00", "Z")
+        with self.assertRaisesRegex(
+                ValueError,
+                "teardown lacks two seconds of quiescent recovery") as caught:
+            self.validate_trace(trace)
+        self.assertEqual(
+            str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
+
     def test_physically_impossible_unreclaim_was_false_acceptance(self) -> None:
         trace, host = synthetic_trace()
         index = 13  # First synthetic steady-state sample.
