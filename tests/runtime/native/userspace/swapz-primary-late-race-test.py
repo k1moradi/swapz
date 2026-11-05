@@ -12,6 +12,7 @@ A deliberately weakened local copy must demonstrate the regression's power.
 from pathlib import Path
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1430,6 +1431,85 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         timeout=10, check=False)
 
 
+
+def check_namespace_child_failure_boundary() -> int:
+    """A child which entered a new namespace but failed is not an environment SKIP."""
+    unshare = shutil.which("unshare")
+    if unshare is None:
+        print("SKIP: boundary=namespace-setup expected_identity=distinct "
+              "observed_identity=unavailable refusal=unshare-absent first_errno=ENOENT")
+        return 0
+    try:
+        parent_namespace = os.stat("/proc/self/ns/mnt")
+    except OSError as error:
+        print(f"FAIL: boundary=namespace-parent-identity expected_identity=known "
+              f"observed_identity=unavailable refusal=stat-error first_errno={error.errno}",
+              file=sys.stderr)
+        return 1
+
+    # No mounts or swap operations: the child only compares namespace IDs.
+    # Its deliberate status 23 is a FAIL classification negative control.
+    child = (
+        "import os, sys\n"
+        "print('SWAPZ_NAMESPACE_CHILD_ENTERED', flush=True)\n"
+        "namespace = os.stat('/proc/self/ns/mnt')\n"
+        "if (namespace.st_dev, namespace.st_ino) == "
+        "(int(sys.argv[1]), int(sys.argv[2])):\n"
+        "    raise SystemExit(24)\n"
+        "raise SystemExit(23)\n"
+    )
+    try:
+        completed = subprocess.run(
+            [unshare, "--user", "--map-root-user", "--mount", "--fork",
+             sys.executable, "-c", child,
+             str(parent_namespace.st_dev), str(parent_namespace.st_ino)],
+            capture_output=True, text=True, check=False, timeout=10,
+            env={**os.environ, "LC_ALL": "C"})
+    except OSError as error:
+        print(f"FAIL: boundary=namespace-child-spawn expected_identity=distinct "
+              f"observed_identity=unknown refusal=spawn-error first_errno={error.errno}",
+              file=sys.stderr)
+        return 1
+    except subprocess.TimeoutExpired:
+        print("FAIL: boundary=namespace-child-start expected_identity=distinct "
+              "observed_identity=unknown refusal=timeout first_errno=unknown",
+              file=sys.stderr)
+        return 1
+
+    if "SWAPZ_NAMESPACE_CHILD_ENTERED" not in completed.stdout.splitlines():
+        # Environmental SKIP is permitted only for a confirmed unshare setup
+        # error, before the child ever emitted its execution handshake.
+        setup_match = re.fullmatch(
+            r"unshare: unshare failed: "
+            r"(Operation not permitted|Permission denied|Invalid argument|Function not implemented)\n?",
+            completed.stderr)
+        if setup_match and completed.returncode != 0:
+            setup_errno = {
+                "Operation not permitted": "EPERM",
+                "Permission denied": "EACCES",
+                "Invalid argument": "EINVAL",
+                "Function not implemented": "ENOSYS",
+            }[setup_match.group(1)]
+            print("SKIP: boundary=namespace-setup expected_identity=distinct "
+                  f"observed_identity=unavailable refusal=unshare-denied first_errno={setup_errno}")
+            return 0
+        print(f"FAIL: boundary=namespace-child-start expected_identity=distinct "
+              f"observed_identity=unknown refusal=missing-start-marker "
+              f"first_errno=unknown observed_exit={completed.returncode}",
+              file=sys.stderr)
+        return 1
+    if completed.returncode != 23:
+        print(f"FAIL: boundary=namespace-child-after-start expected_identity=distinct "
+              f"observed_identity=unknown refusal=unexpected-child-exit "
+              f"first_errno=none observed_exit={completed.returncode} expected_exit=23",
+              file=sys.stderr)
+        return 1
+    print("PASS: boundary=namespace-child-after-start expected_identity=distinct "
+          "observed_identity=distinct negative_control=executed-child-failure "
+          "classification=FAIL refusal=nonzero-exit-not-environment-SKIP "
+          "first_errno=none observed_exit=23")
+    return 0
+
 def main() -> int:
     source = SOURCE.read_text()
     with tempfile.TemporaryDirectory(prefix="swapz-primary-late-race-") as folder:
@@ -1448,7 +1528,7 @@ def main() -> int:
             print(mutant.stdout + mutant.stderr, file=sys.stderr, end="")
             return 1
         print("PASS: negative control exposes all intercepted destructive boundaries")
-    return 0
+    return check_namespace_child_failure_boundary()
 
 
 if __name__ == "__main__":
