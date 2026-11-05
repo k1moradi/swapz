@@ -6151,6 +6151,9 @@ mandatory in the rootless `make test` stage: `tests/tools/test-rootless.sh`
 invokes it exactly once, enforced by `tests/runtime/native/source-contract-test.py`.
 The existing Systemd/package workflow also runs it indirectly through its
 workflow-contract fixture; it must not add a duplicate direct invocation.
+The rootless stderr classifier also recognizes `GeneratorPublicationTest` so a
+failed adversarial assertion names its responsible test method without exposing
+private generator stderr in the public failure marker.
 The suite needs Python 3, Bash and GNU userspace commands, and operates only on
 private temporary directories with a stubbed manager. Generator subprocesses
 have a 30-second bound, and the official rootless stage keeps the original

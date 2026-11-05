@@ -108,8 +108,8 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\.test_[A-Za-z0-9_]{1,96}\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\.test_[A-Za-z0-9_]{1,96}\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.test_[A-Za-z0-9_]{1,96}\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.test_[A-Za-z0-9_]{1,96}\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
   local first_progress_kind=
   local first_progress_test=
@@ -310,13 +310,13 @@ report_rootless_failure() {
              }
              if (target_test != "unavailable" &&
                  target_kind != "unavailable") {
-               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\." target_test "\\)"
+               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\." target_test "\\)"
                if (text !~ pattern) return 0
                if (target_subtest != "unavailable" &&
                    text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
                return 1
              }
-             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\.test_[A-Za-z0-9_]+\)/
+             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\.test_[A-Za-z0-9_]+\)/
            }
            function target_ends(text) {
              if (compile_mode) {
