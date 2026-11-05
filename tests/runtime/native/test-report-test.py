@@ -3448,6 +3448,135 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("test_expected_negative", reason)
         self.assertIn("make-interface-test.py", reason)
 
+    def test_tmp_cleanup_official_failure_retains_private_first_unittest(self):
+        """Rootless negative controls for the unwrapped failing source suite."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory(prefix="report-tmp-cleanup-") as name:
+            old_root = runner.ROOT
+            runner.ROOT = Path(name)
+            try:
+                directory = (runner.ROOT / "build/tests" /
+                             "rootless-failure.ABC12345")
+                directory.mkdir(parents=True, mode=0o700)
+                log_file = directory / "diagnostic.log"
+                log_name = ("build/tests/rootless-failure.ABC12345/"
+                            "diagnostic.log")
+
+                def fail(transcript, exit_code=1, reason="nonzero_exit",
+                         log=log_name, available=True):
+                    log_file.unlink(missing_ok=True)
+                    if available:
+                        log_file.write_text(
+                            "--- swapz rootless attribution ---\n"
+                            f"exit_code={exit_code}\n")
+                        log_file.chmod(0o600)
+                    marker = (
+                        "FAIL: rootless phase=tmp-cleanup-test.py "
+                        "subtest=unavailable test=unavailable "
+                        f"exit={exit_code} reason={reason} phase_s=1 stage_s=2 "
+                        f"line=496 log={log}\n"
+                        "Failed during: tests/runtime/native/tmp-cleanup-test.py\n"
+                        f"Reason: exit={exit_code} reason={reason} "
+                        "subtest=unavailable\n")
+                    result = {"stages": []}
+                    with patch.object(
+                            runner.subprocess, "run",
+                            return_value=SimpleNamespace(
+                                stdout=transcript + marker,
+                                returncode=exit_code)), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        status = runner.run_stage(
+                            "Native and rootless contracts",
+                            ["python3", "-c", "pass"], result)
+                    evidence = (log_file.read_text() if log_file.exists() else "")
+                    return status, result["stages"][0], evidence
+
+                # The detailed summary places a later teardown ERROR first;
+                # the earlier verbose FAIL remains causal despite Make noise.
+                output = (
+                    "FAIL: test_expected_negative "
+                    "(__main__.EarlierFixture.test_expected_negative)\n"
+                    "make: *** [Makefile:40: concurrent] Error 9\n"
+                    "test_first (__main__.OwnedTemporaryCleanupTests.test_first)"
+                    " ... FAIL\n"
+                    "test_cleanup (__main__.OwnedTemporaryCleanupTests.test_cleanup)"
+                    " ... ERROR\n"
+                    "======================================================================\n"
+                    "ERROR: test_cleanup "
+                    "(__main__.OwnedTemporaryCleanupTests.test_cleanup)\n"
+                    "Traceback (most recent call last):\n"
+                    "RuntimeError: LATER CLEANUP\n"
+                    "======================================================================\n"
+                    "FAIL: test_first (__main__.OwnedTemporaryCleanupTests.test_first)\n"
+                    "Traceback (most recent call last):\n"
+                    "  File \"/private/secret.py\", line 19, in test_first\n"
+                    "AssertionError: FIRST CAUSE\n"
+                    "----------------------------------------------------------------------\n"
+                    "Ran 2 tests in 0.1s\nFAILED (failures=1, errors=1)\n"
+                    + "x" * 300000 + "\n")
+                status, stage, evidence = fail(output)
+                self.assertEqual((status, stage["exit_code"], stage["status"]),
+                                 (1, 1, "FAIL"))
+                self.assertEqual(stage["failed_phase"], "tmp-cleanup-test.py")
+                self.assertIn("reason=nonzero_exit", stage["diagnostic"])
+                self.assertIn("subtest=unavailable test=unavailable",
+                              stage["diagnostic"])
+                self.assertIn("log=" + log_name, stage["diagnostic"])
+                self.assertNotIn("/private/secret.py", stage["diagnostic"])
+                self.assertNotIn("test_first", stage["diagnostic"])
+                self.assertNotIn("test_expected_negative", stage["diagnostic"])
+                self.assertIn("AssertionError: FIRST CAUSE", evidence)
+                self.assertIn("/private/secret.py", evidence)
+                self.assertLessEqual(log_file.stat().st_size, 262144)
+                self.assertEqual(log_file.stat().st_mode & 0o777, 0o600)
+
+                # A marker from an earlier child is not authoritative if
+                # another rootless phase failed later in the same stage.
+                later_marker = (
+                    "FAIL: rootless phase=another-suite.py "
+                    "subtest=unavailable test=unavailable exit=1 "
+                    "reason=nonzero_exit phase_s=2 stage_s=3 "
+                    "line=123 log=unavailable\n")
+                _, _, ignored = fail(output + later_marker)
+                self.assertNotIn("first matched tmp-cleanup", ignored)
+
+                exception = (
+                    "test_first (__main__.OwnedTemporaryCleanupTests.test_first)"
+                    " ... ERROR\n"
+                    "ERROR: test_first "
+                    "(__main__.OwnedTemporaryCleanupTests.test_first)\n"
+                    "Traceback (most recent call last):\n"
+                    "ValueError: ORIGINAL EXCEPTION\n")
+                _, stage, evidence = fail(exception)
+                self.assertIn("ValueError: ORIGINAL EXCEPTION", evidence)
+                self.assertNotIn("test_first", stage["diagnostic"])
+
+                # Silent nonzero, lost evidence, failed relay and timeout must
+                # preserve the process exit without inventing a nested test.
+                for case in (
+                        {"transcript": "", "exit_code": 1},
+                        {"transcript": "", "exit_code": 1,
+                         "log": "unavailable", "available": False},
+                        {"transcript": "", "exit_code": 1,
+                         "reason": "stderr_relay_failure"},
+                        {"transcript": "", "exit_code": 124,
+                         "reason": "timeout_or_exit_124"}):
+                    with self.subTest(case=case):
+                        status, stage, evidence = fail(**case)
+                        self.assertEqual(status, case["exit_code"])
+                        self.assertEqual(stage["exit_code"], case["exit_code"])
+                        self.assertEqual(stage["failed_phase"],
+                                         "tmp-cleanup-test.py")
+                        self.assertIn("test=unavailable", stage["diagnostic"])
+                        self.assertIn("reason=" +
+                                      case.get("reason", "nonzero_exit"),
+                                      stage["diagnostic"])
+                        self.assertNotIn("first matched tmp-cleanup", evidence)
+            finally:
+                runner.ROOT = old_root
+
     def test_randomized_native_failure_reports_safe_source_and_line(self):
         phase, reason = runner.failure_context(
             "FAIL: randomized-authority.c:188 expression=result == 0\n",

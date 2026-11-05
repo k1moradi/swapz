@@ -2243,6 +2243,111 @@ def make_invocation():
     )
 
 
+def retain_tmp_cleanup_first_failure(output, child_exit_code):
+    """Retain the first unwrapped tmp-cleanup traceback in Bash's private log.
+
+    This never authenticates a nested public unittest identity. The reporter
+    already owns the child stage's merged stdout/stderr until it returns.
+    """
+    marker_pattern = re.compile(
+        r"(?m)^FAIL: rootless phase=tmp-cleanup-test[.]py "
+        r"subtest=unavailable test=unavailable exit=([0-9]{1,3}) "
+        r"reason=nonzero_exit phase_s=[0-9]+ stage_s=[0-9]+ "
+        r"line=(?:[0-9]+|unavailable) "
+        r"log=build/tests/(rootless-failure[.][A-Za-z0-9]{8})/diagnostic[.]log$")
+    markers = list(marker_pattern.finditer(output))
+    if not markers or int(markers[-1].group(1)) != child_exit_code:
+        return
+    marker = markers[-1]
+    # An earlier fixture or a different later failing rootless phase cannot
+    # authenticate this capture. Bash's own marker must be the last one.
+    all_markers = list(re.finditer(r"(?m)^FAIL: rootless phase=", output))
+    if not all_markers or all_markers[-1].start() != marker.start():
+        return
+    transcript = output[:marker.start()]
+
+    # unittest's verbose failures are execution-ordered, unlike its detailed
+    # ERROR/FAIL summaries. Never take an earlier passing fixture's FAIL line.
+    progress = re.search(
+        r"(?m)^[ \t]*(test_[A-Za-z0-9_]+) "
+        r"\(__main__[.]OwnedTemporaryCleanupTests[.]\1\)"
+        r"(?:[ \t]+\([^\n]*\))?[ \t]+[.][.][.][ \t]+"
+        r"(FAIL|ERROR)[ \t]*$", transcript)
+    detailed_headers = list(re.finditer(
+        r"(?m)^(FAIL|ERROR): (test_[A-Za-z0-9_]+) "
+        r"\(__main__[.]OwnedTemporaryCleanupTests[.]\2\)"
+        r"(?:[ \t]+[^\n]*)?$", transcript))
+    selected = next((
+        header for header in detailed_headers
+        if progress is not None and header.group(1) == progress.group(2)
+        and header.group(2) == progress.group(1)), None)
+    if selected is None and progress is None and detailed_headers:
+        selected = detailed_headers[0]
+    first_block = b""
+    if selected is not None:
+        boundary = re.search(r"(?m)^={12,}[ \t]*$",
+                             transcript[selected.end():])
+        end = (selected.end() + boundary.start() if boundary is not None
+               else len(transcript))
+        first_block = transcript[selected.start():end].encode(
+            "utf-8", errors="replace")
+
+    # No new log or symlink traversal: only append to the exact existing
+    # mode-0600 artifact named by the authenticated rootless marker.
+    descriptors = []
+    try:
+        directory_flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
+                           os.O_CLOEXEC)
+        base = os.open(ROOT / "build/tests", directory_flags)
+        descriptors.append(base)
+        directory = os.open(marker.group(2), directory_flags, dir_fd=base)
+        descriptors.append(directory)
+        directory_stat = os.fstat(directory)
+        if (not stat.S_ISDIR(directory_stat.st_mode) or
+                directory_stat.st_uid != os.getuid() or
+                stat.S_IMODE(directory_stat.st_mode) != 0o700):
+            return
+        log = os.open("diagnostic.log",
+                      os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW |
+                      os.O_CLOEXEC, dir_fd=directory)
+        descriptors.append(log)
+        log_stat = os.fstat(log)
+        if (not stat.S_ISREG(log_stat.st_mode) or log_stat.st_nlink != 1 or
+                log_stat.st_uid != os.getuid() or
+                stat.S_IMODE(log_stat.st_mode) != 0o600):
+            return
+        remaining_bytes = 262144 - log_stat.st_size
+        first_label = (b"\n--- first matched tmp-cleanup unittest failure "
+                       b"(private; not a public test identity) ---\n")
+        tail_label = (b"\n--- official stage merged stdout/stderr tail "
+                      b"(context only) ---\n")
+        if remaining_bytes <= len(first_label) + len(tail_label):
+            return
+        budget = remaining_bytes - len(first_label) - len(tail_label)
+        first_budget = min(65536, budget // 2) if first_block else 0
+        if len(first_block) > first_budget:
+            prefix_bytes = first_budget // 2
+            first_block = (first_block[:prefix_bytes] +
+                           first_block[-(first_budget - prefix_bytes):])
+        tail_budget = budget - len(first_block)
+        tail = transcript.encode("utf-8", errors="replace")[-tail_budget:]
+        pending = memoryview(first_label + first_block + tail_label + tail)
+        while pending:
+            written = os.write(log, pending)
+            if written <= 0:
+                return
+            pending = pending[written:]
+    except OSError:
+        # A secondary diagnostic error cannot replace the first child exit.
+        pass
+    finally:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
 def failure_context(output, *, loaded=True, default_phase=None):
     """Return a sanitized failure phase/reason without leaking host details.
 
@@ -2381,6 +2486,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
         # it says test=unavailable, do not guess from earlier transcript lines.
         rootless_failure_marker_seen = False
         rootless_reported_test = None
+        rootless_last_marker = None
         rootless_marker_re = re.compile(
             r"FAIL: rootless phase=([A-Za-z0-9 ._:+-]{1,96}) "
             r"subtest=(unavailable|[a-z0-9-]{1,64}) "
@@ -2398,10 +2504,12 @@ def failure_context(output, *, loaded=True, default_phase=None):
             # Only the complete sanitized grammar may contribute test identity.
             rootless_failure_marker_seen = True
             rootless_reported_test = None
+            rootless_last_marker = None
             rootless_compile_failure = None
             rootless_invalid_late_race_identity = False
             match = rootless_marker_re.fullmatch(candidate)
             if match:
+                rootless_last_marker = match
                 marker_phase, marker_subtest, marker_test, marker_exit, marker_reason = (
                     match.groups())
                 if marker_test == "swapz-primary-late-race-test.py":
@@ -2425,6 +2533,19 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 if match:
                     unittest_failure = match.group(1)
                     break
+
+    # The fixed failing source phase and complete private-log pointer are
+    # authenticated by Bash; a nested unittest identity is not.
+    if (not loaded and rootless_last_marker is not None and
+            rootless_last_marker.group(1) == "tmp-cleanup-test.py" and
+            rootless_last_marker.group(2) == "unavailable" and
+            rootless_last_marker.group(3) == "unavailable"):
+        return (
+            "tmp-cleanup-test.py",
+            f"Rootless child exit={rootless_last_marker.group(4)} "
+            f"reason={rootless_last_marker.group(5)} "
+            "subtest=unavailable test=unavailable "
+            f"log={rootless_last_marker.group(0).rsplit(' log=', 1)[1]}")
 
     native_diagnostic = None
     if not loaded:
@@ -2670,6 +2791,8 @@ def run_stage(title, command, result, *, parse_bench=False):
     except OSError as exc:
         output, rc = type(exc).__name__, 127
     observed_exit_code = rc
+    if title == "Native and rootless contracts" and rc != 0:
+        retain_tmp_cleanup_first_failure(output, rc)
     predictor_evidence = parse_predictor_evidence(output)
     gc_scale_evidence = parse_gc_scan_scale_evidence(output)
     extent_geometry_evidence = parse_extent_geometry_evidence(output)

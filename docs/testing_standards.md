@@ -1096,6 +1096,24 @@ and privacy of public markers. Explicit shell exits and failing shell
 assertions remain part of the general rootless attribution contract.
 These regressions are not substitutes for the single official `make test`.
 
+For the unwrapped `tmp-cleanup-test.py` suite, an official failed
+native stage must retain the first matching unittest traceback that would
+otherwise be discarded with the reporter's captured merged output. On a
+validated generic rootless marker and matching original child exit, append a
+bounded first execution-order failure block and contextual stage tail to the
+**existing** private `diagnostic.log` only. Require an owned 0700
+directory, a regular single-link 0600 log, and no symlink traversal; the entire
+artifact, including the original Bash metadata, must remain within 256 KiB.
+Never promote an earlier marker if a different rootless phase failed later.
+The public report names the source-controlled `tmp-cleanup-test.py` phase,
+original exit, fixed reason, and complete repository-relative log location.
+`subtest=unavailable test=unavailable` remains mandatory unless the
+producer authenticates nested identity. No silent failure, relay error, timeout
+or later cleanup may invent one or replace the first cause. Read the private
+evidence locally with `sed -n '1,140p' build/tests/rootless-failure.XXXXXXXX/diagnostic.log`,
+substituting the eight-character directory from the public marker; never
+publish that raw text.
+
 ### Native CI failure evidence contract
 
 The private project-goal wrapper in `tests/tools/product_goals.py` is
