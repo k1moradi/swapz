@@ -146,6 +146,16 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                         sum(expected for expected, _ in missing.values()), 24)
                     self.assertEqual(
                         sum(observed for _, observed in missing.values()), 1)
+                    first_failure = audit["first_failed_evidence"]
+                    self.assertEqual(first_failure["workload"],
+                                     "sd-service-balanced")
+                    self.assertEqual(first_failure["evidence_class"], "BLOCKED")
+                    self.assertEqual(audit["admitted_source_sha"], SOURCE)
+                    counts = audit["cohort_pair_counts"][omitted_workload]
+                    self.assertEqual(counts["required_pairs"],
+                                     QUALIFICATION.WORKLOADS[omitted_workload]["pairs"])
+                    self.assertEqual(counts["attempted_pairs"], 0)
+                    self.assertEqual(counts["accepted_pairs"], 0)
                     for workload in QUALIFICATION.AMENDMENT["workloads"]:
                         self.assertEqual(missing[workload][1], 0)
                     if omit_decision:
