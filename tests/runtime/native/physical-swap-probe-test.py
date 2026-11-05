@@ -1817,11 +1817,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
             saved_state["stage"] = (
                 "ORACLE_PASS" if teardown_not_complete else "COMPLETE")
+            if not teardown_not_complete:
+                # Production recovery restores and rereads block zero before
+                # marking recovery complete and releasing partition ownership.
+                observed_block_zero = target["header"]
+                events.append(("restore0",))
             probe._release_partition_ownership(saved_state)
-            # Successful synthetic recovery must update the simulated device
-            # bytes before publishing observations that claim header restore.
-            observed_block_zero = target["header"]
-            events.append(("restore0",))
             result_path = Path(saved_state_dir) / probe.RESULTS_NAME
             saved_results = json.loads(result_path.read_text())
             inventory_after = probe._dm_inventory_snapshot(
