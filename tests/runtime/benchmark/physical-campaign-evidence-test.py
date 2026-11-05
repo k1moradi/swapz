@@ -446,6 +446,7 @@ class CapacityRamPropagation(unittest.TestCase):
         # summary; the sealer must catch every type drift.
         regenerated_summary = copy.deepcopy(summary)
         if summary_mutation is not None:
+            summary = copy.deepcopy(summary)
             summary_mutation(summary)
 
         with tempfile.TemporaryDirectory() as directory:
