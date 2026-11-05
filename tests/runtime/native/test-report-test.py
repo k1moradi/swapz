@@ -4425,7 +4425,8 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
             },
         }
 
-    def package_report_gate(self, report, *, kernel_release=None):
+    def package_report_gate(self, report=None, *, kernel_release=None,
+                            raw_payload=None):
         """Execute only the actual package report-parser here-doc, not packaging."""
         import subprocess
         import sys
@@ -4437,9 +4438,11 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
         )
         self.assertEqual(source.count(marker), 1)
         parser = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        if raw_payload is None:
+            raw_payload = json.dumps(report)
         with tempfile.TemporaryDirectory(prefix="report-admission-") as name:
             report_path = Path(name) / "synthetic-report.json"
-            report_path.write_text(json.dumps(report), encoding="utf-8")
+            report_path.write_text(raw_payload, encoding="utf-8")
             return subprocess.run(
                 [sys.executable, "-c", parser, str(report_path),
                  kernel_release or self.KERNEL_RELEASE],
@@ -4529,6 +4532,9 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
             ("stages[0].exit_code", "integer-0", "<float>",
              "rerun-make-test-for-exact-clean-source",
              lambda report: report["stages"][0].update(exit_code=0.0)),
+            ("stages[0].exit_code", "integer-0", "<int>",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report["stages"][0].update(exit_code=10 ** 500)),
             ("qualified_artifacts.module_sha256",
              "64-lower-hex-sha256", "missing",
              "rerun-make-test-and-rebuild-qualified-artifacts",
@@ -4583,6 +4589,23 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
         extra["unqualified"] = "e" * 64
         self.assertFalse(runner.owner_qualification_artifacts_available(extra))
 
+    def test_package_report_parser_sanitizes_unreadable_documents(self):
+        for raw_payload in ("{broken", "9" * 5000):
+            with self.subTest(payload_length=len(raw_payload)):
+                outcome = self.package_report_gate(raw_payload=raw_payload)
+                diagnostic = outcome.stderr.strip()
+                self.assertNotEqual(outcome.returncode, 0)
+                self.assertIn("field=document", diagnostic)
+                self.assertIn("source_sha=unavailable", diagnostic)
+                self.assertIn("tested_commit_sha=unavailable", diagnostic)
+                self.assertIn("expected=UTF-8-JSON-object", diagnostic)
+                self.assertIn("observed=unreadable", diagnostic)
+                self.assertIn(
+                    "next=rerun-make-test-for-exact-clean-source", diagnostic)
+                self.assertNotIn("Traceback", diagnostic)
+                for private_prefix in ("/home/", "/tmp/", "/var/", "/mnt/"):
+                    self.assertNotIn(private_prefix, diagnostic)
+
     def test_publisher_rejects_stale_or_divergent_report_before_git(self):
         from unittest import mock
 
@@ -4613,26 +4636,42 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
         import subprocess
 
         source = (ROOT / "packaging/package-dkms.sh").read_text()
-        guard = (
-            '[[ "$build_source_sha" == "$qualified_source_sha" && '
-            '"$build_source_clean" == 1 ]]'
-        )
-        self.assertEqual(source.count(guard), 1)
+        admission = source[source.index("qualification_output="):]
+        source_extract = next(
+            line for line in admission.splitlines()
+            if line.startswith('build_source_sha="$(sed -n '))
+        clean_extract = next(
+            line for line in admission.splitlines()
+            if line.startswith('build_source_clean="$(sed -n '))
+        guard_line = next(
+            line for line in admission.splitlines()
+            if line.startswith(
+                '[[ "$build_source_sha" == "$qualified_source_sha"'))
+        self.assertTrue(guard_line.endswith(" ||"))
+        guard = guard_line[:-3]
+        script = "\n".join((source_extract, clean_extract, guard))
+
         for header_sha, clean_bit, expected in (
                 (self.SOURCE_SHA, "1", "PASS"),
                 ("e" * 40, "1", "BLOCKED"),
                 (self.SOURCE_SHA, "0", "BLOCKED"),
-                ("", "1", "BLOCKED")):
+                ("A" * 40, "1", "BLOCKED")):
             with self.subTest(header_sha=header_sha, clean_bit=clean_bit):
-                environment = {
-                    **os.environ,
-                    "build_source_sha": header_sha,
-                    "qualified_source_sha": self.SOURCE_SHA,
-                    "build_source_clean": clean_bit,
-                }
-                outcome = subprocess.run(
-                    ["bash", "-c", guard], env=environment,
-                    capture_output=True, text=True, check=False, timeout=5)
+                with tempfile.TemporaryDirectory(
+                        prefix="report-build-header-") as name:
+                    build_info = Path(name) / "source-build-info.h"
+                    build_info.write_text(
+                        f'#define SWAPZ_BUILD_SOURCE_SHA "{header_sha}"\n'
+                        f"#define SWAPZ_BUILD_SOURCE_CLEAN {clean_bit}\n",
+                        encoding="utf-8")
+                    environment = {
+                        **os.environ,
+                        "build_info": str(build_info),
+                        "qualified_source_sha": self.SOURCE_SHA,
+                    }
+                    outcome = subprocess.run(
+                        ["bash", "-c", script], env=environment,
+                        capture_output=True, text=True, check=False, timeout=5)
                 observed = "PASS" if outcome.returncode == 0 else "BLOCKED"
                 self.assertEqual(
                     observed, expected,

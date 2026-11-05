@@ -1929,7 +1929,9 @@ def safe_observed(value):
     if value is False:
         return "false(bool)"
     if type(value) is int:
-        return str(value)
+        if -(10 ** 79) < value < 10 ** 79:
+            return str(value)
+        return "<int>"
     if (isinstance(value, str) and
             re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:+-]{0,79}", value)):
         return value
@@ -1950,7 +1952,7 @@ def reject(field, expected, observed, next_step):
 
 try:
     report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-except (OSError, UnicodeError, json.JSONDecodeError):
+except (OSError, UnicodeError, ValueError, RecursionError):
     raise SystemExit(
         "qualification report invalid: field=document "
         "source_sha=unavailable tested_commit_sha=unavailable "
