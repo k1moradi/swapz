@@ -30,6 +30,7 @@ static int fixture_inventory_seen_foreign_pid;
 static int fixture_mount_vanish_on_read;
 static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
+static int fixture_mount_close_error;
 static int fixture_mount_fd = -1;
 static const char *fixture_regular_swap_path;
 static dev_t fixture_regular_swap_device;
@@ -154,9 +155,19 @@ static struct dirent *fixture_readdir(DIR *directory)
 
 static int fixture_close(int fd)
 {
-	if (fd == fixture_mount_fd)
+	int is_remote = fd == fixture_mount_fd;
+	int result;
+
+	if (is_remote)
 		fixture_mount_fd = -1;
-	return close(fd);
+	result = close(fd);
+	if (result < 0)
+		return result;
+	if (is_remote && fixture_mount_close_error) {
+		errno = fixture_mount_close_error;
+		return -1;
+	}
+	return 0;
 }
 
 static FILE *fixture_fopen(const char *path, const char *mode)
@@ -338,6 +349,7 @@ static void fixture_reset(void)
 	fixture_mount_vanish_on_read = 0;
 	fixture_namespace_stat_error = 0;
 	fixture_mount_read_error = 0;
+	fixture_mount_close_error = 0;
 	fixture_mount_fd = -1;
 	fixture_regular_swap_path = NULL;
 	fixture_regular_swap_device = 0;
@@ -656,6 +668,9 @@ int main(void)
 	fixture_reset();
 	fixture_mount_read_error = EIO;
 	expect_mount_admission("opened remote table read error", 0, EIO);
+	fixture_reset();
+	fixture_mount_close_error = EIO;
+	expect_mount_admission("opened remote table close error", 0, EIO);
 	fixture_reset();
 	fixture_inventory_error = EACCES;
 	expect_mount_admission("permission-denied PID inventory", 0, EACCES);
