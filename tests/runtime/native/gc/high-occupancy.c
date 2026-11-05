@@ -993,6 +993,83 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 	return 0;
 }
 
+/*
+ * A one-entry closed-segment sidecar is only a candidate for early DISCARD,
+ * never proof of last ownership. Fabricate a second authoritative map into
+ * that segment without updating the sidecar: the invalidation must fail
+ * before the final survivor, generation or physical reference can change.
+ *
+ * Restore the fabricated entry and actually DISCARD the final map. The dead
+ * segment is then reclaimable, but its old media cannot be reused until the
+ * ordinary allocator has independently proved it empty.
+ */
+static int test_closed_segment_last_discard_rejects_hidden_survivor(void)
+{
+	const swapz_u32 victim = 0U;
+	const swapz_u32 last_logical = SWAPZ_SEGMENT_BLOCKS - 1U;
+	const swapz_u32 hidden_logical = SWAPZ_SEGMENT_BLOCKS;
+	struct swapz_map saved_hidden;
+	swapz_u32 prior_generation, logical;
+	int error;
+
+	CHECK(setup() == 0);
+	CHECK(fill_all_pages(1U) == 0);
+	for (logical = 0; logical < last_logical; ++logical)
+		CHECK(write_page(logical, 2U) == 0);
+	CHECK(a.open_segment == FOREGROUND_SEGMENTS - 1U);
+	CHECK(segment_maps[victim] == 1U && live[last_logical] == 1U);
+	CHECK(roles[victim] && reserve_segments() == 2U);
+	prior_generation = maps[last_logical].generation;
+	saved_hidden = maps[hidden_logical];
+
+	/* Corrupt only an unrelated mapping; keep the physical sidecar at one. */
+	maps[hidden_logical].start_block = last_logical;
+	error = swapz_discard_page(&a, last_logical);
+	if (error != -EUCLEAN ||
+	    !maps[last_logical].valid ||
+	    maps[last_logical].generation != prior_generation ||
+	    segment_maps[victim] != 1U || live[last_logical] != 1U ||
+	    !roles[victim] || reserve_segments() != 2U) {
+		fprintf(stderr,
+			"%s:%d FAIL DISCARD false-last seed=0x%08" PRIx32
+			" logical=%" PRIu32 " hidden=%" PRIu32
+			" segment=%" PRIu32 " block=%" PRIu32
+			" generation_before=%" PRIu32
+			" generation_after=%" PRIu32
+			" original_errno=%d live_refs=%u mapped_refs=%" PRIu32
+			" available_reserve=%u gc_reads=%llu gc_writes=%llu"
+			" retained_media_bytes=%zu\\n",
+			__FILE__, __LINE__, (uint32_t)CHURN_SEED,
+			last_logical, hidden_logical, victim, last_logical,
+			prior_generation, maps[last_logical].generation, error,
+			(unsigned int)live[last_logical], segment_maps[victim],
+			reserve_segments(), gc_reads, gc_writes, sizeof(media));
+		return 1;
+	}
+	maps[hidden_logical] = saved_hidden;
+	CHECK(verify_all_pages() == 0);
+
+	CHECK(swapz_discard_page(&a, last_logical) == 0);
+	expected_generations[last_logical]++;
+	CHECK(!maps[last_logical].valid &&
+	      maps[last_logical].generation == prior_generation + 1U);
+	CHECK(!live[last_logical] && segment_maps[victim] == 0U);
+	CHECK(reserve_segments() == 2U && !gc_reads && !gc_writes);
+
+	/* Consume the last spare block, then reuse only the proven-dead victim. */
+	CHECK(write_page(0U, 3U) == 0);
+	CHECK(a.next_block == FOREGROUND_SEGMENTS * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(write_page(last_logical, 2U) == 0);
+	CHECK(a.open_segment == victim && a.next_block == 1U);
+	CHECK(maps[last_logical].start_block == 0U &&
+	      maps[last_logical].generation == prior_generation + 2U);
+	CHECK(segment_maps[victim] == 1U && live[0] == 1U &&
+	      classes[0] == 1U);
+	CHECK(reserve_segments() == 2U);
+	CHECK(verify_all_pages() == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -1006,6 +1083,8 @@ int main(void)
 	CHECK(test_full_destination_raw_roll_forward() == 0);
 	passed++;
 	CHECK(test_uncertain_recovery_exhausts_reserves() == 0);
+	passed++;
+	CHECK(test_closed_segment_last_discard_rejects_hidden_survivor() == 0);
 	passed++;
 	printf("SWAPZ_GC_HIGH_OCCUPANCY_PASS=%d "
 	       "foreground_writes=%llu gc_reads=%llu gc_writes=%llu "
