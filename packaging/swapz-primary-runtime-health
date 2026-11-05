@@ -117,7 +117,7 @@ canonical_status_error()
 		limit=4095
 		;;
 	*)
-		# The target publishes Linux errno values: zero or a negative int.
+		# The target publishes Linux errno values: zero or -1 through -4095.
 		# Positive output is malformed telemetry, not a terminal errno.
 		return 1
 		;;
@@ -126,7 +126,7 @@ canonical_status_error()
 	[1-9]*) ;;
 	*) return 1 ;;
 	esac
-	[ "${#magnitude}" -le 10 ] || return 1
+	[ "${#magnitude}" -le 4 ] || return 1
 	remaining_digits=$magnitude
 	while [ -n "$remaining_digits" ]; do
 		case "$remaining_digits" in
@@ -134,7 +134,6 @@ canonical_status_error()
 		*) return 1 ;;
 		esac
 	done
-	[ "${#magnitude}" -lt 10 ] && return 0
 	[ "$magnitude" -le "$limit" ]
 }
 
