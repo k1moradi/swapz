@@ -81,7 +81,10 @@ def _run(command: list[str], *, check: bool = True,
         command, cwd=cwd, text=True, capture_output=True,
         check=False, timeout=timeout, env=_source_command_environment())
     if check and result.returncode != 0:
-        raise Blocked(f"source admission command failed: {command[0]}")
+        raise Blocked(
+            "source admission command failed:"
+            f"command={Path(command[0]).name}:exit_status={result.returncode}:"
+            "next=verify_source_provenance_and_retry")
     return result
 
 
@@ -104,18 +107,47 @@ def _check_git_source(validated_source: str, git: str | None = None) -> None:
         raise Blocked(
             "physical qualification requires main == origin/main == "
             "validated source")
+    if _run([git, "status", "--porcelain"], timeout=10).stdout:
+        raise Blocked("production source tree is not clean")
+    # A concurrent checkout or tracking update may have occurred while status ran.
+    # Re-read local identity before the final canonical remote-main observation.
+    final_head = _run([git, "rev-parse", "HEAD"], timeout=10).stdout.strip()
+    final_branch = _run(
+        [git, "rev-parse", "--abbrev-ref", "HEAD"],
+        timeout=10).stdout.strip()
+    final_origin_main = _run(
+        [git, "rev-parse", "--verify", "refs/remotes/origin/main"],
+        timeout=10).stdout.strip()
+    if (final_head != validated_source or final_branch != "main" or
+            final_origin_main != validated_source):
+        observed_head = (
+            final_head if re.fullmatch(r"[0-9a-f]{40}", final_head) else "invalid")
+        observed_origin_main = (
+            final_origin_main if re.fullmatch(r"[0-9a-f]{40}", final_origin_main)
+            else "invalid")
+        raise Blocked(
+            "source_local_identity_changed:"
+            f"expected={validated_source}:head={observed_head}:"
+            f"branch={'main' if final_branch == 'main' else 'other'}:"
+            f"origin_main={observed_origin_main}:next=sync_main_and_retry")
     remote_main = _run(
         [git, "ls-remote", "--exit-code",
          CANONICAL_REMOTE_URL, "refs/heads/main"],
         check=False, timeout=30, cwd=Path("/"))
     if remote_main.returncode != 0:
         raise Blocked(
-            "cannot verify the current remote main for physical qualification")
+            "cannot verify the current remote main for physical qualification:"
+            f"exit_status={remote_main.returncode}:next=check_remote_and_retry")
     if remote_main.stdout.strip() != (
             f"{validated_source}\trefs/heads/main"):
-        raise Blocked("current remote main differs from the validated source")
-    if _run([git, "status", "--porcelain"], timeout=10).stdout:
-        raise Blocked("production source tree is not clean")
+        observed_remote = remote_main.stdout.strip().split("\t", 1)[0]
+        observed_remote = (
+            observed_remote if re.fullmatch(r"[0-9a-f]{40}", observed_remote)
+            else "invalid")
+        raise Blocked(
+            "current remote main differs from the validated source:"
+            f"expected={validated_source}:observed={observed_remote}:"
+            "next=sync_main_and_retry")
 
 
 def _git_file_bytes(validated_source: str, path: Path,
@@ -641,7 +673,9 @@ def main() -> int:
     except (OSError, subprocess.SubprocessError) as exc:
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
-            f"admission_runtime_error:{type(exc).__name__}",
+            f"admission_runtime_error:{type(exc).__name__}:"
+            f"errno={exc.errno if isinstance(exc, OSError) and exc.errno is not None else 'none'}:"
+            "next=verify_source_admission_prerequisites",
             file=sys.stderr)
         return 2
 

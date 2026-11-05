@@ -1909,13 +1909,17 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
             completed(args=[], returncode=0, stdout="main\n", stderr=""),
             completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
+            completed(args=[], returncode=0, stdout="", stderr=""),
+            completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
+            completed(args=[], returncode=0, stdout="main\n", stderr=""),
+            completed(args=[], returncode=0, stdout=source_sha + "\n", stderr=""),
             completed(args=[], returncode=0,
                       stdout=source_sha + "\trefs/heads/main\n", stderr=""),
-            completed(args=[], returncode=0, stdout="", stderr=""),
         ]
         with mock.patch.object(parent, "_run", side_effect=good) as run:
             parent._check_git_source(source_sha, "/usr/bin/git")
-        remote_call = run.call_args_list[3]
+        self.assertEqual(run.call_count, 8)
+        remote_call = run.call_args_list[7]
         self.assertEqual(
             remote_call.args[0],
             ["/usr/bin/git", "ls-remote", "--exit-code",
@@ -1937,18 +1941,34 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             parent._check_git_source(source_sha, "/usr/bin/git")
 
         stale_remote = list(good)
-        stale_remote[3] = completed(
+        stale_remote[7] = completed(
             args=[], returncode=0, stdout="b" * 40 + "\trefs/heads/main\n", stderr="")
         with mock.patch.object(parent, "_run", side_effect=stale_remote), \
                 self.assertRaisesRegex(parent.Blocked, "current remote main differs"):
             parent._check_git_source(source_sha, "/usr/bin/git")
 
         unreachable_remote = list(good)
-        unreachable_remote[3] = completed(
+        unreachable_remote[7] = completed(
             args=[], returncode=128, stdout="", stderr="remote unavailable")
         with mock.patch.object(parent, "_run", side_effect=unreachable_remote), \
                 self.assertRaisesRegex(parent.Blocked, "cannot verify the current remote"):
             parent._check_git_source(source_sha, "/usr/bin/git")
+
+        # Source identities can move during a clean status probe.
+        # The final local snapshot must never reuse the first HEAD observation.
+        for final_index, observed in (
+                (4, "b" * 40 + "\n"),
+                (5, "HEAD\n"),
+                (6, "b" * 40 + "\n")):
+            with self.subTest(final_index=final_index):
+                concurrent_move = list(good)
+                concurrent_move[final_index] = completed(
+                    args=[], returncode=0, stdout=observed, stderr="")
+                with mock.patch.object(
+                        parent, "_run", side_effect=concurrent_move):
+                    with self.assertRaisesRegex(
+                            parent.Blocked, "source_local_identity_changed"):
+                        parent._check_git_source(source_sha, "/usr/bin/git")
 
     def canonical_manifest(self):
         run_id = "1" * 32

@@ -141,8 +141,12 @@ cycle's `primary prepare`, and again before emitting PASS. The parent must
 resolve Git through the same root-owned, non-group/world-writable executable
 policy used for its other trusted commands; a PATH-substituted Git binary
 cannot become source authority. The parent repeats the same
-clean/local/tracking/remote-main proof for each request; requests must
-arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
+clean/local/tracking/remote-main proof for each request. Recheck local
+HEAD, branch and origin/main after the clean-worktree query, then query canonical
+remote main last; movement during the local probe must refuse admission with
+bounded expected/observed identities and a safe next action. These observations
+do not lock a concurrently moving remote ref; later phases cannot reuse an
+earlier approval. Requests must arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
 parent disconnect, malformed/duplicated JSON, peer-identity change, missing
 approval or unavailable remote blocks before the next durable transaction/card
 mutation or prevents the final PASS. The unprivileged parent itself performs no
