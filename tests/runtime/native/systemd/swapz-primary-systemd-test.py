@@ -3149,7 +3149,24 @@ class RuntimeHealthTests(unittest.TestCase):
                 r"""\
                 #!/bin/sh
                 case "$1" in
-                info) printf '%s\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}"; exit "${MOCK_DM_INFO_EXIT_CODE:-0}" ;;
+                info)
+                    if [ -n "${MOCK_DM_INFO_SEQUENCE_FILE:-}" ]; then
+                        counter=0
+                        if [ -f "$MOCK_DM_INFO_SEQUENCE_FILE" ]; then
+                            IFS= read -r counter < "$MOCK_DM_INFO_SEQUENCE_FILE" || exit 2
+                        fi
+                        counter=$((counter + 1))
+                        printf '%s\n' "$counter" > "$MOCK_DM_INFO_SEQUENCE_FILE" || exit 2
+                        if [ "$counter" -eq 1 ]; then
+                            printf ' \n'
+                        else
+                            printf 'SWAPZ-PRIMARY-bad\nsecond-line\n'
+                        fi
+                    else
+                        printf '%s\n' "${MOCK_DM_UUID:-SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef}"
+                    fi
+                    exit "${MOCK_DM_INFO_EXIT_CODE:-0}"
+                    ;;
                 table) printf '0 216641536 swapz 8:1 0 64 0 2 0 1 0 0\n'; exit "${MOCK_DM_TABLE_EXIT_CODE:-0}" ;;
                 status)
                     if [ "${MOCK_DM_STATUS_SLEEP:-0}" != 0 ]; then sleep "$MOCK_DM_STATUS_SLEEP"; fi
@@ -3757,6 +3774,16 @@ class RuntimeHealthTests(unittest.TestCase):
         result = self.run_helper("monitor", env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr.count("SWAPZ_RUNTIME_HEALTH="), 1)
+
+    def test_monitor_logs_dm_info_observation_shape_changes(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_INFO_SEQUENCE_FILE"] = str(self.root / "dm-info-sequence")
+        env["SWAPZ_PRIMARY_TEST_MAX_POLLS"] = "2"
+        result = self.run_helper("monitor", env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr.count("SWAPZ_RUNTIME_HEALTH=DEGRADED"), 2)
+        self.assertEqual(result.stderr.count("observed=missing_uuid"), 1)
+        self.assertEqual(result.stderr.count("observed=invalid_output"), 1)
 
     def test_resume_configuration_and_hibernation_guard_fail_closed(self) -> None:
         (self.proc / "cmdline").write_text(
