@@ -384,20 +384,23 @@ class LiveSwapSupervisorTests(unittest.TestCase):
 
     def test_target_admission_requires_physical_parent_identity(self):
         target = FakeOps().inspect_target()
-        supervisor._validate_target_facts(target)
-        missing_parent = dict(target)
-        del missing_parent["parent_major_minor"]
-        with self.assertRaisesRegex(
-                supervisor.LiveSwapError, "physical parent identity"):
-            supervisor._validate_target_facts(missing_parent)
-        self_parent = dict(
-            target,
-            parent_major_minor=
-                f"{supervisor.DEVICE_MAJOR}:{supervisor.DEVICE_MINOR}")
-        with self.assertRaisesRegex(
-                supervisor.LiveSwapError, "own physical parent"):
-            supervisor._validate_target_facts(self_parent)
-        state = supervisor._target_state(target)
+        original_digest = hashlib.sha256(target["header"]).hexdigest()
+        with mock.patch.object(
+                supervisor, "ORIGINAL_HEADER_SHA256", original_digest):
+            supervisor._validate_target_facts(target)
+            missing_parent = dict(target)
+            del missing_parent["parent_major_minor"]
+            with self.assertRaisesRegex(
+                    supervisor.LiveSwapError, "physical parent identity"):
+                supervisor._validate_target_facts(missing_parent)
+            self_parent = dict(
+                target,
+                parent_major_minor=
+                    f"{supervisor.DEVICE_MAJOR}:{supervisor.DEVICE_MINOR}")
+            with self.assertRaisesRegex(
+                    supervisor.LiveSwapError, "own physical parent"):
+                supervisor._validate_target_facts(self_parent)
+            state = supervisor._target_state(target)
         self.assertEqual(
             state["parent_major_minor"], SYNTHETIC_PARENT_MAJOR_MINOR)
 
