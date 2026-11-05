@@ -672,8 +672,10 @@ a lower READ or decompression. Roadmap IDs 29, 44, 66 and 70 cover related
 already-qualified mechanisms. **Revalidate these properties against the
 current source; do not reimplement them.**
 
-The native `swapz_primary_native_swapon()` in
-`src/userspace/swapz-primary.c` now calls `SYS_swapon` with
+The original brief described `SYS_swapon` with flags `0`; that historical
+gap was closed by the [2026-11-05 native DISCARD policy change](https://github.com/k1moradi/swapz/commit/89284b499a3a92a54ad4e98b467d951d853aabd0).
+The current `swapz_primary_native_swapon()` in
+`src/userspace/swapz-primary.c` calls `SYS_swapon` with
 `SWAP_FLAG_DISCARD | SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES` (Linux
 `SWAP_FLAG_DISCARD_PAGES` ABI bit `0x40000`). This **requests** released
 swap-cluster DISCARD on the swapz mapper; it does not request activation-time
@@ -768,7 +770,8 @@ event-to-invalidation delay instead of promising synchronous app-exit
 reclamation. Physical-media TRIM remains advisory and must never block
 logical authority correctness or dispose of a segment containing live pages.
 
-**Delivery:** Agent 17 writes a concise root-cause/contract assessment,
+**Historical delivery expectation:** Agent 17 was to write a concise
+root-cause/contract assessment,
 source+kernel version, before/after regression, any small justified
 direct-`main` commit (with applicable canonical testing-standard update in
 the same commit), exact-SHA validation, and a Codex-only loaded test request.
@@ -777,9 +780,10 @@ handoff. Preserve existing comments and apply the owner's maintainability,
 ownership, high-warning, failure-only diagnostic and no-speculative-churn
 standards. If the existing implementation already does everything possible
 with the notifications Linux supplies, **report that finding and do not add
-redundant code**. This current-cycle investigation runs **in parallel** with the first-card
-debugging/qualification work, but no Agent 17 edit or test may disrupt or
-bypass those P0 blockers or relax the frozen release gates.
+redundant code**. These were instructions for a former parallel investigation
+during first-card debugging/qualification, **not** a current assignment or
+authorization to change source. Current P0 blockers and frozen release gates
+remain in force.
 
 
 ## Deferred asynchronous segment TRIM design for review
