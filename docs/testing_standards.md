@@ -5512,7 +5512,9 @@ selected proof class, expected condition, sanitized observed identity/evidence
 class, operation, phase/stage, originating errno and safe next action. When an
 active swap row first appears after publication, the captured diagnostic must
 contain the single postpublication UNCERTAIN classification and must not also
-emit a context-free REFUSED classification.
+emit a context-free REFUSED classification. Exclusive-open denials and the
+final returned-descriptor F_GETFL gate must use the same structured admission
+fields, including a sanitized observed class and the attempted operation.
 
 This establishes a rootless observed-snapshot safety invariant, not exclusive
 kernel ownership or a bound against swapon racing between the final inventory

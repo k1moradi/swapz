@@ -3315,6 +3315,7 @@ static int format_partuuid_alias_stat(const char *partuuid, struct stat *info)
 
 enum format_admission_stage {
 	FORMAT_ADMISSION_IDENTITY = 0,
+	FORMAT_ADMISSION_EXCLUSIVE_OPEN,
 	FORMAT_ADMISSION_DESCRIPTOR_MODE,
 	FORMAT_ADMISSION_TOPOLOGY,
 	FORMAT_ADMISSION_INVENTORY,
@@ -3349,6 +3350,8 @@ static const char *format_admission_stage_name(enum format_admission_stage stage
 	switch (stage) {
 	case FORMAT_ADMISSION_IDENTITY:
 		return "identity";
+	case FORMAT_ADMISSION_EXCLUSIVE_OPEN:
+		return "exclusive open";
 	case FORMAT_ADMISSION_DESCRIPTOR_MODE:
 		return "descriptor mode";
 	case FORMAT_ADMISSION_TOPOLOGY:
@@ -3365,8 +3368,10 @@ static const char *format_admission_proof_name(enum format_admission_stage stage
 	switch (stage) {
 	case FORMAT_ADMISSION_IDENTITY:
 		return "selected path, descriptor, PARTUUID and geometry identity";
+	case FORMAT_ADMISSION_EXCLUSIVE_OPEN:
+		return "exclusive block-device open request";
 	case FORMAT_ADMISSION_DESCRIPTOR_MODE:
-		return "opened descriptor read-only state";
+		return "opened descriptor access and read-only state";
 	case FORMAT_ADMISSION_TOPOLOGY:
 		return "live removable USB parent topology";
 	case FORMAT_ADMISSION_INVENTORY:
@@ -3771,6 +3776,15 @@ static void format_report_admission_refusal(
 				      original_errno, next_action);
 }
 
+static void format_report_admission_failure(
+	const char *summary, const char *operation,
+	const struct format_admission_problem *problem, int original_errno)
+{
+	format_report_admission_error(
+		"", summary, operation, problem, original_errno,
+		"inspect the failed stage read-only; no header write attempted");
+}
+
 static void format_report_admission_uncertain(
 	const char *summary, const char *operation,
 	const struct format_admission_problem *problem, int original_errno)
@@ -3850,14 +3864,18 @@ static int format_device_with_ops(
 			&admission_problem, saved_errno);
 		return 2;
 	}
+	format_admission_problem_set(
+		&admission_problem, FORMAT_ADMISSION_EXCLUSIVE_OPEN,
+		"O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW accepted on "
+		"the selected block device");
 	fd = ops->open_device(ops->context, path);
 	if (fd < 0) {
 		saved_errno = errno;
-		format_report_failure(
-			"exclusive open", "exclusive open",
-			"O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW accepted on "
-			"the selected block device",
-			saved_errno);
+		format_admission_problem_observed(
+			&admission_problem, "exclusive-open-denied");
+		format_report_admission_failure(
+			"exclusive open", "open selected block device",
+			&admission_problem, saved_errno);
 		return 1;
 	}
 	if (format_authorized_opened_verify(ops, fd, path, expected,
@@ -3949,22 +3967,33 @@ static int format_device_with_ops(
 	 * F_GETFL validates access mode, never kernel O_EXCL/holder exclusion.
 	 */
 	{
-		int descriptor_flags = ops->get_descriptor_flags(ops->context, fd);
+		int descriptor_flags;
 
+		format_admission_problem_set(
+			&admission_problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
+			"fcntl(F_GETFL) succeeds and reports O_RDWR");
+		descriptor_flags = ops->get_descriptor_flags(ops->context, fd);
 		if (descriptor_flags < 0) {
 			saved_errno = errno;
-			format_report_refusal(
-				"descriptor mode query failed", "descriptor mode",
-				"fcntl(F_GETFL) succeeds and reports O_RDWR",
-				saved_errno);
+			format_admission_problem_observed(
+				&admission_problem, "descriptor-flags-unavailable");
+			format_report_admission_refusal(
+				"descriptor mode query failed", "header publication",
+				&admission_problem, saved_errno);
 			result = 2;
 			goto close_error;
 		}
 		if ((descriptor_flags & O_ACCMODE) != O_RDWR) {
 			errno = EBADF;
-			format_report_refusal(
-				"descriptor mode is not O_RDWR", "descriptor mode",
-				"fcntl(F_GETFL) & O_ACCMODE == O_RDWR", errno);
+			format_admission_problem_set(
+				&admission_problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
+				"fcntl(F_GETFL) & O_ACCMODE == O_RDWR");
+			format_admission_problem_observed(
+				&admission_problem,
+				"returned-descriptor-access-mode-not-read-write");
+			format_report_admission_refusal(
+				"descriptor mode is not O_RDWR", "header publication",
+				&admission_problem, errno);
 			result = 2;
 			goto close_error;
 		}

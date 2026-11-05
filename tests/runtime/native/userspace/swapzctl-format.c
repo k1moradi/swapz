@@ -713,7 +713,10 @@ static void test_real_cli_exclusive_open_permission_refuses_without_io(void)
 	if (status != 1 || observed_errno != EACCES ||
 	    !strstr(report, "swapzctl format: exclusive open:") ||
 	    !strstr(report, "stage=exclusive open") ||
+	    !strstr(report, "proof=exclusive block-device open request") ||
 	    !strstr(report, "expected=O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW") ||
+	    !strstr(report, "observed=exclusive-open-denied") ||
+	    !strstr(report, "operation=open selected block device") ||
 	    !strstr(report, "action=") ||
 	    !strstr(report, errno_field) ||
 	    !strstr(report, strerror(EACCES)) ||
@@ -760,7 +763,10 @@ static void test_real_cli_exclusive_open_busy_refuses_without_io(void)
 	test_diagnostic_errno_clobber = 0;
 	if (status != 1 || observed_errno != EBUSY ||
 	    !strstr(report, "stage=exclusive open") ||
+	    !strstr(report, "proof=exclusive block-device open request") ||
 	    !strstr(report, "expected=O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW") ||
+	    !strstr(report, "observed=exclusive-open-denied") ||
+	    !strstr(report, "operation=open selected block device") ||
 	    !strstr(report, errno_field) ||
 	    !strstr(report, "action=inspect the failed stage read-only") ||
 	    strstr(report, ADMISSION_DEVICE) ||
@@ -1372,10 +1378,14 @@ static void test_real_cli_descriptor_access_modes_refuse_without_write(void)
 		int descriptor_error;
 		int expected_errno;
 		const char *failed_stage;
+		const char *observed;
 	} cases[] = {
-		{ O_RDWR, ENODEV, ENODEV, "descriptor mode query failed" },
-		{ O_RDONLY, 0, EBADF, "descriptor mode is not O_RDWR" },
-		{ O_WRONLY, 0, EBADF, "descriptor mode is not O_RDWR" },
+		{ O_RDWR, ENODEV, ENODEV, "descriptor mode query failed",
+		  "descriptor-flags-unavailable" },
+		{ O_RDONLY, 0, EBADF, "descriptor mode is not O_RDWR",
+		  "returned-descriptor-access-mode-not-read-write" },
+		{ O_WRONLY, 0, EBADF, "descriptor mode is not O_RDWR",
+		  "returned-descriptor-access-mode-not-read-write" },
 	};
 	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
 
@@ -1400,7 +1410,11 @@ static void test_real_cli_descriptor_access_modes_refuse_without_write(void)
 		if (status != 2 || observed_errno != cases[index].expected_errno ||
 		    !strstr(report, cases[index].failed_stage) ||
 		    !strstr(report, "stage=descriptor mode") ||
+		    !strstr(report,
+			    "proof=opened descriptor access and read-only state") ||
 		    !strstr(report, "expected=fcntl(F_GETFL)") ||
+		    !strstr(report, cases[index].observed) ||
+		    !strstr(report, "operation=header publication") ||
 		    !strstr(report, errno_field) ||
 		    !strstr(report, "action=") ||
 		    !strstr(report, "CLEANUP FAILED: close") ||
