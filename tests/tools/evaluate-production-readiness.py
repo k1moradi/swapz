@@ -590,7 +590,7 @@ def _physical_audit_binding_is_valid(
             set(counts) != set(producer_workloads)):
         return False
     observed_counts = {workload: 0 for workload in producer_workloads}
-    observed_accepted_counts = {
+    observed_pass_pair_counts = {
         workload: 0 for workload in producer_workloads}
     observed_indices = {workload: set() for workload in producer_workloads}
     pair_identifiers = set()
@@ -629,7 +629,7 @@ def _physical_audit_binding_is_valid(
         artifact_digests.add(pair["sha256"])
         observed_counts[workload] += 1
         if pair["status"] == "PASS":
-            observed_accepted_counts[workload] += 1
+            observed_pass_pair_counts[workload] += 1
     for workload, specification in producer_workloads.items():
         count = counts.get(workload)
         if (
@@ -640,8 +640,8 @@ def _physical_audit_binding_is_valid(
                 type(count.get("accepted_pairs")) is not int or
                 count["required_pairs"] != specification["pairs"] or
                 count["attempted_pairs"] != observed_counts[workload] or
-                count["accepted_pairs"] !=
-                observed_accepted_counts[workload] or
+                count["accepted_pairs"] >
+                observed_pass_pair_counts[workload] or
                 count["accepted_pairs"] < 0 or
                 count["accepted_pairs"] > count["attempted_pairs"]):
             return False

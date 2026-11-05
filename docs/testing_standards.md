@@ -7372,8 +7372,11 @@ requires zero retained/omitted diagnostics, no first failed phase/evidence and
 complete accepted counts; an older, partial, extra-field, wrong-source,
 wrong-target or count-mismatched audit remains BLOCKED even when the surrounding
 campaign claims PASS. For every workload, the audit's `accepted_pairs` must
-equal the retained PASS/non-excluded pair-manifest count; a scalar that counts
-an EXCLUDED pair as accepted is contradictory evidence and remains BLOCKED.
+never exceed the retained PASS/non-excluded pair-manifest count; a scalar that
+counts an EXCLUDED pair as accepted is contradictory evidence and remains
+BLOCKED. The count may be lower when analyzer-level screening makes an otherwise
+immutable PASS pair unusable; such unrelated incompleteness must not erase a
+separately authenticated producer or measured FAIL.
 
 A source/target/policy/tool-bound campaign can establish producer-proven FAIL
 only from the current audit's retained first-failure witness. The first failure

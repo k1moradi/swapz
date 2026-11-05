@@ -3652,6 +3652,34 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             for blocker in result["code_blockers"]),
             result["code_blockers"])
 
+    def test_physical_fail_survives_unrelated_analyzer_exclusion(self):
+        policy = acceptance_policy()
+        campaign = physical_campaign_failure_evidence(encoded(policy))
+        audit = campaign["physical_evidence_audit"]
+        unrelated_workload = "sd-service-representative"
+        count = audit["cohort_pair_counts"][unrelated_workload]
+        self.assertEqual(count["accepted_pairs"], count["required_pairs"])
+
+        # The producer counts analysis-usable rows, which may be fewer than the
+        # immutable PASS pair artifacts when an unrelated cohort is screened.
+        count["accepted_pairs"] -= 1
+        audit["diagnostics"].append({
+            "status": "BLOCKED",
+            "metric": "pair.analysis_usable",
+            "expected": True,
+            "observed": None,
+            "workload": unrelated_workload,
+            "pair_index": 1,
+            "arm": None,
+            "reason": "unrelated synthetic analyzer exclusion",
+        })
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["release_verdict"], "FAIL")
+        self.assertEqual(
+            result["METADATA_RAM_MEASUREMENT"]["status"],
+            "MEASURED_WITHIN_LIMIT")
+
     def test_physical_audit_pass_requires_current_identity_and_pair_counts(self):
         policy = acceptance_policy()
         policy_raw = encoded(policy)
