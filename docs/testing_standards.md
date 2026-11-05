@@ -6853,7 +6853,9 @@ pair index and arm without copying private representative payload hashes.
 Lower-device bytes/requests are host-visible I/O, **not NAND wear**.
 Sealer provenance comparisons are type-exact at every JSON depth: a boolean
 cannot substitute for an integer arm counter or frozen numeric limit, even
-when Python would compare their values equal. The public diagnostic limit
-must retain the field-level reason for higher-severity BLOCKED or FAIL
-findings; displaced entries remain counted without publishing private samples.
+when Python would compare their values equal. The public diagnostic limit must retain at least one field-level reason for
+every encountered FAIL, BLOCKED and UNAVAILABLE classification; displaced
+entries remain counted without publishing private samples. A known FAIL
+dominates BLOCKED, which dominates UNAVAILABLE, so a later prerequisite or
+observation gap cannot relabel already failed/excluded evidence.
 No pending prospective-v2 amendment is applied as a retroactive replacement.

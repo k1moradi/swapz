@@ -75,10 +75,11 @@ def host_snapshots():
     )
 
 
-def inspect(rows, before=None, after=None, decisions=None):
+def inspect(rows, before=None, after=None, decisions=None,
+            summary_status="PASS"):
     baseline, finished = host_snapshots()
     result = EVIDENCE.audit_physical_pairs(
-        {"status": "PASS", "records": rows,
+        {"status": summary_status, "records": rows,
          "decisions": decisions or {}, "raw_repeat_spread": {}},
         baseline if before is None else before,
         finished if after is None else after)
@@ -234,33 +235,36 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                 for field in ("lower_io", "throughput", "cpu",
                               "latency", "measurement_snapshots"):
                     candidate[field] = {}
+        # Model a rejected evaluator result followed by three late identity
+        # blocks after unavailable measurements have filled the public cap.
+        records[0]["status"] = "EXCLUDED"
+        records[0]["excluded"] = True
+        records[0]["analysis_usable"] = False
+        records[-1]["swapz"]["workload_id"] = records[0]["swapz"]["workload_id"]
+        records[-1]["swapz"]["source_sha"] = "b" * 40
         records[-1]["swapz"]["arm_boot_id"] = (
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-        audit, _ = inspect(records)
-        self.assertEqual(audit["status"], "BLOCKED")
+        audit, _ = inspect(
+            records, summary_status="FAIL_OR_INCOMPLETE")
+        # FAIL is authoritative once a failed/excluded attempt is known;
+        # later prerequisite blocks and unavailable observations stay distinct.
+        self.assertEqual(audit["status"], "FAIL")
         self.assertEqual(len(audit["diagnostics"]),
                          EVIDENCE.MAX_EVIDENCE_DIAGNOSTICS)
         self.assertGreater(audit["omitted_diagnostic_count"], 0)
-        blockers = [item for item in audit["diagnostics"]
-                    if item["status"] == "BLOCKED"]
-        self.assertEqual(len(blockers), 1)
-        self.assertEqual(blockers[0]["metric"], "arm.arm_boot_id")
-        self.assertEqual(blockers[0]["pair_index"], 5)
-        self.assertEqual(blockers[0]["arm"], "swapz")
-        self.assertIsNone(blockers[0]["observed"])
-        self.assertIn("mixed or absent", blockers[0]["reason"])
-
-        # A later excluded attempt remains FAIL rather than UNAVAILABLE.
-        records[-1]["swapz"]["arm_boot_id"] = BOOT
-        records[-1]["status"] = "EXCLUDED"
-        records[-1]["excluded"] = True
-        records[-1]["analysis_usable"] = False
-        rejected, _ = inspect(records)
-        self.assertEqual(rejected["status"], "FAIL")
+        self.assertEqual(
+            {item["status"] for item in audit["diagnostics"]},
+            {"FAIL", "BLOCKED", "UNAVAILABLE"})
         self.assertTrue(any(
             item["status"] == "FAIL" and item["metric"] == "pair.status" and
-            item["pair_index"] == 5
-            for item in rejected["diagnostics"]))
+            item["pair_index"] == 1
+            for item in audit["diagnostics"]))
+        self.assertTrue(any(
+            item["status"] == "BLOCKED" and
+            item["metric"] in {
+                "arm.workload_id", "arm.source_sha", "arm.arm_boot_id"} and
+            item["pair_index"] == 5 and item["arm"] == "swapz"
+            for item in audit["diagnostics"]))
 
     def test_distinct_evidence_failure_classifications(self):
         baseline = pair(1, 1100)
@@ -499,16 +503,27 @@ class CapacityRamPropagation(unittest.TestCase):
         def change_arm_count(summary):
             summary["records"][0]["raw"]["read_ops"] = True
 
+        def change_arm_count_float(summary):
+            summary["records"][0]["raw"]["read_ops"] = 1.0
+
         def change_frozen_limit(summary):
             summary["contract"]["acceptance"]["sustained"][
                 "gc_no_headroom_skips_max"] = False
+
+        def change_frozen_limit_float(summary):
+            summary["contract"]["acceptance"]["sustained"][
+                "gc_no_headroom_skips_max"] = 0.0
 
         def change_evaluator_flag(summary):
             summary["campaign_target_consistent"] = 1
 
         for mutation, rejected_field in (
                 (change_arm_count, "summary changed original pair field raw"),
+                (change_arm_count_float,
+                 "summary changed original pair field raw"),
                 (change_frozen_limit, "contract differs from frozen policy"),
+                (change_frozen_limit_float,
+                 "contract differs from frozen policy"),
                 (change_evaluator_flag, "does not exactly match supplied pair")):
             with self.subTest(field=rejected_field):
                 with self.assertRaisesRegex(ValueError, rejected_field):

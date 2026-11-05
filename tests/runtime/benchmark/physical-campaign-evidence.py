@@ -834,7 +834,11 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
     diagnostics = []
     omitted = 0
     encountered_statuses = set()
-    diagnostic_priority = {"UNAVAILABLE": 0, "FAIL": 1, "BLOCKED": 2}
+    # A known failed check must not be downgraded by a later prerequisite gap.
+    diagnostic_priority = {"UNAVAILABLE": 0, "BLOCKED": 1, "FAIL": 2}
+    retained_status_counts = {
+        status: 0 for status in diagnostic_priority
+    }
 
     def diagnose(status, metric_name, expected, observed=None,
                  workload=None, pair_index=None, arm=None,
@@ -844,14 +848,25 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         replacement_index = None
         if len(diagnostics) == MAX_EVIDENCE_DIAGNOSTICS:
             omitted += 1
-            # Retain a field-level reason for a newly encountered
-            # higher-severity finding when earlier details fill the cap.
-            replacement_index = next(
-                (index for index, entry in enumerate(diagnostics)
-                 if diagnostic_priority[entry["status"]] <
-                 diagnostic_priority[status]), None)
-            if replacement_index is None:
+            # Preserve at least one field-level diagnostic for every observed
+            # classification. Remaining slots favor higher-severity findings.
+            status_is_retained = retained_status_counts[status] > 0
+            replaceable_statuses = [
+                retained_status
+                for retained_status, count in retained_status_counts.items()
+                if count > 1 and (
+                    not status_is_retained or
+                    diagnostic_priority[retained_status] <
+                    diagnostic_priority[status])
+            ]
+            if not replaceable_statuses:
                 return
+            replacement_status = min(
+                replaceable_statuses, key=diagnostic_priority.get)
+            replacement_index = next(
+                index for index, entry in enumerate(diagnostics)
+                if entry["status"] == replacement_status)
+            retained_status_counts[replacement_status] -= 1
         # Avoid unbounded integers, non-finite floats and private strings.
         if type(observed) is int:
             value = observed if 0 <= abs(observed) <= (1 << 64) - 1 else None
@@ -868,6 +883,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             diagnostics.append(detail)
         else:
             diagnostics[replacement_index] = detail
+        retained_status_counts[status] += 1
 
     records = summary.get("records")
     if not isinstance(records, list):
@@ -1091,8 +1107,8 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                              reason="frozen three-pair directional bound failed")
     return {
         "status": ("PASS" if not encountered_statuses else
-                   "BLOCKED" if "BLOCKED" in encountered_statuses
-                   else "FAIL" if "FAIL" in encountered_statuses
+                   "FAIL" if "FAIL" in encountered_statuses
+                   else "BLOCKED" if "BLOCKED" in encountered_statuses
                    else "UNAVAILABLE"),
         "diagnostics": diagnostics, "omitted_diagnostic_count": omitted,
         "claim_boundary": QUALIFICATION["CONTRACT"]["claim_boundary"],
