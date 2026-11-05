@@ -613,6 +613,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         power_helper = self.script[power_helper_start:power_helper_end]
         self.assertIn("os.O_WRONLY", power_helper)
         self.assertIn("os.O_NOFOLLOW", power_helper)
+        self.assertIn("os.O_NONBLOCK", power_helper)
         self.assertNotIn("os.O_CREAT", power_helper)
         self.assertIn("identity = os.fstat(fd)", power_helper)
         self.assertIn('os.write(fd, b"0\\n")', power_helper)
@@ -621,6 +622,54 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             power_helper.index("pending_exception = sys.exc_info()[0]"),
             power_helper.index("os.close(fd)"),
         )
+
+    def test_rootless_pinned_power_refuses_unobservable_path_without_blocking(self):
+        begin = self.script.index("owned_nullblk_power_off_pinned() {")
+        end = self.script.index("\n}", begin) + 2
+        helper = self.script[begin:end]
+
+        with TemporaryDirectory(
+                prefix="swapz-primary-pinned-power-") as directory:
+            fixture = Path(directory)
+            config = fixture / ("nullb-swapz-" + "e" * 16)
+            config.mkdir()
+            power = config / "power"
+            power.write_text("1\n", encoding="ascii")
+            identity = power.stat()
+            expected_identity = (
+                f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
+            )
+
+            def run_helper():
+                program = (
+                    f"CONFIG={shlex.quote(str(config))}\n"
+                    f"CONFIG_POWER_IDENTITY={shlex.quote(expected_identity)}\n"
+                    + helper + "\nowned_nullblk_power_off_pinned\n"
+                )
+                return subprocess.run(
+                    ["bash", "-c", program], cwd=ROOT,
+                    capture_output=True, text=True, timeout=5, check=False)
+
+            exact = run_helper()
+            self.assertEqual(exact.returncode, 0, exact.stderr)
+            self.assertEqual(power.read_text(encoding="ascii"), "0\n")
+            self.assertEqual(exact.stdout, "")
+            self.assertEqual(exact.stderr, "")
+
+            power.unlink()
+            os.mkfifo(power, 0o600)
+            fifo = run_helper()
+            self.assertEqual(fifo.returncode, 1, fifo.stderr)
+            self.assertTrue(power.is_fifo())
+            self.assertEqual(fifo.stdout, "")
+            self.assertEqual(fifo.stderr, "")
+
+            power.unlink()
+            missing = run_helper()
+            self.assertEqual(missing.returncode, 1, missing.stderr)
+            self.assertFalse(power.exists())
+            self.assertEqual(missing.stdout, "")
+            self.assertEqual(missing.stderr, "")
 
     def test_rootless_postproof_replacement_cannot_redirect_power_write(self):
         def shell_function(name):

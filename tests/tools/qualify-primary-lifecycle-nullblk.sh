@@ -195,11 +195,14 @@ import sys
 path, expected_identity = sys.argv[1:3]
 fd = -1
 try:
-    fd = os.open(
-        path,
-        os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
-    )
-    identity = os.fstat(fd)
+    try:
+        fd = os.open(
+            path,
+            os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+        )
+        identity = os.fstat(fd)
+    except OSError:
+        raise SystemExit(2)
     observed_identity = f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
     if (not stat.S_ISREG(identity.st_mode) or
             observed_identity != expected_identity):
