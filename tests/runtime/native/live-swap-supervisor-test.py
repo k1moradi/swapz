@@ -752,6 +752,14 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "pressure_phase": pressure,
         }
         self.assertTrue(supervisor._actual_swap_io(result))
+        # A positive request counter without written bytes (or vice versa)
+        # cannot establish independent lower-device write evidence.
+        requests_only = json.loads(json.dumps(result))
+        requests_only["observations"][1]["block_stats"]["values"][6] = 0
+        self.assertFalse(supervisor._actual_swap_io(requests_only))
+        bytes_only = json.loads(json.dumps(result))
+        bytes_only["observations"][1]["block_stats"]["values"][4] = 0
+        self.assertFalse(supervisor._actual_swap_io(bytes_only))
 
         no_swap_in = json.loads(json.dumps(result))
         no_swap_in["observations"][1]["vmstat"]["pswpin"] = 0
@@ -1712,6 +1720,46 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                             supervisor.LiveSwapError, "duplicate/malformed"):
                         supervisor._read_memory_events(Path(directory))
 
+    def test_bad_child_wait_status_still_closes_pipe_and_attempts_cgroup_removal(self):
+        """No real child or host cgroup: failed wait decoding must not skip cleanup."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            read_fd, write_fd = os.pipe()
+            os.close(write_fd)
+
+            def fake_mkdir(path, _mode=0o755):
+                REAL_MKDIR(path)
+                (Path(path) / "memory.max").write_text("max\n")
+                (Path(path) / "memory.zswap.max").write_text("max\n")
+                (Path(path) / "memory.events").write_text("oom 0\noom_kill 0\n")
+
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    supervisor, "PRESSURE_CGROUP_ROOT", root))
+                stack.enter_context(mock.patch.object(
+                    supervisor.os, "mkdir", side_effect=fake_mkdir))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_spawn_pressure_child",
+                    return_value=(1234, read_fd)))
+                stack.enter_context(mock.patch.object(
+                    supervisor.os, "waitpid", return_value=(1234, 0)))
+                stack.enter_context(mock.patch.object(
+                    supervisor.os, "waitstatus_to_exitcode",
+                    side_effect=ValueError("synthetic bad wait status")))
+                removed = stack.enter_context(mock.patch.object(
+                    supervisor, "_remove_empty_cgroup", return_value=None))
+                with self.assertRaises(supervisor.LiveSwapError) as caught:
+                    supervisor.LinuxOps().pressure_workload(
+                        {"run_id": RUN_ID},
+                        cgroup_name="swapz-live-0123456789abcdef",
+                        guard=lambda: None,
+                        stop_requested=lambda: False, timeout=10)
+            self.assertIn("child_wait_status:ValueError", str(caught.exception))
+            self.assertEqual(removed.call_count, 1)
+            self.assertNotIn(directory, str(caught.exception))
+            with self.assertRaises(OSError):
+                os.fstat(read_fd)
+
     def test_live_inspection_permits_used_swap_only_through_helper_flag(self):
         header = b"O" * supervisor.PAGE_BYTES
         target = {"device": supervisor.DEVICE_PATH,
@@ -2019,6 +2067,59 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         self.assertFalse(any(Path(call[0]).name == "swapoff" and
                              "/dev/mapper/" in call[-1]
                              for call in ops.mutations))
+
+    def test_failure_evidence_write_error_does_not_skip_restoration(self):
+        """An ENOSPC on first failure report is not permission to abandon swap."""
+        for mode in ("mismatch", "stop"):
+            with self.subTest(mode=mode):
+                ops = FakeOps(pressure_mode=mode)
+                saved = supervisor._save_results
+                failure_record_attempted = False
+
+                def injected_write(state_dir, results):
+                    nonlocal failure_record_attempted
+                    if "failure" in results and not failure_record_attempted:
+                        failure_record_attempted = True
+                        raise OSError(errno.ENOSPC, "private evidence write")
+                    return saved(state_dir, results)
+
+                with mock.patch.object(supervisor, "_save_results",
+                                       side_effect=injected_write), \
+                        self.assertRaises(supervisor.LiveSwapError) as caught:
+                    self.run_mock_trial(ops)
+                self.assertTrue(failure_record_attempted)
+                self.assertIn("normal swap restored", str(caught.exception))
+                self.assertIn("phase=activation_failure_record", str(caught.exception))
+                self.assertIn("errno=28", str(caught.exception))
+                self.assertNotIn("private evidence", str(caught.exception))
+                self.assertTrue(ops.original_active)
+                self.assertFalse(ops.mapper_active)
+                self.assertFalse(ops.mapper_exists)
+                self.assertFalse(ops.module)
+                self.assertEqual(ops.header, ops.original)
+
+    def test_final_evidence_write_failure_never_returns_pass(self):
+        ops = FakeOps()
+        saved = supervisor._save_results
+
+        def injected_write(state_dir, results):
+            if results.get("final_recovery_state") == "COMPLETE" and \
+                    "live_swap_trial" in results:
+                raise OSError(errno.ENOSPC, "private final report")
+            return saved(state_dir, results)
+
+        with mock.patch.object(supervisor, "_save_results",
+                               side_effect=injected_write), \
+                self.assertRaises(supervisor.LiveSwapError) as caught:
+            self.run_mock_trial(ops)
+        self.assertIn("phase=final_evidence", str(caught.exception))
+        self.assertIn("write_errno=28", str(caught.exception))
+        self.assertNotIn("private final report", str(caught.exception))
+        self.assertTrue(ops.original_active)
+        self.assertFalse(ops.mapper_active)
+        self.assertFalse(ops.mapper_exists)
+        self.assertFalse(ops.module)
+        self.assertEqual(ops.header, ops.original)
 
     def test_first_pressure_failure_survives_mapper_cleanup_failure(self):
         ops = FakeOps(fail_phase="mapper_swapoff", pressure_mode="mismatch")

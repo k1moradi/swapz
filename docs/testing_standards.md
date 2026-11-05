@@ -5150,6 +5150,19 @@ a passing fixture. Missing, malformed, nonfinite, duplicate or exhausted
 memory/PSI/cgroup evidence refuses admission. Intentionally generated PSI
 still cannot silently defeat the conservative stop thresholds.
 
+Rootless debugging must also prove that a malformed reaped-child wait status
+cannot bypass parent pipe closure or an attempted owned-cgroup removal.
+A failed durable write of the *initial* activation failure report must not
+replace the first worker/integrity failure or skip the single normal cleanup
+attempt; any such evidence-write error revokes PASS, including when the
+initial stop was otherwise classified as SAFE_STOP. A failed final report
+write likewise cannot return PASS, even when original swap restoration
+was independently confirmed. Surface original failure category and secondary
+write errno without printing private paths. Lower-device write evidence
+requires positive independently observed **bytes and requests** for the
+same bounded trial, never just one positive counter; missing or inconsistent
+telemetry blocks qualification rather than being treated as a synthetic win.
+
 Pressure cancellation may signal only the supervisor's unreaped direct child,
 not every PID found in the pressure cgroup. Child waits and postreap report
 reads remain bounded; an inherited report writer or unproven child death

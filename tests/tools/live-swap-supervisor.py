@@ -1020,7 +1020,11 @@ class LinuxOps:
                 cleanup_errors.append(("child_reap", exc))
         if pid is not None and status is not None:
             outcome["child_reaped"] = True
-            outcome["exit_code"] = os.waitstatus_to_exitcode(status)
+            try:
+                outcome["exit_code"] = os.waitstatus_to_exitcode(status)
+            except (OSError, ValueError) as exc:
+                # A malformed wait status must not skip pipe or cgroup cleanup.
+                cleanup_errors.append(("child_wait_status", exc))
         if read_fd is not None:
             try:
                 if status is not None:
@@ -2419,7 +2423,7 @@ def _actual_swap_io(results):
             baseline["dmsetup_status"]["counters"]["logical_write"] and
             final["dmsetup_status"]["counters"]["logical_read"] >
             baseline["dmsetup_status"]["counters"]["logical_read"] and
-            (total_lower_write_bytes > 0 or total_lower_write_requests > 0))
+            total_lower_write_bytes > 0 and total_lower_write_requests > 0)
     except (KeyError, IndexError, TypeError, ValueError, PHYSICAL.ProbeError):
         return False
 
@@ -3080,16 +3084,25 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
         state["consumed_run_id"] = True
         _transition(state_dir, state, "PREPARED", results)
         activation_error = None
+        activation_evidence_error = None
         try:
             _activate_trial(
                 state_dir, state, results, target, snapshots, ops,
                 monotonic=monotonic, sleep=sleep)
         except BaseException as exc:
             activation_error = exc
-            results["failure"] = _bounded(exc)
+            results["failure"] = _public_diagnostic(exc)
             if isinstance(exc, SafeStop):
                 results.setdefault("stop_reason", exc.reason)
-            _save_results(state_dir, results)
+            try:
+                _save_results(state_dir, results)
+            except BaseException as evidence_exc:
+                # Failure-report I/O is secondary: still attempt one bounded
+                # ordinary restoration without discarding the first failure.
+                activation_evidence_error = evidence_exc
+                results["failure_evidence_error"] = (
+                    f"phase=activation_failure_record "
+                    f"errno={getattr(evidence_exc, 'errno', None)}")
         try:
             recovery = _cleanup_and_restore(
                 state_dir, state, results, ops,
@@ -3127,6 +3140,7 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
                 f"retained=private_recovery_state "
                 f"cleanup={type(recovery_exc).__name__} "
                 f"errno={getattr(recovery_exc, 'errno', None)} "
+                f"initial_record_errno={getattr(activation_evidence_error, 'errno', None)} "
                 f"record={'FAILED' if recovery_record_error else 'RECORDED'} "
                 f"record_errno={getattr(recovery_record_error, 'errno', None)}"
                 ) from (
@@ -3147,16 +3161,36 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
         results["final_recovery_state"] = recovery["state"]["stage"]
         results["recovery_disposition"] = "COMPLETE"
         results["actual_swap_io_observed"] = _actual_swap_io(results)
-        results["live_swap_trial"] = _trial_outcome(activation_error, results)
+        results["live_swap_trial"] = (
+            "FAIL" if activation_evidence_error is not None else
+            _trial_outcome(activation_error, results))
         results["normal_swap_restored"] = True
         results["end_timestamp"] = _utc_now()
-        _save_results(state_dir, results)
+        try:
+            _save_results(state_dir, results)
+        except BaseException as final_evidence_exc:
+            raise LiveSwapError(
+                "phase=final_evidence recovery=COMPLETE "
+                f"original={type(activation_error).__name__ if activation_error else 'none'} "
+                f"original_detail={_public_diagnostic(activation_error) if activation_error else 'none'} "
+                f"write_errno={getattr(final_evidence_exc, 'errno', None)} "
+                "retained=private_recovery_state") from (
+                    activation_error if activation_error is not None
+                    else final_evidence_exc)
+        if activation_evidence_error is not None:
+            raise LiveSwapError(
+                "live trial failed; normal swap restored; "
+                f"phase=activation original={type(activation_error).__name__} "
+                f"detail={_public_diagnostic(activation_error)} "
+                "phase=activation_failure_record "
+                f"errno={getattr(activation_evidence_error, 'errno', None)} "
+                "retained=private_recovery_state") from activation_error
         if activation_error is not None and \
                 not isinstance(activation_error, SafeStop):
             raise LiveSwapError(
                 "live trial failed; normal swap restored; "
                 f"phase=activation errno={getattr(activation_error, 'errno', None)} "
-                f"retained=private_recovery_state: {_bounded(activation_error)}"
+                f"retained=private_recovery_state: {_public_diagnostic(activation_error)}"
                 ) from activation_error
         return results
     finally:
