@@ -385,6 +385,16 @@ def _verify_target_identity(target):
         raise ProbeError(
             f"parent_major_minor expected={target.get('parent_major_minor')!r} "
             f"observed={parent!r}")
+    expected_card_sha = target.get("card_identity_sha256")
+    if expected_card_sha is not None:
+        observed_card = _campaign_card_identity(target["device"], parent)
+        if observed_card["sha256"] != expected_card_sha:
+            raise ProbeError(
+                "parent_card_identity changed during the operation")
+        if (observed_card["model"] != target.get("parent_model") or
+                observed_card["transport"] != target.get("parent_transport")):
+            raise ProbeError(
+                "parent_card_attributes changed during the operation")
 
 
 def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
@@ -448,11 +458,23 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
     })
     if not swap_signature_valid(header, os.sysconf("SC_PAGE_SIZE")):
         raise ProbeError("selected partition does not have a supported SWAPSPACE2 header")
+    card_identity = _campaign_card_identity(device, parent_major_minor)
+    if (card_identity["transport"] != "usb" or
+            card_identity["parent_removable"] is not True):
+        raise ProbeError(
+            "physical_parent expected=removable_usb "
+            f"observed=transport_{card_identity['transport']!r},"
+            f"removable_{card_identity['parent_removable']!r}")
     return {
         "device": device,
         "major": major,
         "minor": minor,
         "parent_major_minor": parent_major_minor,
+        "parent_model": card_identity["model"],
+        "parent_transport": card_identity["transport"],
+        "parent_size_bytes": card_identity["parent_size_bytes"],
+        "parent_removable": card_identity["parent_removable"],
+        "card_identity_sha256": card_identity["sha256"],
         "size_bytes": size_bytes,
         "uuid": row["uuid"],
         "partuuid": partuuid,
@@ -2154,11 +2176,26 @@ def inspect_target_identity_for_recovery(state, device_arg, confirm_arg):
         raise ProbeError(
             f"recovery_parent_major_minor "
             f"expected={state['parent_major_minor']!r} observed={parent!r}")
+    card_identity = None
+    if state.get("card_identity_sha256") is not None:
+        card_identity = _campaign_card_identity(device, parent)
+        if (card_identity["sha256"] != state["card_identity_sha256"] or
+                card_identity["model"] != state.get("parent_model") or
+                card_identity["transport"] != state.get("parent_transport")):
+            raise ProbeError(
+                "recovery_parent_card_identity does not match saved state")
     return {
         "device": device,
         "major": major,
         "minor": minor,
         "parent_major_minor": parent,
+        **({
+            "parent_model": card_identity["model"],
+            "parent_transport": card_identity["transport"],
+            "parent_size_bytes": card_identity["parent_size_bytes"],
+            "parent_removable": card_identity["parent_removable"],
+            "card_identity_sha256": card_identity["sha256"],
+        } if card_identity is not None else {}),
         "size_bytes": size,
         "partuuid": partuuid,
     }
@@ -2197,6 +2234,11 @@ def _prepare_state(target, state_dir, evidence, review):
         "major": target["major"],
         "minor": target["minor"],
         "parent_major_minor": target.get("parent_major_minor"),
+        "parent_model": target.get("parent_model"),
+        "parent_transport": target.get("parent_transport"),
+        "parent_size_bytes": target.get("parent_size_bytes"),
+        "parent_removable": target.get("parent_removable"),
+        "card_identity_sha256": target.get("card_identity_sha256"),
         "size_bytes": target["size_bytes"],
         "partuuid": target["partuuid"],
         "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
@@ -2403,7 +2445,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             _run([
                 formatter, "format", target["device"], "--expect-major-minor",
                 f"{target['major']}:{target['minor']}", "--expect-bytes",
-                str(target["size_bytes"]),
+                str(target["size_bytes"]), "--expect-partuuid",
+                target["partuuid"], "--expect-parent-major-minor",
+                target["parent_major_minor"], "--expect-parent-model",
+                target["parent_model"], "--expect-parent-transport",
+                target["parent_transport"],
             ], timeout=30)
             formatted_header = _read_block0(target["device"], target)
             if not swapz_header_valid(formatted_header, target["size_bytes"]):
@@ -2757,8 +2803,11 @@ def _campaign_card_identity(device, parent_major_minor):
     model = _optional_card_identity_text(parent / "device/model")
     serial = _optional_card_identity_text(parent / "device/serial")
     wwid = _optional_card_identity_text(parent / "device/wwid")
+    # TRAN belongs to the physical disk. Querying a partition often returns
+    # an empty field even though its parent is connected over USB.
     transport = _run(
-        ["lsblk", "-dnro", "TRAN", device]).stdout.strip().lower()
+        ["lsblk", "-dnro", "TRAN", f"/dev/block/{parent_major_minor}"]
+    ).stdout.strip().lower()
     if not model or not transport:
         raise ProbeError(
             "card_identity expected=nonempty_model_and_transport "

@@ -4422,6 +4422,11 @@ the SWZ mapper as Linux swap. It saves the exact original 4096-byte block-zero
 header durably on the validated persistent recovery filesystem, records a
 fresh one-use run claim, and exercises only one helper-owned 16 MiB mapper
 with the existing 128-page byte-exact write/flush/overwrite/readback oracle.
+The formatter invocation must bind the opened partition major:minor, exact
+byte size, PARTUUID, physical-parent major:minor, parent model and USB
+transport. Resolve transport from the physical parent because `lsblk` may
+report an empty transport for a partition node; recheck the saved parent-card
+fingerprint before formatting and during recovery.
 Normal exact-identity mapper removal and same-process-owned module cleanup
 must complete before the exact saved header is restored and reread. Final
 kernel swap inventory must prove the target remains inactive. Any uncertain

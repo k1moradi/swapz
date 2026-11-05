@@ -1405,6 +1405,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         target.update({
             "device": "/dev/synthetic-physical-partition",
             "parent_major_minor": "8:0",
+            "parent_model": "synthetic-card",
+            "parent_transport": "usb",
+            "parent_size_bytes": 128 << 20,
+            "parent_removable": True,
+            "card_identity_sha256": "a" * 64,
             "swap_path": target["device_arg"], "swap_priority": -1,
             "swap_size_kib": target["size_bytes"] // 1024,
             "swap_used_kib": 0,
@@ -1832,7 +1837,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         commands = [event[1] for event in events if event[0] == "command"]
         self.assertIn(("/reviewed/swapzctl", "format", target["device"],
                        "--expect-major-minor", "8:4", "--expect-bytes",
-                       str(target["size_bytes"])), commands)
+                       str(target["size_bytes"]), "--expect-partuuid",
+                       target["partuuid"], "--expect-parent-major-minor",
+                       target["parent_major_minor"], "--expect-parent-model",
+                       target["parent_model"], "--expect-parent-transport",
+                       target["parent_transport"]), commands)
         self.assertIn(("/reviewed/device-roundtrip",
                        f"/dev/mapper/{state['dm_name']}",
                        "--expect-dm-uuid", state["dm_uuid"]), commands)
@@ -2508,6 +2517,35 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "parent_major_minor expected='8:16' observed='8:32'"):
                 probe._verify_target_identity(target)
 
+    def test_saved_parent_card_fingerprint_is_rechecked(self):
+        target = {
+            "device": "/dev/synthetic-part", "major": 8, "minor": 17,
+            "parent_major_minor": "8:16", "parent_model": "synthetic-card",
+            "parent_transport": "usb", "card_identity_sha256": "a" * 64,
+            "partuuid": "deadbeef-01", "size_bytes": 16 << 20,
+        }
+        with mock.patch.object(probe, "block_identity", return_value=(8, 17)), \
+                mock.patch.object(
+                    probe, "_run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 0, stdout=str(target["size_bytes"]), stderr="")), \
+                mock.patch.object(probe, "_partition_identity",
+                                  return_value=(target["partuuid"],
+                                                target["size_bytes"])), \
+                mock.patch.object(probe, "_physical_parent_identity",
+                                  return_value="8:16"), \
+                mock.patch.object(
+                    probe, "_campaign_card_identity",
+                    return_value={
+                        "sha256": "b" * 64,
+                        "model": target["parent_model"],
+                        "transport": target["parent_transport"],
+                    }):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "parent_card_identity changed during the operation"):
+                probe._verify_target_identity(target)
+
     def test_selected_swap_usage_blocks_smoke_preflight(self):
         # This smoke requires an active but *unused* original swap; the
         # performance campaign instead requires an inactive selected card.
@@ -3028,8 +3066,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
             lsblk = subprocess.CompletedProcess(
                 [], 0, stdout="mmc\n", stderr="")
+            commands = []
+
+            def fake_run(command, **kwargs):
+                del kwargs
+                commands.append(tuple(command))
+                return lsblk
+
             with mock.patch.object(probe.Path, "resolve", resolve), \
-                    mock.patch.object(probe, "_run", return_value=lsblk):
+                    mock.patch.object(probe, "_run", side_effect=fake_run):
                 first = probe._campaign_card_identity(
                     "/dev/synthetic", "179:0")
                 self.assertEqual(first["model"], "SD-A")
@@ -3045,6 +3090,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 (card / "device/model").write_text("SD-B\n")
                 third = probe._campaign_card_identity(
                     "/dev/synthetic", "179:0")
+            self.assertEqual(commands, [
+                ("lsblk", "-dnro", "TRAN", "/dev/block/179:0"),
+            ] * 3)
             self.assertNotEqual(first["sha256"], second["sha256"])
             self.assertNotEqual(first["sha256"], third["sha256"])
 
