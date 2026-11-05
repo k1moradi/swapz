@@ -1117,9 +1117,9 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                 diagnose("BLOCKED", "arm.source_sha", "admitted source",
                          workload=workload, pair_index=index, arm=label,
                          reason="stale source or artifact provenance")
-            if (arm.get("arm_boot_id") != boot_id or
-                    arm.get("arm_boot_id") !=
-                    (after.get("kernel") or {}).get("boot_id")):
+            arm_boot_matches = (
+                valid_boot_binding and arm.get("arm_boot_id") == boot_id)
+            if not arm_boot_matches:
                 diagnose("BLOCKED", "arm.arm_boot_id", "same host boot",
                          workload=workload, pair_index=index, arm=label,
                          reason="mixed or absent physical boot identity")
@@ -1130,7 +1130,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                 diagnose("UNAVAILABLE", "arm.monotonic_window_ns", "start < end",
                          workload=workload, pair_index=index, arm=label,
                          reason="arm timestamp missing or reversed")
-            else:
+            elif arm_boot_matches:
                 windows.append((start, end, workload, index, label))
                 if valid_host_window and not host_start < start < end < host_end:
                     diagnose("BLOCKED", "arm.monotonic_window_ns",
@@ -1189,12 +1189,16 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         latest_end = None
         latest_end_identity = None
         for row in rows:
+            arms = (row.get("raw"), row.get("swapz"))
+            if (not valid_boot_binding or
+                    any(not isinstance(arm, dict) or
+                        arm.get("arm_boot_id") != boot_id for arm in arms)):
+                continue
             times = [
                 (arm.get("arm_started_monotonic_ns"),
                  arm.get("arm_finished_monotonic_ns"))
-                for arm in (row.get("raw"), row.get("swapz"))
-                if isinstance(arm, dict)]
-            if len(times) != 2 or any(
+                for arm in arms]
+            if any(
                     type(a) is not int or type(b) is not int or
                     not 0 < a < b for a, b in times):
                 continue
