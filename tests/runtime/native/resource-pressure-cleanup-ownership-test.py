@@ -171,6 +171,40 @@ rmdir() {
         self.membership.write_text("123\n", encoding="ascii")
         self.assert_retained(self.execute(), "stale")
 
+    def test_reaped_direct_child_pid_is_stale_cleanup_membership(self):
+        # A reaped child's numeric PID is no longer termination authority,
+        # even if synthetic cgroup membership still reports that PID.
+        preamble = '''
+sleep 0.3 >/dev/null 2>&1 &
+PAIR_PID=$!
+PAIR_PROCESS_IDENTITY="$(capture_direct_child_identity "$PAIR_PID")"
+wait "$PAIR_PID"
+printf '%s\\n' "$PAIR_PID" > "$CGROUP/cgroup.procs"
+'''
+        result = self.execute(preamble=preamble)
+        self.assert_retained(result, "stale")
+        self.assertIn("phase:membership", result.stderr)
+
+    def test_delayed_cgroup_departure_after_stale_snapshot_can_clean(self):
+        self.membership.write_text("123\n", encoding="ascii")
+        # The first observation is stale; the child departs before the next.
+        # The bounded grace period never grants numeric-PID signal authority.
+        preamble = '''
+awk() {
+    command awk "$@"
+    if [[ ! -e $SESSION/pressure.active ]]; then
+        : > "$SESSION/pressure.active"
+        : > "$CGROUP/cgroup.procs"
+    fi
+}
+'''
+        result = self.execute(preamble=preamble)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "PASS_ID36_RESOURCE_PRESSURE=synthetic\n")
+        self.assertEqual(result.stderr, "")
+        self.assertFalse(self.cgroup.exists())
+        self.assertFalse(self.session.exists())
+
     def test_foreign_member_entering_after_initial_admission_is_retained(self):
         # The recorded readiness PID was accepted earlier; membership changed
         # while the pressure pair ran, and cleanup must not reuse that proof.
@@ -202,8 +236,16 @@ awk() {
         printf '%s\\n' 456 > "$CGROUP/cgroup.procs"
     fi
 }
+signal_direct_owned_child() {
+    : > "$SESSION/pair.log"
+    return 2
+}
 '''
-        self.assert_retained(self.execute(preamble=preamble), "foreign")
+        result = self.execute(preamble=preamble)
+        self.assert_retained(result, "foreign")
+        self.assertIn("phase:pre-rmdir", result.stderr)
+        self.assertFalse((self.session / "pair.log").exists(),
+                         "a new cgroup member must never be signaled")
 
     def test_arrival_during_rmdir_preserves_evidence(self):
         preamble = '''
@@ -236,6 +278,32 @@ rmdir() {
         self.assertIn("phase:post-rmdir", result.stderr)
         self.assertTrue(self.cgroup.exists())
         self.assertTrue(self.session.exists())
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_session_replacement_after_cgroup_removal_retains_only_session(self):
+        # A post-rmdir replacement cannot redirect pinned scratch ownership.
+        preamble = '''
+rmdir() {
+    if [[ $1 == "$CGROUP" ]]; then
+        command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+        command rmdir -- "$CGROUP" || return 1
+        command mv -- "$SESSION" "$SESSION.original"
+        command mkdir -- "$SESSION"
+        return 0
+    fi
+    command rmdir "$@"
+}
+'''
+        result = self.execute(preamble=preamble)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertTrue((self.root / "private-session.original").exists())
+        self.assertIn("phase:session-identity", result.stderr)
+        self.assertIn("observed:stale", result.stderr)
+        self.assertIn("original_exit:0", result.stderr)
+        self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
     def test_cgroup_replacement_before_cleanup_is_stale(self):
@@ -292,6 +360,38 @@ ln -s "${SESSION%/*}/foreign-target" "$STOP"
         self.assertTrue((self.session / "pressure.stop").is_file())
         self.assertIn("phase:session-inventory", result.stderr)
         self.assertIn("observed:unexpected", result.stderr)
+        self.assertIn("original_exit:0", result.stderr)
+        self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertNotIn("retained_cleanup:child-cgroup-and-private-session",
+                         result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_interrupted_session_unlink_keeps_original_failure_and_evidence(self):
+        # Model an interrupted unlink after one known file was removed.
+        # Earlier FAIL wins, and the remaining session is still quarantined.
+        preamble = '''
+: > "$SESSION/pair.log"
+rm() {
+    if [[ $# -ge 2 && $1 == -f && $2 == -- ]]; then
+        command rm -f -- "$SESSION/pair.log"
+        return 130
+    fi
+    command rm "$@"
+}
+'''
+        result = self.execute(preamble=preamble, status=1)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertFalse((self.session / "pair.log").exists())
+        self.assertTrue((self.session / "pressure.stop").exists())
+        self.assertIn("FAIL: ID36 private scratch cleanup did not complete",
+                      result.stderr)
+        self.assertIn("phase:session-remove", result.stderr)
+        self.assertIn("observed:unremovable-known-entry", result.stderr)
+        self.assertIn("original_exit:1", result.stderr)
+        self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
     def test_prior_retention_and_original_failure_precedence(self):

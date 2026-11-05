@@ -1558,10 +1558,15 @@ pinned descriptor and require the directory to be empty before `rmdir`; any
 path replacement or later arrival retains the remaining evidence. Cleanup
 diagnostics identify phase, required ownership, observed safe category,
 original exit status and retained obligation without paths or PID lists;
-original FAIL/signal status takes precedence over cleanup BLOCKED. Rootless
-regression fixtures must inject PID-identity mismatch, late membership,
-same-path directory replacement, stop-marker substitution, unknown session
-entries and deletion races without mutating host cgroups.
+original FAIL/signal status takes precedence over cleanup BLOCKED. A refusal
+before cgroup teardown retains both resources; after successful cgroup removal,
+a session-identity or session-inventory refusal reports only private-session
+retention. Partial removal of known session files must not change the earliest
+FAIL or misreport a removed cgroup as retained. Rootless regression fixtures
+must inject reaped or reused PIDs, delayed departure, PID-identity mismatch,
+late membership between snapshots (without any new signal authority), same-path
+directory replacement, stop-marker substitution, unknown session entries and
+interrupted deletion without mutating host cgroups.
 
 ### Foreground GC pressure and scaling telemetry
 

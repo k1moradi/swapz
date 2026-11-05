@@ -819,8 +819,13 @@ report_cleanup_refusal() {
             printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
                 "$severity" "$phase" "$observed" "$original_exit" >&2
             ;;
-        session-identity|session-signal|session-inventory)
+        session-signal)
             printf '%s: ID36 private scratch ownership refused; phase:%s required:same created private-session identity and only canonical ID36 entries observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
+                "$severity" "$phase" "$observed" "$original_exit" >&2
+            ;;
+        session-identity|session-inventory)
+            # The created cgroup has already been removed at these phases.
+            printf '%s: ID36 private scratch ownership refused; phase:%s required:same created private-session identity and only canonical ID36 entries observed:%s original_exit:%s retained_cleanup:private-session\n' \
                 "$severity" "$phase" "$observed" "$original_exit" >&2
             ;;
         session-remove|session-post-rmdir)
