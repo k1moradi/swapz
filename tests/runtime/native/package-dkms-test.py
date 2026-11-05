@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -419,10 +420,23 @@ esac
         env = dict(self.env)
         if extra:
             env.update(extra)
-        return subprocess.run(
-            ["bash", str(self.script), action, str(self.prefix)],
-            cwd=self.repo_root, env=env, capture_output=True, text=True,
-            timeout=timeout)
+        command = ["bash", str(self.script), action, str(self.prefix)]
+        with subprocess.Popen(
+                command, cwd=self.repo_root, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True,
+                start_new_session=True) as process:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # The timed-out shell's children must not outlive the sandbox.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate()
+                raise
+        return subprocess.CompletedProcess(
+            command, process.returncode, stdout, stderr)
 
     def assert_absent(self):
         self.assertFalse((self.prefix / "sbin/swapzctl").exists())
@@ -452,11 +466,62 @@ esac
         self.assertEqual(
             self.installed_module.read_bytes(), self.module.read_bytes())
 
+    def installed_package_state(self):
+        """Fingerprint all installed payloads, not just CLI and module bytes."""
+        package_entries = [self.dkms_state, self.installed_module]
+        for package_root in (
+                self.prefix, self.home / "usr/src" / ("swapz-" + VERSION)):
+            package_entries.extend(package_root.rglob("*"))
+
+        snapshot = {}
+        for package_path in package_entries:
+            metadata = package_path.lstat()
+            if stat.S_ISDIR(metadata.st_mode):
+                continue
+            relative_name = str(package_path.relative_to(self.home))
+            if stat.S_ISREG(metadata.st_mode):
+                identity = ("file", stat.S_IMODE(metadata.st_mode),
+                            sha256(package_path))
+            elif stat.S_ISLNK(metadata.st_mode):
+                identity = (
+                    "symlink", stat.S_IMODE(metadata.st_mode),
+                    hashlib.sha256(os.fsencode(
+                        os.readlink(package_path))).hexdigest())
+            else:
+                identity = ("special", stat.S_IMODE(metadata.st_mode), None)
+            snapshot[relative_name] = identity
+        return snapshot
+
     def uninstall_transactions(self):
         transaction_parent = self.home / "transactions"
         if not transaction_parent.exists():
             return []
         return sorted(transaction_parent.glob("swapz-uninstall.*"))
+
+    def test_package_invoke_timeout_reaps_descendants(self):
+        # A timed-out fixture must not write into a sandbox after its cleanup.
+        ready_marker = self.home / "timeout-child-ready"
+        late_marker = self.home / "timeout-child-late"
+        fixture = self.home / "timeout-fixture.sh"
+        fixture.write_text(
+            "#!/bin/sh\n"
+            ": > \"$SWAPZ_PACKAGE_TEST_ROOT/timeout-child-ready\"\n"
+            "(\n"
+            "  sleep 2\n"
+            "  : > \"$SWAPZ_PACKAGE_TEST_ROOT/timeout-child-late\"\n"
+            ") &\n"
+            "wait\n")
+        original_script = self.script
+        try:
+            self.script = fixture
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self.invoke("install", timeout=1)
+        finally:
+            self.script = original_script
+        self.assertTrue(ready_marker.exists(), "timeout fixture never started")
+        # Exceed the child's entire sleep even if startup reached the deadline.
+        time.sleep(2.1)
+        self.assertFalse(late_marker.exists(), "timed-out descendant survived")
 
     def test_package_lock_refuses_parallel_mutation(self):
         package_lock = self.home / "package.lock"
@@ -968,10 +1033,12 @@ exec "{flock_binary}" "$@"
         self.assertIn("incomplete package transaction retained", blocked.stderr)
 
     def test_upgrade_all_mutation_checkpoints_restore_exact_old_package(self):
-        self.assertEqual(self.invoke("install").returncode, 0)
+        initial_install = self.invoke("install")
+        self.assertEqual(initial_install.returncode, 0, initial_install.stderr)
         installed_cli = self.prefix / "sbin/swapzctl"
         old_cli = installed_cli.read_bytes()
         old_module = self.installed_module.read_bytes()
+        old_package_state = self.installed_package_state()
         self.module.write_bytes(b"replacement-qualified-module\n")
         self.write_report()
 
@@ -982,16 +1049,74 @@ exec "{flock_binary}" "$@"
             "module-promoted", "depmod-complete", "package-files-published",
             "systemd-reload-complete", "cli-published",
         )
+        checkpoint_elapsed_seconds = []
         for phase in phases:
             with self.subTest(phase=phase):
-                result = self.invoke(
-                    "install", {"SWAPZ_TEST_INSTALL_FAIL_AFTER": phase})
-                self.assertNotEqual(result.returncode, 0, result.stdout)
-                self.assertIn("attempting transaction rollback", result.stderr)
-                self.assertEqual(installed_cli.read_bytes(), old_cli)
-                self.assertEqual(self.installed_module.read_bytes(), old_module)
+                phase_started = time.monotonic()
+                try:
+                    result = self.invoke(
+                        "install", {"SWAPZ_TEST_INSTALL_FAIL_AFTER": phase})
+                except subprocess.TimeoutExpired as error:
+                    # Keep TimeoutExpired intact for first-failure attribution.
+                    if hasattr(error, "add_note"):
+                        previous = ", ".join(
+                            f"{name}={seconds:.2f}"
+                            for name, seconds in checkpoint_elapsed_seconds)
+                        error.add_note(
+                            f"checkpoint={phase} elapsed_s="
+                            f"{time.monotonic() - phase_started:.2f}; "
+                            f"previous_checkpoint_s={previous}")
+                    raise
+                checkpoint_elapsed_seconds.append(
+                    (phase, time.monotonic() - phase_started))
+                diagnostics = (
+                    "checkpoint_elapsed_s="
+                    + ", ".join(
+                        f"{name}={seconds:.2f}"
+                        for name, seconds in checkpoint_elapsed_seconds)
+                    + f"; stdout_tail={result.stdout[-512:]!r}"
+                    + f"; stderr_tail={result.stderr[-2048:]!r}")
+                self.assertNotEqual(result.returncode, 0, diagnostics)
+                self.assertIn("attempting transaction rollback", result.stderr,
+                              diagnostics)
+                self.assertEqual(installed_cli.read_bytes(), old_cli, diagnostics)
+                self.assertEqual(self.installed_module.read_bytes(), old_module,
+                                 diagnostics)
+                after_package_state = self.installed_package_state()
+                changed_package_paths = sorted(
+                    path for path in old_package_state.keys() | after_package_state.keys()
+                    if old_package_state.get(path) != after_package_state.get(path))
                 self.assertFalse(
-                    list((self.home / "transactions").glob("swapz-package.*")))
+                    changed_package_paths,
+                    f"package payload drift={changed_package_paths[:8]!r} "
+                    f"count={len(changed_package_paths)}; {diagnostics}")
+                self.assertFalse(
+                    list((self.home / "transactions").glob("swapz-package.*")),
+                    diagnostics)
+
+    def test_package_state_oracle_detects_noncli_payload_drift(self):
+        initial_install = self.invoke("install")
+        self.assertEqual(initial_install.returncode, 0, initial_install.stderr)
+        original_package_state = self.installed_package_state()
+        installed_cli = self.prefix / "sbin/swapzctl"
+        original_cli = installed_cli.read_bytes()
+        original_module = self.installed_module.read_bytes()
+        runtime_health_unit = (
+            self.prefix / "lib/systemd/system/swapz-primary-runtime-health.service")
+        original_unit = runtime_health_unit.read_bytes()
+        original_mode = stat.S_IMODE(runtime_health_unit.stat().st_mode)
+
+        # The former CLI/module-only oracle cannot detect this unit drift.
+        runtime_health_unit.write_bytes(b"regressed-test-runtime-health\n")
+        self.assertEqual(installed_cli.read_bytes(), original_cli)
+        self.assertEqual(self.installed_module.read_bytes(), original_module)
+        self.assertNotEqual(self.installed_package_state(), original_package_state)
+
+        runtime_health_unit.write_bytes(original_unit)
+        runtime_health_unit.chmod(0o600)
+        self.assertNotEqual(self.installed_package_state(), original_package_state)
+        runtime_health_unit.chmod(original_mode)
+        self.assertEqual(self.installed_package_state(), original_package_state)
 
     def test_dkms_installed_status_requires_exact_version_kernel_and_one_record(self):
         installed = self.invoke("install")
