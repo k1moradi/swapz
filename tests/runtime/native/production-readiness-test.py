@@ -920,6 +920,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                  "mapper sysfs identity"),
                 ("gc-invalid", {"gc_pages": "unavailable"},
                  "GC telemetry is malformed"),
+                ("gc-leading-zero", {"gc_pages": "00"},
+                 "GC telemetry is malformed"),
                 ("gc-reserve-zero", {"gc_reserve_segments_current": "0"},
                  "GC reserve telemetry is inconsistent"),
                 ("gc-reserve-growth", {

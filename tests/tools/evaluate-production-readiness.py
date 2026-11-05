@@ -1871,6 +1871,14 @@ def validate_cold_boot_evidence(
             cold_boot["loaded_module_build_source_sha"] != source_sha or
             cold_boot["loaded_module_build_source_clean"] != "1"):
         reject("persistent cold-boot module source binding is invalid")
+    observed_source = cold_boot["loaded_module_build_source_sha"]
+    observed_module = cold_boot["module_artifact_sha256"]
+    evidence_identity_diagnostic = (
+        f"required_source_sha={source_sha} "
+        f"observed_source_sha={observed_source if _valid_source(observed_source) else 'invalid'} "
+        f"required_module_sha256={module_hash if isinstance(module_hash, str) and SHA256_RE.fullmatch(module_hash) else 'invalid'} "
+        f"observed_module_sha256={observed_module if SHA256_RE.fullmatch(observed_module) else 'invalid'} "
+    )
 
     run_id = cold_boot["active_transaction_run_id"]
     expected_uuid = f"SWAPZ-PRIMARY-{run_id}"
@@ -1891,6 +1899,7 @@ def validate_cold_boot_evidence(
             "first_failed_phase=mapper_identity "
             "required_mapper_sysfs_dm_name=swapz-primary "
             f"observed_mapper_sysfs_dm_name={safe_mapper_sysfs_name} "
+            f"{evidence_identity_diagnostic}"
             "verdict=BLOCKED reason=wrong_mapper_sysfs_identity")
 
     logical_sectors = _bounded_decimal_text(cold_boot["dm_logical_sectors"])
@@ -1928,8 +1937,6 @@ def validate_cold_boot_evidence(
             cold_boot["swap_priority"] != "-1" or
             logical_bytes <= 4096 or
             swap_size_kib != logical_bytes // 1024 - 4):
-        observed_source = cold_boot["loaded_module_build_source_sha"]
-        observed_module = cold_boot["module_artifact_sha256"]
         reject(
             "persistent cold-boot active swap evidence is inconsistent: "
             "evidence_class=persistent_cold_boot first_failed_phase=active_swap "
@@ -1937,10 +1944,7 @@ def validate_cold_boot_evidence(
             f"observed_total_entries={swap_total_entries if swap_total_entries is not None else 'invalid'} "
             f"required_used_kib=0..{swap_size_kib if swap_size_kib >= 0 else 'invalid'} "
             f"observed_used_kib={swap_used_kib if swap_used_kib is not None else 'invalid'} "
-            f"required_source_sha={source_sha} "
-            f"observed_source_sha={observed_source if _valid_source(observed_source) else 'invalid'} "
-            f"required_module_sha256={module_hash if isinstance(module_hash, str) and SHA256_RE.fullmatch(module_hash) else 'invalid'} "
-            f"observed_module_sha256={observed_module if SHA256_RE.fullmatch(observed_module) else 'invalid'} "
+            f"{evidence_identity_diagnostic}"
             "verdict=BLOCKED reason=contradictory_or_malformed_swap_inventory")
     if (
             cold_boot["mapper_service_active_state"] != "active" or
@@ -1964,11 +1968,15 @@ def validate_cold_boot_evidence(
         "gc_destination_advances", "window_gc_pressure",
     )
     gc_counter_maximum = 10**18 - 1
-    gc_counters = {
-        field: _bounded_decimal_text(
-            cold_boot[field], maximum=gc_counter_maximum)
-        for field in gc_counter_fields
-    }
+    gc_counters = {}
+    for field in gc_counter_fields:
+        counter_text = cold_boot[field]
+        counter_value = _bounded_decimal_text(
+            counter_text, maximum=gc_counter_maximum)
+        gc_counters[field] = (
+            counter_value
+            if counter_value is not None and str(counter_value) == counter_text
+            else None)
     invalid_gc_counters = [
         field for field, value in gc_counters.items() if value is None]
     if invalid_gc_counters:
@@ -1976,8 +1984,9 @@ def validate_cold_boot_evidence(
             "persistent cold-boot GC telemetry is malformed: "
             "evidence_class=persistent_cold_boot "
             "first_failed_phase=gc_telemetry "
-            "required_counter_format=unsigned_decimal_0..999999999999999999 "
+            "required_counter_format=canonical_unsigned_decimal_0..999999999999999999 "
             f"observed_invalid_counter_count={len(invalid_gc_counters)} "
+            f"{evidence_identity_diagnostic}"
             "verdict=BLOCKED reason=malformed_gc_progress_telemetry")
     else:
         reserve_initial = gc_counters["gc_reserve_segments_initial"]
@@ -1992,6 +2001,7 @@ def validate_cold_boot_evidence(
                 "required_reserve=initial>0,current>0,current<=initial "
                 f"observed_initial={reserve_initial} "
                 f"observed_current={reserve_current} "
+                f"{evidence_identity_diagnostic}"
                 "verdict=BLOCKED reason=invalid_gc_reserve_telemetry")
     if cold_boot["failure_reasons"] or cold_boot["incomplete_reasons"]:
         reject("persistent cold-boot report contains failure/incomplete reasons")
