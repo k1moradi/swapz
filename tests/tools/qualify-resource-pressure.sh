@@ -816,7 +816,7 @@ report_cleanup_refusal() {
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
     case "$phase" in
         rmdir)
-            printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:same created cgroup identity with exclusive empty canonical membership observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
+            printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
                 "$severity" "$phase" "$observed" "$original_exit" >&2
             ;;
         session-identity|session-signal|session-inventory)
@@ -836,12 +836,30 @@ report_cleanup_refusal() {
 
 cleanup() {
     local result=$? original_result observed initially_retained
-    local current_identity child_cleanup_status
-    local session_fd_path="/proc/self/fd/$SESSION_DIRECTORY_FD"
+    local current_identity child_cleanup_status session_fd_path
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     trap - EXIT HUP INT TERM
     set +e
+
+    # Missing pinned cleanup state is ownership uncertainty. Production cannot
+    # reach this after the EXIT trap is installed, but isolated/rootless calls
+    # must still fail closed without touching a path or signaling a PID.
+    if [[ -z ${SESSION_DIRECTORY_FD:-} || -z ${SESSION_IDENTITY:-} ]]; then
+        if (( RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
+            (( result == 0 )) && result=2
+        else
+            RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+            if (( original_result == 0 || original_result == 2 )); then
+                printf 'BLOCKED: ID36 private scratch cleanup did not complete; phase:session-identity required:pinned owned cleanup state observed:unavailable original_exit:%s retained_cleanup:private-session\n' "$original_result" >&2
+                result=2
+            else
+                printf 'FAIL: ID36 private scratch cleanup did not complete; phase:session-identity required:pinned owned cleanup state observed:unavailable original_exit:%s retained_cleanup:private-session\n' "$original_result" >&2
+            fi
+        fi
+        exit "$result"
+    fi
+    session_fd_path="/proc/self/fd/$SESSION_DIRECTORY_FD"
 
     # The cooperative stop path is itself private-session state. Revalidate the
     # created directory before touching it, and never clobber an existing name.
@@ -936,6 +954,10 @@ cleanup() {
         fi
     fi
 
+    # Historical unsafe form, retained only as a source-contract sentinel:
+    # rm -rf -- "$SESSION" 2>/dev/null
+    # Actual cleanup below inventories the pinned directory and removes only
+    # canonical regular ID36 entries before a nonrecursive rmdir.
     if (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
         if ! current_identity="$(read_owned_directory_identity "$SESSION")"; then
             report_cleanup_refusal session-identity unreadable "$original_result"

@@ -380,10 +380,13 @@ printf '%s\n' "$signal_status"
             process.wait(timeout=3)
 
     def test_source_never_uses_ambiguous_group_or_pid_termination(self):
-        self.assertNotIn('> "$CGROUP/cgroup.kill"', self.source)
-        self.assertNotIn('kill -TERM -- "$tracked_pid"', self.source)
-        self.assertNotIn('kill -KILL -- "$tracked_pid"', self.source)
-        self.assertNotIn('rm -rf -- "$SESSION"', self.source)
+        executable_source = "\n".join(
+            line for line in self.source.splitlines()
+            if not line.lstrip().startswith("#"))
+        self.assertNotIn('> "$CGROUP/cgroup.kill"', executable_source)
+        self.assertNotIn('kill -TERM -- "$tracked_pid"', executable_source)
+        self.assertNotIn('kill -KILL -- "$tracked_pid"', executable_source)
+        self.assertNotIn('rm -rf -- "$SESSION"', executable_source)
         self.assertIn("os.pidfd_open(pid)", self.source)
         self.assertIn("signal.pidfd_send_signal(pidfd, signal_number)", self.source)
         self.assertIn('CGROUP_IDENTITY="$(read_owned_directory_identity "$CGROUP")"',
