@@ -1,7 +1,7 @@
 # Handoff reference and evidence index
 
 This directory combines **supporting current observations**, **immutable
-source-bound history**, **retired experiments** and **deferred research**.
+source-bound history**, **abandoned/rejected experiments** and **deferred research**.
 A historical `Current` heading, old source path, helper argument, source SHA,
 PASS, or approval instruction is not authority for the current checkout.
 Keep the original records intact; use the linked contract and current
@@ -24,11 +24,11 @@ development-only and never qualifies or publishes a source.
   operational explanation, not a substitute for the package/boot contracts.
 - [Host-history registry](host-history.json) is an audited, **active input**
   to private descriptive per-host plotting; it is not a release verdict.
-- [Production-readiness snapshot](production-readiness.json) is explicitly
-  **HISTORICAL**, not a live status or an acceptance-policy source.
 
 ## Historical qualification and physical observations
 
+- [Production-readiness snapshot](production-readiness.json) is explicitly
+  **HISTORICAL**, not a live status or an acceptance-policy source.
 - [Source qualification snapshots](historical-source-qualification-snapshots.md)
   and [benchmark qualification narratives](historical-benchmark-qualification-narratives.md)
   preserve earlier source-specific PASS/FAIL/BLOCKED and measured tradeoffs.
@@ -42,7 +42,7 @@ development-only and never qualifies or publishes a source.
 - [ID73 CPU/cache batch](id73-cpu-cache-qualification-batch.md)
   preserves the older source-bound implementation and test summary.
 
-## Retired experiments and superseded work orders
+## Abandoned/rejected experiments and superseded work orders
 
 - [Rejected optimization pilots](historical-rejected-optimization-pilots.md)
   keep removed candidates, measurements and reopening conditions.
