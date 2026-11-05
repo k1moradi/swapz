@@ -117,7 +117,7 @@ enum admission_change {
 	ADMISSION_SWAP_INVENTORY_MALFORMED,
 	ADMISSION_EXITED_PID_CONTROL,
 };
-#define ADMISSION_DIAGNOSTIC_BYTES 512U
+#define ADMISSION_DIAGNOSTIC_BYTES 1024U
 #define ADMISSION_DEVICE_FD 987654
 #define ADMISSION_DEVICE "/dev/swapz-synthetic-card"
 #define ADMISSION_ALIAS "/dev/disk/by-partuuid/f13428f6-01"
@@ -590,8 +590,13 @@ static void test_real_cli_exclusive_open_permission_refuses_without_io(void)
 {
 	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
 	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+	char errno_field[64];
+	int errno_length;
 	int status, observed_errno;
 
+	errno_length = snprintf(errno_field, sizeof(errno_field), "errno=%d (",
+				EACCES);
+	assert(errno_length > 0 && (size_t)errno_length < sizeof(errno_field));
 	admission_start(ADMISSION_UNCHANGED);
 	admission_fixture.open_error = EACCES;
 	test_diagnostic_errno_clobber = ECHILD;
@@ -599,6 +604,10 @@ static void test_real_cli_exclusive_open_permission_refuses_without_io(void)
 	test_diagnostic_errno_clobber = 0;
 	if (status != 1 || observed_errno != EACCES ||
 	    !strstr(report, "swapzctl format: exclusive open:") ||
+	    !strstr(report, "stage=exclusive open") ||
+	    !strstr(report, "expected=O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW") ||
+	    !strstr(report, "action=") ||
+	    !strstr(report, errno_field) ||
 	    !strstr(report, strerror(EACCES)) ||
 	    strstr(report, ADMISSION_DEVICE) ||
 	    admission_fixture.observed_open_flags !=
@@ -628,28 +637,39 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		enum admission_change change;
 		const char *observed_identity;
 		int expected_errno;
+		const char *expected_stage;
+		const char *expected_condition;
 	} cases[] = {
-		{ ADMISSION_BAD_PARTUUID, "sysfs-PARTUUID", ESTALE },
-		{ ADMISSION_PARENT_CHANGED, "parent-dev_t", ESTALE },
+		{ ADMISSION_BAD_PARTUUID, "sysfs-PARTUUID", ESTALE,
+		  "identity", "sysfs PARTUUID matches the expected opened block identity" },
+		{ ADMISSION_PARENT_CHANGED, "parent-dev_t", ESTALE,
+		  "topology", "expected removable USB parent" },
 		{ ADMISSION_SWAPFILE_ACTIVE, "active-swapfile-unauthenticated",
-		  EOPNOTSUPP },
-		{ ADMISSION_PARENT_MOUNTED, "foreign-parent-mount", EBUSY },
+		  EOPNOTSUPP, "inventory", "absent from mount namespaces and /proc/swaps" },
+		{ ADMISSION_PARENT_MOUNTED, "foreign-parent-mount", EBUSY,
+		  "inventory", "absent from mount namespaces and /proc/swaps" },
 		{ ADMISSION_FOREIGN_DENIED, "foreign-mount-namespace-EACCES",
-		  EACCES },
+		  EACCES, "inventory", "absent from mount namespaces and /proc/swaps" },
 		{ ADMISSION_LIVE_PID_TABLE_MISSING, "live-pid-mountinfo-missing",
-		  ENOENT },
-		{ ADMISSION_GEOMETRY_CHANGED, "BLKGETSIZE64", ESTALE },
-		{ ADMISSION_ALIAS_CHANGED, "by-partuuid-alias", ESTALE },
-		{ ADMISSION_PATH_SYMLINK, "path-symlink-substitution", ESTALE },
-		{ ADMISSION_PATH_INODE_CHANGED, "same-dev_t-new-inode", ESTALE },
+		  ENOENT, "inventory", "absent from mount namespaces and /proc/swaps" },
+		{ ADMISSION_GEOMETRY_CHANGED, "BLKGETSIZE64", ESTALE,
+		  "identity", "opened descriptor inode and geometry match" },
+		{ ADMISSION_ALIAS_CHANGED, "by-partuuid-alias", ESTALE,
+		  "identity", "opened descriptor inode and geometry match" },
+		{ ADMISSION_PATH_SYMLINK, "path-symlink-substitution", ESTALE,
+		  "identity", "opened descriptor inode and geometry match" },
+		{ ADMISSION_PATH_INODE_CHANGED, "same-dev_t-new-inode", ESTALE,
+		  "identity", "opened descriptor inode and geometry match" },
 		{ ADMISSION_PATH_REGULAR_CHANGED,
-		  "path-terminal-regular-replacement", ESTALE },
+		  "path-terminal-regular-replacement", ESTALE,
+		  "identity", "opened descriptor inode and geometry match" },
 		{ ADMISSION_OPENED_RO_QUERY_FAILED, "opened-BLKROGET-ENODEV",
-		  ENODEV },
+		  ENODEV, "descriptor mode", "BLKROGET == 0" },
 		{ ADMISSION_OPENED_READ_ONLY, "opened-BLKROGET-read-only",
-		  EROFS },
+		  EROFS, "descriptor mode", "BLKROGET == 0" },
 		{ ADMISSION_SWAP_INVENTORY_MALFORMED,
-		  "malformed-late-swap-inventory", EPROTO },
+		  "malformed-late-swap-inventory", EPROTO,
+		  "inventory", "absent from mount namespaces and /proc/swaps" },
 	};
 	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
 
@@ -663,35 +683,58 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 		status = admission_capture_cli(report, &observed_errno);
 		test_diagnostic_errno_clobber = 0;
 
-		if (status != 2 || observed_errno != cases[index].expected_errno ||
-		    !strstr(report, "REFUSED: target identity changed before "
-			    "header write") ||
-		    !strstr(report, strerror(cases[index].expected_errno)) ||
-		    !admission_fixture.observed_identity ||
-		    strcmp(admission_fixture.observed_identity,
-			   cases[index].observed_identity) ||
-		    admission_fixture.observed_identity_calls != 1U ||
-		    strstr(report, ADMISSION_DEVICE) ||
-		    admission_fixture.opens != 1U ||
-		    admission_fixture.reads != 1U ||
-		    admission_fixture.writes != 0U ||
-		    admission_fixture.syncs != 0U ||
-		    admission_fixture.closes != 1U ||
-		    memcmp(admission_fixture.block_zero, unchanged,
-			   sizeof(unchanged))) {
-			fprintf(stderr, "FAIL: phase=final-prewrite "
-				"reason=snapshot-refusal expected_identity=%s "
-				"observed_identity=%s identity_reads=%u errno=%d "
-				"expected_errno=%d status=%d opens=%u reads=%u "
-				"writes=%u\n",
-				cases[index].observed_identity,
-				admission_fixture.observed_identity ?
-					admission_fixture.observed_identity : "none",
-				admission_fixture.observed_identity_calls,
-				observed_errno, cases[index].expected_errno,
-				status, admission_fixture.opens,
-				admission_fixture.reads, admission_fixture.writes);
-			abort();
+		{
+			char stage_field[64];
+			char errno_field[64];
+			int field_length;
+
+			field_length = snprintf(stage_field, sizeof(stage_field),
+						"stage=%s",
+						cases[index].expected_stage);
+			assert(field_length > 0 &&
+			       (size_t)field_length < sizeof(stage_field));
+			field_length = snprintf(errno_field, sizeof(errno_field),
+						"errno=%d (",
+						cases[index].expected_errno);
+			assert(field_length > 0 &&
+			       (size_t)field_length < sizeof(errno_field));
+			if (status != 2 ||
+			    observed_errno != cases[index].expected_errno ||
+			    !strstr(report, "REFUSED: target admission changed before "
+				    "header write") ||
+			    !strstr(report, stage_field) ||
+			    !strstr(report, cases[index].expected_condition) ||
+			    !strstr(report, errno_field) ||
+			    !strstr(report, "action=") ||
+			    !strstr(report, strerror(cases[index].expected_errno)) ||
+			    !admission_fixture.observed_identity ||
+			    strcmp(admission_fixture.observed_identity,
+				   cases[index].observed_identity) ||
+			    admission_fixture.observed_identity_calls != 1U ||
+			    strstr(report, ADMISSION_DEVICE) ||
+			    admission_fixture.opens != 1U ||
+			    admission_fixture.reads != 1U ||
+			    admission_fixture.writes != 0U ||
+			    admission_fixture.syncs != 0U ||
+			    admission_fixture.closes != 1U ||
+			    memcmp(admission_fixture.block_zero, unchanged,
+				   sizeof(unchanged))) {
+				fprintf(stderr, "FAIL: phase=final-prewrite "
+					"reason=snapshot-refusal expected_stage=%s "
+					"expected_identity=%s observed_identity=%s "
+					"identity_reads=%u errno=%d expected_errno=%d "
+					"status=%d opens=%u reads=%u writes=%u\n",
+					cases[index].expected_stage,
+					cases[index].observed_identity,
+					admission_fixture.observed_identity ?
+						admission_fixture.observed_identity : "none",
+					admission_fixture.observed_identity_calls,
+					observed_errno, cases[index].expected_errno,
+					status, admission_fixture.opens,
+					admission_fixture.reads,
+					admission_fixture.writes);
+				abort();
+			}
 		}
 		admission_stop();
 	}
@@ -730,8 +773,14 @@ static void test_real_cli_descriptor_access_modes_refuse_without_write(void)
 	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
 	     ++index) {
 		char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+		char errno_field[64];
+		int errno_length;
 		int status, observed_errno;
 
+		errno_length = snprintf(errno_field, sizeof(errno_field),
+					"errno=%d (", cases[index].expected_errno);
+		assert(errno_length > 0 &&
+		       (size_t)errno_length < sizeof(errno_field));
 		admission_start(ADMISSION_UNCHANGED);
 		admission_fixture.descriptor_mode = cases[index].descriptor_mode;
 		admission_fixture.descriptor_error = cases[index].descriptor_error;
@@ -741,9 +790,12 @@ static void test_real_cli_descriptor_access_modes_refuse_without_write(void)
 		test_diagnostic_errno_clobber = 0;
 		if (status != 2 || observed_errno != cases[index].expected_errno ||
 		    !strstr(report, cases[index].failed_stage) ||
-		    !strstr(report, "expected=") ||
-		    !strstr(report, "errno=") ||
+		    !strstr(report, "stage=descriptor mode") ||
+		    !strstr(report, "expected=fcntl(F_GETFL)") ||
+		    !strstr(report, errno_field) ||
+		    !strstr(report, "action=") ||
 		    !strstr(report, "CLEANUP FAILED: close") ||
+		    !strstr(report, "stage=cleanup") ||
 		    strstr(report, ADMISSION_DEVICE) ||
 		    admission_fixture.opens != 1U ||
 		    admission_fixture.reads != 1U ||
@@ -910,18 +962,26 @@ static int mock_authorized_target_verify(
 	return 0;
 }
 
-static int mock_preopen_verify(void *opaque, const char *path,
-			       const struct format_expectation *expected)
+static int mock_preopen_verify(
+	void *opaque, const char *path,
+	const struct format_expectation *expected,
+	struct format_admission_problem *problem)
 {
 	struct mock_format_context *context = opaque;
 
 	assert(path != NULL);
 	assert(expected != NULL);
 	context->preopen_calls++;
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_IDENTITY,
+		"synthetic pre-open identity matches the expected target");
 	if (context->preopen_error) {
 		errno = context->preopen_error;
 		return -1;
 	}
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_INVENTORY,
+		"synthetic mount/swap inventory remains clear");
 	return mock_inventory_verify(context, 0);
 }
 
@@ -952,8 +1012,10 @@ static int mock_descriptor_flags(void *opaque, int fd)
 		context->descriptor_mode : O_RDWR;
 }
 
-static int mock_verify_opened(void *opaque, int fd, const char *path,
-			      const struct format_expectation *expected)
+static int mock_verify_opened(
+	void *opaque, int fd, const char *path,
+	const struct format_expectation *expected,
+	struct format_admission_problem *problem)
 {
 	struct mock_format_context *context = opaque;
 	int error = 0;
@@ -962,12 +1024,18 @@ static int mock_verify_opened(void *opaque, int fd, const char *path,
 	assert(path != NULL);
 	assert(expected != NULL);
 	context->verify_calls++;
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_IDENTITY,
+		"synthetic opened identity matches the expected target");
 	if (context->verify_error_index < context->verify_error_count)
 		error = context->verify_errors[context->verify_error_index++];
 	if (error) {
 		errno = error;
 		return -1;
 	}
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_INVENTORY,
+		"synthetic mount/swap inventory remains clear");
 	return mock_inventory_verify(context, context->verify_calls >= 2U);
 }
 

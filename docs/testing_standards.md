@@ -4019,8 +4019,13 @@ write/durability and secondary close failures. The real final formatter gate
 must query F_GETFL on the returned descriptor, require O_RDWR after O_ACCMODE,
 and refuse a query failure or O_RDONLY/O_WRONLY with zero writes and zero
 syncs. Tests inspect numeric errno, expected condition and safe action in
-diagnostics; fake O_EXCL requests never prove kernel BLK_EXCL or mount/swap
-exclusion. It must cover
+diagnostics. Final-gate production-CLI mutations must additionally require the
+diagnostic stage to match the surface that actually failed: PARTUUID/path/
+geometry substitutions are identity, BLKROGET failures or read-only state are
+descriptor mode, parent substitutions are topology, and mount/swap evidence
+failures are inventory. A generic "identity changed" label is insufficient for
+topology or inventory failures. Fake O_EXCL requests never prove kernel BLK_EXCL
+or mount/swap exclusion. It must cover
 malformed PARTUUIDs, numeric overflow and single digits exceeding small
 numeric bounds (for example removable=2 when maximum=1), copied cloneable
 identifiers with a

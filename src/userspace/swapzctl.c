@@ -3086,8 +3086,47 @@ static int format_partuuid_alias_stat(const char *partuuid, struct stat *info)
 	return stat(path, info);
 }
 
-static int format_preopen_verify(const char *path,
-				 const struct format_expectation *expected)
+enum format_admission_stage {
+	FORMAT_ADMISSION_IDENTITY = 0,
+	FORMAT_ADMISSION_DESCRIPTOR_MODE,
+	FORMAT_ADMISSION_TOPOLOGY,
+	FORMAT_ADMISSION_INVENTORY,
+};
+
+struct format_admission_problem {
+	enum format_admission_stage stage;
+	const char *expected;
+};
+
+static void format_admission_problem_set(
+	struct format_admission_problem *problem,
+	enum format_admission_stage stage, const char *expected)
+{
+	if (!problem)
+		return;
+	problem->stage = stage;
+	problem->expected = expected;
+}
+
+static const char *format_admission_stage_name(enum format_admission_stage stage)
+{
+	switch (stage) {
+	case FORMAT_ADMISSION_IDENTITY:
+		return "identity";
+	case FORMAT_ADMISSION_DESCRIPTOR_MODE:
+		return "descriptor mode";
+	case FORMAT_ADMISSION_TOPOLOGY:
+		return "topology";
+	case FORMAT_ADMISSION_INVENTORY:
+		return "inventory";
+	default:
+		return "internal";
+	}
+}
+
+static int format_preopen_verify(
+	const char *path, const struct format_expectation *expected,
+	struct format_admission_problem *problem)
 {
 	struct stat path_info;
 	struct stat partuuid_info;
@@ -3095,6 +3134,9 @@ static int format_preopen_verify(const char *path,
 	dev_t expected_parent;
 	dev_t parent_device;
 
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_IDENTITY,
+		"path and PARTUUID alias match the expected root-owned block identity");
 	if (!path || !expected) {
 		errno = EINVAL;
 		return -1;
@@ -3113,55 +3155,107 @@ static int format_preopen_verify(const char *path,
 		errno = ESTALE;
 		return -1;
 	}
-	if (format_sysfs_partuuid_matches(expected_device, expected->partuuid) < 0 ||
-	    format_verify_parent_topology(expected_device, expected,
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_IDENTITY,
+		"sysfs PARTUUID matches the expected partition identity");
+	if (format_sysfs_partuuid_matches(expected_device, expected->partuuid) < 0)
+		return -1;
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_TOPOLOGY,
+		"expected removable USB parent is the sole partition parent with "
+		"empty holders and slaves");
+	if (format_verify_parent_topology(expected_device, expected,
 					  &parent_device) < 0)
 		return -1;
 	if (parent_device != expected_parent) {
 		errno = ESTALE;
 		return -1;
 	}
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_INVENTORY,
+		"selected partition and parent are absent from mount namespaces and "
+		"/proc/swaps");
 	if (format_mount_inventory_clear(expected_device, expected_parent) < 0 ||
 	    format_swap_inventory_clear(expected_device, expected_parent) < 0)
 		return -1;
 	return 0;
 }
 
-static int format_opened_verify(int fd, const char *path,
-				const struct format_expectation *expected)
+static int format_opened_verify(
+	int fd, const char *path, const struct format_expectation *expected,
+	struct format_admission_problem *problem)
 {
 	struct stat path_info;
 	struct stat opened_info;
 	struct stat partuuid_info;
 	unsigned long long opened_bytes = 0;
+	dev_t expected_parent;
 	dev_t parent_device;
 	int opened_read_only = 0;
 
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_IDENTITY,
+		"path, PARTUUID alias, opened descriptor inode and geometry match "
+		"the expected root-owned block identity");
 	if (fd < 0 || !path || !expected) {
 		errno = EINVAL;
 		return -1;
 	}
+	expected_parent = makedev(expected->parent_major, expected->parent_minor);
 	if (lstat(path, &path_info) < 0 ||
 	    fstat(fd, &opened_info) < 0 ||
 	    format_partuuid_alias_stat(expected->partuuid, &partuuid_info) < 0 ||
-	    ioctl(fd, BLKGETSIZE64, &opened_bytes) < 0 ||
-	    ioctl(fd, BLKROGET, &opened_read_only) < 0 ||
-	    format_verify_parent_topology(opened_info.st_rdev, expected,
-					  &parent_device) < 0)
+	    ioctl(fd, BLKGETSIZE64, &opened_bytes) < 0)
+		return -1;
+	/*
+	 * Validate all opened/path identity fields before consulting topology.
+	 * Passing expected_parent here deliberately defers only the live parent
+	 * proof to the topology stage below.
+	 */
+	if (!format_identity_values_match(expected, &path_info, &opened_info,
+					  &partuuid_info, opened_bytes,
+					  expected_parent)) {
+		errno = ESTALE;
+		return -1;
+	}
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
+		"opened block device reports BLKROGET == 0");
+	if (ioctl(fd, BLKROGET, &opened_read_only) < 0)
 		return -1;
 	if (opened_read_only) {
 		errno = EROFS;
 		return -1;
 	}
-	if (!format_identity_values_match(expected, &path_info, &opened_info,
-					  &partuuid_info, opened_bytes,
-					  parent_device)) {
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_TOPOLOGY,
+		"expected removable USB parent is the sole partition parent with "
+		"empty holders and slaves");
+	if (format_verify_parent_topology(opened_info.st_rdev, expected,
+					  &parent_device) < 0)
+		return -1;
+	if (parent_device != expected_parent) {
 		errno = ESTALE;
 		return -1;
 	}
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_IDENTITY,
+		"sysfs PARTUUID matches the expected opened block identity");
 	if (format_sysfs_partuuid_matches(opened_info.st_rdev,
-					 expected->partuuid) < 0 ||
-	    format_mount_inventory_clear(opened_info.st_rdev, parent_device) < 0 ||
+					 expected->partuuid) < 0)
+		return -1;
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_INVENTORY,
+		"selected partition and parent are absent from mount namespaces and "
+		"/proc/swaps");
+	if (format_mount_inventory_clear(opened_info.st_rdev, parent_device) < 0 ||
 	    format_swap_inventory_clear(opened_info.st_rdev, parent_device) < 0)
 		return -1;
 	return 0;
@@ -3171,12 +3265,16 @@ struct format_runtime_ops {
 	void *context;
 	int (*authorized_target_verify)(
 		void *context, const struct format_expectation *expected);
-	int (*preopen_verify)(void *context, const char *path,
-			      const struct format_expectation *expected);
+	int (*preopen_verify)(
+		void *context, const char *path,
+		const struct format_expectation *expected,
+		struct format_admission_problem *problem);
 	int (*open_device)(void *context, const char *path);
 	int (*get_descriptor_flags)(void *context, int fd);
-	int (*verify_opened)(void *context, int fd, const char *path,
-			     const struct format_expectation *expected);
+	int (*verify_opened)(
+		void *context, int fd, const char *path,
+		const struct format_expectation *expected,
+		struct format_admission_problem *problem);
 	int (*read_header)(void *context, int fd,
 			   unsigned char block[SWAPZ_SUPERBLOCK_BYTES]);
 	int (*random_bytes)(void *context, unsigned char *bytes, size_t length);
@@ -3211,10 +3309,11 @@ static int format_default_authorized_target_verify(
 
 static int format_default_preopen_verify(
 	void *context, const char *path,
-	const struct format_expectation *expected)
+	const struct format_expectation *expected,
+	struct format_admission_problem *problem)
 {
 	(void)context;
-	return format_preopen_verify(path, expected);
+	return format_preopen_verify(path, expected, problem);
 }
 
 static int format_default_open_device(void *context, const char *path)
@@ -3233,10 +3332,11 @@ static int format_default_descriptor_flags(void *context, int fd)
 
 static int format_default_verify_opened(
 	void *context, int fd, const char *path,
-	const struct format_expectation *expected)
+	const struct format_expectation *expected,
+	struct format_admission_problem *problem)
 {
 	(void)context;
-	return format_opened_verify(fd, path, expected);
+	return format_opened_verify(fd, path, expected, problem);
 }
 
 static int format_default_read_header(
@@ -3277,48 +3377,73 @@ static int format_default_close_device(void *context, int fd)
  * Output and cleanup cannot replace the errno of the originating failure.
  * Callers pass that saved errno; restore it after every diagnostic.
  */
-static void format_report_error(const char *classification, const char *stage,
+static void format_report_error(const char *classification,
+				const char *summary, const char *failed_stage,
 				const char *expected, int original_errno,
 				const char *next_action)
 {
 	fprintf(stderr,
-		"swapzctl format: %s%s: expected=%s; errno=%d (%s); action=%s\n",
-		classification, stage, expected, original_errno,
+		"swapzctl format: %s%s: stage=%s; expected=%s; errno=%d (%s); "
+		"action=%s\n",
+		classification, summary, failed_stage, expected, original_errno,
 		strerror(original_errno), next_action);
 	errno = original_errno;
 }
 
-static void format_report_refusal(const char *stage, const char *expected,
-				  int original_errno)
+static void format_report_refusal(const char *summary, const char *failed_stage,
+				  const char *expected, int original_errno)
 {
-	format_report_error("REFUSED: ", stage, expected, original_errno,
-			    "inspect selector, identity, topology and inventory "
-			    "read-only; no header write");
+	format_report_error("REFUSED: ", summary, failed_stage, expected,
+			    original_errno,
+			    "inspect the failed stage read-only; no header write");
 }
 
-static void format_report_uncertain(const char *stage, const char *expected,
-				    int original_errno)
+static void format_report_uncertain(const char *summary,
+				    const char *failed_stage,
+				    const char *expected, int original_errno)
 {
-	format_report_error("UNCERTAIN: ", stage, expected, original_errno,
+	format_report_error("UNCERTAIN: ", summary, failed_stage, expected,
+			    original_errno,
 			    "RECOVERY REQUIRED before retry; inspect header and "
 			    "target identity read-only");
 }
 
-static void format_report_failure(const char *stage, const char *expected,
-				  int original_errno)
+static void format_report_failure(const char *summary, const char *failed_stage,
+				  const char *expected, int original_errno)
 {
-	format_report_error("", stage, expected, original_errno,
-			    "inspect failed prerequisite read-only; no header "
-			    "write attempted");
+	format_report_error("", summary, failed_stage, expected, original_errno,
+			    "inspect the failed stage read-only; no header write "
+			    "attempted");
+}
+
+static void format_report_admission_refusal(
+	const char *summary, const struct format_admission_problem *problem,
+	int original_errno)
+{
+	format_report_refusal(summary, format_admission_stage_name(problem->stage),
+			      problem->expected, original_errno);
+}
+
+static void format_report_admission_uncertain(
+	const char *summary, const struct format_admission_problem *problem,
+	int original_errno)
+{
+	format_report_uncertain(summary,
+				format_admission_stage_name(problem->stage),
+				problem->expected, original_errno);
 }
 
 static int format_authorized_opened_verify(
 	const struct format_runtime_ops *ops, int fd, const char *path,
-	const struct format_expectation *expected)
+	const struct format_expectation *expected,
+	struct format_admission_problem *problem)
 {
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_IDENTITY,
+		"protected target selector PARTUUID matches the expected partition");
 	if (ops->authorized_target_verify(ops->context, expected) < 0)
 		return -1;
-	return ops->verify_opened(ops->context, fd, path, expected);
+	return ops->verify_opened(ops->context, fd, path, expected, problem);
 }
 
 static int format_device_with_ops(
@@ -3327,6 +3452,10 @@ static int format_device_with_ops(
 {
 	unsigned char block[SWAPZ_SUPERBLOCK_BYTES];
 	unsigned char readback[SWAPZ_SUPERBLOCK_BYTES];
+	struct format_admission_problem admission_problem = {
+		.stage = FORMAT_ADMISSION_IDENTITY,
+		.expected = "valid formatter admission state",
+	};
 	int already_formatted = 0;
 	int publication_attempted = 0;
 	int fd = -1;
@@ -3344,49 +3473,55 @@ static int format_device_with_ops(
 	}
 	if (ops->authorized_target_verify(ops->context, expected) < 0) {
 		saved_errno = errno;
-		format_report_refusal("protected target selector does not authorize "
-				      "this partition",
-				"protected selector/identity, topology and mount/swap "
-				      "inventory remain clear", saved_errno);
+		format_report_refusal(
+			"protected target selector does not authorize this partition",
+			"identity",
+			"protected target selector PARTUUID matches the expected partition",
+			saved_errno);
 		return 2;
 	}
-	if (ops->preopen_verify(ops->context, path, expected) < 0) {
+	if (ops->preopen_verify(ops->context, path, expected,
+				&admission_problem) < 0) {
 		saved_errno = errno;
-		format_report_refusal("pre-open target identity is not proven",
-				"protected selector/identity, topology and mount/swap "
-				      "inventory remain clear", saved_errno);
+		format_report_admission_refusal(
+			"pre-open admission is not proven", &admission_problem,
+			saved_errno);
 		return 2;
 	}
 	fd = ops->open_device(ops->context, path);
 	if (fd < 0) {
 		saved_errno = errno;
-		format_report_failure("exclusive open",
-				      "O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW "
-				      "accepted on selected block device", saved_errno);
+		format_report_failure(
+			"exclusive open", "exclusive open",
+			"O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW accepted on "
+			"the selected block device",
+			saved_errno);
 		return 1;
 	}
-	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected,
+					    &admission_problem) < 0) {
 		saved_errno = errno;
-		format_report_refusal("opened descriptor identity is not proven",
-				"protected selector/identity, topology and mount/swap "
-				      "inventory remain clear", saved_errno);
+		format_report_admission_refusal(
+			"opened-descriptor admission is not proven",
+			&admission_problem, saved_errno);
 		result = 2;
 		goto close_error;
 	}
 	if (ops->read_header(ops->context, fd, block) < 0) {
 		saved_errno = errno;
-		format_report_failure("read block 0", "exact 4096-byte header read",
-				      saved_errno);
+		format_report_failure("read block 0", "header read",
+				      "exact 4096-byte header read", saved_errno);
 		goto close_error;
 	}
 	if (swapz_sb_valid(block, expected->device_bytes)) {
 		already_formatted = 1;
-		if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
+		if (format_authorized_opened_verify(
+			    ops, fd, path, expected, &admission_problem) < 0) {
 			saved_errno = errno;
-			format_report_refusal(
-				"target identity changed while recognizing existing SWZ header",
-					"protected selector/identity, topology and mount/swap "
-				      "inventory remain clear", saved_errno);
+			format_report_admission_refusal(
+				"target admission changed while recognizing "
+				"existing SWZ header",
+				&admission_problem, saved_errno);
 			result = 2;
 			goto close_error;
 		}
@@ -3394,10 +3529,11 @@ static int format_device_with_ops(
 	}
 	if (!block_is_zero(block)) {
 		errno = EINVAL;
-		format_report_error("REFUSED: ",
-				    "block 0 is neither zero nor a valid SWZ authorization header",
-				    "all-zero or valid 4096-byte SWZ header", errno,
-				    "RECOVERY REQUIRED before retry; inspect header read-only");
+		format_report_error(
+			"REFUSED: ",
+			"block 0 is neither zero nor a valid SWZ authorization header",
+			"identity", "all-zero or valid 4096-byte SWZ header", errno,
+			"RECOVERY REQUIRED before retry; inspect header read-only");
 		result = 2;
 		goto close_error;
 	}
@@ -3415,8 +3551,8 @@ static int format_device_with_ops(
 			      block + SWAPZ_SUPERBLOCK_UUID_OFFSET,
 			      SWAPZ_SUPERBLOCK_UUID_BYTES) < 0) {
 		saved_errno = errno;
-		format_report_failure("getrandom", "16 random UUID bytes",
-				      saved_errno);
+		format_report_failure("getrandom", "header construction",
+				      "16 random UUID bytes", saved_errno);
 		goto close_error;
 	}
 	block[SWAPZ_SUPERBLOCK_UUID_OFFSET + 6U] =
@@ -3428,17 +3564,19 @@ static int format_device_with_ops(
 	if (!swapz_sb_valid(block, expected->device_bytes)) {
 		errno = EINVAL;
 		format_report_failure("internal SWZ header construction failed",
+				      "header construction",
 				      "valid 4096-byte SWZ authorization header",
 				      errno);
 		goto close_error;
 	}
 
 	/* This is the last gate before the only destructive operation. */
-	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected,
+					    &admission_problem) < 0) {
 		saved_errno = errno;
-		format_report_refusal("target identity changed before header write",
-				"protected selector/identity, topology and mount/swap "
-				      "inventory remain clear", saved_errno);
+		format_report_admission_refusal(
+			"target admission changed before header write",
+			&admission_problem, saved_errno);
 		result = 2;
 		goto close_error;
 	}
@@ -3451,17 +3589,18 @@ static int format_device_with_ops(
 
 		if (descriptor_flags < 0) {
 			saved_errno = errno;
-			format_report_refusal("descriptor mode query failed",
-					      "fcntl(F_GETFL) succeeds and reports O_RDWR",
-					      saved_errno);
+			format_report_refusal(
+				"descriptor mode query failed", "descriptor mode",
+				"fcntl(F_GETFL) succeeds and reports O_RDWR",
+				saved_errno);
 			result = 2;
 			goto close_error;
 		}
 		if ((descriptor_flags & O_ACCMODE) != O_RDWR) {
 			errno = EBADF;
-			format_report_refusal("descriptor mode is not O_RDWR",
-					      "fcntl(F_GETFL) & O_ACCMODE == O_RDWR",
-					      errno);
+			format_report_refusal(
+				"descriptor mode is not O_RDWR", "descriptor mode",
+				"fcntl(F_GETFL) & O_ACCMODE == O_RDWR", errno);
 			result = 2;
 			goto close_error;
 		}
@@ -3469,46 +3608,53 @@ static int format_device_with_ops(
 	publication_attempted = 1;
 	if (ops->write_header(ops->context, fd, block) < 0) {
 		saved_errno = errno;
-		format_report_uncertain("header write did not complete",
-				"durable valid 4096-byte header and unchanged identity", saved_errno);
+		format_report_uncertain(
+			"header write did not complete", "write",
+			"one exact 4096-byte pwrite at offset zero completes",
+			saved_errno);
 		result = 3;
 		goto close_error;
 	}
 	if (ops->sync_device(ops->context, fd) < 0) {
 		saved_errno = errno;
-		format_report_uncertain("header durability is not proven",
-				"durable valid 4096-byte header and unchanged identity", saved_errno);
+		format_report_uncertain(
+			"header durability is not proven", "durability",
+			"fsync completes after header publication", saved_errno);
 		result = 3;
 		goto close_error;
 	}
-	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected,
+					    &admission_problem) < 0) {
 		saved_errno = errno;
-		format_report_uncertain(
-			"target identity became uncertain after header write",
-				"durable valid 4096-byte header and unchanged identity", saved_errno);
+		format_report_admission_uncertain(
+			"target admission became uncertain after header write",
+			&admission_problem, saved_errno);
 		result = 3;
 		goto close_error;
 	}
 	if (ops->read_header(ops->context, fd, readback) < 0) {
 		saved_errno = errno;
-		format_report_uncertain("header readback could not be verified",
-				"durable valid 4096-byte header and unchanged identity", saved_errno);
+		format_report_uncertain(
+			"header readback could not be verified", "durability",
+			"exact 4096-byte header readback succeeds", saved_errno);
 		result = 3;
 		goto close_error;
 	}
 	if (memcmp(readback, block, sizeof(block)) ||
 	    !swapz_sb_valid(readback, expected->device_bytes)) {
 		errno = EIO;
-		format_report_uncertain("SWZ header readback mismatch",
-					"byte-identical valid 4096-byte readback", errno);
+		format_report_uncertain(
+			"SWZ header readback mismatch", "durability",
+			"byte-identical valid 4096-byte readback", errno);
 		result = 3;
 		goto close_error;
 	}
-	if (format_authorized_opened_verify(ops, fd, path, expected) < 0) {
+	if (format_authorized_opened_verify(ops, fd, path, expected,
+					    &admission_problem) < 0) {
 		saved_errno = errno;
-		format_report_uncertain(
-			"target identity changed after header verification",
-				"durable valid 4096-byte header and unchanged identity", saved_errno);
+		format_report_admission_uncertain(
+			"target admission changed after header verification",
+			&admission_problem, saved_errno);
 		result = 3;
 		goto close_error;
 	}
@@ -3519,11 +3665,14 @@ close_success:
 		if (publication_attempted) {
 			format_report_uncertain(
 				"device close failed after verified header publication",
-					"durable valid 4096-byte header and unchanged identity", saved_errno);
+				"durability",
+				"descriptor closes after durable header verification",
+				saved_errno);
 			return 3;
 		}
-		format_report_failure("close", "descriptor closes without publication",
-				      saved_errno);
+		format_report_failure(
+			"close", "cleanup",
+			"descriptor closes without header publication", saved_errno);
 		return 1;
 	}
 	if (already_formatted) {
@@ -3542,10 +3691,11 @@ close_error:
 	if (fd >= 0 && ops->close_device(ops->context, fd) < 0) {
 		const int cleanup_errno = errno;
 
-		format_report_error("CLEANUP FAILED: ", "close",
-				    "descriptor closes; original error remains authoritative",
-				    cleanup_errno,
-				    "retain original failure; inspect target read-only");
+		format_report_error(
+			"CLEANUP FAILED: ", "close", "cleanup",
+			"descriptor closes; original error remains authoritative",
+			cleanup_errno,
+			"retain original failure; inspect target read-only");
 	}
 	errno = saved_errno;
 	return result;
