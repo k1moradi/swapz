@@ -3884,11 +3884,15 @@ mount ID. A root or session rename, replacement, or remount during the bounded
 inspection must block with no deletion. After that pathname/mount revalidation
 and before the first unlink, perform a bounded same-owner /proc inventory and
 retain the session if any process still references an inspected session object
-through cwd, root, or an open descriptor. An unreadable same-owner process
-inventory is uncertainty and blocks cleanup rather than assuming the child
-exited. Keep the independent final session identity check before rmdir; these
-checks do not claim atomicity against a privileged same-UID actor concurrently
-mutating private directories.
+through cwd, root, or an open descriptor. Failure to enumerate /proc itself is
+uncertainty and blocks cleanup. A process that exits during the scan or exposes
+an individually permission-restricted proc link/descriptor is skipped rather
+than making unrelated same-UID host state a cleanup prerequisite; such a process
+does not provide ownership evidence for this session. The same-owner provenance
+model already does not defend against a same-UID actor deliberately forging the
+markers and evidence. Keep the independent final session identity check before
+rmdir; these checks do not claim atomicity against a privileged same-UID actor
+concurrently mutating private directories.
 
 On refusal, the private helper emits the phase, category, original errno (when
 present) or process exit code, prior fully removed count, and conservative

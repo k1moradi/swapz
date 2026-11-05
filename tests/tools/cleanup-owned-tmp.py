@@ -271,7 +271,7 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                 continue
             try:
                 process_stat = process.stat(follow_symlinks=False)
-            except FileNotFoundError:
+            except (FileNotFoundError, PermissionError):
                 continue
             if process_stat.st_uid != owner_uid or int(process.name) == os.getpid():
                 continue
@@ -285,7 +285,7 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                         "same-owner process references exceed cleanup bound", "bound")
                 try:
                     current = os.stat(os.path.join(process_path, reference_name))
-                except FileNotFoundError:
+                except (FileNotFoundError, PermissionError):
                     continue
                 if (current.st_dev, current.st_ino) in identities:
                     return True
@@ -297,11 +297,11 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                                 "same-owner process references exceed cleanup bound", "bound")
                         try:
                             current = descriptor.stat(follow_symlinks=True)
-                        except FileNotFoundError:
+                        except (FileNotFoundError, PermissionError):
                             continue
                         if (current.st_dev, current.st_ino) in identities:
                             return True
-            except FileNotFoundError:
+            except (FileNotFoundError, PermissionError):
                 continue
     return False
 

@@ -239,6 +239,42 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(owned.exists())
 
+    def test_inaccessible_proc_links_do_not_hide_live_session_descriptor(self):
+        owned = self.session("Abcd1234")
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c",
+             "import os, sys\n"
+             "descriptor = os.open(sys.argv[1], os.O_RDONLY)\n"
+             "print('ready', flush=True)\n"
+             "sys.stdin.buffer.read(1)\n"
+             "os.close(descriptor)\n",
+             str(owned / "fixture.bin")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        original_stat = cleanup_module.os.stat
+
+        def deny_proc_directory_links(path, *args, **kwargs):
+            if (isinstance(path, str) and path.startswith("/proc/")
+                    and path.endswith(("/cwd", "/root"))):
+                raise PermissionError(errno.EACCES, "synthetic protected proc link")
+            return original_stat(path, *args, **kwargs)
+
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "ready")
+            state = cleanup_module.CleanupState()
+            with mock.patch.object(cleanup_module.os, "stat",
+                                   side_effect=deny_proc_directory_links):
+                self.assertEqual(
+                    cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700, state),
+                    0)
+            self.assertEqual(state.removed, 0)
+            self.assertEqual(state.retained_active, 1)
+            self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
+        finally:
+            if child.poll() is None:
+                child.stdin.write("x")
+                child.stdin.flush()
+            child.wait(timeout=5)
+
     def test_unreadable_same_owner_process_inventory_blocks_before_unlink(self):
         owned = self.session("Abcd1234")
         state = cleanup_module.CleanupState()
