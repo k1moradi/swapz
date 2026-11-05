@@ -3600,6 +3600,8 @@ class RuntimeHealthTests(unittest.TestCase):
             ("failed=0", "failed=2"),
             ("failed=0", "failed=not-a-number"),
             ("error=0", "error=-0"),
+            ("error=0", "error=1"),
+            ("error=0", "error=2147483647"),
             ("error=0", "error=2147483648"),
             ("error=0", "error=-2147483649"),
             ("error=0", "error=12junk"),
@@ -3627,7 +3629,9 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("failed=1", failed.stderr)
         self.assertNotIn("phase=target_terminal ", failed.stderr)
 
-        for valid_error in ("-5", "-2147483648", "2147483647"):
+        # swapz_fail_at() normalizes every elected target failure to a
+        # negative Linux errno before publishing failed=1.
+        for valid_error in ("-5", "-2147483648"):
             with self.subTest(valid_error=valid_error):
                 env["MOCK_DM_STATUS"] = valid_status.replace(
                     "error=0", f"error={valid_error}"
@@ -3645,6 +3649,16 @@ class RuntimeHealthTests(unittest.TestCase):
                     "next=inspect_dmsetup_status_read_only check=first_error",
                     terminal_error.stderr,
                 )
+
+        env["MOCK_DM_STATUS"] = valid_status.replace(
+            "failed=0 error=0", "failed=1 error=1"
+        )
+        contradictory = self.run_helper("once", env)
+        self.assertEqual(contradictory.returncode, 1, contradictory.stderr)
+        self.assertIn("failures=target_failed", contradictory.stderr)
+        self.assertIn("target_failure_state_invalid", contradictory.stderr)
+        self.assertNotIn("failures=first_terminal_error", contradictory.stderr)
+        self.assertNotIn("phase=target_terminal ", contradictory.stderr)
 
     def test_mapper_device_alias_requires_the_expected_sysfs_dm_name(self) -> None:
         # A substituted mapper alias can match raw backing swap accounting,

@@ -117,8 +117,9 @@ canonical_status_error()
 		limit=2147483648
 		;;
 	*)
-		magnitude=$status_error
-		limit=2147483647
+		# The target publishes Linux errno values: zero or a negative int.
+		# Positive output is malformed telemetry, not a terminal errno.
+		return 1
 		;;
 	esac
 	case "$magnitude" in

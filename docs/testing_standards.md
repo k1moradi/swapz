@@ -7520,8 +7520,12 @@ failure as degraded evidence, low-noise unchanged polling, kernel/systemd
 telemetry, and sustained GC pressure without progress. A confirmed nonzero
 canonical DM `error` must produce a bounded `target_terminal` / `first_error`
 phase/check/expected/observed/command-status diagnostic containing the signed
-kernel errno and a read-only next step; missing or malformed terminal errors
-must never be reported as confirmed first errors. A nominally active
+kernel errno and a read-only next step. Rootless coverage must accept zero and
+negative signed-32-bit Linux errno values, reject positive/overflow/noncanonical
+error tokens as malformed telemetry, and prove that `failed=1` still yields
+FAIL without fabricated first-error attribution when the error token is
+malformed. Missing or malformed terminal errors must never be reported as
+confirmed first errors. A nominally active
 oneshot mapper must have `SubState=exited` and an active passive swap unit
 must have `SubState=active`; synthetic contradictory substates must fail even
 with successful `Result`, while a failed substate probe must degrade with its
