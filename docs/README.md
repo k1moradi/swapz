@@ -108,16 +108,29 @@ explicitly **historical**, not a live release verdict.
 
 | Evidence gate | A PASS establishes only | Never infer |
 | :--- | :--- | :--- |
-| Native/rootless and source-bound CI | The contracts actually exercised on that source | Loaded kernel, real swap, physical SD or boot |
-| Positively owned loaded `null_blk` | Loaded RAM-backed byte-oracle, GC, pressure and service checks actually run | Physical behavior, anonymous swap-in, cold boot |
-| Authorized physical SD | Separately completed full-capacity incompressible RAM/geometry, anonymous swap, physical GC/churn and lifecycle gates | A skipped gate, NAND lifetime, boot or hibernation |
+| Synthetic fixture or mock | Injected condition and reporter/evaluator assertion | Real kernel I/O, host identity or qualification |
+| Native/rootless and exact-source CI | Contracts actually exercised at that SHA | Owner `make test`, loaded kernel, real swap, physical SD or boot |
+| `make fast_test` | Development build, native/replay and any owned-RAM scenarios executed | Exact-source qualification or an official report PASS |
+| `PHYSICAL_DEVELOPMENT_SMOKE=PASS` | Source-bound 16 MiB mapper oracle, byte comparisons and header recovery | `swapon`, anonymous swap, full-card capacity or physical acceptance |
+| Five-stage owner `make test` on owned `null_blk` | Loaded RAM-backed byte-oracle, GC, pressure and service checks actually run | Physical behavior, anonymous swap-in or cold boot |
+| Separately admitted real-swap/physical gates | Only full-capacity, anonymous-swap, GC/churn and lifecycle phases actually completed | A skipped gate, NAND lifetime, boot or hibernation |
 | Owner-observed next boot | The durable verifier's matching boot ID, source, PARTUUID/parent, mapper and services | Recovery of pre-crash swap pages or hibernation |
+
+See the normative [evidence levels](testing_standards.md#evidence-levels),
+[development-only card smoke](testing_standards.md#development-only-card-backed-data-path-smoke),
+[real-swap host qualification](testing_standards.md#primary-real-swap-native-host-qualification)
+and [release-evidence integrity](testing_standards.md#qualification-discovery-and-release-evidence-integrity).
+A synthetic or development PASS never upgrades another gate's evidence class.
 
 ### Diagnose the first record
 
 Start with the report's `overall`. If `stages[]` contains a non-`PASS`
 item, use the first one and record `name`, optional `failed_phase` and
-`diagnostic`, and `exit_code`. If every recorded stage is `PASS` but
+`diagnostic`, and `exit_code`. For the first failing phase, record the
+actual `source_sha`/`tested_commit_sha` (and any bound helper/artifact SHA),
+expected invariant, first observed error or emitted numeric errno, retained
+ownership state and safe read-only next action. Never replace the first error
+with a secondary recovery failure. If every recorded stage is `PASS` but
 `overall` is not, inspect the current runner's post-stage gates:
 `benchmarks.verdicts.{overall,reason}`,
 `benchmarks.write_saturation.{overall,reason}`, and
@@ -148,6 +161,11 @@ PRIMARY_PREPARE=FAILED phase=partition-lock-close errno=5 error=Input/output err
 PRIMARY_START=FAILED phase=swapon errno=16 error=Device or resource busy
 ```
 
+The samples are synthetic, not source-bound logs: attach the actual 40-hex
+source SHA from the failing run. In the first, the expected managed-lock
+invariant met an observed close `errno=5` and a retained claim; in the second,
+expected swap activation met `errno=16` with mapper ownership unknown.
+Neither observation authorizes retry or cleanup.
 The first sample explicitly retains the claim; the second does **not** state
 whether the mapper is still live. Preserve recovery files and inspect the
 exact selected device, `/proc/swaps`, mapper and journal before any action.
@@ -201,8 +219,11 @@ For safe startup/stop/recovery policy use [AGENT_CONTEXT](AGENT_CONTEXT.md),
 for package journal ownership use [compile](compile.md#packaging), and for
 qualification/negative storage-admission limits use
 [benchmark](benchmark.md#physical-media-and-workload-validity). The old
-[/dev/sda4 trial](live-swap-trial-recovery.md) is historical evidence only,
-never authority for the current dedicated card.
+[/dev/sda4 trial](live-swap-trial-recovery.md) is historical evidence only:
+it authorizes neither the first dedicated-card host nor the
+[separately scoped second Lubuntu host](AGENT_CONTEXT.md#separate-lubuntu-host-scope-for-devsda4).
+The latter remains blocked for mutation until its independent recovery-storage
+and all other admission gates are proven.
 
 ## Documentation
 

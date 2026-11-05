@@ -10,8 +10,8 @@ history, not device authorization. Start with [AGENTS](../../AGENTS.md),
 
 ## Debugging navigation
 
-- **First Codex /dev/sda1:** [dedicated-card identity and standing scope](../AGENT_CONTEXT.md#current-production-mission); pathname alone is not identity.
-- **Second Lubuntu Codex /dev/sda4:** [separate host scope](../AGENT_CONTEXT.md#separate-lubuntu-host-scope-for-devsda4)
+- **First dedicated-card host /dev/sda1:** [dedicated-card identity and standing scope](../AGENT_CONTEXT.md#current-production-mission); pathname alone is not identity.
+- **Second Lubuntu host /dev/sda4:** [separate host scope](../AGENT_CONTEXT.md#separate-lubuntu-host-scope-for-devsda4)
   is conditional; recovery storage currently shares the target's parent and
   **blocks mutation**. The [retired host record](old-host-physical-and-live-swap-evidence.md)
   and [one-use trial](../live-swap-trial-recovery.md) are historical, not its
@@ -44,12 +44,24 @@ The root `test_results.json` is sanitized public evidence, not this private reco
 
 ## Historical qualification and physical observations
 
-- [First-host current-source SD mapper development smoke (2026-11-05)](2026-11-05-first-host-current-source-development-smoke.md):
-  one source-bound 128-page mapper oracle with exact header restoration;
-  development-only, not Linux swap or production qualification.
-- [First-host development-only SD mapper smoke (2026-11-05)](2026-11-05-first-host-development-smoke.md):
-  earlier source-bound 128-page mapper oracle; superseded by the newer
-  source-bound run above and retained for chronology.
+These 2026-11-05 first-host results are distinct **historical, source-bound**
+observations. "Current-source" in a report title means current *when recorded*;
+it does not describe today's `main`. The underlying evidence and artifact
+hashes stay in their original reports.
+
+- [Mapper smoke at `7c7bc974`](2026-11-05-first-host-current-source-development-smoke.md):
+  128-page oracle, restored header and later reporter follow-up.
+- [Mapper smoke at `046681b1`](2026-11-05-first-host-046681b1-development-smoke.md):
+  128-page oracle and primary-plan BLOCKED observation.
+- [Mapper smoke at `fe7ae0e4`](2026-11-05-first-host-fe7ae0e4-development-smoke.md):
+  128-page oracle and namespace-fixture CI failure.
+- [Mapper smoke at `81ddcfbf`](2026-11-05-first-host-development-smoke.md):
+  128-page oracle and mount-namespace CI refusal.
+
+All four are development-only mapper tests with inactive Linux swap and
+restored original headers, **not** `make test`, real anonymous swap,
+full-card physical qualification or boot acceptance. For subsequent status,
+read the timestamp and source SHA in [production status](../production-status.json).
 - [Source qualification](historical-source-qualification-snapshots.md) and
   [benchmark narratives](historical-benchmark-qualification-narratives.md):
   prior PASS/FAIL/BLOCKED and tradeoffs.

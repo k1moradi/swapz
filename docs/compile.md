@@ -88,6 +88,14 @@ Exactly five commands are public:
 
 No other root aliases or public test targets are permitted.
 
+Build, signature, CI and native checks establish only their own evidence
+level; they never admit a production target. Use the
+[evidence levels](testing_standards.md#evidence-levels),
+[exact-source release rules](testing_standards.md#qualification-discovery-and-release-evidence-integrity),
+[first-failure triage](README.md#diagnose-the-first-record) and
+[host-scoped authority](AGENT_CONTEXT.md#standing-owner-authorization) before
+interpreting any PASS or proceeding to a device operation.
+
 ## Direct-main CI standards co-changes
 
 When a push triggers project-goals, the repository-policy job checks **every
