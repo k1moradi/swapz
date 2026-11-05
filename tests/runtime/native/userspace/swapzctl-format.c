@@ -897,6 +897,9 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		    !strstr(report, errno_field) ||
 		    !strstr(report, "action=") ||
 		    !strstr(report, strerror(cases[index].expected_errno)) ||
+		    (cases[index].expected_errno == EOPNOTSUPP &&
+		     !strstr(report, "active entry without a verifiable "
+			     "kernel backing identity")) ||
 		    strstr(report, ADMISSION_DEVICE) ||
 		    admission_fixture.swap_inventory_checks !=
 			    expected_inventory_checks ||

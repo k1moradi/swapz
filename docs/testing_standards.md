@@ -4722,7 +4722,21 @@ zero for PARTUUID drift, changed parent, foreign-mounted parent, active
 swapfile, unreadable foreign mount namespace, vanished PID mount table with
 a still-live namespace, stale size, substituted alias, symlink, and same-dev_t
 inode replacement. Diagnostics must not expose private device paths or
-serials. Each case must prove the mutated identity surface was actually
+serials. The direct-C production-CLI inventory regression must pass synthetic
+active file and block rows, duplicate rows, malformed and empty tables, truncated
+records, and inaccessible inventory through the real formatter gates, not only
+direct parser calls or injected callback errors. Retest late active, duplicated,
+truncated, and inaccessible snapshots after the first fake block-zero read,
+with a previously clear snapshot. Each refusal must retain its original errno,
+identify stage=inventory and a safe action, count zero header pwrite and sync
+calls, and compare the complete in-memory block zero byte-for-byte to its
+pre-invocation state. Failure output must use phase=active_swap_inventory,
+sanitized entry counts/classes where observable, the affected gate and the
+refused operation; never emit raw swap paths. This establishes a rootless
+observed-snapshot safety invariant, not exclusive kernel ownership or a bound
+against swapon racing between the final inventory check and header pwrite.
+The physical-card mapper-page oracle is separate and still required.
+Each case must prove the mutated identity surface was actually
 re-read after the accepted block-zero snapshot rather than deriving the
 observed category only from the fixture selector, and the captured refusal
 diagnostic must carry the expected errno text. A disappeared PID whose mount
