@@ -63,8 +63,10 @@ systemd service unlocks these gates before exact-source and card qualification.
 
 The exact-source gates belong to the [operating context](../AGENT_CONTEXT.md#production-readiness-definition)
 and [systemd test contract](../testing_standards.md#runtime-systemd-health-and-non-hibernation-regression),
-not this supplementary handoff. Rootless systemd/package CI cannot establish
-physical-card acceptance or a deployed-host/boot PASS. Code/deployment readiness
+not this supplementary handoff. Rootless systemd/package CI is partial evidence
+only; it cannot independently establish physical-card acceptance, either
+production-readiness PASS, or `COLD_BOOT_OBSERVED=PASS`. Both readiness outcomes
 and verifier arming can precede the **owner-triggered** reboot; only its durable
-observation can establish `COLD_BOOT_OBSERVED=PASS`. Apply the separate
-[frozen physical policy](../production-acceptance.json) to exact-source evidence.
+observation can change `COLD_BOOT_OBSERVED` from `NO` to `PASS` or `FAIL`.
+Apply the separate [frozen physical policy](../production-acceptance.json) to
+exact-source evidence.
