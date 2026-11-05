@@ -232,6 +232,35 @@ These synthetic facts cannot authorize the host-bound scope, certify physical
 device ancestry, or close either the within-scan or post-snapshot mutation
 exclusion interval.
 
+Process and namespace identity must not be conflated when interpreting these
+regressions. A numeric PID/TID is reusable; PPID can change through ordinary
+reparenting while the parent's PID and `/proc/<pid>/stat` start ticks remain
+constant. Start ticks are sampled at kernel clock granularity, not a retained
+reference to a task. Comparing two `/proc/<pid>/ns/mnt` stat device/inode
+tuples identifies the observed mount namespace, not the lifetime of the PID,
+its parent, or the atomicity of its mount table. Two equal stat observations
+can span task reuse into the same namespace or an intervening namespace ABA
+transition. This reader does not own a pidfd/task handle or namespace fd;
+even a future pinned reference would not by itself freeze mounts or make
+the final inventory and mutation atomic. The rootless parent-reparent
+reproducer establishes only that an observed parent tuple may change without
+parent replacement; it does not establish a matching primary mount-reader
+path or a destructive admission. Preserve **UNPROVEN** for unclosed snapshot
+intervals; do not label them FIXED solely from repeated namespace stats.
+
+A live non-leader task whose initial namespace `stat()` fails with `EINVAL`
+must not be conflated with a task proven to have exited: the current helper
+groups `EINVAL` with exit errors at that initial stat and requires an
+additional live-task refusal regression and production-owner review before
+claiming this source path fail-closed. Malformed mountinfo still requires its
+originating `EINVAL`; namespace identity changes detected after a successful
+table read require `EAGAIN`. These are running-test refusals, not setup SKIPs.
+The optional rootless `unshare` child-failure control must mark SKIP only for
+an identified namespace setup rejection before the child-start marker.
+Once that marker is observed, any unexpected child error or wrong namespace
+identity is FAIL, preserving the original child exit status and never exposing
+host namespace inode numbers in diagnostics.
+
 The primary-start rootless lifecycle fixture must independently show a
 foreign-PID conflict on the initial admission, a different visible PID appearing
 between scans, and the same numeric PID retaining its name while its mount-
