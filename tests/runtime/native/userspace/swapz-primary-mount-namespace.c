@@ -1080,6 +1080,7 @@ int main(void)
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
 	expect_mount_admission("selected parent in another namespace", 0, 0);
+	fixture_reset();
 
 	/*
 	 * Linux exposes non-leader thread /proc/<tid> paths without returning
