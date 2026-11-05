@@ -630,18 +630,15 @@ results are preserved without changing their original conclusions in
 [handoff/2026-11-02-optimization-work-queue.md](handoff/2026-11-02-optimization-work-queue.md).
 Those dated instructions are not current code-change or test authorization.
 
-## Current-cycle Agent 17 — Cold swap-slot reclamation after application exit
+## Cold swap-slot reclamation after application exit — historical Agent 17 brief
 
-**Owner request / priority:** append this as a **current-cycle**, parallel
-rootless debugging/correctness assignment for **Agent 17**, a remote-edit
-agent. Begin source inspection and isolated regressions now, but do not
-interrupt Codex 1's first actual
-`/dev/sda1` mapper-page oracle, Codex 2's shared-root/lifecycle work, or
-current exact-source CI repairs. Agent 14 (GC/authority) and Agent 7
-(real-swap/oracle) should independently review Agent 17's results during
-this cycle without duplicating its edits. This is a **rootless debugging
-assignment**, not a blanket production-code change mandate, a new acceptance
-threshold, or permission for remote agents to change host swap configuration.
+**Historical owner request (2026-11-05; not current scope):** Agent 17 was
+assigned a parallel rootless DISCARD investigation without interrupting
+Codex 1's `/dev/sda1` mapper-page oracle, Codex 2's shared-root/lifecycle
+work or exact-source CI. Agent 14 (GC/authority) and Agent 7
+(real-swap/oracle) were designated independent reviewers, not co-editors.
+This brief preserves coordination context, not standing ownership,
+physical-device permission, a source-edit mandate or a new acceptance gate.
 
 ### User scenario and desired behavior
 
@@ -675,12 +672,15 @@ a lower READ or decompression. Roadmap IDs 29, 44, 66 and 70 cover related
 already-qualified mechanisms. **Revalidate these properties against the
 current source; do not reimplement them.**
 
-At roadmap drafting, `swapz_primary_native_swapon()` in
-`src/userspace/swapz-primary.c` invokes `SYS_swapon` with flags **0**.
-Thus the production lifecycle does **not request** Linux's optional
-freed-swap-page/cluster DISCARD policy, even though the DM target supports
-DISCARD. The block layer does not receive a general per-PID exit event or
-a guaranteed per-slot free callback. Without a delivered upper DISCARD or
+The native `swapz_primary_native_swapon()` in
+`src/userspace/swapz-primary.c` now calls `SYS_swapon` with
+`SWAP_FLAG_DISCARD | SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES` (Linux
+`SWAP_FLAG_DISCARD_PAGES` ABI bit `0x40000`). This **requests** released
+swap-cluster DISCARD on the swapz mapper; it does not request activation-time
+`SWAP_FLAG_DISCARD_ONCE` or prove that the running kernel delivered a
+DISCARD. See the [lifecycle contract](testing_standards.md#primary-lifecycle-transaction-state-contract).
+The block layer does not receive a general per-PID exit event or a
+guaranteed per-slot free callback. Without a delivered upper DISCARD or
 a later WRITE replacing the same logical offset, swapz cannot safely declare
 the old mapping dead just because the kernel internally freed a slot.
 
@@ -700,7 +700,11 @@ References: [swapon(8) discard policies](https://man7.org/linux/man-pages/man8/s
 [Linux swap cluster discard implementation](https://linux.googlesource.com/linux/kernel/git/torvalds/linux.git/+/refs/heads/master/mm/swapfile.c),
 and the existing [technical swap context](context.md).
 
-### Current-cycle Agent 17 — exclusive remote scope and investigation order
+### Historical Agent 17 DISCARD investigation checklist
+
+This original checklist predates the implemented swapon policy. It preserves
+verification questions, not current agent ownership or permission to modify
+lifecycle source; the linked contract above governs current behavior.
 
 1. **Baseline before editing.** Fetch current clean `main`, read
    `AGENTS.md`, the source and standards, and reproduce the existing
@@ -709,25 +713,22 @@ and the existing [technical swap context](context.md).
    plus existing DM source/native fixtures. Confirm that an authenticated
    upper DISCARD neither reads lower storage nor invokes decompression, and
    identify any synchronous whole-segment TRIM latency on the path.
-2. **Establish the actual gap.** Inspect the native primary `swapon` flags
-   and rootless lifecycle tests; compare them with the supported kernel
-   `SWAP_FLAG_DISCARD` and `SWAP_FLAG_DISCARD_PAGES` contract. Isolate
+2. **Verify the notification gap.** Check the implemented native `swapon`
+   flags and rootless lifecycle source guards. Isolate
    the difference between a freed **swap slot**, a free **swap cluster**,
    a delivered **upper BIO DISCARD**, removal of a swapz **logical map**,
    and reclaim/reuse of a dead **physical segment**. Do not claim these
    events occur at the same instant.
-3. **Minimal opt-in candidate, only if justified.** Evaluate requesting
-   page/cluster discards on the **already authorized swapz mapper** through
-   the current primary activation, with an existing-header/kernel-supported
-   flag combination and rootless negative/positive controls; do not request
-   activation-time whole-area DISCARD. This must be a tightly scoped
-   `swapon`-policy correction, not a new management protocol or a fallback
-   device. Preserve existing priority, source/target admission, failure
-   errno, atomic activation semantics and automatic-start locks. If kernel
-   capability or discard safety cannot be proved, leave the policy unchanged
-   and report **BLOCKED / not guaranteed**, rather than silently claiming
-   immediate reclamation. Coordinate with Codex before editing
-   `src/userspace/swapz-primary.c`; do not overwrite unpublished work.
+3. **Implemented activation policy; qualify observed behavior separately.**
+   Native primary activation already requests released-cluster DISCARD on the
+   authorized mapper without `SWAP_FLAG_DISCARD_ONCE`, priority changes or
+   a zero-flags retry. This request does not prove that a given kernel will
+   emit upper DISCARD or that swapz will reclaim space on process exit.
+   Preserve source/target admission, the original errno, atomic activation
+   semantics and automatic-start locks. If host-bound evidence cannot safely
+   establish actual notification behavior, report **BLOCKED / not demonstrated**
+   rather than promising immediate reclamation. Any future lifecycle-source
+   change requires coordination with its owner and regression coverage.
 4. **Validate authority and races.** Exercise multi-page DISCARD
    prevalidation (all-or-nothing on corruption), generation increment and
    slot reuse, duplicate/out-of-range DISCARD, shared physical extents with
