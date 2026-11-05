@@ -1226,7 +1226,7 @@ static int check_case(enum fixture_scenario candidate)
                scenario_names[candidate], phase, scenario_names[candidate],
                expected_error,
                expected_mount_conflict
-                   ? "mount-facts-target-mounted" : "independent-gate",
+                   ? "mount-facts-target-mounted" : "phase-errno-zero-mutation",
                late ? "recovery-requested" : "READY");
     }
     return 0;

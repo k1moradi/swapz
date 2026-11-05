@@ -93,9 +93,12 @@ captured production failure phase and *original* errno, zero intercepted header
 writes, mapper operations, `mkswap` and `swapon`, and retention of the READY
 or recovery-requested owner state. A mount-conflict diagnostic may identify that
 category only when the actual production mount-facts call returned
-`target_mounted`; fixture scenario selection alone is not evidence. Case
-diagnostics must identify the safe conflict category and which mutation was
-prevented without printing private proc paths or run IDs.
+`target_mounted`; fixture scenario selection alone is not evidence. Non-mount
+refusals may cite validated phase/errno/zero-mutation evidence, but must not be
+mislabelled as an independent subsystem gate when the refusal is a mount-
+inventory parse or access failure. Case diagnostics must identify the safe
+conflict category and which mutation was prevented without printing private
+proc paths or run IDs.
 Keep a negative control that removes final revalidation and demonstrates
 intercepted mutations. Evidence created **after** the last successful
 read-only snapshot, including a new mount, swap activation or now-unreadable
