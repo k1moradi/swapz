@@ -413,6 +413,12 @@ int swapz_batch_pause(struct swapz_authority *authority, const struct swapz_tx *
  */
 int swapz_batch_abort_tail(struct swapz_authority *authority,
 			  const struct swapz_tx *tx);
+/* Authenticate the entire oldest paused lower run before ANY replay or map
+ * publication. On mismatch, leave every reservation pending/quarantined;
+ * the ordered caller must fail the run, never retry it as newly available. */
+int swapz_batch_authenticate_run(struct swapz_authority *authority,
+				 const struct swapz_tx *transactions,
+				 swapz_u8 extent_count);
 int swapz_batch_resume(struct swapz_authority *authority, const struct swapz_tx *tx);
 /* Cancel an abandoned physical region; old mappings remain authoritative. */
 int swapz_abort(struct swapz_authority *authority, const struct swapz_tx *tx);

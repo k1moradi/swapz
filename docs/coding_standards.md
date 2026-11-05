@@ -2046,6 +2046,16 @@ depend on `struct bio`. A future async target may reuse a run buffer only after
 its lower completion has been finalized and every paused transaction has been
 published or aborted.
 
+A full-success lower run must authenticate every paused transaction against its
+authority-held immutable CRC and sequence, and validate all run offsets,
+record counts, RAW extents and physical bounds before replaying the first
+extent. A mismatch must leave all uncertain reservations pending, deny every
+upper success, and fail the serialized owner; a prior authoritative mapping is
+not replaceable by an unauthenticated physical write. This preflight does not
+change the committed-prefix contract for a later independently verified
+payload-publication failure or the original errno/abort path for failed lower
+I/O. Physical bytes written to media are never themselves publication credit.
+
 A matching oldest sequence is necessary but not full snapshot ownership:
 a damaged later transaction may fail authentication after the first has passed.
 Credit lower-completed block, successful-run and extent counters only after

@@ -1650,6 +1650,45 @@ int swapz_batch_abort_tail(struct swapz_authority *a,
 /* A saved snapshot can only be rearmed in exactly increasing staged
  * sequence order. Reusing a stage never fabricates physical completion.
  * The caller MUST subsequently finish/abort the rearmed transaction. */
+
+/*
+ * Read-only authentication of every paused snapshot in one immutable lower
+ * run. A valid oldest sequence is insufficient: a later damaged snapshot
+ * must not be discovered only after an earlier mapping was published.
+ * The ordered owner holds transaction storage and authority serialization.
+ */
+int swapz_batch_authenticate_run(struct swapz_authority *a,
+				 const struct swapz_tx *transactions,
+				 swapz_u8 extent_count)
+{
+	swapz_u8 index;
+
+	if (!a || !transactions || a->in_flight || a->batch_replaying ||
+	    !extent_count || extent_count > a->batch_pending ||
+	    (swapz_u16)a->batch_consumed + a->batch_pending >
+		    SWAPZ_MAX_RECORDS)
+		return -ESTALE;
+	for (index = 0; index < extent_count; ++index) {
+		const struct swapz_tx *transaction = &transactions[index];
+
+		if (transaction->sequence != a->batch_first_sequence + index ||
+		    transaction->start_block / SWAPZ_SEGMENT_BLOCKS !=
+			    a->batch_segment ||
+		    !swapz_legal_class(transaction->extent_blocks) ||
+		    !transaction->count || transaction->count > SWAPZ_MAX_RECORDS ||
+		    transaction->start_block >= a->physical_blocks ||
+		    transaction->extent_blocks >
+			    a->physical_blocks - transaction->start_block ||
+		    transaction->start_block + transaction->extent_blocks >
+			    a->next_block ||
+		    a->batch_hashes[a->batch_consumed + index] !=
+			    swapz_batch_snapshot_crc32c(
+				    a, transaction, &a->batch_resume_crc_wall_ns))
+			return -ESTALE;
+	}
+	return 0;
+}
+
 int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 {
 	swapz_u8 i;

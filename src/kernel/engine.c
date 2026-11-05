@@ -1782,6 +1782,47 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 	}
 	if (!error && completed_blocks != run->blocks)
 		error = -EIO;
+	/*
+	 * Full lower completion is necessary, not sufficient, for publication.
+	 * Authenticate ALL paused transactions and the complete run geometry
+	 * before replay may publish the first extent. If the identity is damaged,
+	 * keep the uncertain reservations pending: the serialized target owner
+	 * fails its upper BIOs and cannot repurpose this physical range.
+	 * Preserve the existing abort/errno path for failed or short lower I/O.
+	 */
+	if (!error) {
+		swapz_u16 checked_pages = 0, previous_end = 0;
+
+		if (run->extent_count > SWAPZ_MAX_RECORDS ||
+		    run->page_count > SWAPZ_MAX_RECORDS)
+			return -ESTALE;
+		for (i = 0; i < run->extent_count; ++i) {
+			const struct swapz_tx *transaction = &run->txs[i];
+			swapz_u32 offset;
+
+			if (transaction->start_block < run->start_block)
+				return -ESTALE;
+			offset = transaction->start_block - run->start_block;
+			if (offset < previous_end || offset >= run->blocks ||
+			    transaction->extent_blocks > run->blocks - offset ||
+			    run->offsets[i] != offset ||
+			    run->takes[i] != transaction->count ||
+			    run->raw[i] > 1U ||
+			    (run->raw[i] &&
+			     (transaction->count != 1U ||
+			      transaction->extent_blocks != 1U)))
+				return -ESTALE;
+			checked_pages += transaction->count;
+			previous_end = offset + transaction->extent_blocks;
+		}
+		if (checked_pages != run->page_count ||
+		    previous_end != run->blocks)
+			return -ESTALE;
+		error = swapz_batch_authenticate_run(
+			e->authority, run->txs, run->extent_count);
+		if (error)
+			return error;
+	}
 	/* Count only credible lower completions, including a torn failed run.
 	 * Physical completion is not authority publication: the failure path
 	 * still quarantines the entire reserved run before any map changes.

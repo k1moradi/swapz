@@ -1924,10 +1924,148 @@ static int test_damaged_nonoldest_snapshot_preserves_lower_ownership(void)
 	return 0;
 }
 
+
+/*
+ * A full, CRC-valid physical lower run must not permit its first mapping to
+ * publish just because the oldest sequence matches. This uses the real
+ * prepare/write/complete C path and a test-only lifetime pin, not another
+ * legitimate dm_io notification or a second ordered publisher.
+ */
+static int test_full_lower_success_authenticates_entire_run_before_publish(void)
+{
+	static const char *const scenarios[] = {
+		"nonoldest-generation", "oldest-sequence",
+		"nonoldest-offset", "intact-control",
+	};
+	unsigned int scenario;
+
+	for (scenario = 0; scenario < sizeof(scenarios) /
+	     sizeof(scenarios[0]); ++scenario) {
+		struct swapz_io_run run = { .bytes = bulk, .txs = bulk_txs };
+		struct synthetic_lower_write_owner owner = {};
+		swapz_u8 initial_committed = 0, prepared = 0;
+		swapz_u8 committed = 99, repeated_committed = 99;
+		swapz_u16 lower_completed = 0;
+		swapz_u32 credited_before, next_before;
+		swapz_u32 abandoned_before, committed_before;
+		swapz_u8 pending_before;
+		unsigned long long physical_before;
+		unsigned int publications_before, index;
+		int error, lower_error, repeated_error;
+		int valid_control = scenario == 3;
+
+		CHECK(setup() == 0);
+		CHECK(swapz_engine_write_window_batched(
+			&e, pages, 16, &initial_committed) == 0);
+		CHECK(initial_committed == 16);
+		for (index = 0; index < 16; ++index)
+			CHECK(maps[index].valid && maps[index].generation == 1);
+		credited_before = e.completed_blocks;
+		physical_before = lower_written_bytes;
+		publications_before = published_calls;
+		CHECK(swapz_engine_prepare_batched_run(
+			&e, pages, 16, &run, &prepared, 0) == 0);
+		CHECK(prepared == 16 && run.extent_count >= 2);
+		owner.accepted_writes = prepared;
+		owner.references = 3; /* Accepted upper, lower request, test pin. */
+		next_before = a.next_block;
+		abandoned_before = a.abandoned_blocks;
+		committed_before = a.committed_blocks;
+		pending_before = a.batch_pending;
+		if (scenario == 0)
+			run.txs[1].records[0].generation++;
+		else if (scenario == 1)
+			run.txs[0].sequence++;
+		else if (scenario == 2)
+			run.offsets[1]++;
+
+		write_sealed(NULL, prepared);
+		lower_error = write_run(NULL, run.start_block, run.blocks,
+					run.bytes, &lower_completed);
+		owner.original_lower_errno = lower_error;
+		owner.references--; /* The only real lower notification. */
+		CHECK(lower_error == 0 && lower_completed == run.blocks);
+		CHECK(lower_written_bytes - physical_before ==
+		      (unsigned long long)run.blocks * SWAPZ_BLOCK_BYTES);
+		CHECK(!maps_visible_during_run && !ownership_violation);
+		error = swapz_engine_complete_batched_run(
+			&e, &run, lower_completed, lower_error, &committed);
+		if (!error && committed == prepared) {
+			write_published(NULL, committed);
+			owner.upper_success_completions = committed;
+		}
+		owner.upper_final_completions = prepared;
+		owner.references--; /* Ordered owner gives each upper BIO one result. */
+		repeated_error = swapz_engine_complete_batched_run(
+			&e, &run, lower_completed, lower_error, &repeated_committed);
+		if (valid_control) {
+			if (error || committed != prepared ||
+			    published_calls != publications_before + 1U ||
+			    a.batch_pending || e.completed_blocks !=
+				    credited_before + run.blocks ||
+			    owner.upper_success_completions != prepared)
+				goto failed;
+			for (index = 0; index < prepared; ++index)
+				if (!maps[index].valid || maps[index].generation != 2)
+					goto failed;
+		} else {
+			if (error != -ESTALE || committed ||
+			    published_calls != publications_before ||
+			    e.completed_blocks != credited_before ||
+			    a.batch_pending != pending_before ||
+			    a.next_block != next_before ||
+			    a.abandoned_blocks != abandoned_before ||
+			    a.committed_blocks != committed_before ||
+			    owner.upper_success_completions)
+				goto failed;
+			for (index = 0; index < prepared; ++index)
+				if (!maps[index].valid || maps[index].generation != 1)
+					goto failed;
+			/* Unauthenticated, physically written space stays reserved. */
+			{
+				struct swapz_tx unrelated;
+				swapz_u32 logical_page = 100;
+
+				if (swapz_stage(&a, &logical_page, 1, 1,
+						&unrelated) != -EBUSY)
+					goto failed;
+			}
+		}
+		if (repeated_error != -ESTALE || repeated_committed ||
+		    owner.references != 1 ||
+		    owner.upper_final_completions != owner.accepted_writes ||
+		    owner.original_lower_errno != 0)
+			goto failed;
+		owner.references--; /* The synthetic duplicate's lifetime pin. */
+		CHECK(!owner.references);
+		continue;
+failed:
+		fprintf(stderr,
+			"FAIL: lower-write-aggregation scenario=%s "
+			"lower_errno=%d completion_errno=%d repeated_errno=%d "
+			"upper_final=%u upper_success=%u accepted=%u refs=%u "
+			"committed=%u repeat_committed=%u credited_before=%u "
+			"credited_after=%u physical_written_delta=%llu "
+			"published_before=%u published_after=%u "
+			"pending_before=%u pending_after=%u "
+			"generation_first=%u generation_second=%u\n",
+			scenarios[scenario], lower_error, error, repeated_error,
+			owner.upper_final_completions, owner.upper_success_completions,
+			owner.accepted_writes, owner.references,
+			committed, repeated_committed, credited_before,
+			e.completed_blocks, lower_written_bytes - physical_before,
+			publications_before, published_calls, pending_before,
+			a.batch_pending, maps[0].generation, maps[1].generation);
+		return 1;
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
 
+	CHECK(test_full_lower_success_authenticates_entire_run_before_publish() == 0); passed++;
 	CHECK(test_damaged_nonoldest_snapshot_preserves_lower_ownership() == 0); passed++;
 	CHECK(test_stale_lower_completion_keeps_successor_reserved() == 0); passed++;
 	CHECK(test_duplicate_lower_completion_accounted_once() == 0); passed++;

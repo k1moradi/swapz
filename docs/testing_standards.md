@@ -3404,6 +3404,17 @@ never dereferences freed storage. Rootless success does not qualify the
 loaded dm-io callback-once assumption or actual upper BIO lifetime.
 
 
+A successful full lower WRITE is also a negative control for partial authority
+publication: with valid old mappings, damage only the second paused
+transaction's generation while keeping the oldest sequence and complete
+physical bytes valid. The production-linked completion must reject it before
+publishing the first replacement, leave prior generations unchanged, credit
+zero unauthenticated lower bytes, retain all uncertain reservations, and
+finish each accepted upper write once with an error. Independently reject a
+wrong oldest sequence and altered later run offset; the intact snapshot must
+still publish every record once. Keep a test-only pin for a duplicate engine
+finalizer, not a fabricated second real dm_io callback or simultaneous worker.
+
 The remaining non-oldest-snapshot boundary must be a production-linked native
 regression: keep one test-only owner pin across an actual partial `-EIO` lower
 notification and a duplicate finalizer call, while a younger run is paused in
