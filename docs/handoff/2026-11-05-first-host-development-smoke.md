@@ -88,12 +88,15 @@ systemd/package, and private kernel-debug/static workflows passed. Official
 owner `make test` and real anonymous swap were not run as part of this smoke.
 
 This is the 2026-11-05 state for the tested source, not a verdict on later
-`main` changes. Check [issue #94](https://github.com/k1moradi/swapz/issues/94)
-and [current evidence](../README.md#current-evidence) for subsequent qualification.
+`main` changes. Use the [canonical issue #94 contract](../testing_standards.md#primary-cross-namespace-mount-admission-evidence-issue-94)
+and [current evidence](../README.md#current-evidence) for subsequent qualification;
+the issue body predates later source fixes and is historical context, not a
+current source description.
 The recorded follow-up was to resolve the mount-namespace CI defect, obtain
 green exact-source CI, then run official owner `make test`. Only after its
 required gates and real-swap admission pass could primary-manager
 anonymous-page qualification proceed, with independent
 `pswpout`/`pswpin`, cgroup swap charge, mapper and backing-device I/O, byte
-oracle, OOM and normal-teardown evidence. Preserve the current unclaimed
-`null_blk` refusal; it is not permission to remove or adopt those resources.
+oracle, OOM and normal-teardown evidence. At that observation, the unclaimed
+`null_blk` refusal was to be preserved; it was not permission to remove or
+adopt those resources.

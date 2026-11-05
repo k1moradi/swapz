@@ -316,13 +316,16 @@ The test runner keeps `test_results.json` unchanged until qualification
 work stops. It then replaces that file and attempts a report-only `[skip ci]`,
 non-force commit directly to `main`. If a push fails after `origin/main`
 advances, a bounded retry may parent the new remote head only if it descends
-from the tested source and no newer-source qualification report would be
-overwritten. The report's `source_sha`/`tested_commit_sha` still identify the
-tested source, not the concurrent descendant; the latter is not qualified.
+from the tested source. Before doing so, it refuses to replace a published
+qualification report whose tested source is a descendant of this run's tested
+source. The report's `source_sha`/`tested_commit_sha` still identify the tested
+source, not the concurrent descendant; the latter is not qualified.
 
-After a successful remote push, the runner updates local `main` and index
-when safe. Otherwise it reports remote-only synchronization; reconcile and
-verify local and remote `main` before starting new work.
+After a successful remote push, the runner refreshes local `main` and the index
+when safe. After a concurrent advance it may also refresh the otherwise-clean
+checkout to the published descendant; otherwise it reports remote-only
+synchronization. Reconcile and verify local and remote `main` before starting
+new work.
 
 
 Because the root `test_results.json` is generated evidence, its local
