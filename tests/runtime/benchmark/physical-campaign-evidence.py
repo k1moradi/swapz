@@ -1167,23 +1167,27 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                              workload=workload, pair_index=index, arm=label,
                              reason="required useful I/O, tail, CPU or GC missing")
     windows.sort()
-    for prior, current in zip(windows, windows[1:]):
-        if prior[1] >= current[0]:
-            # An overlap contaminates both measurements. Marking only the later
-            # arm would let the earlier interval authenticate a terminal FAIL.
-            for row in (prior, current):
+    active_windows = []
+    for current in windows:
+        # Keep every still-overlapping predecessor, not just the adjacent
+        # sorted interval. A long arm can overlap several shorter later arms.
+        active_windows = [
+            prior for prior in active_windows if prior[1] >= current[0]]
+        if active_windows:
+            for row in (*active_windows, current):
                 untrusted_pair_keys.add((row[2], row[3]))
                 untrusted_cohorts.add(row[2])
             diagnose("BLOCKED", "arm.monotonic_window_ns", "nonoverlapping",
                      workload=current[2], pair_index=current[3], arm=current[4],
                      reason="replayed or overlapping physical arms")
+        active_windows.append(current)
     for workload in workloads:
         rows = sorted(
             (r for r in records if isinstance(r, dict) and
              r.get("workload") == workload and type(r.get("pair_index")) is int),
             key=lambda r: r["pair_index"])
-        last_end = None
-        last_identity = None
+        latest_end = None
+        latest_end_identity = None
         for row in rows:
             times = [
                 (arm.get("arm_started_monotonic_ns"),
@@ -1196,17 +1200,18 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                 continue
             first, end = min(a for a, _ in times), max(b for _, b in times)
             current_identity = (workload, row["pair_index"])
-            if last_end is not None and first <= last_end:
-                if last_identity is not None:
-                    untrusted_pair_keys.add(last_identity)
+            if latest_end is not None and first <= latest_end:
+                if latest_end_identity is not None:
+                    untrusted_pair_keys.add(latest_end_identity)
                 untrusted_pair_keys.add(current_identity)
                 untrusted_cohorts.add(workload)
                 diagnose("BLOCKED", "pair.prospective_chronology_ns",
                          "ascending pair indices",
                          workload=workload, pair_index=row["pair_index"],
                          reason="later pair reuses earlier physical time")
-            last_end = end
-            last_identity = current_identity
+            if latest_end is None or end > latest_end:
+                latest_end = end
+                latest_end_identity = current_identity
 
     # Authenticate terminal producer failures only after seeing every attempt:
     # a later duplicate, foreign source or overlapping window can invalidate an
