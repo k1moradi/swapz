@@ -163,9 +163,13 @@ static struct {
 	unsigned int descriptor_queries;
 	/* Borrowed late table, injected only after the first fake header read. */
 	const char *late_swap_inventory;
+	/* Borrowed activity appearing only after the last inventory snapshot. */
+	const char *swap_inventory_after_descriptor_query;
 	unsigned int swap_inventory_checks;
 	int late_swap_unreadable;
 } admission_fixture;
+
+static void admission_write_text(const char *virtual_path, const char *value);
 
 static int admission_fcntl(int fd, int command, ...)
 {
@@ -175,6 +179,13 @@ static int admission_fcntl(int fd, int command, ...)
 		if (admission_fixture.descriptor_error) {
 			errno = admission_fixture.descriptor_error;
 			return -1;
+		}
+		if (admission_fixture.swap_inventory_after_descriptor_query) {
+			const char *inventory =
+				admission_fixture.swap_inventory_after_descriptor_query;
+
+			admission_fixture.swap_inventory_after_descriptor_query = NULL;
+			admission_write_text("/proc/swaps", inventory);
 		}
 		return admission_fixture.descriptor_mode;
 	}
@@ -944,6 +955,77 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		admission_stop();
 	}
 	puts("PASS: rootless active-swap inventory refusals before header pwrite");
+}
+
+/*
+ * Positive control: test_real_cli_active_swap_inventory_never_writes()
+ * refuses activity visible at the last inventory gate. Inject activity
+ * immediately after that snapshot, at F_GETFL, to show why that clearance
+ * cannot prove atomic exclusion through pwrite. The fake block descriptor
+ * deliberately cannot model Linux BLK_EXCL or a competing real swapon.
+ */
+static void test_real_cli_post_snapshot_swap_activity_is_not_excluded(void)
+{
+	static const char active_inventory[] = ADMISSION_SWAP_HEADER
+		"/opaque/active file 4 1 -2\n";
+	const unsigned char original_block[SWAPZ_SUPERBLOCK_BYTES] = {0};
+	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+	char errno_field[64];
+	unsigned int previous_pwrite_calls;
+	int observed_errno, status, field_length;
+	int block_zero_modified;
+
+	field_length = snprintf(errno_field, sizeof(errno_field),
+				"errno=%d (", EOPNOTSUPP);
+	assert(field_length > 0 &&
+	       (size_t)field_length < sizeof(errno_field));
+	admission_start(ADMISSION_UNCHANGED);
+	previous_pwrite_calls = test_pwrite_calls;
+	admission_fixture.swap_inventory_after_descriptor_query = active_inventory;
+	test_diagnostic_errno_clobber = ECHILD;
+	status = admission_capture_cli(report, &observed_errno);
+	test_diagnostic_errno_clobber = 0;
+	block_zero_modified = memcmp(admission_fixture.block_zero, original_block,
+				     sizeof(original_block)) != 0;
+
+	if (status != 3 || observed_errno != EOPNOTSUPP ||
+	    !strstr(report, "UNCERTAIN: target admission became uncertain "
+		    "after header write") ||
+	    !strstr(report, "stage=inventory") ||
+	    !strstr(report, errno_field) ||
+	    !strstr(report, "RECOVERY REQUIRED") ||
+	    strstr(report, ADMISSION_DEVICE) ||
+	    strstr(report, "/opaque/active") ||
+	    admission_fixture.swap_inventory_after_descriptor_query != NULL ||
+	    admission_fixture.swap_inventory_checks != 4U ||
+	    admission_fixture.observed_open_flags !=
+		    (O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW) ||
+	    admission_fixture.descriptor_mode != O_RDWR ||
+	    admission_fixture.descriptor_queries != 1U ||
+	    admission_fixture.opens != 1U ||
+	    admission_fixture.reads != 1U ||
+	    admission_fixture.writes != 1U ||
+	    admission_fixture.syncs != 1U ||
+	    admission_fixture.closes != 1U ||
+	    test_pwrite_calls != previous_pwrite_calls + 1U ||
+	    !block_zero_modified ||
+	    !swapz_sb_valid(admission_fixture.block_zero,
+			    admission_fixture.geometry_bytes)) {
+		fprintf(stderr, "FAIL: phase=post-final-inventory "
+			"observed_inventory_class=active-after-zero-row-snapshot "
+			"original_errno=%d expected_errno=%d status=%d "
+			"requested_flags=%#x verified_access_mode=%#x "
+			"block_zero_modified=%d inventory_checks=%u "
+			"descriptor_queries=%u writes=%u syncs=%u\n",
+			observed_errno, EOPNOTSUPP, status,
+			admission_fixture.observed_open_flags,
+			admission_fixture.descriptor_mode & O_ACCMODE,
+			block_zero_modified, admission_fixture.swap_inventory_checks,
+			admission_fixture.descriptor_queries,
+			admission_fixture.writes, admission_fixture.syncs);
+		abort();
+	}
+	admission_stop();
 }
 
 static void test_missing_partition_slaves_directory_is_empty(void)
@@ -3108,6 +3190,7 @@ int main(void)
 	test_real_cli_descriptor_access_modes_refuse_without_write();
 	test_real_cli_snapshots_refuse_before_first_header_write();
 	test_real_cli_active_swap_inventory_never_writes();
+	test_real_cli_post_snapshot_swap_activity_is_not_excluded();
 	test_missing_partition_slaves_directory_is_empty();
 	test_missing_partition_slaves_does_not_hide_removal();
 	puts("PASS: swapzctl formatter identity and destructive-action gates");
