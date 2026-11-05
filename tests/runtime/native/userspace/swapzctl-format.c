@@ -161,6 +161,10 @@ static struct {
 	int open_error, observed_open_flags;
 	int descriptor_mode, descriptor_error, close_error;
 	unsigned int descriptor_queries;
+	/* Borrowed late table, injected only after the first fake header read. */
+	const char *late_swap_inventory;
+	unsigned int swap_inventory_checks;
+	int late_swap_unreadable;
 } admission_fixture;
 
 static int admission_fcntl(int fd, int command, ...)
@@ -275,6 +279,11 @@ static void admission_after_first_read(void)
 	case ADMISSION_PARTITION_DISAPPEARS:
 		break;
 	}
+	if (admission_fixture.late_swap_inventory)
+		admission_write_text("/proc/swaps",
+				     admission_fixture.late_swap_inventory);
+	if (admission_fixture.late_swap_unreadable)
+		test_fopen_denied_path = "/proc/swaps";
 }
 
 static struct stat admission_block_stat(dev_t device, ino_t inode)
@@ -791,6 +800,135 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 	puts("PASS: rootless CLI snapshot admission; kernel exclusivity NOT PROVEN");
 }
 
+
+/*
+ * Parser-only failures are not proof that the real CLI refuses before pwrite.
+ * Exercise its default pre-open and last prewrite inventory gates with fake
+ * procfs and an in-memory block zero; no actual block descriptor is opened.
+ */
+static void test_real_cli_active_swap_inventory_never_writes(void)
+{
+	static const struct {
+		const char *scenario;
+		const char *inventory;
+		const char *observed_entries;
+		const char *entry_class;
+		int expected_errno;
+		int late;
+		int inaccessible;
+	} cases[] = {
+		{ "active-regular", ADMISSION_SWAP_HEADER
+		  "/unresolvable/swapfile file 4 1 -2\n",
+		  "1", "regular", EOPNOTSUPP, 0, 0 },
+		{ "active-partition", ADMISSION_SWAP_HEADER
+		  "/dev/other partition 4 1 -2\n",
+		  "1", "partition", EOPNOTSUPP, 0, 0 },
+		{ "duplicated", ADMISSION_SWAP_HEADER
+		  "/unresolvable/swapfile file 4 1 -2\n"
+		  "/unresolvable/swapfile file 4 1 -3\n",
+		  "2", "duplicate", EOPNOTSUPP, 0, 0 },
+		{ "malformed-header", "Filename Type Size Used Priority\n",
+		  "0", "malformed-header", EPROTO, 0, 0 },
+		{ "malformed-after-active", ADMISSION_SWAP_HEADER
+		  "/unresolvable/swapfile file 4 1 -2\n"
+		  "/unresolvable/swapfile file 4 1\n",
+		  "2", "malformed-row", EPROTO, 0, 0 },
+		{ "truncated", ADMISSION_SWAP_HEADER
+		  "/unresolvable/swapfile file 4 1 -2",
+		  "1", "truncated-row", EPROTO, 0, 0 },
+		{ "empty", "", "0", "empty", EPROTO, 0, 0 },
+		{ "inaccessible", NULL, "unknown", "unreadable",
+		  EACCES, 0, 1 },
+		{ "late-active", ADMISSION_SWAP_HEADER
+		  "/unresolvable/swapfile file 4 1 -2\n",
+		  "1", "regular", EOPNOTSUPP, 1, 0 },
+		{ "late-duplicated", ADMISSION_SWAP_HEADER
+		  "/unresolvable/swapfile file 4 1 -2\n"
+		  "/unresolvable/swapfile file 4 1 -3\n",
+		  "2", "duplicate", EOPNOTSUPP, 1, 0 },
+		{ "late-truncated", ADMISSION_SWAP_HEADER
+		  "/unresolvable/swapfile file 4 1 -2",
+		  "1", "truncated-row", EPROTO, 1, 0 },
+		{ "late-inaccessible", NULL, "unknown", "unreadable",
+		  EACCES, 1, 1 },
+	};
+
+	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
+	     ++index) {
+		unsigned char original_block[SWAPZ_SUPERBLOCK_BYTES];
+		char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+		char errno_field[64];
+		const char *expected_summary = cases[index].late ?
+			"REFUSED: target identity changed before header write" :
+			"REFUSED: pre-open admission is not proven";
+		unsigned int previous_pwrite_calls;
+		unsigned int expected_inventory_checks = cases[index].late ? 3U : 1U;
+		unsigned int expected_open_calls = cases[index].late ? 1U : 0U;
+		int unchanged, observed_errno, status;
+		int length;
+
+		admission_start(ADMISSION_UNCHANGED);
+		memcpy(original_block, admission_fixture.block_zero,
+		       sizeof(original_block));
+		previous_pwrite_calls = test_pwrite_calls;
+		if (cases[index].late) {
+			admission_fixture.late_swap_inventory = cases[index].inventory;
+			admission_fixture.late_swap_unreadable =
+				cases[index].inaccessible;
+		} else if (cases[index].inaccessible) {
+			test_fopen_denied_path = "/proc/swaps";
+		} else {
+			admission_write_text("/proc/swaps", cases[index].inventory);
+		}
+
+		length = snprintf(errno_field, sizeof(errno_field), "errno=%d (",
+				  cases[index].expected_errno);
+		assert(length > 0 && (size_t)length < sizeof(errno_field));
+		test_diagnostic_errno_clobber = ECHILD;
+		status = admission_capture_cli(report, &observed_errno);
+		test_diagnostic_errno_clobber = 0;
+		unchanged = !memcmp(admission_fixture.block_zero, original_block,
+				    sizeof(original_block));
+
+		if (status != 2 || observed_errno != cases[index].expected_errno ||
+		    !strstr(report, expected_summary) ||
+		    !strstr(report, "stage=inventory") ||
+		    !strstr(report, "expected=") ||
+		    !strstr(report, errno_field) ||
+		    !strstr(report, "action=") ||
+		    !strstr(report, strerror(cases[index].expected_errno)) ||
+		    strstr(report, ADMISSION_DEVICE) ||
+		    admission_fixture.swap_inventory_checks !=
+			    expected_inventory_checks ||
+		    admission_fixture.opens != expected_open_calls ||
+		    admission_fixture.reads != expected_open_calls ||
+		    admission_fixture.closes != expected_open_calls ||
+		    admission_fixture.writes != 0U ||
+		    admission_fixture.syncs != 0U ||
+		    test_pwrite_calls != previous_pwrite_calls || !unchanged) {
+			fprintf(stderr, "FAIL: phase=active_swap_inventory "
+				"scenario=%s gate=%s observed_entries=%s entry_class=%s "
+				"original_errno=%d expected_errno=%d status=%d "
+				"operation=header_pwrite expected=refused writes=%u "
+				"pwrite_delta=%u block_zero_untouched=%d "
+				"inventory_checks=%u opens=%u reads=%u "
+				"syncs=%u closes=%u\n",
+				cases[index].scenario, cases[index].late ? "prewrite" : "preopen",
+				cases[index].observed_entries,
+				cases[index].entry_class, observed_errno,
+				cases[index].expected_errno, status,
+				admission_fixture.writes,
+				test_pwrite_calls - previous_pwrite_calls, unchanged,
+				admission_fixture.swap_inventory_checks,
+				admission_fixture.opens, admission_fixture.reads,
+				admission_fixture.syncs, admission_fixture.closes);
+			abort();
+		}
+		admission_stop();
+	}
+	puts("PASS: rootless active-swap inventory refusals before header pwrite");
+}
+
 static void test_missing_partition_slaves_directory_is_empty(void)
 {
 	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
@@ -942,6 +1080,8 @@ static FILE *test_format_fopen(const char *path, const char *mode)
 	char mapped[PATH_MAX];
 	const char *actual;
 
+	if (admission_fixture.enabled && !strcmp(path, "/proc/swaps"))
+		++admission_fixture.swap_inventory_checks;
 	if (admission_fixture.enabled && admission_fixture.reads) {
 		if (admission_fixture.change == ADMISSION_SWAPFILE_ACTIVE &&
 		    !strcmp(path, "/proc/swaps"))
@@ -2950,6 +3090,7 @@ int main(void)
 	test_real_cli_exclusive_open_permission_refuses_without_io();
 	test_real_cli_descriptor_access_modes_refuse_without_write();
 	test_real_cli_snapshots_refuse_before_first_header_write();
+	test_real_cli_active_swap_inventory_never_writes();
 	test_missing_partition_slaves_directory_is_empty();
 	test_missing_partition_slaves_does_not_hide_removal();
 	puts("PASS: swapzctl formatter identity and destructive-action gates");
