@@ -1334,10 +1334,10 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                              value, workload=workload, pair_index=position,
                              reason="frozen three-pair directional bound failed")
     return {
-        "status": ("PASS" if not encountered_statuses else
-                   "FAIL" if "FAIL" in encountered_statuses
-                   else "BLOCKED" if "BLOCKED" in encountered_statuses
-                   else "UNAVAILABLE"),
+        # UNAVAILABLE is a diagnostic evidence class, never a campaign
+        # disposition: missing required measurements block qualification.
+        "status": ("FAIL" if "FAIL" in encountered_statuses else
+                   "BLOCKED" if encountered_statuses else "PASS"),
         "diagnostics": diagnostics, "omitted_diagnostic_count": omitted,
         "qualification_status": (
             qualification_status if qualification_status in
