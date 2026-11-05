@@ -1969,10 +1969,10 @@ paused snapshot, the portable completion entry point must prove that its run
 still names the oldest paused sequence (which may coexist with a younger
 prepared run). A stale or repeated delivery must not alter committed-lower-byte
 counters, publication, or younger reservations; if the delivery also carries a
-lower error, retain that original error. An impossible completed-block count is
-untrusted and contributes zero completed bytes, but it must not replace a
-definitive nonzero lower errno with a synthetic integrity error. This guards
-engine replay only:
+lower error, retain that original error. For batched aggregation, an impossible
+completed-block count is untrusted and contributes zero completed bytes, but it
+must not replace a definitive nonzero lower errno with a synthetic integrity
+error. This guards engine replay only:
 duplicate dm-io callbacks, upper BIO reference release, and the lifetime of
 a reused packed buffer still require separate loaded completion qualification.
 
