@@ -747,15 +747,20 @@ lifecycle source; the linked contract above governs current behavior.
    reserve allocation, and suspend/destruction. A failed or uncertain
    DISCARD must never free a live record, double-decrement a reference,
    resurrect an old generation, reuse a submitted lower-TRIM range, or
-   turn a prior error into success. No per-discard heap allocations,
-   lower-page read, decompression or full-map scan in the hot path.
+   turn a prior error into success. Do not read or decompress discarded
+   lower pages. Retain the safety-critical full-map authority proof when
+   DISCARD would retire a closed segment's final map; range prevalidation
+   can also scan all logical pages. Do not remove either proof without
+   equivalent adversarial corruption/race evidence.
 5. **Measure rather than promise.** With synthetic events/rootless
    production-C tests, capture logical pages invalidated, surviving
    shared-extent references, newly dead segments, upper DISCARD requests
    and sectors, lower READ bytes, decompression calls, CPU work and first
    failure. An explicit DISCARD should retire the specified logical
-   mappings with **zero lower READ/decompression** and bounded
-   per-page metadata work; actual physical flash erasure/TRIM and freed
+   mappings with **zero obsolete-page lower READ/decompression**; measure
+   range-validation work, any final-map **O(logical_pages)** proof, and
+   synchronous advisory lower TRIM separately. A uniform per-page
+   latency bound is not proven; physical flash erasure/TRIM and freed
    RAM are separate claims. A zero-discard control must prove that merely
    claiming an app exited causes **no speculative invalidation**.
 6. **Host-only handoff, not remote execution.** Ask the Codex owner of an
