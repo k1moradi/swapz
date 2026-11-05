@@ -333,6 +333,60 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 self.assertNotIn("Traceback", diagnostic)
                 self.assertNotIn("/private/oracle.py", diagnostic)
 
+    def test_cgroup_migration_esrch_preserves_only_structured_preflight_block(self):
+        blocked_summary = (
+            "BLOCKED: oracle phase=preflight verified_pages=0/16384 "
+            "verified_bytes=0/67108864 expected_page_mismatches=0 "
+            "observed_page_mismatches=0 expected_byte_mismatches=0 "
+            "observed_byte_mismatches=0 error=PermissionError errno=1 "
+            "cleanup_complete=true"
+        )
+        process = mock.Mock(
+            pid=41999, stdin=mock.Mock(), stdout=mock.Mock(),
+            stderr=io.StringIO(blocked_summary))
+        process.poll.return_value = 2
+
+        def migration_esrch(*_args, **_kwargs):
+            raise OSError(errno.ESRCH, "synthetic exited worker")
+
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            with (
+                    mock.patch.multiple(
+                        qualify,
+                        _cgroup_create=mock.Mock(return_value=cgroup),
+                        _memory_events=mock.Mock(
+                            return_value={"oom": 0, "oom_kill": 0}),
+                        _psi_total=mock.Mock(return_value=0),
+                        _trusted_executable_path=mock.Mock(
+                            return_value=sys.executable),
+                        _write_control=mock.Mock(),
+                        read_swap_rows=mock.Mock(return_value=[]),
+                        _row_for_device=mock.Mock(
+                            return_value=mock.Mock(used_kib=0)),
+                        _terminate_child=mock.Mock(),
+                        _close_oracle_pipes=mock.Mock(),
+                        _remove_cgroup=mock.Mock()),
+                    mock.patch.object(
+                        qualify.subprocess, "Popen", return_value=process),
+                    mock.patch.object(
+                        Path, "write_text", new=migration_esrch),
+            ):
+                with self.assertRaisesRegex(
+                        qualify.Blocked,
+                        "child_exit=2.*exited before dedicated cgroup migration.*"
+                        "phase=preflight.*errno=1") as caught:
+                    qualify._run_workload(
+                        {"run_id": "terminal-contract-run"},
+                        {"mapper_device": (1, 2)},
+                        ORACLE,
+                        workload_mib=128,
+                        resident_mib=64,
+                        swap_limit_mib=128,
+                        timeout_seconds=1,
+                    )
+        self.assertNotIn("synthetic exited worker", str(caught.exception))
+
     def test_readiness_guard_allows_only_exited_worker_for_blocked_classification(self):
         processes = [mock.Mock(pid=42001), mock.Mock(pid=42002)]
         for process in processes:

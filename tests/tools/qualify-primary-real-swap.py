@@ -2856,7 +2856,8 @@ def _raise_oracle_event_failure(
     message = (
         f"real-swap oracle phase=terminal child_exit={return_code} "
         f"evidence_complete=false: {reason}{detail}")
-    if return_code == 2 and prefix == "ORACLE_WAITING=" and             summary.startswith("BLOCKED: oracle phase=preflight "):
+    if (return_code == 2 and prefix == "ORACLE_WAITING=" and
+            summary.startswith("BLOCKED: oracle phase=preflight ")):
         raise Blocked(message)
     raise QualificationFailure(message)
 
@@ -3270,10 +3271,22 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                     round_processes.append(process)
                     active_processes.append(process)
                     try:
-                        (cgroup / "cgroup.procs").write_text(f"{process.pid}\n", encoding="ascii")
+                        (cgroup / "cgroup.procs").write_text(
+                            f"{process.pid}\n", encoding="ascii")
                     except OSError as exc:
+                        # A security-preflight refusal can exit before this
+                        # migration races the child. Preserve only the same
+                        # authenticated BLOCKED refusal on Linux's ESRCH;
+                        # every other cgroup ownership failure stays fatal.
+                        if exc.errno == errno.ESRCH:
+                            return_code = process.poll()
+                            if return_code is not None:
+                                _raise_oracle_event_failure(
+                                    process, "ORACLE_WAITING=", return_code,
+                                    "exited before dedicated cgroup migration")
                         raise QualificationFailure(
-                            f"cannot move admitted oracle into dedicated cgroup: {exc}") from exc
+                            "cannot move admitted oracle into dedicated cgroup "
+                            f"errno={exc.errno if exc.errno is not None else 'none'}") from exc
 
                 guard_processes = round_processes
                 # Before readiness, an oracle may fail its own security

@@ -552,8 +552,11 @@ initial ORACLE_WAITING boundary; unstructured exit 2, any later phase, stall,
 signal death or integrity failure remains FAIL. During the readiness wait the
 cgroup guard may tolerate only an already-exited owned worker disappearing so
 the terminal parser can classify that refusal; a live worker leaving the
-dedicated cgroup or foreign membership still fails. Rootless terminal tests
-inject both resource-limit failures and exercise this parent boundary.
+dedicated cgroup or foreign membership still fails. If the refusal races the
+initial `cgroup.procs` migration, only Linux `ESRCH` plus that same structured
+exit-2 preflight record may retain BLOCKED; unrelated migration errors remain
+fatal and their raw error text is not exposed. Rootless terminal tests inject
+both resource-limit failures and exercise both parent race boundaries.
 
 The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
 artifact identity, derive the same
