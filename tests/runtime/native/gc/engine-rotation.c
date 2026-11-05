@@ -880,11 +880,11 @@ static int test_last_compressed_page_boundary_retry(void)
 
 /*
  * One physical run contains both a compressed survivor and a RAW survivor.
- * Test genuinely written short prefixes, lower -EIO/-ENOSPC, a short success
- * and an impossible completion count. No case may publish either candidate,
- * recycle the uncertain prefix, or hand off a partially evacuated victim.
- * A later retry must repack the poisoned scratch and relocate each survivor
- * exactly once; historical class bytes are not a liveness oracle.
+ * Test a genuinely written short -EIO prefix, a short success and an impossible
+ * completion count. No case may publish either candidate, recycle the uncertain
+ * prefix, or hand off a partially evacuated victim. A later retry must repack
+ * the poisoned scratch and relocate each survivor exactly once; historical
+ * class bytes are not a liveness oracle.
  */
 static int test_mixed_raw_gc_uncertain_completion_recovery(void)
 {
@@ -894,7 +894,6 @@ static int test_mixed_raw_gc_uncertain_completion_recovery(void)
 		swapz_u8 impossible_completion;
 	} faults[] = {
 		{ -EIO, 0, 0 },
-		{ -ENOSPC, 0, 0 },
 		{ 0, 1, 0 },
 		{ 0, 0, 1 },
 	};
@@ -983,6 +982,177 @@ static int test_mixed_raw_gc_uncertain_completion_recovery(void)
 	return 0;
 }
 
+/*
+ * Production can reach a non-full destination -ENOSPC when a standalone RAW
+ * survivor has already published and the remaining compressed survivors need a
+ * two-block extent. Repeated torn -EIO runs quarantine two new destination
+ * blocks each time. With one block left, staging must fail before lower I/O;
+ * recovery can then consume the other independently dead reserve and resume the
+ * same victim without republishing or recycling any uncertain block.
+ */
+static int test_gc_compressed_tail_staging_exhaustion(void)
+{
+	const swapz_u32 victim = 0U;
+	const swapz_u32 blocked_destination = 2U;
+	const swapz_u32 replacement_destination = 3U;
+	struct swapz_compressed_page compressed_pages[2] = {
+		{ .logical_page = 1U, .payload = contents[1], .length = 2072 },
+		{ .logical_page = 2U, .payload = contents[2], .length = 2072 },
+	};
+	struct swapz_compressed_page raw_page = {
+		.logical_page = 8U, .payload = raw_contents,
+		.length = SWAPZ_BLOCK_BYTES, .raw = 1,
+	};
+	struct swapz_map prior_compressed[2];
+	swapz_u8 planned_classes[SWAPZ_MAX_RECORDS];
+	swapz_u8 planned_takes[SWAPZ_MAX_RECORDS];
+	swapz_u8 planned_extents = 0U, committed = 99U;
+	swapz_u32 block, stalled_cursor;
+	unsigned int index, lower_writes_before;
+	int error;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	e.io.write_run = lower_write_run;
+
+	/* Leave exactly RAW8 + compressed1 + compressed2 authoritative in
+	 * victim0, while moving the filler page and OPEN into segment1. */
+	committed = 0U;
+	CHECK(swapz_engine_write_window_batched(
+		      &e, &raw_page, 1U, &committed) == 0);
+	CHECK(committed == 1U && verify_raw_page(8U) == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 3U; ++index)
+		CHECK(write_one(0U) == 0);
+	CHECK(write_one(1U) == 0);
+	CHECK(write_one(2U) == 0);
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(write_one(0U) == 0);
+	CHECK(a.open_segment == 1U);
+	CHECK(maps[8].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
+	      maps[1].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
+	      maps[2].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
+	      maps[0].start_block / SWAPZ_SEGMENT_BLOCKS == 1U);
+	prior_compressed[0] = maps[1];
+	prior_compressed[1] = maps[2];
+
+	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
+	CHECK(a.gc_destination == blocked_destination);
+
+	/* swapz_gc_relocate_one() handles a RAW survivor synchronously. Mirror
+	 * that exact engine call first, leaving the two compressed survivors for
+	 * the packed flush that follows in production. */
+	committed = 0U;
+	CHECK(swapz_engine_write_window_batched(
+		      &e, &raw_page, 1U, &committed) == 0);
+	CHECK(committed == 1U &&
+	      maps[8].start_block == blocked_destination * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(verify_raw_page(8U) == 0);
+
+	CHECK(swapz_engine_plan_bounded(
+		      compressed_pages, 2U, 0U, planned_classes, planned_takes,
+		      &planned_extents) == 0);
+	CHECK(planned_extents == 1U && planned_classes[0] == 2U &&
+	      planned_takes[0] == 2U);
+
+	/* Each failed production-shaped packed run writes a credible one-block
+	 * prefix, reports -EIO, and quarantines the full two-block reservation. */
+	for (index = 0;
+	     index < (SWAPZ_SEGMENT_BLOCKS - 2U) / 2U;
+	     ++index) {
+		partial_run_blocks = 1U;
+		injected_run_error = -EIO;
+		committed = 99U;
+		CHECK(swapz_engine_write_window_batched(
+			      &e, compressed_pages, 2U, &committed) == -EIO);
+		CHECK(committed == 0U && !a.in_flight && !a.batch_pending);
+		CHECK(a.next_block ==
+		      blocked_destination * SWAPZ_SEGMENT_BLOCKS + 1U +
+		      2U * (index + 1U));
+	}
+	stalled_cursor = (blocked_destination + 1U) *
+		SWAPZ_SEGMENT_BLOCKS - 1U;
+	CHECK(a.next_block == stalled_cursor &&
+	      a.abandoned_blocks == SWAPZ_SEGMENT_BLOCKS - 2U);
+	CHECK(maps[1].start_block == prior_compressed[0].start_block &&
+	      maps[1].generation == prior_compressed[0].generation &&
+	      maps[2].start_block == prior_compressed[1].start_block &&
+	      maps[2].generation == prior_compressed[1].generation);
+	CHECK(verify_page(0U) == 0 && verify_page(1U) == 0 &&
+	      verify_page(2U) == 0 && verify_raw_page(8U) == 0);
+	for (block = blocked_destination * SWAPZ_SEGMENT_BLOCKS + 1U;
+	     block < stalled_cursor; ++block)
+		CHECK(!live[block] && !classes[block]);
+
+	/* Only one destination block remains, so the two-block extent must fail
+	 * in staging. There must be no lower callback and no cursor rollback. */
+	lower_writes_before = lower_writes;
+	committed = 99U;
+	error = swapz_engine_write_window_batched(
+		&e, compressed_pages, 2U, &committed);
+	if (error != -ENOSPC || committed != 0U ||
+	    lower_writes != lower_writes_before ||
+	    a.next_block != stalled_cursor) {
+		const int prior_mapping_authoritative =
+			maps[1].start_block == prior_compressed[0].start_block &&
+			maps[1].generation == prior_compressed[0].generation &&
+			maps[2].start_block == prior_compressed[1].start_block &&
+			maps[2].generation == prior_compressed[1].generation;
+
+		fprintf(stderr, "%s:%d FAIL phase=gc"
+			" failure_class=staging_exhaustion"
+			" original_errno=%d expected_errno=%d"
+			" victim=%u victim_role=%u"
+			" destination=%u destination_role=%u"
+			" recovery_ownership=authority_rotation"
+			" progress_possible=%u"
+			" prior_mapping_authoritative=%d"
+			" committed=%u lower_writes_before=%u"
+			" lower_writes_after=%u cursor=%u\n",
+			__FILE__, __LINE__, error, -ENOSPC,
+			victim, (unsigned int)roles[victim],
+			blocked_destination,
+			(unsigned int)roles[blocked_destination],
+			(unsigned int)!roles[replacement_destination],
+			prior_mapping_authoritative, (unsigned int)committed,
+			lower_writes_before, lower_writes, a.next_block);
+		return 1;
+	}
+	CHECK(a.gc_allocation && a.gc_forbidden_victim == victim &&
+	      a.gc_destination == blocked_destination &&
+	      a.open_segment == blocked_destination);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
+
+	/* Advance only after the replacement reserve is independently proven
+	 * dead. The blocked destination retains RAW8 plus all uncertain bytes. */
+	CHECK(swapz_gc_advance_rotation_destination(
+		      &a, blocked_destination) == 0);
+	CHECK(a.gc_destination == replacement_destination &&
+	      a.open_segment == replacement_destination &&
+	      roles[blocked_destination] && !roles[replacement_destination] &&
+	      roles[victim]);
+
+	committed = 0U;
+	CHECK(swapz_engine_write_window_batched(
+		      &e, compressed_pages, 2U, &committed) == 0);
+	CHECK(committed == 2U &&
+	      maps[1].generation == prior_compressed[0].generation + 1U &&
+	      maps[2].generation == prior_compressed[1].generation + 1U);
+	CHECK(swapz_gc_commit_rotation(&a, victim) == 0);
+	CHECK(!a.gc_allocation && !roles[victim] &&
+	      roles[blocked_destination] && roles[replacement_destination]);
+	CHECK(verify_page(0U) == 0 && verify_page(1U) == 0 &&
+	      verify_page(2U) == 0 && verify_raw_page(8U) == 0);
+
+	/* Role recovery is useful only if foreground publication really resumes. */
+	CHECK(write_one(3U) == 0 && verify_page(3U) == 0);
+	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
+	     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
+		CHECK(!live[block]);
+	return 0;
+}
+
 /* A canceled, never-submitted reservation is abandoned, not published.
  * The same preallocated run storage can be reused only after the cancellation
  * returns and the next prepare has built a new immutable image. */
@@ -1047,6 +1217,7 @@ int main(void)
 	CHECK(test_partial_gc_failures_resume_same_reserve() == 0); passed++;
 	CHECK(test_last_compressed_page_boundary_retry() == 0); passed++;
 	CHECK(test_mixed_raw_gc_uncertain_completion_recovery() == 0); passed++;
+	CHECK(test_gc_compressed_tail_staging_exhaustion() == 0); passed++;
 	CHECK(test_aborted_prepare_preserves_generation_and_cursor() == 0); passed++;
 	printf("SWAPZ_GC_ENGINE_ROTATION_TESTS_PASS=%d\n", passed);
 	return 0;
