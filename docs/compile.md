@@ -33,7 +33,7 @@ weakening their refusal of group/world-writable files.
 The one generated qualification artifact outside `build/` is the root
 `test_results.json`. This is UTF-8 JSON with newlines, without compression or indentation. It is
 intentionally overwriteable and versioned so
-the latest completed PASS/FAIL/BLOCKED result is directly readable from
+the latest completed PASS/FAIL/BLOCKED/INCOMPLETE result is directly readable from
 GitHub; no second report copy is generated.
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the release-metadata source. Kbuild generates the version header; DKMS and userspace resolve the same value.

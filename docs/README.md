@@ -56,7 +56,7 @@ report BLOCKED (nonzero) when safe noninteractive loaded qualification is
 unavailable.
 
 Completed `make test` runs replace root `test_results.json` with one sanitized,
-plain UTF-8 PASS/FAIL/BLOCKED report and publish ordinary non-force fast-forward
+plain UTF-8 PASS/FAIL/BLOCKED/INCOMPLETE report and publish ordinary non-force fast-forward
 report commits on `main`. Prior evidence remains in Git history. A report-only
 commit is not new production source: `tested_commit_sha` identifies the nearest
 non-report code ancestor. Publication accepts concurrent advances only when
