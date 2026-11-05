@@ -1324,6 +1324,24 @@ Mapper semantics; the official acceptance command remains `make test`.
 
 ## Retained-window scheduler qualification
 
+For queued-I/O forward-progress review, distinguish a bounded **staged**
+64-record window from the potentially longer already-accepted BIO FIFO and
+from the separately bounded preparation-slot mask. A 65th accepted BIO is not
+a 65th staged array entry. Closed admission, an unready oldest descriptor,
+a lower submission error, a terminally cancelled RAW-selected producer and
+drain with detached lower I/O must be checked against actual owner/wake
+transitions: one ordered owner (or the existing leased submitter dispatch),
+the producer that owns its prepared page, and the lower completion callback.
+Do not construct a second simultaneous ordered owner to manufacture a
+counterexample. Check that success and failure release every remaining
+ownership/READY charge exactly once; a worker's early return is safe only
+when a real producer, submitter or lower callback can wake it, or the closed
+drain explicitly joins and restarts it. Bounded failure-only diagnostics for
+such tests identify phase, expected and observed outstanding BIOs, first/last
+sequence or slot index, oldest owner, errno or exit code, and latched terminal
+failure without BIO addresses or contents. Pure window-policy and lane-gap
+tests alone cannot establish those kernel lifecycle facts.
+
 Native tests must keep authoritative sampled tails ahead of dry four-record
 closure, and must cover the device-relative idle bound (half service EWMA,
 20us floor, retain_ms cap, deadline only ever earlier), the pure-WRITE
@@ -2105,7 +2123,15 @@ be pooled as byte-for-byte-equivalent telemetry across this boundary.
 The observational ID178 module compiles the pure `src/kernel/lane-gap.h`
 helpers directly in `tests/runtime/native/io/lane-gap.c`; test every
 timestamp-order permutation on the bounded grid, invalid/zero marks and the
-successor/dwell bin transitions. Rootless source contracts forbid scheduling,
+successor/dwell bin transitions. A rejected partition (zero/missing mark,
+reversed completion/submit endpoints, or null output) must leave **all six**
+previous output fields unchanged, not merely the final seal field. Initialize
+distinct nonzero sentinels before invalid cases and preserve a valid partition
+across the 64-bit reversal boundary; a partially overwritten rejected
+attribution is a regression even if the boolean return value is correct.
+Fail-only native diagnostics identify the phase, relevant timestamp boundaries,
+the first differing field and its expected/observed value. This passive
+contract does not count accepted BIOs or qualify kernel drain progress. Rootless source contracts forbid scheduling,
 lock, wait, queue, or allocation calls inside the accounting helpers; require
 the new per-BIO timestamp fields without changing ID114's marks, sole
 ordered-domain chronology, generation-safe `profile_epoch` invalidation,

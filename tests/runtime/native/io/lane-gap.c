@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Pure ID178 accounting checks: no privileged device or BIO simulation. */
+#include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,20 +46,68 @@ static int test_partitions(void)
 	CHECK(cases == 59049);
 	return 0;
 }
+/* Rejected samples must never partially rewrite an earlier valid partition. */
+static int parts_unchanged(const struct swapz_lane_gap_parts *observed,
+			   const struct swapz_lane_gap_parts *expected,
+			   const char *phase, swapz_u64 completion_ns,
+			   swapz_u64 submit_ns)
+{
+	const struct {
+		const char *name;
+		swapz_u64 expected;
+		swapz_u64 observed;
+	} fields[] = {
+		{ "completion_wake", expected->completion_wake_ns,
+			observed->completion_wake_ns },
+		{ "publication", expected->publication_ns,
+			observed->publication_ns },
+		{ "no_work", expected->no_work_ns, observed->no_work_ns },
+		{ "admitted_unowned", expected->admitted_unowned_ns,
+			observed->admitted_unowned_ns },
+		{ "staged_held", expected->staged_held_ns,
+			observed->staged_held_ns },
+		{ "seal", expected->seal_ns, observed->seal_ns },
+	};
+	unsigned int index;
+
+	for (index = 0; index < sizeof(fields) / sizeof(fields[0]); ++index) {
+		if (fields[index].expected == fields[index].observed)
+			continue;
+		fprintf(stderr, "phase=%s completion_ns=%" PRIu64
+			" submit_ns=%" PRIu64 " field=%s expected=%" PRIu64
+			" observed=%" PRIu64 " exit_code=1\n", phase,
+			completion_ns, submit_ns, fields[index].name,
+			fields[index].expected, fields[index].observed);
+		return 0;
+	}
+	return 1;
+}
 static int test_invalid(void)
 {
-	struct swapz_lane_gap_parts part = { .seal_ns = 987 };
+	const struct swapz_lane_gap_parts retained = {
+		.completion_wake_ns = 101,
+		.publication_ns = 102,
+		.no_work_ns = 103,
+		.admitted_unowned_ns = 104,
+		.staged_held_ns = 105,
+		.seal_ns = 987,
+	};
+	struct swapz_lane_gap_parts part = retained;
 	swapz_u64 marks[] = { 100, 101, 102, 103, 104, 105, 106 };
 	unsigned int index;
 
 	CHECK(!swapz_lane_gap_partition(100, 101, 102, 103, 104, 105, 99, &part));
+	CHECK(parts_unchanged(&part, &retained, "reversed-endpoints", 100, 99));
 	CHECK(!swapz_lane_gap_partition(100, 101, 102, 103, 104, 105, 106, NULL));
+	CHECK(parts_unchanged(&part, &retained, "null-output", 100, 106));
 	for (index = 0; index < 7; ++index) {
 		swapz_u64 saved = marks[index];
+
 		marks[index] = 0;
 		CHECK(!swapz_lane_gap_partition(marks[0], marks[1], marks[2],
 			marks[3], marks[4], marks[5], marks[6], &part));
-		CHECK(part.seal_ns == 987);
+		CHECK(parts_unchanged(&part, &retained, "zero-mark",
+					marks[0], marks[6]));
 		marks[index] = saved;
 	}
 	CHECK(swapz_lane_gap_partition(100, 101, 102, 103, 104, 105, 100, &part));
@@ -107,8 +156,14 @@ static int test_extreme_timestamps_and_successor_counts(void)
 	CHECK(swapz_lane_gap_partition(UINT64_MAX, 1, 1, 1, 1, 1,
 		UINT64_MAX, &part));
 	CHECK(sum(&part) == 0);
-	CHECK(!swapz_lane_gap_partition(UINT64_MAX, 1, 1, 1, 1, 1,
-		UINT64_MAX - 1U, &part));
+	{
+		const struct swapz_lane_gap_parts retained = part;
+
+		CHECK(!swapz_lane_gap_partition(UINT64_MAX, 1, 1, 1, 1, 1,
+			UINT64_MAX - 1U, &part));
+		CHECK(parts_unchanged(&part, &retained, "reversed-u64",
+					UINT64_MAX, UINT64_MAX - 1U));
+	}
 	CHECK(sum(&part) == 0);
 
 	for (index = 0; index < sizeof(successor_counts) /
