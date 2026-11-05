@@ -489,11 +489,14 @@ run_case() {
         die "unowned module unload was attempted"
     if [[ "$case_name" == foreign_nullb ]]; then
         [[ -d "$FIXTURE/sys/kernel/config/nullb/foreign-device" &&
-           -f "$FIXTURE/sys/block/nullb7/dev" ]] ||
+           -f "$FIXTURE/sys/block/nullb7/dev" &&
+           "$(cat "$FIXTURE/sys/block/nullb7/dev")" == "240:7" ]] ||
             die "unrelated null_blk device was claimed or changed"
     elif [[ "$case_name" == unclaimed_nullb_pair ]]; then
         [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" &&
            -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN" &&
+           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/memory_backed")" == 1 &&
+           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/memory_backed")" == 1 &&
            "$output" == *"observed_proof=token_name_only"* &&
            "$output" == *"retained_state_action=retain_unclaimed_null_blk"* &&
            "$output" != *"$FIXTURE/"* &&

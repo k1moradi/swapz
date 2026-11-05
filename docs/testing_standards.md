@@ -559,6 +559,17 @@ module creation authority, so preflight must retain the module rather than
 `swapz-demo-<token>` and exact `SWAPZ-TEST-<token>` UUID variants are
 separate from primary lifecycle ownership and must never adopt one another.
 
+The rootless loaded-preflight fixture must distinguish two concurrent
+token-shaped but unclaimed configfs objects from an unrelated foreign,
+index-named null_blk device. The pair must return BLOCKED for absent creation
+authority, retain both original objects and their memory-backed attributes,
+and report only proof categories rather than private names or fixture paths.
+The unrelated device, when no dm_swapz mapping is loaded, must remain unchanged
+without a false ownership refusal. Neither path may invoke unowned module
+unload or inferred-PID signaling; an unexpected internal command failure is
+FAIL, not a benign ownership BLOCKED. This regular-file evidence cannot
+establish real host ownership or authorize loaded cleanup.
+
 A positively identified stale benchmark mapper is necessary but not sufficient
 to dispose of its lower. The ordinary benchmark pair intentionally generates
 its mapper token independently from each RAM-lower token, so token equality is
