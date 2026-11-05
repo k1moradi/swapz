@@ -466,7 +466,10 @@ oracle must reject any seed that is not exactly 32 lowercase hexadecimal
 characters with a bounded exit-2 diagnostic and no traceback or echoed invalid
 seed. Validated seed bytes are immutable for the worker lifetime and should be
 parsed once, then reused by the fill and verification loops without changing
-the deterministic page-pattern bytes.
+the deterministic page-pattern bytes. A failed core-dump resource limit
+(OSError or ValueError) or dumpability lock is a pre-readiness BLOCKED
+refusal (exit 2): no WAITING record, anonymous allocation or traceback may
+escape. Rootless terminal tests inject both limit failures.
 
 The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
 artifact identity, derive the same
@@ -561,9 +564,10 @@ Closed Python text streams raise `ValueError` rather than `BrokenPipeError`;
 the fill and terminal evidence publishers must retain a structured nonzero
 failure with complete cleanup evidence, never an uncaught traceback.
 The parent must reject reordered records, any duplicate or truncated bytes
-remaining after the one accepted VERIFIED record, nonzero child exit, and
-inconsistent full page/byte mismatch totals or capped mismatch samples before
-aggregation. Successful child exit is terminal evidence only after EOF proves
+remaining after the one accepted VERIFIED record, nonzero child exit, stalled
+or signal-killed workers, and inconsistent full page/byte mismatch totals or
+capped mismatch samples before aggregation. A timeout or unexpected SIGKILL
+must report incomplete terminal evidence rather than successful readback. Successful child exit is terminal evidence only after EOF proves
 that no unconsumed oracle output remains. Short reads, interruption and failed
 unmapping must not produce a complete-looking record. Failure-only diagnostics
 identify the first failure phase, fully compared versus allocated pages/bytes,

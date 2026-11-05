@@ -25,12 +25,12 @@ PR_SET_DUMPABLE = 4
 
 
 def _disable_dumps() -> None:
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     try:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
         libc = ctypes.CDLL(None, use_errno=True)
         if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
             raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE) failed")
-    except (AttributeError, OSError) as exc:
+    except (AttributeError, OSError, ValueError) as exc:
         raise RuntimeError(f"cannot disable process dumps: {exc}") from exc
 
 

@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import signal
 from pathlib import Path
 import sys
 import tempfile
@@ -256,6 +257,62 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertIn(
             "error=byte_mismatch errno=none cleanup_complete=true", stderr)
         self.assertNotIn("ab" * 16, stderr)
+
+
+    def test_dump_limit_failure_blocks_before_readiness_or_allocation(self):
+        for resource_error in (
+                OSError(errno.EPERM, "synthetic RLIMIT_CORE failure"),
+                ValueError("synthetic invalid resource limit")):
+            with self.subTest(error=type(resource_error).__name__):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with mock.patch.object(
+                        oracle.resource, "setrlimit",
+                        side_effect=resource_error), \
+                        mock.patch.object(oracle, "_emit") as emit, \
+                        mock.patch.object(oracle.mmap, "mmap") as allocate, \
+                        contextlib.redirect_stdout(stdout), \
+                        contextlib.redirect_stderr(stderr):
+                    status = oracle.run_workload("ab" * 16, oracle.MIN_MIB)
+                self.assertEqual(status, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn(
+                    "BLOCKED: cannot disable process dumps:", stderr.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
+                self.assertNotIn("ab" * 16, stderr.getvalue())
+                emit.assert_not_called()
+                allocate.assert_not_called()
+
+    def test_parent_stall_and_killed_child_have_no_terminal_evidence(self):
+        read_descriptor, write_descriptor = os.pipe()
+        try:
+            with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                stalled = mock.Mock(stdout=output, stderr=io.StringIO())
+                stalled.poll.return_value = None
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure,
+                        "phase=terminal child_exit=running "
+                        "evidence_complete=false: timed out waiting for "
+                        "ORACLE_VERIFIED="):
+                    qualify._oracle_event(
+                        stalled, "ORACLE_VERIFIED=",
+                        qualify.time.monotonic() - 1, lambda: None, bytearray())
+        finally:
+            os.close(write_descriptor)
+
+        read_descriptor, write_descriptor = os.pipe()
+        os.close(write_descriptor)
+        with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+            killed = mock.Mock(stdout=output, stderr=io.StringIO())
+            killed.poll.return_value = -signal.SIGKILL
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "phase=terminal child_exit=-9 "
+                    "evidence_complete=false: closed output before "
+                    "ORACLE_VERIFIED="):
+                qualify._oracle_event(
+                    killed, "ORACLE_VERIFIED=",
+                    qualify.time.monotonic() + 1, lambda: None, bytearray())
 
     def test_interrupt_before_fill_returns_bounded_failure_without_allocating(self):
         stderr = io.StringIO()
@@ -912,9 +969,13 @@ class TerminalEvidenceContracts(unittest.TestCase):
             ("no mapper usage", {"mapper_used_delta_kib": 0}),
             ("no target write", {"fill_status_after": zero_counters}),
             ("no lower write", {"lower_after_fill": qualify.BlockStats(0, 0)}),
+            ("undercovered lower write", {
+                "lower_after_fill": qualify.BlockStats(0, 1)}),
             ("no vmstat swapout", {"vm_after_fill": {"pswpout": 0}}),
             ("no target read", {"verify_status_after": fill_counters}),
             ("no lower read", {"lower_after_verify": qualify.BlockStats(0, page_bytes // 512)}),
+            ("undercovered lower read", {
+                "lower_after_verify": qualify.BlockStats(1, page_bytes // 512)}),
             ("no vmstat swapin", {"vm_after_verify": {"pswpin": 0}}),
             ("short oracle", {"oracle": {**verified, "verified_bytes": 0}}),
             ("corrupt oracle", {"oracle": {**verified, "mismatches": 1}}),
