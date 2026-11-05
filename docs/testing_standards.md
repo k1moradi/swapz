@@ -70,7 +70,10 @@ bind all three failure epilogues to that helper before any success publication.
 Because `SWAPZ_PRIMARY_ROOTLESS_TEST` compiles out those privileged lifecycle
 callers, keep the production-only static helper out of that build's translation
 unit while continuing to compile its actual body in the isolated errno fixture;
-the rootless manager build remains warning-clean under `-Werror`.
+the rootless manager build remains warning-clean under `-Werror`. Any generated
+production START-coordinator fixture must also include the extracted helper
+after its recovery-state test seam is defined, so the actual caller and helper
+compile together without an implicit declaration.
 
 `tests/runtime/native/primary-lifecycle-audit-test.py` is a rootless
 adversarial model for those invariants and performs no privileged or physical

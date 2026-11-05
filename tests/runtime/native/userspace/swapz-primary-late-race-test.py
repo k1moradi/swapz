@@ -970,7 +970,9 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_dm_create_mapper(a,b,c,d,e,f,g) fixture_mapper_create(e,f,g)
 #define swapz_primary_format_mapper_swap(...) fixture_mkswap()
 #define swapz_primary_activate_mapper_swap(a,b,c,d,e) fixture_swapon(e)
-#define swapz_primary_state_require_recovery_at(...) (++recovery_marks, 0)
+#define swapz_primary_state_require_recovery_at(a,b,c,d) \
+	((void)(a), (void)(b), (void)(c), (void)(d), ++recovery_marks, 0)
+@@RECOVERY_FAILURE_HELPER@@
 #define swapz_primary_release_partition_owner_at(...) fixture_owner_release()
 #define swapz_primary_swap_device_active(device) fixture_observed_swap_device_active(device)
 #define close(fd) 0
@@ -1366,6 +1368,8 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         "swapz_primary_mountinfo_exit_error",
         "swapz_primary_read_mount_facts",
     ))
+    recovery_failure_helper = production_function(
+        source, "swapz_primary_require_recovery_preserving_errno")
     coordinator = production_function(source, "swapz_primary_start_prepared")
     if mutant:
         coordinator = omit_final_revalidation(coordinator)
@@ -1375,6 +1379,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         '@@SWAP_FUNCTION@@', swap_function).replace(
         '@@TARGET_HELPERS@@', target_helpers).replace(
         '@@TARGET_OPEN_FUNCTION@@', target_open).replace(
+        '@@RECOVERY_FAILURE_HELPER@@', recovery_failure_helper).replace(
         '@@START_FUNCTION@@', coordinator)
     if "@@" in unit:
         raise AssertionError("Unexpanded harness placeholder")
