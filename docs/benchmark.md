@@ -572,7 +572,7 @@ with a passing sample. Physical execution is scheduled exclusively by the
 host/Codex owner; no VM/fallback run is an acceptable substitute and no two
 host experiments may overlap.
 
-The read-only [private evidence helper](../tests/runtime/benchmark/physical-campaign-evidence.py#L1331-L1347)
+The read-only [private evidence helper](../tests/runtime/benchmark/physical-campaign-evidence.py)
 is the evidence boundary for that scheduler, not a scheduler or public command.
 Its `snapshot` subcommand requires `--source-sha`, `--device` and `--result`;
 the scheduler captures one observation before the first arm and one after the
