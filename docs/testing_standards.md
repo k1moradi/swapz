@@ -283,12 +283,14 @@ namespace identity change detected after a successful table read refuses with
 production change for that case stays with the production owner.
 
 The optional rootless `unshare` child-failure control must first run an
-assertion-free namespace-setup probe. Only failure of that preflight is an
-environmental SKIP. Once setup has succeeded, a missing child-start marker, an
-unexpected child error, or a wrong namespace identity is FAIL and must never be
-reclassified as setup unavailability. Keep an open parent namespace fd as the
-pinned namespace reference for the comparison rather than passing raw host
-namespace device/inode values through argv or diagnostics.
+assertion-free namespace-setup probe with its own child-start marker. A nonzero
+preflight before that marker is an environmental SKIP; if the marker was
+observed, a nonzero preflight is FAIL. After a successful preflight, a missing
+test-child start marker, an unexpected child error, or a wrong namespace
+identity is FAIL and must never be reclassified as setup unavailability. Keep
+an open parent namespace fd as the pinned namespace reference for the
+comparison rather than passing raw host namespace device/inode values through
+argv or diagnostics.
 
 The primary-start rootless lifecycle fixture must independently show a
 foreign-PID conflict on the initial admission, a different visible PID appearing
