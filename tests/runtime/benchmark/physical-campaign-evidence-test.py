@@ -251,6 +251,145 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertNotIn("/private/host", str(audit))
         self.assertEqual(record["raw"]["failure_reason"], "/private/host/error")
 
+    def test_missing_or_unknown_producer_phase_is_blocked(self):
+        # A FAIL verdict without the producer's real measurement phase cannot
+        # be promoted by inventing a generic audit phase.
+        for stage in (None, "unknown-private-phase"):
+            with self.subTest(stage=stage):
+                record = pair(1, 1100)
+                record["status"] = "EXCLUDED"
+                record["excluded"] = True
+                record["analysis_usable"] = False
+                record["raw"]["verdict"] = "FAIL"
+                if stage is not None:
+                    record["raw"]["stage"] = stage
+                audit, _ = inspect(
+                    [record], summary_status="FAIL_OR_INCOMPLETE")
+                self.assertEqual(
+                    audit["status"], "BLOCKED", audit["diagnostics"])
+                self.assertIsNone(audit["first_failed_phase"])
+                self.assertFalse(any(
+                    item["status"] == "FAIL"
+                    for item in audit["diagnostics"]))
+
+    def test_duplicate_identity_invalidates_both_failure_witnesses(self):
+        def failed_pair(run_id):
+            record = pair(1, 1100, run_id=run_id)
+            record["status"] = "EXCLUDED"
+            record["excluded"] = True
+            record["analysis_usable"] = False
+            record["raw"]["verdict"] = "FAIL"
+            record["raw"]["stage"] = "measure"
+            return record
+
+        first = failed_pair("first-run")
+        duplicate_pair = pair(2, 1800, run_id="second-run")
+        duplicate_pair["pair_id"] = first["pair_id"]
+        audit, metrics = inspect(
+            [first, duplicate_pair], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("pair.pair_id", metrics)
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+        first = failed_pair("duplicate-run")
+        duplicate_run = pair(2, 1800, run_id="duplicate-run")
+        audit, metrics = inspect(
+            [first, duplicate_run], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("arm.workload_id", metrics)
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+    def test_overlap_invalidates_both_physical_failure_witnesses(self):
+        first = pair(1, 1100)
+        first["status"] = "EXCLUDED"
+        first["excluded"] = True
+        first["analysis_usable"] = False
+        first["raw"]["verdict"] = "FAIL"
+        first["raw"]["stage"] = "measure"
+        # Pair 2 overlaps both pair-1 arms. The later diagnostic must also
+        # invalidate the earlier arm as an authenticated physical witness.
+        second = pair(2, 1150)
+        audit, metrics = inspect(
+            [first, second], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("arm.monotonic_window_ns", metrics)
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+    def test_explicit_v2_failure_requires_campaign_target_binding(self):
+        record = pair(1, 1100)
+        record["status"] = "EXCLUDED"
+        record["excluded"] = True
+        record["analysis_usable"] = False
+        record["raw"]["verdict"] = "FAIL"
+        record["raw"]["stage"] = "measure"
+        decisions = {
+            workload: {"status": "INCOMPLETE"}
+            for workload in QUALIFICATION.WORKLOADS
+        }
+        before, after = host_snapshots()
+        audit = EVIDENCE.audit_physical_pairs({
+            "status": "FAIL_OR_INCOMPLETE",
+            "evaluation_protocol": "v2",
+            "records": [record],
+            "decisions": decisions,
+        }, before, after)
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+    def test_invalid_host_source_or_boot_cannot_authenticate_failure(self):
+        for binding in ("source", "boot"):
+            with self.subTest(binding=binding):
+                record = pair(1, 1100)
+                record["status"] = "EXCLUDED"
+                record["excluded"] = True
+                record["analysis_usable"] = False
+                record["raw"]["verdict"] = "FAIL"
+                record["raw"]["stage"] = "measure"
+                before, after = host_snapshots()
+                if binding == "source":
+                    for snapshot in (before, after):
+                        snapshot["source_sha"] = "not-a-source-sha"
+                    record["source_sha"] = "not-a-source-sha"
+                    for label in ("raw", "swapz"):
+                        record[label]["source_sha"] = "not-a-source-sha"
+                else:
+                    for snapshot in (before, after):
+                        snapshot["kernel"]["boot_id"] = None
+                    for label in ("raw", "swapz"):
+                        record[label]["arm_boot_id"] = None
+                audit, _ = inspect(
+                    [record], before=before, after=after,
+                    summary_status="FAIL_OR_INCOMPLETE")
+                self.assertEqual(
+                    audit["status"], "BLOCKED", audit["diagnostics"])
+                self.assertIsNone(audit["first_failed_phase"])
+                self.assertFalse(any(
+                    item["status"] == "FAIL"
+                    for item in audit["diagnostics"]))
+
+    def test_summary_pass_cannot_authenticate_failed_decision(self):
+        records = [pair(index, 1100 + 500 * index)
+                   for index in range(1, 6)]
+        names = ("useful_write", "lower_write_bytes",
+                 "lower_write_requests", "read_p95", "read_p99",
+                 "write_p95", "write_p99", "cpu")
+        decision = QUALIFICATION.service_decision(
+            [{"deltas": {name: 0.0 for name in names}} for _ in range(5)],
+            "sd-service-balanced")
+        self.assertEqual(decision["status"], "FAIL")
+        audit, _ = inspect(
+            records, decisions={"sd-service-balanced": decision},
+            summary_status="PASS")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
     def test_counterbalanced_order_and_duplicate_indices_block_audit(self):
         record = pair(1, 1100)
         record["order"] = "swapz-first"
