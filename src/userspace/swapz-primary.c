@@ -6207,6 +6207,32 @@ int swapz_primary_state_require_recovery_at(
 		recovery_fd, lock_fd, &recovery_required, expected_owner);
 }
 
+static int swapz_primary_require_recovery_preserving_errno(
+	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner,
+	const char *operation, int original_errno)
+{
+	const int primary_errno = original_errno ? original_errno : EIO;
+
+	if (swapz_primary_state_require_recovery_at(
+		    recovery_fd, lock_fd, run_id, expected_owner) < 0) {
+		const int recovery_errno = errno ? errno : EIO;
+
+		fprintf(stderr,
+			"PRIMARY_%s=RECOVERY_STATE_FAILED "
+			"phase=recovery-state-persist "
+			"check=durable-recovery-state "
+			"expected_proof=RECOVERY_REQUIRED-persisted "
+			"observed_proof=write-failed "
+			"original_errno=%d recovery_errno=%d "
+			"retained_resource=transaction-evidence "
+			"disposition=BLOCKED "
+			"safe_next_action=read-only-inspect-recovery-state\n",
+			operation, primary_errno, recovery_errno);
+	}
+	errno = primary_errno;
+	return primary_errno;
+}
+
 int swapz_primary_release_partition_owner_at(int recovery_fd, int lock_fd,
 						     const char *run_id,
 						     uid_t expected_owner)
@@ -11594,21 +11620,9 @@ out:
 			saved_errno, starting_persisted ?
 				"STARTING_PENDING_RECOVERY_UPDATE" : "READY");
 	if (result < 0 && starting_persisted && recovery_fd >= 0 &&
-	    lock_fd >= 0) {
-		int failure_errno = saved_errno;
-
-		if (swapz_primary_state_require_recovery_at(
-			    recovery_fd, lock_fd, state.run_id, 0) < 0) {
-			saved_errno = errno ? errno : EIO;
-			fprintf(stderr,
-				"PRIMARY_START=RECOVERY_STATE_FAILED run_id=%s "
-				"original_error=%s recovery_error=%s\n",
-				state.run_id, strerror(failure_errno),
-				strerror(saved_errno));
-		} else {
-			saved_errno = failure_errno;
-		}
-	}
+	    lock_fd >= 0)
+		saved_errno = swapz_primary_require_recovery_preserving_errno(
+			recovery_fd, lock_fd, state.run_id, 0, "START", saved_errno);
 	if (target_fd >= 0)
 		(void)close(target_fd);
 	if (lock_fd >= 0)
@@ -11798,21 +11812,9 @@ out:
 			"PRIMARY_STOP=FAILED phase=%s errno=%d error=%s\n",
 			failure_phase, saved_errno, strerror(saved_errno));
 	if (result < 0 && stopping_persisted && !complete_persisted &&
-	    recovery_fd >= 0 && lock_fd >= 0) {
-		int failure_errno = saved_errno;
-
-		if (swapz_primary_state_require_recovery_at(
-			    recovery_fd, lock_fd, state.run_id, 0) < 0) {
-			saved_errno = errno ? errno : EIO;
-			fprintf(stderr,
-				"PRIMARY_STOP=RECOVERY_STATE_FAILED run_id=%s "
-				"original_error=%s recovery_error=%s\n",
-				state.run_id, strerror(failure_errno),
-				strerror(saved_errno));
-		} else {
-			saved_errno = failure_errno;
-		}
-	}
+	    recovery_fd >= 0 && lock_fd >= 0)
+		saved_errno = swapz_primary_require_recovery_preserving_errno(
+			recovery_fd, lock_fd, state.run_id, 0, "STOP", saved_errno);
 	if (target_fd >= 0)
 		(void)close(target_fd);
 	if (lock_fd >= 0)
@@ -12022,21 +12024,9 @@ out:
 			"PRIMARY_RECOVER=FAILED phase=%s errno=%d error=%s\n",
 			failure_phase, saved_errno, strerror(saved_errno));
 	if (result < 0 && recovering_persisted && !complete_persisted &&
-	    recovery_fd >= 0 && lock_fd >= 0) {
-		int failure_errno = saved_errno;
-
-		if (swapz_primary_state_require_recovery_at(
-			    recovery_fd, lock_fd, state.run_id, 0) < 0) {
-			saved_errno = errno ? errno : EIO;
-			fprintf(stderr,
-				"PRIMARY_RECOVER=RECOVERY_STATE_FAILED run_id=%s "
-				"original_error=%s recovery_error=%s\n",
-				state.run_id, strerror(failure_errno),
-				strerror(saved_errno));
-		} else {
-			saved_errno = failure_errno;
-		}
-	}
+	    recovery_fd >= 0 && lock_fd >= 0)
+		saved_errno = swapz_primary_require_recovery_preserving_errno(
+			recovery_fd, lock_fd, state.run_id, 0, "RECOVER", saved_errno);
 	if (target_fd >= 0)
 		(void)close(target_fd);
 	if (lock_fd >= 0)

@@ -10,6 +10,7 @@ private cleanup diagnostics.
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import errno
 import os
 import re
 import shlex
@@ -426,6 +427,165 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn("claim=none", failure_format)
         self.assertNotIn("run_id=%s", failure_format)
         self.assertNotIn("target=%s", failure_format)
+
+    def test_lifecycle_recovery_state_failure_preserves_original_errno(self):
+        helper_start = self.primary.index(
+            "static int swapz_primary_require_recovery_preserving_errno(")
+        helper_end = self.primary.index("\n}\n", helper_start) + 3
+        helper = self.primary[helper_start:helper_end]
+
+        with TemporaryDirectory(
+                prefix="swapz-primary-recovery-errno-") as directory:
+            fixture = Path(directory)
+            source = fixture / "recovery-errno.c"
+            binary = fixture / "recovery-errno"
+            source.write_text(
+                r"""#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+
+static int injected_recovery_errno;
+
+int swapz_primary_state_require_recovery_at(
+    int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)run_id;
+    (void)expected_owner;
+    if (injected_recovery_errno == 0)
+        return 0;
+    errno = injected_recovery_errno;
+    return -1;
+}
+
+""" + helper + r"""
+int main(int argc, char **argv)
+{
+    int original_errno;
+    int preserved_errno;
+
+    if (argc != 4)
+        return 64;
+    original_errno = atoi(argv[2]);
+    injected_recovery_errno = atoi(argv[3]);
+    errno = 0;
+    preserved_errno = swapz_primary_require_recovery_preserving_errno(
+        7, 8, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0,
+        argv[1], original_errno);
+    printf("preserved=%d errno=%d\n", preserved_errno, errno);
+    return 0;
+}
+""",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra",
+                    "-Werror", "-Wpedantic", str(source), "-o", str(binary),
+                ],
+                cwd=ROOT,
+                check=True,
+            )
+            cases = (
+                ("START", errno.EIO, errno.ENOSPC),
+                ("STOP", errno.EBUSY, errno.EIO),
+                ("RECOVER", errno.ESTALE, errno.EROFS),
+            )
+            for operation, original_errno, recovery_errno in cases:
+                with self.subTest(operation=operation):
+                    result = subprocess.run(
+                        [
+                            str(binary), operation, str(original_errno),
+                            str(recovery_errno),
+                        ],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(
+                        result.stdout,
+                        f"preserved={original_errno} errno={original_errno}\n",
+                    )
+                    self.assertIn(
+                        f"PRIMARY_{operation}=RECOVERY_STATE_FAILED "
+                        "phase=recovery-state-persist "
+                        "check=durable-recovery-state "
+                        "expected_proof=RECOVERY_REQUIRED-persisted "
+                        "observed_proof=write-failed "
+                        f"original_errno={original_errno} "
+                        f"recovery_errno={recovery_errno} "
+                        "retained_resource=transaction-evidence "
+                        "disposition=BLOCKED "
+                        "safe_next_action=read-only-inspect-recovery-state",
+                        result.stderr,
+                    )
+                    self.assertNotRegex(result.stderr, r"\b[0-9a-f]{32}\b")
+
+                    persisted = subprocess.run(
+                        [
+                            str(binary), operation, str(original_errno), "0",
+                        ],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    self.assertEqual(persisted.returncode, 0, persisted.stderr)
+                    self.assertEqual(
+                        persisted.stdout,
+                        f"preserved={original_errno} errno={original_errno}\n",
+                    )
+                    self.assertEqual(persisted.stderr, "")
+
+    def test_start_stop_recover_share_errno_preserving_recovery_epilogue(self):
+        function_ranges = (
+            (
+                "START",
+                "static int swapz_primary_start_prepared(",
+                "static int swapz_primary_state_recoverable(",
+                "PRIMARY_START=ACTIVE",
+            ),
+            (
+                "STOP",
+                "static int swapz_primary_stop_active(",
+                "static int swapz_primary_recover(",
+                "PRIMARY_STOP=COMPLETE",
+            ),
+            (
+                "RECOVER",
+                "static int swapz_primary_recover(",
+                "static int swapz_primary_read_only_plan(",
+                "PRIMARY_RECOVER=COMPLETE",
+            ),
+        )
+        for operation, begin, end, success_marker in function_ranges:
+            with self.subTest(operation=operation):
+                body_start = self.primary.index(begin)
+                body = self.primary[
+                    body_start:self.primary.index(end, body_start)]
+                epilogue = body[body.index("out:"):]
+                helper_call = (
+                    "saved_errno = "
+                    "swapz_primary_require_recovery_preserving_errno(")
+                self.assertEqual(epilogue.count(helper_call), 1)
+                call_start = epilogue.index(helper_call)
+                call_end = epilogue.index(";", call_start)
+                self.assertIn(
+                    f'"{operation}"', epilogue[call_start:call_end])
+                success_gate = epilogue.index("if (result == 0)", call_end)
+                self.assertIn(success_marker, epilogue[success_gate:])
+                self.assertLess(call_end, success_gate)
+                final_errno = epilogue.index(
+                    "errno = saved_errno;", success_gate)
+                self.assertLess(success_gate, final_errno)
+        self.assertNotIn(
+            "RECOVERY_STATE_FAILED run_id=%s", self.primary)
 
     def test_prepare_global_lock_close_has_phase_specific_diagnostic(self):
         action_start = self.primary.index(

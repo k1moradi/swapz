@@ -56,6 +56,18 @@ The direct-C owner-claim regression must complete run A, let run B claim the
 same partition with a fresh run ID, reject stale A-side ACTIVE/COMPLETE and
 recovery-state writes, and prove B's canonical state bytes remain unchanged.
 
+When START, STOP or RECOVER has already failed, a best-effort durable
+`RECOVERY_REQUIRED` publication is secondary recovery bookkeeping and must not
+replace the operation's first errno. If that publication also fails, return the
+original numeric errno, report the secondary numeric recovery errno separately,
+retain the transaction evidence, and remain fail-closed without publishing
+ACTIVE or COMPLETE. Public diagnostics for this boundary must not expose the
+run ID or private resource names. The rootless
+`tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py` regression
+compiles the production errno-preservation helper with an injected
+recovery-state write failure for START, STOP and RECOVER; source ordering must
+bind all three failure epilogues to that helper before any success publication.
+
 `tests/runtime/native/primary-lifecycle-audit-test.py` is a rootless
 adversarial model for those invariants and performs no privileged or physical
 device operations. Its fake swap inventory must agree with the model's current
