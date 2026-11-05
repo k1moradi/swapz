@@ -4968,7 +4968,15 @@ Rootless qualification must exercise the production formatter decision path
 with synthetic descriptor/kernel operations and identity tables. Deterministic
 diagnostic-clobber injection must prove the original errno survives exclusive
 open, identity/inventory refusal, read, random, final descriptor access mode,
-write/durability and secondary close failures. The real final formatter gate
+write/durability and secondary close failures. The default-CLI synthetic
+opened-descriptor fault matrix must inject failure of the first exact 4,096-byte
+read, a possibly torn 2,048-of-4,096-byte pwrite, failed fsync, failed exact
+4,096-byte readback, and failed close after otherwise durable publication.
+Every pre-publication failure must retain original errno and byte-for-byte
+unchanged block zero; every failure after attempting the header pwrite must
+return status 3 UNCERTAIN, include RECOVERY REQUIRED, retain observable media
+bytes, and preserve originating errno despite diagnostic I/O or secondary close
+failure. The real final formatter gate
 must query F_GETFL on the returned descriptor, require O_RDWR after O_ACCMODE,
 and refuse a query failure or O_RDONLY/O_WRONLY with zero writes and zero
 syncs. Tests inspect numeric errno, expected condition and safe action in
@@ -4990,7 +4998,11 @@ non-removable/held topology, missing sole-partition status,
 parent-model/USB-transport mismatch, an opened descriptor that becomes
 read-only, invalid SWZ UUID/reserved bytes, stale identity immediately before
 the write, truncated reads, unexpected permissions, USB/transport-style I/O
-failure, and device disappearance before and after the write. The swap-inventory gate must reject **every active** `/proc/swaps` row,
+failure, and device disappearance before and after the write. The synthetic default-CLI inventory fixture must include the selected raw
+target and its by-PARTUUID alias at both pre-open and last prewrite admission,
+and the raw parent at pre-open. All are refused with original EOPNOTSUPP,
+zero pwrite/sync calls and unmodified 4,096-byte block zero.
+The swap-inventory gate must reject **every active** `/proc/swaps` row,
 including regular swapfiles and unrelated block devices, with `EOPNOTSUPP`.
 Resolving a reported pathname in the formatter's mount namespace cannot
 authenticate the kernel's already-active backing inode across namespaces;

@@ -1160,6 +1160,8 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		    admission_fixture.writes != cases[index].expected_writes ||
 		    admission_fixture.syncs != cases[index].expected_syncs ||
 		    admission_fixture.closes != 1U ||
+		    admission_fixture.descriptor_queries !=
+			    (cases[index].expected_writes ? 1U : 0U) ||
 		    test_pwrite_calls - previous_pwrite_calls !=
 			    cases[index].expected_writes ||
 		    header_changed != (cases[index].expected_writes != 0U) ||
@@ -1178,10 +1180,10 @@ static void test_real_cli_io_faults_keep_recovery_evidence(void)
 		     cases[index].expected_writes &&
 		     !swapz_sb_valid(admission_fixture.block_zero,
 				     admission_fixture.geometry_bytes)) ||
-		    (cases[index].expected_status == 1 ||
-		     cases[index].write_error || cases[index].sync_error ||
-		     cases[index].read_error_after_write) &&
-		     !strstr(report, "CLEANUP FAILED: close")) {
+		    ((cases[index].expected_status == 1 ||
+		      cases[index].write_error || cases[index].sync_error ||
+		      cases[index].read_error_after_write) &&
+		     !strstr(report, "CLEANUP FAILED: close"))) {
 			fprintf(stderr, "FAIL: phase=synthetic-cli-io "
 				"scenario=%s stage=%s original_errno=%d "
 				"expected_errno=%d status=%d expected_status=%d "
