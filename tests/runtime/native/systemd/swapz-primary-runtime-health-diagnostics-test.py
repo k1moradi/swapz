@@ -277,6 +277,28 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         self.assertIn("check=kernel_log_observation retained_state=unchanged", result.stderr)
         self.assertIn("next=inspect_kernel_journal_read_only", result.stderr)
 
+    def test_failed_latch_without_errno_is_not_reported_as_terminal_errno(self) -> None:
+        env = self.fixture.env.copy()
+        env["MOCK_DM_STATUS"] = (
+            "0 216641536 swapz failed=1 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0 window_gc_pressure=0"
+        )
+        result = self.fixture.run_helper("once", env)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", result.stderr)
+        self.assertIn("failures=target_failed", result.stderr)
+        self.assertIn(
+            "phase=target_failure_state expected=failed_zero "
+            "observed=failed_latched command=dmsetup_status command_status=0",
+            result.stderr,
+        )
+        self.assertIn("check=failed_latch retained_state=unchanged", result.stderr)
+        self.assertNotIn("phase=target_terminal ", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

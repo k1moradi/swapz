@@ -1576,7 +1576,10 @@ make it easier to describe.
 Every non-HEALTHY reason must have a bounded `SWAPZ_RUNTIME_OBSERVER` record
 that identifies the phase and check, expected proof, observed class, originating
 command status (or the validated target errno when the terminal status owns the
-failure), retained-state disposition, and a safe inspection action. A semantic
+failure), retained-state disposition, and a safe inspection action. The
+`target_terminal` phase is reserved for a validated negative kernel errno;
+`failed=1` without such an errno is reported as `target_failure_state` and must
+not fabricate terminal-errno provenance. A semantic
 mismatch after a successful probe reports command status zero; failed systemd,
 dmsetup, inventory or journal probes retain their actual command status. The journal
 observer must preserve the bounded `journalctl` exit separately from the redacted
