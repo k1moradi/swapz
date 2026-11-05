@@ -1361,7 +1361,10 @@ cached counts or a reverse-list-only witness.
 high-live RAW reserve exchanges and additionally exercise repeated uncertain
 writes, byte-exact retries, a physically full GC destination, no-progress
 commit refusal, roll-forward to an independently proven-dead victim, and
-post-recovery RAW CRC/generation verification. Other native compressed/RAW
+post-recovery RAW CRC/generation verification. Uncertain synchronous lower-WRITE
+completion in this authority fixture must use `-EIO`; `-ENOSPC` is an
+allocation/staging result and must be exercised without fabricating a submitted
+lower-write completion. Other native compressed/RAW
 engine-GC fixtures remain required for actual encoded-byte relocation and
 partial lower-run completion; synthetic map metadata alone is not a
 compressed byte oracle. A recovery that cannot fit an extent or claim another

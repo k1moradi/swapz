@@ -711,9 +711,10 @@ static int test_last_mapped_page_partial_victim_failed_publication(void)
 	       media + (size_t)previous.start_block * SWAPZ_BLOCK_BYTES,
 	       SWAPZ_BLOCK_BYTES);
 	/* Repeated uncertain completions consume unique destination blocks.
-	 * Each failed lower write may still have reached the entire medium. */
+	 * Production reaches this post-submission publication boundary with -EIO;
+	 * -ENOSPC is an allocation/staging result and must not be fabricated here. */
 	for (unsigned int attempt = 0; attempt < 3U; ++attempt) {
-		const int lower_error = attempt == 1U ? -ENOSPC : -EIO;
+		const int lower_error = -EIO;
 
 		CHECK(swapz_stage(&a, &last_logical, 1, 1, &transaction) == 0);
 		if (attempt)
