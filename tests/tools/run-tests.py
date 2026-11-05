@@ -2385,6 +2385,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
             # The prefix itself proves this is an aggregated rootless failure.
             # Only the complete sanitized grammar may contribute test identity.
             rootless_failure_marker_seen = True
+            rootless_reported_test = None
             match = rootless_marker_re.fullmatch(candidate)
             if match:
                 rootless_reported_test = match.group(1)

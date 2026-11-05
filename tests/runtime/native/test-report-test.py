@@ -3428,6 +3428,10 @@ class ReportContract(unittest.TestCase):
 
         malformed_marker = (
             earlier_expected
+            + "FAIL: rootless phase=package-dkms-test.py "
+            "subtest=preflight test=test_expected_negative exit=37 "
+            "reason=unittest_assertion phase_s=1 stage_s=1 line=357 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
             + "FAIL: rootless phase=make-interface-test.py "
             "subtest=unavailable test=not-allowlisted exit=1 "
             "reason=nonzero_exit phase_s=1 stage_s=2 line=347 "
