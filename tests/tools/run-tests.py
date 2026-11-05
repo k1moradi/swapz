@@ -2243,22 +2243,26 @@ def make_invocation():
     )
 
 
-def retain_tmp_cleanup_first_failure(output, child_exit_code):
-    """Retain the first unwrapped tmp-cleanup traceback in Bash's private log.
+def retain_direct_rootless_first_failure(output, child_exit_code):
+    """Retain direct-rootless failure evidence in Bash's existing private log.
 
     This never authenticates a nested public unittest identity. The reporter
-    already owns the child stage's merged stdout/stderr until it returns.
+    already owns the failed rootless stage's merged stdout/stderr.
     """
     marker_pattern = re.compile(
-        r"(?m)^FAIL: rootless phase=tmp-cleanup-test[.]py "
+        r"(?m)^FAIL: rootless phase=([A-Za-z0-9 ._:+-]{1,96}) "
         r"subtest=unavailable test=unavailable exit=([0-9]{1,3}) "
-        r"reason=nonzero_exit phase_s=[0-9]+ stage_s=[0-9]+ "
+        r"reason=([a-z0-9_]{1,64}) phase_s=[0-9]+ stage_s=[0-9]+ "
         r"line=(?:[0-9]+|unavailable) "
         r"log=build/tests/(rootless-failure[.][A-Za-z0-9]{8})/diagnostic[.]log$")
     markers = list(marker_pattern.finditer(output))
-    if not markers or int(markers[-1].group(1)) != child_exit_code:
+    if not markers or int(markers[-1].group(2)) != child_exit_code:
         return
     marker = markers[-1]
+    if marker.group(3) not in (
+            "nonzero_exit", "timeout_or_exit_124", "signal_or_child_exit"):
+        return
+    phase = marker.group(1)
     # An earlier fixture or a different later failing rootless phase cannot
     # authenticate this capture. Bash's own marker must be the last one.
     all_markers = list(re.finditer(r"(?m)^FAIL: rootless phase=", output))
@@ -2266,23 +2270,36 @@ def retain_tmp_cleanup_first_failure(output, child_exit_code):
         return
     transcript = output[:marker.start()]
 
-    # unittest's verbose failures are execution-ordered, unlike its detailed
-    # ERROR/FAIL summaries. Never take an earlier passing fixture's FAIL line.
-    progress = re.search(
-        r"(?m)^[ \t]*(test_[A-Za-z0-9_]+) "
-        r"\(__main__[.]OwnedTemporaryCleanupTests[.]\1\)"
-        r"(?:[ \t]+\([^\n]*\))?[ \t]+[.][.][.][ \t]+"
-        r"(FAIL|ERROR)[ \t]*$", transcript)
-    detailed_headers = list(re.finditer(
-        r"(?m)^(FAIL|ERROR): (test_[A-Za-z0-9_]+) "
-        r"\(__main__[.]OwnedTemporaryCleanupTests[.]\2\)"
-        r"(?:[ \t]+[^\n]*)?$", transcript))
-    selected = next((
-        header for header in detailed_headers
-        if progress is not None and header.group(1) == progress.group(2)
-        and header.group(2) == progress.group(1)), None)
-    if selected is None and progress is None and detailed_headers:
-        selected = detailed_headers[0]
+    # Match only source classes from known unwrapped suites: older passing
+    # test fixtures may themselves print synthetic FAIL/ERROR text.
+    phase_classes = {
+        "tmp-cleanup-test.py": "OwnedTemporaryCleanupTests",
+        "test-report-test.py": (
+            "ReportContract|QualificationReportEvidenceBoundaryTest|"
+            "ProductionReadinessEvidenceTest"),
+        "primary-lifecycle-audit-test.py": (
+            "PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|"
+            "PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest"),
+    }
+    selected = None
+    if (class_names := phase_classes.get(phase)) is not None:
+        class_pattern = "(?:" + class_names + ")"
+        progress = re.search(
+            r"(?m)^[ \t]*(test_[A-Za-z0-9_]+) "
+            r"\(__main__[.](" + class_pattern + r")[.]\1\)"
+            r"(?:[ \t]+\([^\n]*\))?[ \t]+[.][.][.][ \t]+"
+            r"(FAIL|ERROR)[ \t]*$", transcript)
+        detailed_headers = list(re.finditer(
+            r"(?m)^(FAIL|ERROR): (test_[A-Za-z0-9_]+) "
+            r"\(__main__[.](" + class_pattern + r")[.]\2\)"
+            r"(?:[ \t]+[^\n]*)?$", transcript))
+        selected = next((
+            header for header in detailed_headers
+            if progress is not None and header.group(1) == progress.group(3)
+            and header.group(2) == progress.group(1)
+            and header.group(3) == progress.group(2)), None)
+        if selected is None and progress is None and detailed_headers:
+            selected = detailed_headers[0]
     first_block = b""
     if selected is not None:
         boundary = re.search(r"(?m)^={12,}[ \t]*$",
@@ -2300,7 +2317,7 @@ def retain_tmp_cleanup_first_failure(output, child_exit_code):
                            os.O_CLOEXEC)
         base = os.open(ROOT / "build/tests", directory_flags)
         descriptors.append(base)
-        directory = os.open(marker.group(2), directory_flags, dir_fd=base)
+        directory = os.open(marker.group(4), directory_flags, dir_fd=base)
         descriptors.append(directory)
         directory_stat = os.fstat(directory)
         if (not stat.S_ISDIR(directory_stat.st_mode) or
@@ -2308,7 +2325,7 @@ def retain_tmp_cleanup_first_failure(output, child_exit_code):
                 stat.S_IMODE(directory_stat.st_mode) != 0o700):
             return
         log = os.open("diagnostic.log",
-                      os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW |
+                      os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW |
                       os.O_CLOEXEC, dir_fd=directory)
         descriptors.append(log)
         log_stat = os.fstat(log)
@@ -2316,12 +2333,19 @@ def retain_tmp_cleanup_first_failure(output, child_exit_code):
                 log_stat.st_uid != os.getuid() or
                 stat.S_IMODE(log_stat.st_mode) != 0o600):
             return
+        # Do not duplicate stderr from suites with pre-existing capture.
+        # Only enrich Bash's attribution-only log created after failure.
+        initial_bytes = os.pread(log, 48, 0).lstrip(b"\n")
+        if not initial_bytes.startswith(b"--- swapz rootless attribution ---\n"):
+            return
         remaining_bytes = 262144 - log_stat.st_size
         transcript_bytes = transcript.encode("utf-8", errors="replace")
         if first_block:
             first_label = (
                 b"\n--- first matched tmp-cleanup unittest failure "
-                b"(private; not a public test identity) ---\n")
+                if phase == "tmp-cleanup-test.py" else
+                b"\n--- first matched direct rootless unittest failure "
+            ) + b"(private; not a public test identity) ---\n"
             tail_label = (
                 b"\n--- official stage merged stdout/stderr tail "
                 b"(context only) ---\n")
@@ -2334,7 +2358,7 @@ def retain_tmp_cleanup_first_failure(output, child_exit_code):
             first_label = b""
             tail_label = (
                 b"\n--- official stage merged stdout/stderr tail "
-                b"(private context only; no authenticated tmp-cleanup "
+                b"(private context only; no authenticated direct "
                 b"unittest traceback) ---\n")
         fixed_bytes = len(first_label) + len(tail_label)
         if remaining_bytes <= fixed_bytes:
@@ -2815,7 +2839,7 @@ def run_stage(title, command, result, *, parse_bench=False):
         output, rc = type(exc).__name__, 127
     observed_exit_code = rc
     if title == "Native and rootless contracts" and rc != 0:
-        retain_tmp_cleanup_first_failure(output, rc)
+        retain_direct_rootless_first_failure(output, rc)
     predictor_evidence = parse_predictor_evidence(output)
     gc_scale_evidence = parse_gc_scan_scale_evidence(output)
     extent_geometry_evidence = parse_extent_geometry_evidence(output)

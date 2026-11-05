@@ -25,8 +25,8 @@ history, not device authorization. Start with [AGENTS](../../AGENTS.md),
 **Private evidence on each Codex machine:** checkout-local
 `build/tests/fast-test/development-evidence.json`,
 `build/tests/rootless-failure.*/diagnostic.log` (bounded diagnostics for
-pre-captured stderr, attribution-only when allocated after an uncaptured failure;
-see [first-error triage](../README.md#diagnose-the-first-record)) and
+pre-captured stderr; direct failures begin attribution-only but may be enriched
+by the official reporter; see [first-error triage](../README.md#diagnose-the-first-record)) and
 `build/history/<architecture>-<host-digest>/` do not sync through Git.
 Root-owned `/var/lib/swapz/physical-recovery/` retains
 `swapz-physical-<run_id>/{state.json,results.json}`,

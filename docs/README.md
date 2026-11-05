@@ -183,14 +183,15 @@ the producer emitted it; never synthesize one from exception text. A
 `RECOVERY_REQUIRED` marker means preserve that state and stop; review live
 ownership and header/swap state read-only before exact-owned recovery, never
 force-remove or rerun to replace the failed attempt. Rootless `build/tests/rootless-failure.*/diagnostic.log` is private. For
-stderr-pre-captured stages it retains bounded child diagnostics plus attribution;
-for ordinary direct phases it is allocated only after failure and can contain
-attribution only. `run-tests.py` captures the aggregate rootless stage and
-publishes only sanitized summary fields, so an uncaptured phase's raw
-assertion/traceback may not be preserved in `test_results.json` or printed to
-the terminal. Treat `failed_phase`, `exit_code`, `signals` and that attribution
-log as localization only. Do not infer a missing traceback or guess a truncated
-`log=` path, and never escalate a rootless failure into loaded/physical cleanup.
+stderr-pre-captured stages it retains bounded child diagnostics plus attribution.
+For direct phases Bash initially creates attribution only; the official runner
+may append bounded first-error or contextual evidence from its merged stage
+output to that same owned log after failure. `run-tests.py` publishes only
+sanitized summaries, not private tracebacks, and may truncate `log=` mid-path.
+Treat `failed_phase`, `exit_code`, and `signals` as localization; consult the
+complete locally retained log when available. Do not infer a missing traceback,
+guess a truncated path, publish private data or escalate rootless failure into
+loaded/physical cleanup.
 
 For safe startup/stop/recovery policy use [AGENT_CONTEXT](AGENT_CONTEXT.md),
 for package journal ownership use [compile](compile.md#packaging), and for

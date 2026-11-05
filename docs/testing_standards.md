@@ -1110,27 +1110,24 @@ and privacy of public markers. Explicit shell exits and failing shell
 assertions remain part of the general rootless attribution contract.
 These regressions are not substitutes for the single official `make test`.
 
-For the unwrapped `tmp-cleanup-test.py` suite, an official failed
-native stage must retain the first matching unittest traceback that would
-otherwise be discarded with the reporter's captured merged output. On a
-validated generic rootless marker and matching original child exit, append a
-bounded first execution-order failure block and contextual stage tail to the
-**existing** private `diagnostic.log` only. Require an owned 0700
-directory, a regular single-link 0600 log, and no symlink traversal; the entire
-artifact, including the original Bash metadata, must remain within 256 KiB.
-Never promote an earlier marker if a different rootless phase failed later.
-The public report names the source-controlled `tmp-cleanup-test.py` phase,
-original exit, fixed reason, and complete repository-relative log location.
-`subtest=unavailable test=unavailable` remains mandatory unless the
-producer authenticates nested identity. If no unittest traceback matches,
-never write a label claiming that one did: retain only bounded private stage-tail
-context when nonempty, and append nothing for genuinely empty stderr. All size
-arithmetic, including a one-byte residual budget after labels, must stay within
-the 256-KiB whole-artifact bound. No silent failure, relay error, timeout or
-later cleanup may invent a cause or replace the first one. Read the private
-evidence locally with `sed -n '1,140p' build/tests/rootless-failure.XXXXXXXX/diagnostic.log`,
-substituting the eight-character directory from the public marker; never
-publish that raw text.
+For direct rootless phases whose stderr was not pre-captured, the official
+reporter may append bounded first-error context from its already captured
+merged stage output to Bash's **existing failure-only** `diagnostic.log`.
+Do not add a relay process to passing suites, create a second log, or change
+successful output. Require the last complete source-controlled Bash rootless
+marker to match the original child exit and an owned mode-0700 directory
+holding a regular, single-link, mode-0600 attribution-only log; reject symlinks,
+unsafe permissions and pre-captured logs. The entire artifact, including Bash
+attribution, must remain within 256 KiB. Class-specific first-failure matching
+is limited to source classes in `tmp-cleanup-test.py`, `test-report-test.py`
+and `primary-lifecycle-audit-test.py`; other direct phases receive a clearly
+labeled contextual tail only, never an invented test identity. A silent failure
+cannot claim a matched traceback. An earlier rootless marker superseded by a
+later marker cannot authenticate the earlier failure. The public report retains
+only source-controlled phase, original exit, fixed reason and sanitized log
+pointer; `subtest=unavailable test=unavailable` remains unless Bash itself
+authenticates nested identity. Secondary diagnostic failures must never replace
+the original child failure. Read retained evidence locally, never publish it.
 
 ### Native CI failure evidence contract
 

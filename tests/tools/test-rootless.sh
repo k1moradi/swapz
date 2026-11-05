@@ -554,6 +554,9 @@ python3 -B tests/runtime/native/test-report-test.py -v
 rootless_phase='tests/runtime/native/production-readiness-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/production-readiness-test.py -v
+rootless_phase='tests/runtime/native/rootless-direct-evidence-test.py'
+rootless_phase_started_seconds=$SECONDS
+python3 -B tests/runtime/native/rootless-direct-evidence-test.py -v
 rootless_phase='tests/runtime/native/rootless-attribution-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/rootless-attribution-test.py -v
