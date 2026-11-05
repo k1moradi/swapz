@@ -341,6 +341,75 @@ def _stop_unadmitted_child_preserving(
             f"{cleanup_error}") from cleanup_error
 
 
+def _peer_identity_refusal(phase: str, child: subprocess.Popen,
+                           observed: str, error_number: int | str = "none") -> Blocked:
+    child_exit = child.poll()
+    return Blocked(
+        "source_admission_peer_identity:"
+        f"phase={phase}:expected=owned_live_child_run:observed={observed}:"
+        f"errno={error_number}:"
+        f"child_exit={child_exit if child_exit is not None else 'running'}:"
+        "authorization=BLOCKED:next=inspect_child_ownership_read_only")
+
+
+def _owned_peer_process_lineage(
+        child: subprocess.Popen, peer_pid: int,
+        phase: str) -> tuple[tuple[int, int, int], ...]:
+    """Bind the kernel-authenticated peer to the live launched sudo run.
+
+    sudo may fork a monitor rather than exec Python in the Popen PID. Require
+    the exact peer process to be in that live ancestry and retain each PID's
+    kernel start time so process replacement cannot reuse an earlier approval.
+    """
+    owned_pid = child.pid
+    if (type(owned_pid) is not int or owned_pid <= 1 or
+            type(peer_pid) is not int or peer_pid <= 1):
+        raise _peer_identity_refusal(phase, child, "invalid_pid")
+    if child.poll() is not None:
+        raise _peer_identity_refusal(phase, child, "launched_child_exited")
+    visited_pids: set[int] = set()
+    lineage: list[tuple[int, int, int]] = []
+    current_pid = peer_pid
+    for _ in range(16):
+        if current_pid in visited_pids:
+            break
+        visited_pids.add(current_pid)
+        try:
+            process_stat = (Path("/proc") / str(current_pid) / "stat").read_text(
+                encoding="ascii")
+        except OSError as exc:
+            raise _peer_identity_refusal(
+                phase, child, "unavailable_process_identity",
+                exc.errno if exc.errno is not None else "none") from exc
+        except UnicodeError as exc:
+            raise _peer_identity_refusal(
+                phase, child, "malformed_process_identity") from exc
+        # /proc stat's comm may contain spaces and closing parentheses.
+        closing_parenthesis = process_stat.rfind(") ")
+        fields = (process_stat[closing_parenthesis + 2:].split()
+                  if closing_parenthesis >= 0 else [])
+        try:
+            if len(fields) < 20:
+                raise ValueError("truncated process identity")
+            parent_pid = int(fields[1])
+            start_ticks = int(fields[19])
+        except ValueError as exc:
+            raise _peer_identity_refusal(
+                phase, child, "malformed_process_identity") from exc
+        if parent_pid < 0 or start_ticks <= 0:
+            raise _peer_identity_refusal(
+                phase, child, "malformed_process_identity")
+        lineage.append((current_pid, parent_pid, start_ticks))
+        if current_pid == owned_pid:
+            if child.poll() is not None:
+                raise _peer_identity_refusal(phase, child, "launched_child_exited")
+            return tuple(lineage)
+        if parent_pid <= 1:
+            break
+        current_pid = parent_pid
+    raise _peer_identity_refusal(phase, child, "unrelated_peer_run")
+
+
 def _serve_admission(server: socket.socket,
                      child: subprocess.Popen,
                      validated_source: str,
@@ -354,6 +423,7 @@ def _serve_admission(server: socket.socket,
         [f"cycle-{index}" for index in range(1, cycles + 1)] +
         ["final"])
     passed_phases: list[str] = []
+    seen_nonces: set[str] = set()
     parent_rejected = False
     if re.fullmatch(r"[0-9a-f]{64}", oracle_sha256) is None:
         failure = Blocked("source admission oracle digest is malformed")
@@ -376,10 +446,12 @@ def _serve_admission(server: socket.socket,
     admission_boundary = "authenticated_channel"
     try:
         with connection:
+            # A connected but silent peer must not hold admission indefinitely.
+            connection.settimeout(45)
             try:
                 credentials = connection.getsockopt(
                     socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-                _peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
+                peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
             except (OSError, struct.error) as exc:
                 failure = Blocked(
                     "cannot authenticate privileged source admission peer")
@@ -389,6 +461,14 @@ def _serve_admission(server: socket.socket,
                 failure = Blocked("source admission peer is not privileged")
                 _stop_unadmitted_child_preserving(child, failure)
                 raise failure
+            try:
+                owned_peer_lineage = _owned_peer_process_lineage(
+                    child, peer_pid, admission_boundary)
+            except Blocked as exc:
+                print("BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
+                      file=sys.stderr)
+                _stop_unadmitted_child_preserving(child, exc)
+                raise
             try:
                 stream_context = connection.makefile("rwb", buffering=0)
             except OSError as exc:
@@ -423,8 +503,31 @@ def _serve_admission(server: socket.socket,
                             "unexpected_source_admission_phase",
                             file=sys.stderr)
                         break
+                    if request["nonce"] in seen_nonces:
+                        parent_rejected = True
+                        _reply(stream, request, "BLOCKED", oracle_sha256,
+                               "replayed_source_admission_nonce")
+                        print(
+                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+                            f"replayed_source_admission_nonce:phase={expected_phase}:"
+                            "expected=fresh_nonce:observed=reused:"
+                            "errno=none:authorization=BLOCKED:"
+                            "next=restart_qualification",
+                            file=sys.stderr)
+                        break
+                    seen_nonces.add(request["nonce"])
                     try:
+                        if _owned_peer_process_lineage(
+                                child, peer_pid, expected_phase) != owned_peer_lineage:
+                            raise _peer_identity_refusal(
+                                expected_phase, child, "changed_peer_run")
                         _check_git_source(validated_source, git)
+                        # Source queries may block: reprove process identity before
+                        # the approval response, not only when the socket connects.
+                        if _owned_peer_process_lineage(
+                                child, peer_pid, expected_phase) != owned_peer_lineage:
+                            raise _peer_identity_refusal(
+                                expected_phase, child, "changed_peer_run")
                     except Blocked as exc:
                         parent_rejected = True
                         _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))

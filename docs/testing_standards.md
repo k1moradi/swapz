@@ -160,7 +160,22 @@ query, check canonical remote main and then recheck local HEAD, branch and
 origin/main before approval, so persistent local movement while the network
 probe is in flight is refused with bounded expected/observed identities and a
 safe next action. These observations do not lock a concurrently moving remote
-ref; later phases cannot reuse an earlier approval. Requests must arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
+ref; later phases cannot reuse an earlier approval. The source-admission
+parent also binds kernel-reported socket peer PID and its Linux process start
+time/ancestry to the still-live launched sudo process tree. sudo may fork a
+monitor, so simple equality to Popen.pid is not sufficient. Exact peer process
+identity is rechecked at each phase and after potentially delayed source
+queries; changed, missing or unreadable identity, an exited launch owner or a
+nonce repeated across phases must BLOCK. An untrusted UID-0 peer is not
+authenticated merely by SO_PEERCRED UID 0. The socket request is bounded by
+a read timeout. This identity proof does not prevent arbitrary code changes
+by a hostile root operator, nor guarantee that a Git ref cannot move between
+the final source observation and a destructive operation. The existing source
+protocol does not carry independently established selected-card/reader
+identity, so a source PASS is never physical-target authorization: unresolved
+last-use selector, reader and opened-descriptor identity remain physical
+production-readiness blockers until the privileged helper and Codex-owned
+physical probe enforce them independently. Requests must arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
 parent disconnect, malformed/duplicated JSON, peer-identity change, missing
 approval or unavailable remote blocks before the next durable transaction/card
 mutation or prevents the final PASS. The unprivileged parent itself performs no
