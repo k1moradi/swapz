@@ -183,6 +183,8 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_FAKE_SIGNATURE_VALID="1",
             SWAPZ_FAKE_SIG_KEY="ABCD",
             SWAPZ_FAKE_VERMAGIC=self.kernel_release,
+            SWAPZ_FAKE_VERMAGIC_EXIT="0",
+            SWAPZ_FAKE_MODULE_LOOKUP_EXIT="0",
             SWAPZ_MOK_CERT=str(self.cert),
         )
 
@@ -304,6 +306,7 @@ fi
 set -eu
 if [[ "$1" == -F && "$2" == vermagic ]]; then
   printf '%s test SMP\n' "$SWAPZ_FAKE_VERMAGIC"
+  exit "${SWAPZ_FAKE_VERMAGIC_EXIT:-0}"
 elif [[ "$1" == -F && "$2" == sig_key ]]; then
   printf '%s\n' "$SWAPZ_FAKE_SIG_KEY"
 elif [[ "$1" == -n && "$2" == dm_swapz ]]; then
@@ -319,6 +322,7 @@ elif [[ "$1" == -n && "$2" == dm_swapz ]]; then
     fi
   fi
   printf '%s\n' "${SWAPZ_FAKE_MODULE_LOOKUP:-$SWAPZ_TEST_INSTALLED_MODULE}"
+  exit "${SWAPZ_FAKE_MODULE_LOOKUP_EXIT:-0}"
 else
   exit 1
 fi
@@ -777,6 +781,26 @@ exec "{flock_binary}" "$@"
             self.assertIn("phase=module_vermagic", result.stderr)
             self.assertIn("command_status=0", result.stderr)
         self.assert_absent()
+
+    def test_modinfo_nonzero_with_matching_stdout_never_qualifies(self):
+        # A failed producer cannot prove vermagic or module lookup from stdout.
+        rejected_vermagic = self.invoke(
+            "install", {"SWAPZ_FAKE_VERMAGIC_EXIT": "61"})
+        self.assertNotEqual(rejected_vermagic.returncode, 0)
+        self.assertIn("artifact=qualified_dm-swapz.ko check=module_vermagic",
+                      rejected_vermagic.stderr)
+        self.assertIn("observed=modinfo_probe_failed command_status=61",
+                      rejected_vermagic.stderr)
+        self.assert_absent()
+
+        self.assertEqual(self.invoke("install").returncode, 0)
+        failed_lookup = self.invoke(
+            "install", {"SWAPZ_FAKE_MODULE_LOOKUP_EXIT": "62"})
+        self.assertNotEqual(failed_lookup.returncode, 0)
+        self.assertIn("existing package is partial, foreign, or modified",
+                      failed_lookup.stderr)
+        self.assertNotIn(str(self.home), failed_lookup.stderr)
+        self.assert_installed_exact()
 
     def test_secure_boot_verifies_real_detached_cms_payload(self):
         openssl = shutil.which("openssl")

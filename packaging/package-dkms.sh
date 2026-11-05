@@ -589,8 +589,9 @@ prepare_exact_module_restore() {
 
 verify_module_resolution() {
   local resolved_module
-  resolved_module="$(modinfo -n dm_swapz 2>/dev/null || true)"
-  resolved_module="$(readlink -f -- "$resolved_module" 2>/dev/null || true)"
+  # A producer failure invalidates the observation even if stdout looks right.
+  resolved_module="$(modinfo -n dm_swapz 2>/dev/null)" || return 1
+  resolved_module="$(readlink -f -- "$resolved_module" 2>/dev/null)" || return 1
   [[ "$resolved_module" == "$installed_module" ]]
 }
 
@@ -2127,7 +2128,7 @@ module_vermagic_status=0
 module_vermagic="$(modinfo -F vermagic "$module_artifact" 2>/dev/null)" ||
   module_vermagic_status=$?
 module_kernel_release="${module_vermagic%% *}"
-if [[ "$module_kernel_release" != "$kernel_release" ]]; then
+if [[ "$module_kernel_release" != "$kernel_release" || "$module_vermagic_status" -ne 0 ]]; then
   module_vermagic_observed=foreign_kernel
   if (( module_vermagic_status != 0 )); then
     module_vermagic_observed=modinfo_probe_failed

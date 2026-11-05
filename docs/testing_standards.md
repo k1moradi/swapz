@@ -7394,6 +7394,9 @@ unverified. Missing installed `swapzctl`, mismatched installed module bytes,
 wrong module vermagic, stale/missing DKMS registration and Secure Boot
 signature/enrollment failure must all remain BLOCKED. A verified detached
 signature plus an enrolled MOK must never imply kernel load acceptance.
+Nonzero `modinfo` exit status invalidates module vermagic and installed
+module-path resolution even if stdout appears to match; synthetic negative
+controls must prove both refusals before package mutation.
 
 DKMS remains the compatibility/header integration mechanism, not the artifact
 authority. After a successful current-kernel DKMS build/install, packaging must
