@@ -498,8 +498,12 @@ precede a checked final fsync of the opened target, within the timed interval
 and before the final lower-I/O/CPU snapshots or a PASS result. A failed drain
 must identify the candidate/mixed phase, OS failure reason, expected versus
 observed measured WRITE byte counts and the failed final-drain oracle; final
-byte readback cannot replace it. A worker failure before the persistent start
-gate opens must abort barriers to release waiting peers. After that gate opens,
+byte readback cannot replace it. Timed short I/O must identify READ versus
+WRITE and expected versus observed byte counts; a completed-length READ with
+wrong content is a byte-oracle mismatch, not a drain failure. A worker failure
+before the persistent start gate opens must abort barriers to release waiting
+peers, join them, and preserve the first non-barrier worker error rather than
+masking it with a racing or generic barrier failure. After that gate opens,
 workers must preserve the original I/O failure without aborting the released
 barrier generation and masking it as `BrokenBarrierError`.
 The native-C engine retains its independently checked final fsync.

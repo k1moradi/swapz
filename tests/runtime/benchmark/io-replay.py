@@ -2053,9 +2053,14 @@ def replay(args):
                             # Never include Python byte-oracle checking in the
                             # individual I/O latency measurement. Still fail the
                             # operation BEFORE the wave and buffer slot can advance.
-                            if count != PAGE or (item["op"] == "R" and
+                            operation = ("WRITE" if item["op"] == "W" else "READ")
+                            if count != PAGE:
+                                raise OSError(
+                                    f"short timed {operation} logical I/O "
+                                    f"(expected {PAGE} bytes, observed {count})")
+                            if (item["op"] == "R" and
                                     mixed_views[slot] != chunks[item["fixture"]]):
-                                raise OSError("short or mismatched timed logical I/O")
+                                raise OSError("timed READ byte oracle mismatch")
                             return elapsed
 
                         gc_was_enabled = gc.isenabled()
@@ -2103,9 +2108,17 @@ def replay(args):
                                 try:
                                     ready.wait(timeout=30)
                                 except threading.BrokenBarrierError as exc:
+                                    worker_failure = None
                                     for job in persistent_jobs:
-                                        if job.done():
+                                        try:
                                             job.result()
+                                        except threading.BrokenBarrierError:
+                                            continue
+                                        except Exception as worker_exc:
+                                            if worker_failure is None:
+                                                worker_failure = worker_exc
+                                    if worker_failure is not None:
+                                        raise worker_failure from exc
                                     raise ValueError(
                                         "persistent workers failed before measurement"
                                     ) from exc

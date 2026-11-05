@@ -2275,9 +2275,76 @@ class PairReplayContract(unittest.TestCase):
                 self.assertFalse(result.exists())
                 self.assertNotIn('"verdict": "PASS"', output)
                 self.assertIn("BENCH_IO_PHASE=off:mixed", errors)
-                self.assertIn("short or mismatched timed logical I/O", errors)
+                self.assertIn(
+                    "short timed WRITE logical I/O "
+                    "(expected 4096 bytes, observed 4095)", errors)
                 self.assertNotIn("final fsync failed", errors)
                 self.assertNotIn("BufferError", errors)
+
+    def test_python_persistent_warmup_failure_preserves_write_reason(self):
+        with self.python_final_drain_case("persistent-write") as case:
+            manifest, _, result, arguments = case
+            module = self.python_replay_module()
+            original_pool = module.concurrent.futures.ThreadPoolExecutor
+            original_pwrite = os.pwrite
+            original_fsync = os.fsync
+            prefill_complete = False
+            injected = False
+            fsync_calls = 0
+
+            class PendingDoneFuture:
+                """Model a worker still unwinding after its barrier was aborted."""
+
+                def __init__(self, future):
+                    self._future = future
+
+                def done(self):
+                    return False
+
+                def result(self, *args, **kwargs):
+                    return self._future.result(*args, **kwargs)
+
+            class PendingDonePool(original_pool):
+                def submit(self, function, *args, **kwargs):
+                    return PendingDoneFuture(
+                        super().submit(function, *args, **kwargs))
+
+            def track_fsync(descriptor):
+                nonlocal prefill_complete, fsync_calls
+                fsync_calls += 1
+                result_value = original_fsync(descriptor)
+                prefill_complete = True
+                return result_value
+
+            def short_lane_zero_warmup(descriptor, data, offset):
+                nonlocal injected
+                page = offset // PAGE
+                if (prefill_complete and not injected and
+                        page % manifest["qd"] == 0):
+                    injected = True
+                    return PAGE - 1
+                return original_pwrite(descriptor, data, offset)
+
+            with mock.patch.object(module.concurrent.futures,
+                                   "ThreadPoolExecutor", PendingDonePool), \
+                    mock.patch.object(module.os, "pwrite",
+                                      side_effect=short_lane_zero_warmup), \
+                    mock.patch.object(module.os, "fsync",
+                                      side_effect=track_fsync):
+                status, output, errors = self.invoke_python_replay_main(
+                    module, arguments)
+            self.assertTrue(injected)
+            self.assertEqual(fsync_calls, 1)  # prefill only
+            self.assertEqual(status, 2)
+            self.assertFalse(result.exists())
+            self.assertNotIn('"verdict": "PASS"', output)
+            self.assertIn("BENCH_IO_PHASE=off:mixed", errors)
+            self.assertIn(
+                "short timed WRITE logical I/O "
+                "(expected 4096 bytes, observed 4095)", errors)
+            self.assertNotIn("persistent workers failed before measurement", errors)
+            self.assertNotIn("BrokenBarrierError", errors)
+            self.assertNotIn("Traceback", errors)
 
     def test_python_final_drain_failure_precedes_sampler_cleanup_error(self):
         for mode in ("qd-waves", "persistent-write", "persistent-mixed"):
