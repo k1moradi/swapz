@@ -2917,6 +2917,22 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS", result["code_blockers"])
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
 
+    def test_direct_campaign_validator_uses_tracked_frozen_policy(self):
+        policy_raw = encoded(acceptance_policy())
+        campaign = physical_campaign_evidence(policy_raw)
+        digest = hashlib.sha256(policy_raw).hexdigest()
+        validate = EVALUATOR.validate_physical_campaign_evidence
+        self.assertEqual(validate(
+            campaign, encoded(campaign), SOURCE, digest,
+            (TARGET["partuuid"], TARGET["size_bytes"])), [])
+        campaign["artifacts"]["pairs"] = campaign["artifacts"]["pairs"][:1]
+        campaign["record_count"] = 1
+        issues = validate(
+            campaign, encoded(campaign), SOURCE, digest,
+            (TARGET["partuuid"], TARGET["size_bytes"]))
+        self.assertTrue(any(
+            "required=14 observed=1" in issue for issue in issues))
+
     def test_claimed_pass_cannot_override_failing_physical_audit(self):
         policy = acceptance_policy()
         for mutation in ("missing", "failed", "diagnostics", "omitted"):

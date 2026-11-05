@@ -971,12 +971,21 @@ def validate_physical_campaign_evidence(
         source_sha: str,
         policy_sha256: str | None,
         target: tuple[str, int] | None,
-        policy: dict[str, Any]) -> list[str]:
+        policy: dict[str, Any] | None = None) -> list[str]:
     issues: list[str] = []
 
     def reject(message: str) -> None:
         if message not in issues:
             issues.append(message)
+
+    # Existing direct-validator callers supply five arguments. They must
+    # still get the tracked frozen cohort, never a caller-invented plan.
+    if policy is None:
+        try:
+            policy, _ = load_json_strict(FROZEN_ACCEPTANCE_MANIFEST)
+        except (OSError, EvidenceError):
+            reject("sealed campaign tracked frozen workload policy unavailable")
+            return issues
 
     physical_policy = policy.get("physical_qualification")
     workloads = (

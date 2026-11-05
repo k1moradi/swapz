@@ -6843,7 +6843,9 @@ arms or an incomplete workload cohort. A shortened or inconsistent campaign
 is BLOCKED even when its internal envelope and digest agree. The producer's
 `physical_evidence_audit` must independently report PASS with zero retained
 and omitted diagnostics and the frozen claim boundary; a PASS-looking
-campaign with an absent or failed audit remains BLOCKED.
+campaign with an absent or failed audit remains BLOCKED. The existing
+five-argument private campaign-validator call must remain supported and
+resolve the tracked frozen policy itself when no policy object is supplied.
 Missing or stale sealed campaign evidence is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
 derives maximum logical pages/bytes and measured target/metadata peak RAM from
