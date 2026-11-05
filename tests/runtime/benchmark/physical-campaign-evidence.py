@@ -1159,7 +1159,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                      reason="producer FAIL lacks valid physical arm identity")
             continue
         stage = arm.get("stage")
-        if (isinstance(stage, str) and
+        if (isinstance(stage, str) and len(stage) <= 48 and
                 re.fullmatch(
                     r"(?:preflight|fill|warmup|measure|steady|gc|teardown|"
                     r"publish|round-[1-9][0-9]*(?:-verify)?)", stage)):
