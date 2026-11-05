@@ -2332,25 +2332,17 @@ def _actual_swap_io(results):
         return False
 
     try:
+        lower_deltas = []
         for before, after in zip(observations, observations[1:]):
             before_block = before["block_stats"]
             after_block = after["block_stats"]
-            if before_block.get("available") is not True or \
-                    after_block.get("available") is not True:
-                return False
             if before_block.get("device_major_minor") != \
                     results["parent_major_minor"] or \
                     after_block.get("device_major_minor") != \
-                    results["parent_major_minor"] or \
-                    before_block.get("sector_bytes") != 512 or \
-                    after_block.get("sector_bytes") != 512:
+                    results["parent_major_minor"]:
                 return False
-            before_values = before_block["values"]
-            after_values = after_block["values"]
-            if not isinstance(before_values, list) or \
-                    not isinstance(after_values, list) or \
-                    len(before_values) < 8 or len(after_values) < 8:
-                return False
+            lower_deltas.append(
+                PHYSICAL._lower_io_delta(before_block, after_block))
             for group, keys in (
                     ("vmstat", ("pswpin", "pswpout")),
                     ("dmsetup_status", ("logical_write", "logical_read"))):
@@ -2362,15 +2354,11 @@ def _actual_swap_io(results):
                     if type(left[key]) is not int or type(right[key]) is not int or \
                             left[key] < 0 or right[key] < left[key]:
                         return False
-            for index in (4, 6):
-                left = before_values[index]
-                right = after_values[index]
-                if type(left) is not int or type(right) is not int or \
-                        left < 0 or right < left:
-                    return False
         final = observations[-1]
-        before_block = baseline["block_stats"]
-        after_block = final["block_stats"]
+        total_lower_write_bytes = sum(
+            delta["lower_write_bytes"] for delta in lower_deltas)
+        total_lower_write_requests = sum(
+            delta["lower_write_requests"] for delta in lower_deltas)
         return bool(
             final["vmstat"]["pswpout"] > baseline["vmstat"]["pswpout"] and
             final["vmstat"]["pswpin"] > baseline["vmstat"]["pswpin"] and
@@ -2378,9 +2366,8 @@ def _actual_swap_io(results):
             baseline["dmsetup_status"]["counters"]["logical_write"] and
             final["dmsetup_status"]["counters"]["logical_read"] >
             baseline["dmsetup_status"]["counters"]["logical_read"] and
-            (after_block["values"][4] > before_block["values"][4] or
-             after_block["values"][6] > before_block["values"][6]))
-    except (KeyError, IndexError, TypeError, ValueError):
+            (total_lower_write_bytes > 0 or total_lower_write_requests > 0))
+    except (KeyError, IndexError, TypeError, ValueError, PHYSICAL.ProbeError):
         return False
 
 

@@ -677,6 +677,10 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                     ]))
 
     def test_actual_swap_io_requires_bound_byte_exact_ordered_evidence(self):
+        baseline_values = [0] * supervisor.PHYSICAL.MIN_BLOCK_STAT_FIELDS
+        sample_values = [0] * supervisor.PHYSICAL.MIN_BLOCK_STAT_FIELDS
+        sample_values[4] = 1
+        sample_values[6] = 8
         baseline = {
             "sample_index": 0,
             "vmstat": {"pswpin": 0, "pswpout": 0},
@@ -684,7 +688,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                                             "logical_read": 0}},
             "block_stats": {
                 "available": True,
-                "values": [0] * 8,
+                "values": baseline_values,
                 "device_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
                 "sector_bytes": 512,
             },
@@ -697,7 +701,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "swap_used_kib": 0,
             "block_stats": {
                 "available": True,
-                "values": [0, 0, 0, 0, 1, 0, 8, 0],
+                "values": sample_values,
                 "device_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
                 "sector_bytes": 512,
             },
@@ -757,6 +761,12 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         blind = json.loads(json.dumps(result))
         blind["observations"][1]["block_stats"]["available"] = False
         self.assertFalse(supervisor._actual_swap_io(blind))
+        truncated_lower = json.loads(json.dumps(result))
+        truncated_lower["observations"][1]["block_stats"]["values"] = [0] * 8
+        self.assertFalse(supervisor._actual_swap_io(truncated_lower))
+        reset_lower = json.loads(json.dumps(result))
+        reset_lower["observations"][1]["block_stats"]["values"][4] = -1
+        self.assertFalse(supervisor._actual_swap_io(reset_lower))
         absent = json.loads(json.dumps(result))
         absent["observations"] = absent["observations"][1:]
         self.assertFalse(supervisor._actual_swap_io(absent))
@@ -2499,6 +2509,9 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         ops.observations_taken += 1
         count = ops.observations_taken
         ops.mapper_used_kib = 64
+        block_values = [0] * supervisor.PHYSICAL.MIN_BLOCK_STAT_FIELDS
+        block_values[4] = count
+        block_values[6] = 8 * count
         sample = {
             "timestamp": "synthetic",
             "swap_used_kib": 64,
@@ -2515,7 +2528,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                 "failed": 0, "error": 0}},
             "block_stats": {
                 "available": True,
-                "values": [0, 0, 0, 0, count, 0, 8 * count, 0],
+                "values": block_values,
                 "device_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
                 "sector_bytes": 512,
             },
