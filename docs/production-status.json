@@ -7,11 +7,11 @@
   },
   "authorized_target_observation": {
     "active_as_swap": false,
-    "identity_verified_by": "exact-source physical helper opened-descriptor, PARTUUID, geometry, parent and recovery checks during the run; read-only post-run topology verification",
+    "identity_verified_by": "exact-source physical helper opened-descriptor, PARTUUID, geometry, removable-parent and recovery checks during the run; read-only post-run verification",
     "major_minor": "8:1",
     "mounted": false,
-    "observation_scope": "source-bound development-only physical mapper smoke on source 24793fa8; target was inactive, unmounted and without holders after cleanup; this is not production qualification",
-    "observed_at_utc": "2026-11-05T22:32:03Z",
+    "observation_scope": "source-bound development-only physical mapper smoke on a8bc0271; target inactive, unmounted and with no holders after cleanup; not production qualification",
+    "observed_at_utc": "2026-11-05T22:56:47Z",
     "parent_model": "Multi-Card",
     "path_at_observation": "/dev/sda1",
     "removable": true,
@@ -19,80 +19,70 @@
     "transport": "usb",
     "unique_partition_and_content_identifiers": "retained only in private root-owned run record"
   },
-  "captured_at_utc": "2026-11-05T22:40:31Z",
+  "captured_at_utc": "2026-11-05T23:06:33Z",
   "current_head_ci_observation": {
-    "head_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-    "latest_main_commit_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-    "observed_at_utc": "2026-11-05T22:40:31Z",
-    "tested_code_tree_relation": "Exact-SHA workflow results below tested 24793fa8. Native rootless failed in two rootless-attribution expected-diagnostic assertions; the other four workflows passed. These workflow results are separate from the local fast_test and physical development smoke.",
-    "current_head_actions_observation": "GitHub Actions results were fetched for this exact SHA; no queued/in-progress result is counted as PASS.",
+    "head_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+    "latest_main_commit_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+    "observed_at_utc": "2026-11-05T23:06:33Z",
+    "tested_code_tree_relation": "Exact-SHA CI for a8bc0271: Native rootless failed in the rootless-attribution fixture; Systemd/package passed; production-C was cancelled after x86_64 exact-C had started. Both compile-only jobs and ARM64 exact-C passed. The local physical smoke is separate development-only evidence.",
+    "current_head_actions_observation": "GitHub Actions results were fetched for this exact SHA. Failed and cancelled jobs are not counted as PASS.",
     "native_rootless_first_failure": {
       "phase": "rootless-attribution-test.py synthetic diagnostic contracts",
       "test": "test_official_native_stage_keeps_first_unittest_failure",
-      "observed": "Assertion at line 858 did not find the expected primary-real-swap-test.py path in the sanitized diagnostic; a second assertion expected a generic fixture-compile message while the actual diagnostic included child exit, subtest and private-log attribution.",
-      "classification": "Two fixture expectation failures in the rootless attribution suite. The bounded CI artifact establishes these assertion mismatches; it does not establish a production lifecycle failure.",
-      "numeric_errno": "not applicable to the fixture assertion failures",
-      "owner": "rootless attribution fixture owner; no duplicate source edit made in this host task",
-      "artifact_sha256": "e63967376f11ea8b42f8296bceec569a311042c0beff30c7cde5171cb600a760"
+      "observed": "Expected the primary-real-swap-test.py phase path in the sanitized diagnostic; observed 'Unit test failed: test_a_primary; child_exit=37 reason=unittest_assertion subtest=unavailable test=test_a_primary ...'. A second assertion expected the pre-attribution fixture-compile string, while the runner included child exit, subtest, test and private-log fields.",
+      "classification": "Two rootless diagnostic fixture expectation failures, reproduced locally as 2 failures among 35 tests. They do not by themselves establish a production lifecycle failure.",
+      "numeric_errno": "not applicable to fixture assertion failures",
+      "owner": "assigned rootless-attribution owner; no duplicate host-side source edit made"
     },
     "workflows": [
       {
         "name": "Native kernel-C project-goal regressions",
-        "run_id": 42121084076,
+        "run_id": 42123672945,
         "status": "completed",
         "conclusion": "failure",
-        "tested_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-        "url": "https://github.com/k1moradi/swapz/actions/runs/42121084076"
+        "tested_source_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/42123672945"
       },
       {
         "name": "Experimental swapz production C qualification",
-        "run_id": 42121083983,
+        "run_id": 42123673006,
         "status": "completed",
-        "conclusion": "success",
-        "tested_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-        "url": "https://github.com/k1moradi/swapz/actions/runs/42121083983"
+        "conclusion": "cancelled",
+        "tested_source_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+        "job_results": {
+          "compile_only_x86_64": "PASS",
+          "compile_only_arm64": "PASS",
+          "exact_c_arm64": "PASS",
+          "exact_c_x86_64": "CANCELLED"
+        },
+        "url": "https://github.com/k1moradi/swapz/actions/runs/42123673006"
       },
       {
         "name": "Systemd and package production-readiness",
-        "run_id": 42121084049,
+        "run_id": 42123673018,
         "status": "completed",
         "conclusion": "success",
-        "tested_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-        "url": "https://github.com/k1moradi/swapz/actions/runs/42121084049"
-      },
-      {
-        "name": "Private kernel debug and static contracts",
-        "run_id": 42121084106,
-        "status": "completed",
-        "conclusion": "success",
-        "tested_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-        "url": "https://github.com/k1moradi/swapz/actions/runs/42121084106"
-      },
-      {
-        "name": "Rootless physical evidence adversarial audit",
-        "run_id": 42121083912,
-        "status": "completed",
-        "conclusion": "success",
-        "tested_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-        "url": "https://github.com/k1moradi/swapz/actions/runs/42121083912"
+        "tested_source_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/42123673018"
       }
     ]
   },
   "deployment_observation": {
-    "basis": "read-only dmsetup, /sys/module, modinfo, systemctl and filesystem observations at capture",
+    "basis": "read-only systemd LoadState/ActiveState, modinfo, module, mapper and filesystem observations",
     "boot_acceptance_directory_present": false,
     "boot_verifier_service": "not-found",
     "dm_swapz_found_by_modinfo": false,
     "dm_swapz_loaded": false,
-    "observed_at_utc": "2026-11-05T21:19:00Z",
+    "observed_at_utc": "2026-11-05T23:06:33Z",
     "primary_mapper_service": "not-found",
+    "primary_runtime_health_service": "not-found",
     "swapz_mapper_present": false,
     "swapzctl_in_path": false
   },
   "fast_test_observation": {
-    "current_main_sha_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-    "tested_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-    "observed_at_utc": "2026-11-05T22:32:03Z",
+    "current_main_sha_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+    "tested_source_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+    "observed_at_utc": "2026-11-05T22:56:47Z",
     "same_commit": true,
     "native_replay": "PASS",
     "loaded_preflight": "BLOCKED",
@@ -101,7 +91,7 @@
     "preflight_observed_proof": "token_name_only",
     "fast_test_exit_status": 2,
     "official_qualification": false,
-    "physical_helper_admission": "development-only exception accepted; mapper oracle completed",
+    "physical_helper_admission": "development-only exception accepted; current-source mapper oracle completed",
     "resume_checkpoint_reused": true,
     "product_build_refreshed": true,
     "fresh_nonce_bound_evidence": true,
@@ -113,31 +103,31 @@
     "architecture": "x86_64",
     "authorized_partition_active_as_swap": false,
     "kernel_release": "7.0.0-42-generic",
-    "mem_available_kib": 2227112,
+    "mem_available_kib": 2219180,
     "mem_total_kib": 3863624,
     "minimum_mem_available_kib_for_ID36": 1048576,
     "observation_scope": "read-only final swap, memory, target topology, mount, holder, mapper and module inventory after the source-bound physical development smoke",
-    "observed_at_utc": "2026-11-05T22:40:31Z",
+    "observed_at_utc": "2026-11-05T23:06:33Z",
     "tmp": {
       "filesystem": "tmpfs",
       "size_bytes": 1978175488,
-      "used_bytes": 9154560,
-      "available_bytes": 1969020928,
+      "used_bytes": 9248768,
+      "available_bytes": 1968926720,
       "percent_used": 1,
-      "observed_at_utc": "2026-11-05T22:40:31Z",
+      "observed_at_utc": "2026-11-05T23:06:33Z",
       "fast_test_reclaimed_logical_bytes": 0,
       "unproven_retained_candidate_count": 1
     },
     "unclaimed_null_blk_action": "two powered configfs objects remain ownership-ambiguous; retained untouched",
     "unclaimed_null_blk_count": 2,
+    "unclaimed_null_blk_observed_at_utc": "2026-11-05T23:06:33Z",
     "unpopulated_unproven_swapz_cgroup_count": null,
     "unrelated_swapfile_modified_during_physical_smoke": false,
-    "unclaimed_null_blk_observed_at_utc": "2026-11-05T22:32:03Z",
     "swapz_mapper_present": false,
     "swapz_module_loaded": false
   },
   "latest_owner_make_test": {
-    "current_main_sha_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
+    "current_main_sha_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
     "current_source_status": "NOT_RUN",
     "latest_tracked_report": {
       "current_source": false,
@@ -149,13 +139,13 @@
     },
     "overall": "NOT_RUN",
     "qualification_scope": "no current-source official qualification",
-    "reason": "make test has not run on current main 24793fa8. Exact-SHA Native rootless CI fails in two rootless-attribution fixture assertions; the development fast_test native/replay stage passed but loaded preflight remained blocked by the two unclaimed null_blk objects. No official full qualification result is claimed."
+    "reason": "make test has not run on current main a8bc0271. The exact-SHA Native rootless workflow fails in two rootless-attribution fixture assertions; the development fast_test native/replay checks passed but loaded preflight was blocked by two unclaimed null_blk objects. The a8 read-only primary plan also blocks privileged execution because exact-source module provenance, a valid qualification report and qualified artifact hashes are unavailable."
   },
   "latest_physical_development_smoke": {
-    "observed_at_utc": "2026-11-05T22:32:03Z",
-    "source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-    "tested_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-    "current_main_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
+    "observed_at_utc": "2026-11-05T22:56:47Z",
+    "source_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+    "tested_source_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+    "current_main_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
     "current_main_advanced_since_run": false,
     "source_was_current_at_run": true,
     "evidence_class": "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION",
@@ -165,8 +155,8 @@
     "linux_swap_activation_tested": false,
     "artifact_sha256": {
       "physical_swap_probe_py": "026fc956b11b873d5c07d273b6dc1e393b40e0a7d27d13bd90744a50b66b69b7",
-      "formatter": "e54ae61fa18270f5430f8eabb551fc50b2e0bd26bbc775e97849ecc8ae942dbf",
-      "dm_swapz_ko": "9e55b9d7f759f7e37ba70dcba1659adcf433fa7c42f56c387af099b4fceab4b8",
+      "formatter": "1a7cf1c076c321d689846726826dae764019135d62a1b02cbedb50bb21e32be4",
+      "dm_swapz_ko": "7cd3b8cdde393e755ffbb4cad97778464557570c58a7b27021bb3ab0aa53e2d1",
       "device_roundtrip": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26"
     },
     "fast_test": {
@@ -189,22 +179,18 @@
       "full_page_comparisons": 256,
       "verified_bytes": 1048576,
       "zero_mismatches": true,
-      "dm_lower_read_bytes": 1052672,
-      "dm_lower_read_requests": 257,
+      "dm_lower_read_bytes": 1060864,
+      "dm_lower_read_requests": 259,
       "dm_lower_write_bytes": 749568,
       "dm_lower_write_requests": 183,
       "successful_flushes": 386,
       "failed_flushes": 0,
       "target_error_counters": 0,
-      "parent_block_stat_read_bytes": 1064960,
-      "parent_block_stat_read_requests": 260,
+      "parent_block_stat_read_bytes": 1069056,
+      "parent_block_stat_read_requests": 261,
       "parent_block_stat_write_bytes": 749568,
       "parent_block_stat_write_requests": 183,
-      "whole_run_parent_read_bytes": 3182592,
-      "whole_run_parent_read_requests": 363,
-      "whole_run_parent_write_bytes": 761856,
-      "whole_run_parent_write_requests": 186,
-      "parent_stat_attribution_caveat": "host block counters can include concurrent host activity; they are not a NAND-wear measurement"
+      "parent_stat_attribution_caveat": "parent block counters may include concurrent host I/O; they are not a NAND-wear measurement"
     },
     "recovery": {
       "durable_state": "COMPLETE",
@@ -218,7 +204,7 @@
       "normal_mapper_removal": true,
       "normal_module_cleanup": true
     },
-    "private_raw_record": "root-owned mode 0600 on persistent recovery storage physically separate from target; local path, run ID, unique identifiers, header digest and raw logs omitted from this public snapshot"
+    "private_raw_record": "root-owned mode 0600 on persistent storage physically separate from target; run identifiers, unique device identifiers, header digest and raw logs remain private"
   },
   "maximum_capacity_and_memory": {
     "basis": "read-only primary plan arithmetic and source-derived allocation estimates; not a full-capacity loaded measurement",
@@ -234,11 +220,11 @@
     "max_safe_logical_capacity_bytes": null,
     "measured_full_capacity_fit": "NOT_MEASURED"
   },
-  "next_action": "Resolve the two exact-source Native rootless diagnostic-fixture assertions through their assigned owner, and establish a safe owned-RAM loaded preflight without touching either unclaimed null_blk object. Then obtain current-source official make test and exact module/report/artifact provenance. The current primary plan is BLOCKED because its qualification report and module provenance are unavailable. Only after that plan admits should the existing real anonymous-swap qualification run on the authenticated card.",
+  "next_action": "Use the assigned rootless-attribution owner’s correction for the two exact-source fixture expectation failures, then recheck current-head CI. Preserve both unclaimed null_blk objects; obtain a demonstrably owned loaded-RAM test target or report the loaded stage BLOCKED. Run exact-current official make test when its prerequisites can pass. Rebuild/install and authenticate the qualified artifacts so the read-only primary plan admits execution; only then run the existing bounded real anonymous-swap campaign on the authenticated card.",
   "primary_plan_observation": {
-    "observed_at_utc": "2026-11-05T22:40:31Z",
-    "current_main_sha_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
-    "control_build_source_sha": "24793fa80cd57ac1e5df368214ce568c33369bc8",
+    "observed_at_utc": "2026-11-05T23:06:33Z",
+    "current_main_sha_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
+    "control_build_source_sha": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
     "plan_is_read_only": true,
     "plan_result": "BLOCKED",
     "privileged_execution_enabled": false,
@@ -290,31 +276,31 @@
     "actual_linux_swap_on_authorized_target": "NOT_RUN",
     "code_production_ready": "IN_PROGRESS",
     "cold_boot_harness": "NOT_ARMED",
+    "current_source_development_mapper_smoke": "PASS_DEVELOPMENT_ONLY",
     "deployment_production_ready": "IN_PROGRESS",
     "full_capacity_backing_and_measured_memory": "NOT_RUN",
     "observational_status": "BLOCKED",
     "owner_observed_cold_boot": "NO_CURRENT_EVIDENCE",
     "production_ready_for_owner_reboot": "NO",
-    "reason": "The current-source development-only mapper oracle passed on 24793fa8 with 128 pages, 256 byte-exact comparisons, zero mismatches and exact header restoration. This does not test Linux swap. Exact-source Native rootless CI still fails in two diagnostic-fixture assertions; the development fast_test loaded preflight retains two unclaimed null_blk resources untouched. The current read-only primary plan blocks privileged execution because exact-source module provenance, a valid qualification report and qualified artifact hashes are unavailable. Real anonymous swap, full-capacity RAM, GC/churn, installation and cold-boot evidence remain absent.",
-    "sustained_physical_gc_and_churn": "NOT_RUN",
-    "current_source_development_mapper_smoke": "PASS_DEVELOPMENT_ONLY"
+    "reason": "The current-source development-only mapper oracle passed on a8bc0271: 128 initial pages, 64 overwrites, 256 full-page comparisons (1 MiB verified), zero mismatches, positive mapper-attributed lower I/O, 386 successful flushes, and exact original-header restoration. This does not test Linux swap. Current exact-SHA Native rootless CI fails two rootless-attribution fixture expectations; fast_test loaded preflight retains two ownership-ambiguous null_blk objects untouched. The read-only primary plan blocks privileged execution because exact-source module provenance, a valid qualification report and qualified artifact hashes are unavailable. Real anonymous swap, full-capacity RAM, GC/churn, installation and cold-boot evidence remain absent.",
+    "sustained_physical_gc_and_churn": "NOT_RUN"
   },
   "repository": {
     "branch": "main",
-    "canonical_remote_main_sha_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
+    "canonical_remote_main_sha_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
     "current_source_qualification": "NOT_QUALIFIED",
-    "local_main_sha_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
+    "local_main_sha_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
     "main_synchronized_at_capture": true,
-    "origin_main_sha_at_capture": "24793fa80cd57ac1e5df368214ce568c33369bc8",
+    "origin_main_sha_at_capture": "a8bc027191f1d76e1d0c40cc4fa9ca271d45c52c",
     "snapshot_captures_sha_before_its_own_report_only_commit": true,
-    "snapshot_observations_current_as_of_utc": "2026-11-05T22:40:31Z",
+    "snapshot_observations_current_as_of_utc": "2026-11-05T23:06:33Z",
     "worktree_clean_before_snapshot_edit": true
   },
   "schema": "swapz-production-status-snapshot",
   "snapshot_kind": "SOURCE_BOUND_READ_ONLY_STATUS",
   "snapshot_semantics": {
     "current_main_exact_source_qualified": false,
-    "interpretation": "At capture on the first host, local and origin/main were 009b1fa4. The latest development mapper oracle is bound to source 82153aab and has durable COMPLETE recovery, but it is not anonymous Linux swap or production qualification. Current-main focused namespace-fixture tests passed with one environment skip; exact-head CI and owner make test were not observed. The last primary plan was blocked and runtime remains disabled.",
+    "interpretation": "At capture on the first host, local and canonical origin/main were a8bc0271. A development-only physical mapper oracle completed on that exact source with 128 initial pages, 64 overwritten pages, 256 byte-exact comparisons and zero mismatches; the original header and inactive target state were restored. This is not real Linux swap or production qualification. Exact-source Native rootless CI failed in two attribution-fixture assertions, production-C x86_64 exact-C was cancelled, and the current primary plan remains BLOCKED for missing qualification report and qualified artifact provenance.",
     "is_live_monitor": false,
     "is_qualification_result": false,
     "volatile_observations_expire_at_capture": true
