@@ -301,6 +301,41 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertFalse(any(
             item["status"] == "FAIL" for item in audit["diagnostics"]))
 
+    def test_duplicate_pair_index_invalidates_first_failure_witness(self):
+        first = pair(1, 1100, run_id="first-run")
+        first["status"] = "EXCLUDED"
+        first["excluded"] = True
+        first["analysis_usable"] = False
+        first["raw"]["verdict"] = "FAIL"
+        first["raw"]["stage"] = "measure"
+        duplicate = pair(1, 1800, run_id="second-run")
+        duplicate["pair_id"] = "different-pair-id"
+        audit, metrics = inspect(
+            [first, duplicate], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("pair.pair_index", metrics)
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+    def test_nested_overlap_invalidates_nonadjacent_failure_witness(self):
+        first = pair(1, 1100)
+        first["raw"]["arm_finished_monotonic_ns"] = 2000
+        middle = pair(2, 1200)
+        failed = pair(3, 1600)
+        failed["status"] = "EXCLUDED"
+        failed["excluded"] = True
+        failed["analysis_usable"] = False
+        failed["swapz"]["verdict"] = "FAIL"
+        failed["swapz"]["stage"] = "measure"
+        audit, metrics = inspect(
+            [first, middle, failed], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("arm.monotonic_window_ns", metrics)
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
     def test_overlap_invalidates_both_physical_failure_witnesses(self):
         first = pair(1, 1100)
         first["status"] = "EXCLUDED"
@@ -626,6 +661,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         # EXCLUDED alone is incomplete evidence. Preserve one genuine producer
         # failure so the diagnostic-cap test still exercises FAIL precedence.
         records[0]["raw"]["verdict"] = "FAIL"
+        records[0]["raw"]["stage"] = "measure"
         records[-1]["swapz"]["workload_id"] = records[0]["swapz"]["workload_id"]
         records[-1]["swapz"]["source_sha"] = "b" * 40
         records[-1]["swapz"]["arm_boot_id"] = (
@@ -645,7 +681,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             item["status"] == "FAIL" and item["metric"] == "arm.verdict" and
             item["pair_index"] == 1 and item.get("producer_status") == "FAIL"
             for item in audit["diagnostics"]))
-        self.assertEqual(audit["first_failed_phase"], "arm")
+        self.assertEqual(audit["first_failed_phase"], "measure")
         self.assertTrue(any(
             item["status"] == "BLOCKED" and
             item["metric"] in {
@@ -711,6 +747,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
 
         producer_failed = copy.deepcopy(excluded)
         producer_failed["raw"]["verdict"] = "FAIL"
+        producer_failed["raw"]["stage"] = "measure"
         failed, _ = inspect(
             [producer_failed], summary_status="FAIL_OR_INCOMPLETE")
         self.assertEqual(failed["status"], "FAIL")
@@ -718,7 +755,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             item for item in failed["diagnostics"]
             if item["metric"] == "arm.verdict")
         self.assertEqual(producer_failure["producer_status"], "FAIL")
-        self.assertEqual(failed["first_failed_phase"], "arm")
+        self.assertEqual(failed["first_failed_phase"], "measure")
 
     def test_different_workload_trace_excludes_pair(self):
         record = pair(1, 1100)
