@@ -6513,8 +6513,9 @@ bindings and contradictory PASS/BLOCKED summaries remain non-qualifying. Any
 expected-failure reproducer for a known evaluator false-PASS is debugging
 evidence only and must be reported as an unresolved release blocker; it never
 upgrades acceptance.
-Privacy assertions in such diagnostic controls execute before the intentionally
-failing completeness assertion, so a known false-PASS cannot bypass leak checks.
+Privacy leak checks use a separate ordinary regression, never an expected-failure
+method, because `unittest.expectedFailure` would mask any assertion failure in
+that method.
 
 `docs/handoff/production-readiness.json` is observational release evidence,
 not a qualification result. Every current PASS must bind to the exact

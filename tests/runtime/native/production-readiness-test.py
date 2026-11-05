@@ -2630,6 +2630,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "real_linux_swap: persistent evidence schema is invalid" in item
             for item in result["code_blockers"]))
         self.assertNotIn(private_marker, json.dumps(result))
+
     def test_blocked_real_swap_preflight_cannot_be_overridden_by_nested_pass(
             self):
         report = owner_report()
@@ -2761,15 +2762,11 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         result = evaluate(report=report, policy=policy, physical=physical)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
 
-    @unittest.expectedFailure
-    def test_failure_diagnostics_preserve_phase_and_source_artifact_identity(self):
-        # Known diagnostic gap: the first authoritative failed phase and the
-        # required/observed source and artifact identities are currently lost.
+    def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
         policy = acceptance_policy()
         observed_source_sha = "b" * 40
         observed_module_sha256 = "7" * 64
-        private_marker = "/private/workspace token=do-not-echo"
         report["overall"] = "FAIL"
         report["source_sha"] = observed_source_sha
         report["tested_commit_sha"] = observed_source_sha
@@ -2779,11 +2776,28 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             status="FAIL", exit_code=1, failed_phase="native-contract",
             diagnostic=private_marker)
         result = evaluate(report=report, policy=policy)
-        diagnostics = "\n".join(result["code_blockers"])
+        return (
+            "\n".join(result["code_blockers"]),
+            observed_source_sha,
+            observed_module_sha256,
+        )
+
+    def test_failure_diagnostics_do_not_disclose_private_input(self):
+        private_marker = "/private/workspace token=do-not-echo"
+        diagnostics, _, _ = self._failed_owner_diagnostics(private_marker)
+        self.assertNotIn(private_marker, diagnostics)
+
+    @unittest.expectedFailure
+    def test_failure_diagnostics_preserve_phase_and_source_artifact_identity(self):
+        # Known diagnostic gap: the first authoritative failed phase and the
+        # required/observed source and artifact identities are currently lost.
+        diagnostics, observed_source_sha, observed_module_sha256 = (
+            self._failed_owner_diagnostics("synthetic-private-marker"))
         required_markers = (
             "native-contract",
             "FAIL",
             "owner qualification",
+            "mandatory owner qualification stages",
             "required",
             "observed",
             SOURCE,
@@ -2791,9 +2805,6 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             ARTIFACTS["module_sha256"],
             observed_module_sha256,
         )
-        # Privacy is independently enforced even while this completeness
-        # assertion is an expected failure.
-        self.assertNotIn(private_marker, diagnostics)
         missing = [
             marker for marker in required_markers
             if marker not in diagnostics
