@@ -823,7 +823,11 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
 
     def test_recovery_persists_fail_closed_interruption_order(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
-        recover = c_function_body(source, "swapz_primary_recover")
+        recover = c_function_body(
+            source, "swapz_primary_recover", code_only=False)
+        recovery_errno_helper = c_function_body(
+            source, "swapz_primary_require_recovery_preserving_errno",
+            code_only=False)
 
         normalize = recover.index("swapz_primary_recovery_required_state(")
         persist_required = recover.index(
@@ -845,9 +849,21 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertLess(remove, restored)
         self.assertLess(restored, complete)
         self.assertLess(complete, release)
+        recovery_update = recover.index(
+            "swapz_primary_require_recovery_preserving_errno(")
+        self.assertLess(release, recovery_update)
+        self.assertLess(
+            recover.index("saved_errno = errno ? errno : EIO;"),
+            recovery_update)
         self.assertIn(
             "recovering_persisted && !complete_persisted", recover)
-        self.assertIn("swapz_primary_state_require_recovery_at(", recover)
+        self.assertIn('"RECOVER", saved_errno', recover[recovery_update:])
+        self.assertIn(
+            "swapz_primary_state_require_recovery_at(",
+            recovery_errno_helper)
+        self.assertIn("errno = primary_errno;", recovery_errno_helper)
+        self.assertIn(
+            "original_errno=%d recovery_errno=%d", recovery_errno_helper)
         self.assertIn(
             "case SWAPZ_PRIMARY_STAGE_RESTORED:",
             c_function_body(source, "swapz_primary_state_recoverable"))

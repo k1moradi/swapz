@@ -67,6 +67,11 @@ run ID or private resource names. The rootless
 compiles the production errno-preservation helper with an injected
 recovery-state write failure for START, STOP and RECOVER; source ordering must
 bind all three failure epilogues to that helper before any success publication.
+Lifecycle source-order audits must follow the shared helper to its state-write
+dependency instead of requiring the persistence call to appear inline in each
+coordinator body. They must still verify that each operation-specific epilogue
+invokes the helper only after capturing the first errno and before publishing
+success.
 Because `SWAPZ_PRIMARY_ROOTLESS_TEST` compiles out those privileged lifecycle
 callers, keep the production-only static helper out of that build's translation
 unit while continuing to compile its actual body in the isolated errno fixture;
