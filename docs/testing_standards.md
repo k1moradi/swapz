@@ -4561,7 +4561,7 @@ inconsistent saved values must not produce a verified-restoration result.
 Preserve historical incident evidence even if an old results file contains
 a false negative.
 
-When `journalctl --kernel` is unsupported or fails, attempt a read-only
+When `journalctl --dmesg` is unsupported or fails, attempt a read-only
 `dmesg --time-format=iso` fallback and bound the recorded swapz lines.
 Explicitly record that the dmesg fallback is **not time-filtered**;
 messages found there may predate the physical attempt and cannot be

@@ -1406,7 +1406,7 @@ def _kernel_swapz_messages(start_timestamp):
     journalctl = shutil.which("journalctl")
     journalctl_error = None
     if journalctl:
-        command = [journalctl, "--boot", "--kernel", "--no-pager",
+        command = [journalctl, "--boot", "--dmesg", "--no-pager",
                    "--output=short-iso", f"--since={start_timestamp}"]
         try:
             result = _run(command, timeout=20, check=False)

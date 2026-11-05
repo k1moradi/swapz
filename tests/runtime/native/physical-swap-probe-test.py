@@ -1107,7 +1107,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             if command[0] == "/usr/bin/journalctl":
                 return subprocess.CompletedProcess(
                     command, 1, stdout="",
-                    stderr="journalctl: unrecognized option --kernel")
+                    stderr="journalctl: journal unavailable")
             return subprocess.CompletedProcess(
                 command, 0, stdout=(
                     "unrelated previous boot message\n"
@@ -1122,9 +1122,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(record["source"], "dmesg")
         self.assertFalse(record["time_filter_applied"])
         self.assertEqual(record["matching_line_count"], 2)
-        self.assertIn("unrecognized option", record["journalctl_error"])
+        self.assertIn("journal unavailable", record["journalctl_error"])
         self.assertIn("lower or mapping error -5", record["messages"])
         self.assertEqual(len(commands), 2)
+        self.assertIn("--dmesg", commands[0])
         self.assertIn("--since=2026-11-02T16:00:00Z", commands[0])
         self.assertIn("--time-format=iso", commands[1])
 
