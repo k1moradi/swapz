@@ -36,6 +36,18 @@ class CleanupBlocked(Exception):
         self.category = category
 
 
+def directory_identity(file_stat) -> tuple[int, int, int, int]:
+    """Return metadata that must remain stable for a pinned directory."""
+    return (file_stat.st_dev, file_stat.st_ino, file_stat.st_mode, file_stat.st_uid)
+
+
+def regular_file_identity(file_stat) -> tuple[int, int, int, int, int, int, int, int]:
+    """Return bounded-file metadata that must remain stable through cleanup."""
+    return (file_stat.st_dev, file_stat.st_ino, file_stat.st_mode, file_stat.st_uid,
+            file_stat.st_nlink, file_stat.st_size, file_stat.st_ctime_ns,
+            file_stat.st_mtime_ns)
+
+
 @dataclass
 class Budget:
     root_entries: int = 0
@@ -50,6 +62,11 @@ class Entry:
     device: int
     inode: int
     mode: int
+    owner_uid: int
+    link_count: int
+    size: int
+    ctime_ns: int
+    mtime_ns: int
     children: list["Entry"] | None
 
 
@@ -64,6 +81,17 @@ class CleanupState:
 def require(condition: bool, diagnostic: str, category: str = "safety-invariant") -> None:
     if not condition:
         raise CleanupBlocked(diagnostic, category)
+
+
+def entry_identity_matches(file_stat, entry: Entry) -> bool:
+    if directory_identity(file_stat) != (
+            entry.device, entry.inode, entry.mode, entry.owner_uid):
+        return False
+    if entry.children is not None:
+        return True
+    return (file_stat.st_nlink, file_stat.st_size, file_stat.st_ctime_ns,
+            file_stat.st_mtime_ns) == (
+                entry.link_count, entry.size, entry.ctime_ns, entry.mtime_ns)
 
 
 def close_preserving_first_error(descriptor: int) -> None:
@@ -98,14 +126,13 @@ def read_marker(directory: int, name: str, owner_uid: int, expected_mount: str) 
     descriptor = os.open(name, os.O_RDONLY | OPEN_FLAGS | os.O_NONBLOCK, dir_fd=directory)
     try:
         opened = os.fstat(descriptor)
-        if ((opened.st_dev, opened.st_ino, opened.st_mode, opened.st_uid,
-             opened.st_nlink, opened.st_size, opened.st_ctime_ns) !=
-            (file_stat.st_dev, file_stat.st_ino, file_stat.st_mode,
-             file_stat.st_uid, file_stat.st_nlink, file_stat.st_size,
-             file_stat.st_ctime_ns)
+        if (regular_file_identity(opened) != regular_file_identity(file_stat)
                 or mount_id(descriptor) != expected_mount):
             return None
         contents = os.read(descriptor, 129)
+        after = os.fstat(descriptor)
+        if regular_file_identity(after) != regular_file_identity(opened):
+            return None
         return contents if len(contents) == opened.st_size else None
     finally:
         close_preserving_first_error(descriptor)
@@ -129,10 +156,7 @@ def completed_evidence(directory: int, owner_uid: int, expected_mount: str,
                          dir_fd=directory)
     try:
         opened = os.fstat(descriptor)
-        if ((opened.st_dev, opened.st_ino, opened.st_mode, opened.st_uid,
-             opened.st_nlink, opened.st_size, opened.st_ctime_ns) !=
-            (before.st_dev, before.st_ino, before.st_mode, before.st_uid,
-             before.st_nlink, before.st_size, before.st_ctime_ns)
+        if (regular_file_identity(opened) != regular_file_identity(before)
                 or mount_id(descriptor) != expected_mount):
             return False
         # Read only the beginning and end; an unbounded benchmark log must
@@ -141,13 +165,14 @@ def completed_evidence(directory: int, owner_uid: int, expected_mount: str,
         ending = os.pread(descriptor, EVIDENCE_WINDOW,
                           max(0, opened.st_size - EVIDENCE_WINDOW))
         after = os.fstat(descriptor)
-        if ((after.st_dev, after.st_ino, after.st_mode, after.st_uid,
-             after.st_nlink, after.st_size, after.st_ctime_ns, after.st_mtime_ns) !=
-            (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_uid,
-             opened.st_nlink, opened.st_size, opened.st_ctime_ns, opened.st_mtime_ns)):
+        if regular_file_identity(after) != regular_file_identity(opened):
             return False
+        directory_path = os.readlink(os.fsencode(f"/proc/self/fd/{directory}"))
+        expected_evidence = (b"EVIDENCE=" + os.path.join(
+            directory_path, os.fsencode(EVIDENCE_FILE)) + b"\n")
         return (b"\nSOURCE_HEAD=" + source_sha + b" " in b"\n" + beginning
-                and b"\nPASS: isolated pair and ordinary teardown\n" in b"\n" + ending)
+                and b"\nPASS: isolated pair and ordinary teardown\n" in b"\n" + ending
+                and ending.endswith(expected_evidence))
     finally:
         close_preserving_first_error(descriptor)
 
@@ -198,9 +223,10 @@ def inspect(directory: int, expected_mount: str, owner_uid: int,
             child = os.open(name, flags | OPEN_FLAGS, dir_fd=directory)
             try:
                 opened = os.fstat(child)
-                require((before.st_dev, before.st_ino, before.st_mode, before.st_uid) ==
-                        (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_uid),
-                        "session entry changed", "substitution")
+                unchanged = (directory_identity(opened) == directory_identity(before)
+                             if is_directory else
+                             regular_file_identity(opened) == regular_file_identity(before))
+                require(unchanged, "session entry changed", "substitution")
                 require(mount_id(child) == expected_mount,
                         "nested mount in owned session", "mount-identity")
                 children = (inspect(child, expected_mount, owner_uid,
@@ -209,22 +235,22 @@ def inspect(directory: int, expected_mount: str, owner_uid: int,
             finally:
                 close_preserving_first_error(child)
             entries.append(Entry(name, before.st_dev, before.st_ino,
-                                 before.st_mode, children))
+                                 before.st_mode, before.st_uid, before.st_nlink,
+                                 before.st_size, before.st_ctime_ns,
+                                 before.st_mtime_ns, children))
     return entries
 
 
 def verify_entry(directory: int, entry: Entry, expected_mount: str) -> int:
     current = os.stat(entry.name, dir_fd=directory, follow_symlinks=False)
-    require((current.st_dev, current.st_ino, current.st_mode) ==
-            (entry.device, entry.inode, entry.mode),
+    require(entry_identity_matches(current, entry),
             "session entry replaced during cleanup", "substitution")
     descriptor = os.open(entry.name,
                          (os.O_DIRECTORY if entry.children is not None else os.O_PATH)
                          | OPEN_FLAGS, dir_fd=directory)
     try:
         opened = os.fstat(descriptor)
-        require((opened.st_dev, opened.st_ino, opened.st_mode) ==
-                (entry.device, entry.inode, entry.mode)
+        require(entry_identity_matches(opened, entry)
                 and mount_id(descriptor) == expected_mount,
                 "session entry or mount changed during cleanup", "substitution")
     except BaseException:
@@ -253,8 +279,7 @@ def remove_tree(directory: int, entries: list[Entry], expected_mount: str,
         # No non-root user can change a root-owned private directory. Still
         # recheck the directory entry before name-based unlink/rmdir.
         current = os.stat(entry.name, dir_fd=directory, follow_symlinks=False)
-        require((current.st_dev, current.st_ino, current.st_mode) ==
-                (entry.device, entry.inode, entry.mode),
+        require(entry_identity_matches(current, entry),
                 "session entry changed before removal", "substitution")
         if entry.children is None:
             os.unlink(entry.name, dir_fd=directory)
@@ -273,9 +298,8 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
     root = os.open(root_path, os.O_DIRECTORY | OPEN_FLAGS)
     try:
         root_stat = os.fstat(root)
-        require((root_stat.st_dev, root_stat.st_ino) ==
-                (root_before.st_dev, root_before.st_ino),
-                "temporary root was substituted", "substitution")
+        require(directory_identity(root_stat) == directory_identity(root_before),
+                "temporary root was substituted or changed", "substitution")
         expected_mount = mount_id(root)
         budget = Budget()
         state.phase = "root-inventory"
@@ -298,8 +322,7 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                 candidate = os.open(name, os.O_DIRECTORY | OPEN_FLAGS, dir_fd=root)
                 try:
                     opened = os.fstat(candidate)
-                    require((opened.st_dev, opened.st_ino) ==
-                            (candidate_stat.st_dev, candidate_stat.st_ino),
+                    require(directory_identity(opened) == directory_identity(candidate_stat),
                             "session directory changed", "substitution")
                     require(mount_id(candidate) == expected_mount,
                             "session is a separate mount", "mount-identity")
@@ -320,17 +343,16 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                     close_preserving_first_error(candidate)
                 state.phase = "session-finalization"
                 check = os.stat(name, dir_fd=root, follow_symlinks=False)
-                require((check.st_dev, check.st_ino) ==
-                        (candidate_stat.st_dev, candidate_stat.st_ino),
-                        "session directory substituted before removal", "substitution")
+                require(directory_identity(check) == directory_identity(candidate_stat),
+                        "session directory substituted or changed before removal",
+                        "substitution")
                 os.rmdir(name, dir_fd=root)
                 state.removed += 1
                 state.partial = False
                 state.phase = "root-inventory"
         state.phase = "root-recheck"
         root_after = os.lstat(root_path)
-        require((root_after.st_dev, root_after.st_ino) ==
-                (root_stat.st_dev, root_stat.st_ino),
+        require(directory_identity(root_after) == directory_identity(root_stat),
                 "temporary root changed during cleanup", "substitution")
         return state.removed
     finally:

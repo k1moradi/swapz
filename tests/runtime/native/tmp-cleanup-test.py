@@ -51,8 +51,10 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
     def evidence(self, directory, *, source_sha=None, passed=True):
         source_sha = self.source_sha if source_sha is None else source_sha
         content = (f"SOURCE_HEAD={source_sha} MODULE_SHA256=not-a-secret\n"
+                   f"EVIDENCE_DIR={directory}\n"
                    + ("PASS: isolated pair and ordinary teardown\n" if passed else
-                      "BLOCKED: device teardown incomplete\n"))
+                      "BLOCKED: device teardown incomplete\n")
+                   + f"EVIDENCE={directory / 'session.log'}\n")
         (directory / "session.log").write_text(content)
         (directory / "session.log").chmod(0o600)
 
@@ -222,6 +224,36 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertEqual(self.run_cleanup().returncode, 0)
         self.assertFalse(owned.exists())
 
+    def test_same_source_pass_log_from_other_session_is_not_provenance(self):
+        source = self.session("Abcd1234", complete=False)
+        candidate = self.session("Bcde1234")
+        (candidate / "session.log").write_bytes((source / "session.log").read_bytes())
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:0 retained:2", result.stdout)
+        self.assertTrue(source.exists())
+        self.assertTrue(candidate.exists())
+
+    def test_marker_change_during_read_retains_session(self):
+        owned = self.session("Abcd1234")
+        complete = owned / ".swapz-benchmark-complete"
+        original_read = cleanup_module.os.read
+        changed = False
+
+        def rewrite_after_read(descriptor, length):
+            nonlocal changed
+            contents = original_read(descriptor, length)
+            if not changed and os.fstat(descriptor).st_ino == complete.stat().st_ino:
+                changed = True
+                complete.write_text(self.record)
+                complete.chmod(0o600)
+            return contents
+
+        with mock.patch.object(cleanup_module.os, "read", side_effect=rewrite_after_read):
+            self.assertEqual(cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700), 0)
+        self.assertTrue(changed)
+        self.assertTrue(owned.exists())
+
     def test_log_symlink_hardlink_and_non_private_log_retained(self):
         owned = self.session("Abcd1234")
         outside = self.root / "other-evidence"
@@ -374,6 +406,53 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertEqual(state.phase, "session-inspection")
         self.assertFalse(state.partial)
         self.assertTrue((owned / "fixture.bin").exists())
+
+    def test_session_mode_change_while_opening_blocks_before_deletion(self):
+        owned = self.session("Abcd1234")
+        original_open = cleanup_module.os.open
+        changed = False
+
+        def make_session_public_after_open(path, flags, *args, **kwargs):
+            nonlocal changed
+            descriptor = original_open(path, flags, *args, **kwargs)
+            if (path == owned.name and kwargs.get("dir_fd") is not None
+                    and not changed):
+                changed = True
+                owned.chmod(0o777)
+            return descriptor
+
+        try:
+            with mock.patch.object(cleanup_module.os, "open",
+                                   side_effect=make_session_public_after_open):
+                with self.assertRaisesRegex(cleanup_module.CleanupBlocked,
+                                            "session directory changed"):
+                    cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700)
+        finally:
+            owned.chmod(0o700)
+        self.assertTrue(changed)
+        self.assertTrue((owned / "fixture.bin").exists())
+
+    def test_regular_file_change_after_inspection_blocks_before_unlink(self):
+        owned = self.session("Abcd1234")
+        fixture = owned / "fixture.bin"
+        original_remove_tree = cleanup_module.remove_tree
+        changed = False
+
+        def grow_after_inspection(directory, entries, mount_id, preserve_markers=False):
+            nonlocal changed
+            if preserve_markers and not changed:
+                changed = True
+                with fixture.open("ab") as output:
+                    output.write(b" changed after inspection")
+            return original_remove_tree(directory, entries, mount_id, preserve_markers)
+
+        with mock.patch.object(cleanup_module, "remove_tree",
+                               side_effect=grow_after_inspection):
+            with self.assertRaisesRegex(cleanup_module.CleanupBlocked, "replaced"):
+                cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700)
+        self.assertTrue(changed)
+        self.assertTrue(fixture.exists())
+        self.assertTrue((owned / ".swapz-benchmark-complete").exists())
 
     def test_session_directory_substitution_before_final_rmdir_is_blocked(self):
         owned = self.session("Abcd1234")

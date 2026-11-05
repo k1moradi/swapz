@@ -3586,15 +3586,26 @@ cleanup after earlier loaded stages, without weakening the 1 GiB
 The matching PID/source markers alone never authorize deletion. A completed
 session also requires a private, single-linked `session.log` with the exact
 source SHA in its initial 4 KiB and the producer's successful ordinary-teardown
-record in its final 4 KiB; reads must be descriptor-pinned, same-mount and
-bounded independent of log size. Missing, mismatched, replaced, or nonprivate
-proof retains the session. This is same-owner corroboration, not cryptographic
-attestation against a privileged actor able to forge both markers and logs.
-Keep the teardown log and owner/completion records until scratch removal ends;
-after proof removal, a failed final rmdir leaves non-resumable retained state,
-never a fabricated cleanup PASS. Rootless native fixtures must cover foreign
-occupants, symlinks, hardlinks, substitutions, interrupted removal, unreadable
-entries, and injected unlink/rmdir/close errors.
+record followed by the exact terminal
+`EVIDENCE=<pinned-session>/session.log` line in its final 4 KiB. Reads must
+remain descriptor-pinned, same-mount and bounded independent of log size. The
+evidence path is derived from the pinned session descriptor, not caller path
+text, so a same-source PASS log copied from another session is not provenance.
+Marker and evidence-file identity metadata must remain stable across their
+reads. Missing, mismatched, replaced, unstable, or nonprivate proof retains the
+session. This is same-owner corroboration, not cryptographic attestation
+against a privileged actor able to forge both markers and logs.
+
+Inspection and removal must revalidate directory owner/mode plus regular-file
+owner/mode, single-link state, size and change timestamps before unlink. A file
+that grows, is hard-linked, changes owner, or otherwise changes after the
+bounded inspection is ambiguous state and blocks cleanup rather than bypassing
+the inspected resource bound. Keep the teardown log and owner/completion
+records until scratch removal ends; after proof removal, a failed final rmdir
+leaves non-resumable retained state, never a fabricated cleanup PASS. Rootless
+native fixtures must cover foreign occupants, symlinks, hardlinks, metadata
+changes, substitutions, interrupted removal, unreadable entries, and injected
+unlink/rmdir/close errors.
 
 On refusal, the private helper emits the phase, category, original errno (when
 present) or process exit code, prior fully removed count, and conservative
