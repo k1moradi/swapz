@@ -300,11 +300,15 @@ unprivileged creator of the admission listener, not merely a same-UID
 replacement endpoint: the socket's inode, mode and ownership, the kernel
 SO_PEERCRED PID and UID, the client's pinned pre-connect ancestor chain with
 /proc start ticks, and a live pidfd must agree on connection and again before
-and after each approval. The client must select the **nearest ancestor with the parent's UID**
-as the only creator candidate; merely finding the peer anywhere in the
-ancestry would also trust a higher same-UID shell or launcher which could
-replace the socket. A three-process rootless AF_UNIX regression must reject
-that higher-ancestor listener while preserving the direct parent's approval.
+and after each approval. The client must select the **nearest ancestor with the parent's
+effective UID** (the second Uid field in /proc/PID/status), not its /proc
+directory owner, as the only creator candidate. Merely finding the peer
+anywhere in the ancestry would also trust a higher same-UID shell or launcher
+which could replace the socket. The rootless AF_UNIX regression must reject
+that higher-ancestor listener, including after it replaces a real nearest
+parent's socket, while preserving a direct parent's synthetic approval.
+Recheck the selected effective UID at every approval boundary; malformed or
+unavailable process credentials are BLOCKED.
 The client must enable SO_PASSCRED and verify
 SCM_CREDENTIALS on every received reply byte; SO_PEERCRED alone remains
 unchanged if a connected descriptor is passed to a foreign writer. Missing,

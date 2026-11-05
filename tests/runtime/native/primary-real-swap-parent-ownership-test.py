@@ -647,6 +647,89 @@ print(result.stdout.strip(), flush=True)
                         (json.dumps(response) + "\n").encode("ascii"))
                     self.assertEqual(self._finish(child), "SYNTHETIC_APPROVED")
 
+    def test_same_uid_grandparent_cannot_replace_creation_parent_listener(self):
+        # Unlike an ordinary sibling substitute, this attacker's PID is in
+        # the child's real ancestry; only the nearest authorized UID may reply.
+        parent_source = r"""
+import os
+import socket
+import subprocess
+import sys
+
+socket_path, helper_path, client_hex = sys.argv[1:]
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as source_listener:
+    source_listener.bind(socket_path)
+    os.chmod(socket_path, 0o600)
+    source_listener.listen(1)
+    print("READY", flush=True)
+    if sys.stdin.readline() != "REPLACED\n":
+        raise RuntimeError("missing substitution gate")
+    client = subprocess.Popen(
+        [sys.executable, "-I", "-B", "-c",
+         bytes.fromhex(client_hex).decode("ascii"),
+         socket_path, helper_path, "normal"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, bufsize=1)
+    try:
+        outcome = client.stdout.readline().strip()
+        if outcome == "CONNECTED":
+            client.stdin.write("GO\n")
+            client.stdin.flush()
+            outcome = client.stdout.readline().strip()
+        print(outcome, flush=True)
+        if client.wait(timeout=5) != 0:
+            raise RuntimeError("source admission client did not exit normally")
+    finally:
+        if client.poll() is None:
+            client.kill()
+        client.wait(timeout=5)
+        for stream in (client.stdin, client.stdout, client.stderr):
+            if stream is not None:
+                stream.close()
+"""
+        for repetition in range(3):
+            with self.subTest(repetition=repetition):
+                with tempfile.TemporaryDirectory(
+                        prefix="swapz-ancestor-substitution-") as directory:
+                    socket_path = Path(directory) / "source.sock"
+                    creator = subprocess.Popen(
+                        [sys.executable, "-I", "-B", "-c", parent_source,
+                         os.fspath(socket_path), os.fspath(CLIENT_HELPER),
+                         self.CLIENT.encode("ascii").hex()],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, bufsize=1)
+                    try:
+                        self.assertTrue(
+                            select.select([creator.stdout], [], [], 5)[0])
+                        self.assertEqual(creator.stdout.readline().strip(), "READY")
+                        socket_path.unlink()  # Grandparent swaps the original P inode.
+                        with socket.socket(
+                                socket.AF_UNIX, socket.SOCK_STREAM) as forged:
+                            forged.bind(os.fspath(socket_path))
+                            os.chmod(socket_path, 0o600)
+                            forged.listen(1)
+                            forged.settimeout(5)
+                            creator.stdin.write("REPLACED\n")
+                            creator.stdin.flush()
+                            with forged.accept()[0] as connection:
+                                connection.settimeout(5)
+                                received = connection.recv(4096)
+                                if received:
+                                    # A former any-ancestor implementation sent
+                                    # source data here and admitted forged PASS.
+                                    request = json.loads(
+                                        received.split(b"\n", 1)[0].decode("ascii"))
+                                    connection.sendall(
+                                        (json.dumps(self._response(request)) +
+                                         "\n").encode("ascii"))
+                            self.assertEqual(received, b"",
+                                             "grandparent received source request")
+                        self._assert_refusal(
+                            self._finish(creator), "connect",
+                            "parent_ancestry", "unrelated_peer_run")
+                    finally:
+                        self._reap(creator)
+
     def test_shared_fd_foreign_writer_cannot_authorize(self):
         child = self._start_client()
         with self.server.accept()[0] as connection:
