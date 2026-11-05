@@ -333,7 +333,10 @@ the current oracle bytes into its root-only temporary workspace, require their
 SHA-256 to match that commit-derived digest, record it, and execute only that
 pinned copy for every cycle. An alter-pin-restore worktree race or a mid-run
 pathname replacement must therefore be unable to fabricate byte-exact PASS
-evidence. Before emitting `ORACLE_WAITING` or allocating anonymous memory, the
+evidence. The source-controlled oracle must retain its Git executable bit
+because the admission path explicitly checks `os.access(..., X_OK)` before
+execution; the rootless terminal-contract test guards this mode requirement.
+Before emitting `ORACLE_WAITING` or allocating anonymous memory, the
 oracle must reject any seed that is not exactly 32 lowercase hexadecimal
 characters with a bounded exit-2 diagnostic and no traceback or echoed invalid
 seed. Validated seed bytes are immutable for the worker lifetime and should be

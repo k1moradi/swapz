@@ -28,6 +28,11 @@ QUALIFIER_SPEC.loader.exec_module(qualify)
 
 
 class TerminalEvidenceContracts(unittest.TestCase):
+    def test_source_oracle_retains_qualification_executable_permission(self):
+        self.assertTrue(
+            os.access(ORACLE, os.X_OK),
+            "real-swap admission rejects a non-executable source oracle")
+
     def run_fixture(self, *, short_read=False, interrupted=False, corrupt=False,
                     corrupt_pages=(), page_count=2, read_errno=None,
                     report_errno=None, close_fails=False, closed_output_at=None):
