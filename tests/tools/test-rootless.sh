@@ -21,6 +21,7 @@ rootless_capture_pid=
 rootless_capture_failure_reason=
 rootless_classified_reason=nonzero_exit
 rootless_classified_subtest=unavailable
+rootless_classified_test=unavailable
 
 begin_rootless_private_stderr_capture() {
   rootless_capture_directory=
@@ -106,17 +107,19 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local failure_header_regex="^(FAIL|ERROR): test_[A-Za-z0-9_]+ \\(__main__\\.PackageLifecycle\\.test_[A-Za-z0-9_]+\\)"
+  local failure_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\.test_[A-Za-z0-9_]{1,96}\\)"
   local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
   local found_failure_header=0
   rootless_classified_reason=nonzero_exit
   rootless_classified_subtest=unavailable
+  rootless_classified_test=unavailable
   [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
 
   while IFS= read -r line || [[ -n $line ]]; do
     if (( found_failure_header == 0 )); then
       if [[ $line =~ $failure_header_regex ]]; then
         found_failure_header=1
+        rootless_classified_test=${BASH_REMATCH[2]}
         if [[ ${BASH_REMATCH[1]} == FAIL ]]; then
           rootless_classified_reason=unittest_assertion
         else
@@ -140,6 +143,7 @@ report_rootless_failure() {
   local failed_at_line=$2
   local failure_reason=${3:-nonzero_exit}
   local failed_subtest=${4:-unavailable}
+  local failed_test=${5:-unavailable}
   # ERR is inherited by command substitutions under -E. Their eventual
   # enclosing assertion, not an incidental internal command, owns the failure.
   if (( BASH_SUBSHELL != 0 )); then
@@ -213,8 +217,8 @@ report_rootless_failure() {
       rm -f -- "$private_diagnostic_path.tail" 2>/dev/null
     fi
     if [[ -n $private_diagnostic_path ]] &&
-       ! printf '\n--- swapz rootless attribution ---\nphase=%s\nsubtest=%s\nreason=%s\nexit_code=%s\nphase_wall_s=%s\nstage_wall_s=%s\nsource_line=%s\nnext_step=inspect_first_captured_FAIL_or_ERROR_locally\n' \
-         "$rootless_phase" "$failed_subtest" "$failure_reason" \
+       ! printf '\n--- swapz rootless attribution ---\nphase=%s\nsubtest=%s\ntest=%s\nreason=%s\nexit_code=%s\nphase_wall_s=%s\nstage_wall_s=%s\nsource_line=%s\nnext_step=inspect_first_captured_FAIL_or_ERROR_locally\n' \
+         "$rootless_phase" "$failed_subtest" "$failed_test" "$failure_reason" \
          "$original_exit_code" "$phase_wall_seconds" "$stage_wall_seconds" \
          "$failed_at_line" >> "$private_diagnostic_path"; then
       private_diagnostic_log=unavailable
@@ -227,8 +231,8 @@ report_rootless_failure() {
   if [[ $failed_subtest != unavailable ]]; then
     failure_phase+=" subtest $failed_subtest"
   fi
-  printf 'FAIL: rootless phase=%s subtest=%s exit=%s reason=%s phase_s=%s stage_s=%s line=%s log=%s\n' \
-    "${rootless_phase##*/}" "$failed_subtest" "$original_exit_code" \
+  printf 'FAIL: rootless phase=%s subtest=%s test=%s exit=%s reason=%s phase_s=%s stage_s=%s line=%s log=%s\n' \
+    "${rootless_phase##*/}" "$failed_subtest" "$failed_test" "$original_exit_code" \
     "$failure_reason" "$phase_wall_seconds" "$stage_wall_seconds" \
     "$failed_at_line" "$private_diagnostic_log" >&2
   printf 'Failed during: %s\n' "$failure_phase" >&2
@@ -239,6 +243,37 @@ report_rootless_failure() {
   printf '%s\n' \
     'NEXT: inspect the mode-0600 local log and first captured FAIL/ERROR; do not publish private data.' >&2
   exit "$original_exit_code"
+}
+
+# Reuse the bounded relay for the two detailed, high-volume unittests.
+# A failed child owns the exit status even if stderr relay or cleanup fails.
+finish_and_report_rootless_unittest() {
+  local original_exit_code=$1
+  local command_line=$2
+  finish_rootless_private_stderr_capture "$original_exit_code"
+  if (( original_exit_code == 0 )); then
+    if [[ -n $rootless_capture_failure_reason ]]; then
+      report_rootless_failure 1 "$command_line" "$rootless_capture_failure_reason"
+    fi
+    return 0
+  fi
+  if [[ -z $rootless_capture_failure_reason ]]; then
+    classify_rootless_private_unittest_failure \
+      "$rootless_private_diagnostic_path"
+  else
+    # A partial relay is not authoritative for a unittest classification.
+    rootless_classified_reason=nonzero_exit
+    rootless_classified_subtest=unavailable
+    rootless_classified_test=unavailable
+  fi
+  if [[ $rootless_classified_reason == nonzero_exit &&
+        $rootless_classified_subtest == unavailable ]]; then
+    report_rootless_failure "$original_exit_code" "$command_line"
+  else
+    report_rootless_failure "$original_exit_code" "$command_line" \
+      "$rootless_classified_reason" "$rootless_classified_subtest" \
+      "$rootless_classified_test"
+  fi
 }
 
 rootless_unexpected_error() {
@@ -292,7 +327,15 @@ rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v
 rootless_phase='tests/runtime/native/primary-real-swap-test.py'
 rootless_phase_started_seconds=$SECONDS
-python3 -B tests/runtime/native/primary-real-swap-test.py -v
+begin_rootless_private_stderr_capture
+rootless_primary_command_line=$LINENO
+if python3 -B tests/runtime/native/primary-real-swap-test.py -v \
+    2>&"$rootless_capture_input_fd"; then
+  rootless_primary_exit_code=0
+else
+  rootless_primary_exit_code=$?
+fi
+finish_and_report_rootless_unittest "$rootless_primary_exit_code" "$rootless_primary_command_line"
 rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/primary-real-swap-oracle-terminal-test.py -v
@@ -321,32 +364,7 @@ if python3 -B tests/runtime/native/package-dkms-test.py -v \
 else
   rootless_package_exit_code=$?
 fi
-finish_rootless_private_stderr_capture "$rootless_package_exit_code"
-if (( rootless_package_exit_code == 0 )) &&
-   [[ -n $rootless_capture_failure_reason ]]; then
-  report_rootless_failure 1 "$rootless_package_command_line" \
-    "$rootless_capture_failure_reason"
-fi
-if (( rootless_package_exit_code != 0 )); then
-  # A nonzero relay can leave a partial capture. Preserve the child's status,
-  # but never promote classifications from bytes whose completeness is unknown.
-  if [[ -z $rootless_capture_failure_reason ]]; then
-    classify_rootless_private_unittest_failure \
-      "$rootless_private_diagnostic_path"
-  else
-    rootless_classified_reason=nonzero_exit
-    rootless_classified_subtest=unavailable
-  fi
-  if [[ $rootless_classified_reason == nonzero_exit &&
-        $rootless_classified_subtest == unavailable ]]; then
-    report_rootless_failure "$rootless_package_exit_code" \
-      "$rootless_package_command_line"
-  else
-    report_rootless_failure "$rootless_package_exit_code" \
-      "$rootless_package_command_line" "$rootless_classified_reason" \
-      "$rootless_classified_subtest"
-  fi
-fi
+finish_and_report_rootless_unittest "$rootless_package_exit_code" "$rootless_package_command_line"
 rootless_phase='tests/runtime/native/systemd/swapz-primary-systemd-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v

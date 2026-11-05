@@ -2367,7 +2367,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
             match = re.match(
                 r"^(?:FAIL|ERROR): (test_[A-Za-z0-9_]+) \(",
                 line.strip())
-            if match:
+            if match and unittest_failure is None:
                 unittest_failure = match.group(1)
 
     native_diagnostic = None

@@ -808,8 +808,9 @@ reason classes may be promoted from a private capture into `FAIL:`, `Failed
 during:`, or `Reason:` markers. A failing status must survive diagnostic write
 errors and EXIT/ERR/signal traps without a duplicate marker.
 
-The long package unittest is the sole rootless suite that may keep a transient
-private stderr copy while it runs. One relay process may preserve stderr
+The long package unittest and primary real-swap native contract suite are the
+only rootless suites that may keep a transient private stderr copy while they
+run. One relay process may preserve stderr
 byte-for-byte into a mode-0600 file inside the mode-0700 failure directory; do
 not add a relay process to every passing suite. On PASS the file and directory
 are removed immediately. On failure, retain a bounded 64-KiB excerpt of the first detailed unittest
@@ -818,7 +819,10 @@ attribution metadata. This fits the existing 256-KiB capture budget and keeps
 the first traceback even when unrelated progress stderr displaces it from the
 tail. Classification
 must stop at the first detailed unittest failure block so a later subtest cannot
-replace the first failing checkpoint. The public marker may expose only an
+replace the first failing checkpoint. Retain its allowlisted unittest test name
+and first assertion or exception privately, even when teardown adds a later
+failure. The official native-stage diagnostic also selects the first unittest
+failure name rather than the final teardown name. The public marker may expose only an
 allowlisted `phase='[a-z0-9-]+'` value and classify that first private failure
 as `unittest_timeout`, `unittest_assertion`, `unittest_error`, or the
 generic nonzero reason. Exit 124 remains ambiguous unless that first private
@@ -836,7 +840,8 @@ private filesystem paths. Failure-log allocation must not follow a symlinked
 build/tests directory.
 The private `tests/runtime/native/rootless-attribution-test.py` regression runs
 before package transactions in the existing rootless path, using the real
-package-stage Bash functions with bounded synthetic stderr, temporary storage,
+package and primary-real-swap stage Bash functions with bounded synthetic stderr,
+temporary storage,
 and a genuine Python `subprocess.TimeoutExpired`. It must also cover
 first-failure ordering, oversized capture, no-log storage, cleanup failures,
 and privacy of public markers. Explicit shell exits and failing shell
