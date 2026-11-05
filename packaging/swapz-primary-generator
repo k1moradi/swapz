@@ -23,17 +23,33 @@ fi
 normal_dir=$1
 early_dir=$2
 late_dir=$3
+safe_output_directory()
+{
+	# Systemd supplies absolute paths. Refuse a symlinked ancestor or a
+	# lexical alias rather than writing through an unexpected directory.
+	current_directory=$1
+	while [ "$current_directory" != / ]; do
+		case "$current_directory" in
+		*/.|*/..) return 1 ;;
+		esac
+		[ -d "$current_directory" ] && [ ! -L "$current_directory" ] || return 1
+		current_directory=${current_directory%/*}
+		[ -n "$current_directory" ] || current_directory=/
+	done
+}
 for output_dir in "$normal_dir" "$early_dir" "$late_dir"; do
 	case "$output_dir" in
 	/*) ;;
 	*) fail 2 arguments generator-output absolute-path mapper-active-job ;;
 	esac
-	if [ ! -d "$output_dir" ] || [ -L "$output_dir" ]; then
+	if ! safe_output_directory "$output_dir"; then
 		fail 2 arguments generator-output unsafe-output-directory mapper-active-job
 	fi
 done
 if [ "$normal_dir" = "$early_dir" ] || [ "$normal_dir" = "$late_dir" ] ||
-	[ "$early_dir" = "$late_dir" ]; then
+	[ "$early_dir" = "$late_dir" ] ||
+	[ "$normal_dir" -ef "$early_dir" ] || [ "$normal_dir" -ef "$late_dir" ] ||
+	[ "$early_dir" -ef "$late_dir" ]; then
 	fail 2 arguments generator-output duplicate-output-directory mapper-active-job
 fi
 
@@ -73,10 +89,12 @@ cleanup()
 	# Remove a partial graph while the mapper mask is still in force. Never
 	# follow a substituted symlink to an external destination.
 	if [ "$transaction_committed" -eq 0 ]; then
-		if [ "$published_mapper" -eq 1 ]; then
+		if [ "$published_mapper" -eq 1 ] && [ ! -L "$mapper_dropin" ] &&
+			[ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ]; then
 			rm -f -- "$mapper_dropin" || :
 		fi
-		if [ "$published_device" -eq 1 ]; then
+		if [ "$published_device" -eq 1 ] && [ ! -L "$device_dropin" ] &&
+			[ "$stage_dir/owned-device" -ef "$device_dropin" ]; then
 			rm -f -- "$device_dropin" || :
 		fi
 	fi
@@ -187,6 +205,11 @@ fi
 if units=$(cat -- "$response_file"); then :; else
 	fail "$?" selection manager-output read-response mapper-active-job
 fi
+# Command substitution erases terminal newlines (and some shells drop NULs).
+# Recheck the exact bounded bytes, including one mandatory final newline.
+if printf '%s\n' "$units" | cmp -s - "$response_file"; then :; else
+	fail 1 selection manager-output noncanonical-response mapper-active-job
+fi
 case "$units" in
 *'
 '*) fail 1 selection manager-output multiline-response mapper-active-job ;;
@@ -296,6 +319,12 @@ if printf '[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n' > "$device_tempor
 fi
 if chmod 0644 "$mapper_temporary" "$device_temporary"; then :; else
 	fail "$?" publication generator-output chmod-dropins mapper-active-job
+fi
+# Retain private hardlinks to verify rollback owns the published inode even
+# when a rename succeeds but its wrapper reports failure or substitutes a file.
+if ln -- "$device_temporary" "$stage_dir/owned-device" &&
+	ln -- "$mapper_temporary" "$stage_dir/owned-mapper"; then :; else
+	fail "$?" publication generator-output pin-published-files mapper-active-job
 fi
 published_device=1
 if mv -fT -- "$device_temporary" "$device_dropin"; then :; else

@@ -54,6 +54,8 @@ class GeneratorPublicationTest(unittest.TestCase):
                 sys.exit(int(os.environ["MOCK_STATUS"]))
             if "MOCK_UNITS" in os.environ:
                 sys.stdout.write(os.environ["MOCK_UNITS"])
+                if os.environ.get("MOCK_APPEND_NUL") == "1":
+                    sys.stdout.write(chr(0))
                 sys.exit(0)
             selector = Path(os.environ["MOCK_SELECTOR"])
             try:
@@ -236,6 +238,71 @@ class GeneratorPublicationTest(unittest.TestCase):
                     self.assert_blocked(self.run_generator(), "publication")
                     (output / leaf).unlink()
         self.assert_blocked(self.run_generator(MOCK_UNITS="", MOCK_STATUS="21"), "selection")
+
+    def test_manager_response_rejects_extra_bytes_and_missing_terminator(self) -> None:
+        device, raw = identities(SELECTED)
+        canonical = f"{device} {raw}\n"
+        for response in (canonical + "\n", canonical + "\n\n", canonical[:-1],
+                         canonical.replace("\n", "\r\n")):
+            with self.subTest(response=repr(response)):
+                result = self.run_generator(MOCK_UNITS=response)
+                self.assert_blocked(result, "selection")
+                self.assertIn("validation=noncanonical-response", result.stderr)
+        # Environment variables cannot contain NUL; the stub emits it itself.
+        nul_result = self.run_generator(MOCK_UNITS=canonical, MOCK_APPEND_NUL="1")
+        self.assert_blocked(nul_result, "selection")
+        self.assertIn("validation=noncanonical-response", nul_result.stderr)
+
+    def test_failed_publication_preserves_substituted_foreign_inode(self) -> None:
+        outside = self.root / "foreign-original"
+        outside.write_text("untouched", encoding="ascii")
+        command = self.commands / "mv"
+        for leaf, destination in (
+            ("50-swapz-timeout.conf", self.device_dropin(SELECTED)),
+            ("50-selected-target.conf", self.mapper_dropin()),
+        ):
+            with self.subTest(leaf=leaf):
+                command.write_text(
+                    '#!/bin/sh\ncase "$*" in\n'
+                    f"  *{leaf}*)\n"
+                    '    for output_path do :; done\n'
+                    '    /usr/bin/ln -s "$MOCK_EXTERNAL" "$output_path" || exit $?\n'
+                    '    exit 74 ;;\n'
+                    'esac\nexec /usr/bin/mv "$@"\n',
+                    encoding="ascii",
+                )
+                command.chmod(0o755)
+                result = self.run_generator(MOCK_EXTERNAL=str(outside))
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn("phase=publication", result.stderr)
+                self.assertIn("status=74", result.stderr)
+                self.assertEqual(os.readlink(self.mask()), "/dev/null")
+                self.assertTrue(destination.is_symlink())
+                self.assertEqual(destination.readlink(), outside)
+                self.assertEqual(outside.read_text(encoding="ascii"), "untouched")
+                if leaf == "50-selected-target.conf":
+                    self.assertFalse(self.device_dropin(SELECTED).exists())
+                self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+                destination.unlink()
+        command.unlink()
+
+    def test_symlinked_output_ancestor_and_directory_alias_fail_before_writes(self) -> None:
+        outside = self.root / "foreign-directory"
+        outside.mkdir()
+        (outside / "normal").mkdir()
+        alias = self.root / "aliased-parent"
+        alias.symlink_to(outside, target_is_directory=True)
+        for output_dir in (alias / "normal", self.normal / ".." / "normal"):
+            with self.subTest(output_dir=output_dir):
+                result = subprocess.run(
+                    [str(self.generator), str(output_dir), str(self.early), str(self.late)],
+                    env=self.environment, capture_output=True, text=True,
+                    check=False, timeout=30,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("validation=unsafe-output-directory", result.stderr)
+        self.assertFalse(list((outside / "normal").iterdir()))
+        self.assertFalse(list(self.normal.iterdir()))
 
     def test_hibernation_guards_survive_refused_selector(self) -> None:
         result = self.run_generator(MOCK_UNITS="garbage")

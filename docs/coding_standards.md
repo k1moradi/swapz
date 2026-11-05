@@ -683,8 +683,14 @@ publishing target-specific units. The mask must remain effective throughout
 staging and cleanup so an enabled mapper cannot acquire an incomplete or stale
 dependency graph. For daemon-reload regeneration, move the prior owned mapper drop-in
 into private staging until its replacement is published; a newly published
-unit must not reuse a just-unlinked file identity. Validate bounded manager
-output, refuse duplicate generated
+unit must not reuse a just-unlinked file identity. Require the manager response
+to byte-match one canonical newline-terminated unit pair: shell command
+substitution can otherwise erase extra terminal newlines or NUL bytes. Pin
+the staged mapper/device inodes through rollback and unlink a published file
+only when its inode still matches; a failing rename may have left a foreign
+symlink or file at that path. Reject output directories reached through
+symlinked ancestors, dot-component aliases or duplicate directory identities.
+Validate bounded manager output, refuse duplicate generated
 unit identities and symlink-substituted output paths, and remove only
 generator-owned stale drop-ins from a previously selected PARTUUID. Publish the
 complete selected graph before releasing the mask; any validation, command,
