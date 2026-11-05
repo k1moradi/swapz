@@ -811,7 +811,7 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 	static const struct {
 		const char *scenario;
 		const char *inventory;
-		const char *observed_entries;
+		const char *safe_observed_entries;
 		const char *entry_class;
 		int expected_errno;
 		int late;
@@ -832,10 +832,10 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		{ "malformed-after-active", ADMISSION_SWAP_HEADER
 		  "/unresolvable/swapfile file 4 1 -2\n"
 		  "/unresolvable/swapfile file 4 1\n",
-		  "2", "malformed-row", EPROTO, 0, 0 },
+		  "1", "regular-then-malformed", EPROTO, 0, 0 },
 		{ "truncated", ADMISSION_SWAP_HEADER
 		  "/unresolvable/swapfile file 4 1 -2",
-		  "1", "truncated-row", EPROTO, 0, 0 },
+		  "0", "truncated-row", EPROTO, 0, 0 },
 		{ "empty", "", "0", "empty", EPROTO, 0, 0 },
 		{ "inaccessible", NULL, "unknown", "unreadable",
 		  EACCES, 0, 1 },
@@ -848,10 +848,18 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		  "2", "duplicate", EOPNOTSUPP, 1, 0 },
 		{ "late-truncated", ADMISSION_SWAP_HEADER
 		  "/unresolvable/swapfile file 4 1 -2",
-		  "1", "truncated-row", EPROTO, 1, 0 },
+		  "0", "truncated-row", EPROTO, 1, 0 },
 		{ "late-inaccessible", NULL, "unknown", "unreadable",
 		  EACCES, 1, 1 },
 	};
+
+	static const char expected_inventory_condition[] =
+		"expected=selected partition and parent are absent from mount "
+		"namespaces and /proc/swaps";
+	static const char expected_refusal_action[] =
+		"action=inspect the failed stage read-only; no header write";
+	static const char active_entry_warning[] =
+		"active entry without a verifiable kernel backing identity";
 
 	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
 	     ++index) {
@@ -893,14 +901,17 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		if (status != 2 || observed_errno != cases[index].expected_errno ||
 		    !strstr(report, expected_summary) ||
 		    !strstr(report, "stage=inventory") ||
-		    !strstr(report, "expected=") ||
+		    !strstr(report, expected_inventory_condition) ||
 		    !strstr(report, errno_field) ||
-		    !strstr(report, "action=") ||
+		    !strstr(report, expected_refusal_action) ||
 		    !strstr(report, strerror(cases[index].expected_errno)) ||
 		    (cases[index].expected_errno == EOPNOTSUPP &&
-		     !strstr(report, "active entry without a verifiable "
-			     "kernel backing identity")) ||
+		     !strstr(report, active_entry_warning)) ||
+		    (cases[index].expected_errno != EOPNOTSUPP &&
+		     strstr(report, active_entry_warning)) ||
 		    strstr(report, ADMISSION_DEVICE) ||
+		    strstr(report, "/unresolvable/swapfile") ||
+		    strstr(report, "/dev/other") ||
 		    admission_fixture.swap_inventory_checks !=
 			    expected_inventory_checks ||
 		    admission_fixture.opens != expected_open_calls ||
@@ -908,6 +919,7 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		    admission_fixture.closes != expected_open_calls ||
 		    admission_fixture.writes != 0U ||
 		    admission_fixture.syncs != 0U ||
+		    admission_fixture.descriptor_queries != 0U ||
 		    test_pwrite_calls != previous_pwrite_calls || !unchanged) {
 			fprintf(stderr, "FAIL: phase=active_swap_inventory "
 				"scenario=%s gate=%s observed_entries=%s entry_class=%s "
@@ -915,16 +927,18 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 				"operation=header_pwrite expected=refused writes=%u "
 				"pwrite_delta=%u block_zero_untouched=%d "
 				"inventory_checks=%u opens=%u reads=%u "
-				"syncs=%u closes=%u\n",
-				cases[index].scenario, cases[index].late ? "prewrite" : "preopen",
-				cases[index].observed_entries,
+				"syncs=%u closes=%u descriptor_queries=%u\n",
+				cases[index].scenario,
+				cases[index].late ? "prewrite" : "preopen",
+				cases[index].safe_observed_entries,
 				cases[index].entry_class, observed_errno,
 				cases[index].expected_errno, status,
 				admission_fixture.writes,
 				test_pwrite_calls - previous_pwrite_calls, unchanged,
 				admission_fixture.swap_inventory_checks,
 				admission_fixture.opens, admission_fixture.reads,
-				admission_fixture.syncs, admission_fixture.closes);
+				admission_fixture.syncs, admission_fixture.closes,
+				admission_fixture.descriptor_queries);
 			abort();
 		}
 		admission_stop();

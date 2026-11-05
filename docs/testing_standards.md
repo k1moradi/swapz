@@ -4762,7 +4762,12 @@ identify stage=inventory and a safe action, count zero header pwrite and sync
 calls, and compare the complete in-memory block zero byte-for-byte to its
 pre-invocation state. Failure output must use phase=active_swap_inventory,
 sanitized entry counts/classes where observable, the affected gate and the
-refused operation; never emit raw swap paths. This establishes a rootless
+refused operation; never emit raw swap paths. Only fully parsed data rows may
+contribute to an observed-entry count: a truncated row contributes zero, a
+malformed row after one valid row reports one safely observed entry, and an
+unreadable table reports the count as unknown. Captured CLI diagnostics must
+match the exact inventory expected-condition and read-only/no-header-write
+action, and must not echo synthetic swap paths. This establishes a rootless
 observed-snapshot safety invariant, not exclusive kernel ownership or a bound
 against swapon racing between the final inventory check and header pwrite.
 The physical-card mapper-page oracle is separate and still required.
