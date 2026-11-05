@@ -2,9 +2,9 @@
 """Unprivileged admission parent for private physical real-swap qualification.
 
 This parent owns every Git/remote-main source decision. It performs no block,
-Device Mapper, swap, module, or lifecycle mutation. The current wire schema can
-bootstrap source identity only; physical cycle/final approval remains BLOCKED
-until the request also binds the required run and target evidence.
+Device Mapper, swap, module, or lifecycle mutation. Connection-time peer
+credentials do not prove the later message writer after descriptor transfer,
+and the current wire schema lacks run/target evidence, so every request BLOCKS.
 """
 
 from __future__ import annotations
@@ -521,25 +521,22 @@ def _serve_admission(server: socket.socket,
                             "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
                             file=sys.stderr)
                         break
-                    if expected_phase != "initial":
-                        parent_rejected = True
-                        child_exit = child.poll()
-                        _reply(
-                            stream, request, "BLOCKED", oracle_sha256,
-                            "physical_admission_identity_missing")
-                        print(
-                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
-                            f"physical_admission_identity:phase={expected_phase}:"
-                            "expected=validated_source_owned_child_run_phase_target_evidence:"
-                            "observed=validated_source_owned_child_phase_source_evidence_only:"
-                            "errno=none:"
-                            f"child_exit={child_exit if child_exit is not None else 'running'}:"
-                            "authorization=BLOCKED:"
-                            "next=extend_admission_protocol_before_physical_retry",
-                            file=sys.stderr)
-                        break
-                    _reply(stream, request, "PASS", oracle_sha256)
-                    passed_phases.append(request["phase"])
+                    parent_rejected = True
+                    child_exit = child.poll()
+                    _reply(
+                        stream, request, "BLOCKED", oracle_sha256,
+                        "physical_admission_identity_missing")
+                    print(
+                        "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+                        f"physical_admission_identity:phase={expected_phase}:"
+                        "expected=source_exact_sender_run_phase_target_required_evidence:"
+                        "observed=source_connection_peer_phase_control_inputs_only:"
+                        "errno=none:"
+                        f"child_exit={child_exit if child_exit is not None else 'running'}:"
+                        "authorization=BLOCKED:"
+                        "next=extend_admission_protocol_before_physical_retry",
+                        file=sys.stderr)
+                    break
     except (OSError, subprocess.SubprocessError) as exc:
         parent_rejected = True
         print(

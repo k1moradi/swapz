@@ -101,32 +101,30 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         child.terminate.assert_called_once_with()
         self.assertIn("observed=unrelated_peer_run", diagnostic)
 
-    def test_source_only_cycle_request_is_not_physical_approval(self):
-        # A repeated nonce value in a different phase is not approval replay:
-        # the child also binds the response to its requested phase. The real
-        # blocker is that this wire schema has no run/target evidence.
+    def test_source_only_initial_request_is_not_authorization(self):
         result, responses, diagnostic, _child, check = self.run_exchange(
-            os.getpid(), [
-                self.request("initial"),
-                self.request("cycle-1"),
-            ])
+            os.getpid(), [self.request("initial", "1" * 32)])
         self.assertEqual(result, 2)
         self.assertEqual([response["status"] for response in responses],
-                         ["PASS", "BLOCKED"])
-        self.assertEqual(responses[-1]["reason"],
+                         ["BLOCKED"])
+        self.assertEqual(responses[0]["reason"],
                          "physical_admission_identity_missing")
         self.assertIn(
-            "observed=validated_source_owned_child_phase_source_evidence_only",
+            "observed=source_connection_peer_phase_control_inputs_only",
             diagnostic)
         self.assertIn("authorization=BLOCKED", diagnostic)
-        self.assertEqual(check.call_count, 2)
+        self.assertEqual(check.call_count, 1)
 
-    def test_initial_source_bootstrap_requires_fresh_git_proof(self):
-        result, responses, _diagnostic, _child, check = self.run_exchange(
-            os.getpid(), [self.request("initial", "1" * 32)])
-        self.assertEqual(result, 2)  # Synthetic child itself reports BLOCKED.
+    def test_source_change_precedes_identity_missing_refusal(self):
+        result, responses, diagnostic, _child, check = self.run_exchange(
+            os.getpid(), [self.request("initial")],
+            git_check=parent.Blocked("production source tree is not clean"))
+        self.assertEqual(result, 2)
         self.assertEqual([response["status"] for response in responses],
-                         ["PASS"])
+                         ["BLOCKED"])
+        self.assertEqual(
+            responses[0]["reason"], "production source tree is not clean")
+        self.assertNotIn("physical_admission_identity:", diagnostic)
         self.assertEqual(check.call_count, 1)
 
     def test_reordered_phase_is_rejected(self):
@@ -172,6 +170,8 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
 
     @unittest.skipIf(os.geteuid() == 0, "real root peer forbidden")
     def test_unix_socket_peer_credential_is_kernel_provided(self):
+        # SO_PEERCRED identifies the connection peer; it is not proof that the
+        # same process later writes through a transferred/shared descriptor.
         first, second = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         with first, second:
             credentials = second.getsockopt(
