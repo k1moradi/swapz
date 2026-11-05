@@ -4267,7 +4267,9 @@ during EXIT cleanup must not abort the remaining ownership-checked teardown
 or replace an already failing original status (including 143) or prior cleanup
 refusal. The EXIT trap must capture the entry status and mark cleanup active
 before calling the cleanup function, so a signal arriving before its local
-signal traps are installed is latched rather than terminating teardown. If
+signal traps are installed is latched rather than terminating teardown. The
+global-to-local trap handoff must use the same first-signal latch: a later
+signal after local installation cannot replace an earlier pending signal. If
 cleanup began successfully, the first such signal supplies its
 129/130/143 status, suppresses PASS even if both resources are removed, and
 produces one path-free cleanup-signal diagnostic with proven ownership,
