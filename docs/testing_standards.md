@@ -61,6 +61,20 @@ remaining disabled is a safety block, not lifecycle qualification. Synthetic
 model PASS does not establish current-host or production-C lifecycle correctness;
 bounded real anonymous-page swap-out/swap-in evidence remains required.
 
+The post-COMPLETE owner-release durability boundary is an additional
+rootless diagnostic (not part of the 18 loaded interruption phases or the 13
+negative loaded-recovery cases). A private regular-file fixture compiles the
+actual production owner-release and recoverability C functions with the
+existing directory-fsync fault shim. If the directory fsync fails after
+unlinking the active-owner marker, the original EIO and owner-release failure
+must remain visible; the earlier durable COMPLETE record is not permission
+to report successful teardown. Since the current recovery admission refuses
+COMPLETE, fresh processes must report BLOCKED without touching a mapper or
+swap, whether the unconfirmed unlink persisted or the marker reappears.
+Repeat recovery must preserve those bytes and the blocked disposition. This
+exposes an owner-release retry/progress gap, not evidence that loaded swap or
+kernel ownership was safely cleaned up.
+
 ### Primary cross-namespace mount admission evidence (issue #94)
 
 The direct-C mount reader fixture must exercise the actual production reader

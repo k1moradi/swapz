@@ -1683,5 +1683,259 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
                 self.assertEqual(set(calls.values()), {0}, result)
 
 
+class PrimaryOwnerReleaseDurabilityTest(unittest.TestCase):
+    """Exercise the production owner-release C body at a private fsync fault.
+
+    This is a rootless durability-boundary check, not loaded swap evidence.
+    The fixture substitutes only record parsing/ownership admission and reads
+    private regular files; the production unlink/fsync and recoverability
+    decisions are compiled unchanged with the existing linker-wrap fault shim.
+    """
+
+    _RUN_ID = "a" * 32
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary_directory = tempfile.TemporaryDirectory(
+            prefix="swapz-primary-owner-release-")
+        cls.addClassCleanup(cls.temporary_directory.cleanup)
+        cls.executable = Path(cls.temporary_directory.name) / "owner-release"
+        production_source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        extractor = PackageCrashToPrimaryAdmissionTest._function_definition
+        release_body = extractor(
+            production_source, "swapz_primary_release_partition_owner_at")
+        recoverable_body = extractor(
+            production_source, "swapz_primary_state_recoverable")
+        recovery_body = c_function_body(production_source,
+                                        "swapz_primary_recover")
+        if "!swapz_primary_state_recoverable(&state)" not in recovery_body:
+            raise AssertionError("production recoverability admission changed")
+        fixture_source = Path(cls.temporary_directory.name) / "owner-release.c"
+        fixture_source.write_text(r'''
+/* Private regular-file harness; release and recoverability bodies follow. */
+#define _GNU_SOURCE
+#include "src/userspace/swapz-primary.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#define SWAPZ_PRIMARY_BLOCK_BYTES 4096U
+#define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
+#define SWAPZ_PRIMARY_PARTITION_NAME_BYTES 128U
+#define SWAPZ_PRIMARY_PARTUUID "fixture"
+#define FIXTURE_RUN_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+static int swapz_primary_valid_run_id(const char *run_id)
+{
+    return run_id && strcmp(run_id, FIXTURE_RUN_ID) == 0;
+}
+
+static int swapz_primary_state_valid(const struct swapz_primary_state *state)
+{
+    return state && swapz_primary_valid_run_id(state->run_id) &&
+           state->stage == SWAPZ_PRIMARY_STAGE_COMPLETE;
+}
+
+static int swapz_primary_state_lock_valid(int recovery_fd, int lock_fd,
+                                           uid_t expected_owner)
+{
+    return recovery_fd >= 0 && lock_fd >= 0 && expected_owner == geteuid();
+}
+
+static int swapz_primary_owner_claim_matches_at(int recovery_fd,
+                                                 const char *run_id,
+                                                 uid_t expected_owner)
+{
+    struct stat marker;
+    return expected_owner == geteuid() &&
+           swapz_primary_valid_run_id(run_id) &&
+           fstatat(recovery_fd, "partition-fixture.active", &marker,
+                   AT_SYMLINK_NOFOLLOW) == 0 && S_ISREG(marker.st_mode);
+}
+
+static int swapz_primary_record_read_at(int recovery_fd, const char *name,
+                                         uid_t expected_owner, char *record,
+                                         size_t capacity, size_t *length,
+                                         struct stat *identity)
+{
+    int descriptor;
+    ssize_t received;
+    struct stat info;
+    if (expected_owner != geteuid() || !record || capacity < 2U) {
+        errno = EPERM;
+        return -1;
+    }
+    descriptor = openat(recovery_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0)
+        return -1;
+    if (fstat(descriptor, &info) < 0 || !S_ISREG(info.st_mode) ||
+        info.st_nlink != 1 || info.st_size <= 0 ||
+        (uintmax_t)info.st_size >= capacity) {
+        (void)close(descriptor);
+        errno = EBADMSG;
+        return -1;
+    }
+    received = read(descriptor, record, (size_t)info.st_size);
+    if (received != info.st_size || close(descriptor) < 0) {
+        errno = EIO;
+        return -1;
+    }
+    record[received] = '\0';
+    *length = (size_t)received;
+    if (identity)
+        *identity = info;
+    return 0;
+}
+
+int swapz_primary_state_parse(const char *record, size_t length,
+                              struct swapz_primary_state *state)
+{
+    if (!record || !length || !state ||
+        !strstr(record, "\"run_id\":\"" FIXTURE_RUN_ID "\"") ||
+        !strstr(record, "\"stage\":\"COMPLETE\"")) {
+        errno = EBADMSG;
+        return -1;
+    }
+    memset(state, 0, sizeof(*state));
+    memcpy(state->run_id, FIXTURE_RUN_ID, sizeof(FIXTURE_RUN_ID));
+    state->stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+    return 0;
+}
+''' + "\n" + recoverable_body + "\n" + release_body + r'''
+int main(int argc, char **argv)
+{
+    int recovery_fd;
+    int lock_fd;
+    int result;
+    int original_errno;
+    char record[SWAPZ_PRIMARY_STATE_RECORD_MAX + 1U];
+    size_t record_length = 0U;
+    struct swapz_primary_state state = {0};
+    if (argc != 3) return 3;
+    recovery_fd = open(argv[1], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (recovery_fd < 0) return 3;
+    lock_fd = openat(recovery_fd, "partition.lock",
+                     O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (lock_fd < 0) return 3;
+    if (!strcmp(argv[2], "release")) {
+        errno = 0;
+        result = swapz_primary_release_partition_owner_at(
+            recovery_fd, lock_fd, FIXTURE_RUN_ID, geteuid());
+        original_errno = errno;
+        printf("phase=owner-release status=%s original_errno=%d "
+               "durable_stage=COMPLETE\n",
+               result == 0 ? "COMPLETE" : "FAILED", original_errno);
+    } else if (!strcmp(argv[2], "recover")) {
+        if (swapz_primary_record_read_at(recovery_fd, "primary-state.json",
+                geteuid(), record, sizeof(record), &record_length, NULL) < 0 ||
+            swapz_primary_state_parse(record, record_length, &state) < 0)
+            return 3;
+        result = swapz_primary_state_recoverable(&state) ? 0 : -1;
+        original_errno = result == 0 ? 0 : EPERM;
+        printf("phase=recovery-admission status=%s original_errno=%d "
+               "durable_stage=COMPLETE\n",
+               result == 0 ? "ADMITTED" : "BLOCKED", original_errno);
+    } else {
+        return 3;
+    }
+    (void)close(lock_fd);
+    (void)close(recovery_fd);
+    return result == 0 ? 0 : 2;
+}
+''', encoding="utf-8")
+        compiled = subprocess.run([
+            "cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Wpedantic",
+            "-Werror", "-Wstrict-prototypes", "-I", str(ROOT),
+            "-Wl,--wrap=fsync", "-Wl,--wrap=open", "-Wl,--wrap=syscall",
+            str(fixture_source),
+            str(ROOT / "tests/tools/primary-lifecycle-fault-shim.c"),
+            "-o", str(cls.executable),
+        ], cwd=ROOT, text=True, capture_output=True, check=False)
+        if compiled.returncode:
+            raise AssertionError("owner-release C fixture failed to compile:\n" +
+                                 compiled.stderr)
+
+    def test_failed_owner_release_fsync_stays_blocked_across_fresh_recovery(self):
+        with tempfile.TemporaryDirectory(
+                prefix="swapz-primary-release-state-") as private_directory:
+            recovery_path = Path(private_directory)
+            state_bytes = (
+                '{"schema":"swapz-primary-state-v1","run_id":"' +
+                self._RUN_ID +
+                '","stage":"COMPLETE","recovery_previous_stage":null}\n'
+            ).encode("ascii")
+            state_path = recovery_path / "primary-state.json"
+            marker_path = recovery_path / "partition-fixture.active"
+            state_path.write_bytes(state_bytes)
+            marker_path.write_bytes(b"owned-by-private-fixture\n")
+            (recovery_path / "partition.lock").touch()
+            for filename in (state_path, marker_path):
+                with filename.open("rb") as durable_file:
+                    os.fsync(durable_file.fileno())
+            directory_fd = os.open(private_directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+
+            def invoke(action, *, inject_fsync_failure=False):
+                environment = os.environ.copy()
+                environment.pop("SWAPZ_PRIMARY_TEST_FAULT", None)
+                environment.pop("SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL",
+                                None)
+                if inject_fsync_failure:
+                    environment["SWAPZ_PRIMARY_TEST_FSYNC_FAIL_DIRECTORY_CALL"] = "1"
+                return subprocess.run(
+                    [str(self.executable), private_directory, action],
+                    env=environment, text=True, capture_output=True,
+                    timeout=10, check=False)
+
+            failure = invoke("release", inject_fsync_failure=True)
+            diagnostic = (
+                "phase=owner-release original_errno=EIO(5) "
+                "durable=COMPLETE mapper=absent swap=inactive "
+                "expected=unconfirmed-owner-release/blocked "
+                "observed=" + failure.stdout.strip() +
+                " recovery_disposition=BLOCKED"
+            )
+            self.assertEqual(failure.returncode, 2, diagnostic)
+            self.assertIn("phase=owner-release status=FAILED original_errno=5",
+                          failure.stdout, diagnostic)
+            self.assertIn("SWAPZ_PRIMARY_TEST_FSYNC_DIRECTORY_HIT=1",
+                          failure.stderr, diagnostic)
+            self.assertEqual(state_path.read_bytes(), state_bytes, diagnostic)
+            self.assertFalse(marker_path.exists(), diagnostic)
+
+            # A failed directory fsync does not prove unlink durability; a
+            # restart may see either absence or the previous owner marker.
+            for marker_persisted in (False, True):
+                with self.subTest(marker_persisted=marker_persisted):
+                    if marker_persisted:
+                        marker_path.write_bytes(b"owned-by-private-fixture\n")
+                    else:
+                        marker_path.unlink(missing_ok=True)
+                    before = (state_path.read_bytes(), marker_path.exists())
+                    for _ in range(2):
+                        recovery = invoke("recover")
+                        recovery_diagnostic = (
+                            "phase=recovery-admission original_errno=EPERM(1) "
+                            "durable=COMPLETE expected=BLOCKED "
+                            f"marker_persisted={marker_persisted} "
+                            "mapper=absent swap=inactive "
+                            "observed=" + recovery.stdout.strip()
+                        )
+                        self.assertEqual(recovery.returncode, 2,
+                                         recovery_diagnostic)
+                        self.assertIn("phase=recovery-admission status=BLOCKED "
+                                      "original_errno=1", recovery.stdout,
+                                      recovery_diagnostic)
+                        self.assertEqual(
+                            (state_path.read_bytes(), marker_path.exists()),
+                            before, recovery_diagnostic)
+
+
 if __name__ == "__main__":
     unittest.main()
