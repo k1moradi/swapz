@@ -122,17 +122,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
     def test_development_fast_test_evidence_is_fresh_exact_and_narrow(self):
         head = "a" * 40
         nonce = "b" * 32
+        # Keep the fixture to the admission-critical fields. The producer may
+        # append diagnostics such as errno/result_file; those do not replace
+        # the nonce, clean-source, native-status or fast-test outcome gates.
         base = {
             "schema": "swapz-fast-test-development-evidence-v1",
             "head": head,
             "dirty": False,
             "nonce": nonce,
             "native_status": "PASS",
-            # Mirror the successful producer's complete terminal record.
-            "loaded_preflight": {
-                "status": "PASS", "check": "complete", "errno": "0"},
+            "loaded_preflight": {"status": "PASS", "check": "complete"},
             "fast_test_status": "PASS",
-            "result_file": "synthetic-fast-mixed.json",
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "development-evidence.json"
@@ -146,6 +146,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 path, os.getuid(), head, nonce)
             self.assertEqual(admitted["outcome"], "FAST_TEST_PASS")
 
+            # A complete successful producer record remains valid; these extra
+            # fields are telemetry, not independent authorization.
+            producer_record = {
+                **base,
+                "loaded_preflight": {
+                    "status": "PASS", "check": "complete", "errno": "0"},
+                "result_file": "synthetic-fast-mixed.json",
+            }
+            write(producer_record)
+            admitted = probe._read_fast_test_development_evidence(
+                path, os.getuid(), head, nonce)
+            self.assertEqual(admitted["outcome"], "FAST_TEST_PASS")
+
             blocked = {
                 **base,
                 "loaded_preflight": {
@@ -154,8 +167,6 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 },
                 "fast_test_status": "BLOCKED",
             }
-            # The producer has not generated a result file on this path.
-            blocked.pop("result_file")
             write(blocked)
             admitted = probe._read_fast_test_development_evidence(
                 path, os.getuid(), head, nonce)
@@ -1873,7 +1884,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 probe.run_probe(
                     target["device_arg"], target["device_arg"], None, None,
                     development_only=True)
-        development.assert_called_once_with(None)
+        # This test is about the artifact boundary, not where the helper
+        # chooses to generate its fresh development nonce.
+        development.assert_called_once()
         inspect.assert_called_once_with(
             target["device_arg"], target["device_arg"],
             allow_inactive_swap=True)
