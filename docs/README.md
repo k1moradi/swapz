@@ -182,9 +182,13 @@ diagnostics. For setup or recovery failures, preserve the helper exit,
 the producer emitted it; never synthesize one from exception text. A
 `RECOVERY_REQUIRED` marker means preserve that state and stop; review live
 ownership and header/swap state read-only before exact-owned recovery, never
-force-remove or rerun to replace the failed attempt. Rootless failures may
-retain a separate local `build/tests/rootless-failure.*/diagnostic.log`; keep
-that failure-only diagnostic private rather than publishing its contents.
+force-remove or rerun to replace the failed attempt. Rootless `build/tests/rootless-failure.*/diagnostic.log` is private and may
+contain **only attribution** for phases whose stderr was not pre-captured
+(such as `primary-lifecycle-audit-test.py`). The first assertion/traceback
+then lives in the original `make test` console output; the published
+`stages[].diagnostic` is bounded and can truncate `log=` mid-path. Use the
+runner's full local path when available; do not guess from that prefix or
+publish private logs.
 
 For safe startup/stop/recovery policy use [AGENT_CONTEXT](AGENT_CONTEXT.md),
 for package journal ownership use [compile](compile.md#packaging), and for
