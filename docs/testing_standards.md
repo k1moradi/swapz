@@ -5159,7 +5159,7 @@ failure after fork reaps the child before propagating, a child-side descriptor
 failure exits the child rather than returning into the supervisor stack, and a
 fork failure preserves its original errno while reporting descriptor-cleanup
 uncertainty. OS-error diagnostics use the stable `OSError` category rather than
-errno-selected Python subclasses such as `BlockingIOError`. A surviving same-name cgroup from an interrupted run is retained
+errno-selected Python subclasses such as `BlockingIOError`. Successful mutation phases retain no command stdout/stderr. Public phase argv redacts non-device absolute paths, and failed/interrupted phase diagnostics are bounded and path-redacted before they can enter printed result JSON. A surviving same-name cgroup from an interrupted run is retained
 because its inode identity was never durably bound; recovery must not remove it
 merely because it is currently empty. A failed write of the recovery-required evidence record is also a secondary
 failure: append its errno, retain the original worker/mapper failure, and do

@@ -235,19 +235,45 @@ def _bounded(value, limit=RESULT_LIMIT):
     return value[:limit - len(suffix)] + suffix
 
 
+def _public_diagnostic(value):
+    """Bound diagnostics and remove absolute paths before CLI/result exposure."""
+    text = _bounded(value).strip()
+    return re.sub(r"(?<![A-Za-z0-9_.-])/(?:[^\s\"'<>]+)", "<path>", text)
+
+
+def _public_argv(argv):
+    """Expose command intent without private executable/artifact paths."""
+    public = []
+    for index, item in enumerate(map(str, argv)):
+        if item.startswith("/dev/"):
+            public.append(item)
+        elif item.startswith("/"):
+            name = Path(item).name
+            public.append(name if index == 0 else f"<path>/{name}")
+        else:
+            public.append(item)
+    return public
+
+
 def _run_isolated(argv, timeout):
     """Run one mutating tool in its own session, so terminal signals reach only the supervisor.
 
     The supervisor records a stop request and finishes the current step; a
     terminal Ctrl-C must not kill a swapoff, format or module load halfway.
     """
+    command_name = Path(str(argv[0])).name if argv else "<missing>"
     try:
         return subprocess.run(
             [str(arg) for arg in argv], check=False, capture_output=True,
             text=True, timeout=timeout, start_new_session=True)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except OSError as exc:
         raise PHYSICAL.ProbeError(
-            f"command failed to run: {argv[0]}: {exc}") from exc
+            f"command failed phase=spawn command={command_name} "
+            f"errno={exc.errno}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise PHYSICAL.ProbeError(
+            f"command failed phase=timeout command={command_name} "
+            f"timeout_seconds={timeout}") from exc
 
 
 def _durable_write(path, data, mode=0o600, exclusive=True):
@@ -2477,28 +2503,29 @@ def _validate_state(state, backup, state_dir):
 
 
 def _record_phase(state_dir, state, results, ops, phase, argv, *, timeout=120):
-    entry = {"phase": phase, "argv": list(map(str, argv)),
+    entry = {"phase": phase, "argv": _public_argv(argv),
              "started_at": _utc_now(), "return_code": None,
-             "stdout": "", "stderr": "", "status": "STARTED"}
+             "status": "STARTED"}
     results.setdefault("phases", []).append(entry)
     _save_results(state_dir, results)
     try:
         result = ops.mutate(argv, timeout=timeout)
         entry["return_code"] = result.returncode
-        entry["stdout"] = _bounded(result.stdout)
-        entry["stderr"] = _bounded(result.stderr)
         entry["status"] = "PASS" if result.returncode == 0 else "FAIL"
         entry["ended_at"] = _utc_now()
+        if result.returncode:
+            entry["diagnostic"] = _public_diagnostic(
+                result.stderr or result.stdout)
         _save_results(state_dir, results)
         if result.returncode:
             raise LiveSwapError(
-                f"{phase} failed ({result.returncode}): "
-                f"{_bounded(result.stderr or result.stdout)}")
+                f"{phase} failed exit={result.returncode}: "
+                f"{entry['diagnostic']}")
         return result
     except BaseException as exc:
         if entry["status"] == "STARTED":
             entry["status"] = "INTERRUPTED"
-            entry["stderr"] = _bounded(exc)
+            entry["diagnostic"] = _public_diagnostic(exc)
             entry["ended_at"] = _utc_now()
             _save_results(state_dir, results)
         raise

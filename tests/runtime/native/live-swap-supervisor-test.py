@@ -898,6 +898,78 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             supervisor._run_isolated(["swapoff", "--", supervisor.DEVICE_PATH], timeout=5)
         self.assertTrue(run.call_args.kwargs["start_new_session"])
 
+    def test_mutation_diagnostics_redact_private_paths_and_are_fail_only(self):
+        private_executable = "/home/private/recovery/swapzctl"
+        with mock.patch.object(
+                supervisor.subprocess, "run",
+                side_effect=OSError(errno.EACCES, "private spawn")):
+            with self.assertRaises(supervisor.PHYSICAL.ProbeError) as caught:
+                supervisor._run_isolated(
+                    [private_executable, "format", supervisor.DEVICE_PATH],
+                    timeout=5)
+        self.assertIn("command=swapzctl", str(caught.exception))
+        self.assertIn("errno=13", str(caught.exception))
+        self.assertNotIn("/home/private", str(caught.exception))
+
+        timeout = subprocess.TimeoutExpired(
+            [private_executable, "format"], timeout=5)
+        with mock.patch.object(supervisor.subprocess, "run",
+                               side_effect=timeout):
+            with self.assertRaises(supervisor.PHYSICAL.ProbeError) as caught:
+                supervisor._run_isolated(
+                    [private_executable, "format", supervisor.DEVICE_PATH],
+                    timeout=5)
+        self.assertIn("phase=timeout", str(caught.exception))
+        self.assertNotIn("/home/private", str(caught.exception))
+
+        class PhaseOps:
+            def __init__(self, returncode):
+                self.returncode = returncode
+
+            def mutate(self, argv, *, timeout):
+                del timeout
+                return subprocess.CompletedProcess(
+                    argv, self.returncode,
+                    "success /home/private/success-output\n",
+                    "failed /home/private/secret-file\n")
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            results = {"phases": []}
+            with mock.patch.object(supervisor, "_save_results"):
+                supervisor._record_phase(
+                    state_dir, {}, results, PhaseOps(0), "synthetic_success",
+                    [private_executable, "format", supervisor.DEVICE_PATH])
+            passed = results["phases"][-1]
+            self.assertEqual(
+                passed["argv"],
+                ["swapzctl", "format", supervisor.DEVICE_PATH])
+            self.assertNotIn("stdout", passed)
+            self.assertNotIn("stderr", passed)
+            self.assertNotIn("diagnostic", passed)
+            self.assertNotIn("/home/private", json.dumps(passed))
+
+            results = {"phases": []}
+            with mock.patch.object(supervisor, "_save_results"):
+                with self.assertRaisesRegex(
+                        supervisor.LiveSwapError,
+                        r"synthetic_failure failed exit=7") as caught:
+                    supervisor._record_phase(
+                        state_dir, {}, results, PhaseOps(7),
+                        "synthetic_failure",
+                        [private_executable, "format",
+                         "/home/private/artifact.bin"])
+            failed = results["phases"][-1]
+            self.assertEqual(failed["status"], "FAIL")
+            self.assertEqual(
+                failed["argv"],
+                ["swapzctl", "format", "<path>/artifact.bin"])
+            self.assertEqual(failed["diagnostic"], "failed <path>")
+            self.assertNotIn("stdout", failed)
+            self.assertNotIn("stderr", failed)
+            self.assertNotIn("/home/private", str(caught.exception))
+            self.assertNotIn("/home/private", json.dumps(failed))
+
     def test_mapper_zero_open_check_retries_transient_udev_probes(self):
         ops = FakeOps()
         attempts = [supervisor.LiveSwapError("owned mapper has unexpected open references"),
