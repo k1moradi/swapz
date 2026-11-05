@@ -394,6 +394,8 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 {
 	static swapz_u8 previous_extent[SWAPZ_BLOCK_BYTES];
 	static swapz_u8 raw_replacement[SWAPZ_BLOCK_BYTES];
+	static swapz_u8 sequence_deltas[4U * SWAPZ_SEGMENT_BLOCKS];
+	static swapz_u32 sequence_bases[4];
 	const char *const phases[] = {
 		"live_bytes_overflow", "io_cost_overflow", "min_blocks_overflow"
 	};
@@ -409,6 +411,8 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 	unsigned int failure_case;
 
 	CHECK(swapz_authority_init(&a, maps, live, classes, 32, 1024) == 0);
+	CHECK(swapz_enable_extent_sequence_index(
+	      &a, sequence_deltas, sequence_bases, 4) == 0);
 	a.reuse_dead_segments = 1;
 	CHECK(swapz_enable_segment_rotation(&a, segment_roles, 4) == 0);
 	CHECK(swapz_enable_segment_mapping_counts(&a, segment_maps, 4) == 0);
