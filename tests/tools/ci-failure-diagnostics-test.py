@@ -57,7 +57,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
 
     def test_rootless_marker_preserves_nested_phase_and_child_status(self):
         marker = (
-            "FAIL: rootless phase=package-dkms-test.py subtest=rollback-check "
+            "FAIL: rootless phase=package-dkms-test.py subtest=rollback-check test=unavailable "
             "exit=37 reason=unittest_error phase_s=2 stage_s=5 line=315 "
             "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
         failure = self.diagnose(marker, 1)
@@ -85,7 +85,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertIn("SIGSEGV", signalled["first_error"])
         rootless_timeout = self.diagnose(
             "FAIL: rootless phase=Makefile native and metadata "
-            "subtest=unavailable exit=124 reason=timeout_or_exit_124 "
+            "subtest=unavailable test=unavailable exit=124 reason=timeout_or_exit_124 "
             "phase_s=1 stage_s=2 line=22 log=unavailable", 1)
         self.assertEqual(rootless_timeout["child_exit_code"], 124)
         self.assertEqual(rootless_timeout["category"], "INFRASTRUCTURE")
@@ -96,7 +96,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "src/kernel/foo.c:19:3: error: incompatible pointer type\n"
             "make: *** [Makefile:99: compile-tests] Error 2\n"
             "FAIL: rootless phase=Makefile native and metadata "
-            "subtest=unavailable exit=2 reason=nonzero_exit "
+            "subtest=unavailable test=unavailable exit=2 reason=nonzero_exit "
             "phase_s=1 stage_s=2 line=22 log=unavailable", 2)
         self.assertEqual(failure["category"], "NATIVE_COMPILE")
         self.assertEqual(failure["phase"], "Makefile native and metadata")
@@ -106,7 +106,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
 
     def test_rootless_signal_style_exit_remains_ambiguous(self):
         marker = (
-            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable test=unavailable "
             "exit=143 reason=signal_or_child_exit phase_s=1 stage_s=2 "
             "line=302 log=unavailable")
         failure = self.diagnose(marker, 1)
@@ -118,7 +118,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
 
     def test_current_rootless_relay_and_colon_phase_markers_are_recognized(self):
         relay = self.diagnose(
-            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable test=unavailable "
             "exit=1 reason=stderr_relay_failure phase_s=2 stage_s=5 "
             "line=303 log=unavailable", 1)
         self.assertEqual(relay["category"], "INFRASTRUCTURE")
@@ -128,7 +128,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
 
         syntax = self.diagnose(
             "FAIL: rootless phase=C syntax: physical lifecycle seam "
-            "subtest=unavailable exit=9 reason=nonzero_exit "
+            "subtest=unavailable test=unavailable exit=9 reason=nonzero_exit "
             "phase_s=1 stage_s=6 line=351 log=unavailable", 1)
         self.assertEqual(syntax["phase"], "C syntax: physical lifecycle seam")
         self.assertEqual(syntax["child_exit_code"], 9)
@@ -136,7 +136,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
 
     def test_rootless_marker_is_native_suite_scoped_path_safe_and_last_wins(self):
         unsafe = self.diagnose(
-            "FAIL: rootless phase=../secret-path subtest=unavailable "
+            "FAIL: rootless phase=../secret-path subtest=unavailable test=unavailable "
             "exit=4 reason=nonzero_exit phase_s=1 stage_s=1 "
             "line=1 log=unavailable", 4)
         self.assertEqual(unsafe["phase"], "native-rootless")
@@ -144,7 +144,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertNotIn("secret-path", unsafe["first_error"])
 
         out_of_suite = self.diagnostics.diagnose_ci_failure(
-            ["FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+            ["FAIL: rootless phase=package-dkms-test.py subtest=unavailable test=unavailable "
              "exit=37 reason=nonzero_exit phase_s=1 stage_s=2 "
              "line=303 log=unavailable"],
             37, "make-interface")
@@ -152,10 +152,10 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertNotIn("child_exit_code", out_of_suite)
 
         last = self.diagnose(
-            "FAIL: rootless phase=fake-child subtest=unavailable "
+            "FAIL: rootless phase=fake-child subtest=unavailable test=unavailable "
             "exit=99 reason=nonzero_exit phase_s=1 stage_s=1 "
             "line=1 log=unavailable\n"
-            "FAIL: rootless phase=package-dkms-test.py subtest=preflight "
+            "FAIL: rootless phase=package-dkms-test.py subtest=preflight test=unavailable "
             "exit=37 reason=unittest_error phase_s=2 stage_s=3 "
             "line=303 log=unavailable", 1)
         self.assertEqual(last["phase"], "package-dkms-test.py")
@@ -167,13 +167,73 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "BLOCKED: expected negative fixture: Permission denied\n" +
             "\n".join("ordinary successful output" for _ in range(20)) +
             "\nFAIL: rootless phase=interface contract assertions "
-            "subtest=unavailable exit=1 reason=nonzero_exit "
+            "subtest=unavailable test=unavailable exit=1 reason=nonzero_exit "
             "phase_s=1 stage_s=7 line=432 log=unavailable")
         failure = self.diagnose(log, 1)
         self.assertEqual(
             failure["phase"], "interface contract assertions")
         self.assertNotIn("expected negative fixture", failure["first_error"])
         self.assertIn("rootless phase=interface contract", failure["first_error"])
+
+    def test_validated_shell_syntax_check_explains_exit_two_without_guessing(self):
+        marker = (
+            "FAIL: rootless phase=bash syntax loaded-preflight.sh "
+            "subtest=unavailable test=unavailable exit=2 reason=nonzero_exit "
+            "phase_s=1 stage_s=516 line=531 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        failure = self.diagnose(
+            "FAIL: test_expected_negative (__main__.PreviousPassingCase)\n"
+            "AssertionError: unrelated passing-suite fixture\n"
+            "BLOCKED: loaded-preflight.sh permission denied in prior fixture\n"
+            + marker, 2)
+        self.assertEqual(failure["category"], "SOURCE_CONTRACT")
+        self.assertEqual(failure["phase"], "bash syntax loaded-preflight.sh")
+        self.assertEqual(failure["test"], "bash syntax loaded-preflight.sh")
+        self.assertEqual(failure["exit_code"], 2)
+        self.assertEqual(failure["child_exit_code"], 2)
+        self.assertEqual(failure["rootless_reason"], "nonzero_exit")
+        self.assertIn("bash -n", failure["reason"])
+        self.assertIn("bash -n", failure["expected_contract"])
+        self.assertIn("build/tests/rootless-failure.Abc123xy/diagnostic.log",
+                      failure["first_error"])
+        self.assertEqual(failure["observed"], failure["first_error"])
+        self.assertNotIn("permission denied", failure["first_error"])
+        self.assertNotIn("unrelated", failure["first_error"])
+
+    def test_unknown_or_malformed_syntax_evidence_stays_generic(self):
+        marker = (
+            "FAIL: rootless phase=bash syntax loaded-preflight.sh "
+            "subtest=unavailable test=unavailable exit=2 reason=nonzero_exit "
+            "phase_s=1 stage_s=516 line=531 log=unavailable")
+        malformed = self.diagnose(marker.replace("test=unavailable ", ""), 2)
+        self.assertEqual(malformed["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(malformed["phase"], "native-rootless")
+        self.assertNotIn("child_exit_code", malformed)
+        wrong_exit = self.diagnose(marker.replace("exit=2 ", "exit=3 "), 2)
+        self.assertEqual(wrong_exit["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(wrong_exit["child_exit_code"], 3)
+        missing = self.diagnose("", 2)
+        self.assertEqual(missing["category"], "UNKNOWN_FAILURE")
+
+    def test_unittest_and_phase_bound_blocked_remain_distinct(self):
+        unittest_marker = (
+            "FAIL: rootless phase=package-dkms-test.py subtest=preflight "
+            "test=test_package_guard exit=1 reason=unittest_assertion "
+            "phase_s=2 stage_s=8 line=442 log=unavailable")
+        assertion = self.diagnose(unittest_marker, 1)
+        self.assertEqual(assertion["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(assertion["test"], "test_package_guard")
+        self.assertEqual(assertion["child_exit_code"], 1)
+        blocked_marker = (
+            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+            "test=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=2 stage_s=8 line=442 log=unavailable")
+        producer_blocked = "BLOCKED: package-dkms-test.py permission denied"
+        blocked = self.diagnose(producer_blocked + "\n" + blocked_marker, 1)
+        self.assertEqual(blocked["category"], "HOST_PERMISSION")
+        self.assertEqual(blocked["first_error"], producer_blocked)
+        self.assertEqual(blocked["phase"], "package-dkms-test.py")
+        self.assertEqual(blocked["child_exit_code"], 1)
 
     def test_redaction_and_bounded_diagnostic_contract(self):
         safe_line = self.diagnostics._ci_safe_line(
@@ -188,7 +248,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertNotIn("privatevalue", json.dumps(failure))
         self.assertIn("<redacted>", failure["first_error"])
         fake_marker = self.diagnose(
-            "FAIL: rootless phase=../secret-path subtest=unavailable "
+            "FAIL: rootless phase=../secret-path subtest=unavailable test=unavailable "
             "exit=4 reason=nonzero_exit phase_s=1 stage_s=1 "
             "line=1 log=/tmp/private.log")
         self.assertEqual(fake_marker["test"], "native-rootless")
@@ -214,6 +274,10 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertEqual(failed.returncode, 127, failed.stderr)
         diagnostic = json.loads(
             failed.stdout.split("SWAPZ_CI_FAILURE=", 1)[1])
+        self.assertEqual(diagnostic["tested_sha"], source)
+        self.assertEqual(diagnostic["job"], "synthetic")
+        self.assertEqual(diagnostic["suite"], suite)
+        self.assertEqual(diagnostic["phase"], suite)
         self.assertEqual(diagnostic["launch_errno"], 2)
         self.assertEqual(diagnostic["exit_code"], 127)
         self.assertEqual(diagnostic["category"], "INFRASTRUCTURE")

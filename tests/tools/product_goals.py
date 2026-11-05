@@ -485,6 +485,13 @@ def diagnose_ci_failure(lines, exit_code, suite):
         unittest_category = None
     compile_phase = (
         phase == "Makefile native and metadata" or phase.startswith("C syntax:"))
+    # The producer runs bash -n for this fixed phase. A status-two failure
+    # identifies that source check, not a test assertion or a parser detail.
+    rootless_shell_syntax_check_failed = (
+        rootless_failure is not None and rootless_reason == "nonzero_exit"
+        and child_exit_code == 2
+        and re.fullmatch(r"bash syntax [A-Za-z0-9_.-]{1,64}[.]sh", phase)
+        is not None)
 
     if failing_test is not None:
         causal_error = unittest_error or unittest_header
@@ -501,7 +508,12 @@ def diagnose_ci_failure(lines, exit_code, suite):
         # that a compile phase keeps its first compiler error even if verbose
         # compiler output separates it from the marker. This prevents expected
         # negative output from an earlier passing suite becoming the cause.
-        if (rootless_reason == "nonzero_exit" and
+        if rootless_shell_syntax_check_failed:
+            # Earlier passing suites may have printed expected FAIL/BLOCKED
+            # diagnostics mentioning this script. The validated phase wins.
+            causal_error = None
+            category = None
+        elif (rootless_reason == "nonzero_exit" and
                 first_category == "NATIVE_COMPILE" and compile_phase):
             causal_error = first_error
             category = first_category
@@ -554,7 +566,12 @@ def diagnose_ci_failure(lines, exit_code, suite):
         if rootless_test is not None:
             marker_reason += " test=" + rootless_test
         marker_reason += " log=" + rootless_failure["log"]
-        if rootless_reason == "timeout_or_exit_124":
+        if rootless_shell_syntax_check_failed:
+            status, category = "FAIL", "SOURCE_CONTRACT"
+            reason = (marker_reason +
+                      " (bash -n source check exited 2; inspect private "
+                      "log for the exact cause)")
+        elif rootless_reason == "timeout_or_exit_124":
             status, category = "FAIL", "INFRASTRUCTURE"
             reason = (marker_reason +
                       " (124 is timeout-or-child-exit; watchdog not proven)")
@@ -625,6 +642,9 @@ def diagnose_ci_failure(lines, exit_code, suite):
         "INFRASTRUCTURE": "required runner tools and execution complete",
         "CANCELLATION": "test runs to an uninterrupted conclusion",
     }.get(category, "test command completes successfully")
+
+    if rootless_shell_syntax_check_failed:
+        expected_contract = "source-controlled shell script passes bash -n"
 
     result = {
         "status": status, "category": category,

@@ -1013,6 +1013,18 @@ the observed diagnostic rather than guessing from earlier output. Relay and
 relay-cleanup failure reasons are harness/infrastructure failures and never
 replace an earlier failing child's status.
 
+A validated rootless `bash syntax <script>.sh` marker with
+`reason=nonzero_exit` and original child exit 2 identifies the failed
+source-controlled `bash -n` check as `SOURCE_CONTRACT`, with an explicit
+required successful parse and observed failing command status. It does not
+prove the precise Bash parser message; that detail stays in the referenced
+private log. Missing or malformed marker fields (including `test=`), a
+different child exit/reason, or unrelated earlier `FAIL:`/`BLOCKED:` output
+cannot be promoted to that shell-syntax classification. A phase-linked producer
+permission `BLOCKED:` remains distinguishable as `HOST_PERMISSION`;
+unittest assertions and relay/runner failures retain their existing separate
+classifications. None of these labels changes test severity or qualification.
+
 If sanitized-log retention itself fails, the original test exit and cause are
 still reported, while `log=unavailable` and the numeric diagnostic errno
 describe that secondary evidence failure. All promoted fields use the existing
