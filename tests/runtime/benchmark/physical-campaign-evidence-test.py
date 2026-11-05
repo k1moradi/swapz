@@ -254,7 +254,9 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
     def test_missing_or_unknown_producer_phase_is_blocked(self):
         # A FAIL verdict without the producer's real measurement phase cannot
         # be promoted by inventing a generic audit phase.
-        for stage in (None, "unknown-private-phase"):
+        for stage in (
+                None, "unknown-private-phase", "preflight", "fill", "warmup",
+                "teardown", "publish"):
             with self.subTest(stage=stage):
                 record = pair(1, 1100)
                 record["status"] = "EXCLUDED"
