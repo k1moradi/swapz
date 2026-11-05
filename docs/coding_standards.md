@@ -688,7 +688,11 @@ to byte-match one canonical newline-terminated unit pair: shell command
 substitution can otherwise erase extra terminal newlines or NUL bytes. Pin
 the staged mapper/device inodes through rollback and unlink a published file
 only when its inode still matches; a failing rename may have left a foreign
-symlink or file at that path. Reject output directories reached through
+symlink or file at that path. Publish target-specific drop-ins using no-clobber
+renames and verify that each destination is the pinned inode and the source
+staging path is gone before releasing the mapper mask. Preserve the original
+status of a failed response-comparison command separately from malformed
+manager response bytes. Reject output directories reached through
 symlinked ancestors, dot-component aliases or duplicate directory identities.
 Validate bounded manager output, refuse duplicate generated
 unit identities and symlink-substituted output paths, and remove only

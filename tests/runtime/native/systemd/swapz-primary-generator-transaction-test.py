@@ -310,6 +310,49 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertFalse(list((outside / "normal").iterdir()))
         self.assertFalse(list(self.normal.iterdir()))
 
+    def test_comparison_failure_preserves_original_status(self) -> None:
+        compare = self.commands / "cmp"
+        compare.write_text("#!/bin/sh\nexit 79\n", encoding="ascii")
+        compare.chmod(0o755)
+        result = self.run_generator()
+        self.assert_blocked(result, "selection")
+        self.assertIn("status=79", result.stderr)
+        self.assertIn("validation=compare-response", result.stderr)
+        compare.unlink()
+
+    def test_successful_rename_does_not_overwrite_late_symlink(self) -> None:
+        outside = self.root / "foreign-unit"
+        outside.write_text("unchanged", encoding="ascii")
+        command = self.commands / "mv"
+        for leaf, destination in (
+            ("50-swapz-timeout.conf", self.device_dropin(SELECTED)),
+            ("50-selected-target.conf", self.mapper_dropin()),
+        ):
+            with self.subTest(leaf=leaf):
+                command.write_text(
+                    '#!/bin/sh\ncase "$*" in\n'
+                    f"  *{leaf}*)\n"
+                    '    for output_path do :; done\n'
+                    '    /usr/bin/ln -s "$MOCK_EXTERNAL" "$output_path" || exit $?\n'
+                    '    exec /usr/bin/mv "$@" ;;\n'
+                    'esac\nexec /usr/bin/mv "$@"\n',
+                    encoding="ascii",
+                )
+                command.chmod(0o755)
+                result = self.run_generator(MOCK_EXTERNAL=str(outside))
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn("phase=publication", result.stderr)
+                self.assertIn("status=1", result.stderr)
+                self.assertEqual(os.readlink(self.mask()), "/dev/null")
+                self.assertTrue(destination.is_symlink())
+                self.assertEqual(destination.readlink(), outside)
+                self.assertEqual(outside.read_text(encoding="ascii"), "unchanged")
+                if leaf == "50-selected-target.conf":
+                    self.assertFalse(self.device_dropin(SELECTED).exists())
+                self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+                destination.unlink()
+        command.unlink()
+
     def test_hibernation_guards_survive_refused_selector(self) -> None:
         result = self.run_generator(MOCK_UNITS="garbage")
         self.assert_blocked(result, "selection")

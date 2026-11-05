@@ -208,7 +208,11 @@ fi
 # Command substitution erases terminal newlines (and some shells drop NULs).
 # Recheck the exact bounded bytes, including one mandatory final newline.
 if printf '%s\n' "$units" | cmp -s - "$response_file"; then :; else
-	fail 1 selection manager-output noncanonical-response mapper-active-job
+	compare_status=$?
+	if [ "$compare_status" -eq 1 ]; then
+		fail 1 selection manager-output noncanonical-response mapper-active-job
+	fi
+	fail "$compare_status" selection manager-output compare-response mapper-active-job
 fi
 case "$units" in
 *'
@@ -326,12 +330,20 @@ if ln -- "$device_temporary" "$stage_dir/owned-device" &&
 	ln -- "$mapper_temporary" "$stage_dir/owned-mapper"; then :; else
 	fail "$?" publication generator-output pin-published-files mapper-active-job
 fi
+# Neither path may replace a unit substituted after the collision preflight.
+# GNU mv -n may succeed without moving; check the pinned inode and source.
 published_device=1
-if mv -fT -- "$device_temporary" "$device_dropin"; then :; else
+if mv -nT -- "$device_temporary" "$device_dropin" &&
+	[ ! -L "$device_dropin" ] &&
+	[ "$stage_dir/owned-device" -ef "$device_dropin" ] &&
+	[ ! -e "$device_temporary" ]; then :; else
 	fail "$?" publication generator-output publish-device-dropin mapper-active-job
 fi
 published_mapper=1
-if mv -fT -- "$mapper_temporary" "$mapper_dropin"; then :; else
+if mv -nT -- "$mapper_temporary" "$mapper_dropin" &&
+	[ ! -L "$mapper_dropin" ] &&
+	[ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ] &&
+	[ ! -e "$mapper_temporary" ]; then :; else
 	fail "$?" publication generator-output publish-mapper-dropin mapper-active-job
 fi
 # Publish the activation barrier last; any earlier error leaves the mask.
