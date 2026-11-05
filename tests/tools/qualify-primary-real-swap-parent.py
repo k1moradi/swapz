@@ -304,16 +304,29 @@ def _owned_process_group(child: subprocess.Popen) -> int | None:
     return None
 
 
-def _child_exited_without_reaping(child: subprocess.Popen) -> bool:
-    """Observe direct-child exit without releasing its PID/process-group ID."""
+def _child_exit_status(child: subprocess.Popen) -> int | None:
+    """Observe exit without reaping a marked session leader."""
+    if _owned_process_group(child) is None:
+        return child.poll()
     if child.returncode is not None:
-        return True
+        return child.returncode
     try:
-        return os.waitid(
+        result = os.waitid(
             os.P_PID, child.pid,
-            os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+            os.WEXITED | os.WNOHANG | os.WNOWAIT)
     except ChildProcessError:
-        return child.returncode is not None
+        return child.returncode
+    if result is None:
+        return None
+    if result.si_code == os.CLD_EXITED:
+        return result.si_status
+    if result.si_code in {os.CLD_KILLED, os.CLD_DUMPED}:
+        return -result.si_status
+    return None
+
+
+def _child_exited_without_reaping(child: subprocess.Popen) -> bool:
+    return _child_exit_status(child) is not None
 
 
 def _wait_child_exit_without_reaping(
@@ -468,7 +481,7 @@ def _stop_unadmitted_child_preserving(
 
 def _peer_identity_refusal(phase: str, child: subprocess.Popen,
                            observed: str, error_number: int | str = "none") -> Blocked:
-    child_exit = child.poll()
+    child_exit = _child_exit_status(child)
     return Blocked(
         "source_admission_peer_identity:"
         f"phase={phase}:expected=owned_live_child_run:observed={observed}:"
@@ -490,7 +503,7 @@ def _owned_peer_process_lineage(
     if (type(owned_pid) is not int or owned_pid <= 1 or
             type(peer_pid) is not int or peer_pid <= 1):
         raise _peer_identity_refusal(phase, child, "invalid_pid")
-    if child.poll() is not None:
+    if _child_exit_status(child) is not None:
         raise _peer_identity_refusal(phase, child, "launched_child_exited")
     visited_pids: set[int] = set()
     lineage: list[tuple[int, int, int]] = []
@@ -526,7 +539,7 @@ def _owned_peer_process_lineage(
                 phase, child, "malformed_process_identity")
         lineage.append((current_pid, parent_pid, start_ticks))
         if current_pid == owned_pid:
-            if child.poll() is not None:
+            if _child_exit_status(child) is not None:
                 raise _peer_identity_refusal(phase, child, "launched_child_exited")
             return tuple(lineage)
         if parent_pid <= 1:
@@ -648,7 +661,7 @@ def _serve_admission(server: socket.socket,
                             file=sys.stderr)
                         break
                     parent_rejected = True
-                    child_exit = child.poll()
+                    child_exit = _child_exit_status(child)
                     _reply(
                         stream, request, "BLOCKED", oracle_sha256,
                         "physical_admission_identity_missing")
@@ -800,7 +813,7 @@ def _start_privileged_child(
     try:
         os.set_blocking(descriptor, False)
         while offset < len(helper_payload):
-            if child.poll() is not None:
+            if _child_exit_status(child) is not None:
                 raise OSError("privileged qualifier exited before source transfer")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -820,7 +833,7 @@ def _start_privileged_child(
         child.stdin.close()
     except (OSError, TimeoutError) as exc:
         # Do not disclose helper bytes, private argv or paths in a refusal.
-        child_exit = child.poll()
+        child_exit = _child_exit_status(child)
         error_number = (
             exc.errno if isinstance(exc, OSError) and exc.errno is not None
             else "none")

@@ -339,6 +339,30 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             real_wait(timeout=5)
             child.stdout.close()
 
+    @unittest.skipIf(os.geteuid() == 0, "rootless process proof requires non-root")
+    def test_marked_child_exit_observation_preserves_group_leader_until_cleanup(self):
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import sys; sys.exit(7)"],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        setattr(child, "_swapz_owned_process_group", child.pid)
+        try:
+            deadline = __import__("time").monotonic() + 5
+            observed = None
+            while observed is None and __import__("time").monotonic() < deadline:
+                observed = parent._child_exit_status(child)
+                if observed is None:
+                    __import__("time").sleep(0.01)
+            self.assertEqual(observed, 7)
+            self.assertIsNone(child.returncode)
+            parent._stop_unadmitted_child(child)
+            self.assertEqual(child.returncode, 7)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+
     @unittest.skipIf(os.geteuid() == 0, "rootless cleanup proof requires non-root")
     def test_owned_process_group_cleanup_reaps_descendant(self):
         child_source = (
