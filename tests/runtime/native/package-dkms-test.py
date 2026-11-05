@@ -727,12 +727,13 @@ exec "{flock_binary}" "$@"
                 "SWAPZ_FAKE_SECURE_BOOT": "enabled",
                 "SWAPZ_FAKE_SIGNATURE_VALID": "0",
             })
-        self.assertNotEqual(
-            result.returncode, 0,
-            "phase=detached_signature producer_status=47 command_status=0")
-        self.assertIn("not cryptographically valid", result.stderr)
-        self.assertIn("phase=detached_signature", result.stderr)
-        self.assertIn("command_status=47", result.stderr)
+        with self.subTest(phase="detached_signature"):
+            self.assertNotEqual(
+                result.returncode, 0,
+                "phase=detached_signature producer_status=47 command_status=0")
+            self.assertIn("not cryptographically valid", result.stderr)
+            self.assertIn("phase=detached_signature", result.stderr)
+            self.assertIn("command_status=47", result.stderr)
         self.assert_absent()
 
         result = self.invoke(
@@ -743,12 +744,13 @@ exec "{flock_binary}" "$@"
 
         result = self.invoke(
             "install", {"SWAPZ_FAKE_VERMAGIC": "other-kernel"})
-        self.assertNotEqual(
-            result.returncode, 0,
-            "phase=module_vermagic producer_status=0 command_status=0")
-        self.assertIn("does not match the running kernel", result.stderr)
-        self.assertIn("phase=module_vermagic", result.stderr)
-        self.assertIn("command_status=0", result.stderr)
+        with self.subTest(phase="module_vermagic"):
+            self.assertNotEqual(
+                result.returncode, 0,
+                "phase=module_vermagic producer_status=0 command_status=0")
+            self.assertIn("does not match the running kernel", result.stderr)
+            self.assertIn("phase=module_vermagic", result.stderr)
+            self.assertIn("command_status=0", result.stderr)
         self.assert_absent()
 
     def test_secure_boot_verifies_real_detached_cms_payload(self):
@@ -844,12 +846,13 @@ exec "{flock_binary}" "$@"
             ["bash", str(ROOT / "packaging/sign-module.sh"),
              "--verify", str(signed_module)],
             cwd=ROOT, env=verify_env, capture_output=True, text=True)
-        self.assertEqual(
-            unsigned.returncode, 2,
-            "phase=detached_signature command_status="
-            f"{unsigned.returncode} unsigned module was accepted")
-        self.assertIn("qualified module is unsigned", unsigned.stderr)
-        self.assertIn("phase=detached_signature", unsigned.stderr)
+        with self.subTest(phase="detached_signature", case="unsigned"):
+            self.assertEqual(
+                unsigned.returncode, 2,
+                "phase=detached_signature command_status="
+                f"{unsigned.returncode} unsigned module was accepted")
+            self.assertIn("qualified module is unsigned", unsigned.stderr)
+            self.assertIn("phase=detached_signature", unsigned.stderr)
         signed_module.write_bytes(canonical_signed_module)
 
         header_offset = (
@@ -995,11 +998,14 @@ exec "{flock_binary}" "$@"
         self.assertEqual(
             kmodsign_log.read_text().splitlines(), ["called", "called"])
         self.assertIn("kmodsign failed", signature_generation_failed.stderr)
-        self.assertIn(
-            "phase=signature_generation", signature_generation_failed.stderr)
-        self.assertIn("command_status=73", signature_generation_failed.stderr)
         self.assertNotIn(str(private_key),
                          signature_generation_failed.stderr)
+        with self.subTest(phase="signature_generation"):
+            self.assertIn(
+                "phase=signature_generation",
+                signature_generation_failed.stderr)
+            self.assertIn(
+                "command_status=73", signature_generation_failed.stderr)
 
         def verify_with_mokutil(*, cert=certificate_der, status="1",
                                 stdout=None, stderr="", path=crypto_bin,
@@ -1031,8 +1037,10 @@ exec "{flock_binary}" "$@"
             f"{not_enrolled.returncode}")
         self.assertIn("not enrolled or enrollment could not be verified",
                       not_enrolled.stderr)
-        self.assertIn("phase=certificate_enrollment", not_enrolled.stderr)
-        self.assertIn("command_status=0", not_enrolled.stderr)
+        with self.subTest(phase="certificate_enrollment"):
+            self.assertIn(
+                "phase=certificate_enrollment", not_enrolled.stderr)
+            self.assertIn("command_status=0", not_enrolled.stderr)
 
         silent_success = verify_with_mokutil(status="0", stdout="")
         self.assertEqual(silent_success.returncode, 2)
