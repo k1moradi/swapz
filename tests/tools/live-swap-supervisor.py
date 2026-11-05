@@ -595,6 +595,10 @@ class LinuxOps:
                 str(rows[0].get("partuuid", "")).lower() != state["partuuid"] or \
                 rows[0].get("size") != state["size_bytes"]:
             raise LiveSwapError("selected partition identity or geometry changed")
+        parent_major_minor = PHYSICAL._physical_parent_identity(
+            state["major"], state["minor"])
+        if parent_major_minor != state.get("parent_major_minor"):
+            raise LiveSwapError("selected partition physical parent changed")
         if PHYSICAL._mountinfo_has_device(state["major"], state["minor"]):
             raise LiveSwapError("selected partition became mounted")
         PHYSICAL._require_root_not_on_target(state["major"], state["minor"])
@@ -634,6 +638,10 @@ class LinuxOps:
             raise LiveSwapError("recovery partition identity or geometry changed")
         if not (Path(f"/sys/dev/block/{state['major']}:{state['minor']}/partition").is_file()):
             raise LiveSwapError("recovery target is no longer a real partition")
+        saved_parent = state.get("parent_major_minor")
+        if saved_parent is not None and PHYSICAL._physical_parent_identity(
+                state["major"], state["minor"]) != saved_parent:
+            raise LiveSwapError("recovery partition physical parent changed")
         if PHYSICAL._mountinfo_has_device(state["major"], state["minor"]):
             raise LiveSwapError("recovery partition became mounted")
         PHYSICAL._require_root_not_on_target(state["major"], state["minor"])
@@ -1145,6 +1153,12 @@ def _validate_target_facts(target):
     }
     if any(target.get(key) != value for key, value in expected.items()):
         raise LiveSwapError("selected partition facts do not match the fixed target")
+    parent_major_minor = target.get("parent_major_minor")
+    if not isinstance(parent_major_minor, str) or not re.fullmatch(
+            r"[0-9]+:[0-9]+", parent_major_minor):
+        raise LiveSwapError("selected physical parent identity is unavailable")
+    if parent_major_minor == f"{target['major']}:{target['minor']}":
+        raise LiveSwapError("selected partition cannot be its own physical parent")
     if type(target.get("swap_used_kib")) is not int or \
             not 0 <= target["swap_used_kib"] <= target["swap_size_kib"]:
         raise LiveSwapError("selected swap usage is missing or outside its capacity")
@@ -1476,6 +1490,7 @@ def _target_state(target):
         "device": target["device"],
         "major": target["major"],
         "minor": target["minor"],
+        "parent_major_minor": target["parent_major_minor"],
         "partuuid": target["partuuid"],
         "size_bytes": target["size_bytes"],
         "original_header_sha256": ORIGINAL_HEADER_SHA256,
@@ -2237,6 +2252,7 @@ def _save_observation(state_dir, state, results, ops, *, first=False):
         "dmsetup_status": status,
         "block_stats": PHYSICAL._block_stat_snapshot({
             "major": state["major"], "minor": state["minor"],
+            "parent_major_minor": state.get("parent_major_minor"),
         }),
     }
     results.setdefault("observations", []).append(entry)
@@ -2264,6 +2280,9 @@ def _actual_swap_io(results):
             results.get("device") != DEVICE_PATH or \
             results.get("major_minor") != f"{DEVICE_MAJOR}:{DEVICE_MINOR}" or \
             results.get("partuuid") != DEVICE_PARTUUID or \
+            not isinstance(results.get("parent_major_minor"), str) or \
+            not re.fullmatch(
+                r"[0-9]+:[0-9]+", results["parent_major_minor"]) or \
             results.get("size_bytes") != DEVICE_SIZE_BYTES or \
             results.get("original_header_sha256") != ORIGINAL_HEADER_SHA256 or \
             results.get("fallback_mode") != "none" or \
@@ -2318,6 +2337,13 @@ def _actual_swap_io(results):
             after_block = after["block_stats"]
             if before_block.get("available") is not True or \
                     after_block.get("available") is not True:
+                return False
+            if before_block.get("device_major_minor") != \
+                    results["parent_major_minor"] or \
+                    after_block.get("device_major_minor") != \
+                    results["parent_major_minor"] or \
+                    before_block.get("sector_bytes") != 512 or \
+                    after_block.get("sector_bytes") != 512:
                 return False
             before_values = before_block["values"]
             after_values = after_block["values"]
@@ -2444,6 +2470,11 @@ def _validate_state(state, backup, state_dir):
     if state.get("stage") not in RECOVERY_RECOGNIZED_STAGES | {
             "PREPARED", "COMPLETE", "CANCELLED_SAFE"}:
         raise LiveSwapError("saved state has an unknown recovery stage")
+    saved_parent = state.get("parent_major_minor")
+    if saved_parent is not None and (
+            not isinstance(saved_parent, str) or
+            not re.fullmatch(r"[0-9]+:[0-9]+", saved_parent)):
+        raise LiveSwapError("saved physical parent identity is malformed")
     if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != \
             ORIGINAL_HEADER_SHA256 or \
             state.get("original_header_sha256") != ORIGINAL_HEADER_SHA256:
@@ -2860,7 +2891,6 @@ def _existing_results(state_dir, state):
             "commands": [],
             "phases": [],
             "observations": [],
-            "state_dir": str(state_dir),
         }
 
 
@@ -2993,6 +3023,7 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
             "device": DEVICE_PATH,
             "major_minor": f"{DEVICE_MAJOR}:{DEVICE_MINOR}",
             "partuuid": DEVICE_PARTUUID,
+            "parent_major_minor": state["parent_major_minor"],
             "size_bytes": DEVICE_SIZE_BYTES,
             "original_header_sha256": ORIGINAL_HEADER_SHA256,
             "fallback_mode": "none",
@@ -3002,7 +3033,6 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
             "phases": [],
             "observations": [],
             "max_swapz_used_kib": 0,
-            "state_dir": str(state_dir),
         }
         _save_results(state_dir, results)
         PHYSICAL._consume_review(target, approval["run_id"])

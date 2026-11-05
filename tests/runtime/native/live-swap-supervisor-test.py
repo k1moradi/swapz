@@ -24,6 +24,7 @@ SPEC.loader.exec_module(supervisor)
 
 HEAD = "c" * 40
 RUN_ID = "d" * 32
+SYNTHETIC_PARENT_MAJOR_MINOR = "8:0"
 REAL_MKDIR = os.mkdir
 PRESSURE_OK = json.dumps({
     "run_id": RUN_ID,
@@ -107,6 +108,7 @@ class FakeOps:
             "device": supervisor.DEVICE_PATH,
             "major": supervisor.DEVICE_MAJOR,
             "minor": supervisor.DEVICE_MINOR,
+            "parent_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
             "partuuid": supervisor.DEVICE_PARTUUID,
             "size_bytes": supervisor.DEVICE_SIZE_BYTES,
             "swap_path": supervisor.DEVICE_PATH,
@@ -380,6 +382,75 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         self.assertEqual(supervisor.MAX_MEMORY_SOME_AVG10, 5.0)
         self.assertEqual(supervisor.MAX_MEMORY_FULL_AVG10, 1.0)
 
+    def test_target_admission_requires_physical_parent_identity(self):
+        target = FakeOps().inspect_target()
+        supervisor._validate_target_facts(target)
+        missing_parent = dict(target)
+        del missing_parent["parent_major_minor"]
+        with self.assertRaisesRegex(
+                supervisor.LiveSwapError, "physical parent identity"):
+            supervisor._validate_target_facts(missing_parent)
+        self_parent = dict(
+            target,
+            parent_major_minor=
+                f"{supervisor.DEVICE_MAJOR}:{supervisor.DEVICE_MINOR}")
+        with self.assertRaisesRegex(
+                supervisor.LiveSwapError, "own physical parent"):
+            supervisor._validate_target_facts(self_parent)
+        state = supervisor._target_state(target)
+        self.assertEqual(
+            state["parent_major_minor"], SYNTHETIC_PARENT_MAJOR_MINOR)
+
+    def test_observation_uses_bound_physical_parent_for_lower_counters(self):
+        ops = FakeOps()
+        state = {
+            "dm_name": "swapz-live-0123456789abcdef",
+            "dm_uuid": "SWAPZ-LIVE-0123456789abcdef",
+            "dm_major": 252,
+            "dm_minor": 0,
+            "major": supervisor.DEVICE_MAJOR,
+            "minor": supervisor.DEVICE_MINOR,
+            "parent_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
+        }
+        results = {"observations": [], "max_swapz_used_kib": 0}
+        block_sample = {
+            "available": True,
+            "values": [0] * 17,
+            "device_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
+            "sector_bytes": 512,
+        }
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                supervisor, "_verify_mapper", return_value="/synthetic/mapper"))
+            stack.enter_context(mock.patch.object(
+                supervisor, "_status_snapshot",
+                return_value={"text": "synthetic", "counters": {
+                    "logical_write": 0, "logical_read": 0}}))
+            stack.enter_context(mock.patch.object(
+                supervisor, "_read_vmstat",
+                return_value={"pswpin": 0, "pswpout": 0}))
+            stack.enter_context(mock.patch.object(
+                supervisor, "_memory_sample", return_value=HIGH_MEMORY))
+            stack.enter_context(mock.patch.object(
+                supervisor, "_verify_trial_swap_inventory"))
+            stack.enter_context(mock.patch.object(
+                supervisor, "_active_swap_row",
+                return_value={"used_kib": 0, "size_kib": 1024,
+                              "priority": 32767}))
+            snapshot = stack.enter_context(mock.patch.object(
+                supervisor.PHYSICAL, "_block_stat_snapshot",
+                return_value=block_sample))
+            stack.enter_context(mock.patch.object(
+                supervisor, "_save_results"))
+            entry = supervisor._save_observation(
+                Path("/synthetic"), state, results, ops, first=True)
+        snapshot.assert_called_once_with({
+            "major": supervisor.DEVICE_MAJOR,
+            "minor": supervisor.DEVICE_MINOR,
+            "parent_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
+        })
+        self.assertEqual(entry["block_stats"], block_sample)
+
     def test_drain_headroom_is_only_surplus_ram_after_current_swap(self):
         used_kib = 3977 * 1024
         memory = {"mem_available_bytes": 10439 * 1024 * 1024}
@@ -611,7 +682,12 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "vmstat": {"pswpin": 0, "pswpout": 0},
             "dmsetup_status": {"counters": {"logical_write": 0,
                                             "logical_read": 0}},
-            "block_stats": {"available": True, "values": [0] * 8},
+            "block_stats": {
+                "available": True,
+                "values": [0] * 8,
+                "device_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
+                "sector_bytes": 512,
+            },
         }
         sample = {
             "sample_index": 1,
@@ -619,8 +695,12 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "dmsetup_status": {"counters": {"logical_write": 4096,
                                             "logical_read": 4096}},
             "swap_used_kib": 0,
-            "block_stats": {"available": True,
-                            "values": [0, 0, 0, 0, 1, 0, 8, 0]},
+            "block_stats": {
+                "available": True,
+                "values": [0, 0, 0, 0, 1, 0, 8, 0],
+                "device_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
+                "sector_bytes": 512,
+            },
         }
         pressure = {
             "status": "PASS",
@@ -654,6 +734,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "major_minor":
                 f"{supervisor.DEVICE_MAJOR}:{supervisor.DEVICE_MINOR}",
             "partuuid": supervisor.DEVICE_PARTUUID,
+            "parent_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
             "size_bytes": supervisor.DEVICE_SIZE_BYTES,
             "original_header_sha256": supervisor.ORIGINAL_HEADER_SHA256,
             "fallback_mode": "none",
@@ -692,7 +773,8 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         for field, value in (
                 ("qualified_source", "0" * 40),
                 ("run_id", "e" * 32),
-                ("helper_sha256", "b" * 63)):
+                ("helper_sha256", "b" * 63),
+                ("parent_major_minor", "8:9")):
             bad_identity = json.loads(json.dumps(result))
             bad_identity[field] = value
             with self.subTest(identity_field=field):
@@ -2431,8 +2513,12 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                 "logical_write": 4096 * count, "logical_read": 4096 * count,
                 "physical_write": 4096 * count, "physical_read": 0,
                 "failed": 0, "error": 0}},
-            "block_stats": {"available": True,
-                            "values": [0, 0, 0, 0, count, 0, 8 * count, 0]},
+            "block_stats": {
+                "available": True,
+                "values": [0, 0, 0, 0, count, 0, 8 * count, 0],
+                "device_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
+                "sector_bytes": 512,
+            },
         }
         results.setdefault("observations", []).append(sample)
         results["max_swapz_used_kib"] = 64
@@ -2560,6 +2646,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         return {"device": supervisor.DEVICE_PATH,
                 "major": supervisor.DEVICE_MAJOR,
                 "minor": supervisor.DEVICE_MINOR,
+                "parent_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
                 "partuuid": supervisor.DEVICE_PARTUUID,
                 "size_bytes": supervisor.DEVICE_SIZE_BYTES}
 
@@ -2577,6 +2664,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                 "device": supervisor.DEVICE_PATH,
                 "major": supervisor.DEVICE_MAJOR,
                 "minor": supervisor.DEVICE_MINOR,
+                "parent_major_minor": SYNTHETIC_PARENT_MAJOR_MINOR,
                 "partuuid": supervisor.DEVICE_PARTUUID,
                 "size_bytes": supervisor.DEVICE_SIZE_BYTES,
                 "swap_size_kib": supervisor.DEVICE_SIZE_BYTES // 1024 - 4,

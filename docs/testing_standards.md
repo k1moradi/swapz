@@ -5172,13 +5172,16 @@ publish PASS on missing/reordered observation indices or regressing kernel
 and lower-device counters.
 Child reports with unknown JSON keys, additional records or nonfinite timing
 must be rejected without persisting their untrusted payloads, which may
-contain page contents or private filesystem paths. The accepted report schema uses typed
+contain page contents or private filesystem paths. Do not persist the private state-directory path in the accepted result object. The accepted report schema uses typed
 nonnegative counts and an errno-only mapping-close field. Before any synthetic
 trial PASS, revalidate the bound run/source/HEAD/helper/artifact and historical
-target/capacity identity, the frozen 128MiB/80,000-page resource limits, exact
-page and byte oracle result, zero OOM/OOM-kill counters, positive mapper/swap
-use, proven child/cgroup teardown, and availability plus monotonic ordering of
-every lower-I/O observation. Rootless adversarial tests must inject both
+target/capacity identity, including the inspected physical-parent major:minor,
+the frozen 128MiB/80,000-page resource limits, exact page and byte oracle result,
+zero OOM/OOM-kill counters, positive mapper/swap use, proven child/cgroup
+teardown, and availability plus monotonic ordering of every lower-I/O
+observation. Lower-device accounting must pass that bound parent identity to
+the shared block-stat snapshot helper and reject a substituted or unavailable
+parent; partition counters are not a substitute for lower-media evidence. Rootless adversarial tests must inject both
 termination uncertainty and failed teardown independently of a clean worker,
 including a timeout followed by cgroup-removal failure. No synthetic PASS
 proves actual anonymous-page reclaim, Linux swap-out/swap-in, maximum-capacity
