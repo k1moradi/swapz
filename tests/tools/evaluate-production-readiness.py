@@ -681,7 +681,7 @@ def _physical_audit_failure_witness_is_valid(
                 arm not in ("raw", "swapz") or
                 not isinstance(phase, str) or
                 re.fullmatch(
-                    r"(?:measure|steady|gc|teardown|publish|"
+                    r"(?:measure|steady|gc|"
                     r"round-[1-9][0-9]*(?:-verify)?)", phase) is None or
                 not any(diagnostic.get("producer_status") == "FAIL"
                         for diagnostic in matching_diagnostics)):
