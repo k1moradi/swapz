@@ -8542,3 +8542,15 @@ must not relabel the authenticated producer/measurement FAIL as BLOCKED. A
 passing rootless test only proves the evaluator behavior: BLOCKED is not an
 acceptance PASS, and authenticated measured FAIL is neither BLOCKED nor a
 qualification PASS.
+
+Release-evaluator truncation regressions must retain the first authenticated
+FAIL when the matching diagnostic, pair disposition, source/target identity
+and failing-cohort counts remain available, even if unrelated diagnostics were
+omitted. Removing that matching diagnostic leaves a first-failure claim
+unverifiable and yields BLOCKED; omitted diagnostics also prevent audit PASS.
+Malformed count values (including boolean values presented as integers),
+inflated accepted-pair counts, stale source/target bindings, and absent
+current evaluator/sealer SHA-256 proofs cannot authenticate FAIL. Report the
+invalid field and expected/observed types with bounded, redacted recapture
+guidance. These are rootless verdict-logic controls only, never physical
+acceptance evidence.

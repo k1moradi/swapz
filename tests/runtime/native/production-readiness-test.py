@@ -3964,6 +3964,20 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                         "reason=missing_or_contradictory_campaign_proof"
                         in blocker for blocker in result["code_blockers"]),
                         result["code_blockers"])
+                    if fault in ("boolean_accepted_count", "list_attempted_count"):
+                        field, observed_type = (
+                            ("accepted_pairs", "bool")
+                            if fault == "boolean_accepted_count"
+                            else ("attempted_pairs", "list"))
+                        self.assertTrue(any(
+                            "failed_evidence_field=physical_evidence_audit."
+                            f"cohort_pair_counts[].{field}" in blocker and
+                            "expected_type=int" in blocker and
+                            f"observed_type={observed_type}" in blocker and
+                            "verdict=BLOCKED" in blocker and
+                            "safe_action=recapture_and_reseal_campaign" in blocker
+                            for blocker in result["code_blockers"]),
+                            result["code_blockers"])
 
         # A PASS audit cannot be complete if it silently drops diagnostics.
         campaign = physical_campaign_evidence(policy_raw)
