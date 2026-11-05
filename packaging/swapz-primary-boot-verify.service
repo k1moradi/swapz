@@ -1,0 +1,37 @@
+[Unit]
+Description=Record swapz primary cold-boot acceptance evidence
+After=swapz-primary-mapper.service dev-mapper-swapz\x2dprimary.swap
+
+[Service]
+Type=oneshot
+ExecStart=@SWAPZ_SBINDIR@/swapz-primary-boot-verify observe
+TimeoutStartSec=30s
+UMask=0077
+# Observe is not an activator, but can persist cold-boot evidence and revoke
+# /run/swapz authorization. /var and /run therefore cannot be globally read-only.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+# observe authenticates the installed /lib/modules/.../dm-swapz.ko image.
+# ProtectKernelModules would hide that evidence; CAP_SYS_MODULE is absent and
+# module syscalls are denied below instead, preserving read-only provenance.
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# CAP_SYS_ADMIN is retained only for read-only DM inspection. Prevent it from
+# undoing filesystem isolation, loading modules, or taking swap ownership.
+SystemCallFilter=~@mount @module @swap
+SystemCallErrorNumber=EPERM
+# Do not add ReadOnlyPaths bind mounts around recovery or package journals:
+# native preflight rejects mount substitution and needs the original mount IDs.
+# The verifier's observe command only writes its report and /run authorization.
+
+[Install]
+WantedBy=multi-user.target

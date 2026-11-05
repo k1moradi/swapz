@@ -1,0 +1,939 @@
+# Roadmap
+
+Current naming, operating, and test-interface policy is canonical in
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md) and [README.md](README.md). This long
+reference does not duplicate those always-loaded rules.
+
+This file is the project's **rolling engineering blueprint**: active priorities, proposals, decisions and acceptance gates. Linux MM/swap/zswap semantics and implementation context live in [context.md](context.md). Completed experiment narratives belong in Git history or explicitly historical handoff records, not the active priority path.
+
+**Agent working-set rule:** keep [AGENT_CONTEXT.md](AGENT_CONTEXT.md),
+[VISION.md](VISION.md) and [README.md](README.md) continuously in context. This
+ROADMAP is a long evidence reference; retrieve only the active rows/sections
+needed for the current decision so total documentation stays within the 64K-token
+budget defined in AGENT_CONTEXT.
+
+## Current production mission — dedicated SD-card host
+
+The current target is the owner-dedicated removable SD card whose observed
+partition is `/dev/sda1` (8:1, 124787884032 bytes, PARTUUID
+`f13428f6-01`). The whole positively identified card is disposable development
+media. Standing owner authorization permits repeated destructive physical and
+live-swap work on that card without another per-run reviewer/owner approval.
+No VM or fallback-swap work is required, and Codex must not reboot or
+intentionally crash the PC. Device identity, exact-source qualification,
+active-page protection and normal teardown remain mandatory.
+
+The production objective is full-card physical backing with the maximum logical
+capacity safe for incompressible data and required GC/forward-progress reserve,
+followed by actual Linux swap correctness, sustained occupancy/churn, native
+startup/shutdown integration and an automatic cold-boot acceptance harness.
+Detailed completion criteria and repository/documentation operating rules are
+canonical in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). Historical `/dev/sda4` trial records are archived in
+[handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md);
+they do not supply the separate host-bound authorization below.
+
+### Separate host-bound `/dev/sda4` policy
+
+The owner has separately authorized a second Lubuntu computer to consider only
+its PARTUUID-selected `/dev/sda4`, which shares a USB parent with root, boot
+and EFI. The first host's dedicated `/dev/sda1` authorization is unchanged.
+The shared-root parent gate remains closed by default and can pass only with
+the exact root-owned host-scope record and fresh descriptor-bound topology
+checks described in [AGENT_CONTEXT.md](AGENT_CONTEXT.md). This record is an
+admission exception only: it does not change frozen production acceptance or
+qualify/activate swapz. Target/recovery-parent separation stays absolute. The
+currently observed recovery directory is on the same parent as this `/dev/sda4`
+target, so target mutation remains blocked until independent persistent
+recovery storage is available. The record and rootless policy tests must land
+before any physical admission work; they do not authorize a live swap trial.
+
+The primary manager reads one protected PARTUUID selector from
+`/etc/swapz/primary-target`; source code must not pin a path, device number or
+partition capacity. It records the discovered partition identity and geometry
+in each transaction manifest and rechecks the PARTUUID, descriptor, parent,
+root-device and recovery-device relationships before preparation. Selecting a
+different goal drive is a configuration and authorization update, not a source
+constant edit. Package cleanup protects every active PARTUUID ownership marker,
+and packaged units no longer name a historical device or UUID. The installed
+systemd generator now derives the selected `.device` ordering and by-PARTUUID
+`.swap` conflict from the protected selector. The packaged units remain disabled. Ordinary production includes the
+lifecycle implementation but keeps activation runtime-locked until the
+owner-armed, current-boot preflight proves exact source, installed artifacts,
+PARTUUID and target geometry after the code and card qualification gates pass.
+Stop/recovery is separately guarded and may act only on an independently
+verified durable, run-owned transaction; compiled capability alone is never
+activation authorization. Deployment must also prevent a raw swap alias
+(for example a by-UUID fstab entry) from activating the same partition.
+The historical live-swap supervisor remains tied to its old host and is
+not a deployment path for the current card.
+
+The [archived early primary-manager implementation notes](handoff/old-host-physical-and-live-swap-evidence.md)
+document the former fixed-device design. Any `/dev/sda4`, `8:4`, 16 GiB, or original-header
+digest values in those notes are historical test context, not current source
+requirements; use the selector and manifest-bound geometry described above.
+
+## Current owner requirement: fixed production compression stack
+
+Every emulated device must run the production delta64 + `DELTA64_SHUF8`
+8-byte byte-plane shuffle (owner-confirmed byte shuffle, not bit-level) + LZ4 stack with delta64
+rescue enabled. This is a main product requirement, not an experiment selector.
+Do not spend qualification time on delta64-off benchmark arms, off/on A/Bs, or
+delta64-off plot/history series. Historical rescue-off results remain evidence
+of past decisions only. Low-level decode/debug compatibility coverage may still
+exercise legacy/disabled states, but no disabled state can qualify or represent
+an emulated-device performance result.
+
+## Previous comparison baseline
+
+**Historical, source-bound comparison.** The previously recorded `0f5db1f8a771`
+owner test and development performance envelope are preserved in
+[handoff/historical-source-qualification-snapshots.md](handoff/historical-source-qualification-snapshots.md).
+They are not current-main or physical-card acceptance evidence.
+
+## Previous qualified source (ID107–ID108)
+
+**Historical, source-bound qualification.** The `03becc01802b` PASS,
+subsequent BLOCKED/FAIL observations, and related development comparisons
+are preserved verbatim in
+[handoff/historical-source-qualification-snapshots.md](handoff/historical-source-qualification-snapshots.md).
+The current release gate remains exact-source `make test` evidence.
+
+## Current qualified source and newer development
+
+**Historical heading retained for reference integrity.** This section's
+former ARM64/x86 source-specific PASS/BLOCKED reports and benchmark metrics
+are archived verbatim in
+[handoff/historical-source-qualification-snapshots.md](handoff/historical-source-qualification-snapshots.md).
+They do not establish that current `main` is qualified. For the actual
+current source, inspect Git/CI, the canonical [owner test report](../test_results.json),
+and the [production-readiness gates](AGENT_CONTEXT.md); never carry over an
+older source's PASS or historical host-specific performance claim.
+
+## Current bottleneck ranking
+
+**Historical ranking retained for reference integrity.** The detailed SATA/NVMe,
+Fast-QD4 and QD8 snapshot based on older x86 `9123b811` and ARM64 `7ff94fd4`
+reports is preserved verbatim in
+[handoff/historical-bottleneck-ranking-9123b811-7ff94fd4.md](handoff/historical-bottleneck-ranking-9123b811-7ff94fd4.md).
+Do not treat that source-bound ranking as current performance evidence. The
+active production order keeps optimization behind correctness/lifecycle and
+physical qualification; when optimization resumes, use the evidence table and
+fresh exact-source measurements rather than carrying these percentages forward.
+
+
+## Optimization evidence table
+
+This table is the canonical anti-retest index. Before proposing optimization
+work, find the matching ID here. Keep each row compact: the current decision,
+one evidence/report anchor when it materially helps, and the specific condition
+that can reopen the question. Do not copy the experiment chronology into other
+documents. Class 1/2/3/5 items are closed unless their row states a reopen
+condition or a materially different workload/device invalidates the evidence;
+Class 4 items are evidence-ready; Class 6 items are external gates.
+
+**Three-host 2026-10-23 cleanup decision:** source `174d42eb7135` passed the
+complete owned-RAM matrix on AVX-512, ARM64/NEON and SSE2. Ordinary first-pass
+LZ4 acceleration selection, READ-coalescing cap selection, delta64 preparation
+width K=2/K=4 and lower-WRITE depth-two are closed experiments. Production keeps
+ordinary LZ4 acceleration 1, coalescing cap 8, delta64 preparation K=1 and
+lower-WRITE depth 1; their runtime selectors and routine A/Bs are removed. The
+current ordered-worker independent READ fan-out is distinct from the retired
+`swapz-read` helper. Its RAW extension has isolated source A/B evidence and
+exact-source owner qualification in ID129; retain that scope rather than
+extending its result to every compressed/cold-READ workload.
+
+Classes are evidence states: **(1)** tested-valid/keep, **(2)** tested-invalid
+because the implementation or metric cannot answer the intended question,
+**(3)** tested-invalid despite a sound experiment, **(4)** ready for a bounded
+experiment/evidence collection, **(5)** refuted/not worth implementing from
+current evidence, and **(6)** architecture/deployment/evidence gate rather than
+an immediately qualified optimization. IDs are stable even when priority
+changes.
+
+| ID | Idea | Class | Current decision |
+|---:|---|---|---|
+| 1 | Direct single-bvec BIO -> LZ4 input | **1** | Qualified; keep the owned-page direct input and fallback. |
+| 2 | Commit plan/pack/publish attribution | **1** | Qualified; keep. |
+| 3 | Global serialized publication/authority on one shared backing device | **1** | Keep correctness authority; pipeline preparation/I/O around it rather than splitting it. |
+| 4 | `WQ_UNBOUND` preparation placement | **1** | Qualified placement; scheduler load-balancing remains preferred to affinity. |
+| 5 | Inline RAW no-bounce staging | **1** | Qualified; copy cost remains small. |
+| 6 | `task_cputime_adjusted()` callback CPU attribution | **2** | Rejected metric and deleted. |
+| 7 | CPU-local/bound preparation worker | **3** | Rejected and deleted. |
+| 8 | Maximize LZ4/lower-I/O overlap as the objective | **3** | Stronger rejection: serial swapz gains massively with only ~0.2 ms overlap, while fast overlap is ~4.8 ms and async still has no significant mixed gain. Optimize useful work/lower traffic, not overlap counters. |
+| 9 | Precompute payload CRC during preparation | **1** | Qualified; keep. |
+| 10 | Validate immutable metadata once during finish | **1** | Qualified; keep. |
+| 11 | Split final-image publish CRC from authority/liveness | **1 completed measurement** | Reconfirmed: final CRC is 12.0/22.1 ms slow and 8.8/17.2 ms fast. It is a major publish subphase, not the global bottleneck. |
+| 12 | Split stage/pause hash/hole-clear/control residual | **1 completed snapshot measurement** | Reconfirmed at ~1.7/1.1 ms pause with ~8.6/6.2 ms residual after subtraction. Full-transaction hashing stays; the snapshot-scope optimization question is closed. Further residual splitting is optional attribution only. |
+| 13 | Dry PACK_READY close -> next accepted WRITE timing | **1 completed measurement** | Question answered and telemetry deleted. |
+| 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. The current candidate instead suppresses idle preparation wakes below four true tails while preserving any-depth lower-WRITE overlap. |
+| 15 | >=5 counterbalanced pairs for promoted performance questions | **1 evidence gate implemented** | Retain five matched fast mixed, corrected persistent-worker fast QD8/QD32 and promoted ID63 confirmations where inference still matters; legacy wave-driver write evidence is historical burst evidence only. |
+| 16 | N=2/4 preparation workers in old single-credit design | **5** | Refuted as formulated. |
+| 17 | Pointer handoff solely to remove current copies | **5** | Reconfirmed: explicit copies are only ~5.1 ms slow / 3.5 ms fast. |
+| 18 | Rewrite bounded DP planner | **5** | Reconfirmed: planner is ~6.3 ms slow / 4.4 ms fast and is not dominant. |
+| 19 | Skip final publish payload CRC | **5** | Rejected despite measured cost; final immutable-run integrity boundary is mandatory. |
+| 20 | Remove batch pause/resume transaction CRC immediately | **5** | No isolated evidence justifies weakening snapshot protection. |
+| 21 | Direct LZ4 decompression into read BIO | **5** | Reconfirmed: read-copy wall is ~1.1-1.4 ms while lower READ wall is ~100-675 ms. |
+| 22 | DMA/hardware offload for current 4KiB copies | **5** | Wrong bottleneck. |
+| 23 | Per-CPU independent authorities on one shared device | **5** | Reject; fragments ordering, GC and global packing. |
+| 24 | Trustworthy kernel-worker on-CPU attribution | **2 boundary metric insufficient; scope corrected by ID131** | Historical fast prep is 52.2 ms callback wall / 2.2 ms scheduler delta / 36.8 ms partial phase wall; ordered is 960.4 / 277.6 / 88.3 ms. Boundary deltas are diagnostics, not guaranteed lower bounds; phase wall includes preemption and is not CPU. Require external scheduler accounting before N=2/affinity decisions. |
+| 25 | Async lower-I/O state machine with immutable run ownership | **1** | Owner-loaded qualification reconfirms the ownership/publication machinery. Keep the infrastructure; K=1 scheduling policy remains separate. |
+| 26 | NUMA-local preparation domains | **6** | Hardware-blocked. |
+| 27 | One swapz target per NUMA node with node-local backing | **6** | Deployment topology only. |
+| 28 | Sustained live-GC workload | **1** | Reconfirmed with exact mapping counts active: 20 victims/rotations, 20 distinct victims and 4096 verified pages. |
+| 29 | Dead-segment DISCARD/TRIM | **1 qualified on owned RAM** | Owner evidence confirms 36 exact 1MiB discards / 73728 sectors, 20 GC victims/rotations and byte-exact 4096-page verification. Keep advisory fail-closed semantics; physical endurance remains unproven. |
+| 30 | Tiny microsecond grace timer | **5** | Refuted and deleted. |
+| 31 | Shared descriptor queue + multiple unbound prep workers | **4 dependent** | Serial still has no preparation backlog and fast remains shallow (~0.21/0.06 at lower-WRITE boundaries). Consider N=2 only after repeated corrected sustained-QD evidence plus trustworthy on-CPU attribution. |
+| 32 | One affinity-pinned worker per physical core | **3** | Reject affinity form. |
+| 33 | Linux kernel CRC32C primitive | **1** | Already implemented; keep architecture-selected kernel backend. |
+| 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
+| 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
+| 36 | Heavy-CPU plus low-RAM qualification | **1 qualified; parent orchestration margin repaired again / owner requalification pending** | This four-thread x86 host later passed ID36 at source `ac6c71e` (report `e9709aa`) with the same production kernel C as current tested source `49618ee`. Current report `c2306f7`, collected under intentional background browser/video load, reached swapz packed-read with `memory.high` +107,100, CPU PSI +490,890,748 usec, no reported OOM/OOM-kill, then the 680s pair watchdog expired before the active 280s candidate reported its own timeout. That is parent orchestration-budget exhaustion, not evidence that the candidate exceeded its forward-progress bound. Keep the 576MiB pressure set, `memory.max=896MiB`, 2x niceness-10 CPU burners, allocation-bounded 32 persistent packed-read lanes and the unchanged 280s per-candidate bound; give the pair 840s (`2*280+280`) and the top-level helper 960s so pressure-throttled barrier/setup/comparison/teardown cannot preempt a legal child. Owner pass still requires positive high/CPU-PSI deltas, zero OOM/OOM-kill, byte-exact readback and teardown. |
+| 37 | K=1 ping-pong WRITE pipeline | **1 qualified / keep; release gate open** | Latest five-pair fast sustained-write evidence shows async/sync QD4 +1.66% CI [+0.33%,+3.00%], QD8 +23.88% [+18.52%,+29.24%], and QD32 +22.15% [+15.65%,+28.65%]. QD8 lower requests fall 17.96%; QD32 requests fall 9.96% while bytes are statistically neutral. Keep the fixed one-slot path and existing activation gates; low-RAM/heavy-CPU remains a release gate. |
+| 38 | Shared accumulator with K>1 lower-write slots | **5 refuted / removed** | Repeated depth-1/depth-2 evidence did not establish a useful service benefit. Production is fixed at one slot, and the second-slot allocation/append path plus runtime selector are removed. Reopening K>1 requires a new workload and an explicit architecture experiment. |
+| 39 | Latency-first bounded parallel READ service | **1 promoted / selector and routine A/B retired** | The retired `swapz-read` helper workqueue remains absent. The final five-pair ARM64 fast-model decision at source `11fbc839...`, with ID63 off, showed fan-out +17.9% mixed WRITE/READ throughput (95% CI +17.2..+18.5), -48.7% mixed READ p99, +67.9% sequential READ throughput and +101.8% seeded-random READ throughput while raw-control drift overlapped zero. Keep ordered-worker private-slot fan-out fixed on; remove the `parallel_reads` module selector and routine ten-session A/B. |
+| 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
+| 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
+| 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
+| 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **1 qualified / covered** | Explicit multi-bvec, non-zero bv_offset, and THP compound folio backing qualified on owned RAM with kernel observation counters (`bio_segments_gt1`, `bio_segments_max`, `bio_nonzero_offset`, `bio_compound_folio_pages >= 128`, `bio_copy_fallback_pages`). The direct-I/O fixture now requires an aligned 2MiB anonymous range to collapse with `MADV_COLLAPSE` before counting THP coverage; `MADV_HUGEPAGE` alone was only a hint and could leave the test on base pages. Byte-exact across segmented, THP, and cross-mode reads/writes with zero failures. Larger base PAGE_SIZE/native larger records remain architecture work. |
+| 44 | Exact per-segment authoritative mapping counts / GC map-scan elimination | **1** | Owner-qualified with 20 live victims/rotations and byte-exact 4096-page verification. Keep O(1) dead-segment/post-evacuation checks; victim scoring/evacuation reverse indexing remains a separate future optimization. |
+| 45 | 4-block extent payload block-residency cache | **1** | Owner-qualified; keep. Slow packed sequential p99 improved to 16.85 ms with 3056 KiB / 457.5 lower requests, and native C proves each block of a seven-record 16KiB extent is fetched at most once before invalidation. |
+| 46 | Timed-interval scheduling telemetry hygiene | **1 completed measurement** | Qualified. Mixed/write-only scheduling conclusions now use kernel snapshots strictly around measured waves; full-process prefill/warmup counters are not evidence. |
+| 47 | Explicit ordering-boundary singleton reset | **1** | Qualified correctness/measurement hygiene. PREFLUSH/FUA/discard/shutdown/other reset learned singleton state, including empty fsync PREFLUSH; ordinary idle/deadline closes do not. |
+| 48 | Fast mixed one-page PACK_READY cause attribution | **1 completed measurement** | Repaired-read confirmation is 78.0 tail-target / 24.2 read-bypass / 0 wave-interruption, with slow 0/0/0. Sampled singleton tails remain dominant; read-bypass/wave as the primary root cause is refuted. |
+| 49 | 16-entry shared multi-extent READ residency cache | **1** | Reconfirmed again on hwq=1: 2830 KiB / 400.5 requests / 14.33 ms sequential and 2498 KiB / 624.5 / 22.21 ms random. Keep the 256KiB ordered-owner cache and exact invalidation. |
+| 50 | Sampled-single-tail PACK_READY deferral | **1 qualified / keep** | Latest fast D/C/DL/I/O is 110.8/78.3/32.5/0/0; only 2.0 companions resolve after 1 ms. Keep the ordinary deadline; do not add another active age cutoff. |
+| 51 | Deferred-singleton outcome attribution | **1 completed measurement** | Reconfirmed fast D/C/DL/I/O = 98.8/65.8/33.0/0/0 with exact conservation. Retain counters while residual fragmentation is localized. |
+| 52 | Deferred-singleton timing/service discrimination | **1 completed measurement** | Full-deadline passive data returns to only 1.5/65.8 companions >1 ms. Together with ID53's feedback artifact, this closes the age-threshold path: retain diagnostics only; do not implement another cutoff. |
+| 53 | 1 ms deferred-singleton age cutoff | **5 refuted / reverted** | 31.5 cutoff closes produced 13.8 next-WRITE-before-original-deadline observations (43.8%). Fast mixed async also had 960.4 vs 822.6 sync lower requests and no confirmed >=5% gain. Remove the active cutoff and watermark; restore ID50's ordinary deadline. |
+| 54 | Passive PACK_READY primary-cause attribution | **1 completed measurement** | Latest fast evidence: tail -41.2 CI [-71.1,-11.3], burst +90.2 [+36.9,+143.5], service-dry +30.4 [+3.5,+57.3]. Small-tail suppression remains refuted; dry is now a secondary fragmentation signal. |
+| 55 | Learned burst-target PACK_READY site/geometry attribution | **1 completed measurement; ID77 is a distinct reopen** | Historical evidence showed admission-side burst closure and rejected changing policy from the site/size histogram alone. That conclusion still forbids small-target gating. ID77 reopens closure ownership only because the later `5f92ea3` run, after ID75 removed lower-READ preparation, leaves a significant async request/throughput regression and source inspection proves a separate post-K1 completion stranding path. Do not rerun the old site/geometry A/B; qualify ID77 against its explicit gates. |
+| 56 | Post-PACK tail-sample timing vs detached K=1 state | **1 completed measurement** | Fast async records 604.2 tail0/inflight vs 0 sync, plus 116.4 tail1/inflight and 70.4 tail2+/inflight. The timing asymmetry is proven, but slow async also has many tail0/inflight samples without a throughput loss, so use a controlled active successor rather than declaring causality. |
+| 57 | K=1-busy PACK_READY gate + completion-aware zero-tail preservation | **3 refuted by owner evidence; reverted** | Two qualified runs reproduce ~-42% fast-QD8 async/sync. Latest is -41.1%, CI [-45.8%,-36.4%], with QD8 target 12 and 274.8 deadlines; fast mixed adds +271.6 lower requests while service-dry closes rise +263.4. Restore ID56/pre-ID57 sampling/closure behavior and remove active ID57 counters. |
+| 58 | Nonzero same-filled-page special representation | **4 low-priority representative-corpus evidence** | Current synthetic trace has 0/12,301 nonzero same-filled writes and 0 final live same-filled pages, so there is no benchmark opportunity. Keep the offline detector; do not add a production representation until representative swap content shows prevalence. |
+| 59 | Exact-content page deduplication / shared payload ownership | **4 representative-corpus + architecture evidence** | Synthetic trace reports 12,301 resident duplicate opportunities from only 128 payloads and 1,024 final duplicate pages. This proves the analyzer, not production prevalence. Measure representative lifetime overlap before implementing collision-free verification, bounded refcounts, generation-safe COW and GC/DISCARD ownership. |
+| 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
+| 61 | Foreground GC scaling / background-GC question | **1 ID61b owner-qualified / keep; broader background-GC question remains open** | Report `85aeac4` proves the production survivor list in loaded GC: 20 relocated pages produced exactly 20 relocation-list visits, `gc_choose_map_entries=0`, 1,280 segment-score visits, 20 victims/rotations and byte-exact verification of all 4,096 pages. The same qualified report's native scaling measured full-map relocation at 1.215/4.901ms versus 0.00169/0.00196ms for the 256-survivor list at 1/4GiB-equivalent scale. Keep the per-segment list; realistic foreground-GC stall/headroom evidence remains separate. |
+| 62 | Real-device / physical-media qualification | **1 active production gate on dedicated SD card** | Standing owner authorization now covers repeated destructive and live-swap work on the positively identified dedicated SD card in AGENT_CONTEXT. No per-run reviewer/owner permission, VM or fallback is required. Keep exact parent/partition identity, source/artifact qualification, bounded real-swap tests, active-page protection, GC/churn/resource evidence and fail-closed lifecycle checks. Generic claims beyond this card remain device-specific. |
+| 63 | Physically adjacent distinct-extent READ coalescing | **1 owner-qualified / active default-on / cap fixed at 8 blocks** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` reconfirms the active path. Fast sequential lower requests fall 11.29% (95% CI -14.35..-8.24) while throughput and p99 overlap zero. Serial-depth sequential requests fall 25.89%, p99 13.69% and throughput rises 30.58%, all significant. Keep exact 2..8-range zero-padding-free coalescing and the fixed eight-block cap. |
+| 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
+| 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
+| 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
+| 67 | Page-local delta64 rescue around LZ4 | **4 default-on by owner decision (ID115); representative-content gate remains** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` records 4096/4096 direct adoptions on the controlled positive fixture: useful WRITE +26.87% (95% CI +17.25..+36.49), p99 -20.93% (-23.24..-18.62), lower WRITE bytes -25.33% (-25.51..-25.14), while lower-request change overlaps zero. Default-on since ID115 (owner decision); representative anonymous-memory/page-corpus prevalence decides whether it stays on. |
+| 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
+| 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ. |
+| 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
+| 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
+| 72 | Physical wear / logical allocator fairness | **1 terminal A/B completed; switch removed, circular fairness retained** | Five-pair 70%-occupancy 40,960-rewrite loaded benchmark on owned RAM proved circular probing naturally distributes opens evenly across dead segments (min 0, max 4, sum 172 in all runs; spread 4). Least-open scanning achieved 0.00% spread reduction while regressing write p99 latency by +9.93% (+18.0 us). Per the predeclared terminal protocol, the optional switch was removed and circular allocator fairness was retained as the sole canonical policy. Logical opens remain allocator fairness telemetry, never NAND P/E cycles. |
+| 73 | Flexible/larger extent study | **5 larger/irregular classes deprioritized** | Report 711ceaad shows packed 1/2/4 captures the dominant geometry gain. A 3-block class saves only 2/2,089 blocks; 32/64KiB maxima save 14/22 more blocks while cold-read cost rises 1.47->1.53/1.55. Keep SWZ 1/2/4 classes unchanged unless a broader representative corpus materially overturns this result. |
+| 74 | Modern storage service-envelope bottleneck attribution | **1 evidence complete; kernel concurrency stays closed** | Repeated fully qualified reports `1b711f242ee8` and `b4b8187cad6a` on source `38560803e0d0` complete all eight modern-SD/SATA/Gen4/Gen5 directional rows. Saved lower work translates strongly on the 500us SD model, but useful WRITE service regresses on SATA and both NVMe envelopes despite substantial lower-byte/request reduction. The explicit reopen signals remain small: K=1 ready-window wait stays below ~0.54% of wall across the fast-media rows and preparation wait/backlog is shallow, so neither lower-WRITE K>1 nor wider preparation is justified yet. The two same-source runs also expose submitter instability: raw Gen4/Gen5 controls range from roughly 80/333 MB/s to 174/1038 MB/s for mixed/write-only despite unchanged device models. Qualify a lower-overhead replay engine before interpreting multi-gigabyte capability or reopening kernel concurrency. |
+| 75 | Mixed-I/O lower-READ preparation overlap and bounded full-batch ID63 gate | **1 owner-qualified cleanup / keep** | Source `5f92ea3` passed the five-stage owner matrix with lower-READ preparation starts fixed at zero. Versus the earlier `aa5237c` baseline, fast async-minus-sync lower-WRITE request excess fell from +319.8 to +45.6, while QD8/QD32 async gains remained positive. The residual request excess and -4.86% fast-mixed throughput delta are not explained by lower-READ preparation; keep the removal and move the remaining scheduling question to ID77. |
+| 76 | Native modern-storage replay engine | **1 owner-qualified / keep** | Report `aa5237c` (tested source `329a10c`) completed the five-stage owner `make test` with `replay_engine=native-c` in both raw and swapz modern-envelope arms and byte-exact qualification. The replay confounder is therefore closed for those rows. Configured multi-GiB/s Gen4/Gen5 caps remain service-model inputs, not physical-media claims: use attained raw-control service as the host capability check. The qualified native replay strengthens, rather than weakens, ID74's conclusion that K>1 and wider preparation remain closed absent ready-run/backlog evidence. |
+| 77 | Worker-owned PACK_READY and post-K1 completion re-evaluation | **1 owner-qualified / keep; residual moves to ID78** | Report `6c7d645924cd` on exact source `8a6dd2a` passes all five owner stages. Admission burst closes are now exactly zero, async-minus-sync lower-WRITE request excess improves from +45.6 (CI +13.9..+77.3) to +31.6 (CI -10.3..+73.5), and the throughput delta improves from -4.86% significant to -3.13% with CI crossing zero. QD8/QD32 async gains survive at +74.6%/+14.9%. Keep worker ownership. The remaining +49.8 burst-target closes and asymmetric post-PACK sampling are a distinct state-conservation defect tracked by ID78, not evidence to restore admission closure. |
+| 78 | Completion-aware post-PACK generation conservation / RAW-safe pack recognition | **1 owner-qualified state repair / keep; performance recovery incomplete** | Exact ARM64/NEON source `ab885372` passed the full five-stage owner `make test`. It eliminates the catastrophic `c07edd9` deadline/target inflation and keeps completed-generation learning bounded, but it does not recover the earlier async throughput advantage: latest fast QD8 async/sync is -0.07% (95% CI -1.12..+0.98) and QD32 is -0.36% (-8.27..+7.54), while lower-WRITE requests regress +2.16% and +8.13% respectively; QD4 is -9.32% with a wide CI. Keep the completion-state repair and RAW-safe recognition as correctness/state hygiene, but do not claim a scheduling win. Same-source mixed evidence is heavily replay/load sensitive, so the remaining low-QD detachment question moves to ID80 rather than reopening K>1 or the refuted staged-only PACK_READY lockout. |
+| 79 | Planned single-record exact read-cache invalidation | **1 owner-qualified READ-I/O win / keep; isolated causality A/B next** | Current report `dc78c9bbffbd` on exact source `0155a09a0f2e` retains the 9.0 fast mixed lower READ requests in both sync and async after ID80/ID81 removal. Versus qualified pre-ID79 `ab885372`, the fast synchronous metadata-set hit rate rises 42.94%->99.78% and lower READ requests 2328.4->9.0, while windows rise 694.8->1793.8 and lower WRITE requests 724.6->1818.2. The two production kernel trees are byte-identical outside `engine.c`, and their fast mixed fixture/trace/order match; cross-report throughput is still host-load-sensitive. Keep exact-range fencing in production, but run one temporary ID79-off source A/B to prove whether the lost lower-READ stall was accidentally providing WRITE batching. Do not retain a selector. |
+| 80 | Shallow K=1 detachment eligibility | **5 owner-refuted / removed; restored pre-ID80 policy requalified** | Report `71251ba9232e` refuted ID80's static `count > 4U` gate with fast QD8 async/sync -9.1% (95% CI -15.1..-3.1). Current report `dc78c9bbffbd` on source `0155a09a0f2e` passes all five stages with the actual pre-ID80 predicate `count > 4U || preparation_queued > 0`; sustained QD4/QD8/QD32 async/sync throughput is +3.94% / +0.95% / +0.94%, with all three intervals overlapping zero. Keep ID80 removed and retain no dormant selector. |
+| 81 | Cache-hit-neutral retained burst learning | **5 correctness-refuted / removed; rollback lifecycle requalified** | Exact source `26a045c80b56` passed build/native/W=1/W=2, then BLOCKED after 3.40s in owned-RAM retained suspend/drain because the lifecycle writer failed across suspend/resume (report `adc0aa8f3e1c`); no benchmark result from that source is valid. The bundled candidate also replaced the true pre-ID80 detach predicate with unqualified `count > 1U`. Current source `0155a09a0f2e` removes the whole bundle and passes retained suspend/drain plus the complete owner matrix in report `dc78c9bbffbd`. This proves the rollback is healthy but does not identify which ID81 sub-change caused the lifecycle failure; do not split or revive those changes without independent evidence. |
+| 82 | Fast-media retained deadline and wakeup overhead | **4 evidence-backed candidate; measurement first** | Current exact source `0155a09a0f2e` shows Gen4 mixed 591.3 ms with 197 worker-empty deadline closes, 33.9 ms lower-WRITE service, 37.3 ms ordered-worker CPU and zero K=1 ready waits; Gen5 is 522.5 ms / 176 deadlines / 23.8 ms lower-WRITE / 32.3 ms worker CPU. At retain_ms=2, count*deadline proves at least 394/352 ms of aggregate deadline-reaching window age; it is not a pure-idle measurement. First add exact retained idle-wait and worker-wake attribution; then test a fast-media microsecond-scale or accepted-work-only closure policy without changing K=1, SWZ, ID63 or authority ownership. Reject if SD gains, lower-byte savings, lifecycle safety or mixed p99 regress materially. |
+| 83 | Work-conserving admission queue + prepared reservoir + compressed/RAW dispatcher | **4 timer/pivot refuted; bounded mixed-wave + pack-state repair ready for owner qualification** | Exact source `829cdbe0d9eb`, report `efb713c06daa`, passes all five owner stages but refutes the 500us/cache-hit-pivot candidate: fast mixed async is 32.21 MB/s versus raw 62.96, lower-WRITE requests rise to 2572.6, and undersized accepted-work lower-idle reaches 756.58 ms. Remove the timer/pivot/lifetime state. Preserve the pure-WRITE four-record floor, but let already-observed mixed-wave boundaries make two/three-record tails finite immediately; separately preserve earlier valid compressed-pack geometry across RAW interleaving after total count exceeds four while keeping the count-four first-pack guard. Qualify only through public `make test`; K=1, one producer, 64 slots and SWZ stay fixed. |
+| 84 | Four-record proven-dry mixed dispatch | **5 reported owner regression; superseded** | Reported exact-source `aec662bd` owner result (report commit `b729549f`) has fast mixed useful WRITE 35.27 MB/s versus the predecessor 39.41 MB/s, more undersized idle and WRITE fragments. Do not override authoritative sampled targets or detach a four-record K=1 run when preparation backlog is zero; retain the first-three inline LZ4 guard. |
+| 85 | Independent-READ-transparent bounded post-PACK sampler | **4 candidate; owner qualification pending** | Count plain WRITEs across only accepted independent READs, with staged/earlier queued same-page checks, authority/fence rules and a 64-BIO scan cap. Retain the staged-only post-K1 rule. Hypothesis: fewer zero/singleton false tail samples, larger valid mixed WRITE windows, fewer lower WRITE requests and improved fast useful throughput; possible added CPU/early close. Require paired owner `make test` for raw/control, mixed/QD4/8/32, SD/SSD/NVMe, p99, GC, lower bytes/requests, and fault/lifecycle correctness before promotion. |
+| 86 | Fresh independent-READ boundary for dry post-PACK 2/3 tails | **4 candidate / owner qualification pending** | Permit a dry 2/3-record post-PACK residue to close only after a successful independent READ serviced after that residue was staged, with no pending sample or active K=1 WRITE. This is distinct from stale earlier READ evidence and does not wait for compression or future BIOs; it leaves pure-WRITE and singleton policies intact. Hypothesis: reduce mixed worker-empty 2ms deadlines and improve useful WRITE latency while avoiding the unsafe unbounded preparation wait and four-record target hold proposed in the attached analysis. Risk: write fragmentation if cache-hit READ boundaries occur mid-wave. Require exact-source owner `make test` with paired raw/sync/async useful READ/WRITE, p99, lower IO, QD4/8/32, SD/SSD/NVMe, GC, and fault/lifecycle evidence before promotion. |
+| 87 | READ-boundary observation across pending K=1 sampling and read fan-out | **4 candidate / qualification pending** | ID86 drops fresh post-PACK READ evidence while K=1's tail sample remains pending, and successful independent slot fan-out or parallel read-batch service omits the same observation. Record success in all three ordered-worker READ paths and retain it until the sample completes; a later staged WRITE or nonempty flush revokes it. The established close gates still prohibit active K=1, pending samples, sampled targets, singleton tails, non-post-PACK waves and non-dry accepted FIFOs. Hypothesis: fewer wasted 2ms tail deadlines and better useful mixed throughput/latency; risk: more small lower-WRITE requests or fragmentation. Require exact-source owner `make test` with raw/sync/async QD4/8/32, SD/SSD/NVMe, p99, lower bytes/requests, GC and lifecycle faults; rootless CI is supporting only. |
+| 88 | Owned retained WRITE-fault BLOCKED: device-node identity and fail-closed diagnosis | **4 root-cause isolation / exact-source owner repeat required** | Source `08e9ce0d34a1` passed build/native/W=1/W=2, oracle, GC, DISCARD and suspend, then BLOCKED when a single direct WRITE unexpectedly succeeded with test_fail_write_nth=1. The test checked dmsetup's UUID but did not prove that /dev/mapper after repeated remove/create pointed to the same DM device. The harness now validates the opened node's sysfs UUID/name and reports the armed hook's counters if the write still succeeds. This removes a wrong-device false qualification path but is not proof that udev was the actual cause; if calls=1 and injected=1 despite success, fix upper BIO completion/error propagation before any performance work. Re-run full owner `make test` on the exact source. |
+| 89 | Pre-submission retained WRITE error propagated to upper BIO | **Owner loaded gate pending** | The ID88 owner report authenticated the exact mapped node and recorded `write_fault_calls=1 injected=1 failed=1 zero_pages=0`, yet direct `dd` returned success. This eliminates the stale-node theory and proves the synthetic lower fault was armed, not that the upper WRITE completed in error. Protect `swapz_complete` against new success on an already failed target; count actual upper WRITE BIO success/error completions and require exactly one upper WRITE error after the injected fault. Native source and kernel compile tests validate code paths but cannot prove original user-process error propagation: owner `make test` remains the sole acceptance gate. |
+| 90 | Retained synthetic WRITE error survives DM clone boundary | **Owner loaded gate pending** | The owner test for `e9122f3` reports `calls=1 injected=1 failed=1 upper_write_ok=0 upper_write_err=1 logical_write_bytes=0` but direct `dd` still returns zero. Kernel 6.12's Device Mapper `clone_endio()` passes clone errors to the original bio, which the previous counter did not inspect. Add a target `end_io` fail-closed guard and distinct pre-DM-boundary counters; neither native CI nor those counters qualify userspace error propagation. Accept only after owner `make test` sees the direct injected WRITE fail and all subsequent loaded phases pass. |
+| 91 | Replace ambiguous retained WRITE-fault process probe with exact O_DIRECT syscall oracle | **Owner loaded gate pending** | The owner test for `42347a9` records `upper_write_err=1 endio_seen_err=1 endio_seen_ok=0 logical_write_bytes=0`, proving the target clone reached Device Mapper with an error. Linux 7.0 block-device synchronous direct I/O waits for BIO completion and converts final BIO status to errno, while GNU dd separately wraps write(2) and process exit behavior. Qualification now uses a tiny aligned `O_DIRECT` `pwrite(2)` helper that exits zero only for exactly `-1/EIO`; success, partial I/O, a different errno, setup failure or timeout remains BLOCKED with numeric syscall evidence. This changes the oracle, not the kernel fault policy. Accept only after owner `make test` passes this loaded gate and the remaining stages. |
+| 92 | Loaded WRITE-fault marker parser drift after exact syscall oracle | **Root-cause fix / owner requalification required** | Owner `make test` on `fdcd5c6456f0` completed every loaded smoke subphase including `PASS_RETAINED_SYNTHETIC_WRITE_FAULT`, `PASS_RETAINED_SYNTHETIC_FLUSH_FAULT`, packed placement, both RAM regimes, storage envelopes, delta64/read-coalescing A/B, sustained QD sweeps and ID36 resource pressure. Stage 5 still FAILed with `missing loaded correctness markers: write_fault` because `parse_loaded_correctness()` required the pre-ID91 marker without `syscall_errno:EIO`. Synchronize the parser with the exact aligned-pwrite marker and native synthetic fixture, rejecting missing/wrong errno and incorrect fault/lower-I/O numbers. This is a report-contract bug, not proof of a kernel regression; rootless CI plus the owner’s already-executed loaded data support the diagnosis, but only an exact-source owner `make test` can requalify the full matrix. |
+| 93 | ID36 mixed replay under memory.high occasionally exhausts its per-candidate deadline | **Harness allocation fix / owner loaded qualification pending** | The owner `make test` on `69e7f2643627` passed build/native/W=1/W=2, owned smoke, retained WRITE/FLUSH faults, both mixed RAM models, storage envelopes, delta64/coalescing A/B and all sustained QD sweeps. During the last ID36 test, the off replay and swapz prefill passed but swapz mixed timed out at its unchanged 280s bound. Under the intentionally exceeded cgroup `memory.high` limit, the Python mixed QD-wave dispatcher was still allocating a new `Future`/`WorkItem` per I/O, triggering avoidable reclaim throttling. Select the existing pre-created native-C QD32 waves for **ID36 only**, with identical immutable 128+2048 trace, byte-exact reads/writes, ownership, packed readback, CPU/memory pressure and original watchdogs. A kernel stall or wrong data must still BLOCK; native/CI checks do not prove the owner-loaded timeout is resolved. |
+| 94 | Detached K=1 producer/ordered FIFO-head collision | **4 candidate / owner qualification pending** | The K=1 async lower pipeline reuses `lower_write_active`, but the producer's head-first rule predates detachment and assumes that signal means the ordered worker is blocked in synchronous lower I/O. During detached K=1 the ordered worker remains runnable, so a producer-owned PREPARING head can force a queue handback instead of useful inline LZ4 work. Distinguish the existing in-flight K=1 state: synchronous lower WRITE remains head-first; detached K=1 leaves a singular head for ordered steal and prepares true tails without idle credit. No new state, worker, buffer, lower depth, timer or format. Hypothesis: fewer preparation handoffs/waits and less preparing-head/no-ready idle, with equal or lower lower-WRITE work and improved fast mixed/QD4-QD32 service. Require exact-source owner `make test`, including raw/sync/async, p99, lower bytes/requests, lifecycle/fault/GC and SSE2/AVX2/AVX-512/NEON qualification. |
+| 95 | Gate opportunistic RAW pressure selection on actual hand dispatchability | **4 candidate / owner qualification pending** | The retained close policy intentionally refuses the eight-record hand below a larger effective learned/sampled target, but ordered async preparation still forces records before that hand to RAW whenever eight accepted records are visible. That can spend lower bytes without starting I/O. Keep the qualified no-below-target dispatch rule; instead allow pressure RAW only when retention is disabled or the effective target is <= the eight-record hand. Larger-target waves retain LZ4 opportunity. Hypothesis: lower async backing WRITE bytes/requests and improve endurance proxy with neutral-to-positive useful service; risk is extra inline LZ4 CPU before larger targets on very fast media. Require exact-source owner `make test`, including raw/sync/async useful service, p99, lower bytes/requests, QD4/8/32, SD/SSD/NVMe, lifecycle/fault/GC and architecture qualification. |
+| 96 | Retained suspend completion race against DM core barrier | **4 root-cause fix / owner requalification required** | Exact source `aaf2f523e3a8` passed build/native/W=1/W=2 plus loaded oracle, compound BIO, live GC and DISCARD/TRIM, then BLOCKED when the retained lifecycle writer failed after `dmsetup suspend` and `resume` both succeeded (report `522d1583447d`). The target closed admission in `->presuspend` and delayed buffered completions by 25–35ms hoping DM core would set `DMF_BLOCK_IO_FOR_SUSPEND` first. Linux DM converts ordinary-flush-suspend `DM_MAPIO_REQUEUE` to I/O error unless noflush/split/polled requeue rules apply, so the delay cannot prove safety. Move the existing closed-admission drain to `->postsuspend`, where DM has already blocked new I/O, crossed SRCU and waited for preexisting target I/O; remove delayed completion buffering. This is a lifecycle correctness repair, not ID94/ID95 performance evidence. Require exact-source owner `make test` before interpreting any benchmark. |
+| 97 | Bounded accepted short-tail continuity at the work-conserving hand | **5 owner result did not justify keep / removed** | Exact source `b6461a8e2871` passed the full five-stage owner `make test`, but its latest report `e1eac4cd62b5` shows fast mixed async 33.62 MB/s, 2,816.2 lower-WRITE requests and 658.8 ms of undersized accepted-work lower idle. The older report had async 64.52 MB/s and 1,450.6 requests; synchronous throughput also moved sharply between runs, so the cross-report regression is not a clean causal A/B. The candidate nevertheless failed its promotion gate, and its unprepared pressure-hand claim can deliberately run ordered LZ4 before dispatching an already-serviceable batch. Remove that claim rather than retain an unqualified hot-path policy. |
+| 98 | Retention-idle state repair after ID97 | **5 owner-qualified / partial keep; follow-up repair required** | Exact source `ffc527f4956b` passed the full five-stage owner `make test` and improved fast mixed async versus ID97 to 39.84 MB/s with 2458.0 lower-WRITE requests and 581.5 ms undersized accepted-work lower idle, but it still trails raw 62.81 MB/s and the earlier pre-ID97 64.52 MB/s baseline. Keep the READY-only pressure hand and correctness-side retained READ-bypass repair; preparation/ready-wait telemetry is zero on the failing workload, so do not add resources. The two-record/8KiB early latch and stale wave-level READ tail certification remain the bounded scheduling defects isolated by ID99. |
+| 99 | Block-saving deferred pack and current-snapshot certification | **5 owner performance hypothesis rejected / geometry retained provisionally** | Source `de51b8e5` passed loaded `make test` but fast mixed useful WRITE fell from 39.84 to 35.14 MB/s while SERVICE_DRY/deadline fragmentation rose. Removing non-saving 2-record/8KiB latch improved sustained-write saturation, but does not establish a mixed win. |
+| 100 | Bounded successful-READ continuity across continuing PACK chains | **5 owner result did not recover / superseded by ID101** | Exact source `6d0ea1225339` (report `41b2c14c5f8f`) passed all five stages but fast mixed async stayed at 38.42 vs raw 62.91 MB/s with 611.5 ms undersized accepted-work idle. The deadline itself, not READ-boundary bookkeeping, was the stall; see ID101. |
+| 101 | Device-relative idle bound on the single retention timer | **4 owner-qualified (`0f5db1f`, report `08a4b85`)** | While a proven-dry staged window waits with no lower WRITE in flight, close at most half of one lower-WRITE service EWMA (20us floor, retain_ms cap) after idle began; never extend a deadline. Fast mixed -36% -> +8..+11% vs raw, SATA/NVMe mixed -66/-75% -> -50/-47%. Reopen only if owner SD/lifecycle evidence regresses. |
+| 102 | Pure-WRITE half bursts wait for the learned width | **4 owner-qualified (`0f5db1f`)** | Under K=1 a pure-WRITE tail below the learned burst is the half staged during the previous run; merging beats ping-pong when the reissue gap is below the device's fixed latency and packs denser extents when bandwidth-bound. Fast QD8 -9% -> +21..+32%. Applying the same wait to mixed waves gave no SATA/NVMe gain and more idle-bound waits; mixed READ evidence keeps finite tails immediate. |
+| 103 | Measured-cost RAW pressure hand | **4 owner-qualified (`0f5db1f`)** | Force RAW for an unprepared head only when per-page inline LZ4 exceeds half the per-block lower-WRITE service EWMA. On this host LZ4 is ~0.9 us/page, so QD8 stopped forcing 21% of records RAW (lower bytes 0.776 -> 0.747). |
+| 104 | CPU-bound ordered workqueue | **4 owner-qualified (`0f5db1f`)** | The ordered owner now chains admission, K=1 completion and upper wakeups on the submitting CPU instead of waking idle remote CPUs: fast QD1 -12% -> -1.5%, QD4 -22% -> -12%, SD QD1 -4% -> -1%, ID36 pressure gate passes. Preparation stays unbound (ID7). `WQ_HIGHPRI` showed no effect and is not used. |
+| 105 | `make fast_test` development loop | **1 owner-requested / keep** | Runs native/replay contract checks and three paired repeats per selected owned-null_blk scenario (six mixed/QD scenarios by default), with compact raw/swapz, critical-path and synchronous-cycle tables plus telemetry in `build/tests/fast-test/latest.json`. `CONTENT=representative` is opt-in and requires the owner-supplied page file in ID177. Never qualifies or publishes; `make test` remains the only qualification command. |
+| 106 | Pressure-hand inline extension when LZ4 is cheap | **5 no effect / removed** | Hand closes on the NVMe trace happen when the accepted FIFO is genuinely dry, not over an unprepared queued head, so the gate never fired. |
+| 107 | Unrelated READs stay independent after a K=1 window is dispatched | **1 owner-qualified (`03becc0`, report `b5227ca`)** | With an empty collector and an active run, a READ took the dependency path and its empty flush slept the ordered worker for the whole lower WRITE (traced ~127 us/wave in D state) while cache hits and stragglers queued. Committed mappings stay authoritative, so the in-flight run fence alone applies; window evidence and the deadline-after-READ flush still need an open window. SATA mixed swapz 188 -> 206 MB/s, READ p99 0.40 -> 0.24 ms. |
+| 108 | Acknowledge a finalized run after the next window reaches the lane | **1 owner-qualified (`03becc0`, report `b5227ca`)** | Finalize delivered ~20 `bio_endio()` wakeups (1–5 us each, preempted by co-located writers) before dispatching the staged straggler window. Deferral (only with staged/queued work, preemption-disabled batch, delivered before any lower wait and before the work item returns) cut first-done -> second-issue from ~100 to ~17 us: SATA mixed 206 -> 216–223 MB/s; QD1/QD4 unchanged in interleaved A/B. A dedicated completion thread was not needed. |
+| 109 | First window of a mixed wave waits for the learned width | **5 no throughput gain / removed** | Gating the first mixed window (chain_completed == 0) like ID102 cut SATA/NVMe lower requests 1047/1255 -> 868/1056 but left useful WRITE flat and raised idle-bound closes; under trace perturbation write p99 jumped to 2.3 ms. Stragglers arrive ~35–80 us late, close to what one fixed device latency saves. Reopen only with K=2 data showing merge beats overlap. |
+| 110 | Fresh two-run lower-WRITE overlap after ID101/ID107/ID108 | **5 no demonstrated service benefit / removed** | ARM64 development experiment on `03becc0`/report head `b5227ca`, 2026-10-29: two disjoint immutable slots, FIFO publication, same-page append fences, bounded paused-group capacity and four-record successor service. Observed depth reached 2 on SATA/NVMe/fast mixed. Adjacent K=1/K=2 blocks, three `make fast_test` repeats each (mean useful WRITE MB/s): SATA 182.19/177.11, NVMe4 237.33/234.14, fast QD4 61.91/60.81, QD8 95.80/92.08, fast mixed 47.54/48.39. Lower-WRITE requests changed +21.2/+3.6/+0.3/+9.9/+3.9%; SATA lower-byte ratio 0.696/0.702 and fast mixed 0.762/0.765. Raw SATA 329.14/322.33 and NVMe4 422.61/439.16 show residual host drift; these pre-ID111 observations have no quiet-window screen and are directional, unpaired development evidence, not confidence-qualified regression claims. No demonstrated service gain repays the added requests, ownership state and buffers; restore K=1. Rootless, W=1/W=2, loaded smoke, full default development scenarios and ID36 passed. Reopen only with a materially different workload/policy and repeatable useful-service benefit without fragmentation; depth-two activity alone is insufficient. Authority blocker: swapz_authority keeps one paused batch group (batch_pending, batch_segment, batch_first_sequence and batch_hashes are singletons for one physical segment), so a second in-flight run needs a second paused group or segment with its own rollback and replay rules. |
+| 111 | Compact automatic host-noise screen for development comparisons | **1 owner-requested / keep** | `make fast_test` adds 200ms pre/post quiet CPU/PSI/steal deltas, timed steal and >10% same-scenario raw-repeat spread checks. `NOISY`/`UNKNOWN` results set `performance_validity.performance_usable=false`, retain all evidence and print compact reasons. Timed workload CPU/PSI alone is never external-noise proof. Thresholds are conservative screening heuristics; `SCREENED` is not idle-host proof, single repeats cannot bound control drift, and owner `make test` qualification/ID36 is unchanged. |
+| 112 | Per-round ARM64/NEON VM performance history plots | **1 owner-requested / keep** | After every optimization round, regenerate default-LZ4 mixed useful READ/WRITE, mixed p99, lower-WRITE savings and persistent-WRITE QD plots plus source-mapped CSV/JSON under `build/history/arm64-neon/`. Initial history through report `b5227ca` selects 51 owner-PASS NEON/seven-CPU reports from 230 revisions. Exclude failed/blocked/other-host and unqualified trial data; use each report's own raw controls and break kernel/model/content/replay discontinuities. Descriptive history never establishes causal gains or physical wear. |
+| 113 | WRITE-folio locality as an equal-cost packing hint | **6 source audit / representative evidence gate** | See [reviewed measurement proposal](context.md). Current 4KiB splitting preserves page references but no explicit parent-BIO token. READ destination folios cannot identify earlier WRITE RAM; correlation needs bounded logical/generation tags and live-owner-only cohort discovery, with censoring and reuse handled explicitly. ID43 THP direct I/O is functional coverage, not real swap-locality evidence. Linux 7.0 block swap and newer `master` batching differ. Keep layout unchanged until folio membership predicts backing READ co-access beyond logical adjacency. A later policy must preserve full byte/read/extent costs and physical run/tail geometry; equal-length permutations are a narrower candidate than arbitrary reordering. No actual-swap collection or larger upper BIO is authorized by this design. |
+| 114 | Focused K=1 critical-path profiling before another scheduler change | **2 passive instrumentation / ARM64 baseline collected** | Keep K=1, the four-record service rule, one preparation producer, the 64-slot reservoir, LZ4 acceleration one and SWZ unchanged. `make fast_test` defaults to three repeated SATA mixed, NVMe4 mixed, NVMe5 mixed, fast mixed, fast QD4 and fast QD8 pairs with existing host-noise screening. New interval telemetry measures accepted WRITE -> first ordered-worker ownership plus successful synchronous four-record wall/lower/non-I/O and completion -> next-four-record reissue gaps; existing counters supply ordered-worker CPU, accepted-idle unscheduled time, preparation/copy, ordering/planning, pack/CRC, lower service and publication. Detailed runs stay in `build/tests/fast-test/latest.json`; compact output is diagnostic. Choose at most one narrow production-C candidate from screened evidence, keep/remove it with matched `make fast_test`, refresh ARM64 history, then require exact-source `make test` for any retained change. |
+| 115 | Delta64 rescue on by default | **1 owner decision / owner-qualified (`b86fefd`, report `0d97e99`)** | Owner decision after ID67: the transform is cheap and positive-content evidence is strong. Report `b5227ca` paired A/B on the delta64-positive fixture: compression ratio ~1.46 -> ~1.94, lower WRITE bytes -25%, useful WRITE +26% (+16..+35%), p99 -22%; transform 0.13–0.16 us/page on ARM64/NEON and LZ4 on transformed pages 4.6–5.0 vs 5.4–5.8 us/page untransformed. `delta64_rescue` defaults to 1 (0 disables) and `delta64_lz4_acceleration` defaults to 4, the second-pass value the A/B qualified (it was 1, an unqualified configuration, when rescue first became default-on). Standard mixed and write-only sessions historically included rescue-off controls, but that comparison is now retired: every emulated-device session runs delta64 + DELTA64_SHUF8 + LZ4 fixed on, and current history plots exclude rescue-off reports. Owner `make test` on `b86fefd` (report `0d97e99`; the earlier `de79f2e` run failed only on the ID114 profiling-epoch acknowledgement that `b86fefd` fixed) passed all five stages with standard sessions at rescue 1 / second-pass acceleration 4. Ordinary medium mixed content: the classifier scored every page, made 0 attempts and adopted 0, so lower bytes stay -25.8% (fast) / -30.5% (SD); its loaded wall is 81–155 ns/page in async mixed sessions (it takes the page's first cache misses). Fast mixed +10.8%, SD mixed +404%, fast QD1/4/8/32 -4.9/-11.3/+28.4/+50.0%, SD QD +0/+266/+252/+268%: unchanged within run-to-run noise versus rescue-off `b5227ca`. Paired positive A/B (off arm now pinned `--no-delta64-rescue`): useful WRITE +29.5% (+24.6..+34.3), lower bytes -25.0%, p99 -21.0%. Single directional delta-positive envelopes moved SATA 0.51->0.38 and NVMe Gen4 0.25->0.30; this remains historical evidence. Current policy does not reopen rescue-off benchmarking; investigate future regressions against raw and the fixed production stack instead. |
+| 116 | NEON delta64 kernel shapes at -O2 | **1 keep inverse / ARM64 owner-qualified (`3362fa0`, `87180ee`)** | Development -O2 harness on ARM64/NEON (Apple core under VMware), pinned CPU, 15 interleaved rounds, byte-exact against scalar on 256 mixed-profile pages. Inverse: 16-word ZIP column scan 69–74 ns/page versus 85–88 ns for the per-vector EXT/DUP tree (~18%); 8-word ZIP 73–78 ns; LD4/ST4 columns 104–108 ns (slower). Forward: the existing EXT kernel stays (32 ns hot / 59 ns 1 MiB sweep); unaligned predecessor reloads 53/96 ns and a 128-byte unroll 32/61 ns did not help. Scalar is ~130–135 ns either way. The rootless suite builds at -O1, so its backend ns/page overstate kernel cost. Delta64 work is now ~0.1 us/page each way; LZ4 dominates the rescue path. |
+| 117 | Byte-plane shuffle after delta64 before LZ4 | **1 owner-qualified: x86 `005592d`/`4886c4d`, ARM64 `3362fa0`/`87180ee`** | DELTA64_SHUF8 has record bits 15+14 and map bit 0x40; reject lone bit 14 and preserve plain DELTA64 decoding. Existing scratch and one SIMD section per combined call; one portable shuffle body per ISA. ARM64 native oracle/backend round trips, codec/map validation, rootless, W=1/W=2 and loaded smoke passed. Loaded delta-positive pair: rescue off 124.5 MB/s, 11.5 MB lower WRITE, p99 12.9 ms; shuffle on 298.1 MB/s, 3.05 MB, 0.98 ms, 1024 pages byte-exact. Prior plain-delta64 on arm was about 173 MB/s and 8.6 MB; this historical comparison is supporting, not a counterbalanced causal A/B. Offline delta-positive ratio 2.31 -> 6.81 and compression 3.25 -> 0.62 us/page; medium/entropy neutral, text/COW/raster can worsen, so retain classifier routing and existing adoption constraints. Owner x86 make test passed all five stages on 005592d (report 4886c4d), including scalar/SSE2/AVX2/AVX-512 runtime checks. Synthetic profiles do not establish population prevalence. |
+| 118 | Preemption-disabled ACK batch for successful synchronous four-record windows | **5 no measured benefit / removed** | On `005592d`, three screened fast QD4 repeats: original 73.79 vs candidate 73.81 MB/s, reissue gap 39.58 vs 39.52 us. Lower bytes stay 0.750 of raw. Existing deferred K=1 ACK batching (ID108) remains; applying it to this synchronous path did not repay a new branch. Reopen only with a demonstrated reissue/wakeup improvement. |
+| 119 | Queue ordinary retained WRITE wakeups instead of modifying pending immediate work | **5 no repeatable service gain / removed** | Same-source ARM64 development: initial QD4 +1.1%, but adjacent five-repeat candidate/control blocks give 74.12/74.65 MB/s with raw 84.06/84.01; SATA 231.72/228.93 with raw 395.38/395.49. Candidate NVMe blocks fail the >10% raw-spread screen. A small SATA-only observation does not justify changing wake semantics. Preserve accepted-idle wake timestamps in any future queue experiment; no selector/alternate path retained. |
+| 120 | IRQ-masked groups of four deferred acknowledgements | **5 inconclusive / removed** | Five screened SATA repeats 231.54 vs adjacent original block 228.93 MB/s; raw 392.86 vs 395.49. Fast mixed stays about 69.8 MB/s, within observed variation; NVMe excluded for raw spread. Diagnostic perf samples cluster at completion IRQ-restore return and can skid from masked intervals, so they cannot prove precise completion CPU cost or justify longer masking. Keep original IRQ behavior; require repeatable useful-service and latency benefit before reopening. |
+| 121 | Let adjacent READ coalescing scan across disjoint queued retained WRITEs | **5 no demonstrated opportunity / removed** | ARM64 on `005592d`: the standard mixed timed interval has only nine lower READ requests, with almost all READs cache-resident and zero asynchronous READ batches. Extending the bounded prefix gives SATA 221.54 -> 222.52 MB/s and fast mixed 69.26 -> 69.34, within variation; NVMe noisy. A private C prototype covers queued same-page hazards, fences and 64-record bounds, but no new policy ships. Reopen only on a measured cold/mixed-read workload with real adjacent missing ranges. |
+| 122 | Reject cached FIFO heads before independent READ fan-out scans | **5 not promoted / removed** | Before the quantum repair, adjacent candidate/control/candidate blocks show SATA 230.22/228.36/232.49 MB/s, worker CPU 29.40/31.37/29.08 ms and READ p99 0.237/0.288/0.241 ms. With corrected worker accounting, the combined trial gives SATA 212.14 versus 220.66 for accounting alone, and fast mixed 67.74 versus 69.47; lower requests/arrival geometry also vary. CPU savings alone do not establish a useful-service win. Remove the shortcut and its test/policy branch; reopen only against the corrected budget baseline with repeatable service/latency evidence. |
+| 123 | Restore the finite worker BIO quantum after rejected READ probes | **1 owner-qualified ARM64 (`b30b2ab`, `8458690`)** | The coalescing probe clears `processed_out` even on false; the worker previously retained zero for an ordinary BIO, so its 64-BIO budget did not decrement and its reschedule predicate could fire per BIO. Restore the ordinary one-BIO charge after both probes decline, preserving accepted batch counts, and skip READ probes for non-READ heads. An executable extraction of the real selection block fails on the old source and passes for zero/poisoned rejected counts, successful 5/3-BIO batches, non-READ bypass and exactly 64 fallback completions. Rootless and development byte-exact replays pass; exact source b30b2ab then passed all five official stages (report 8458690), including resource pressure. This is a fairness/accounting repair; throughput impact is mixed and no speedup is claimed. |
+| 124 | Reissue-gap decomposition at barrier-wave boundaries | **2 passive measurement / keep as diagnostic** | Traced `make fast_test` on `b30b2ab`, one run per device; tracing slowed swapz about 6% on SATA and 17% on NVMe, so absolute microseconds are inflated. Upper arrivals grouped in 32-op blocks; all 512 SATA blocks hold exactly 32 completions. SATA: writer arrival spread 98 us p50; the fourth write arrives 11 us into the block, but the first lower write issues 61 us after the first arrival (24 of 503 blocks dispatch within 10 us of the fourth arrival); inter-window gaps 17 us p50 with all records already staged (7 of 514 gaps had arrivals inside); last completion to last ack 40 us; device idle 26% of the active span. NVMe, 409 blocks: spread 117 us, first window 70 us after first arrival, gaps 85 us per block (36% of gaps had arrivals inside, median 65 us), device idle 56%. Ordered-worker CPU 2.5 us per op on SATA and 3.0 us on NVMe, on-CPU about half of its active wall; cached reads cost about 1.1 us and writes about 1.2 us on the worker. |
+| 125 | Idle lane never holds a pure-WRITE tail below learned width | **5 refuted / removed** | Hypothesis from row 124 that the first-window hold is the ID102 pure-WRITE rule. Development-only variant, not committed, `make fast_test` REPEAT=2 against the b30b2ab baseline means: SATA 226.1 vs 231.5 MB/s, NVMe 339.6 vs 349.0, fast mixed 69.6 vs 70.0, fast QD8 82.6 vs 105.6 (-22%, the ID102 ping-pong regression). The first-window hold is not this rule. |
+| 126 | Idle lane closes a window at four staged records despite queued followups | **5 no demonstrated gain / removed** | Development-only variant, not committed, REPEAT=2 against the same baseline: SATA 239.2 vs 231.5 MB/s (baseline range 228.9-233.2; two repeats only), NVMe 349.1 vs 349.0 with lower-write requests about 17% higher (1,470-1,479 vs about 1,250), fast mixed 69.4 vs 70.0, fast QD8 105.4 vs 105.6. Lower bytes unchanged, so endurance does not improve and request count rises. Not promoted. |
+| 127 | Idle-bound hold at full rather than half lower-WRITE service | **5 refuted / removed** | Development-only variant, with the native window-policy expectations matched for the run and restored afterwards; `make fast_test` REPEAT=2 against the b30b2ab baseline means: SATA 217.9 vs 231.5 MB/s (-6%), NVMe 336.5 vs 349.0 (-4%), fast mixed 66.8 vs 70.0 (-5%), fast QD8 108.0 vs 105.6 (+2%). Idle-bound closes fell from about 129-153 to 115-123 per run, but the longer hold cost more device idle than the saved window boundaries recovered. Byte and request counts unchanged. The half-service bound from ID101 stays. |
+| 128 | Ordered workqueue unbound instead of bound to the submitting CPU | **5 refuted / removed** | Development-only variant, restored afterwards; `make fast_test` REPEAT=2 against the b30b2ab baseline means: SATA 223.8 vs 231.5 MB/s (-3%), NVMe 329.5 vs 349.0 (-6%), fast mixed 69.0 vs 70.0 (-1%), fast QD8 110.8 vs 105.6 (+5%), fast QD1 19.1 MB/s against about 21 in earlier runs (-14%, the ID104 regression). Lower-write requests fell about 11% on SATA and 19% on NVMe with bytes unchanged, but mixed throughput did not improve. The bound worker from ID104 stays. |
+| 129 | Fan out independent RAW READs through the existing eight slots | **1 owner-qualified ARM64 (`a9bfe44`, `1e8a5bb`)** | Standard medium timed READs mostly hit cache and cannot measure RAW fallback. All-entropy development control issues 4,083 lower READs and zero async batches: SATA 72, NVMe4 168, fast 42 MB/s useful WRITE. Extend only existing private READ slots to authoritative one-block RAW, retaining staged/in-flight/queued-WRITE/fence checks, lower-callback ownership and CRC verification; never prime/seed/absorb RAW in SWZ caches. No new worker, buffer, RAW cache or WRITE depth. Ten prospective counterbalanced source rounds, ten declared model/content endpoints, SCREENED/provenance-matched pairs and <=10% paired raw drift; exclude noisy/missing pairs without replacements. Require exact two-sided sign p <=0.005 (Bonferroni family 0.05), 99.5% paired log-effect t intervals and a +3% practical floor. Balanced content: SATA +41.4% [37.9,45.0], NVMe4 +23.9% [20.6,27.2], fast +13.5% [11.9,15.2], all n=10/p=0.001953. Entropy SATA +116.5% [108.3,125.1], n=9/p=0.003906; fast +43.5% [39.0,48.2], n=10/p=0.001953. Entropy NVMe4 +60.0% remains inconclusive at n=8/p=0.007812 despite its positive interval. Medium SATA/NVMe4/NVMe5/fast changes remain inconclusive; their intervals do not prove equivalence or exclude every small regression. Source control uses b30b2ab production C; dirty source hashes, complete excluded-pair reasons and secondary metrics are archived under build/optimization-round/raw-trial/paired. Balanced fast lower WRITE bytes +0.2% and requests +5.1% are trade-offs, not endurance improvements; balanced SATA/NVMe4 byte changes are unresolved. Rootless extracted target-C/real-CRC tests and W=1/W=2 pass. Exact source a9bfe44 passed all five official stages (report 1e8a5bb), including the mandatory all-RAW/balanced gate: 2,048 verified pages, 172 async READ batches, 768 lower READ requests. Current-source x86 loaded qualification remains outstanding. |
+| 130 | Prepare accepted WRITE heads while the owner joins RAW READs | **5 no demonstrated material service gain / removed** | Fresh aggregate probe on a9bfe44 C: balanced SATA/NVMe4/fast has 379/368/206 eligible RAW groups with no lower WRITE active, mean unclaimed WRITE backlog 15.5/14.2/6.4, and join wall 134.8/39.9/174.2 us; producers inactive at 359/346/200 starts. This is a real opportunity, unlike the old cached medium workload, but it is not a performance win. Trial lends heads to the existing one producer only for RAW submit/join intervals with >=4 queued WRITEs, preserving snapshot ownership and clearing the flag before decode/WRITE processing. Producer head claims rise into thousands. Ten prospective counterbalanced source pairs on three balanced targets use SCREENED/provenance/raw-drift exclusions without replacements, exact sign cutoff 0.05/3 and 98.333% paired log-effect t intervals, with a predeclared +3% practical floor. SATA n8 +1.77% [0.44,3.11], p0.0703; NVMe4 n10 +2.39% [0.23,4.58], p0.1094: fail the exact-test criterion. Fast n10 +1.35% [0.83,1.88], p0.001953: detectable but below the practical floor. Secondary request point estimates rise ~6–9%; no endurance improvement is established. Remove all probe counters/logging, flag, helpers and scheduling changes; kernel C remains byte-identical to qualified a9bfe44. Patches/data remain local under build/optimization-round/read-prep. Reopen only with a distinct mechanism addressing request fragmentation or a new demonstrated material service opportunity. |
+| 131 | Correct worker-CPU diagnostic scope | **1 reporting clarification / no timing or policy change** | Existing cheap boundary reads of current->se.sum_exec_runtime can omit pending execution and can include pre-entry execution when accounting updates inside a callback. They are neither exact callback CPU nor guaranteed lower bounds. Explicit phase timers measure partial wall time and can include involuntary preemption. Correct fast-test labels, structured cpu_scope and standards; retain existing metric names/values for compatibility and preserve the ban on unexported scheduler helpers. Do not infer CPU savings from the ID130 work transfer. This changes interpretation, not product service or qualification gates. |
+| 132 | Replace shared-pool owner dispatch with one private kernel-thread worker | **5 unpromising development pilot / removed** | Existing medium traces show several milliseconds of wake-to-entry and lower-completion-to-finalization wall time, with overlap possible. Prototype replaces only the serialized owner work item with one kthread_worker, preserving FIFO, quantum, preparation producer, lower WRITE depth and publication ownership; no affinity or spin wait. Exported queue/flush/cancel APIs and lifecycle semantics inspected; final producer join precedes final owner flush and producers stop before their post destination is destroyed. Declared control-before / candidate / control-after pilot, three repeats each, uses medium SATA/NVMe4/NVMe5/fast mixed and fast WRITE QD1/4/8. Every replay/image check passes. Fast raw controls remain near 22/84 MB/s at QD1/4, while swapz pilot means are 21.85/74.76 before, 19.40/67.24 candidate and 21.17/74.49 after. These are descriptive pilot observations, not statistically qualified regressions. NVMe raw variation and excluded SATA/NVMe observations prevent causal interpretation of small mixed-workload differences. No material broadly useful signal justifies a prospective confirmation or added lifecycle complexity. All kernel changes removed; C remains byte-identical to qualified a9bfe44. Local source hashes, screen exclusions, logs and plotted samples remain under build/optimization-round/owner-task. Reopen only with new evidence isolating a material owner-dispatch bottleneck. |
+| 133 | Classify proven-dry timer parks by size, RAW content and mixed READ proof | **1 passive question answered / probe removed** | On qualified a9bfe44 C, append-only aggregate probe records park-to-next-owner-entry wall time at dry, lower-idle timer returns. Status snapshots allow exact timed subtraction by verified logical WRITE/READ byte deltas. Twelve development cases: medium SATA/NVMe4/NVMe5/fast mixed plus fast QD4/QD8, and balanced/entropy SATA/NVMe4/fast mixed. Zero >=4-record mixed parks in every case: current service_close_ready already authorizes the four-record lower-idle hand regardless of compressed-pack geometry, so the old all-RAW dry-tail gap hypothesis is stale. Timed mixed 1–3-record park wall: medium 8.42/8.51/7.60/49.92 ms, balanced 2.55/2.46/21.56 ms, entropy 0.18/0.40/1.76 ms. Larger parks belong to protected pure-WRITE bursts. This is instrumented wall attribution, not a performance A/B or permission to reopen rejected singleton/pure-tail cutoffs. All counters/logging removed; data local under build/optimization-round/dry-park. |
+| 134 | Coalesce ordinary retained WRITE owner kicks on a nonempty incoming FIFO | **5 unpromising development pilot / removed** | Unlike ID119, skip the workqueue call entirely for an ordinary retained WRITE if older incoming work already owns progress; preserve empty-transition, READ/fence/nonretained, lower completion, READY/error and finite-worker requeue wakes under queue_lock. Declared control/candidate/control pilot, three repeats on seven medium scenarios; all replay/image checks pass. SATA useful WRITE means 210.07/218.02/219.34 MB/s: final control reproduces the apparent gain. Fast mixed 67.93/68.58/68.56; QD4 71.78/72.57/72.18; NVMe4 352.41/344.40/348.83; NVMe5 358.81/356.64/357.17. No statistically qualified gain/loss conclusion or promotion from these pilot means. Remove the branch; C stays a9bfe44. Source hashes, full QD1/8 results and exclusions local under build/optimization-round/admission-kicks. |
+| 135 | Suppress detached preparation wakes below the existing two-descriptor claim minimum | **5 unpromising development pilot / removed** | ID136 phase probe motivates matching common kick eligibility to the producer's protected-head rule: when K=1 is detached and only one unclaimed descriptor exists, skip that kick; preserve synchronous lower-WRITE head preparation at any depth, existing owner/result wakes and all representation ownership. Three-repeat control/candidate/control on medium SATA/NVMe5/fast mixed and fast QD4/QD8; every replay/image check passes. SATA 217.52/218.29/218.43 MB/s, fast mixed 68.29/67.87/68.00, QD4 71.59/72.24/72.55; candidate NVMe5 excluded by raw-repeat drift. QD8 102.69/108.23/105.98 remains a pilot observation, not a significant win. No demonstrated material service advantage justifies retention. All changes removed; data/source hashes local under build/optimization-round/producer-eligibility. |
+| 136 | Attribute admission queue-lock wall phases without treating sampled return PCs as CPU | **1 passive question answered / probes removed** | Initial perf capture lacks symbols for modules loaded after recording starts and cannot support target function costs. Live-module capture resolves 1,423 swapz-containing stacks, but 330/339 map leaf samples land at +0x268 after IRQ restore; software-clock skid prevents precise function CPU allocation. VM has no supported cycles/instructions PMU. Separate C phase clocks, matched to timed snapshots, show mean ordinary WRITE setup/wait/hold/owner-kick ns: SATA 58/773/753/344, NVMe4 59/644/702/330, NVMe5 53/714/669/330, fast mixed 57/58/2336/445. Producer queue calls occupy ~22.1 ms of fast mixed lock hold, versus total WRITE lock hold 9.26/8.64/8.22/28.73 ms across those targets. Extra clocks/counters perturb execution and wall includes scheduling/VM effects; do not call these CPU totals or causal service savings. IDs134/135 test two narrow implications and are removed. No probe or timing code ships. Local artifacts: build/optimization-round/admission-cost and cpu-profile. |
+| 137 | Hybrid sleep-then-spin wait for short detached lower WRITEs | **5 unpromising development pilot / removed** | Two-repeat SATA/NVMe4 mixed pilots showed no retained service benefit; the detached-wake effect was not isolated and scheduler wall is not exact CPU. Reopen only for a distinct CPU/service hypothesis. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id137). |
+| 138 | Post admission notifications after queue unlock | **5 unpromising development pilot / removed** | Three-repeat admission-unlock pilot showed no material gain; it did not prove a general drain-before-map-return guarantee. Candidate removed and production C restored; a later unguarded variant was interrupted, not qualified. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id138). |
+| 139 | Separate sparse null_blk RAM first-touch from target cost | **1 diagnostic answered / no protocol promotion** | Transfer-scoped allocation tracing confirms fresh RAM backing allocates on first writes; counts cover the full pair and are not timed-phase CPU attribution. Prewarming both newly owned 64MiB devices before timing changes the backend for both arms, not product C. An attractive pilot fails prospective confirmation: 12 fixed counterbalanced pairs on three medium targets, primary paired log effect of (swapz/raw) prewarmed versus standard, 98.333% intervals, exact sign cutoff 0.05/3 and +3% practical floor. SATA n12 +1.31% [-0.67,+3.33], p0.146; NVMe5 n11 -0.58% [-5.53,+4.63], p1; fast n11 +0.73% [-0.24,+1.70], p0.549. One NVMe5 and one fast pair excluded by predeclared screens, no replacements. All inconclusive, not equivalence. No cross-protocol raw-drift exclusion because raw is also affected by preconditioning. Restore the helper/recorder; no production change or historical performance point. Local full evidence and plot: build/optimization-round/null-first-touch/paired. |
+| 140 | Decompose fourth-admitted WRITE to first physical lower issue | **1 passive question answered / probe removed** | Bounded preallocated 8192-event prefix per target, original queue locking, ordered-compression/ready/flush/lower-API events, block issue/completion and owner scheduling. Reject the first incomplete dump; final indices are contiguous and wave BIO ownership balances. On 1edf76f/a9bfe44 C, SATA has 21 complete eligible waves; NVMe5 has 20 plus one first window of three. Mean lead partitions (us), admission-to-ownership / fourth representation / service after fourth ready / plan-pack-reserve / lower API-to-issue: SATA 9.07/2.09/50.97/4.00/2.31; NVMe5 9.65/1.86/40.10/4.39/1.92. Owner scheduled callback wall 54.11/53.67 us includes ~13 us ordered compression and ~5/6 us lock acquisition; blocked means 12.49/2.86 us mostly coincide with lower READ service. Scheduled wall includes IRQs, not exact CPU. First-window median 16/12 records; complete waves use 1-3/1-4 lower windows. Service after four includes later accepted work, not pure waiting. Earlier dispatch may add serialized requests (ID126); summed concurrent lock waits cannot be subtracted from wave wall. No causal gain/loss claim. Remove all probe C; source remains a9bfe44. Local trace, analysis and plot: build/optimization-round/window-lead. |
+| 141 | Isolate mixed-workload wave barriers with identical lane-owned streams | **1 workload sensitivity measured / development controls retained** | Persistent mixed lanes and a matched lane-owned wave control leave the official mixed workload intact. Both modes have identical trace/payload/final-image hashes: each lane owns its WRITE stripe, READs use immutable disjoint pages, pre-created native C workers differ only in barrier selection. Twelve prospectively fixed rounds rotate model order and alternate mode order; all 36 pairs are SCREENED and byte/hash exact, no exclusions/replacements. Primary paired log change of swapz/raw useful WRITE ratio, 98.333% intervals and exact sign cutoff 0.05/3: SATA +85.38% [71.74,100.11], NVMe5 -49.79% [-51.87,-47.61], both material; fast +1.98% [0.93,3.05], detectable direction but +3% materiality unresolved. All sign p=0.0004883. Descriptive mean raw/swapz MB/s, waves -> persistent: SATA 388.5/221.1 -> 408.6/430.9; NVMe5 616.8/372.7 -> 1948.2/590.5; fast 63.0/121.1 -> 63.0/123.5. These do not separately qualify swapz-over-raw significance. NVMe accepted-idle selected-wait total falls 26.27 -> 1.41 ms, while its separate accepted post-lower interval rises 4.32 -> 16.18 ms; neither is a complete device-idle budget. Deferred-ACK wall 23.18 -> 32.76 ms includes preemption at preempt_enable, not exact CPU. Removing barriers helps absolute swapz service but exposes a larger NVMe raw gap; it does not explain that gap away. Raw is first within each owned pair; workload intervention affects both arms, so cross-mode raw changes are outcomes, not exclusion criteria. Keep replay identities separate; do not merge into old history or infer a source speedup/real-swap result. Production C remains a9bfe44; local plan, hashes, logs, intervals and plot: build/optimization-round/mixed-lanes. |
+| 142 | Split ACK-loop, enable-return and lower-done handoff wall | **1 passive question answered / probe removed** | On 1e96108/a9bfe44 C, preallocated bounded C events plus scheduler switches capture all 16,384 timed operations in persistent NVMe5 and a matched wave control. Both complete with exact bytes, contiguous event indices and no reported trace loss. Persistent ACK loop 36.09 ms, enable-to-return 0.147 ms; wave 27.10/0.478 ms. No owner off-CPU interval overlaps the ACK loops, but IRQ execution remains included: do not call loop wall exact CPU. Persistent lower-done-to-finalization-start 16.12 ms, of which 12.67 ms overlaps delivery of the preceding ACK cohort; wave 11.16/7.24 ms. Only 0.10 ms of persistent post-lower delay is owner-runnable off-CPU, versus 15.55 ms scheduled callback wall. This contradicts the hypothesis that the ~33 ms ACK timer was mostly a preempt_enable scheduling artifact and motivates moving completion work rather than another wake/spin trial. Remove all probe C. Exact logs, interval analysis and plot local under build/optimization-round/completion-handoff. |
+| 143 | One bounded published-ACK batch on the existing unbound preparation queue | **1 ARM64 owner-qualified (`d2b66ac`, `77a0c3c`) / throughput-I/O trade-off** | After serialized lower-success publication and prepared-slot release, transfer one 4..64-BIO cohort only while a new detached lower WRITE is pending. Single atomic slot, existing queue/producer width, inline fallback while occupied; queue publication is serialized with admission close under queue_lock and drain joins all completion work. Preserve preemption-disabled delivery and atomic completion/DM-endio counters. No early ACK, second lower run, I/O buffer or helper authority mutation. Final C exactly matches owner-qualified d2b66ac. A separate fixed 16-round final-source confirmation on four medium workloads uses six prespecified service/I/O endpoints, SCREENED/provenance/<=10% paired raw-drift exclusions without replacement, 99.1667% paired log-effect intervals and exact sign cutoff 0.05/6. Persistent NVMe5 n13 useful WRITE/raw +22.66% [18.47,27.00], p0.000244; mean raw/swapz control 2023/572 and candidate 2051/712 MB/s. Lower WRITE bytes +1.29% [1.13,1.46] and requests +26.22% [22.66,29.88], both p0.000244: an explicit throughput/I/O trade-off, not an endurance improvement over control. Candidate still writes ~29.7% fewer bytes and ~90.4% fewer requests than raw. Legacy NVMe5 n16 +4.45% [1.67,7.31], p0.00418: detectable positive direction but +3% materiality unproved; SATA n16 +0.35% [-0.03,0.74] and fast n16 +0.12% [-1.16,1.42] inconclusive around zero. All legacy -3% guards pass; three persistent pairs excluded, no legacy exclusions. These bounds do not prove exact equivalence, raw parity or gains on other content/hosts. READ/WRITE p99 are secondary; no total CPU reduction is established. Final-source hashes, prospective plan, all observations and plots: build/optimization-round/completion-handoff/paired-final; earlier prototype/pilots remain local separately. All five owner stages pass, including actual target-body native tests, 602 handoffs/16,512 exact WRITEs across suspend, seven handoffs before lower failure with post-failure EIO, and ID36. Current-source x86 qualification remains outstanding. |
+| 144 | Observe admission/completion CPU locality before choosing another ACK mechanism | **1 passive association measured / probe removed** | Three byte-exact instrumented sessions on qualified d2b66ac C: NVMe5 persistent, matched waves and fast WRITE QD4. Preallocated bounded events have contiguous indices and capture all 16,384/16,384/4,096 timed operations with paired endio entry/return. Median READ endio wall, different/same admission CPU: persistent 2.584/0.500 us, waves 3.250/0.708 us; fast QD4 owner WRITE 2.708/1.250 us. IRQ/off-CPU observations do not make the remainder exact CPU. Placement and probe overhead confound these conditional associations; no causal gain, removable budget or significance claim. Globally sort per-CPU BPF records before correlation. Reject the raw request-locality comparison: native GO-to-fsync has 12,301 issue events per run but only 11,438/11,945 matched completions, with duplicate keys and pending requests despite no reported ring loss. No raw CPU-locality inference survives that completeness failure. Probe and capture buffers removed; qualified production C unchanged. Local event traces, completeness analysis and plot: build/optimization-round/completion-locality. |
+| 145 | Separate helper completion atomics from owner statistics | **1 unpromising layout pilot / padding removed** | False-sharing hypothesis unproven: 72 byte-exact arms, insufficient screened comparisons, and unknown physical cache-line size. Padding removed and qualified layout restored; reconsider only with new measured coherence evidence. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id145). |
+| 146 | Attribute endio wakeup path without a new completion mechanism | **1 passive attribution / no source change** | Two fixed medium native NVMe5 sessions (persistent and matched waves) on qualified C, observed only between native GO and fsync return. Map-aggregated bio_endio/try_to_wake_up/ttwu_queue_wakelist kprobes preserve paired entries/returns, no overflow or leftover state, and all 16,384 data completions per swapz phase. One additional WRITE-op completion per phase resolves through DWARF/disassembly to the zero-sector PREFLUSH success branch at swapz_process; account for it separately. First-seen raw/symbolic stacks separate direct target calls from nested DM and interrupted lower-I/O ancestors; never sum those populations. Both final-image oracles pass. Most observed wake-list calls during direct READ endio are accepted (95.15% persistent, 77.12% waves), consistent with remote task activation; IRQ wakeups can also occur inside those intervals. Nested kprobes contribute overhead within the observed READ endio/wakeup means (~10/~5 us), so these are instrumented path observations, not exact CPU, a removable budget, production timing or a source speedup. No raw cost/locality comparison. Native hardware cycles are unavailable on this VM. Production C unchanged; local BPF source, raw aggregates, population checks, call-site proof and analysis: build/optimization-round/completion-wakeup. |
+| 147 | Already-copied READs join the existing published-ACK handoff | **1 weakly exercised pilot / removed** | READ handoff had 15,653 deferred READs but only seven helper completions; most comparisons were noise-screened and one source-contract assertion failed. Candidate removed. Revisit only with explicit notification boundaries and material helper activity. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id147). |
+| 148 | Lower-WRITE completion publication and owner notification share the drain gate | **1 controlled race verified / busy-host owner run interrupted** | Adapter audit finds the callback published lower_done after releasing queue_lock, then still dereferenced ctx to queue the owner. A waiter can observe completion, finalize the last upper BIO and reach the final drain gate before that notification; no kernel UAF is claimed observed. Move complete plus mod_delayed_work inside the existing queue-lock critical section and make unlock the callback's last target/slot access. This preserves the established admission/workqueue lock order, completion/error semantics, K=1 ownership and publication policy; no new resource or speedup claim. Actual callback-body native test fails on old source when a controlled waiter passes the final gate at complete, and passes on repaired source under both dm-io ABIs, success, ordinary error and separate unsupported bitmap. Full rootless suite and W=1/W=2 builds pass with known warnings. A fixed default development run passes all 15 byte oracles; SATA/NVMe4/fast mixed are NOISY (raw spreads 19.7/32.7/39.5%), so exclude performance inference. Fast WRITE QD4/QD8 are SCREENED but this is not a source A/B. Owner run on 2aa3ba0 was intentionally stopped for the reported busy host: report ff66c70 is BLOCKED, exit 2, after stages 1–4 and loaded smoke/ACK/RAW-read gates passed; remaining matrix/ID36 unfinished. Owned cleanup completed. No performance evidence or history point is accepted from the interrupted run; wait for owner host-free notice before benchmarking again. Exact-source qualification remains required. READ callback already ends with complete and performs no following slot access. Keep direct-BIO work separate. Local exact sources, red-control proof, plan and logs: build/optimization-round/lower-completion-lifetime. |
+| 149 | Direct BIO for the detached immutable lower WRITE | **1 unpromising x86 pilot / removed** | Direct-BIO x86 draft passed 216 byte-exact arms but showed no qualified service/I/O win; split/error, ARM, and exact-source qualification remained incomplete. Adapter removed; require a new material mechanism before retry. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id149). |
+| 150 | Bounded submitter-context preparation before ordered ownership | **4 x86 correctness qualified / host-specific service trade-offs** | Move ordinary WRITE LZ4/payload-CRC preparation into the already-admitting task without moving FIFO admission, lower I/O or authority publication. Up to eight preallocated submitter scratch lanes share the existing 64 prepared-page reservoir; each claim is allocation-free and failure falls back immediately to the qualified single producer/ordered path. The descriptor is admitted first, marked submitter-owned under queue_lock, and the ordered worker defers that FIFO head until a release/acquire handoff publishes a terminal prepared representation. PREFLUSH/FUA and non-task contexts retain the old path. Existing LZ4/SWZ bytes, K=1, four-record floor, planner, allocator and publication contract are unchanged. New status separates submitter claims/misses/active peak/owner deferrals and submitter wall/CPU/LZ4/copy/CRC time. First x86 owner run on `0f42e018` passed stages 1–4 and all 384 segmented/THP byte-exact writes/reads, then BLOCKED because `bio_copy_fallback_pages` omitted the new submitter owner's fallback counter (`segs_gt1=384`, `segs_max=4`, `nonzero_off=384`, `compound=256`, reported fallback=0). Fix only the status aggregation to include ordered + background producer + submitter fallback counts; data-path bytes and ownership are unchanged. Second x86 owner run on `14cbd609` passed compound/THP, live-GC/pressure, DISCARD/TRIM, suspend/drain, retained WRITE/FLUSH faults and packed placement, then BLOCKED in the completion-handoff fault fixture. The production failure path and controlled native handoff/failure interleavings remain intact; the loaded fixture still injected on lower-WRITE attempt 32, which ID150's changed preparation timing can reach before a real offloaded batch. Move only that test injection to guaranteed-late attempt 256 within the fixed 16,512-WRITE workload and emit all fault predicates on failure. Third x86 owner run on `91e3013e` passed the complete owned-null_blk smoke, including real completion handoffs and injected terminal failure, then BLOCKED in the RAW-read fan-out pair because its `prep_lower_write_overlap_starts>0` gate observes only the old background producer, not submitter preparation. Revise only the loaded pair activity gate to require actual producer lower-WRITE overlap or completed submitter preparation with enabled policy, claim conservation and drained ownership; report each separately without claiming submitter/lower-I/O temporal overlap. Fourth x86 owner run on `1599ad45` passed all loaded correctness phases, RAW-read fan-out, complete serial/fast mixed and QD1/4/8/32 saturation pairs, SD/SATA/NVMe envelope, coalescing, and ID36. Reporter alone marked FAIL: every enabled delta64 positive-control arm classified, attempted and adopted 4096 pages but `delta64_prepare_pages=0` because the same 4096 pages were submitter-prepared; repair the reporter to count background or submitter preparation while retaining actual delta64 and conservation gates. Evidence also shows fast mixed async/sync useful WRITE 118.69/119.88 MB/s, paired -1.0% CI [-1.7%,-0.3%], lower WRITE requests 1285.4 vs 1060.8; this is not an ID150 service win and requires a keep/revert decision only after qualified evidence review. A fifth owner attempt on an SSE2-only legacy x86 host at `0c9c8fb` passed build/native/W=1/W=2 plus oracle, compound BIO, live-GC/pressure and DISCARD/TRIM, then BLOCKED before suspend because the userspace observer never sampled the existing 4ms retained window. This is an observer-schedulability limit, not an SSE2 codec failure: production C is unchanged from the modern-host run that passed suspend/drain. Keep the physical/production retain ceiling at 4ms, but permit an explicit 64ms retain only on null_blk and use it for the lifecycle oracle so a slow status round-trip can observe an open window; keep performance arms at their qualified retention settings. Require an exact-source owner `make test` rerun; then compare persistent NVMe5 plus SATA/fast mixed and QD4/QD8 to the qualified x86 baseline. Keep only if useful service improves without correctness, lower-I/O, p99 or ID36 resource-pressure regression. Pre-rerun review found a candidate-only wake defect: `swapz_map()` still woke the CPU-bound ordered owner (ID104) for a submitter-claimed WRITE before preparation began, so that pass could preempt the submitter, find the head still submitter-active, defer, and be woken again after release: up to two owner passes and context switches per WRITE, plus premature passes that can close smaller windows (a plausible contributor to the +21% fast-mixed request count above, not a proven cause). Admission now skips the owner wake only for a successful submitter claim; the submitter wakes after the release store with the unchanged retained/non-retained policy. Claims also require IRQs enabled at `->map` entry, and the drain-visible active count is decremented last. Compare `submitter_owner_deferrals` per claim before and after; it should fall sharply. Ownership, publication and representation bytes are unchanged. Sixth owner run on `bc8d15f` (pre-wake-fix) passed all five stages with only six live handoffs and one handoff before fault attempt 256 on the slow four-CPU host; the run on `58bd7af` then BLOCKED the same fault gate with zero handoffs before attempt 256 (loaded smoke phase 1 still observed live handoffs). One run each cannot separate the wake change from timing noise, and this gate already blocked once at attempt 32. Make only the fixture robust: inject at attempt 4096 and repeat the fixed series at most 16 times (>=4,128 guaranteed attempts), keeping the handoff-before-failure, exact-call, single-injection, upper-EIO and post-failure probe predicates. Modern x86 host then passed all five stages on `58bd7af` (report `8916874`; 552 live handoffs, 70 before the fault). Versus that host's `1599ad45` report, mixed deferrals per claim fell 0.31 -> 0.18-0.22 but fast QD4/QD8 rose 0.37/0.49 -> 0.53/0.64: most deferrals come from other writers' wakes, not this admission wake. Useful service is unchanged within these single-report means (fast mixed async 118.7 -> 117.6 MB/s vs sync 119.1; fast QD1 async 25.4 -> 23.3, n=1), so the wake change shows no benefit. The old four-CPU host on `203d100` passed the new handoff/fault gate, then FAILED the replay validator: `submitter_prepare_active_max` exceeded the four lanes because `58bd7af` decremented the active count after returning the lane, letting another submitter claim it first. Restore active-count release while the lane is held, keep the lane return as the final ctx access, and make drain wait for every lane/active tail before draining queues. The old host on `1ab1743` then BLOCKED earlier, in the live handoff probe: one fixed series under a 500-poll budget exposed no handoff. Same timing fragility as the fault gate; repeat that series (bounded to 16) and poll each pass until its writer exits. Rare handoffs on this host are themselves a service signal: the ID143 overlap seldom engages here. Old-PC owner rerun on `09e1cfaa40ca` passed build/rootless/W=1/W=2, oracle, compound BIO, GC/pressure, DISCARD/TRIM, suspend/drain, retained WRITE/FLUSH faults and packed placement, then BLOCKED only in the same completion-handoff fault fixture: the no-fault half had progressed, but the fault target reached call 4096 on pass 2 with `offloaded=0 active=0 failed=1 injected=1 upper_err=24`. This is another observer-geometry failure, not evidence of lost fail-closed propagation. Keep the product/no-fault 64-record window unchanged; for the correctness-only fault target use max_window=4 and test_fail_write_nth=65,535. Eight known zero elisions leave 16,504 nonzero WRITEs, so each fixed pass guarantees at least 4,126 lower attempts and 16 passes guarantee 66,016, while the handoff path remains eligible at its four-record minimum. The same-target requirements remain: real offloaded batch before terminal failure, exact single injection/call ordinal, drained completion ownership, upper EIO and post-failure EIO. |
+| 151 | Correct preparation input-copy attribution | **qualified on modern x86** | Both preparation paths compress an immutable RAW snapshot after unmapping the BIO, so mapped-snapshot preparation is not direct mapped-BIO LZ4 input and must not count as direct LZ4 input. New mapped-snapshot telemetry and ordered-only direct-input counting preserve data, ownership and lower-I/O behavior. Loaded development validation observed 12,301 mapped snapshots, zero direct inputs and byte-exact output. Fresh IRQ-inclusive owner scheduling and exclusive sample attribution identify LZ4 state clear outside the ordered owner; scheduler/completion clocks overlap and must not be summed into serialized or removable CPU. The 14.1% raw drift forbids a performance decision. |
+| 152 | Independent LZ4 state reuse with submitter preparation | **5 development pilot / removed** | The tested mechanism used the exported continuation API plus a zero-length dictionary reset after each call; it preserved independent blocks, changed LZ4 hash behavior as well as reset cost, and was not a custom small-table 4 KiB encoder. Actual-helper, kernel owner-class, RAW fallback, delta64 and >1 GiB successful-reuse checks passed. Fixed 12-round three-arm pilot passed 432 byte-oracle arms; persistent B/C -3.60% with 99.4444% interval -9.45..+2.63% missed the declared +3% floor. Stateless production and all temporary controls restored. Current submitter C/A +15.46% on persistent NVMe5, adjusted sign p 0.0352, carries scoped CPU/memory and fast-QD8 guard trade-offs. |
+| 153 | CPU-targeted READ/WRITE completion | **5 fixed pilot / removed** | Fixed pilot passed 288 byte-exact arms but NVMe5 +4.29% CI crossed zero and adjusted sign p=0.539; no established CPU or lower-I/O benefit. Revisit only with callback-cell lifetime/drain and offline/invalid-destination fallbacks proven. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id153). |
+| 154 | Direct admission contention diagnostic | **measurement incomplete; probe removed** | Six fixed source blocks/48 arm oracles pass. Try-lock observations find 11..13% contention in persistent NVMe5/SATA and 2..4% in fast workloads; failed-trylock fallback wall is not full lock wait/hold, CPU, or an upper bound on savings. All three NVMe5 perturbation pairs fail the raw-drift screen, and remaining intervals are wide. No production change selected; the perturbed evidence does not justify a lockless rewrite. Next bound hold/notification work and probe cost with stable controls. |
+| 155 | Systematic admission hold/notification sampling | **diagnostic hypothesis; probe removed** | Twelve fixed blocks/96 arm oracles pass. One-in-64 samples place owner notification at roughly 0.34..0.94 us versus 0.02..0.06 us preceding non-submitter work; clock checks 13..21 ns. The sampled wall is only a partial IRQ-disabled hold interval: systematic one-in-64 complete-session samples are not exact CPU, total lock hold/acquisition cost, or a removable budget. Perturbation remains unresolved after exclusions. Any future out-of-lock owner notification must keep acceptance checks, FIFO insertion and producer/owner reference publication under `queue_lock`, acquire its target lifetime reference under admission-close protection, and have close/drain join all notification tails before teardown. |
+| 156 | Lifetime-pinned owner notification outside admission lock | **native fixed comparison declined / removed** | First pilot unusable (71/72 excluded); second missed retention (NVMe5 n=7, +1.63%, CI -6.43..+10.39%, below n=9). Production restored. Any revisit must preserve ID155 lifetime pin/join. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id156). |
+| 157 | Resolve pack/submit ancestry to actual lower-backend work | **native diagnostic / model sensitivity next** | Three fixed owned pairs/six arm oracles and complete gates pass; source/ELF/live-section checks resolve 1,019 owner samples. 165 include null_blk backend allocation/initialization/locking, versus 39 dm_io-only and 815 other. Those observed null_blk allocation/initialization/locking frames are lower-backend work, not a pure swapz packing budget. Broad pack/stage labels and cycle-weighted samples are not exact CPU; all rows NOISY on 16% raw-repeat drift. Do not infer RAM-bandwidth saturation or reopen rejected direct BIO from this evidence alone. Next matched both-arm full-backing materialization control with unchanged C and separate protocol history. |
+| 158 | Matched both-arm RAM-backing materialization sensitivity | **native model study complete; no product change** | Eight fixed rounds/16 blocks/192 arm oracles pass with unchanged C. Materializing both raw and swapz backing yields persistent normalized +9.07%, family interval +0.78..+18.04%, but n5<7 and adjusted sign p0.1875 fail direction criteria. SATA +1.10% and fast -0.19% remain inconclusive. Four exclusions without replacement; cross-condition raw changes are outcomes, not exclusion criteria. Exploratory absolute swapz service +6.48% NVMe/+2.13% SATA, fast unchanged with p99 trade-off. Preserve cold qualification/history: this is a model-sensitivity study, not product promotion, physical-NVMe fidelity, or evidence of RAM-bandwidth saturation. Next isolate backend mechanism/residual C. |
+| 159 | Both-arm serial lower-queue sensitivity on SATA/NVMe5 | **superseded before owner measurement / removed from make test** | The depth-one-both-arms control would mostly remove raw concurrency while production swapz is already K=1, and mixed READs would be penalized asymmetrically because raw reaches lower storage while swapz often serves cached reads. It therefore cannot answer whether swapz can use additional lower-WRITE concurrency. Remove the four permanent pairs and report plumbing before relying on an owner result; preserve only this design lesson. |
+| 160 | Independent-target striped replay, N=1/2/4 | **development experiments expanded / owner data pending** | Use one page/lane-owned persistent QD32 trace, partitioned exactly by logical page modulo N across N independent existing K=1 swapz targets and N matched raw lower devices. Aggregate offered QD stays 32. Each lower receives 1/N of model bandwidth and 1/N of aggregate queue capacity; raw and swapz use identical mapping. Measurement starts are synchronized after every native lane completes warmup. Record common-interval throughput, lower bytes/requests, per-stripe p99/depth, plus an observational all-lower sampler for simultaneous WRITE-active swapz backings. NVMe5 is primary; SATA is secondary. Five counterordered rounds per N are the default for the selected `*-stripes` fast-test scenario. Separate opt-in fast-model sustained WRITE QD4/QD8 trials now reuse the same exact N=1/2/4 split and 80 MiB/s aggregate model, with QD/N per target; their ratios and request savings are separate cohorts, not pooled with QD32 mixed. The ordinary fast_test SUBMITTER_PREPARE=0 control pins the existing module switch to compare async placement without changing product C, and records an optional browser-load profile without waiving noise gates. The lone-RAW production optimization is retired by ID161: an empty accepted queue is not proof that the next WRITE cannot share the extent, and the old-PC owner result showed no service gain. Interpret striping only as a lower-service overlap diagnostic: splitting QD across targets also splits packing opportunity (N=4 at aggregate QD4 is QD1 per target), so target-count scaling alone cannot model an in-target K>1 packer. The experiment never changes kernel C or qualification history and must observe actual simultaneous swapz lower service before K>1/sharded-authority work is reopened. If normalized swapz/raw WRITE service does not materially improve with N despite observed overlap, drop the multi-WRITE hypothesis. Pre-run review (`0ae549b`) found three defects CI cannot exercise: every swapz arm would be rejected by io-replay's owned-target check (`SWAPZ-STRIPE-*` UUID instead of `SWAPZ-TEST-<16 hex>`); N=2/4 mappings stayed 8192 sectors although each stripe's workload is 1024/N pages, which the exact-size check rejects; and the start gate released stripes before swapz-only `dmsetup` epoch/status subprocesses, staggering swapz N>1 starts and biasing the common-interval throughput against striping. Fixed: SWAPZ-TEST UUIDs, mapping size from the child manifests, and release immediately before timed GO after all pre-measurement snapshots; rootless contracts pin all three. |
+| 161 | Learned isolated-singleton RAW representation | **5 old-PC owner-refuted / removed** | Source `8c8f8c6233d2` passed all five `make test` stages. ID161 selected 5,372 pages across the full session, with no cancellations or multi-record mistakes. Timed Fast QD1 RAW useful WRITE was 14.48 MB/s versus same-pair raw 16.59 (−12.7%), with exactly 4,096 lower WRITE requests and identical 16,777,216 lower bytes; p99 worsened to 0.437 vs 0.383 ms. Timed LZ4 work was zero yet the candidate did not outperform the ordinary async 14.67 MB/s from another pair. Skipping compression does not remove fixed ordered/window/commit overhead. Remove experimental code, counters, qualification pair, parser and reporting; Git retains evidence. Reopen only with a different singleton completion path that preserves generation/CRC/fence ownership and demonstrates service benefit. |
+| 162 | Work-conserving early-hand threshold A/B | **2 selector retained / hand16 pilot has no established service gain** | Fast sustained QD32 asynchronous preparation often closes via the eight-record hand, fragmenting windows and lower requests versus sync. Same-source two-host observations support that scheduling signature, but host CPU pressure confounds historical throughput changes. Keep K=1, SWZ, the four-record floor and immutable completion ownership. `HAND_RECORDS=8|16|64` (default 8) is an opt-in ordinary retained-async `make fast_test` null_blk-only control; nondefault thresholds are rejected for synchronous/non-retained or physical targets and checked in DM status. Compare Fast/Serial QD32 with submitter on/off and controlled host load: useful throughput/p99, lower bytes/requests, windows/pages per request, early hand closes, accepted-work idle, ready-run wait, byte oracle and screening. The 64 threshold does not guarantee a 64-record physical run: other closes remain valid. The fixed production-stack old-PC hand8/16/16/8 pilot on `99fa60bb` passes all 32 byte oracles: screened fast-QD32 requests -18.0%, bytes -1.74%, normalized useful WRITE -0.5% (95% CI -10.7..+10.8%), accepted-work idle +69.8%. Hand16 reduced window fragmentation and requests but did not establish the required useful-service gain and raised accepted-work idle. Keep eight; primary service benefit and all guard bounds are unproved. Threshold64 and submitter-off interactions remain separate untested questions. No promotion without exact-source owner `make test`. |
+| 163 | Four-record async detachment without queued preparation | **fixed old-PC pilot did not justify retention / removed** | On qualified b336754e C, change only the async-detach count gate from >4 to >=4. Prespecified control/candidate/candidate/control, two repeats on fast QD8/QD4/mixed and serial QD8: 32 byte-exact raw/swapz pairs; six screened exclusions without replacement. Two usable QD8 pairs give normalized useful WRITE +0.4% (95% CI -37.8..+61.9%), below the 5% practical criterion; QD4 point service -4.4% and WRITE p99 +22.8% do not meet guards, with broad intervals. All-observation diagnostics show QD8 synchronous four-record commits 790 -> 0, windows 968 -> 828 and requests 975.5 -> 836.5, but idle 21.5 -> 77.8 ms. Activity and packing improve without an established service gain. Restore the production strict `>4` predicate exactly; do not infer equivalence or causal regression, or keep an unsupported selector. |
+| 164 | Bounded early acknowledgement from staging | **0 unapproved architecture proposal / not implemented** | Early acknowledgement would change the storage-success contract: Linux v7.0 backing-swap WRITE failure re-dirties/retains the folio, so reporting success before lower success removes that kernel recovery path. Production therefore remains lower-I/O-confirmed acknowledgement. Any future design requires explicit owner approval and must never early-ack a FUA WRITE or complete PREFLUSH before all earlier acknowledged generations reach lower success; keep every acknowledged staged generation bounded and independently owned after its upper BIO is gone; prevent overwrite, DISCARD, or late lower completion from resurrecting stale generations; never let READ expose stale lower data; drain or otherwise preserve acknowledged unwritten generations across suspend, drain, and table removal; and define the contract for lower failure after ACK. No implementation or opt-in is authorized by this row. |
+| 165 | Dispatch older ready prefix before submitter-owner deferral | **5 fixed old-PC pilot rejected / removed** | One helper flushes an already-staged >=4-record work-conserving prefix on an idle K=1 lane, after FIFO handback and without touching the active head. Fixed control/candidate/candidate/control, two repeats on fast QD8/QD32/mixed and serial QD8; all 32 pairs byte-exact. Screened normalized primary fast-QD8 service -3.7% (unadjusted paired 95% CI -6.2..-1.2%). The extra prefix dispatch split useful aggregation: fast-QD32 lower-WRITE requests +10.0% and serial-QD8 +43.4% violate the 5% request guard. Existing early-hand counters prove engagement, not a removable budget. Restore C exactly; a submitter deferral is not automatically removable idle or a proven lifecycle bug. Reopen only for a distinct measured mechanism that preserves useful aggregation. |
+| 166 | Suppress submitter-release wakes behind an active visible FIFO head | **5 fixed old-PC pilot unpromising / removed** | Peek the current incoming head under queue_lock after release, preserving wakes for empty incoming; pair suppression with a locked worker ownership recheck before handback to prevent a lost wake. Actual C interleaving probe passes and rejects a missing-recheck mutant. Fixed control/candidate/candidate/control, two repeats on five scenarios: all 40 raw/swapz pairs byte-exact. Four screened primary fast-QD32 comparisons give normalized useful WRITE -0.2% (95% CI -6.6..+6.5%) and owner deferrals +1.4% (-6.1..+9.6%); no established service/mechanism gain. Restore C exactly. Empty incoming/private-FIFO wake suppression was explicitly not tested; reopening needs a distinct measured mechanism and complete wake proof. |
+| 167 | Suppress submitter-release wakes for a private ordered FIFO | **5 fixed old-PC pilot unpromising / removed** | Extend ID166 to wake only a nonempty ready incoming head, suppressing empty/private-FIFO wakes too; keep the locked ownership recheck and prove release/handback cases plus a rejecting mutant. Fixed control/candidate/candidate/control, two repeats on five scenarios; all 40 pairs byte-exact. Four screened primary fast-QD32 pairs give normalized useful WRITE -2.1% (95% CI -5.0..+0.8%) and deferrals -4.5% (-11.1..+2.6%), missing the +5% service/-25% deferral targets. Restore C exactly. Both suppression variants lack service/deferral evidence; do not add another wake predicate without a specifically attributed unnecessary-wake population, a distinct prospective mechanism and complete progress proof. |
+| 168 | Submitter on/off placement on the two-core old PC | **5 QD4 primary missed / default unchanged** | Same-source on/off/off/on, two repeats on five medium scenarios, production compression fixed on, all 40 pairs byte-exact. Background/submitter raw-normalized QD4 +0.8% (95% CI -0.8..+2.5%) misses the 5% floor; QD8 secondary +4.4% (+2.8..+6.1%) with producer/lower-WRITE overlap motivates ID169, not a global disable. Mixed/latency guards remained unresolved, so the global submitter-off mode was not promoted. |
+| 169 | Use producer preparation during active lower WRITE service | **4 promoted / x86 and ARM64 owner PASS (`9123b811`, `7ff94fd4`); i3 pending** | Owner reports (x86 `5a66c7ec`, ARM64 `3faa3914`) pass all stages with the frozen guard; Fast QD8 +36.2/+27.8% and Fast mixed +88.7/+14.4% with lower bytes/requests saved. Same-run evidence is directional, not a causal A/B. Bypass only the submitter resource claim while `lower_write_active`; retain idle-lane submitters, existing fallback ownership and module default. Actual claim-body resource/I/O-state checks pass and reject a missing-guard mutant. After the 40-pair hypothesis-generating pilot, the exact C was frozen for eight independent ABBA cycles on QD8/QD32/mixed: all 192 raw/swapz pairs were byte-exact and actor-conserved. Primary QD8 has 24 usable comparisons over eight cycles: normalized useful WRITE +5.61% (cycle-cluster 95% CI +3.83..+7.41%), sign-flip p=0.0078125; QD8/QD32 guards pass. The fixed shorter mixed cohort has only 11 comparisons/five cycles, below the 12/six minimum, with service and p99 bounds unresolved; 46 screened observations were excluded without replacement, with no pilot pooling or extension. At confirmation close the candidate was restored because the primary benefit alone did not authorize retention, and the mixed result must not be read as a regression or portable-host claim. Owner decision 2026-11-01 later promoted that same frozen guard to production; unresolved mixed service/lower-I/O/p99 bounds became exact-source owner-run watchpoints. Reject again if those owner mixed watchpoints regress beyond their guards. |
+| 170 | Longer mixed development traces for guard measurement | **2 harness validated / no product-policy change** | `MIXED_OPS=65536` extends ordinary mixed-only `make fast_test` streams fourfold; default/official traces remain 16384. Reject WRITE-only, stripe and calibration misuse before privilege. Actual rootless plans preserve the original exact trace prefix and final-image oracle; two loaded control pairs pass 65536 ops per arm. Quiet/raw-drift screens stay unchanged; new duration is a separate cohort and cannot relabel or pool ID169's completed evidence. The nested rootless suite needs a bounded 90s allowance on this CPU (~44s measured); loaded watchdogs are unchanged. Fresh idle process observations show possible agent/app interference but do not attribute historical exclusions. A prospective mixed guard protocol remains required. |
+| 171 | Release submitter snapshot before optional compression | **5 unconditional pilot rejected / removed** | Unconditional early-snapshot-release pilot rejected: 40 byte-exact pairs, only two usable QD4 comparisons and +2.73% lower bytes breached guard. Restored control; EWMA observation motivated ID172, not retention. [Verbatim historical evidence](handoff/historical-rejected-optimization-pilots.md#id171). |
+| 172 | Include completed asynchronous LZ4 cost in adaptive EWMA | **1 owner-qualified (`bb665730`, report `48a1580f`)** | ID171 controls report zero EWMA despite 4096 submitter compressions and 25.6–27.0 ms LZ4 wall. Publish a per-page LZ4 elapsed delta from both asynchronous owners before READY, then let only the ordered owner update the existing estimator for READY_COMPRESSED/READY_RAW. Ignore mutable/unready/error metadata and preserve zero/unknown samples. Keep original submitter lifetime, slot references, RAW policy, encodings and K=1. Actual-body writer/observer tests reject cumulative-time/missing-guard mutants. Three loaded validation pairs are byte-exact and drained with zero inline work: QD4/QD8/mixed EWMAs 7284/5222/4938 ns. Kernel DWARF size remains 8256 bytes per slot. Full owner make test passes five stages; all 66 recorded swapz WRITE arms retain required compression and positive EWMA. Resource-pressure startup under memory.high extends the complete run to 35m59s without relaxed limits. Seven this-host PASS reports/74 history points; low-QD fast and SATA/NVMe service gaps remain. This repairs a missing input, not an attributed throughput gain.  |
+| 173 | Acquire READY after losing the RAW-selection race | **2 implemented; owner run BLOCKED at raw pressure control (`3ef72d9f`, report `fd5ed47e`)** | Linux conditional RMW failure is unordered. Reacquire stable READY after losing PREPARING-to-RAW cmpxchg; the consumer reference prevents reuse. Ordinary READY/RAW-win paths keep one acquire, with no wait, ownership, codec or depth change. Old header and compiled relaxed-reread mutant fail; fixed native threaded reuse and ASan/UBSan pass. Owner stages 1–4 and pre-pressure loaded checks pass; ID36 raw startup times out at 280s in memory.high charging. Preserve BLOCKED; stop only test-owned pressure after terminal failure to allow cleanup, no retry or relaxed gate. All 66 recorded WRITE arms keep compression on, positive EWMA and drained gauges. Partial fast QD4/8/32 normalized service declines 5/5/7% are watchpoints, not causal estimates; history excludes this run. |
+| 174 | Per-device-class product goals | **1 owner-adopted acceptance criteria / descriptive scorecard** | Compression can only shorten service that waits on device bandwidth or queueing. Device-bound classes (serial/fast mixed, serial QD4/8/32, fast QD8/32, SD card, SATA) must beat raw useful WRITE and save lower WRITE bytes and requests. Latency-bound (serial/fast QD1, fast QD4) and host-bound (NVMe Gen4/Gen5 mixed) classes are guards within 5% of raw that must not add lower WRITE work. Linux v7.0 swap-out to a DM target is asynchronous, so closed-loop QD1/QD4 rows are guards, not targets. `tests/tools/product_goals.py` classifies once for the report scorecard (`benchmarks.goal_scorecard`) and the history plots. Descriptive only: never a gate. Stop polishing guard rows that already sit at their single-lane ceiling (i7 QD4 measured +5.9%/-2.2% against a computed ~+7% ceiling). |
+| 175 | Idle-lane submitter dispatch | **4 implemented / x86 and ARM64 owner PASS; i3 QD1 evidence pending** | Owner reports for `9123b811` (x86) and `7ff94fd4` (ARM64) pass all stages; 4032 of 4096 timed QD1 writes dispatched from the submitter on both hosts, and Serial/Fast QD1 stay inside the 5% guard (x86 -1.7/-2.6%, ARM64 -0.4/-4.7%). Not finished: its stated target is the i3 QD1 (-25%), which still needs an exact-source i3 report. Design: a QD1 write paid two extra thread hops (submitter to ordered worker, then lower completion to worker); the measured per-write overhead tracked each host's own host-side time (about 6/21/86 us on i7/ARM/i3). Remove the submit hop: when a learned isolated stream (`singleton_fast_close`) admits a lone plain WRITE with an idle lower lane, the submitting task trylocks the ordered-domain mutex, prepares the page in its ID150 lane, re-proves eligibility (nonzero READY representation, no staged/in-flight/queued work, open-segment placement with no GC or segment-recycle DISCARD) and detaches the one-record K=1 run itself. `->map` never waits: lower BIOs only queue on `current->bio_list`; an undetached dispatch fails closed. Completion, publication and ACK stay with the ordered worker; a dispatched run is ACKed after the worker releases ownership so the next closed-loop write can dispatch again. No new queue, slot, lane, timer, format or module parameter. Telemetry: `submitter_dispatches`, `submitter_dispatch_declines`. Reject if loaded lifecycle/fault/suspend/ID36 gates fail or i3 QD1 does not improve with positive dispatches. Generalizing it to append into an active window is ID180, not this row. |
+| 176 | Two lower-WRITE lanes behind one authority | **6 deprioritized, not refuted** | Busy fractions (38-76%) bound what any pipelining can recover, but they do not show that a second lane would have work: ID178 must first show how often a successor run exists before the active lower WRITE finishes. The ID160 screen (`make fast_test SCENARIOS=nvme5-stripes,sata-stripes` on the quiet x86) stays descriptive: a positive N=2 result shows that more independent execution can raise normalized service, but stripes change owners, batching domains and targets together, so it cannot identify owner serialization or prove in-target K=2. The 2026-11-01 x86 five-repeat screen retained SATA N=1 and N=4 (5/5 each): normalized swapz/raw WRITE was 1.2043 and 1.6147 (+34.1% N=1→N=4), with four simultaneous lower devices observed in every N=4 pair. Lower-WRITE savings fell from 31.15% to 27.65% bytes and 93.29% to 83.88% requests. SATA N=2 was excluded for 10.9% raw-control spread; every NVMe5 stripe count was excluded for 10.9–30.0% spread. Treat this as evidence that independent SATA-model targets can raise aggregate service at a measurable lower-I/O cost; it does not identify single-owner serialization. The first combined-model plan setup also exposed duplicate generation of the shared mixed trace; the builder now prepares each workload once and its actual-plan regression covers both models. The fixed run artifact is preserved locally at `build/tests/fast-test/archive/id160-stripes-265a39e1-dirty.json` (SHA-256 `d3f9a5a37e850245995e48e7101e25ae12e522b68202316cc81d3021fc62349d`); tooling was dirty and the run is not qualification history. Reopen design only if ID178/ID179 show the single-lane pipeline routinely has a sealed successor before the active lower WRITE completes, with lower-byte/request savings and READ p99 preserved. Design prerequisite unchanged: the authority keeps one paused batch group (`batch_pending`, `batch_segment`, `batch_first_sequence`, `batch_hashes` are singletons), so a second in-flight run needs a second paused group or segment-disjoint ownership, plus FIFO publication and same-page fences. |
+| 177 | Representative swap content | **Analyzer and matched-cohort tooling implemented; owner sample measurement pending / no product policy change** | The benchmark fixture compresses ~1.43x while reported LZ4 ratios on real swap are ~1.5-2.6x. `make fast_test` now accepts an owner-supplied file of 128..8192 concatenated 4 KiB pages through `CONTENT=representative ANON_PAGE_SAMPLE=/private/path/pages.bin`; it copies the sample into a private temporary plan, runs the aggregate-only offline analyzer, then gives the same fixture and trace to raw and swapz arms. The analyzer models production's predictor-first direct adoption, fallback/packing route, acceleration defaults and 64-page extent planner, and reports aggregate content/route/planner statistics without page bytes, per-page records, hashes or source paths. Native tests cover aggregate-only output, representative plan identity and symlink refusal. The owner sample and matched hardware cohort have not yet been measured. This remains offline emulation: no swapon, physical partition, policy change or qualification claim. |
+| 178 | Lower-lane gap attribution (passive) | **4 owner PASS on x86 + ARM64 (`1a527d46`; reports `fbd6c1f2`, `95430926`) / decision evidence consumed by ID181** | Observational only; no policy, wait, queue, allocation, format or ACK-timing change. Implemented by external agents (`6170f59d`, `5329aae3`, `2787ffa6`, `f6599bb8`); lead review fixed: engine observer hooks fired during GC compaction and counted `lane_gap_invalid` (which fails every timed session closed), an unpaired submission left an older predecessor valid, a profile_epoch race on a synchronous run counted as invalid, and foreign WRITEs between a predecessor's completion and publication went unnoticed; t3 was restored to the seal start (the second agent had moved it after prepare, folding plan/pack/CRC into staged/held), and accounting now follows the lower submission. Per K=1 gap (predecessor lower completion t0 → successor lower submit t4) record an exact partition: completion→owner observes (t0..t1), publication (t1..t2), then for the successor run: no admitted work (t2..a), admitted but not yet ordered-owned (a..s), staged and held before sealing (s..t3), seal = plan/stage/pack/CRC/submit (t3..t4), with marks clamped so the parts sum exactly to the gap; gaps overlapped by any other lower WRITE (GC, single-page RAW) are foreign. Report paired/foreign/unpaired coverage, admitted and ordered-owned successor histograms at t0 (0, 1, 2-3, 4-7, 8-15, 16+), publication→`bio_endio` dwell bins for deferred/immediate ACKs, owner READ service inside measured gaps (annotation, not a part), and `host_cpu` on SATA/NVMe4/NVMe5/fast-mixed arms. [Work order](handoff/lane-gap-diagnostics.md). Decision rules after both-host owner reports: staged-held + seal dominant with a successor commonly present at t0 → ID179; admitted-not-owned dominant → owner pickup/wake/READ-ahead path; no-work dominant with no successor at t0 → upper round trip (ACK dwell, ID164 early ACK, or K=2 with split runs); completion/publication dominant → shorten finalization. |
+| 179 | Seal-ahead at K=1 | **6 conditional on ID178** | Candidate only if ID178 shows a successor is commonly present by lower completion but sealed after it. Seal (plan, pack, CRC) the successor while the active lower WRITE is in flight and submit it at completion, keeping one lower WRITE in flight and one publication authority. Not a second buffer: the sealed successor must preserve FIFO publication, reservation ownership, same-page fences, failure rollback of both runs, GC boundaries and suspend/drain, while the authority's paused batch group is a singleton. Must keep lower bytes/requests and READ p99 within guards. |
+| 181 | Successor-first dispatch (A) and publication-time ACK handoff (B) | **REJECTED / REMOVED: x86 no promotion, ARM64 production PASS with selectors disabled** | Default-off owned-null_blk experiment. Fixed x86 factorial at `6730ef7c` found no promotable policy. On exact source `705589f`, owner `make test` passed 5/5 (report `c56dfdc`); the repeat four-block factorial at the report-only descendant `c56dfdc` found no >=10% normalized useful-WRITE gain: A/B/AB vs control SATA -1.3/-2.7/-2.6%, fast mixed +0.1/+0.2/+0.8%, fast QD4 -0.8/+0.4/-1.1%, QD8 -1.7/-2.0/-4.0%. SATA A/AB added lower WRITE requests; fast QD8 A added +17.7% (CI +4.3..+32.7%). NVMe4/5 were excluded by fixed raw-spread screens (18.8/28.7%). On 2026-11-02, the ARM64 owner `make test` passed all five stages for exact source `604866c1` (report `e760e91`, AArch64 host identity); this qualifies lifecycle/reporting, not ID181 performance. Owner decision 2026-11-02: retire the A/B/AB development policy without an ARM64 factorial; x86's fixed screening rules show no generally promotable result, and ARM64 default-off production qualifies. Remove selector fields, policy branches, counters, factorial tooling and dedicated tests while retaining shared ID143/ID175 completion handoff. ARM64 mechanism-specific performance remains untested; do not misstate the x86 results as cross-host refutation. A cleaned source requires fresh x86 and ARM64 owner qualification. ID162 remains separate; ID179/ID176/ID164/ID180 stay deferred. |
+| 180 | Submitter append to an active window; cached-READ submitter bypass | **0 deferred / not justified** | Appending ID175-style into an open window under load adds FIFO and concurrency hazards, and the submitter mostly fails `mutex_trylock()` while the worker owns the domain. Serving cached READs in submitter context would bypass the owner, but the x86 READ p99 loss includes lookup, decode, verification, copy, locking and scheduling, not pure queueing. Reconsider only if ID178 shows admission→owner or owner READ service as a dominant, avoidable part of lane idle. |
+
+## What the pinned queue experiment establishes
+
+**Historical model interpretation.** The original serial-depth versus fast-model
+conclusions are preserved verbatim with the older bottleneck snapshot in
+[handoff/historical-bottleneck-ranking-9123b811-7ff94fd4.md](handoff/historical-bottleneck-ranking-9123b811-7ff94fd4.md).
+They remain useful experiment context, but they are not a current production
+priority or proof that newer source has the same bottleneck. Reopen the question
+only from fresh exact-source evidence after the active correctness and physical
+qualification gates close.
+
+
+## Huge/compound-page support roadmap
+
+ID43 already qualifies 4KiB slices backed by THP/compound memory. ID113's
+[folio-locality audit](context.md) separates that completed input-shape
+support from unqualified semantic locality and larger upper-BIO admission.
+The current upper READ/WRITE contract remains exactly 4KiB.
+
+swapz must not permanently assume that useful RAM input arrives as one ordinary
+4KiB physical page. Add explicit support for compound/folio-backed inputs,
+including transparent huge pages and hugetlb-backed memory where the block path
+can expose them.
+
+The first implementation should **not** silently change SWZ format semantics:
+retain 4KiB logical records, generations, CRC boundaries and random-read units,
+but walk/map 4KiB slices of a larger folio directly and avoid bounce copies.
+Qualification must cover nonzero bio_vec offsets, boundaries crossing a base
+page within a compound allocation, partial BIOs where permitted, lifetime/
+pinning rules, direct LZ4 input safety, low-memory reclaim and byte-exact
+readback.
+
+A later experiment may evaluate larger native logical records/extents (for
+example 16KiB/64KiB or huge-page-aware super-windows). That is a format and
+latency experiment, not merely an input optimization: it changes compression
+opportunity, metadata density, selective read amplification, CRC scope,
+recovery, GC movement and random swap-in cost. It requires separate evidence
+before any on-disk-format change.
+
+
+## MM-aware storage blueprint: zswap collaboration and locality
+
+**Direction.** Preserve swapz's independently decodable 4KiB logical records
+and 4/8/16KiB SWZ physical extents while avoiding wasteful compression work
+when the Linux swap path already compressed a page. Combine that with
+no-wait locality-aware placement only when it does not sacrifice bytes,
+bounded cold-read cost, extent count or lower-device service. The technical
+explanation of Linux reclaim, folios, BIOs and the zswap writeback implementation
+lives in [context.md](context.md), not in this rolling blueprint.
+
+**Scope and priority.** This remains planned cross-subsystem work, **not an
+enabled feature or evidence of a current performance win**. The current
+dedicated-host mission already authorizes bounded actual-kernel-swap and
+physical-card qualification under AGENT_CONTEXT; no additional owner permission
+is required. Any zswap-specific implementation still needs its own correctness
+design, exact-source qualification and measured evidence before promotion. Do
+not infer a new public test command, format change or performance win from this
+section.
+
+### Goal, measurable hypothesis and non-goals
+
+The specific zswap case is **stored-then-evicted writeback**: zswap may
+compress a page into RAM, later decompress it into a normal swap-cache folio,
+and pass that page to the backing device. Today swapz can recompress those
+bytes. An explicit origin hint could allow the swapz dispatcher to bypass its
+own compression, reduce accepted-work lower-idle time and save CPU/wakeups,
+possibly at the cost of more lower WRITE blocks and future cold-read traffic.
+
+The first experiment asks whether the saved compression and scheduling time
+outweighs the extra physical service time **on each target device class**.
+Do not assume that the answer is identical for fast NVMe, SATA and SD/slow
+backing. Do not infer origin from `REQ_SWAP`, a PID/current task, folio
+drop-behind, a zswap presence check, or a failed `zswap_store()`.
+Object-aware extents, direct interpretation of zswap bytes as SWZ LZ4,
+additional producer lanes/buffers and an SWZ format extension are not part
+of the initial feature.
+
+### Phase A — establish an explicit and testable origin contract
+
+1. Reinspect the target Linux version's `mm/page_io.c`,
+   `mm/zswap.c` and Device Mapper BIO cloning/splitting path; record exact
+   origin propagation sites and lifetime requirements. Upstream reference
+   anchors are in [context.md](context.md).
+2. Define a narrowly scoped semantic origin, at minimum
+   `ORDINARY_OR_UNKNOWN` versus `ZSWAP_STORED_WRITEBACK`. Distinguish
+   `ZSWAP_INITIAL_REJECT` only if the kernel explicitly supplies it;
+   rejection alone does not imply incompressibility.
+3. Carry the origin from `zswap_writeback_entry()` through
+   `swap_io_ctx` / backing-BIO creation to the swapz per-BIO descriptor.
+   Choose a reviewed explicit kernel/BIO interface; a hypothetical
+   `REQ_ZSWAP_WRITEBACK` is **not** currently a real flag or committed ABI.
+   Preserve origin during BIO split/clone, and prevent mixed-origin folios
+   from being mislabeled by a single whole-BIO tag.
+4. Preserve unknown/non-zswap traffic exactly as today. Kernel builds
+   without the new origin interface must compile with unchanged behavior,
+   without guessing from a shared flag. Document any kernel-version guard
+   only where required by the actual implementation.
+
+**A exit gate:** source/native contract fixtures can manufacture ordinary,
+reject/unknown and verified zswap-writeback origins and prove correct routing
+through a split/clone-equivalent path; ambiguous origin never triggers
+compression bypass. No change to authority or on-media format.
+
+### Phase B — first no-recompression representation candidate
+
+1. On a correctly tagged write, skip **both** ordinary LZ4 and delta64
+   work, including unnecessary producer-queue claims and compressed-result
+   allocation. The existing `struct swapz_bio_ref` has
+   `preparation_force_raw`, and `swapz_accept_write()` has a forced-RAW
+   route, but these are presently scheduling-specific: setting that bit
+   in `swapz_map()` alone is **not** a complete implementation.
+2. Coordinate admission, the bounded preparation queue and any already
+   claimed producer slot so the descriptor gets a **stable 4KiB RAW
+   snapshot** and one terminal representation selection before it can be
+   sealed. A producer must not read a BIO after upper completion; an
+   asynchronous result must not overwrite a selected RAW representation.
+   Avoid waiting for a worker that was intentionally bypassed.
+3. Use existing RAW placement, mapping/generation/CRC and serialized
+   authority publication after definitive lower-I/O completion. Preserve
+   one upper-BIO completion, zero-page exactness, fences, duplicate-page
+   ordering, DISCARD, GC, suspend, teardown, failure and rollback rules.
+   Unsupported/unavailable RAW batching must safely fall back to existing
+   semantics instead of silently dropping or reinterpreting the write.
+4. Maintain the work-conserving dispatcher: dispatch the best available
+   representation from already accepted writes at the current service hand.
+   Do not delay lower service for better compression, future folio partners
+   or a fuller window.
+
+**B exit gate:** exact byte readback, full authority/lifecycle/native
+regressions, no leaked prepared slots and zero swapz LZ4/delta64 attempts on
+**tagged RAW-bypass** writes. Unknown/ordinary writes retain current
+compression behavior; independently measured lower bytes/requests remain
+visible rather than hidden behind a throughput claim.
+
+### Phase C — evidence and storage-adaptive selection
+
+Compare **matched zswap-enabled** workloads with the explicit-origin hint
+disabled versus enabled, including genuine stored-then-evicted zswap pages,
+ordinary backing writes and initial zswap rejections. Keep useful work,
+compressibility, device/queue depth, zswap compressor/pool and fault behavior
+equivalent. Record at least:
+
+- zswap accepted/rejected/evicted backing pages and reliable tagged counts;
+- swapz tagged pages selecting RAW and attempted compression (must be zero);
+- zswap decompression time and swapz compression CPU/wall saved, prep-slot
+  occupancy, accepted-work lower-idle time and lower active fraction;
+- useful WRITE and READ throughput, p95/p99 latency, CPU/RAM footprint;
+- independently measured lower READ/WRITE bytes and requests, plus GC,
+  overwrite, DISCARD and subsequent swap-in/read amplification.
+
+Use the existing representative fast, SATA/NVMe, slow/SD, and QD1/QD4/QD8/QD32
+evaluation dimensions where available. A faster write with materially more
+lower traffic is a **device-dependent tradeoff**, not proof of product success.
+A slow device may prefer recompression; fast storage may favor immediate RAW.
+Only introduce a device-sensitive choice if measurements exclude a simpler,
+work-conserving default, and retain bounded/atomic representation ownership.
+
+**C exit gate:** benefit repeats in the chosen target class without
+unacceptable read latency, lower traffic, memory pressure, GC wear/space or
+error/lifecycle regressions; document the keep/reject verdict in this roadmap
+and qualify only through the authorized supported test scope.
+
+### Phase D — investigate direct compressed zswap handoff (separate design)
+
+The ideal later pipeline could hand off the **already compressed** zswap
+payload, avoiding both zswap decompression and swapz recompression. This is
+*not* the same feature as Phase B RAW bypass. Before any implementation,
+specify compressor/encoding compatibility (zswap need not use SWZ LZ4),
+bounded payload size, integrity/CRC, ownership and release handshake,
+crash/recovery/format semantics, read-side decoding and GC relocation.
+Do not reinterpret opaque zswap payload bytes as ordinary SWZ records.
+A new SWZ representation/format requires its own independent justification,
+compatibility rules and measured admission gate. If interoperability is not
+worth the complexity, retain the Phase B/C outcome.
+
+
+### Phase E — folio locality (ID113: measured cohort correlation)
+
+**Hypothesis.** When real swap WRITEs originate from the same large RAM
+folio, those pages are more likely to cause **nearby lower-device READs**
+than equally adjacent logical swap pages or pages merely admitted together.
+This is unproven; the initial task is source-aware telemetry, not packing.
+The full technical reasoning, kernel-version distinctions and identity
+model are in [context.md](context.md).
+
+**E1 — pin the source and identify the WRITE observation boundary.**
+Reinspect the installed kernel and the relevant upstream release before
+assuming the shape of a swap BIO. The audited Ubuntu 7.0.14-based source
+used one block-backed BIO per folio; newer upstream
+`swap_io_ctx` can merge compatible folios. Swapz's current 4KiB split
+retains bvec page references and can already observe compound folio
+membership. Do not make larger upper BIOs a prerequisite. Keep the
+original upstream BIO-group token, if later desired, as a distinct
+kernel-interface proposal.
+
+**E2 — collect bounded WRITE-cohort observations.** While a write
+window owns its accepted BIOs, inspect page/folio identity, folio order
+and position of each 4KiB slice in that folio. Group pages from a
+single safely observed source folio into a **window-local cohort**;
+also retain comparison controls for logical adjacency and arrival order.
+No persistent folio pointer, added reference extending the RAM's life
+through swap-in, unbounded allocation or new SWZ metadata is allowed.
+Ordinary ownership, fences and publication stay unchanged. Report window boundary censoring explicitly: a large folio can span several 64-record windows, and absence from a given window does not imply a different folio. Copy scalar hints before source BIO ownership ends.
+
+**E3 — correlate through authority, not READ folio identity.**
+Maintain a fixed-size, volatile cache of
+`(logical_page, successfully_committed_generation) -> cohort_id`. The reviewed **initial prototype budget** is 256 preallocated 64-byte entries (16KiB), with a numeric cohort/epoch, observed order/index and committed extent identity; this is a proposal, not active configuration.
+Publish associations **only after** the lower write succeeds and mapping
+authority commits; handle overwrite, generation changes, DISCARD, slot
+reuse, failed/partial writes, GC relocation and cache eviction without
+stale attribution. Invalidate tags on zero elision; clear cache safely on cohort/epoch wrap and target teardown. Keep cache updates confined to the serialized authority worker. Cache absence is unknown; generation mismatch must
+never match. A later target READ uses its **current authoritative
+logical page/generation** to look up the WRITE cohort; its destination
+folio may be a new allocation and is not compared to the earlier WRITE
+folio. Cohort records are telemetry only, never a correctness dependency.
+
+**E4 — test whether the signal predicts real lower READ co-access.**
+Measure timing and sequences of later **backing** READs attributed to
+each known cohort, with controls for logical adjacency, arrival order,
+compression length and read readahead. Record upper WRITE `REQ_SWAP` provenance without requiring `REQ_SWAP` on upper READs or confusing lower swapz BIO flags with upper origins. Separate observable demand
+READs from speculative readahead where possible; target-only reads
+cannot see swap-cache or zswap hits and must not be described as all
+application accesses. Report cohort coverage/evictions, false/stale
+lookup prevention, hit-rate denominators, time windows, conditional
+co-access lift over controls and independent lower READ bytes/requests.
+Existing `series_thp()` tests validate THP-backed I/O handling only:
+they are **not** evidence of swap-in correlation.
+
+**E5 — consider one geometry-preserving layout candidate only if
+E4 is positive.** The current greedy largest-plus-partner ordering
+precedes a DP planner that optimizes the supplied record length sequence.
+Do **not** generally sort the whole window by folio before DP. The first
+candidate may permute **only compressed records with exactly equal encoded
+lengths after greedy ordering**, under the already-accepted independent
+window and the existing fences. Verify whole-window equality of physical
+bytes, bounded cold-read cost, extent count, exact extent classes, lower
+run splits/requests, segment alignment padding and segment-tail waste.
+Account for any extra CPU/planner cost. An implementation that adds no explicit wait may still increase dispatch latency by doing extra permutation work; measure it. Reorder neither RAW nor
+different-length records in this first candidate. Never wait for a
+future cohort member or postpone an otherwise dispatchable lower WRITE.
+
+**ID113 exit gate:** a bounded, generationally safe correlation cache
+with no held original folios; native/safe loaded correctness of stale
+entry and publication cases; and evidence that same-folio membership
+predicts later backing READ co-access **beyond adjacency and arrival
+order**. Only then may the separately gated equal-length placement
+policy be evaluated. Promotion requires preserved byte-exact readback,
+zero new order/authority violations, no lower dispatch delay, and no
+increase in physical runs, bytes, padding or cold-read amplification.
+Otherwise retain observational telemetry or close the idea as refuted.
+
+### Qualification and integration constraints
+
+Native contracts and safe owned-RAM `null_blk` fixtures can exercise the
+origin/RAW state machine without activating swap. Real zswap writeback,
+swap-in, memory-cgroup interactions and accurate origin ratios require
+separately authorized actual-swap qualification. Keep the single official
+`make test` interface and the limited `make fast_test` development loop;
+do not silently expand their privilege or device scope. The governing
+regressions and loaded-safety gates are in
+[testing_standards.md](testing_standards.md).
+
+This blueprint stays **future work** until a measured, qualified source
+revision proves otherwise. It does not override the immediate scheduler
+queue or change the work-conserving four-record dispatch priority.
+
+
+## Deferred content/concurrency evidence backlog
+
+**Historical backlog retired from the active path.** The dated alpha.24/ID178
+instructions, including the now-superseded statement that physical devices were
+outside the development safety scope, are preserved verbatim in
+[handoff/2026-11-01-content-concurrency-backlog.md](handoff/2026-11-01-content-concurrency-backlog.md).
+Use the current evidence-table rows for IDs 38, 58, 59, 61, 62, 65 and 178,
+and the [production decision order](AGENT_CONTEXT.md), instead. In particular,
+ID62 is now an active dedicated-SD-card production gate under standing owner
+authorization; the archived wording does not override that policy.
+
+
+## Immediate work queue
+
+**Current execution order:** follow the [production decision order](AGENT_CONTEXT.md)
+and exact-source qualification requirements in AGENT_CONTEXT, rather than
+resuming a past performance proposal. The current priorities are deterministic
+primary lifecycle interruption/recovery, owned-RAM execution evidence, then
+safe physical-card correctness, capacity/peak-memory and sustained-GC proof,
+followed by deployment/boot qualification. Performance optimization remains
+secondary until those correctness and lifecycle gates close. Read live source,
+CI and [the canonical test report](../test_results.json) before claiming a
+source is qualified.
+
+**Historical optimization queue (2026-11-02):** the ID181 retirement plan,
+old-host QD4 measurements, ID169/ID175 follow-ups and prior experimental
+results are preserved without changing their original conclusions in
+[handoff/2026-11-02-optimization-work-queue.md](handoff/2026-11-02-optimization-work-queue.md).
+Those dated instructions are not current code-change or test authorization.
+
+## Current-cycle Agent 17 — Cold swap-slot reclamation after application exit
+
+**Owner request / priority:** append this as a **current-cycle**, parallel
+rootless debugging/correctness assignment for **Agent 17**, a remote-edit
+agent. Begin source inspection and isolated regressions now, but do not
+interrupt Codex 1's first actual
+`/dev/sda1` mapper-page oracle, Codex 2's shared-root/lifecycle work, or
+current exact-source CI repairs. Agent 14 (GC/authority) and Agent 7
+(real-swap/oracle) should independently review Agent 17's results during
+this cycle without duplicating its edits. This is a **rootless debugging
+assignment**, not a blanket production-code change mandate, a new acceptance
+threshold, or permission for remote agents to change host swap configuration.
+
+### User scenario and desired behavior
+
+A long-running browser (for example Firefox) accumulates cold **anonymous**
+memory, and Linux swaps some of those pages to swapz. When the browser closes
+for an update and starts again, its now-unreferenced swapped pages should
+cease consuming swapz's **logical mapping/liveness and reclaimable physical
+capacity** as soon as Linux **authoritatively releases the corresponding
+swap entries and tells the block device**. They should be invalidated in
+metadata, **without reading the old page from backing media, allocating a
+replacement RAM page, decoding LZ4, or recompressing it**. GC must skip
+newly dead records, and an entire physical segment becomes eligible for
+safe reuse/advisory lower TRIM only once **all** authoritative references are
+gone. The new browser instance needs no association with the prior one.
+
+This objective is **event-driven page invalidation**, not PID tracking, a
+periodic cold-page scanner, a browser-specific policy, proactive swap-in, or
+`swapoff`. Shared pages, forked descendants, shmem/tmpfs, retained swap
+cache, and live references can outlast one application's exit. The Linux MM
+owns swap-slot lifetimes; swapz is a Device Mapper block target and must
+never infer that a slot is free because a process exited or its PID changed.
+
+### Existing path and the actual notification gap
+
+The current target already advertises upper DISCARD capability
+(`src/kernel/dm-target.c`), and the ordered
+`swapz_discard()` -> `swapz_discard_page()` path already invalidates logical
+map generations, updates packed-extent live-reference accounting, unlinks
+segment-page-list membership and can detect fully dead segments without
+a lower READ or decompression. Roadmap IDs 29, 44, 66 and 70 cover related
+already-qualified mechanisms. **Revalidate these properties against the
+current source; do not reimplement them.**
+
+At roadmap drafting, `swapz_primary_native_swapon()` in
+`src/userspace/swapz-primary.c` invokes `SYS_swapon` with flags **0**.
+Thus the production lifecycle does **not request** Linux's optional
+freed-swap-page/cluster DISCARD policy, even though the DM target supports
+DISCARD. The block layer does not receive a general per-PID exit event or
+a guaranteed per-slot free callback. Without a delivered upper DISCARD or
+a later WRITE replacing the same logical offset, swapz cannot safely declare
+the old mapping dead just because the kernel internally freed a slot.
+
+Linux's documented `swapon --discard=pages` / swap flags can arrange
+**asynchronous DISCARD of fully released swap clusters**, subject to the
+running kernel and actual block-device queue capabilities. This is **not
+guaranteed per-page or immediate at task exit**: a cluster containing even
+one still-referenced swap entry can remain undiscarded, and workqueue timing
+may delay the notification. The kernel's `SWP_PAGE_DISCARD` path schedules
+discard when its cluster becomes free. Check both the exact owner kernel
+source and its loaded behavior before asserting any stronger latency
+contract. `discard=once` is an unrelated activation-time operation, **not**
+a substitute for freeing obsolete swapped pages.
+
+References: [swapon(8) discard policies](https://man7.org/linux/man-pages/man8/swapon.8.html),
+[swapon(2) flags](https://man7.org/linux/man-pages/man2/swapon.2.html),
+[Linux swap cluster discard implementation](https://linux.googlesource.com/linux/kernel/git/torvalds/linux.git/+/refs/heads/master/mm/swapfile.c),
+and the existing [technical swap context](context.md).
+
+### Current-cycle Agent 17 — exclusive remote scope and investigation order
+
+1. **Baseline before editing.** Fetch current clean `main`, read
+   `AGENTS.md`, the source and standards, and reproduce the existing
+   rootless DISCARD behavior with
+   `tests/runtime/native/mapping/{raw-discard,authority,randomized-authority}.c`
+   plus existing DM source/native fixtures. Confirm that an authenticated
+   upper DISCARD neither reads lower storage nor invokes decompression, and
+   identify any synchronous whole-segment TRIM latency on the path.
+2. **Establish the actual gap.** Inspect the native primary `swapon` flags
+   and rootless lifecycle tests; compare them with the supported kernel
+   `SWAP_FLAG_DISCARD` and `SWAP_FLAG_DISCARD_PAGES` contract. Isolate
+   the difference between a freed **swap slot**, a free **swap cluster**,
+   a delivered **upper BIO DISCARD**, removal of a swapz **logical map**,
+   and reclaim/reuse of a dead **physical segment**. Do not claim these
+   events occur at the same instant.
+3. **Minimal opt-in candidate, only if justified.** Evaluate requesting
+   page/cluster discards on the **already authorized swapz mapper** through
+   the current primary activation, with an existing-header/kernel-supported
+   flag combination and rootless negative/positive controls; do not request
+   activation-time whole-area DISCARD. This must be a tightly scoped
+   `swapon`-policy correction, not a new management protocol or a fallback
+   device. Preserve existing priority, source/target admission, failure
+   errno, atomic activation semantics and automatic-start locks. If kernel
+   capability or discard safety cannot be proved, leave the policy unchanged
+   and report **BLOCKED / not guaranteed**, rather than silently claiming
+   immediate reclamation. Coordinate with Codex before editing
+   `src/userspace/swapz-primary.c`; do not overwrite unpublished work.
+4. **Validate authority and races.** Exercise multi-page DISCARD
+   prevalidation (all-or-nothing on corruption), generation increment and
+   slot reuse, duplicate/out-of-range DISCARD, shared physical extents with
+   surviving live pages, overwrite/GC concurrent with DISCARD, ordering
+   against accepted READ/WRITE and PREFLUSH/FUA, stale cache references,
+   reserve allocation, and suspend/destruction. A failed or uncertain
+   DISCARD must never free a live record, double-decrement a reference,
+   resurrect an old generation, reuse a submitted lower-TRIM range, or
+   turn a prior error into success. No per-discard heap allocations,
+   lower-page read, decompression or full-map scan in the hot path.
+5. **Measure rather than promise.** With synthetic events/rootless
+   production-C tests, capture logical pages invalidated, surviving
+   shared-extent references, newly dead segments, upper DISCARD requests
+   and sectors, lower READ bytes, decompression calls, CPU work and first
+   failure. An explicit DISCARD should retire the specified logical
+   mappings with **zero lower READ/decompression** and bounded
+   per-page metadata work; actual physical flash erasure/TRIM and freed
+   RAM are separate claims. A zero-discard control must prove that merely
+   claiming an app exited causes **no speculative invalidation**.
+6. **Host-only handoff, not remote execution.** Ask the Codex owner of an
+   already admitted, isolated mapper to test a bounded anonymous-memory
+   workload: swap out known pages, terminate the owner normally **without
+   swapoff**, retain separately shared/live controls, observe actual
+   kernel-to-DM discards and cluster-empty timing, verify no stale mappings,
+   no byte corruption for surviving pages, and clean normal teardown.
+   Compare activated policy with and without page-discard capability
+   **only when safe and source-bound**. No remote agent may change real
+   swap flags, activate swap, load modules or touch physical storage.
+
+### Acceptance and coordination boundary
+
+This is successful only if current-source rootless/native tests prove safe
+zero-decompression **on received DISCARD**, and appropriate owned loaded
+evidence confirms what Linux actually emits after swap-slot release,
+including partial-cluster and shared-page controls. Record the observed
+event-to-invalidation delay instead of promising synchronous app-exit
+reclamation. Physical-media TRIM remains advisory and must never block
+logical authority correctness or dispose of a segment containing live pages.
+
+**Delivery:** Agent 17 writes a concise root-cause/contract assessment,
+source+kernel version, before/after regression, any small justified
+direct-`main` commit (with applicable canonical testing-standard update in
+the same commit), exact-SHA validation, and a Codex-only loaded test request.
+No new branch, PR, fork, worktree, force push, feature redesign or patch-only
+handoff. Preserve existing comments and apply the owner's maintainability,
+ownership, high-warning, failure-only diagnostic and no-speculative-churn
+standards. If the existing implementation already does everything possible
+with the notifications Linux supplies, **report that finding and do not add
+redundant code**. This current-cycle investigation runs **in parallel** with the first-card
+debugging/qualification work, but no Agent 17 edit or test may disrupt or
+bypass those P0 blockers or relax the frozen release gates.
+
+
+## Deferred asynchronous segment TRIM design for review
+
+Step 3 of the owner's original plan is deferred behind resource-pressure and
+churn evidence following the external review of source `1888781`. This is a
+proposal for independent review before any kernel implementation. The current
+`swapz_discard_dead_segment()` still calls
+`blkdev_issue_discard()` synchronously. It runs during allocator reuse, after
+GC role rotation, and when upper DISCARD removes a closed segment's last map.
+Overwrite-created deaths have no early notification. The latest passing owner
+report therefore qualifies the existing synchronous mechanism only.
+
+The proposed implementation is bounded to one outstanding whole-segment TRIM
+per target and a preallocated pending bitmap indexed by physical segment.
+Authority transitions would record candidates only after successful RAW,
+compressed or zero/discard publication has settled all mapping counts and
+survivor lists. Notification must not allocate, submit I/O or fail a committed
+mapping transition. A GC victim becomes eligible only after its role exchange
+commits. Zero maps alone are insufficient: immediately before reservation,
+the ordered owner must revalidate all live refs, OPEN/reserve roles, staged
+transactions and the immutable lower-WRITE run.
+
+The state transition to review is queued -> reserved -> submitted -> completed
+-> reaped. A dedicated reclaim-safe submission context would keep BIO allocation
+and block-layer submission off the ordered upper-I/O worker. Completion would
+record status and wake the ordered owner; that owner would publish successful
+`segment_trimmed` state and retire the reservation. Every allocator path,
+including the balancing selector and GC reserve destination, must respect this
+reservation. Queued but unsubmitted work may be cancelled for reuse. A submitted
+discard cannot be cancelled by clearing a flag or skipping a helper call.
+
+The unresolved design decision is reuse under capacity pressure. If the sole
+usable destination has a submitted TRIM, simply skipping that segment can turn
+temporary I/O into false ENOSPC, while waiting on the ordered worker can stall
+unrelated upper I/O. The preferred review candidate is completion-driven retry
+that retains the exact accepted BIO/window ownership and committed prefix,
+without repeating successful writes or spinning. A bounded wait at that exact
+reuse fence is a simpler alternative that requires an explicit exception to
+the plan's no-upper-path-wait requirement. Resolve this choice before coding.
+
+Suspend/destruction must stop new TRIM dispatch, cancel pending candidates,
+drain submission and outstanding callbacks, reap completion, and only then free
+the target, queues and backing reference. Device TRIM errors remain advisory;
+ownership disagreement remains fatal. Failed or unsupported TRIM must not set
+`segment_trimmed`. The callback must never publish maps or complete upper BIOs.
+
+The official qualification will need deterministic coverage of overwritten
+closed-segment death, same-segment replacement, a delayed discard racing reuse,
+the last eligible destination, GC reserve rotation, duplicate suppression,
+submission/allocation/device failures, and suspend/destruction with a discard
+outstanding. Byte-exact readback and independent lower DISCARD counters are
+required. Report death/reuse dispatch counts, maximum discard latency,
+submission wall time, deferred-reuse pressure and exact completion accounting.
+The normal throughput matrix alone cannot prove this ownership protocol.
+
+The [Linux 7.0 discard helper](https://github.com/torvalds/linux/blob/v7.0/block/blk-lib.c)
+builds chained BIOs and its synchronous wrapper waits for their completion.
+The implementation review must check split-range completion and memory-pressure
+behavior against the running kernel headers before selecting the async adapter.
+This step changes neither SWZ nor physical-device admission. Heavy-CPU/low-RAM,
+real swap semantics, representative churn and modeled interruption
+qualification remain separate release gates. True cold-boot behavior remains
+unverified because VMs and intentional host crashes/reboots are excluded.
+
+## NUMA / deployment topology
+
+Preparation should become NUMA-local only after bounded multi-worker scaling is
+proven. The preferred architecture is one preparation domain per memory-local
+NUMA node (node-local LZ4 workmem/scratch/prepared pools, routed by source page
+home), feeding one global ordered mapping/allocation/GC authority when all nodes
+share one backing device. Do not equate a Linux NUMA node one-to-one with a
+physical memory controller without hardware-specific topology evidence.
+
+A fully independent `swapz` instance per NUMA node is a deployment topology,
+not the default single-target design. It is appropriate to evaluate when each
+NUMA node also has genuinely node-local backing storage (for example an NVMe
+behind that node's PCIe root complex). If multiple nodes share one backing
+device, preserve one global storage authority so extent packing, barriers,
+physical allocation and GC do not fragment across independent writers.
+
+## ID73 — CPU/cache qualification batch
+
+**Completed implementation/qualification chronology.** The original ID73 batch
+summary is preserved verbatim in
+[handoff/id73-cpu-cache-qualification-batch.md](handoff/id73-cpu-cache-qualification-batch.md).
+Its durable production invariants and qualification requirements are normative
+in [coding_standards.md](coding_standards.md) and
+[testing_standards.md](testing_standards.md), including fixed ordinary LZ4
+acceleration, validated metadata/sequence checks, publication preflight, planner
+proof reuse, one preparation producer, payload-CRC boundaries, and the bounded
+adjacent-read policy. Reopen an ID73 policy only through the corresponding
+active evidence-table row and current standards; this historical batch does not
+qualify a newer source by itself.
+
+
+## Release gates
+
+**Bounded qualification trials are not production release.** Trials on the
+positively identified dedicated SD card follow the standing owner authorization,
+exact source/artifact provenance, device/parent/mapper ownership, frozen physical
+acceptance policy, active-page protection, fail-closed lifecycle behavior and
+normal teardown specified in [AGENT_CONTEXT.md](AGENT_CONTEXT.md),
+[VISION.md](VISION.md) and [testing_standards.md](testing_standards.md).
+The retired old-host per-run independent-review workflow and completed
+performance qualification are not prerequisites for a safely admitted trial.
+Physical-device admission is outside ordinary `make test`.
+
+**Production release remains blocked** until the same exact production source
+passes official owner qualification and required CI, then satisfies the real
+anonymous-swap, byte-exact full-card capacity, lower-error, high-occupancy GC,
+resource-bound, storage-semantics, lifecycle/recovery, physical service and
+deployment acceptance criteria defined by those canonical documents and the
+[frozen acceptance manifest](production-acceptance.json). Matched performance
+promotion follows correctness qualification; a historical report or trial PASS
+does not qualify current `main`.
+
+### Owner-requested physical swap-partition smoke — bounded correctness only
+
+**Historical old-host evidence.** The 2026-11-02 `/dev/sda4` work produced one
+bounded physical correctness PASS and preserved an earlier failed attempt plus
+its recovery incident. Those runs established only the recorded byte-correct
+physical smoke and restoration behavior; they did not qualify performance,
+endurance, production deployment, or the current dedicated SD card.
+
+The run IDs, hashes, approval-consumption records, failure details, restoration
+observations, and exact old-host narrative are preserved in
+[handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md).
+The historical recovery protocol remains
+[live-swap-trial-recovery.md](live-swap-trial-recovery.md). Current physical
+authorization and target identity come only from
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md).
+### Alpha.29 loaded qualification observability repair
+
+**Historical completed test-harness repair.** The recorded alpha.29 sequence
+addressed silent loaded-stage output, bounded watchdog execution, positively
+owned RAM-backed mapper preflight, shell-runtime failures and rootless syntax
+regressions. The full sequence, including failed runs and exact repair steps,
+is preserved in
+[handoff/alpha29-loaded-qualification-observability.md](handoff/alpha29-loaded-qualification-observability.md).
+Current required ownership, preflight and rootless contracts remain in
+[testing_standards.md](testing_standards.md); this history does not qualify a
+new source revision or establish a current-host PASS.
+
+### Historical old-host full-capacity and live-swap qualification
+
+**Historical old-host evidence.** The retired `/dev/sda4` host used different
+geometry, capacity limits, approval mechanics, and live-swap constraints. Its
+maximum-capacity calculations, old qualification SHAs, issue-76 trial evidence,
+failure records, and recovery observations must not be reused as current-host
+production claims or instructions.
+
+The complete migrated record is in
+[handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md);
+the immutable recovery procedure is
+[live-swap-trial-recovery.md](live-swap-trial-recovery.md). Current capacity,
+lifecycle, and release gates are defined by the active sections above,
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md), and the canonical acceptance manifest.

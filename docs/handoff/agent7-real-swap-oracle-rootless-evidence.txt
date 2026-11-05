@@ -1,0 +1,94 @@
+Agent 7 rootless byte-integrity control evidence
+Generated UTC: 2026-11-05T16:51:12.123558+00:00
+Independent audit: 2026-11-05
+Repository: k1moradi/swapz (shared main only)
+Audited main commit: b7f5109dc7a884753c2e6c6190c2ee9a8dd1188f
+
+Evidence provenance correction
+------------------------------
+The producer harness imports the exact downloaded oracle source and verifies its Git blob SHA before executing it.
+The other three auxiliary harnesses do NOT import the full qualifier module: they execute exact transcriptions of contiguous qualifier excerpts. Their source binding is therefore external, not self-enforcing. During both the original run and this independent audit, those transcriptions matched the fetched qualifier source by length and FNV-1a64 fingerprint as recorded below. Treat all three as supplemental regression controls, not as a substitute for running tests/runtime/native/primary-real-swap-oracle-terminal-test.py against the full qualifier.
+
+Exact oracle source Git blob SHA: e1b1894cf2f4b48f8f129cbf06b7d6266d8f1f53
+GitHub main oracle blob SHA: e1b1894cf2f4b48f8f129cbf06b7d6266d8f1f53
+Main qualifier Git blob SHA for tested excerpts: ab76eecee2fd3c5856d5559e10bd25a6d10adbf1
+Main terminal fixture Git blob SHA (reviewed, not executed verbatim): 55380d7aa9993177f5eb152f73dcba55014c7436
+Qualifier evaluator excerpt: length=4105, FNV-1a64=48118fb048a5158c
+Qualifier terminal parser excerpt: length=6862, FNV-1a64=57044412a58bb381
+Qualifier geometry/rounds excerpt: length=6176, FNV-1a64=eed8e736714d5538
+
+Independent audit rerun: 43/43 auxiliary controls passed.
+NO real swap, privileged operations, mapper, module, storage, or DISCARD executed.
+Exact tests/runtime/native/primary-real-swap-oracle-terminal-test.py: NOT RUN as an entire suite.
+The original captured test output follows unchanged.
+
+=== run_source_bound_oracle_controls.py: exit=0 ===
+test_closed_fill_stream_withholds_success (__main__.SourceBoundOracleControls.test_closed_fill_stream_withholds_success) ... ok
+test_closed_verified_stream_withholds_success (__main__.SourceBoundOracleControls.test_closed_verified_stream_withholds_success) ... ok
+test_corruption_totals_are_not_capped_to_diagnostic_samples (__main__.SourceBoundOracleControls.test_corruption_totals_are_not_capped_to_diagnostic_samples) ... ok
+test_exact_byte_counts_digest_and_identity_on_clean_readback (__main__.SourceBoundOracleControls.test_exact_byte_counts_digest_and_identity_on_clean_readback) ... ok
+test_interrupted_command_before_allocation_fails_closed (__main__.SourceBoundOracleControls.test_interrupted_command_before_allocation_fails_closed) ... ok
+test_interrupted_read_with_close_error_preserves_original_errno (__main__.SourceBoundOracleControls.test_interrupted_read_with_close_error_preserves_original_errno) ... ok
+test_keyboard_interrupt_after_first_page_is_incomplete (__main__.SourceBoundOracleControls.test_keyboard_interrupt_after_first_page_is_incomplete) ... ok
+test_mismatch_precedes_cleanup_error (__main__.SourceBoundOracleControls.test_mismatch_precedes_cleanup_error) ... ok
+test_mismatch_precedes_report_errno (__main__.SourceBoundOracleControls.test_mismatch_precedes_report_errno) ... ok
+test_reporting_failure_retains_errno (__main__.SourceBoundOracleControls.test_reporting_failure_retains_errno) ... ok
+test_short_read_with_teardown_error_remains_primary (__main__.SourceBoundOracleControls.test_short_read_with_teardown_error_remains_primary) ... ok
+test_successful_comparison_cannot_override_unmap_failure (__main__.SourceBoundOracleControls.test_successful_comparison_cannot_override_unmap_failure) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.014s
+
+OK
+
+=== traffic_contract_excerpt_controls.py: exit=0 ===
+test_control_requires_all_channels (__main__.TrafficSeparation.test_control_requires_all_channels) ... ok
+test_mismatched_digest_is_rejected (__main__.TrafficSeparation.test_mismatched_digest_is_rejected) ... ok
+test_missing_lower_counter_does_not_pass (__main__.TrafficSeparation.test_missing_lower_counter_does_not_pass) ... ok
+test_missing_lower_read_is_rejected (__main__.TrafficSeparation.test_missing_lower_read_is_rejected) ... ok
+test_missing_lower_write_is_rejected (__main__.TrafficSeparation.test_missing_lower_write_is_rejected) ... ok
+test_missing_mapper_write_counter_does_not_pass (__main__.TrafficSeparation.test_missing_mapper_write_counter_does_not_pass) ... ok
+test_zero_byte_oracle_cannot_pass_even_with_traffic (__main__.TrafficSeparation.test_zero_byte_oracle_cannot_pass_even_with_traffic) ... ok
+test_zero_mapper_usage_is_rejected (__main__.TrafficSeparation.test_zero_mapper_usage_is_rejected) ... ok
+test_zero_pswpin_is_rejected (__main__.TrafficSeparation.test_zero_pswpin_is_rejected) ... ok
+test_zero_pswpout_is_rejected (__main__.TrafficSeparation.test_zero_pswpout_is_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.001s
+
+OK
+
+=== terminal_parser_excerpt_controls.py: exit=0 ===
+test_duplicate_json_key_is_rejected (__main__.TerminalConsumerControls.test_duplicate_json_key_is_rejected) ... ok
+test_eof_cannot_be_inferred_from_zero_exit_with_open_writer (__main__.TerminalConsumerControls.test_eof_cannot_be_inferred_from_zero_exit_with_open_writer) ... ok
+test_partial_fail_diagnostic_is_not_exposed (__main__.TerminalConsumerControls.test_partial_fail_diagnostic_is_not_exposed) ... ok
+test_private_traceback_is_not_exposed (__main__.TerminalConsumerControls.test_private_traceback_is_not_exposed) ... ok
+test_read_interruption_returns_bounded_error (__main__.TerminalConsumerControls.test_read_interruption_returns_bounded_error) ... ok
+test_trailing_record_after_valid_is_rejected (__main__.TerminalConsumerControls.test_trailing_record_after_valid_is_rejected) ... ok
+test_valid_looking_record_nonzero_exit_is_rejected (__main__.TerminalConsumerControls.test_valid_looking_record_nonzero_exit_is_rejected) ... ok
+test_valid_record_zero_exit_and_eof (__main__.TerminalConsumerControls.test_valid_record_zero_exit_and_eof) ... ok
+test_zero_exit_partial_record_is_rejected (__main__.TerminalConsumerControls.test_zero_exit_partial_record_is_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.002s
+
+OK
+
+=== geometry_rounds_excerpt_controls.py: exit=0 ===
+test_bad_digest_shape_rejected (__main__.GeometryAndRoundsControls.test_bad_digest_shape_rejected) ... ok
+test_bad_page_size_and_short_bytes_rejected (__main__.GeometryAndRoundsControls.test_bad_page_size_and_short_bytes_rejected) ... ok
+test_boolean_page_count_rejected (__main__.GeometryAndRoundsControls.test_boolean_page_count_rejected) ... ok
+test_incomplete_mismatch_sample_rejected (__main__.GeometryAndRoundsControls.test_incomplete_mismatch_sample_rejected) ... ok
+test_missing_round_rejected (__main__.GeometryAndRoundsControls.test_missing_round_rejected) ... ok
+test_no_concurrency_round_rejected (__main__.GeometryAndRoundsControls.test_no_concurrency_round_rejected) ... ok
+test_nonreleased_swap_slots_rejected (__main__.GeometryAndRoundsControls.test_nonreleased_swap_slots_rejected) ... ok
+test_one_missing_worker_rejected (__main__.GeometryAndRoundsControls.test_one_missing_worker_rejected) ... ok
+test_required_two_reuse_rounds_pass (__main__.GeometryAndRoundsControls.test_required_two_reuse_rounds_pass) ... ok
+test_two_complete_distinct_workers_pass (__main__.GeometryAndRoundsControls.test_two_complete_distinct_workers_pass) ... ok
+test_worker_swapping_cannot_be_hidden_in_aggregate (__main__.GeometryAndRoundsControls.test_worker_swapping_cannot_be_hidden_in_aggregate) ... ok
+test_wrong_mismatch_sample_offset_rejected (__main__.GeometryAndRoundsControls.test_wrong_mismatch_sample_offset_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.001s
+
+OK

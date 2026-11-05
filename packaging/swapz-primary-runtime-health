@@ -1,0 +1,1427 @@
+#!/bin/sh
+# Read-only runtime health and hibernation-safety checks for primary swapz.
+set -eu
+umask 077
+
+# Production observation must not inherit an administrator or service caller's
+# executable search path or locale. Rootless fixtures opt into their mock path
+# explicitly below.
+LC_ALL=C
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL PATH
+
+usage()
+{
+	echo "Usage: swapz-primary-runtime-health monitor|once|stop-observe|activation-guard|hibernation-config-check|hibernate-guard" >&2
+	exit 2
+}
+
+[ "$#" -eq 1 ] || usage
+mode=$1
+case "$mode" in
+monitor|once|stop-observe|activation-guard|hibernation-config-check|hibernate-guard) ;;
+*) usage ;;
+esac
+
+self_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+swapzctl=$self_dir/swapzctl
+proc_root=/proc
+sys_root=/sys
+dev_root=/dev
+etc_root=/etc
+recovery_base=/var/lib/swapz/physical-recovery
+poll_seconds=60
+max_polls=0
+stall_poll_threshold=5
+command_timeout_seconds=5
+
+# Rootless systemd regression fixtures can redirect observation roots and bound
+# monitor execution. Production units never set this marker. Tests must supply
+# their executable path explicitly rather than inheriting the caller's PATH.
+if [ "${SWAPZ_PRIMARY_SYSTEMD_TESTING:-0}" = 1 ]; then
+	proc_root=${SWAPZ_PRIMARY_TEST_PROC_ROOT:?missing test proc root}
+	sys_root=${SWAPZ_PRIMARY_TEST_SYS_ROOT:?missing test sys root}
+	dev_root=${SWAPZ_PRIMARY_TEST_DEV_ROOT:?missing test dev root}
+	etc_root=${SWAPZ_PRIMARY_TEST_ETC_ROOT:?missing test etc root}
+	recovery_base=${SWAPZ_PRIMARY_TEST_RECOVERY_BASE:?missing test recovery base}
+	PATH=${SWAPZ_PRIMARY_TEST_PATH:?missing test executable path}
+	export PATH
+	poll_seconds=${SWAPZ_PRIMARY_TEST_POLL_SECONDS:-0}
+	max_polls=${SWAPZ_PRIMARY_TEST_MAX_POLLS:-1}
+	stall_poll_threshold=${SWAPZ_PRIMARY_TEST_STALL_POLLS:-3}
+	command_timeout_seconds=${SWAPZ_PRIMARY_TEST_COMMAND_TIMEOUT_SECONDS:-5}
+fi
+case "$command_timeout_seconds" in
+[1-9]|[1-9][0-9]*) ;;
+*)
+	echo "swapz-primary-runtime-health: invalid command timeout" >&2
+	exit 2
+	;;
+esac
+command -v timeout >/dev/null 2>&1 || {
+	echo "swapz-primary-runtime-health: timeout command is unavailable" >&2
+	exit 2
+}
+
+primary_target_config=$etc_root/swapz/primary-target
+mapper_name=swapz-primary
+mapper_path=$dev_root/mapper/$mapper_name
+mapper_service=swapz-primary-mapper.service
+mapper_swap_unit='dev-mapper-swapz\x2dprimary.swap'
+
+append_reason()
+{
+	variable=$1
+	reason=$2
+	eval "current=\${$variable:-}"
+	if [ -n "$current" ]; then
+		current=$current,$reason
+	else
+		current=$reason
+	fi
+	eval "$variable=\$current"
+}
+
+canonical_unsigned()
+{
+	unsigned_value=$1
+	case "$unsigned_value" in
+	0)
+		return 0
+		;;
+	[1-9]*) ;;
+	*)
+		return 1
+		;;
+	esac
+	[ "${#unsigned_value}" -le 18 ] || return 1
+	remaining_unsigned_digits=$unsigned_value
+	while [ -n "$remaining_unsigned_digits" ]; do
+		case "$remaining_unsigned_digits" in
+		[0-9]*) remaining_unsigned_digits=${remaining_unsigned_digits#?} ;;
+		*) return 1 ;;
+		esac
+	done
+	return 0
+}
+
+canonical_status_error()
+{
+	status_error=$1
+	case "$status_error" in
+	0)
+		return 0
+		;;
+	-*)
+		magnitude=${status_error#-}
+		limit=4095
+		;;
+	*)
+		# The target publishes Linux errno values: zero or -1 through -4095.
+		# Positive output is malformed telemetry, not a terminal errno.
+		return 1
+		;;
+	esac
+	case "$magnitude" in
+	[1-9]*) ;;
+	*) return 1 ;;
+	esac
+	[ "${#magnitude}" -le 4 ] || return 1
+	remaining_digits=$magnitude
+	while [ -n "$remaining_digits" ]; do
+		case "$remaining_digits" in
+		[0-9]*) remaining_digits=${remaining_digits#?} ;;
+		*) return 1 ;;
+		esac
+	done
+	[ "$magnitude" -le "$limit" ]
+}
+
+canonical_partuuid()
+{
+	value=$1
+	[ "${#value}" -ge 8 ] && [ "${#value}" -le 64 ] || return 1
+	hex_digit_count=0
+	previous_was_hyphen=1
+	while [ -n "$value" ]; do
+		case "$value" in
+		[0-9a-f]*)
+			value=${value#?}
+			hex_digit_count=$((hex_digit_count + 1))
+			previous_was_hyphen=0
+			;;
+		-*)
+			[ "$previous_was_hyphen" -eq 0 ] || return 1
+			value=${value#-}
+			previous_was_hyphen=1
+			;;
+		*)
+			return 1
+			;;
+		esac
+	done
+	[ "$hex_digit_count" -ge 8 ] && [ "$previous_was_hyphen" -eq 0 ]
+}
+
+run_bounded()
+{
+	timeout --signal=TERM --kill-after=1s "${command_timeout_seconds}s" "$@"
+}
+
+path_major_minor()
+{
+	candidate=$1
+	[ -n "$candidate" ] || return 1
+	value=$(run_bounded lsblk -dnro MAJ:MIN -- "$candidate" 2>/dev/null) || return 1
+	case "$value" in *'
+'*|'') return 1 ;; esac
+	printf '%s\n' "$value" | grep -Eq '^[0-9]+:[0-9]+$' || return 1
+	printf '%s\n' "$value"
+}
+
+manager_target_identity()
+{
+	[ -x "$swapzctl" ] || return 1
+	units=$(run_bounded "$swapzctl" primary systemd-units 2>/dev/null) || return 1
+	case "$units" in *'
+'*) return 1 ;; esac
+	set -f
+	old_ifs=$IFS
+	IFS=' '
+	# shellcheck disable=SC2086 # Exact reconstruction validates the split.
+	set -- $units
+	IFS=$old_ifs
+	set +f
+	[ "$#" -eq 2 ] && [ "$1 $2" = "$units" ] || return 1
+	case "$1" in 'dev-disk-by\x2dpartuuid-'*.device) ;; *) return 1 ;; esac
+	case "$2" in 'dev-disk-by\x2dpartuuid-'*.swap) ;; *) return 1 ;; esac
+	encoded=${1#'dev-disk-by\x2dpartuuid-'}
+	encoded=${encoded%.device}
+	raw_encoded=${2#'dev-disk-by\x2dpartuuid-'}
+	raw_encoded=${raw_encoded%.swap}
+	[ "$encoded" = "$raw_encoded" ] || return 1
+	selected_partuuid=$(printf '%s\n' "$encoded" | sed 's/\\x2d/-/g')
+	canonical_partuuid "$selected_partuuid" || return 1
+	reencoded=$(printf '%s\n' "$selected_partuuid" | sed 's/-/\\x2d/g')
+	[ "$encoded" = "$reencoded" ] || return 1
+	selected_path=$dev_root/disk/by-partuuid/$selected_partuuid
+	selected_major_minor=unavailable
+	# Keep the parsed selected identity even when removable media vanished.
+	# The observer can then report definite absence as FAIL instead of
+	# misclassifying it as unavailable telemetry.
+	[ -e "$selected_path" ] || return 0
+	selected_major_minor=$(path_major_minor "$selected_path") || return 1
+	return 0
+}
+
+primary_target_configuration_state()
+{
+	# A configured primary target excludes hibernation for the entire
+	# configured interval, not only while /proc/swaps happens to show it
+	# active. This closes the check-then-activate race without mutating swap.
+	if [ -e "$primary_target_config" ] || [ -L "$primary_target_config" ]; then
+		[ -f "$primary_target_config" ] && [ ! -L "$primary_target_config" ] || return 2
+		manager_target_identity >/dev/null 2>&1 || return 2
+		return 0
+	fi
+	# If the manager can still prove a target despite an unexpected config
+	# layout, remain conservative and treat it as configured.
+	manager_target_identity >/dev/null 2>&1 && return 0
+	return 1
+}
+
+json_string_field()
+{
+	key=$1
+	file=$2
+	[ -f "$file" ] && [ ! -L "$file" ] || return 1
+	value=$(sed -n 's/.*"'"$key"'":"\([^"]*\)".*/\1/p' "$file") || return 1
+	case "$value" in *'
+'*|'') return 1 ;; esac
+	printf '%s\n' "$value"
+}
+
+json_unsigned_field()
+{
+	key=$1
+	file=$2
+	[ -f "$file" ] && [ ! -L "$file" ] || return 1
+	value=$(sed -n 's/.*"'"$key"'":\([0-9][0-9]*\).*/\1/p' "$file") || return 1
+	case "$value" in *'
+'*|'') return 1 ;; esac
+	canonical_unsigned "$value" || return 1
+	printf '%s\n' "$value"
+}
+
+active_run_id()
+{
+	state=$recovery_base/primary-state.json
+	run_id=$(json_string_field run_id "$state") || return 1
+	stage=$(json_string_field stage "$state") || return 1
+	printf '%s\n' "$run_id" | grep -Eq '^[0-9a-f]{32}$' || return 1
+	[ "$stage" = ACTIVE ] || return 1
+	claim=$recovery_base/partition-$selected_partuuid.active
+	claim_run_id=$(json_string_field run_id "$claim") || return 1
+	claim_partuuid=$(json_string_field partuuid "$claim") || return 1
+	claim_major=$(json_unsigned_field major "$claim") || return 1
+	claim_minor=$(json_unsigned_field minor "$claim") || return 1
+	[ "$claim_run_id" = "$run_id" ] && [ "$claim_partuuid" = "$selected_partuuid" ] || return 1
+	[ "$claim_major:$claim_minor" = "$selected_major_minor" ] || return 1
+	printf '%s\n' "$run_id"
+}
+
+status_token()
+{
+	key=$1
+	text=$2
+	printf '%s\n' "$text" | awk -v wanted="$key" '
+		{
+			for (position = 1; position <= NF; ++position) {
+				split($position, pair, "=")
+				if (pair[1] != wanted)
+					continue
+				value = substr($position, length(wanted) + 2)
+				if (seen || value == "" || index(value, "=") != 0)
+					invalid = 1
+				else {
+					result = value
+					seen = 1
+				}
+			}
+		}
+		END {
+			if (invalid) print "invalid"
+			else if (seen) print result
+		}
+	'
+}
+
+sanitize_log_text()
+{
+	printf '%s' "$1" | LC_ALL=C tr '\r\n\t' '   ' | LC_ALL=C tr -cd '[:print:]' | cut -c1-240
+}
+
+resume_spec_matches_swapz()
+{
+	spec=$1
+	case "$spec" in
+	''|none|None|NONE) return 1 ;;
+	auto|Auto|AUTO) return 0 ;;
+	/dev/mapper/swapz-primary|"$mapper_path") return 0 ;;
+	esac
+
+	swapz_identity_known=0
+	[ -n "${selected_partuuid:-}" ] && swapz_identity_known=1
+	[ -n "${mapper_major_minor:-}" ] && swapz_identity_known=1
+
+	if [ -n "${selected_partuuid:-}" ]; then
+		normalized=$(printf '%s\n' "$spec" | tr '[:upper:]' '[:lower:]')
+		case "$normalized" in
+		partuuid="$selected_partuuid"|/dev/disk/by-partuuid/"$selected_partuuid"|"$dev_root"/disk/by-partuuid/"$selected_partuuid") return 0 ;;
+		esac
+		case "$normalized" in
+		partuuid=*)
+			candidate_partuuid=${normalized#partuuid=}
+			if canonical_partuuid "$candidate_partuuid"; then
+				# A distinct canonical PARTUUID proves this tagged resume
+				# target is not the selected primary partition even when
+				# removable media is currently absent.
+				return 1
+			fi
+			return 2
+			;;
+		esac
+	fi
+
+	case "$spec" in
+	[0-9]*:[0-9]*)
+		printf '%s\n' "$spec" | grep -Eq '^[0-9]+:[0-9]+$' || return 2
+		if [ -n "${selected_major_minor:-}" ] && [ "$selected_major_minor" != unavailable ] &&
+		    [ "$spec" = "$selected_major_minor" ]; then
+			return 0
+		fi
+		[ -n "${mapper_major_minor:-}" ] && [ "$spec" = "$mapper_major_minor" ] && return 0
+		if [ -n "${selected_partuuid:-}" ] &&
+		    { [ -z "${selected_major_minor:-}" ] || [ "$selected_major_minor" = unavailable ]; }; then
+			return 2
+		fi
+		return 1
+		;;
+	/dev/*|"$dev_root"/*)
+		resolved_major_minor=$(path_major_minor "$spec" 2>/dev/null || true)
+		if [ -z "$resolved_major_minor" ]; then
+			[ "$swapz_identity_known" -eq 0 ] && return 1
+			return 2
+		fi
+		[ -n "${selected_major_minor:-}" ] && [ "$selected_major_minor" != unavailable ] &&
+		    [ "$resolved_major_minor" = "$selected_major_minor" ] && return 0
+		[ -n "${mapper_major_minor:-}" ] && [ "$resolved_major_minor" = "$mapper_major_minor" ] && return 0
+		return 1
+		;;
+	UUID=*|LABEL=*|PARTUUID=*|PARTLABEL=*)
+		if ! command -v blkid >/dev/null 2>&1; then
+			[ "$swapz_identity_known" -eq 0 ] && return 1
+			return 2
+		fi
+		resolved=$(run_bounded blkid -o device -t "$spec" 2>/dev/null || true)
+		case "$resolved" in *'
+'*) return 2 ;; esac
+		if [ -z "$resolved" ]; then
+			[ "$swapz_identity_known" -eq 0 ] && return 1
+			return 2
+		fi
+		resolved_major_minor=$(path_major_minor "$resolved" 2>/dev/null || true)
+		[ -n "$resolved_major_minor" ] || return 2
+		[ -n "${selected_major_minor:-}" ] && [ "$selected_major_minor" != unavailable ] &&
+		    [ "$resolved_major_minor" = "$selected_major_minor" ] && return 0
+		[ -n "${mapper_major_minor:-}" ] && [ "$resolved_major_minor" = "$mapper_major_minor" ] && return 0
+		return 1
+		;;
+	esac
+	return 1
+}
+check_resume_spec()
+{
+	location=$1
+	spec=$2
+	if resume_spec_matches_swapz "$spec"; then
+		hibernation_conflict=$location:$spec
+		return 1
+	else
+		status=$?
+		if [ "$status" -eq 2 ]; then
+			hibernation_conflict=$location:unresolved:$spec
+			return 1
+		fi
+	fi
+	return 0
+}
+
+scan_cmdline_text()
+{
+	location=$1
+	text=$2
+	clean=$(printf '%s\n' "$text" | tr '"' ' ' | tr "'" ' ')
+	set -f
+	old_ifs=$IFS
+	IFS=' '
+	# shellcheck disable=SC2086 # Kernel command line tokens are intentionally split.
+	set -- $clean
+	IFS=$old_ifs
+	set +f
+	for token do
+		case "$token" in
+		resume=*) check_resume_spec "$location" "${token#resume=}" || return 1 ;;
+		esac
+	done
+	return 0
+}
+
+hibernation_config_check()
+{
+	hibernation_conflict=
+	selected_partuuid=
+	selected_major_minor=
+	selected_path=
+	mapper_major_minor=$(path_major_minor "$mapper_path" 2>/dev/null || true)
+	manager_target_identity >/dev/null 2>&1 || true
+
+	# Without the running kernel's command line we cannot exclude resume=.
+	[ -r "$proc_root/cmdline" ] || {
+		hibernation_conflict=kernel-cmdline:unavailable
+		return 1
+	}
+	cmdline=$(cat -- "$proc_root/cmdline" 2>/dev/null) || {
+		hibernation_conflict=kernel-cmdline:unreadable
+		return 1
+	}
+	scan_cmdline_text kernel-cmdline "$cmdline" || return 1
+	for command_line_file in "$etc_root/kernel/cmdline" "$etc_root/default/grub"; do
+		[ -r "$command_line_file" ] || continue
+		while IFS= read -r line || [ -n "$line" ]; do
+			trimmed=$(printf '%s\n' "$line" | sed 's/^[[:space:]]*//')
+			case "$trimmed" in ''|'#'*) continue ;; esac
+			scan_cmdline_text "$command_line_file" "$trimmed" || return 1
+		done < "$command_line_file"
+	done
+	for resume_file in "$etc_root"/initramfs-tools/conf.d/*; do
+		[ -f "$resume_file" ] && [ ! -L "$resume_file" ] || continue
+		while IFS= read -r line || [ -n "$line" ]; do
+			line=${line%%#*}
+			case "$line" in *RESUME=*)
+				spec=${line#*RESUME=}
+				spec=$(printf '%s\n' "$spec" | tr -d '"' | tr -d "'" | awk '{$1=$1; print}')
+				case "$spec" in *' '*) spec=${spec%% *} ;; esac
+				check_resume_spec "$resume_file" "$spec" || return 1
+				;;
+			esac
+		done < "$resume_file"
+	done
+	resume_sysfs=$sys_root/power/resume
+	if [ -r "$resume_sysfs" ]; then
+		resume_device=$(cat -- "$resume_sysfs" 2>/dev/null | tr -d '[:space:]' || true)
+		case "$resume_device" in ''|0:0) ;; *) check_resume_spec sys-power-resume "$resume_device" || return 1 ;; esac
+	fi
+	return 0
+}
+
+# /proc/swaps is kernel-generated, tab-separated, and may have padded fields.
+# Validate the complete inventory before claiming that there is no live swap;
+# an unreadable, truncated, or malformed inventory is *not* evidence of safety.
+read_swap_inventory()
+{
+	[ -r "$proc_root/swaps" ] || return 1
+	LC_ALL=C awk '
+		function decimal_greater(left, right, normalized_left, normalized_right) {
+			normalized_left = left
+			normalized_right = right
+			sub(/^0+/, "", normalized_left)
+			sub(/^0+/, "", normalized_right)
+			if (normalized_left == "")
+				normalized_left = "0"
+			if (normalized_right == "")
+				normalized_right = "0"
+			if (length(normalized_left) != length(normalized_right))
+				return length(normalized_left) > length(normalized_right)
+			return ("x" normalized_left) > ("x" normalized_right)
+		}
+		NR == 1 {
+			if (NF != 5 || $1 != "Filename" || $2 != "Type" ||
+			    $3 != "Size" || $4 != "Used" || $5 != "Priority")
+				exit 2
+			header_seen = 1
+			next
+		}
+		NF != 5 || ($2 != "partition" && $2 != "file") ||
+		$3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ || $5 !~ /^-?[0-9]+$/ {
+			malformed = 1
+			next
+		}
+		seen_source[$1]++ {
+			malformed = 1
+			next
+		}
+		decimal_greater($4, $3) {
+			malformed = 1
+			next
+		}
+		{ print $1, $2, $3, $4, $5 }
+		END { if (!header_seen || malformed) exit 2 }
+	' "$proc_root/swaps"
+}
+
+swap_inventory_roster()
+{
+	printf '%s\n' "$1" | awk 'NF { print $1, $2, $3, $5 }'
+}
+
+active_swapz_swap()
+{
+	mapper_major_minor=$(path_major_minor "$mapper_path" 2>/dev/null || true)
+	swap_inventory=$(read_swap_inventory) || return 2
+	if printf '%s\n' "$swap_inventory" | while read -r source type size used priority; do
+		[ -n "$source" ] || continue
+		if [ "$source" = "$mapper_path" ] || [ "$source" = /dev/mapper/swapz-primary ]; then
+			exit 10
+		fi
+		source_major_minor=$(path_major_minor "$source" 2>/dev/null || true)
+		# A block swap whose identity cannot be resolved could be a swapz
+		# alias. Do not confuse a valid inventory row with verified absence.
+		if [ "$type" = partition ] && [ -z "$source_major_minor" ]; then
+			exit 11
+		fi
+		if [ -n "$mapper_major_minor" ] && [ "$source_major_minor" = "$mapper_major_minor" ]; then
+			exit 10
+		fi
+		# Classify the captured block identity, never a second resolution of
+		# the mutable source pathname. A by-id/by-UUID alias can change after
+		# path_major_minor(), while /proc/swaps still names the original device.
+		block_sysfs=$sys_root/dev/block/$source_major_minor
+		dm_dir=$block_sysfs/dm
+		dm_name_file=$dm_dir/name
+		case "$source" in
+		/dev/dm-[0-9]*|/dev/mapper/*|"$dev_root"/dm-[0-9]*|"$dev_root"/mapper/*)
+			[ -r "$dm_name_file" ] || exit 11
+			;;
+		esac
+		if [ -r "$dm_name_file" ]; then
+			dm_name=$(cat -- "$dm_name_file" 2>/dev/null) || exit 11
+			[ -n "$dm_name" ] || exit 11
+			[ "$dm_name" = "$mapper_name" ] && exit 10
+		elif [ "$type" = partition ]; then
+			# A captured DM object with an unreadable/missing name is
+			# ambiguous. A missing sysfs object is equally unsafe; only an
+			# existing non-DM block identity proves this swap unrelated.
+			if [ -e "$dm_dir" ] || [ -L "$dm_dir" ]; then
+				exit 11
+			fi
+			[ -e "$block_sysfs" ] || exit 11
+		fi
+	done; then
+		status=0
+	else
+		status=$?
+	fi
+	[ "$status" -eq 10 ] && return 0
+	[ "$status" -eq 0 ] || return 2
+	# Alias resolution happens after the proc snapshot. A changed inventory
+	# cannot prove inactivity because a mutable pathname may now name a
+	# different block device than the active row we just classified.
+	stable_swap_inventory=$(read_swap_inventory) || return 2
+	swap_inventory_rows=$(swap_inventory_roster "$swap_inventory")
+	stable_swap_inventory_rows=$(swap_inventory_roster "$stable_swap_inventory")
+	[ "$stable_swap_inventory_rows" = "$swap_inventory_rows" ] || return 2
+	return 1
+}
+
+hibernate_guard()
+{
+	if ! hibernation_config_check; then
+		echo "swapz-primary-runtime-health: hibernation/resume configuration is unsupported for swapz: $(sanitize_log_text "$hibernation_conflict")" >&2
+		return 1
+	fi
+	if primary_target_configuration_state; then
+		echo "swapz-primary-runtime-health: hibernation is unsupported while a primary swapz target is configured" >&2
+		return 1
+	else
+		status=$?
+		if [ "$status" -eq 2 ]; then
+			echo "swapz-primary-runtime-health: cannot prove primary swapz target configuration absent; refusing hibernation" >&2
+			return 1
+		fi
+	fi
+	if active_swapz_swap; then
+		echo "swapz-primary-runtime-health: hibernation is unsupported while the volatile swapz-primary mapping is active" >&2
+		return 1
+	else
+		status=$?
+		if [ "$status" -eq 2 ]; then
+			echo "swapz-primary-runtime-health: cannot prove swapz-primary inactive; refusing hibernation" >&2
+			return 1
+		fi
+	fi
+	return 0
+}
+
+unit_property()
+{
+	unit=$1
+	property=$2
+	value=$(run_bounded systemctl show --property="$property" --value "$unit" 2>/dev/null) || return $?
+	# Blank or multiline output is untrusted observation, not an inactive unit.
+	case "$value" in ''|*'
+'*) return 2 ;; esac
+	printf '%s\n' "$value"
+}
+
+observe_runtime_unit_property()
+{
+	runtime_unit_property_unit=$1
+	runtime_unit_property_name=$2
+	runtime_unit_property_value=unavailable
+	runtime_unit_property_command_status=0
+	runtime_unit_property_category=probe_failed
+	if runtime_unit_property_raw=$(run_bounded systemctl show --property="$runtime_unit_property_name" --value "$runtime_unit_property_unit" 2>/dev/null); then
+		runtime_unit_property_category=invalid_output
+		case "$runtime_unit_property_raw" in
+		''|*'
+'*) ;;
+		*)
+			runtime_unit_property_value=$runtime_unit_property_raw
+			runtime_unit_property_category=value
+			;;
+		esac
+	else
+		runtime_unit_property_command_status=$?
+	fi
+}
+
+activation_guard()
+{
+	# This is the other half of the hibernation/activation interlock. If
+	# hibernation starts before the configured-target guard can observe the
+	# target, the mapper still refuses to enter a mutating recovery/start
+	# transaction while any hibernation-capable unit is in flight.
+	for sleep_service in systemd-hibernate.service systemd-hybrid-sleep.service systemd-suspend-then-hibernate.service; do
+		load_state=$(unit_property "$sleep_service" LoadState 2>/dev/null) || {
+			echo "swapz-primary-runtime-health: cannot prove $sleep_service is unavailable for primary activation" >&2
+			return 1
+		}
+		case "$load_state" in
+		not-found|masked) continue ;;
+		loaded) ;;
+		*)
+			echo "swapz-primary-runtime-health: cannot trust $sleep_service load state: $(sanitize_log_text "$load_state")" >&2
+			return 1
+			;;
+		esac
+		active_state=$(unit_property "$sleep_service" ActiveState 2>/dev/null) || {
+			echo "swapz-primary-runtime-health: cannot inspect $sleep_service before primary activation" >&2
+			return 1
+		}
+		case "$active_state" in
+		inactive|failed) ;;
+		*)
+			echo "swapz-primary-runtime-health: primary activation refused while $sleep_service state is $(sanitize_log_text "$active_state")" >&2
+			return 1
+			;;
+		esac
+	done
+	return 0
+}
+
+kernel_error_snapshot()
+{
+	kernel_error_count=unavailable
+	kernel_error_latest=unavailable
+	command -v journalctl >/dev/null 2>&1 || return 1
+	# Bound journal work and process memory independently of system uptime.
+	# The DM target keeps cumulative failure counters; this is a recent-error
+	# diagnostic window, not a cumulative all-boot error count.
+	journal=$(run_bounded journalctl --boot=0 --kernel --priority=err..alert --lines=256 --no-pager --output=cat 2>/dev/null) || return 1
+	filtered=$(printf '%s\n' "$journal" | awk '
+		{ lowered = tolower($0) }
+		lowered ~ /swapz|dm-swapz|swapz-primary/ { print }
+	')
+	kernel_error_count=$(printf '%s\n' "$filtered" | awk 'NF { count++ } END { print count + 0 }')
+	if [ "$kernel_error_count" -gt 0 ]; then
+		kernel_error_latest=$(printf '%s\n' "$filtered" | awk 'NF { line=$0 } END { print line }')
+		kernel_error_latest=$(sanitize_log_text "$kernel_error_latest")
+	fi
+	return 0
+}
+
+observe_runtime()
+{
+	failure_reasons=
+	warning_reasons=
+	observation_reasons=
+	selected_partuuid=unavailable
+	selected_major_minor=unavailable
+	selected_path=unavailable
+	active_run=unavailable
+	dm_uuid=unavailable
+	dm_table=unavailable
+	dm_status=unavailable
+	mapper_major_minor=unavailable
+	mapper_table_sectors=unavailable
+	mapper_expected_swap_size_kib=unavailable
+	swap_size_kib=0
+	swap_used_kib=0
+	swap_remaining_kib=0
+	swap_mapper_entries=0
+	swap_total_entries=0
+	mapper_swap_type_state=verified
+	mapper_swap_priority_state=verified
+	mapper_swap_capacity_state=verified
+	swap_occupancy_percent=0
+	mapper_active=unavailable
+	mapper_sub=unavailable
+	mapper_result=unavailable
+	swap_unit_active=unavailable
+	swap_unit_sub=unavailable
+	swap_unit_result=unavailable
+	passive_enablement=unavailable
+	passive_enablement_command_status=0
+	mapper_sub_command_status=0
+	mapper_sub_category=probe_failed
+	swap_unit_sub_command_status=0
+	swap_unit_sub_category=probe_failed
+	failed=unavailable
+	first_error=unavailable
+	flush_err=unavailable
+	segment_discards_failed=unavailable
+	upper_write_completed_err=unavailable
+	endio_write_seen_err=unavailable
+	endio_write_forced_err=unavailable
+	gc_victims=unavailable
+	gc_pages=unavailable
+	gc_no_headroom_skips=unavailable
+	gc_reserve_segments_initial=unavailable
+	gc_reserve_segments_current=unavailable
+	gc_destination_advances=unavailable
+	window_gc_pressure=unavailable
+	kernel_error_count=unavailable
+	kernel_error_latest=unavailable
+	mapper_info_command_status=0
+	mapper_info_observation_state=not_observed
+	mapper_table_command_status=0
+	mapper_status_command_status=0
+	swap_inventory_command_status=0
+	swap_inventory_state=verified
+	swap_inventory_recheck_command_status=0
+	swap_inventory_consistency_state=not_checked
+
+	if manager_target_identity; then
+		if [ ! -e "$selected_path" ]; then
+			append_reason failure_reasons backing_device_unavailable
+		elif active_run=$(active_run_id 2>/dev/null); then
+			:
+		else
+			active_run=unavailable
+			append_reason failure_reasons active_transaction_identity_invalid
+		fi
+	else
+		# A live mapper without provable selected authority is not merely a
+		# missing optional counter: its exact identity cannot be trusted.
+		if [ -e "$mapper_path" ]; then
+			append_reason failure_reasons selected_target_identity_unavailable
+		else
+			append_reason observation_reasons selected_target_identity_unavailable
+		fi
+	fi
+
+	if [ -e "$mapper_path" ]; then
+		mapper_major_minor=$(path_major_minor "$mapper_path" 2>/dev/null || printf 'unavailable')
+		# An alias substituted for /dev/mapper/swapz-primary must never be
+		# mistaken for the mapper merely because its swap inventory matches.
+		mapper_dm_name=unavailable
+		if [ "$mapper_major_minor" != unavailable ] &&
+		   [ -r "$sys_root/dev/block/$mapper_major_minor/dm/name" ]; then
+			mapper_dm_name=$(cat -- "$sys_root/dev/block/$mapper_major_minor/dm/name" 2>/dev/null || printf 'unavailable')
+		fi
+		[ "$mapper_dm_name" = "$mapper_name" ] || append_reason failure_reasons mapper_device_identity_invalid
+		# Valid-looking stdout followed by command failure (including timeout)
+		# is not a complete Device Mapper observation.
+		if dm_uuid_output=$(run_bounded dmsetup info --columns --noheadings --separator '|' -o uuid "$mapper_name" 2>/dev/null); then
+			mapper_info_observation_state=invalid_output
+			case "$dm_uuid_output" in
+			*'
+'*) dm_uuid=unavailable ;;
+			*)
+				dm_uuid=$(printf '%s\n' "$dm_uuid_output" | awk '{ gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }')
+				if [ -n "$dm_uuid" ]; then
+					mapper_info_observation_state=value
+				else
+					dm_uuid=unavailable
+					mapper_info_observation_state=missing_output
+				fi
+				;;
+			esac
+		else
+			mapper_info_command_status=$?
+			mapper_info_observation_state=probe_failed
+			dm_uuid=unavailable
+		fi
+		if dm_table=$(run_bounded dmsetup table "$mapper_name" 2>/dev/null); then
+			:
+		else
+			mapper_table_command_status=$?
+			dm_table=unavailable
+		fi
+		if dm_status=$(run_bounded dmsetup status "$mapper_name" 2>/dev/null); then
+			:
+		else
+			mapper_status_command_status=$?
+			dm_status=unavailable
+		fi
+		[ -n "$dm_uuid" ] || dm_uuid=unavailable
+		[ -n "$dm_table" ] || dm_table=unavailable
+		[ -n "$dm_status" ] || dm_status=unavailable
+		# Missing or malformed dmsetup info is incomplete observation, not a
+		# proven mismatch. Keep observation state separate from the display
+		# sentinel because "unavailable" itself is valid command output.
+		if [ "$mapper_info_observation_state" = value ]; then
+			# A returned name alone is not proof of the kernel DM UUID grammar.
+			if ! printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$'; then
+				append_reason failure_reasons mapper_uuid_invalid
+			fi
+			if [ "$active_run" != unavailable ] &&
+			   [ "$dm_uuid" != "SWAPZ-PRIMARY-$active_run" ]; then
+				append_reason failure_reasons mapper_uuid_not_bound_to_active_run
+			fi
+		else
+			append_reason observation_reasons mapper_uuid_unavailable
+		fi
+		if [ "$dm_table" != unavailable ]; then
+			case "$dm_table" in *'
+'*) append_reason failure_reasons mapper_table_not_single_target ;;
+			esac
+			set -f
+			old_ifs=$IFS
+			IFS=' '
+			# shellcheck disable=SC2086 # DM table fields are intentionally tokenized.
+			set -- $dm_table
+			IFS=$old_ifs
+			set +f
+			# Only the complete production table grammar proves a bound mapper.
+			if [ "$#" -ne 12 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
+			   ! canonical_unsigned "$2" || [ "$2" = 0 ] ||
+			   [ "$5" != 0 ] || [ "$6" != 64 ] || [ "$7" != 0 ] ||
+			   [ "$8" != 2 ] || [ "$9" != 0 ] || [ "${10}" != 1 ] ||
+			   [ "${11}" != 0 ] || [ "${12}" != 0 ]; then
+				append_reason failure_reasons mapper_table_invalid
+			else
+				mapper_table_sectors=$2
+				# /proc/swaps reports usable KiB after the one-page swap header.
+				# Keep this runtime observation identical to the boot verifier's
+				# already-established mapper-to-swap capacity contract.
+				mapper_expected_swap_size_kib=$((mapper_table_sectors / 2 - 4))
+				if [ "$selected_major_minor" != unavailable ] &&
+				   [ "$4" != "$selected_major_minor" ]; then
+					append_reason failure_reasons mapper_backing_identity_mismatch
+				fi
+			fi
+		else
+			append_reason observation_reasons mapper_table_unavailable
+		fi
+		if [ "$dm_status" != unavailable ]; then
+			# DM status must describe one complete swapz target. Do not read
+			# terminal bits from a torn, multiline, or foreign-target record.
+			case "$dm_status" in
+			*'
+'*) append_reason observation_reasons mapper_status_not_single_target; dm_status=unavailable ;;
+			esac
+			if [ "$dm_status" != unavailable ]; then
+				set -f
+				old_ifs=$IFS
+				IFS=' '
+				# shellcheck disable=SC2086 # Validate the DM status token framing.
+				set -- $dm_status
+				IFS=$old_ifs
+				set +f
+				if [ "$#" -lt 4 ] || ! canonical_unsigned "$1" ||
+				   ! canonical_unsigned "$2"; then
+					append_reason observation_reasons mapper_status_invalid
+					dm_status=unavailable
+				elif [ "$1" != 0 ] || [ "$2" = 0 ]; then
+					append_reason failure_reasons mapper_status_geometry_invalid
+					dm_status=unavailable
+				elif [ "$3" != swapz ]; then
+					append_reason failure_reasons mapper_status_target_invalid
+					dm_status=unavailable
+				elif [ "$mapper_table_sectors" != unavailable ] &&
+				     [ "$2" != "$mapper_table_sectors" ]; then
+					# Table and status geometry must agree; unlike independent
+					# completion counters, target geometry is immutable.
+					append_reason failure_reasons mapper_status_geometry_invalid
+					dm_status=unavailable
+				fi
+			fi
+		fi
+		if [ "$dm_status" != unavailable ]; then
+			for token in failed error flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err gc_victims gc_pages gc_no_headroom_skips gc_reserve_segments_initial gc_reserve_segments_current gc_destination_advances window_gc_pressure; do
+				value=$(status_token "$token" "$dm_status")
+				[ -n "$value" ] || value=unavailable
+				case "$token" in
+				failed) failed=$value ;;
+				error) first_error=$value ;;
+				flush_err) flush_err=$value ;;
+				segment_discards_failed) segment_discards_failed=$value ;;
+				upper_write_completed_err) upper_write_completed_err=$value ;;
+				endio_write_seen_err) endio_write_seen_err=$value ;;
+				endio_write_forced_err) endio_write_forced_err=$value ;;
+				gc_victims) gc_victims=$value ;;
+				gc_pages) gc_pages=$value ;;
+				gc_no_headroom_skips) gc_no_headroom_skips=$value ;;
+				gc_reserve_segments_initial) gc_reserve_segments_initial=$value ;;
+				gc_reserve_segments_current) gc_reserve_segments_current=$value ;;
+				gc_destination_advances) gc_destination_advances=$value ;;
+				window_gc_pressure) window_gc_pressure=$value ;;
+				esac
+			done
+			for token_name in flush_err segment_discards_failed upper_write_completed_err endio_write_seen_err endio_write_forced_err; do
+				eval "value=\$$token_name"
+				if [ "$value" = unavailable ]; then
+					append_reason observation_reasons dm_status_counter_unavailable
+				elif ! canonical_unsigned "$value"; then
+					append_reason observation_reasons dm_status_counter_invalid
+				fi
+			done
+			# Monitoring cannot exclude a sustained GC stall when any of its
+			# pressure/progress counters are absent or unparseable.
+			for token_name in gc_victims gc_pages gc_no_headroom_skips window_gc_pressure; do
+				eval "value=\$$token_name"
+				canonical_unsigned "$value" || append_reason observation_reasons gc_progress_telemetry_unavailable
+			done
+			# Missing or malformed terminal-state telemetry is incomplete
+			# evidence, not proof that the target entered a failure state.
+			failed_state_valid=0
+			error_state_valid=0
+			if [ "$failed" = unavailable ] || [ "$first_error" = unavailable ]; then
+				append_reason observation_reasons target_failure_state_unavailable
+			fi
+			case "$failed" in
+			0|1) failed_state_valid=1 ;;
+			unavailable) ;;
+			*) append_reason observation_reasons target_failure_state_invalid ;;
+			esac
+			if [ "$first_error" != unavailable ]; then
+				if canonical_status_error "$first_error"; then
+					error_state_valid=1
+				else
+					append_reason observation_reasons target_failure_state_invalid
+				fi
+			fi
+			if [ "$failed_state_valid" -eq 1 ] && [ "$failed" -eq 1 ]; then
+				append_reason failure_reasons target_failed
+			fi
+			if [ "$error_state_valid" -eq 1 ] && [ "$first_error" != 0 ]; then
+				append_reason failure_reasons first_terminal_error
+			fi
+			[ "$flush_err" = 0 ] || [ "$flush_err" = unavailable ] || append_reason warning_reasons flush_errors
+			[ "$segment_discards_failed" = 0 ] || [ "$segment_discards_failed" = unavailable ] || append_reason warning_reasons lower_discard_errors
+			[ "$upper_write_completed_err" = 0 ] || [ "$upper_write_completed_err" = unavailable ] || append_reason warning_reasons logical_write_errors
+			[ "$endio_write_seen_err" = 0 ] || [ "$endio_write_seen_err" = unavailable ] || append_reason warning_reasons endio_write_errors
+			[ "$endio_write_forced_err" = 0 ] || [ "$endio_write_forced_err" = unavailable ] || append_reason warning_reasons forced_endio_errors
+			if canonical_unsigned "$gc_reserve_segments_initial" 2>/dev/null &&
+			   canonical_unsigned "$gc_reserve_segments_current" 2>/dev/null &&
+			   canonical_unsigned "$gc_destination_advances" 2>/dev/null; then
+				if [ "$gc_reserve_segments_initial" -eq 0 ] ||
+				   [ "$gc_reserve_segments_current" -gt "$gc_reserve_segments_initial" ]; then
+					append_reason failure_reasons gc_reserve_role_count_invalid
+				elif [ "$gc_reserve_segments_current" -eq 0 ]; then
+					append_reason failure_reasons gc_reserve_exhausted
+				elif [ "$gc_reserve_segments_current" -lt "$gc_reserve_segments_initial" ]; then
+					append_reason warning_reasons gc_reserve_degraded
+				fi
+			else
+				append_reason observation_reasons gc_reserve_telemetry_unavailable
+			fi
+		else
+			append_reason observation_reasons mapper_status_unavailable
+		fi
+	else
+		append_reason failure_reasons mapper_missing
+	fi
+
+	if swap_inventory=$(read_swap_inventory); then
+		# Explicitly parse normalized whitespace, including kernel tabs.
+		while read -r source type size used priority; do
+			[ -n "$source" ] || continue
+			swap_total_entries=$((swap_total_entries + 1))
+			# Bind each active block row to the captured identity, not a later
+			# resolution of its possibly changing source pathname.
+			source_identity_command_status=0
+			source_major_minor=$(run_bounded lsblk -dnro MAJ:MIN -- "$source" 2>/dev/null) || source_identity_command_status=$?
+			if [ "$source_identity_command_status" -ne 0 ]; then
+				source_major_minor=
+			else
+				case "$source_major_minor" in
+				*'
+'*|'') source_major_minor= ;;
+				*) printf '%s\n' "$source_major_minor" | grep -Eq '^[0-9]+:[0-9]+$' || source_major_minor= ;;
+				esac
+			fi
+			if [ "$type" = partition ]; then
+				if [ -z "$source_major_minor" ]; then
+					if [ "$swap_inventory_state" = verified ]; then
+						swap_inventory_state=unresolved_block_alias
+						swap_inventory_command_status=$source_identity_command_status
+					fi
+				else
+					if [ "$selected_major_minor" != unavailable ] &&
+					   [ "$source_major_minor" = "$selected_major_minor" ]; then
+						swap_inventory_state=raw_backing_active
+						swap_inventory_command_status=0
+					fi
+					source_sysfs=$sys_root/dev/block/$source_major_minor
+					source_dm_directory=$source_sysfs/dm
+					source_dm_name_file=$source_dm_directory/name
+					if [ -r "$source_dm_name_file" ]; then
+						source_dm_name=$(cat -- "$source_dm_name_file" 2>/dev/null) || source_dm_name=
+						case "$source_dm_name" in
+						*'
+'*) source_dm_name= ;;
+						esac
+						if [ -z "$source_dm_name" ]; then
+							if [ "$swap_inventory_state" = verified ]; then
+								swap_inventory_state=uninspectable_dm_alias
+							fi
+						elif [ "$source_dm_name" = "$mapper_name" ] &&
+						     [ "$source_major_minor" != "$mapper_major_minor" ] &&
+						     [ "$swap_inventory_state" != raw_backing_active ]; then
+							swap_inventory_state=conflicting_dm_identity
+						fi
+					elif [ -e "$source_dm_directory" ] || [ -L "$source_dm_directory" ] ||
+					     [ ! -e "$source_sysfs" ]; then
+						if [ "$swap_inventory_state" = verified ]; then
+							swap_inventory_state=uninspectable_dm_alias
+						fi
+					else
+						case "$source" in
+						/dev/dm-[0-9]*|/dev/mapper/*|"$dev_root"/dm-[0-9]*|"$dev_root"/mapper/*)
+							if [ "$swap_inventory_state" = verified ]; then
+								swap_inventory_state=uninspectable_dm_alias
+							fi
+							;;
+						esac
+					fi
+				fi
+			fi
+			if [ "$source" = "$mapper_path" ] || [ "$source" = /dev/mapper/swapz-primary ] || { [ "$mapper_major_minor" != unavailable ] && [ "$source_major_minor" = "$mapper_major_minor" ]; }; then
+				swap_mapper_entries=$((swap_mapper_entries + 1))
+				# A matching alias is not sufficient: the native manager activates
+				# only a partition swap at priority -1.
+				if [ "$type" != partition ]; then
+					mapper_swap_type_state=invalid
+					append_reason failure_reasons mapper_swap_type_invalid
+				fi
+				if [ "$priority" != -1 ]; then
+					mapper_swap_priority_state=invalid
+					append_reason failure_reasons mapper_swap_priority_invalid
+				fi
+				if canonical_unsigned "$size" && canonical_unsigned "$used" && [ "$used" -le "$size" ]; then
+					swap_size_kib=$size
+					swap_used_kib=$used
+					swap_remaining_kib=$((size - used))
+					swap_occupancy_percent=$(awk -v used="$used" -v size="$size" 'BEGIN { if (size > 0) printf "%d", (used * 100) / size; else print 0 }')
+					if [ "$mapper_expected_swap_size_kib" != unavailable ] &&
+					   [ "$size" -ne "$mapper_expected_swap_size_kib" ]; then
+						mapper_swap_capacity_state=invalid
+						append_reason failure_reasons mapper_swap_capacity_invalid
+					fi
+				else
+					append_reason observation_reasons swap_accounting_invalid
+				fi
+			fi
+		done <<EOF
+$swap_inventory
+EOF
+		[ "$swap_mapper_entries" -eq 1 ] || append_reason failure_reasons mapper_swap_inventory_invalid
+		case "$swap_inventory_state" in
+		raw_backing_active) append_reason failure_reasons raw_backing_swap_active ;;
+		conflicting_dm_identity) append_reason failure_reasons conflicting_swap_mapper_identity ;;
+		verified) ;;
+		*) append_reason observation_reasons swap_block_identity_unavailable ;;
+		esac
+		[ "$swap_occupancy_percent" -lt 90 ] || append_reason warning_reasons swap_capacity_low
+		swap_inventory_consistency_state=stable
+		if stable_swap_inventory=$(read_swap_inventory); then
+			swap_inventory_rows=$(swap_inventory_roster "$swap_inventory")
+			stable_swap_inventory_rows=$(swap_inventory_roster "$stable_swap_inventory")
+			if [ "$stable_swap_inventory_rows" != "$swap_inventory_rows" ]; then
+				swap_inventory_consistency_state=changed_during_observation
+				append_reason observation_reasons swap_inventory_changed_during_observation
+			fi
+		else
+			swap_inventory_recheck_command_status=$?
+			swap_inventory_consistency_state=recheck_unavailable_or_invalid
+			append_reason observation_reasons swap_inventory_recheck_unavailable_or_invalid
+		fi
+	else
+		swap_inventory_command_status=$?
+		swap_inventory_state=unavailable_or_invalid
+		append_reason observation_reasons swap_inventory_unavailable_or_invalid
+	fi
+
+	# The passive .swap may describe an already-active mapper, but must
+	# never be enabled as an independent activation job.
+	if passive_enablement=$(run_bounded systemctl is-enabled "$mapper_swap_unit" 2>/dev/null); then
+		:
+	else
+		passive_enablement_command_status=$?
+	fi
+	# systemctl is-enabled deliberately uses nonzero for disabled states. Bind
+	# the textual state to its documented exit so partial output after timeout
+	# or another probe failure cannot prove that the passive unit is safe.
+	case "$passive_enablement:$passive_enablement_command_status" in
+	static:0|disabled:1) ;;
+	enabled:0|enabled-runtime:0|alias:0|linked:1|linked-runtime:1)
+		append_reason failure_reasons passive_swap_unit_enabled
+		;;
+	*)
+		append_reason observation_reasons passive_swap_enablement_unavailable
+		;;
+	esac
+	mapper_active=$(unit_property "$mapper_service" ActiveState 2>/dev/null || printf 'unavailable')
+	observe_runtime_unit_property "$mapper_service" SubState
+	mapper_sub=$runtime_unit_property_value
+	mapper_sub_command_status=$runtime_unit_property_command_status
+	mapper_sub_category=$runtime_unit_property_category
+	mapper_result=$(unit_property "$mapper_service" Result 2>/dev/null || printf 'unavailable')
+	swap_unit_active=$(unit_property "$mapper_swap_unit" ActiveState 2>/dev/null || printf 'unavailable')
+	observe_runtime_unit_property "$mapper_swap_unit" SubState
+	swap_unit_sub=$runtime_unit_property_value
+	swap_unit_sub_command_status=$runtime_unit_property_command_status
+	swap_unit_sub_category=$runtime_unit_property_category
+	swap_unit_result=$(unit_property "$mapper_swap_unit" Result 2>/dev/null || printf 'unavailable')
+	case "$mapper_active" in
+	active) ;;
+	unavailable) append_reason observation_reasons mapper_service_state_unavailable ;;
+	*) append_reason failure_reasons mapper_service_not_active ;;
+	esac
+	case "$swap_unit_active" in
+	active) ;;
+	unavailable) append_reason observation_reasons passive_swap_unit_state_unavailable ;;
+	*) append_reason failure_reasons passive_swap_unit_not_active ;;
+	esac
+	# The oneshot mapper remains active/exited; the passive swap is active/active.
+	# Contradictory observed substates must not pass, but missing telemetry is
+	# not itself evidence that either service actually failed.
+	case "$mapper_sub_category" in
+	value)
+		[ "$mapper_sub" = exited ] || append_reason failure_reasons mapper_service_substate_invalid
+		;;
+	invalid_output) append_reason observation_reasons mapper_service_substate_telemetry_invalid ;;
+	probe_failed) append_reason observation_reasons mapper_service_substate_unavailable ;;
+	esac
+	case "$swap_unit_sub_category" in
+	value)
+		[ "$swap_unit_sub" = active ] || append_reason failure_reasons passive_swap_unit_substate_invalid
+		;;
+	invalid_output) append_reason observation_reasons passive_swap_unit_substate_telemetry_invalid ;;
+	probe_failed) append_reason observation_reasons passive_swap_unit_substate_unavailable ;;
+	esac
+	case "$mapper_result" in
+	success) ;;
+	unavailable) append_reason observation_reasons mapper_service_result_unavailable ;;
+	*) append_reason failure_reasons mapper_service_failed ;;
+	esac
+	case "$swap_unit_result" in
+	success) ;;
+	unavailable) append_reason observation_reasons passive_swap_unit_result_unavailable ;;
+	*) append_reason failure_reasons passive_swap_unit_failed ;;
+	esac
+
+	if ! hibernation_config_check; then
+		append_reason failure_reasons hibernation_resume_configuration_conflict
+	fi
+	if ! kernel_error_snapshot; then
+		append_reason observation_reasons kernel_log_unavailable
+	elif [ "$kernel_error_count" -gt 0 ]; then
+		append_reason warning_reasons relevant_kernel_errors
+	fi
+
+	if [ -n "$failure_reasons" ]; then
+		health_state=FAIL
+	elif [ -n "$observation_reasons" ]; then
+		health_state=DEGRADED
+	elif [ -n "$warning_reasons" ]; then
+		health_state=WARN
+	else
+		health_state=HEALTHY
+	fi
+}
+
+# Log only classified, bounded observer diagnostics; never emit device paths,
+# probe output, private transaction data, or unbounded journal content.
+log_observer_diagnostic()
+{
+	printf 'SWAPZ_RUNTIME_OBSERVER phase=%s expected=%s observed=%s command=%s command_status=%s identity_mismatch=%s service_state=%s next=%s check=%s\n' \
+		"$1" "$2" "$3" "$4" "$5" "${7:-none}" "${8:-not_applicable}" "$6" "${9:-$1}" >&2
+}
+
+log_runtime_state()
+{
+	printf 'SWAPZ_RUNTIME_HEALTH=%s failures=%s warnings=%s observation_errors=%s partuuid=%s backing=%s mapper_uuid=%s swap_used_kib=%s swap_size_kib=%s swap_remaining_kib=%s swap_occupancy_percent=%s failed=%s first_error=%s flush_err=%s logical_write_err=%s endio_write_err=%s forced_endio_err=%s lower_discard_err=%s gc_victims=%s gc_pages=%s gc_reserve_segments_initial=%s gc_reserve_segments_current=%s gc_destination_advances=%s gc_stall_polls=%s mapper_unit=%s/%s/%s swap_unit=%s/%s/%s kernel_error_count=%s\n' \
+		"$health_state" "${failure_reasons:-none}" "${warning_reasons:-none}" "${observation_reasons:-none}" \
+		"$selected_partuuid" "$selected_major_minor" "$dm_uuid" "$swap_used_kib" "$swap_size_kib" \
+		"$swap_remaining_kib" "$swap_occupancy_percent" "$failed" "$first_error" "$flush_err" \
+		"$upper_write_completed_err" "$endio_write_seen_err" "$endio_write_forced_err" \
+		"$segment_discards_failed" "$gc_victims" "$gc_pages" \
+		"$gc_reserve_segments_initial" "$gc_reserve_segments_current" "$gc_destination_advances" "$gc_stall_polls" \
+		"$mapper_active" "$mapper_sub" "$mapper_result" "$swap_unit_active" "$swap_unit_sub" "$swap_unit_result" \
+		"$kernel_error_count" >&2
+	if [ "$mapper_info_command_status" -ne 0 ]; then
+		log_observer_diagnostic mapper_info run_bound_uuid probe_failed dmsetup_info "$mapper_info_command_status" inspect_dmsetup_info_read_only
+	else
+		case "$mapper_info_observation_state" in
+		missing_output)
+			log_observer_diagnostic mapper_info run_bound_uuid missing_uuid dmsetup_info 0 inspect_dmsetup_info_read_only
+			;;
+		invalid_output)
+			log_observer_diagnostic mapper_info run_bound_uuid invalid_output dmsetup_info 0 inspect_dmsetup_info_read_only
+			;;
+		esac
+	fi
+	case ",$failure_reasons," in
+	*,mapper_uuid_invalid,*|*,mapper_uuid_not_bound_to_active_run,*)
+		log_observer_diagnostic mapper_identity run_bound_uuid mismatched_uuid dmsetup_info 0 inspect_dmsetup_info_read_only bound observed
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,first_terminal_error,*)
+		# Only a validated signed kernel errno may enter public diagnostics.
+		log_observer_diagnostic target_terminal first_error_zero "$first_error" dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed first_error
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_status_geometry_invalid,*)
+		log_observer_diagnostic mapper_status_geometry matching_dm_table_geometry contradictory_geometry dmsetup_status "$mapper_status_command_status" inspect_dmsetup_table_and_status_read_only none observed
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_status_target_invalid,*)
+		log_observer_diagnostic mapper_status_target swapz_target foreign_target dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only bound observed
+		;;
+	esac
+	if [ "$mapper_table_command_status" -ne 0 ]; then
+		log_observer_diagnostic mapper_table single_bound_table probe_failed dmsetup_table "$mapper_table_command_status" inspect_dmsetup_table_read_only
+	fi
+	if [ "$mapper_status_command_status" -ne 0 ]; then
+		log_observer_diagnostic mapper_status single_complete_status probe_failed dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only
+	fi
+	if [ "$mapper_swap_type_state" = invalid ]; then
+		log_observer_diagnostic swap_inventory_type partition unexpected_type read_swap_inventory 0 inspect_proc_swaps_read_only none observed
+	fi
+	if [ "$mapper_swap_priority_state" = invalid ]; then
+		log_observer_diagnostic swap_inventory_priority minus_one unexpected_priority read_swap_inventory 0 inspect_proc_swaps_read_only none observed
+	fi
+	if [ "$mapper_swap_capacity_state" = invalid ]; then
+		log_observer_diagnostic swap_inventory_capacity dm_geometry_minus_4kib_header unexpected_capacity read_swap_inventory 0 inspect_proc_swaps_and_dm_table_read_only none observed
+	fi
+	case "$swap_inventory_state" in
+	raw_backing_active|conflicting_dm_identity)
+		log_observer_diagnostic swap_inventory single_primary_mapper "$swap_inventory_state" lsblk "$swap_inventory_command_status" inspect_proc_swaps_and_sysfs_read_only
+		;;
+	unresolved_block_alias|uninspectable_dm_alias)
+		log_observer_diagnostic swap_inventory resolved_block_identity "$swap_inventory_state" lsblk "$swap_inventory_command_status" inspect_proc_swaps_and_sysfs_read_only
+		;;
+	unavailable_or_invalid)
+		log_observer_diagnostic swap_inventory complete_five_column_inventory "$swap_inventory_state" read_swap_inventory "$swap_inventory_command_status" inspect_proc_swaps_read_only
+		;;
+	esac
+	case "$passive_enablement:$passive_enablement_command_status" in
+	static:0|disabled:1) ;;
+	enabled:0|enabled-runtime:0|alias:0|linked:1|linked-runtime:1)
+		log_observer_diagnostic passive_swap_enablement static_or_disabled activation_capable systemctl_is_enabled "$passive_enablement_command_status" inspect_systemctl_is_enabled_read_only none observed
+		;;
+	:[1-9]*)
+		log_observer_diagnostic passive_swap_enablement static_or_disabled probe_failed systemctl_is_enabled "$passive_enablement_command_status" inspect_systemctl_is_enabled_read_only none inferred
+		;;
+	*)
+		log_observer_diagnostic passive_swap_enablement static_or_disabled inconsistent_or_invalid systemctl_is_enabled "$passive_enablement_command_status" inspect_systemctl_is_enabled_read_only none observed
+		;;
+	esac
+	case "$mapper_sub_category" in
+	value)
+		[ "$mapper_sub" = exited ] || log_observer_diagnostic mapper_service_substate exited incompatible_substate systemctl_show 0 inspect_systemctl_show_read_only none observed
+		;;
+	invalid_output) log_observer_diagnostic mapper_service_substate exited invalid_output systemctl_show 0 inspect_systemctl_show_read_only none observed ;;
+	probe_failed) log_observer_diagnostic mapper_service_substate exited probe_failed systemctl_show "$mapper_sub_command_status" inspect_systemctl_show_read_only none inferred ;;
+	esac
+	case "$swap_unit_sub_category" in
+	value)
+		[ "$swap_unit_sub" = active ] || log_observer_diagnostic passive_swap_unit_substate active incompatible_substate systemctl_show 0 inspect_systemctl_show_read_only none observed
+		;;
+	invalid_output) log_observer_diagnostic passive_swap_unit_substate active invalid_output systemctl_show 0 inspect_systemctl_show_read_only none observed ;;
+	probe_failed) log_observer_diagnostic passive_swap_unit_substate active probe_failed systemctl_show "$swap_unit_sub_command_status" inspect_systemctl_show_read_only none inferred ;;
+	esac
+	case "$swap_inventory_consistency_state" in
+	changed_during_observation)
+		log_observer_diagnostic swap_inventory_stability stable_complete_inventory "$swap_inventory_consistency_state" read_swap_inventory "$swap_inventory_recheck_command_status" repeat_read_only_observation
+		;;
+	recheck_unavailable_or_invalid)
+		log_observer_diagnostic swap_inventory_stability stable_complete_inventory "$swap_inventory_consistency_state" read_swap_inventory "$swap_inventory_recheck_command_status" inspect_proc_swaps_read_only
+		;;
+	esac
+	if [ "$kernel_error_latest" != unavailable ] && [ "$kernel_error_latest" != "${previous_kernel_error_latest:-unavailable}" ]; then
+		# Journal text is untrusted and can contain private recovery/config paths.
+		log_observer_diagnostic kernel_log no_relevant_kernel_errors relevant_kernel_errors journalctl 0 inspect_kernel_journal_read_only none observed
+	fi
+	previous_kernel_error_latest=$kernel_error_latest
+}
+
+run_once()
+{
+	gc_stall_polls=0
+	observe_runtime
+	log_runtime_state
+	case "$health_state" in
+	HEALTHY|WARN) return 0 ;;
+	DEGRADED) return 2 ;;
+	FAIL) return 1 ;;
+	esac
+	return 2
+}
+
+stop_observe()
+{
+	mapper_present=0
+	active_swap=0
+	[ ! -e "$mapper_path" ] || mapper_present=1
+	if active_swapz_swap; then active_swap=1; else status=$?; [ "$status" -ne 2 ] || active_swap=1; fi
+	if [ "$mapper_present" -ne 0 ] || [ "$active_swap" -ne 0 ]; then
+		printf 'SWAPZ_RUNTIME_STOP=FAIL reason=swap_or_mapper_still_present mapper_present=%s active_swap=%s action=none operator_next=inspect_failed_primary_stop_no_retry\n' "$mapper_present" "$active_swap" >&2
+		return 1
+	fi
+	return 0
+}
+
+monitor_loop()
+{
+	previous_signature=
+	previous_gc_victims=unavailable
+	previous_gc_pages=unavailable
+	previous_gc_pressure=unavailable
+	previous_gc_no_headroom=unavailable
+	previous_kernel_error_latest=unavailable
+	gc_stall_polls=0
+	stop_required_latched=0
+	stop_required_reported=0
+	poll_count=0
+	while :; do
+		observe_runtime
+		pressure_advanced=0
+		if canonical_unsigned "$window_gc_pressure" 2>/dev/null && canonical_unsigned "$previous_gc_pressure" 2>/dev/null && [ "$window_gc_pressure" -gt "$previous_gc_pressure" ]; then pressure_advanced=1; fi
+		if canonical_unsigned "$gc_no_headroom_skips" 2>/dev/null && canonical_unsigned "$previous_gc_no_headroom" 2>/dev/null && [ "$gc_no_headroom_skips" -gt "$previous_gc_no_headroom" ]; then pressure_advanced=1; fi
+		gc_progress=0
+		if canonical_unsigned "$gc_victims" 2>/dev/null && canonical_unsigned "$previous_gc_victims" 2>/dev/null && [ "$gc_victims" -gt "$previous_gc_victims" ]; then gc_progress=1; fi
+		if canonical_unsigned "$gc_pages" 2>/dev/null && canonical_unsigned "$previous_gc_pages" 2>/dev/null && [ "$gc_pages" -gt "$previous_gc_pages" ]; then gc_progress=1; fi
+		if [ "$pressure_advanced" -eq 1 ] && [ "$gc_progress" -eq 0 ]; then
+			gc_stall_polls=$((gc_stall_polls + 1))
+		else
+			gc_stall_polls=0
+		fi
+		if [ "$gc_stall_polls" -ge "$stall_poll_threshold" ]; then
+			stop_required_latched=1
+		fi
+		if [ "$stop_required_latched" -eq 1 ]; then
+			append_reason failure_reasons sustained_gc_stall
+			health_state=FAIL
+			if [ "$stop_required_reported" -eq 0 ]; then
+				printf '%s\n' 					'SWAPZ_RUNTIME_STOP_REQUIRED=1 reason=sustained_gc_stall action=normal_primary_stop_required' >&2
+				stop_required_reported=1
+			fi
+		fi
+		if [ "$swap_occupancy_percent" -ge 95 ]; then
+			capacity_bucket=critical
+		elif [ "$swap_occupancy_percent" -ge 90 ]; then
+			capacity_bucket=low
+		elif [ "$swap_occupancy_percent" -ge 75 ]; then
+			capacity_bucket=busy
+		else
+			capacity_bucket=normal
+		fi
+		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$passive_enablement\|$passive_enablement_command_status\|$mapper_sub\|$mapper_sub_category\|$swap_unit_sub\|$swap_unit_sub_category\|$mapper_sub_command_status\|$swap_unit_sub_command_status\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_info_observation_state\|$mapper_table_command_status\|$mapper_status_command_status
+		if [ "$signature" != "$previous_signature" ]; then
+			log_runtime_state
+			previous_signature=$signature
+		fi
+		previous_gc_victims=$gc_victims
+		previous_gc_pages=$gc_pages
+		previous_gc_pressure=$window_gc_pressure
+		previous_gc_no_headroom=$gc_no_headroom_skips
+		poll_count=$((poll_count + 1))
+		if [ "$max_polls" -gt 0 ] && [ "$poll_count" -ge "$max_polls" ]; then
+			return 0
+		fi
+		sleep "$poll_seconds"
+	done
+}
+
+case "$mode" in
+activation-guard)
+	activation_guard
+	;;
+hibernation-config-check)
+	if hibernation_config_check; then
+		exit 0
+	fi
+	echo "swapz-primary-runtime-health: unsupported hibernation/resume target: $(sanitize_log_text "$hibernation_conflict")" >&2
+	exit 1
+	;;
+hibernate-guard)
+	hibernate_guard
+	;;
+stop-observe)
+	stop_observe
+	;;
+once)
+	run_once
+	;;
+monitor)
+	monitor_loop
+	;;
+esac

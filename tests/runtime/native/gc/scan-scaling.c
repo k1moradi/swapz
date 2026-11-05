@@ -1,0 +1,567 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#define _POSIX_C_SOURCE 200809L
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "gc-cost.h"
+
+#define REPEATS 7U
+#define GEOMETRIES 4U
+#define KERNEL_PROOF_RESCHED_INTERVAL_ENTRIES 4096U
+
+struct scale_row {
+	swapz_u32 logical_pages;
+	swapz_u32 segments;
+	uint64_t legacy_score_scan_ns;
+	uint64_t incremental_select_ns;
+	uint64_t relocation_scan_ns;
+	uint64_t relocation_list_ns;
+	uint64_t legacy_dead_probe_ns;
+	uint64_t authoritative_negative_scan_ns;
+	uint64_t authoritative_negative_scan_worst_ns;
+	uint64_t mapped_touch_control_ns;
+	uint64_t map_bytes;
+	uint64_t mapped_dead_probe_ns;
+	swapz_u32 victim_records;
+};
+
+static volatile uint64_t evidence_sink;
+
+static uint64_t now_ns(void)
+{
+	struct timespec ts;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &ts))
+		return 0;
+	return (uint64_t)ts.tv_sec * UINT64_C(1000000000) +
+	       (uint64_t)ts.tv_nsec;
+}
+
+static int compare_u64(const void *left, const void *right)
+{
+	uint64_t a = *(const uint64_t *)left;
+	uint64_t b = *(const uint64_t *)right;
+
+	return (a > b) - (a < b);
+}
+
+static uint64_t median_ns(uint64_t values[REPEATS])
+{
+	qsort(values, REPEATS, sizeof(values[0]), compare_u64);
+	return values[REPEATS / 2U];
+}
+
+static uint64_t legacy_score_scan(const struct swapz_map *maps,
+				  swapz_u32 logical_pages,
+				  swapz_u32 segments,
+				  swapz_u32 *bytes,
+				  swapz_u32 *io,
+				  swapz_u16 *counts,
+				  swapz_u16 *min_blocks)
+{
+	swapz_u32 logical;
+	uint64_t start;
+
+	memset(bytes, 0, (size_t)segments * sizeof(*bytes));
+	memset(io, 0, (size_t)segments * sizeof(*io));
+	memset(counts, 0, (size_t)segments * sizeof(*counts));
+	memset(min_blocks, 0, (size_t)segments * sizeof(*min_blocks));
+	start = now_ns();
+	for (logical = 0; logical < logical_pages; ++logical) {
+		const struct swapz_map *m = &maps[logical];
+		swapz_u32 segment = m->start_block / SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 live = swapz_gc_live_byte_cost(m);
+		swapz_u32 io_cost = swapz_gc_estimated_io_cost(m);
+
+		bytes[segment] += live;
+		io[segment] += io_cost;
+		counts[segment]++;
+		min_blocks[segment] += swapz_gc_min_live_blocks(m);
+	}
+	evidence_sink += bytes[segments / 2U] + io[segments / 2U] +
+			 counts[segments / 2U] + min_blocks[segments / 2U];
+	return now_ns() - start;
+}
+
+static uint64_t incremental_select(swapz_u32 segments,
+				   const swapz_u32 *bytes,
+				   const swapz_u32 *io,
+				   const swapz_u16 *counts,
+				   const swapz_u16 *min_blocks)
+{
+	swapz_u32 segment, selected = ~(swapz_u32)0;
+	swapz_u32 best = ~(swapz_u32)0;
+	swapz_u16 best_count = ~(swapz_u16)0;
+	uint64_t start = now_ns();
+
+	for (segment = 0; segment < segments; ++segment) {
+		swapz_u16 count = counts[segment];
+		swapz_u32 score;
+
+		if (!count ||
+		    !swapz_gc_candidate_can_free_block(bytes[segment],
+						       min_blocks[segment]))
+			continue;
+		score = io[segment];
+		if (swapz_gc_prefer(score, count, best, best_count)) {
+			best = score;
+			best_count = count;
+			selected = segment;
+		}
+	}
+	evidence_sink += selected + best + best_count;
+	return now_ns() - start;
+}
+
+static uint64_t relocation_scan(const struct swapz_map *maps,
+				swapz_u32 logical_pages,
+				swapz_u32 victim,
+				swapz_u32 *records_out)
+{
+	swapz_u32 logical, records = 0;
+	uint64_t start = now_ns();
+
+	for (logical = 0; logical < logical_pages; ++logical)
+		records += maps[logical].valid &&
+			maps[logical].start_block / SWAPZ_SEGMENT_BLOCKS == victim;
+	evidence_sink += records;
+	*records_out = records;
+	return now_ns() - start;
+}
+
+static uint64_t relocation_list_scan(const struct swapz_map *maps,
+				     const swapz_u32 *first_page,
+				     const swapz_u32 *next_page,
+				     swapz_u32 logical_pages,
+				     swapz_u32 victim,
+				     swapz_u32 *records_out)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	swapz_u32 logical = first_page[victim], records = 0;
+	uint64_t start = now_ns();
+
+	while (logical != none) {
+		const struct swapz_map *m;
+
+		if (logical >= logical_pages || records >= logical_pages) {
+			*records_out = ~(swapz_u32)0;
+			return 0;
+		}
+		m = &maps[logical];
+		if (!m->valid ||
+		    m->start_block / SWAPZ_SEGMENT_BLOCKS != victim) {
+			*records_out = ~(swapz_u32)0;
+			return 0;
+		}
+		records++;
+		logical = next_page[logical];
+	}
+	evidence_sink += records;
+	*records_out = records;
+	return now_ns() - start;
+}
+
+static uint64_t legacy_dead_probe(const swapz_u16 *live_records,
+				 const swapz_u8 *extent_classes,
+				 const swapz_u32 *mapped_pages,
+				 swapz_u32 segments, swapz_u32 *selected_out)
+{
+	swapz_u32 segment;
+	uint64_t start = now_ns();
+
+	*selected_out = ~(swapz_u32)0;
+	for (segment = 0; segment < segments; ++segment) {
+		swapz_u32 block = segment * SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 off, live_total = 0, used = 0;
+
+		for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
+			live_total += live_records[block + off];
+			used += extent_classes[block + off] != 0;
+		}
+		if (live_total != mapped_pages[segment])
+			return 0;
+		if (live_total)
+			continue;
+		*selected_out = segment;
+		evidence_sink += used;
+		break;
+	}
+	evidence_sink += *selected_out;
+	return now_ns() - start;
+}
+
+static uint64_t mapped_dead_probe(const swapz_u16 *live_records,
+				 const swapz_u8 *extent_classes,
+				 const swapz_u32 *mapped_pages,
+				 swapz_u32 segments, swapz_u32 *selected_out)
+{
+	swapz_u32 segment;
+	uint64_t start = now_ns();
+
+	*selected_out = ~(swapz_u32)0;
+	for (segment = 0; segment < segments; ++segment) {
+		swapz_u32 block, off, live_total = 0, used = 0;
+
+		if (mapped_pages[segment])
+			continue;
+		block = segment * SWAPZ_SEGMENT_BLOCKS;
+		for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
+			live_total += live_records[block + off];
+			used += extent_classes[block + off] != 0;
+		}
+		if (live_total)
+			return 0;
+		*selected_out = segment;
+		evidence_sink += used;
+		break;
+	}
+	evidence_sink += *selected_out;
+	return now_ns() - start;
+}
+
+
+/*
+ * Model the no-reference, successful production ownership proof. This is
+ * an OFFLINE host-memory model, not the production entry point: the matched
+ * actual production-C claim is timed in mapping/authority-throughput.c.
+ * This model also performs the current map-indexed extent-class/liveness
+ * authentication. The candidate begins immediately after the mapped
+ * foreground range.
+ */
+static uint64_t authoritative_negative_scan(const struct swapz_map *maps,
+					     const swapz_u16 *live_records,
+					     const swapz_u8 *extent_classes,
+					     swapz_u32 logical_pages,
+					     int *safe)
+{
+	const swapz_u32 candidate_start = logical_pages;
+	const swapz_u32 physical_blocks =
+		logical_pages + SWAPZ_SEGMENT_BLOCKS;
+	swapz_u32 logical;
+	uint64_t start = now_ns();
+
+	*safe = 0;
+	for (logical = 0; logical < logical_pages; ++logical) {
+		const struct swapz_map *map = &maps[logical];
+		swapz_u32 end_block;
+
+		if (!map->valid)
+			continue;
+		if (map->start_block >= physical_blocks ||
+		    (map->extent_blocks != 1 && map->extent_blocks != 2 &&
+		     map->extent_blocks != 4) ||
+		    map->extent_blocks > physical_blocks - map->start_block ||
+		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+		    extent_classes[map->start_block] != map->extent_blocks ||
+		    !live_records[map->start_block])
+			return now_ns() - start;
+		/* Mirror production's recovery-only interior-block rejection. */
+		for (swapz_u8 block_offset = 1U;
+		     block_offset < map->extent_blocks; ++block_offset)
+			if (extent_classes[map->start_block + block_offset] ||
+			    live_records[map->start_block + block_offset])
+				return now_ns() - start;
+		end_block = map->start_block + map->extent_blocks;
+		if (map->start_block < physical_blocks &&
+		    end_block > candidate_start)
+			return now_ns() - start;
+	}
+	*safe = 1;
+	evidence_sink += logical_pages;
+	return now_ns() - start;
+}
+
+/* Matched map + physical-sidecar touches without ownership validation. */
+static uint64_t mapped_touch_control(const struct swapz_map *maps,
+				      const swapz_u16 *live_records,
+				      const swapz_u8 *extent_classes,
+				      swapz_u32 logical_pages,
+				      swapz_u32 physical_blocks)
+{
+	swapz_u32 logical;
+	uint64_t touched = 0;
+	uint64_t start = now_ns();
+
+	for (logical = 0; logical < logical_pages; ++logical) {
+		const struct swapz_map *map = &maps[logical];
+
+		if (!map->valid)
+			continue;
+		if (map->start_block >= physical_blocks)
+			return 0;
+		touched += live_records[map->start_block] &&
+			   extent_classes[map->start_block] ==
+				   map->extent_blocks;
+	}
+	evidence_sink += touched;
+	return now_ns() - start;
+}
+
+static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
+{
+	swapz_u32 segments = logical_pages / SWAPZ_SEGMENT_BLOCKS;
+	swapz_u32 physical_blocks;
+	struct swapz_map *maps = NULL;
+	swapz_u32 *bytes = NULL, *io = NULL, *mapped_pages = NULL;
+	swapz_u32 *first_page = NULL, *last_page = NULL;
+	swapz_u32 *prev_page = NULL, *next_page = NULL;
+	swapz_u16 *counts = NULL, *min_blocks = NULL, *live_records = NULL;
+	swapz_u8 *extent_classes = NULL;
+	uint64_t legacy[REPEATS], select[REPEATS], relocation[REPEATS];
+	uint64_t relocation_list[REPEATS];
+	uint64_t legacy_probe[REPEATS], mapped_probe[REPEATS];
+	uint64_t authoritative_scan[REPEATS], touch_control[REPEATS];
+	uint64_t authoritative_worst_ns = 0;
+	swapz_u32 logical, repeat, records = 0, list_records = 0, selected = 0;
+	int safe;
+	int rc = 1;
+
+	if (!segments || logical_pages % SWAPZ_SEGMENT_BLOCKS ||
+	    logical_pages > ~(swapz_u32)0 - SWAPZ_SEGMENT_BLOCKS)
+		return 1;
+	physical_blocks = logical_pages + SWAPZ_SEGMENT_BLOCKS;
+	maps = calloc(logical_pages, sizeof(*maps));
+	bytes = calloc(segments, sizeof(*bytes));
+	io = calloc(segments, sizeof(*io));
+	counts = calloc(segments, sizeof(*counts));
+	min_blocks = calloc(segments, sizeof(*min_blocks));
+	mapped_pages = calloc(segments, sizeof(*mapped_pages));
+	first_page = malloc((size_t)segments * sizeof(*first_page));
+	last_page = malloc((size_t)segments * sizeof(*last_page));
+	prev_page = malloc((size_t)logical_pages * sizeof(*prev_page));
+	next_page = malloc((size_t)logical_pages * sizeof(*next_page));
+	live_records = calloc(physical_blocks, sizeof(*live_records));
+	extent_classes = calloc(physical_blocks, sizeof(*extent_classes));
+	if (!maps || !bytes || !io || !counts || !min_blocks ||
+	    !mapped_pages || !first_page || !last_page || !prev_page ||
+	    !next_page || !live_records || !extent_classes)
+		goto out;
+	memset(first_page, 0xff, (size_t)segments * sizeof(*first_page));
+	memset(last_page, 0xff, (size_t)segments * sizeof(*last_page));
+	memset(prev_page, 0xff, (size_t)logical_pages * sizeof(*prev_page));
+	memset(next_page, 0xff, (size_t)logical_pages * sizeof(*next_page));
+
+	for (logical = 0; logical < logical_pages; ++logical) {
+		swapz_u32 segment = logical / SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 last = last_page[segment];
+
+		maps[logical] = (struct swapz_map){
+			.start_block = logical,
+			.payload_length = (swapz_u16)(1800U + logical % 401U),
+			.extent_blocks = 1,
+			.valid = 1,
+		};
+		prev_page[logical] = last;
+		if (last == ~(swapz_u32)0)
+			first_page[segment] = logical;
+		else
+			next_page[last] = logical;
+		last_page[segment] = logical;
+	}
+	/*
+	 * Near-full allocator geometry: every segment except the final one has
+	 * one authoritative start block. The old probe touches all 256 block
+	 * entries before consulting mapped_pages; current policy rejects live
+	 * segments from the O(1) sidecar and scans only the zero-mapped candidate.
+	 */
+	for (logical = 0; logical + 1U < segments; ++logical) {
+		swapz_u32 block = logical * SWAPZ_SEGMENT_BLOCKS;
+
+		mapped_pages[logical] = 1;
+		live_records[block] = 1;
+		extent_classes[block] = 1;
+	}
+	/* Populate the exact incremental state before timing current selection. */
+	(void)legacy_score_scan(maps, logical_pages, segments, bytes, io,
+				counts, min_blocks);
+	for (repeat = 0; repeat < REPEATS; ++repeat) {
+		legacy[repeat] = legacy_score_scan(
+			maps, logical_pages, segments, bytes, io,
+			counts, min_blocks);
+		select[repeat] = incremental_select(
+			segments, bytes, io, counts, min_blocks);
+		relocation[repeat] = relocation_scan(
+			maps, logical_pages, segments / 2U, &records);
+		relocation_list[repeat] = relocation_list_scan(
+			maps, first_page, next_page, logical_pages,
+			segments / 2U, &list_records);
+		if (list_records != records)
+			goto out;
+		legacy_probe[repeat] = legacy_dead_probe(
+			live_records, extent_classes, mapped_pages,
+			segments, &selected);
+		if (selected != segments - 1U)
+			goto out;
+		mapped_probe[repeat] = mapped_dead_probe(
+			live_records, extent_classes, mapped_pages,
+			segments, &selected);
+		if (selected != segments - 1U)
+			goto out;
+	}
+
+	/*
+	 * Reuse the physical sidecar arrays after the dead-probe measurements.
+	 * Current production authoritative-map verification authenticates every
+	 * valid map against its class byte and nonzero start-block liveness.
+	 */
+	for (logical = 0; logical < logical_pages; ++logical) {
+		live_records[logical] = 1U;
+		extent_classes[logical] = 1U;
+	}
+	for (repeat = 0; repeat < REPEATS; ++repeat) {
+		authoritative_scan[repeat] = authoritative_negative_scan(
+			maps, live_records, extent_classes, logical_pages, &safe);
+		if (!safe)
+			goto out;
+		if (authoritative_scan[repeat] > authoritative_worst_ns)
+			authoritative_worst_ns = authoritative_scan[repeat];
+		touch_control[repeat] = mapped_touch_control(
+			maps, live_records, extent_classes, logical_pages,
+			physical_blocks);
+	}
+	if (records != SWAPZ_SEGMENT_BLOCKS)
+		goto out;
+	/*
+	 * A false-zero candidate can carry a late authoritative reference.
+	 * Supply valid physical-start metadata for that reference, so refusal
+	 * cannot be credited to a missing class or liveness witness.
+	 */
+	{
+		const swapz_u32 tail = logical_pages - 1U;
+		const struct swapz_map saved_tail = maps[tail];
+
+		maps[tail].start_block = logical_pages;
+		live_records[logical_pages] = 1U;
+		extent_classes[logical_pages] = 1U;
+		(void)authoritative_negative_scan(
+			maps, live_records, extent_classes, logical_pages, &safe);
+		if (safe)
+			goto out;
+		maps[tail] = saved_tail;
+		live_records[logical_pages] = 0U;
+		extent_classes[logical_pages] = 0U;
+	}
+	/*
+	 * Last-entry extent: a clean two-block map reaches the end of the
+	 * complete logical traversal, while a nonzero physical interior must
+	 * be refused even though the candidate's cached count is zero.
+	 */
+	maps[logical_pages - 2U].valid = 0;
+	maps[logical_pages - 1U].start_block = logical_pages - 2U;
+	maps[logical_pages - 1U].extent_blocks = 2U;
+	extent_classes[logical_pages - 2U] = 2U;
+	extent_classes[logical_pages - 1U] = 0U;
+	live_records[logical_pages - 1U] = 0U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (!safe)
+		goto out;
+	/* Class-only interior corruption must be sufficient to refuse. */
+	extent_classes[logical_pages - 1U] = 1U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (safe)
+		goto out;
+	extent_classes[logical_pages - 1U] = 0U;
+
+	/* Liveness-only interior corruption is independently invalid. */
+	live_records[logical_pages - 1U] = 1U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (safe)
+		goto out;
+	live_records[logical_pages - 1U] = 0U;
+
+	/* A valid class with a falsely zero extent-start liveness is invalid. */
+	live_records[logical_pages - 2U] = 0U;
+	(void)authoritative_negative_scan(
+		maps, live_records, extent_classes, logical_pages, &safe);
+	if (safe)
+		goto out;
+	*row = (struct scale_row){
+		.logical_pages = logical_pages,
+		.segments = segments,
+		.legacy_score_scan_ns = median_ns(legacy),
+		.incremental_select_ns = median_ns(select),
+		.relocation_scan_ns = median_ns(relocation),
+		.relocation_list_ns = median_ns(relocation_list),
+		.legacy_dead_probe_ns = median_ns(legacy_probe),
+		.mapped_dead_probe_ns = median_ns(mapped_probe),
+		.victim_records = records,
+		.authoritative_negative_scan_ns = median_ns(authoritative_scan),
+		.authoritative_negative_scan_worst_ns = authoritative_worst_ns,
+		.mapped_touch_control_ns = median_ns(touch_control),
+		.map_bytes = (uint64_t)logical_pages * sizeof(*maps),
+	};
+	rc = 0;
+out:
+	free(extent_classes);
+	free(live_records);
+	free(next_page);
+	free(prev_page);
+	free(last_page);
+	free(first_page);
+	free(mapped_pages);
+	free(min_blocks);
+	free(counts);
+	free(io);
+	free(bytes);
+	free(maps);
+	return rc;
+}
+
+int main(void)
+{
+	const swapz_u32 sizes[GEOMETRIES] = {
+		262144U, 1048576U, 4194304U, 27080192U
+	};
+	struct scale_row rows[GEOMETRIES];
+	unsigned int index;
+
+	for (index = 0; index < GEOMETRIES; ++index)
+		if (run_geometry(sizes[index], &rows[index])) {
+			fprintf(stderr, "FAIL GC scaling geometry=%u\n", sizes[index]);
+			return 1;
+		}
+
+	printf("SWAPZ_GC_SCAN_SCALE_EVIDENCE={\"scope\":"
+	       "\"OFFLINE_NATIVE_GC_SCALE_ONLY\","
+	       "\"kernel_only_reschedule_opportunity_entries\":%u,"
+	       "\"rows\":[", KERNEL_PROOF_RESCHED_INTERVAL_ENTRIES);
+	for (index = 0; index < GEOMETRIES; ++index) {
+		const struct scale_row *row = &rows[index];
+
+		printf("%s{\"logical_pages\":%u,\"segments\":%u,"
+		       "\"legacy_score_scan_ns\":%" PRIu64 ","
+		       "\"incremental_select_ns\":%" PRIu64 ","
+		       "\"relocation_scan_ns\":%" PRIu64 ","
+		       "\"relocation_list_ns\":%" PRIu64 ","
+		       "\"legacy_dead_probe_ns\":%" PRIu64 ","
+		       "\"mapped_dead_probe_ns\":%" PRIu64 ","
+		       "\"victim_records\":%u,"
+		       "\"map_bytes\":%" PRIu64 ","
+		       "\"authoritative_negative_scan_ns\":%" PRIu64 ","
+		       "\"authoritative_negative_scan_worst_ns\":%" PRIu64 ","
+		       "\"mapped_touch_control_ns\":%" PRIu64 ","
+		       "\"effective_scan_gbps\":%.3f}",
+		       index ? "," : "", row->logical_pages, row->segments,
+		       row->legacy_score_scan_ns, row->incremental_select_ns,
+		       row->relocation_scan_ns, row->relocation_list_ns,
+		       row->legacy_dead_probe_ns, row->mapped_dead_probe_ns,
+		       row->victim_records, row->map_bytes,
+		       row->authoritative_negative_scan_ns,
+		       row->authoritative_negative_scan_worst_ns,
+		       row->mapped_touch_control_ns,
+		       row->authoritative_negative_scan_ns ?
+			(double)row->map_bytes /
+			(double)row->authoritative_negative_scan_ns : 0.0);
+	}
+	puts("]}");
+	puts("PASS: GC selection/dead probes are segment-scaled; relocation list is survivor-scaled; full-map ownership proof is logical-page-scaled (offline host-memory model; kernel 4096-entry reschedule opportunities are not total proof latency limits)");
+	return evidence_sink == UINT64_MAX ? 1 : 0;
+}

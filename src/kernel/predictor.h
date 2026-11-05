@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef SWAPZ_PREDICTOR_H
+#define SWAPZ_PREDICTOR_H
+
+#include "codec.h"
+
+#define SWAPZ_PREDICTOR_CACHELINE_BYTES 64U /* structured corpus geometry */
+#define SWAPZ_PREDICTOR_U64_BYTES 8U
+#define SWAPZ_PREDICTOR_SUBPAGE_BYTES 512U
+#define SWAPZ_PREDICTOR_STAGE1_PAIRS 8U
+#define SWAPZ_PREDICTOR_STAGE1_MIN_SCORE 2U
+#define SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES 128U
+#define SWAPZ_PREDICTOR_SAMPLE_PHASE_BYTES 16U
+#define SWAPZ_PREDICTOR_SAMPLE_PHASE_STEP 2U
+#define SWAPZ_PREDICTOR_SUBPAGE_LANES \
+	(SWAPZ_PREDICTOR_SUBPAGE_BYTES / SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES)
+#define SWAPZ_PREDICTOR_SAMPLE_PHASES \
+	(SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES / SWAPZ_PREDICTOR_SAMPLE_PHASE_BYTES)
+#define SWAPZ_PREDICTOR_SAMPLE_PAIRS 32U
+#define SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD 24U
+#define SWAPZ_LZ4_ORDINARY_ACCELERATION_DEFAULT 1U
+#define SWAPZ_LZ4_DELTA64_ACCELERATION_DEFAULT 4U
+/* A lower score is allowed only for already-compressed pages when the
+ * candidate must cross the next exact SWZ packing cliff before adoption. */
+#define SWAPZ_PREDICTOR_PACK_THRESHOLD 16U
+
+#if __SIZEOF_LONG_LONG__ != 8
+#error "swapz delta64 predictor requires an exact 64-bit unsigned long long"
+#endif
+
+int swapz_predictor_init(void);
+const char *swapz_predictor_transform_backend_name(void);
+const char *swapz_predictor_inverse_backend_name(void);
+
+swapz_u32 swapz_predict_delta64_sample_score(const swapz_u8 *input);
+int swapz_predict_should_try_delta64(const swapz_u8 *input, swapz_u32 threshold);
+/*
+ * Delta64 treats each 8-byte word as a little-endian unsigned integer. Full
+ * 4KiB page buffers may be unaligned, but input and output must be distinct,
+ * non-overlapping storage.
+ */
+swapz_u32 swapz_predict_delta64(const swapz_u8 *input, swapz_u8 *output);
+void swapz_unpredict_delta64(const swapz_u8 *input, swapz_u8 *output);
+/*
+ * SWAPZ_ENCODING_DELTA64_SHUF8 payload transform: delta64 into the caller's
+ * 4KiB scratch page, then the 8-byte byte-plane shuffle into output (and the
+ * reverse). Both stages share one kernel FPU section. All three buffers are
+ * distinct 4KiB pages.
+ */
+swapz_u32 swapz_predict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				      swapz_u8 *output);
+void swapz_unpredict_delta64_shuf8(const swapz_u8 *input, swapz_u8 *scratch,
+				   swapz_u8 *output);
+
+#endif
