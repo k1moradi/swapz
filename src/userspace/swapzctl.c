@@ -3575,7 +3575,7 @@ static int format_device_with_ops(
 					    &admission_problem) < 0) {
 		saved_errno = errno;
 		format_report_admission_refusal(
-			"target admission changed before header write",
+			"target identity changed before header write",
 			&admission_problem, saved_errno);
 		result = 2;
 		goto close_error;

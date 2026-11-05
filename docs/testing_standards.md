@@ -4040,8 +4040,10 @@ diagnostics. Final-gate production-CLI mutations must additionally require the
 diagnostic stage to match the surface that actually failed: PARTUUID/path/
 geometry substitutions are identity, BLKROGET failures or read-only state are
 descriptor mode, parent substitutions are topology, and mount/swap evidence
-failures are inventory. A generic "identity changed" label is insufficient for
-topology or inventory failures. Fake O_EXCL requests never prove kernel BLK_EXCL
+failures are inventory. The stable summary
+`target identity changed before header write` may remain for CLI compatibility,
+but it is insufficient by itself: the same diagnostic must carry the precise
+`stage=` classification and stage-specific expected condition. Fake O_EXCL requests never prove kernel BLK_EXCL
 or mount/swap exclusion. It must cover
 malformed PARTUUIDs, numeric overflow and single digits exceeding small
 numeric bounds (for example removable=2 when maximum=1), copied cloneable

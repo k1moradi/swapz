@@ -700,7 +700,7 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 			       (size_t)field_length < sizeof(errno_field));
 			if (status != 2 ||
 			    observed_errno != cases[index].expected_errno ||
-			    !strstr(report, "REFUSED: target admission changed before "
+			    !strstr(report, "REFUSED: target identity changed before "
 				    "header write") ||
 			    !strstr(report, stage_field) ||
 			    !strstr(report, cases[index].expected_condition) ||

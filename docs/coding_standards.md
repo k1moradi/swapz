@@ -472,9 +472,11 @@ exposing device paths or block contents. Admission helpers must propagate the
 actual failing stage instead of collapsing topology or mount/swap inventory
 failures into a generic identity refusal: the formatter distinguishes identity,
 descriptor mode/state, topology and inventory at pre-open, opened-descriptor,
-final-prepublication and postpublication revalidation boundaries. A secondary
-close failure must be reported separately and cannot replace the originating
-failure errno.
+final-prepublication and postpublication revalidation boundaries. The explicit
+`stage=` field supplements stable human-readable phase summaries; do not rename
+an established summary solely to encode a more specific failing stage. A
+secondary close failure must be reported separately and cannot replace the
+originating failure errno.
 Once publication is attempted, write, durability, identity, readback and
 close failures still retain status 3 and RECOVERY REQUIRED. The standalone
 formatter never creates a mapper or activates swap. After a successful write it
