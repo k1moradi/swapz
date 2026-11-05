@@ -77,6 +77,9 @@ source = source.replace(
     '[[ -n $mapper_node && -e $mapper_node ]] ||',
 )
 source = source.replace('[[ -b $source ]]', '[[ -e $source ]]')
+source = source.replace('-b $lower', '-e $lower')
+# Inspect only this synthetic process's opened fd through procfs.
+source = source.replace(str(root / "proc") + '/$BASHPID/fd/', '/proc/$BASHPID/fd/')
 source = source.replace(
     '[[ -n $source_devno && -b $swap_path ]]',
     '[[ -n $source_devno && -e $swap_path ]]',
@@ -101,13 +104,14 @@ swapz_clear_tmp_before_memory_check() {
 SH
 # Only these utilities exist in the child PATH. All potentially privileged
 # commands are fixed stubs, never inherited host commands.
-for command in bash tr cat readlink find rm rmdir python3; do
+for command in bash tr cat readlink find rm python3 mkdir mv cp; do
     executable="$(command -v "$command")" || die "fixture setup lacks $command"
     ln -s "$executable" "$STUBS/$command"
 done
 REAL_AWK="$(command -v awk)" || die "fixture setup lacks awk"
 REAL_LS="$(command -v ls)" || die "fixture setup lacks ls"
 REAL_STAT="$(command -v stat)" || die "fixture setup lacks stat"
+REAL_RMDIR="$(command -v rmdir)" || die "fixture setup lacks rmdir"
 cat > "$STUBS/awk" <<SH
 #!/bin/bash
 if [[ \${SWAPZ_FIXTURE_CASE:-} == swap_inventory_error &&
@@ -133,6 +137,11 @@ if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
     printf '253:0\n'
     exit 0
 fi
+if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
+      "\$3" == "$FIXTURE/dev/nullb-swapz-$TOKEN" ]]; then
+    printf '240:7\n'
+    exit 0
+fi
 exec "$REAL_STAT" "\$@"
 SH
 cat > "$STUBS/id" <<'SH'
@@ -153,11 +162,38 @@ SH
 cat > "$STUBS/rmmod" <<'SH'
 #!/bin/bash
 # Refuse any unexpected mutation in the fake-preflight negative cases.
+printf 'unexpected\n' > "$SWAPZ_FIXTURE_ROOT/unexpected-rmmod"
 exit 98
 SH
 cat > "$STUBS/timeout" <<'SH'
 #!/bin/bash
-exit 98
+case "$SWAPZ_FIXTURE_CASE" in
+    owned_cleanup|replaced_inode|cleanup_failure)
+        [[ "$*" == *"dmsetup remove --retry SWAPZ-TEST-aaaaaaaaaaaaaaaa" ]] || exit 98
+        fake_root="$SWAPZ_FIXTURE_ROOT"
+        config="$fake_root/sys/kernel/config/nullb/nullb-swapz-aaaaaaaaaaaaaaaa"
+        rm -- "$fake_root/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa" || exit 98
+        printf '0\n' > "$fake_root/sys/module/dm_swapz/refcnt"
+        if [[ $SWAPZ_FIXTURE_CASE == replaced_inode ]]; then
+            mv -- "$config" "$fake_root/retained-original-config" || exit 98
+            mkdir -- "$config" || exit 98
+            for attribute in index memory_backed size blocksize queue_mode power; do
+                cp -- "$fake_root/retained-original-config/$attribute" "$config/$attribute" || exit 98
+            done
+        fi
+        exit 0
+        ;;
+    *) exit 98 ;;
+esac
+SH
+cat > "$STUBS/rmdir" <<SH
+#!/bin/bash
+[[ "\$1" == -- && "\$2" == "\$SWAPZ_FIXTURE_ROOT/sys/kernel/config/nullb/nullb-swapz-aaaaaaaaaaaaaaaa" ]] || exit 98
+[[ "\$SWAPZ_FIXTURE_CASE" == owned_cleanup ]] || exit 98
+for attribute in index memory_backed size blocksize queue_mode power; do
+    rm -- "\$2/\$attribute" || exit 98
+done
+exec "$REAL_RMDIR" -- "\$2"
 SH
 cat > "$STUBS/findmnt" <<'SH'
 #!/bin/bash
@@ -198,6 +234,7 @@ case "$*" in
     "info -c --noheadings -o uuid swapz-demo-aaaaaaaaaaaaaaaa")
         case "$SWAPZ_FIXTURE_CASE" in
             stale_token) printf 'SWAPZ-TEST-bbbbbbbbbbbbbbbb\n' ;;
+            primary_namespace) printf 'SWAPZ-PRIMARY-aaaaaaaaaaaaaaaa\n' ;;
             recognized_readfault) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa-readfault\n' ;;
             recognized_codec) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa-codec-background\n' ;;
             recognized_completion) printf 'SWAPZ-TEST-aaaaaaaaaaaaaaaa-completionfault\n' ;;
@@ -208,6 +245,14 @@ case "$*" in
     "deps -o devname swapz-demo-aaaaaaaaaaaaaaaa")
         if [[ $SWAPZ_FIXTURE_CASE == wrong_owner ]]; then
             printf '1 dependencies : (nullb-swapz-bbbbbbbbbbbbbbbb)\n'
+        elif [[ $SWAPZ_FIXTURE_CASE == foreign_dependency ]]; then
+            counter_file="$SWAPZ_FIXTURE_ROOT/dependency-count"
+            if [[ -e $counter_file ]]; then
+                printf '1 dependencies : (nullb-swapz-bbbbbbbbbbbbbbbb)\n'
+            else
+                : > "$counter_file"
+                printf '1 dependencies : (nullb-swapz-aaaaaaaaaaaaaaaa)\n'
+            fi
         else
             printf '1 dependencies : (nullb-swapz-aaaaaaaaaaaaaaaa)\n'
         fi
@@ -224,18 +269,21 @@ exit 98
 SH
 chmod 0755 "$STUBS"/awk "$STUBS"/ls "$STUBS"/stat \
     "$STUBS"/id "$STUBS"/uname "$STUBS"/modprobe \
-    "$STUBS"/rmmod "$STUBS"/timeout "$STUBS"/findmnt \
+    "$STUBS"/rmmod "$STUBS"/timeout "$STUBS"/rmdir "$STUBS"/findmnt \
     "$STUBS"/dmsetup "$STUBS"/sleep
 
 reset_fake() {
     # Delete only this test's known fake roots; never real /proc, /sys or /dev.
     rm -rf -- "$FIXTURE/proc" "$FIXTURE/sys" "$FIXTURE/dev" \
-        "$FIXTURE/boot" "$FIXTURE/lib" "$FIXTURE/var"
+        "$FIXTURE/boot" "$FIXTURE/lib" "$FIXTURE/var" \
+        "$FIXTURE/retained-original-config" "$FIXTURE/dependency-count" \
+        "$FIXTURE/unexpected-rmmod"
     mkdir -p "$FIXTURE/proc/self" "$FIXTURE/sys/kernel/config" \
         "$FIXTURE/sys/module" "$FIXTURE/dev/mapper"
     printf 'CapEff:\t0000000000200000\n' > "$FIXTURE/proc/self/status"
     printf 'MemAvailable: 2097152 kB\n' > "$FIXTURE/proc/meminfo"
     printf 'Filename Type Size Used Priority\n' > "$FIXTURE/proc/swaps"
+    printf 'Character devices:\n\nBlock devices:\n240 nullb\n' > "$FIXTURE/proc/devices"
 }
 
 setup_busy_module() {
@@ -246,9 +294,17 @@ setup_mapper_node() {
     : > "$FIXTURE/dev/mapper/swapz-demo-$TOKEN"
 }
 setup_owned_lower() {
-    mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
-    printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/memory_backed"
-    printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/power"
+    local config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
+    local disk="$FIXTURE/sys/block/nullb-swapz-$TOKEN"
+    mkdir -p "$config" "$disk/holders" "$FIXTURE/sys/dev/block"
+    printf '1\n' > "$config/memory_backed"
+    printf '1\n' > "$config/power"
+    printf '7\n' > "$config/index"
+    printf '64\n' > "$config/size"
+    printf '4096\n' > "$config/blocksize"
+    printf '2\n' > "$config/queue_mode"
+    printf '240:7\n' > "$disk/dev"
+    ln -s "$disk" "$FIXTURE/sys/dev/block/240:7"
     : > "$FIXTURE/dev/nullb-swapz-$TOKEN"
 }
 run_case() {
@@ -266,7 +322,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|foreign_dependency|cleanup_failure)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -305,9 +361,14 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor)
+        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|foreign_dependency|cleanup_failure)
             setup_owned_lower
             setup_mapper_node
+            if [[ $case_name == missing_sysfs_proof ]]; then
+                rm -- "$FIXTURE/sys/block/nullb-swapz-$TOKEN/dev"
+            elif [[ $case_name == mismatched_devno ]]; then
+                printf '240:8\n' > "$FIXTURE/sys/block/nullb-swapz-$TOKEN/dev"
+            fi
             ;;
         unclaimed_nullb)
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
@@ -357,11 +418,58 @@ run_case() {
             die "$case_name did not refuse the stale mapper identity safely: $output"
     fi
     [[ -f "$FIXTURE/proc/swaps" ]] || die "host swap inventory was mutated"
+    [[ ! -e "$FIXTURE/unexpected-rmmod" ]] ||
+        die "unowned module unload was attempted"
+    if [[ "$case_name" == owned_cleanup ]]; then
+        [[ ! -e "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" &&
+           ! -e "$FIXTURE/dev/mapper/swapz-demo-$TOKEN" ]] ||
+            die "owned cleanup did not remove its proven mapper and configfs object"
+    elif [[ "$case_name" == replaced_inode ]]; then
+        [[ "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/power")" == 1 &&
+           "$(cat "$FIXTURE/retained-original-config/power")" == 1 ]] ||
+            die "replaced configfs inode was powered off"
+    elif [[ "$case_name" == cleanup_failure ]]; then
+        [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" &&
+           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/power")" == 0 ]] ||
+            die "cleanup error failed to retain powered-off configfs state"
+    fi
+    if [[ "$case_name" == owned_cleanup || "$case_name" == replaced_inode ||
+          "$case_name" == cleanup_failure || "$case_name" == missing_sysfs_proof ||
+          "$case_name" == mismatched_devno || "$case_name" == foreign_dependency ]]; then
+        [[ "$output" == *"phase="* && "$output" == *"resource_kind="* &&
+           "$output" == *"expected_proof="* && "$output" == *"observed_proof="* &&
+           "$output" == *"original_errno_or_exit="* &&
+           "$output" == *"retained_state_action="* &&
+           "$output" != *"$FIXTURE/"* ]] ||
+            die "$case_name omitted private-safe cleanup failure attribution"
+    fi
     if [[ "$case_name" == unrelated_swap ]]; then
         grep -Fxq '/var/swapfile file 1024 0 -3' "$FIXTURE/proc/swaps" ||
             die "unrelated swap disappeared"
     fi
 }
+
+# Demonstrate the first old path-only false admission entirely in this private
+# directory. The old ownership check admitted the replacement because its
+# pathname, memory_backed and power values matched after the inode changed.
+reset_fake
+setup_owned_lower
+legacy_config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
+[[ -d $legacy_config && "$(cat "$legacy_config/memory_backed")" == 1 &&
+   "$(cat "$legacy_config/power")" == 1 ]] ||
+    die "legacy ownership model did not admit the initial synthetic object"
+mv -- "$legacy_config" "$FIXTURE/retained-original-config"
+mkdir -- "$legacy_config"
+for attribute in index memory_backed size blocksize queue_mode power; do
+    cp -- "$FIXTURE/retained-original-config/$attribute" "$legacy_config/$attribute"
+done
+[[ -d $legacy_config && "$(cat "$legacy_config/memory_backed")" == 1 &&
+   "$(cat "$legacy_config/power")" == 1 ]] ||
+    die "legacy pathname predicate did not admit replacement"
+printf '0\n' > "$legacy_config/power"
+[[ "$(cat "$legacy_config/power")" == 0 &&
+   "$(cat "$FIXTURE/retained-original-config/power")" == 1 ]] ||
+    die "legacy false-cleanup admission did not mutate only the replacement"
 
 [[ -x "$ROOT/tests/tools/loaded-preflight.sh" ]] ||
     die "preflight executable mode is missing"
@@ -396,9 +504,16 @@ run_case recognized_readfault owned_mapper_removal BLOCKED unavailable
 run_case recognized_codec owned_mapper_removal BLOCKED unavailable
 run_case recognized_completion owned_mapper_removal BLOCKED unavailable
 run_case recognized_constructor owned_mapper_removal BLOCKED unavailable
+run_case primary_namespace stale_run_token BLOCKED unavailable
+run_case missing_sysfs_proof owned_resource_proof BLOCKED unavailable
+run_case mismatched_devno owned_resource_proof BLOCKED unavailable
+run_case foreign_dependency owned_resource_proof BLOCKED unavailable
+run_case replaced_inode owned_resource_proof BLOCKED unavailable
+run_case cleanup_failure owned_resource_proof BLOCKED 98
+run_case owned_cleanup idle_module_removal BLOCKED unavailable
 run_case unclaimed_nullb unclaimed_null_blk BLOCKED unavailable
 run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity and 33 isolated preflight refusal/observation fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 41 isolated preflight fixtures'

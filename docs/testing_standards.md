@@ -470,6 +470,49 @@ cleanup mutants. `tests/tools/primary-real-swap-oracle.py` only allocates and
 verifies memory; it configures no swap or mapper state. Agent 12 owns shared
 runner/official-pipeline registration; Agent 8 must not edit that wiring.
 
+### Loaded-preflight ownership and retained cleanup
+
+The root preflight is not a host-resource garbage collector. A
+`nullb-swapz-<16 hex>` name, even paired with an idle `dm_swapz` module,
+never grants creation ownership. An unclaimed null_blk remains
+`LOADED_PREFLIGHT=BLOCKED check=unclaimed_null_blk`; only its original owner
+can supply independent creation provenance. A zero module refcount is not
+module creation authority, so preflight must retain the module rather than
+`rmmod` it. No inferred holder PID may be signaled. Benchmark mapper
+`swapz-demo-<token>` and exact `SWAPZ-TEST-<token>` UUID variants are
+separate from primary lifecycle ownership and must never adopt one another.
+
+A positively identified stale benchmark mapper is necessary but not sufficient
+to dispose of its lower. Capture the configfs directory device/inode, power
+attribute inode, index, memory-backed status, positive size, 4096-byte block
+size and queue mode before removal. Require unique null_blk sysfs name/index,
+the nullb block major from `/proc/devices`, exact sysfs major:minor and an
+equal real lower block node `st_rdev`; missing or ambiguous telemetry blocks
+cleanup. Before removal, revalidate the original mapper UUID, device number,
+open count, mounted/swap inventory and unchanged dependency output, plus the
+original configfs/lower proof. Remove by exact mapper UUID, never by an
+unverified reused name or with force. Before power-off, check the same configfs
+inode and all live lower proofs again and require an empty holder directory;
+write only via a descriptor whose inode matches the initially observed power
+attribute. After power-off invalidates the sysfs block evidence, retain the
+captured configfs device/inode, index, creation attributes and power inode
+through the last immediately preceding `rmdir` check. A pathname-based
+`rmdir` does not provide an atomic compare-and-unlink primitive, so its
+remaining concurrent-name-reuse boundary must not be described as a kernel
+atomic guarantee.
+
+On missing, mismatched or substituted proof, fail closed and retain surviving
+state; a successful mapper removal alone is not a passing preflight. Diagnostics
+at cleanup gates use fail-only `phase`, `resource_kind`,
+`expected_proof`, `observed_proof`, `original_errno_or_exit` and
+`retained_state_action` categories, never private resource names or PID
+inventories. The rootless `tests/runtime/native/nullblk-identity-test.sh`
+fixture must prove the original path-only false admission and exercise real
+owned proof, changed configfs inode, missing sysfs proof, mismatched rdev,
+changed/foreign mapper dependencies, namespace refusal, ambiguous module
+ownership and cleanup failure against only synthetic files and stubs. This
+unit evidence never substitutes for authorized loaded testing.
+
 ### Development decision loop
 
 The project-goal CI policy validates all five root Make targets
