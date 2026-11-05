@@ -4170,6 +4170,17 @@ Marker and evidence-file identity metadata must remain stable across their
 reads. Missing, mismatched, replaced, unstable, or nonprivate proof retains the
 session. This is same-owner corroboration, not cryptographic attestation
 against a privileged actor able to forge both markers and logs.
+An equal-size in-place marker rewrite may leave mtime and ctime unchanged
+on coarse-timestamp filesystems, including observed F2FS cases. Marker proof
+must therefore compare two bounded reads from the same pinned descriptor as
+well as its original metadata; changed-content samples retain the session
+even when the metadata looks stable. Identical-byte rewrites do not prove
+content mutation and may be indistinguishable when timestamps remain stable.
+The two observations are not atomic against a deliberate same-UID actor who
+rewrites and restores bytes between them. Rootless regression must cover
+synthetically stable timestamps with changed marker content (fail-before /
+pass-after), native timestamp behavior and identical-content rewriting;
+repeat on tmpfs, and report unavailable F2FS execution separately.
 
 Inspection and removal must revalidate directory owner/mode plus regular-file
 owner/mode, single-link state, size and change timestamps before unlink. A file

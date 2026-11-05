@@ -784,24 +784,65 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertTrue(candidate.exists())
 
     def test_marker_change_during_read_retains_session(self):
-        owned = self.session("Abcd1234")
-        complete = owned / ".swapz-benchmark-complete"
         original_read = cleanup_module.os.read
-        changed = False
+        original_fstat = cleanup_module.os.fstat
+        # A same-size changed-content rewrite is authorization uncertainty,
+        # even if filesystem timestamps do not advance. Rewriting identical
+        # bytes is not evidence that the marker's content changed.
+        for suffix, contents_change, coarse_timestamps, expected_removed in (
+                ("Abcd1234", True, True, 0),
+                ("Bcde1234", True, False, 0),
+                ("Cdef1234", False, True, 1)):
+            with self.subTest(contents_change=contents_change,
+                              coarse_timestamps=coarse_timestamps):
+                owned = self.session(suffix)
+                complete = owned / ".swapz-benchmark-complete"
+                marker_before = complete.stat()
+                changed_record = (self.record.replace(self.source_sha, "b" * 40)
+                                  if contents_change else self.record)
+                rewritten = False
+                masked_timestamps = False
 
-        def rewrite_after_read(descriptor, length):
-            nonlocal changed
-            contents = original_read(descriptor, length)
-            if not changed and os.fstat(descriptor).st_ino == complete.stat().st_ino:
-                changed = True
-                complete.write_text(self.record)
-                complete.chmod(0o600)
-            return contents
+                def rewrite_after_read(descriptor, length):
+                    nonlocal rewritten
+                    contents = original_read(descriptor, length)
+                    if (not rewritten
+                            and original_fstat(descriptor).st_ino == marker_before.st_ino):
+                        rewritten = True
+                        complete.write_text(changed_record)
+                    return contents
 
-        with mock.patch.object(cleanup_module.os, "read", side_effect=rewrite_after_read):
-            self.assertEqual(cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700), 0)
-        self.assertTrue(changed)
-        self.assertTrue(owned.exists())
+                def coarse_timestamp_fstat(descriptor):
+                    nonlocal masked_timestamps
+                    observed = original_fstat(descriptor)
+                    if (coarse_timestamps and rewritten and not masked_timestamps
+                            and (observed.st_dev, observed.st_ino) ==
+                            (marker_before.st_dev, marker_before.st_ino)):
+                        masked_timestamps = True
+                        return marker_before
+                    return observed
+
+                with mock.patch.object(cleanup_module.os, "read",
+                                       side_effect=rewrite_after_read), \
+                     mock.patch.object(cleanup_module.os, "fstat",
+                                       side_effect=coarse_timestamp_fstat):
+                    removed = cleanup_module.cleanup(
+                        str(self.root), self.owner_uid, 0o700)
+                diagnostic = (
+                    "phase=session-provenance "
+                    "marker_identity=pinned-device-inode-owner-mode-size "
+                    f"marker_content={'changed' if contents_change else 'identical'} "
+                    f"timestamp_evidence={'coarse-stable' if coarse_timestamps else 'native'} "
+                    f"expected_removed={expected_removed} observed_removed={removed} "
+                    "original_errno=none "
+                    f"retained_session={'required' if contents_change else 'not-required'} "
+                    "safe_next_action=inspect-retained-evidence-read-only")
+                self.assertTrue(rewritten, diagnostic)
+                self.assertEqual(masked_timestamps, coarse_timestamps, diagnostic)
+                self.assertEqual(removed, expected_removed, diagnostic)
+                self.assertEqual(owned.exists(), contents_change, diagnostic)
+                if contents_change:
+                    self.assertEqual(complete.read_text(), changed_record, diagnostic)
 
     def test_log_symlink_hardlink_and_non_private_log_retained(self):
         owned = self.session("Abcd1234")

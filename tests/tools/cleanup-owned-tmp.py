@@ -136,8 +136,12 @@ def read_marker(directory: int, name: str, owner_uid: int, expected_mount: str) 
                 or mount_id(descriptor) != expected_mount):
             return None
         contents = os.read(descriptor, 129)
+        # In-place writes can leave coarse file timestamps unchanged. Require
+        # a second bounded sample of the same pinned marker contents.
+        confirmed_contents = os.pread(descriptor, 129, 0)
         after = os.fstat(descriptor)
-        if regular_file_identity(after) != regular_file_identity(opened):
+        if (regular_file_identity(after) != regular_file_identity(opened)
+                or contents != confirmed_contents):
             return None
         return contents if len(contents) == opened.st_size else None
     finally:
