@@ -998,15 +998,16 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	static swapz_u32 mapped_pages[4];
 	static swapz_u32 first_page[4], last_page[4];
 	static swapz_u32 previous_page[32], next_page[32];
-	struct swapz_compressed_page compressed_pages[2] = {
+	struct swapz_compressed_page compressed_pages[3] = {
 		{ .logical_page = 1U, .payload = contents[1], .length = 2072 },
 		{ .logical_page = 2U, .payload = contents[2], .length = 2072 },
+		{ .logical_page = 3U, .payload = contents[3], .length = 2072 },
 	};
 	struct swapz_compressed_page raw_page = {
 		.logical_page = 8U, .payload = raw_contents,
 		.length = SWAPZ_BLOCK_BYTES, .raw = 1,
 	};
-	struct swapz_map prior_compressed[2];
+	struct swapz_map prior_compressed[3];
 	swapz_u8 planned_classes[SWAPZ_MAX_RECORDS];
 	swapz_u8 planned_takes[SWAPZ_MAX_RECORDS];
 	swapz_u8 planned_extents = 0U, committed = 99U;
@@ -1026,34 +1027,38 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	e.bulk_txs = bulk_txs;
 	e.io.write_run = lower_write_run;
 
-	/* Leave exactly RAW8 + compressed1 + compressed2 authoritative in
-	 * victim0, while moving the filler page and OPEN into segment1. */
+	/* Leave exactly RAW8 + compressed1/2/3 authoritative in victim0, while
+	 * moving the filler page and OPEN into segment1. */
 	committed = 0U;
 	CHECK(swapz_engine_write_window_batched(
 		      &e, &raw_page, 1U, &committed) == 0);
 	CHECK(committed == 1U && verify_raw_page(8U) == 0);
-	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 3U; ++index)
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 4U; ++index)
 		CHECK(write_one(0U) == 0);
 	CHECK(write_one(1U) == 0);
 	CHECK(write_one(2U) == 0);
+	CHECK(write_one(3U) == 0);
 	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
 	CHECK(write_one(0U) == 0);
 	CHECK(a.open_segment == 1U);
 	CHECK(maps[8].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
 	      maps[1].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
 	      maps[2].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
+	      maps[3].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
 	      maps[0].start_block / SWAPZ_SEGMENT_BLOCKS == 1U);
-	CHECK(mapped_pages[victim] == 3U && first_page[victim] == 8U &&
-	      last_page[victim] == 2U && next_page[8U] == 1U &&
-	      next_page[1U] == 2U && next_page[2U] == ~(swapz_u32)0);
+	CHECK(mapped_pages[victim] == 4U && first_page[victim] == 8U &&
+	      last_page[victim] == 3U && next_page[8U] == 1U &&
+	      next_page[1U] == 2U && next_page[2U] == 3U &&
+	      next_page[3U] == ~(swapz_u32)0);
 	prior_compressed[0] = maps[1];
 	prior_compressed[1] = maps[2];
+	prior_compressed[2] = maps[3];
 
 	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
 	CHECK(a.gc_destination == blocked_destination);
 
 	/* swapz_gc_relocate_one() handles a RAW survivor synchronously. Mirror
-	 * that exact engine call first, leaving the two compressed survivors for
+	 * that exact engine call first, leaving the three compressed survivors for
 	 * the packed flush that follows in production. */
 	committed = 0U;
 	CHECK(swapz_engine_write_window_batched(
@@ -1063,10 +1068,10 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	CHECK(verify_raw_page(8U) == 0);
 
 	CHECK(swapz_engine_plan_bounded(
-		      compressed_pages, 2U, 0U, planned_classes, planned_takes,
+		      compressed_pages, 3U, 0U, planned_classes, planned_takes,
 		      &planned_extents) == 0);
 	CHECK(planned_extents == 1U && planned_classes[0] == 2U &&
-	      planned_takes[0] == 2U);
+	      planned_takes[0] == 3U);
 
 	/* Each failed production-shaped packed run writes a credible one-block
 	 * prefix, reports -EIO, and quarantines the full two-block reservation. */
@@ -1077,7 +1082,7 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 		injected_run_error = -EIO;
 		committed = 99U;
 		CHECK(swapz_engine_write_window_batched(
-			      &e, compressed_pages, 2U, &committed) == -EIO);
+			      &e, compressed_pages, 3U, &committed) == -EIO);
 		CHECK(committed == 0U && !a.in_flight && !a.batch_pending);
 		CHECK(a.next_block ==
 		      blocked_destination * SWAPZ_SEGMENT_BLOCKS + 1U +
@@ -1090,9 +1095,12 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	CHECK(maps[1].start_block == prior_compressed[0].start_block &&
 	      maps[1].generation == prior_compressed[0].generation &&
 	      maps[2].start_block == prior_compressed[1].start_block &&
-	      maps[2].generation == prior_compressed[1].generation);
+	      maps[2].generation == prior_compressed[1].generation &&
+	      maps[3].start_block == prior_compressed[2].start_block &&
+	      maps[3].generation == prior_compressed[2].generation);
 	CHECK(verify_page(0U) == 0 && verify_page(1U) == 0 &&
-	      verify_page(2U) == 0 && verify_raw_page(8U) == 0);
+	      verify_page(2U) == 0 && verify_page(3U) == 0 &&
+	      verify_raw_page(8U) == 0);
 	for (block = blocked_destination * SWAPZ_SEGMENT_BLOCKS + 1U;
 	     block < stalled_cursor; ++block)
 		CHECK(!live[block] && !classes[block]);
@@ -1102,7 +1110,7 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	lower_writes_before = lower_writes;
 	committed = 99U;
 	error = swapz_engine_write_window_batched(
-		&e, compressed_pages, 2U, &committed);
+		&e, compressed_pages, 3U, &committed);
 	if (error != -ENOSPC || committed != 0U ||
 	    lower_writes != lower_writes_before ||
 	    a.next_block != stalled_cursor) {
@@ -1110,7 +1118,9 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 			maps[1].start_block == prior_compressed[0].start_block &&
 			maps[1].generation == prior_compressed[0].generation &&
 			maps[2].start_block == prior_compressed[1].start_block &&
-			maps[2].generation == prior_compressed[1].generation;
+			maps[2].generation == prior_compressed[1].generation &&
+			maps[3].start_block == prior_compressed[2].start_block &&
+			maps[3].generation == prior_compressed[2].generation;
 
 		fprintf(stderr, "%s:%d FAIL phase=gc"
 			" failure_class=staging_exhaustion"
@@ -1147,18 +1157,20 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 
 	committed = 0U;
 	CHECK(swapz_engine_write_window_batched(
-		      &e, compressed_pages, 2U, &committed) == 0);
-	CHECK(committed == 2U &&
+		      &e, compressed_pages, 3U, &committed) == 0);
+	CHECK(committed == 3U &&
 	      maps[1].generation == prior_compressed[0].generation + 1U &&
-	      maps[2].generation == prior_compressed[1].generation + 1U);
+	      maps[2].generation == prior_compressed[1].generation + 1U &&
+	      maps[3].generation == prior_compressed[2].generation + 1U);
 	CHECK(swapz_gc_commit_rotation(&a, victim) == 0);
 	CHECK(!a.gc_allocation && !roles[victim] &&
 	      roles[blocked_destination] && roles[replacement_destination]);
 	CHECK(verify_page(0U) == 0 && verify_page(1U) == 0 &&
-	      verify_page(2U) == 0 && verify_raw_page(8U) == 0);
+	      verify_page(2U) == 0 && verify_page(3U) == 0 &&
+	      verify_raw_page(8U) == 0);
 
 	/* Role recovery is useful only if foreground publication really resumes. */
-	CHECK(write_one(3U) == 0 && verify_page(3U) == 0);
+	CHECK(write_one(4U) == 0 && verify_page(4U) == 0);
 	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
 	     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
 		CHECK(!live[block]);
