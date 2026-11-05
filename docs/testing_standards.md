@@ -886,6 +886,16 @@ error boundary must still reject an integrity/authority failure (-EBADMSG or
 -EUCLEAN) as terminal even with a live recovery token, while preserving
 retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.
 
+The GC cost-accounting native regression must force u32 live-byte, u32 I/O-cost
+and u16 minimum-block overflow independently after a compressed generation is
+durably published. Each lower-complete RAW replacement must return -EOVERFLOW
+without publishing the new generation, changing reserve roles, reusing its
+abandoned block or losing the previous byte/CRC-validated payload. After the
+bounded failures, a clean replacement must use fresh blocks and publish exactly
+one new generation. Emit phase, victim/reserve class, errno, expected/observed
+progress and retained-state evidence only on a failed assertion. Saturating
+synthetic sidecars cannot establish loaded or full-capacity forward progress.
+
 The native GC retry-policy regression must execute the exact small predicate
 included by the production DM target and accept only active authenticated
 recovery plus a lower WRITE `-EIO`; no token, a READ, or another error remains

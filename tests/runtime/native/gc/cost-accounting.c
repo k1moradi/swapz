@@ -383,6 +383,136 @@ static int test_failed_lower_writes_preserve_committed_costs(void)
 	return 0;
 }
 
+/*
+ * Synthetic u32/u16 sidecar saturation is a pre-publication overflow probe,
+ * not a physical full-capacity result. The previous compressed generation is
+ * durable in previous_extent; an entirely completed RAW replacement must be
+ * abandoned before any mapping, checksum or reserve role changes.
+ * Serialized authority owns every array throughout this bounded test.
+ */
+static int test_saturated_gc_accounting_preserves_durable_generation(void)
+{
+	static swapz_u8 previous_extent[SWAPZ_BLOCK_BYTES];
+	static swapz_u8 raw_replacement[SWAPZ_BLOCK_BYTES];
+	const char *const phases[] = {
+		"live_bytes_overflow", "io_cost_overflow", "min_blocks_overflow"
+	};
+	const swapz_u32 logical = 7U;
+	struct swapz_builder builder;
+	struct swapz_tx transaction;
+	struct swapz_map durable_map;
+	struct swapz_decoded decoded;
+	const swapz_u8 *readback;
+	swapz_u8 durable_roles[sizeof(segment_roles)];
+	swapz_u32 durable_live_bytes, durable_io_cost;
+	swapz_u16 durable_min_blocks;
+	unsigned int failure_case;
+
+	CHECK(swapz_authority_init(&a, maps, live, classes, 32, 1024) == 0);
+	a.reuse_dead_segments = 1;
+	CHECK(swapz_enable_segment_rotation(&a, segment_roles, 4) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(&a, segment_maps, 4) == 0);
+	CHECK(swapz_enable_segment_gc_accounting(
+	      &a, segment_bytes, segment_io, segment_min_blocks, 4) == 0);
+	memset(p0, 0x3c, sizeof(p0));
+	memset(raw_replacement, 0xa7, sizeof(raw_replacement));
+	CHECK(swapz_stage(&a, &logical, 1, 1, &transaction) == 0);
+	CHECK(swapz_begin(&builder, previous_extent, sizeof(previous_extent),
+			  transaction.sequence) == 0);
+	CHECK(swapz_append(&builder, logical,
+			   transaction.records[0].generation,
+			   p0, sizeof(p0)) == 0);
+	CHECK(swapz_seal(&builder) == 0);
+	CHECK(swapz_finish(&a, &transaction, previous_extent,
+			   sizeof(previous_extent), 1, 0) == 0);
+	durable_map = maps[logical];
+	durable_live_bytes = segment_bytes[0];
+	durable_io_cost = segment_io[0];
+	durable_min_blocks = segment_min_blocks[0];
+	memcpy(durable_roles, segment_roles, sizeof(durable_roles));
+	CHECK(durable_map.valid && !durable_map.raw &&
+	      durable_map.generation == 1U &&
+	      durable_live_bytes == sizeof(p0) + sizeof(struct swapz_record));
+
+	for (failure_case = 0; failure_case < 3; ++failure_case) {
+		struct gc_cost_snapshot expected;
+		swapz_u32 failed_block;
+		int actual_error, read_error;
+		int state_retained, byte_exact;
+
+		if (failure_case == 0)
+			segment_bytes[0] = ~(swapz_u32)0;
+		else if (failure_case == 1)
+			segment_io[0] = ~(swapz_u32)0;
+		else
+			segment_min_blocks[0] = (swapz_u16)~0U;
+		expected = gc_cost_capture(logical);
+		CHECK(swapz_stage(&a, &logical, 1, 1, &transaction) == 0);
+		failed_block = transaction.start_block;
+		/* A lower-complete write is not an authority publication. */
+		actual_error = swapz_finish_raw(&a, &transaction,
+					       raw_replacement, 1, 0);
+		state_retained = !memcmp(&maps[logical], &durable_map,
+					 sizeof(durable_map)) &&
+			!a.in_flight && !a.gc_allocation &&
+			segment_maps[0] == expected.mapped_count &&
+			segment_bytes[0] == expected.live_bytes &&
+			segment_io[0] == expected.io_cost &&
+			segment_min_blocks[0] == expected.min_blocks &&
+			a.committed_blocks == expected.committed_blocks &&
+			a.abandoned_blocks == expected.abandoned_blocks + 1U &&
+			a.next_block == failed_block + 1U &&
+			failed_block < a.physical_blocks &&
+			!live[failed_block] && !classes[failed_block] &&
+			live[durable_map.start_block] == 1U &&
+			classes[durable_map.start_block] == 1U &&
+			!memcmp(segment_roles, durable_roles,
+				sizeof(durable_roles));
+		readback = NULL;
+		read_error = swapz_peek(previous_extent, sizeof(previous_extent),
+					durable_map.record_index, &decoded);
+		if (!read_error)
+			read_error = swapz_read_authoritative_peeked(
+				&a, logical, &durable_map, previous_extent,
+				sizeof(previous_extent), &decoded, &readback);
+		byte_exact = !read_error && readback &&
+			     decoded.generation == durable_map.generation &&
+			     decoded.payload_length == sizeof(p0) &&
+			     !memcmp(readback, p0, sizeof(p0));
+		if (actual_error != -EOVERFLOW || !state_retained || !byte_exact) {
+			fprintf(stderr,
+				"GC_COST_FAIL phase=%s victim=none reserve=untouched "
+				"expected_errno=%d observed_errno=%d "
+				"expected_progress=0 observed_progress=%u "
+				"state_retained=%d byte_exact=%d "
+				"expected_generation=%u observed_generation=%u "
+				"failed_block=%u abandoned=%u\n",
+				phases[failure_case], -EOVERFLOW, actual_error,
+				maps[logical].generation != durable_map.generation,
+				state_retained, byte_exact, durable_map.generation,
+				maps[logical].generation, failed_block,
+				a.abandoned_blocks);
+			return 1;
+		}
+		/* Undo only synthetic corrupt sidecars, never the failed cursor. */
+		segment_bytes[0] = durable_live_bytes;
+		segment_io[0] = durable_io_cost;
+		segment_min_blocks[0] = durable_min_blocks;
+	}
+
+	/* A later valid publication must use fresh media and generation two. */
+	CHECK(swapz_stage(&a, &logical, 1, 1, &transaction) == 0);
+	CHECK(transaction.start_block == 4U);
+	CHECK(swapz_finish_raw(&a, &transaction, raw_replacement, 1, 0) == 0);
+	CHECK(maps[logical].raw && maps[logical].generation == 2U);
+	CHECK(swapz_verify_raw(&a, logical, raw_replacement) == 0);
+	CHECK(segment_bytes[0] == SWAPZ_BLOCK_BYTES);
+	CHECK(segment_io[0] == 2U * SWAPZ_BLOCK_BYTES);
+	CHECK(segment_min_blocks[0] == 1U);
+	CHECK(!memcmp(segment_roles, durable_roles, sizeof(durable_roles)));
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -395,6 +525,7 @@ int main(void)
 	CHECK(test_io_aware_cost_corrects_loaded_gc_counterexample() == 0); passed++;
 	CHECK(test_reclaim_headroom_preflight() == 0); passed++;
 	CHECK(test_proven_large_record_gc_block_bound() == 0); passed++;
+	CHECK(test_saturated_gc_accounting_preserves_durable_generation() == 0); passed++;
 	printf("SWAPZ_GC_COST_TESTS_PASS=%d\n", passed);
 	return 0;
 }

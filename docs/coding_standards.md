@@ -203,6 +203,12 @@ erosion, fails on zero or an impossible current count above the initial count,
 and treats missing telemetry as degraded evidence. If no replacement reserve
 exists, convert the owned no-progress condition to terminal fail-closed state;
 ordinary foreground -ENOSPC outside an owned recovery remains nonterminal.
+GC cost-accounting sidecars must preflight u32 live-byte and estimated-I/O
+overflow and u16 minimum-live-block overflow before publishing replacement
+mappings. Even a completed lower write that fails this accounting check must
+abandon its reservation, retain the previous authoritative generation and
+payload/CRC, and never reuse the uncertain physical block. Synthetic saturated
+counter probes establish only this rejection boundary, not full-card progress.
 
 ## Performance work
 
