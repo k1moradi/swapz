@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Rootless negative controls for the private kernel-debug qualification lane."""
+"""Rootless negative controls for the private kernel-debug qualification lane.
+
+Fixture standard: each negative case changes only its intended evidence field.
+Keep unrelated run markers, publication order and terminal newline complete;
+place duplicate records adjacent to their canonical record, and use a benign
+post-publication sentinel when testing terminal tails. The verify-CLI fixture
+must pass the canonical log bytes unchanged. A synthetic PASS never proves
+loaded-kernel execution, and unknown failure markers must remain fail-closed.
+"""
 from __future__ import annotations
 
 import contextlib
@@ -270,7 +278,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
             (GOOD_LOG.replace(
                 boot_marker, f"ERROR: {private_detail}\n{boot_marker}"),
              "observed=unknown failure marker"),
-            (GOOD_LOG + f"TEARDOWN_FAILED={private_detail}\n",
+            (GOOD_LOG + f"POST_PUBLICATION_NOTE={private_detail}\n",
              "field=terminal tail"),
             (GOOD_LOG.replace(owned_lower, foreign_owned_lower),
              "observed=different owned run identities"),
@@ -720,7 +728,8 @@ exit 0
             f"RUNNING_KERNEL={KERNEL_RELEASE}",
             f"RUNNING_KERNEL={qualification.running_kernel_release()}",
         )
-        execution.write_text(cli_log + "\n", encoding="utf-8")
+        self.assertTrue(cli_log.endswith("\n"))
+        execution.write_text(cli_log, encoding="utf-8")
         required = ("kasan", "lockdep")
         runtime_before.write_text(
             self.runtime_snapshot(required), encoding="utf-8")
@@ -819,7 +828,8 @@ exit 0
         cases = (
             (GOOD_LOG.replace("PASS_LOADED_LIVE_GC=", "SKIPPED="),
              "missing loaded run marker: PASS_LOADED_LIVE_GC"),
-            (GOOD_LOG + "\n" + compound_record,
+            (GOOD_LOG.replace(
+                compound_record, compound_record + "\n" + compound_record, 1),
              "duplicated loaded run marker: PASS_LOADED_COMPOUND_BIO"),
             (GOOD_LOG.replace("segs_gt1:2", "segs_gt1:2 invalid:1"),
              "malformed loaded run marker: PASS_LOADED_COMPOUND_BIO"),
@@ -828,7 +838,9 @@ exit 0
             (GOOD_LOG.replace(f"SOURCE_HEAD={SOURCE_SHA}",
                               "SOURCE_HEAD=" + "b" * 40),
              "source run marker mismatch:"),
-            (GOOD_LOG + "\nSOURCE_HEAD=" + SOURCE_SHA,
+            (GOOD_LOG.replace(
+                f"SOURCE_HEAD={SOURCE_SHA}",
+                f"SOURCE_HEAD={SOURCE_SHA}\nSOURCE_HEAD={SOURCE_SHA}", 1),
              "duplicated SOURCE_HEAD run marker"),
         )
         for execution, explanation in cases:
