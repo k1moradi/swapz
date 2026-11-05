@@ -4060,8 +4060,20 @@ an individually permission-restricted proc link/descriptor is skipped rather
 than making unrelated same-UID host state a cleanup prerequisite; such a process
 does not provide ownership evidence for this session. Inaccessible mappings
 cannot prove the absence of a live file holder and require read-only review
-before cleanup is retried. The same-owner provenance
-model already does not defend against a same-UID actor deliberately forging the
+before cleanup is retried. Native rootless tests independent of procfs visibility
+must substitute a deterministic, explicitly named process inventory only within
+the test interpreter, never through the production cleaner's environment or
+command-line. Register each real live FD or mmap fixture holder so its actual
+procfs cwd/root/fd/maps evidence remains subject to the normal activity check.
+Retain separate permission-denial controls for an enumerated live holder's maps
+and for unknown process ownership, verifying the original EACCES, phase,
+disposition and read-only remedy. Synthetic cwd/root inode observations may
+cover unprivileged fixtures, but production must retain the real cwd/root scan.
+Never classify an arbitrary protected runner process as exited or treat a
+failed relevant mapping read as proof of inactivity. Diagnostic refusal must
+identify the observed uncertainty without exposing private paths.
+The same-owner provenance model already does not defend against a same-UID
+actor deliberately forging the
 markers and evidence. Keep the independent final session identity check before
 rmdir; these checks do not claim atomicity against a privileged same-UID actor
 concurrently mutating private directories.

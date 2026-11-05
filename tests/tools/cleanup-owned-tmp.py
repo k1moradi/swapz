@@ -491,7 +491,10 @@ def main() -> int:
     state = CleanupState()
     if len(sys.argv) != 4:
         print("BLOCKED: tmp-cleanup phase=invocation category=invalid-arguments "
-              "original_errno=none exit_code=2 retained=unexamined removed=0", file=sys.stderr)
+              "original_errno=none observed_uncertainty=invalid-input exit_code=2 "
+              "retained=unexamined removed=0 session_class=swapz-benchmark "
+              "ownership_identity=unproved-or-unexamined "
+              "safe_next_action=verify-arguments-read-only", file=sys.stderr)
         return 2
     try:
         owner_uid = int(sys.argv[2])
@@ -510,12 +513,16 @@ def main() -> int:
                           if isinstance(error, OSError) and error.errno is not None else "none")
         exit_code = 130 if isinstance(error, KeyboardInterrupt) else 2
         retained = "partial-or-uncertain" if state.partial else "unexamined-or-unproved"
+        observed_uncertainty = (
+            "partial-removal" if state.partial else
+            "same-owner-process-activity-unproved" if state.phase == "session-activity"
+            else "validation-incomplete")
         ownership_identity = ("proven" if state.phase in (
             "session-inspection", "session-activity", "session-removal",
             "session-finalization") else "unproved-or-unexamined")
         print(f"BLOCKED: tmp-cleanup phase={state.phase} category={category} "
-              f"original_errno={original_errno} exit_code={exit_code} "
-              f"retained={retained} removed={state.removed} "
+              f"original_errno={original_errno} observed_uncertainty={observed_uncertainty} "
+              f"exit_code={exit_code} retained={retained} removed={state.removed} "
               f"session_class=swapz-benchmark ownership_identity={ownership_identity} "
               "safe_next_action=inspect-retained-evidence-read-only", file=sys.stderr)
         return exit_code

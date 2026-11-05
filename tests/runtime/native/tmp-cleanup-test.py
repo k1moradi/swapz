@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rootless filesystem safety regressions for the private /tmp memory gate."""
 
+import contextlib
 import errno
 import importlib.util
 import io
@@ -28,6 +29,30 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.owner_uid = os.getuid()
         self.source_sha = "a" * 40
         self.record = f"pid=99999999\nsource_sha={self.source_sha}\n"
+        self.visible_process_ids = set()
+        original_scandir = cleanup_module.os.scandir
+
+        class VisibleProcess:
+            def __init__(self, process_id):
+                self.name = str(process_id)
+
+            def stat(self, *, follow_symlinks=False):
+                return os.stat(f"/proc/{self.name}", follow_symlinks=follow_symlinks)
+
+        def isolated_scandir(path):
+            if path == "/proc":
+                return contextlib.nullcontext(
+                    [VisibleProcess(process_id)
+                     for process_id in sorted(self.visible_process_ids)])
+            return original_scandir(path)
+
+        # Only named fixture holders enter the test inventory. Real procfs
+        # link, fd and map inspection remains active for each named holder;
+        # production cleanup always scans the actual complete inventory.
+        inventory_patcher = mock.patch.object(
+            cleanup_module.os, "scandir", side_effect=isolated_scandir)
+        inventory_patcher.start()
+        self.addCleanup(inventory_patcher.stop)
 
     def tearDown(self):
         self.directory.cleanup()
@@ -60,14 +85,21 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         (directory / "session.log").chmod(0o600)
 
     def run_cleanup(self):
-        return subprocess.run(
-            [sys.executable, "-B", str(HELPER), str(self.root),
-             str(self.owner_uid), "700"],
-            capture_output=True, text=True, timeout=30)
+        arguments = [str(HELPER), str(self.root), str(self.owner_uid), "700"]
+        # Invoke the real CLI entry point in-process so its scoped process
+        # inventory cannot be replaced by unrelated CI runner visibility.
+        with mock.patch.object(sys, "argv", arguments), \
+             mock.patch.object(sys, "stdout", new_callable=io.StringIO) as output, \
+             mock.patch.object(sys, "stderr", new_callable=io.StringIO) as diagnostics:
+            status = cleanup_module.main()
+        return subprocess.CompletedProcess(
+            arguments, status, output.getvalue(), diagnostics.getvalue())
 
     def test_only_completed_owned_sessions_are_removed_and_foreign_survives(self):
         foreign = self.root / "some-other-application-database"
         foreign.write_bytes(b"DO NOT DELETE")
+        persistent_recovery = self.root / "swapz-recovery-state"
+        persistent_recovery.write_bytes(b"PERSISTENT RECOVERY - DO NOT DELETE")
         foreign_directory = self.root / "foreign-private-state"
         foreign_directory.mkdir()
         (foreign_directory / "important").write_bytes(b"data")
@@ -92,10 +124,40 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertTrue(incomplete.exists())
         self.assertTrue(conflicting.exists())
         self.assertEqual(foreign.read_bytes(), b"DO NOT DELETE")
+        self.assertEqual(persistent_recovery.read_bytes(),
+                         b"PERSISTENT RECOVERY - DO NOT DELETE")
         self.assertEqual((foreign_directory / "important").read_bytes(), b"data")
         self.assertTrue(symlink.is_symlink())
         self.assertTrue(unrelated_prefix.exists())
         self.assertIn("removed:0", self.run_cleanup().stdout)
+
+    def test_unrelated_procfs_denial_does_not_affect_isolated_fixture(self):
+        owned = self.session("Abcd1234")
+        original_open = open
+
+        def deny_unrelated_maps(path, *args, **kwargs):
+            if (isinstance(path, str) and path.startswith("/proc/")
+                    and path.endswith("/maps")):
+                raise PermissionError(errno.EACCES, "unrelated protected process")
+            return original_open(path, *args, **kwargs)
+
+        # No unregistered process may affect an independent private fixture.
+        with mock.patch("builtins.open", side_effect=deny_unrelated_maps):
+            result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(owned.exists())
+
+    def test_invalid_cli_arguments_report_safe_disposition(self):
+        result = subprocess.run(
+            [sys.executable, "-B", str(HELPER)],
+            capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn(
+            "phase=invocation category=invalid-arguments original_errno=none "
+            "observed_uncertainty=invalid-input exit_code=2", result.stderr)
+        self.assertIn("retained=unexamined removed=0", result.stderr)
+        self.assertIn("safe_next_action=verify-arguments-read-only", result.stderr)
 
     def test_symlink_inside_owned_session_blocks_before_deletion(self):
         owned = self.session("Abcd1234")
@@ -224,6 +286,7 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
              "os.close(descriptor)\n",
              str(owned / "fixture.bin")],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.visible_process_ids.add(child.pid)
         try:
             self.assertEqual(child.stdout.readline().strip(), "ready")
             result = self.run_cleanup()
@@ -236,20 +299,47 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
                 child.stdin.write("x")
                 child.stdin.flush()
             child.wait(timeout=5)
+            self.visible_process_ids.discard(child.pid)
         result = self.run_cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(owned.exists())
 
     def test_cleanup_process_cwd_inside_session_is_retained(self):
         owned = self.session("Abcd1234")
-        result = subprocess.run(
-            [sys.executable, "-B", str(HELPER), str(self.root),
-             str(self.owner_uid), "700"],
-            cwd=owned / "plan", capture_output=True, text=True, timeout=30)
+        previous_directory = Path.cwd()
+        try:
+            os.chdir(owned / "plan")
+            result = self.run_cleanup()
+        finally:
+            os.chdir(previous_directory)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("removed:0 retained:1", result.stdout)
         self.assertIn("retained_active:1", result.stdout)
         self.assertEqual((owned / "plan" / "trace.jsonl").read_text(), "one\n")
+
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:1 retained:0", result.stdout)
+        self.assertFalse(owned.exists())
+
+    def test_cleanup_process_root_reference_is_retained(self):
+        owned = self.session("Abcd1234")
+        original_stat = cleanup_module.os.stat
+
+        def synthetic_root_reference(path, *args, **kwargs):
+            # An unprivileged rootless test cannot call chroot; inject only
+            # the observed root inode, not an alternative cleanup policy.
+            if path == "/":
+                return original_stat(owned / "plan")
+            return original_stat(path, *args, **kwargs)
+
+        with mock.patch.object(cleanup_module.os, "stat",
+                               side_effect=synthetic_root_reference):
+            result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:0 retained:1", result.stdout)
+        self.assertIn("retained_active:1", result.stdout)
+        self.assertTrue((owned / "fixture.bin").exists())
 
         result = self.run_cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -323,6 +413,7 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
              "os.close(descriptor)\n",
              str(owned / "fixture.bin")],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.visible_process_ids.add(child.pid)
         original_stat = cleanup_module.os.stat
 
         def deny_proc_directory_links(path, *args, **kwargs):
@@ -347,6 +438,7 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
                 child.stdin.write("x")
                 child.stdin.flush()
             child.wait(timeout=5)
+            self.visible_process_ids.discard(child.pid)
 
     def test_fd_closed_but_live_mmap_retains_completed_session(self):
         owned = self.session("Abcd1234")
@@ -373,6 +465,7 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         child = subprocess.Popen(
             [sys.executable, "-I", "-B", "-c", child_code, str(owned / "fixture.bin")],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.visible_process_ids.add(child.pid)
         try:
             ready, _, _ = select.select([child.stdout], [], [], 5)
             self.assertTrue(ready, "mapped-file fixture did not become ready")
@@ -409,6 +502,8 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
             self.assertEqual(output.getvalue(), "")
             self.assertIn("phase=session-activity category=filesystem-error", diagnostics.getvalue())
             self.assertIn("original_errno=EACCES(13)", diagnostics.getvalue())
+            self.assertIn("observed_uncertainty=same-owner-process-activity-unproved",
+                          diagnostics.getvalue())
             self.assertIn("retained=unexamined-or-unproved removed=0", diagnostics.getvalue())
             self.assertIn("session_class=swapz-benchmark ownership_identity=proven",
                           diagnostics.getvalue())
@@ -423,6 +518,7 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
                 child.wait(timeout=5)
                 raise
             child.stdout.close()
+            self.visible_process_ids.discard(child.pid)
 
         result = self.run_cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -556,6 +652,7 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertEqual(output.getvalue(), "")
         self.assertIn("phase=session-removal category=filesystem-error", diagnostics.getvalue())
         self.assertIn("original_errno=EACCES(13)", diagnostics.getvalue())
+        self.assertIn("observed_uncertainty=partial-removal", diagnostics.getvalue())
         self.assertIn("retained=partial-or-uncertain", diagnostics.getvalue())
         self.assertIn("exit_code=2", diagnostics.getvalue())
         self.assertNotIn("/private", diagnostics.getvalue())
