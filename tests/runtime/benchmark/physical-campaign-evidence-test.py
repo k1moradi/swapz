@@ -678,6 +678,31 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             and item["status"] == "UNAVAILABLE"
             for item in audited["diagnostics"]))
 
+    def test_screened_raw_drift_cannot_claim_measured_decision_fail(self):
+        records = [pair(index, 1100 + 500 * index)
+                   for index in range(1, 6)]
+        names = ("useful_write", "lower_write_bytes",
+                 "lower_write_requests", "read_p95", "read_p99",
+                 "write_p95", "write_p99", "cpu")
+        decision = QUALIFICATION.service_decision(
+            [{"deltas": {name: 0.0 for name in names}} for _ in range(5)],
+            "sd-service-balanced")
+        drift_bound = QUALIFICATION.CONTRACT["screening"][
+            "same_workload_raw_spread_max"]
+        audit, _ = inspect(
+            records,
+            decisions={"sd-service-balanced": decision},
+            summary_status="FAIL_OR_INCOMPLETE",
+            raw_repeat_spread={"sd-service-balanced": drift_bound + 0.01})
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertTrue(any(
+            item["metric"] == "raw_repeat_spread" and
+            item["status"] == "BLOCKED"
+            for item in audit["diagnostics"]))
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
     def test_failed_attempts_and_95_percent_bound(self):
         records = [pair(i, 1100 + 500 * i) for i in range(1, 6)]
         records[1]["status"] = "EXCLUDED"
