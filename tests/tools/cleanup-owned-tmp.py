@@ -25,6 +25,8 @@ MAX_TOTAL_OBJECTS = 65_536
 MAX_SESSION_OBJECTS = 8_192
 MAX_DEPTH = 8
 MAX_TOTAL_BYTES = 64 * 1024**3
+MAX_PROCESSES = 131_072
+MAX_PROCESS_REFERENCES = 1_048_576
 OPEN_FLAGS = os.O_CLOEXEC | os.O_NOFOLLOW
 
 
@@ -78,6 +80,7 @@ class CleanupState:
     reclaimed_logical_bytes: int = 0
     retained_unproved: int = 0
     retained_identity: int = 0
+    retained_active: int = 0
     partial: bool = False
 
 
@@ -244,6 +247,65 @@ def inspect(directory: int, expected_mount: str, owner_uid: int,
     return entries
 
 
+def session_object_identities(session_stat, entries: list[Entry]) -> set[tuple[int, int]]:
+    """Return the inspected session objects that an active process could retain."""
+    identities = {(session_stat.st_dev, session_stat.st_ino)}
+    pending = list(entries)
+    while pending:
+        entry = pending.pop()
+        identities.add((entry.device, entry.inode))
+        if entry.children is not None:
+            pending.extend(entry.children)
+    return identities
+
+
+def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
+                                             entries: list[Entry]) -> bool:
+    """Return whether a same-owner process still references inspected session state."""
+    identities = session_object_identities(session_stat, entries)
+    process_count = 0
+    reference_count = 0
+    with os.scandir("/proc") as iterator:
+        for process in iterator:
+            if not process.name.isdecimal():
+                continue
+            try:
+                process_stat = process.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if process_stat.st_uid != owner_uid or int(process.name) == os.getpid():
+                continue
+            process_count += 1
+            require(process_count <= MAX_PROCESSES,
+                    "same-owner process inventory exceeds cleanup bound", "bound")
+            process_path = os.path.join("/proc", process.name)
+            for reference_name in ("cwd", "root"):
+                reference_count += 1
+                require(reference_count <= MAX_PROCESS_REFERENCES,
+                        "same-owner process references exceed cleanup bound", "bound")
+                try:
+                    current = os.stat(os.path.join(process_path, reference_name))
+                except FileNotFoundError:
+                    continue
+                if (current.st_dev, current.st_ino) in identities:
+                    return True
+            try:
+                with os.scandir(os.path.join(process_path, "fd")) as descriptors:
+                    for descriptor in descriptors:
+                        reference_count += 1
+                        require(reference_count <= MAX_PROCESS_REFERENCES,
+                                "same-owner process references exceed cleanup bound", "bound")
+                        try:
+                            current = descriptor.stat(follow_symlinks=True)
+                        except FileNotFoundError:
+                            continue
+                        if (current.st_dev, current.st_ino) in identities:
+                            return True
+            except FileNotFoundError:
+                continue
+    return False
+
+
 def verify_entry(directory: int, entry: Entry, expected_mount: str) -> int:
     current = os.stat(entry.name, dir_fd=directory, follow_symlinks=False)
     require(entry_identity_matches(current, entry),
@@ -358,6 +420,14 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                                 "session directory or mount changed before removal", "substitution")
                     finally:
                         close_preserving_first_error(rebound)
+                    state.phase = "session-activity"
+                    if session_referenced_by_same_owner_process(
+                            owner_uid, candidate_stat, entries):
+                        state.retained += 1
+                        state.retained_active += 1
+                        state.phase = "root-inventory"
+                        continue
+                    state.phase = "session-removal"
                     state.partial = True  # An unlink may succeed before a later error.
                     remove_tree(candidate, entries, expected_mount, preserve_markers=True)
                 finally:
@@ -412,7 +482,8 @@ def main() -> int:
     print(f"SWAPZ_TMP_CLEANUP=completed-owned-only removed:{removed} retained:{state.retained} "
           f"reclaimed_logical_bytes:{state.reclaimed_logical_bytes} "
           f"retained_unproved:{state.retained_unproved} "
-          f"retained_identity:{state.retained_identity}")
+          f"retained_identity:{state.retained_identity} "
+          f"retained_active:{state.retained_active}")
     return 0
 
 

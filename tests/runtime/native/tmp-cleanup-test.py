@@ -85,7 +85,8 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("removed:1 retained:3", result.stdout)
         self.assertIn(f"reclaimed_logical_bytes:{expected_reclaimed_bytes}", result.stdout)
-        self.assertIn("retained_unproved:2 retained_identity:1", result.stdout)
+        self.assertIn("retained_unproved:2 retained_identity:1 retained_active:0",
+                      result.stdout)
         self.assertFalse(owned.exists())
         self.assertTrue(incomplete.exists())
         self.assertTrue(conflicting.exists())
@@ -210,6 +211,46 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
             (owned / marker).write_text(oversized_pid)
         self.assertEqual(self.run_cleanup().returncode, 0)
         self.assertTrue(owned.exists())
+
+    def test_exited_owner_with_live_same_owner_session_fd_is_retained(self):
+        owned = self.session("Abcd1234")
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c",
+             "import os, sys\n"
+             "descriptor = os.open(sys.argv[1], os.O_RDONLY)\n"
+             "print('ready', flush=True)\n"
+             "sys.stdin.buffer.read(1)\n"
+             "os.close(descriptor)\n",
+             str(owned / "fixture.bin")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "ready")
+            result = self.run_cleanup()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("removed:0 retained:1", result.stdout)
+            self.assertIn("retained_active:1", result.stdout)
+            self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
+        finally:
+            if child.poll() is None:
+                child.stdin.write("x")
+                child.stdin.flush()
+            child.wait(timeout=5)
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(owned.exists())
+
+    def test_unreadable_same_owner_process_inventory_blocks_before_unlink(self):
+        owned = self.session("Abcd1234")
+        state = cleanup_module.CleanupState()
+        with mock.patch.object(
+                cleanup_module, "session_referenced_by_same_owner_process",
+                side_effect=OSError(errno.EACCES, "synthetic proc visibility failure")):
+            with self.assertRaises(OSError) as caught:
+                cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700, state)
+        self.assertEqual(caught.exception.errno, errno.EACCES)
+        self.assertEqual(state.phase, "session-activity")
+        self.assertFalse(state.partial)
+        self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
 
     def test_pid_and_matching_markers_without_teardown_evidence_are_not_authority(self):
         owned = self.session("Abcd1234")

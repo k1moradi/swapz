@@ -3833,8 +3833,10 @@ successful cleanup. Rootless contracts must pin that fail-before-evidence
 branch rather than require an obsolete shell `||` spelling.
 
 The shared helper inspects the real root-owned mode-1777 `/tmp` and deletes
-only positively owned swapz benchmark sessions with matching completion proof
-and an exited owner process. Unrelated occupants, incomplete/quarantined
+only positively owned swapz benchmark sessions with matching completion proof,
+an exited owner process, and no same-owner process still referencing the
+inspected session directory or files through cwd, root, or an open descriptor.
+Unrelated occupants, incomplete/quarantined
 sessions, and unproved ownership remain untouched. Unsafe mounts, unreadable
 proofs or failed owned cleanup block admission; neither helper broadly empties
 `/tmp` or drops kernel caches. ID36 repeats this bounded completed-owned
@@ -3867,17 +3869,23 @@ unlink/rmdir/close errors. Before the first unlink, revalidate that the root
 pathname still identifies the original pinned root and reopen the named session
 without following symlinks to confirm its original device/inode/owner/mode and
 mount ID. A root or session rename, replacement, or remount during the bounded
-inspection must block with no deletion. Keep the independent final session
-identity check before rmdir; these checks do not claim atomicity against a
-privileged same-UID actor concurrently mutating private directories.
+inspection must block with no deletion. After that pathname/mount revalidation
+and before the first unlink, perform a bounded same-owner /proc inventory and
+retain the session if any process still references an inspected session object
+through cwd, root, or an open descriptor. An unreadable same-owner process
+inventory is uncertainty and blocks cleanup rather than assuming the child
+exited. Keep the independent final session identity check before rmdir; these
+checks do not claim atomicity against a privileged same-UID actor concurrently
+mutating private directories.
 
 On refusal, the private helper emits the phase, category, original errno (when
 present) or process exit code, prior fully removed count, and conservative
 retained-state disposition without echoing paths or PID inventories. The first
 operation error takes precedence over secondary descriptor-close failure.
 Successful output is a single bounded aggregate of completed removals,
-unproved retained candidates, identity-rejected candidates, and logical bytes
-unlinked by fully removed sessions, never per-entry success chatter. Logical
+unproved retained candidates, identity-rejected candidates, active-use retained
+candidates, and logical bytes unlinked by fully removed sessions, never per-entry
+success chatter. Logical
 file bytes are not a claim of immediate physical or tmpfs RAM release: sparse
 files and still-open descriptors can make actual reclamation differ. A failed
 or partial session never contributes to successful reclaimed-byte totals. The existing
