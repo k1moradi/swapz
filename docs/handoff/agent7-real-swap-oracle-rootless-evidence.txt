@@ -1,15 +1,26 @@
 Agent 7 rootless byte-integrity control evidence
 Generated UTC: 2026-11-05T16:51:12.123558+00:00
-Repository: k1moradi/swapz (main)
+Independent audit: 2026-11-05
+Repository: k1moradi/swapz (shared main only)
+Audited main commit: b7f5109dc7a884753c2e6c6190c2ee9a8dd1188f
+
+Evidence provenance correction
+------------------------------
+The producer harness imports the exact downloaded oracle source and verifies its Git blob SHA before executing it.
+The other three auxiliary harnesses do NOT import the full qualifier module: they execute exact transcriptions of contiguous qualifier excerpts. Their source binding is therefore external, not self-enforcing. During both the original run and this independent audit, those transcriptions matched the fetched qualifier source by length and FNV-1a64 fingerprint as recorded below. Treat all three as supplemental regression controls, not as a substitute for running tests/runtime/native/primary-real-swap-oracle-terminal-test.py against the full qualifier.
+
 Exact oracle source Git blob SHA: e1b1894cf2f4b48f8f129cbf06b7d6266d8f1f53
 GitHub main oracle blob SHA: e1b1894cf2f4b48f8f129cbf06b7d6266d8f1f53
 Main qualifier Git blob SHA for tested excerpts: ab76eecee2fd3c5856d5559e10bd25a6d10adbf1
 Main terminal fixture Git blob SHA (reviewed, not executed verbatim): 55380d7aa9993177f5eb152f73dcba55014c7436
-Qualifier evaluator excerpt: length=4105, FNV-1a64=48118fb048a5158c (matches fetched main)
-Qualifier terminal parser excerpt: length=6862, FNV-1a64=57044412a58bb381 (matches fetched main)
-Qualifier geometry/rounds excerpt: length=6176, FNV-1a64=eed8e736714d5538 (matches fetched main)
+Qualifier evaluator excerpt: length=4105, FNV-1a64=48118fb048a5158c
+Qualifier terminal parser excerpt: length=6862, FNV-1a64=57044412a58bb381
+Qualifier geometry/rounds excerpt: length=6176, FNV-1a64=eed8e736714d5538
+
+Independent audit rerun: 43/43 auxiliary controls passed.
 NO real swap, privileged operations, mapper, module, storage, or DISCARD executed.
-Exact tests/runtime/native/primary-real-swap-oracle-terminal-test.py: NOT RUN as an entire suite; requires full qualifier outside the isolated downloaded snippets.
+Exact tests/runtime/native/primary-real-swap-oracle-terminal-test.py: NOT RUN as an entire suite.
+The original captured test output follows unchanged.
 
 === run_source_bound_oracle_controls.py: exit=0 ===
 test_closed_fill_stream_withholds_success (__main__.SourceBoundOracleControls.test_closed_fill_stream_withholds_success) ... ok
