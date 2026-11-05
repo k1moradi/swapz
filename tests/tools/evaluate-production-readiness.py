@@ -558,6 +558,19 @@ def _physical_device_boundary_is_quiescent(
     )
 
 
+def _malformed_physical_evidence_issue(
+        phase: str, field: str, expected_type: str, observed: Any) -> str:
+    """Describe malformed nested evidence without echoing its raw value."""
+    return (
+        "sealed campaign nested evidence is malformed: "
+        f"phase={phase} failed_evidence_field={field} "
+        f"expected_type={expected_type} "
+        f"observed_type={type(observed).__name__} "
+        "original_error=unavailable verdict=BLOCKED "
+        "safe_action=recapture_and_reseal_campaign"
+    )
+
+
 def _physical_audit_binding_is_valid(
         audit: Any,
         source_sha: str,
@@ -565,8 +578,9 @@ def _physical_audit_binding_is_valid(
         physical_policy: Any,
         producer_workloads: dict[str, Any],
         pairs: Any,
-        qualification_status: Any) -> bool:
-    """Bind the current producer audit to source, target and retained pairs."""
+        qualification_status: Any,
+        failure_count_workload: str | None = None) -> bool:
+    """Bind the producer audit; a proven FAIL may scope count validation."""
     if (
             not isinstance(audit, dict) or set(audit) != PHYSICAL_AUDIT_KEYS or
             not isinstance(audit.get("diagnostics"), list) or
@@ -585,9 +599,12 @@ def _physical_audit_binding_is_valid(
         return False
 
     counts = audit.get("cohort_pair_counts")
-    if (
-            not isinstance(counts, dict) or
-            set(counts) != set(producer_workloads)):
+    if not isinstance(counts, dict):
+        return False
+    if failure_count_workload is None:
+        if set(counts) != set(producer_workloads):
+            return False
+    elif failure_count_workload not in producer_workloads:
         return False
     observed_counts = {workload: 0 for workload in producer_workloads}
     observed_pass_pair_counts = {
@@ -631,6 +648,10 @@ def _physical_audit_binding_is_valid(
         if pair["status"] == "PASS":
             observed_pass_pair_counts[workload] += 1
     for workload, specification in producer_workloads.items():
+        if (
+                failure_count_workload is not None and
+                workload != failure_count_workload):
+            continue
         count = counts.get(workload)
         if (
                 not isinstance(count, dict) or
@@ -1625,6 +1646,77 @@ def validate_physical_campaign_evidence(
             campaign.get("qualification_status") != "PASS"):
         reject("sealed campaign qualification is not PASS")
     physical_audit = campaign.get("physical_evidence_audit")
+    if release_validation:
+        if not isinstance(physical_audit, dict):
+            reject(_malformed_physical_evidence_issue(
+                "physical_evidence_audit", "physical_evidence_audit",
+                "dict", physical_audit))
+        else:
+            audit_diagnostics = physical_audit.get("diagnostics")
+            if not isinstance(audit_diagnostics, list):
+                reject(_malformed_physical_evidence_issue(
+                    "physical_evidence_audit",
+                    "physical_evidence_audit.diagnostics",
+                    "list", audit_diagnostics))
+            else:
+                for diagnostic in audit_diagnostics:
+                    if not isinstance(diagnostic, dict):
+                        reject(_malformed_physical_evidence_issue(
+                            "physical_evidence_audit",
+                            "physical_evidence_audit.diagnostics[]",
+                            "dict", diagnostic))
+                        break
+
+            first_failure = physical_audit.get("first_failed_evidence")
+            if first_failure is not None:
+                if not isinstance(first_failure, dict):
+                    reject(_malformed_physical_evidence_issue(
+                        "physical_evidence_audit",
+                        "physical_evidence_audit.first_failed_evidence",
+                        "dict", first_failure))
+                else:
+                    failure_workload = first_failure.get("workload")
+                    if (
+                            not isinstance(failure_workload, str) or
+                            failure_workload not in producer_workloads):
+                        reject(_malformed_physical_evidence_issue(
+                            "physical_evidence_audit",
+                            "physical_evidence_audit."
+                            "first_failed_evidence.workload",
+                            "str", failure_workload))
+
+            audit_counts = physical_audit.get("cohort_pair_counts")
+            if (
+                    not isinstance(audit_counts, dict) or
+                    set(audit_counts) != set(producer_workloads)):
+                reject(_malformed_physical_evidence_issue(
+                    "physical_evidence_audit",
+                    "physical_evidence_audit.cohort_pair_counts",
+                    "dict", audit_counts))
+            else:
+                malformed_count = False
+                for count in audit_counts.values():
+                    if not isinstance(count, dict):
+                        reject(_malformed_physical_evidence_issue(
+                            "physical_evidence_audit",
+                            "physical_evidence_audit."
+                            "cohort_pair_counts[].count",
+                            "dict", count))
+                        malformed_count = True
+                        break
+                    for field in (
+                            "required_pairs", "attempted_pairs",
+                            "accepted_pairs"):
+                        if type(count.get(field)) is not int:
+                            reject(_malformed_physical_evidence_issue(
+                                "physical_evidence_audit",
+                                "physical_evidence_audit."
+                                f"cohort_pair_counts[].{field}",
+                                "int", count.get(field)))
+                            malformed_count = True
+                            break
+                    if malformed_count:
+                        break
     if campaign.get("evaluation_protocol") != "v2":
         reject("sealed campaign did not use the required v2 protocol")
     if (
@@ -1931,21 +2023,14 @@ def validate_physical_campaign_evidence(
                         "sealed campaign contains duplicate pair artifact digests")
                 artifact_digests.add(pair["sha256"])
                 workload = pair.get("workload")
-                if not isinstance(workload, str):
+                if (
+                        not isinstance(workload, str) or
+                        workload not in producer_workloads):
                     # Nested JSON evidence is untrusted even when its parent
                     # artifact has valid name, size and digest fields.
-                    reject(
-                        "sealed campaign pair workload type is invalid: "
-                        "phase=pair_manifest "
-                        "failed_evidence_field=artifacts.pairs[].workload "
-                        "expected_type=str "
-                        f"observed_type={type(workload).__name__} "
-                        "original_error=unavailable verdict=BLOCKED "
-                        "safe_action=recapture_and_reseal_campaign")
-                    continue
-                if workload not in producer_workloads:
-                    reject(
-                        "sealed campaign contains a non-producer workload")
+                    reject(_malformed_physical_evidence_issue(
+                        "pair_manifest", "artifacts.pairs[].workload",
+                        "str", workload))
                     continue
                 workload_spec = producer_workloads[workload]
                 pair_index = pair.get("pair_index")
@@ -1961,12 +2046,15 @@ def validate_physical_campaign_evidence(
                         "observed=missing_duplicate_or_out_of_range")
                     continue
                 observed_indices[workload].add(pair_index)
-                if (not isinstance(pair_id, str) or not pair_id or
-                        (workload, pair_id) in pair_identifiers):
+                if not isinstance(pair_id, str) or not pair_id:
+                    reject(_malformed_physical_evidence_issue(
+                        "pair_manifest", "artifacts.pairs[].pair_id",
+                        "str", pair_id))
+                elif (workload, pair_id) in pair_identifiers:
                     reject(
                         f"sealed campaign workload={workload} pair_id "
                         "required=unique_nonempty "
-                        "observed=invalid_or_duplicate")
+                        "observed=duplicate")
                 else:
                     pair_identifiers.add((workload, pair_id))
                 if order != workload_spec[
@@ -2100,10 +2188,19 @@ def _physical_campaign_failure_is_proven(
         _, producer_workloads = _physical_campaign_workloads(policy)
     except EvidenceError:
         return False
+    first_failure = (
+        audit.get("first_failed_evidence")
+        if isinstance(audit, dict) else None)
+    failure_count_workload = (
+        first_failure.get("workload")
+        if isinstance(first_failure, dict) else None)
     if (
+            not isinstance(failure_count_workload, str) or
+            failure_count_workload not in producer_workloads or
             not _physical_audit_binding_is_valid(
                 audit, source_sha, target, physical_policy,
-                producer_workloads, pairs, record.get("qualification_status")) or
+                producer_workloads, pairs, record.get("qualification_status"),
+                failure_count_workload) or
             audit.get("status") != "FAIL" or
             audit.get("qualification_status") != "FAIL_OR_INCOMPLETE" or
             not _physical_audit_failure_witness_is_valid(

@@ -8332,12 +8332,18 @@ count invariant is `0 <= accepted_pairs <= retained PASS/non-excluded pairs
 <= attempted_pairs`; analysis screening can reduce accepted counts without
 rewriting immutable pair artifacts. Never require strict accepted/PASS equality.
 
-Type failures must produce bounded, redacted diagnostics stating a phase,
-failed evidence field, expected/observed types, original error if available
-(otherwise `unavailable`), verdict, and safe recapture/reseal action, without
-echoing private pair records or host paths. Preserve earlier failed-phase
-attribution if multiple gates fail. A malformed witness cannot authenticate
-its own FAIL, while a separately authenticated producer/measurement FAIL
-continues to dominate an unrelated screening gap. A passing rootless test
-only proves the evaluator behavior: BLOCKED is not an acceptance PASS, and
-authenticated measured FAIL is neither BLOCKED nor a qualification PASS.
+Malformed nested-field failures must produce bounded, redacted diagnostics
+stating a phase, failed evidence field, expected/observed types, original error
+if available (otherwise `unavailable`), verdict, and safe recapture/reseal
+action, without echoing private pair records or host paths. This applies to
+wrong-type values and structurally invalid values of the nominal type, such as
+an unknown workload string or incomplete count map. Preserve earlier
+failed-phase attribution if multiple gates fail. A malformed field in the
+first-failure witness cannot authenticate its own FAIL. Once the witness,
+source/target identity, retained pair manifest and that witness workload's
+count invariant are independently authenticated, malformed count or diagnostic
+records belonging only to another cohort still block audit completeness but
+must not relabel the authenticated producer/measurement FAIL as BLOCKED. A
+passing rootless test only proves the evaluator behavior: BLOCKED is not an
+acceptance PASS, and authenticated measured FAIL is neither BLOCKED nor a
+qualification PASS.
