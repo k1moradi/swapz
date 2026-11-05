@@ -1893,6 +1893,7 @@ def validate_physical_campaign_evidence(
             observed_frozen_pairs = sum(
                 1 for pair in pairs
                 if isinstance(pair, dict) and
+                isinstance(pair.get("workload"), str) and
                 pair.get("workload") in frozen_workloads
             ) if isinstance(pairs, list) else 0
             if observed_frozen_pairs != frozen_required_pairs:
@@ -1930,9 +1931,19 @@ def validate_physical_campaign_evidence(
                         "sealed campaign contains duplicate pair artifact digests")
                 artifact_digests.add(pair["sha256"])
                 workload = pair.get("workload")
-                if (
-                        not isinstance(workload, str) or
-                        workload not in producer_workloads):
+                if not isinstance(workload, str):
+                    # Nested JSON evidence is untrusted even when its parent
+                    # artifact has valid name, size and digest fields.
+                    reject(
+                        "sealed campaign pair workload type is invalid: "
+                        "phase=pair_manifest "
+                        "failed_evidence_field=artifacts.pairs[].workload "
+                        "expected_type=str "
+                        f"observed_type={type(workload).__name__} "
+                        "original_error=unavailable verdict=BLOCKED "
+                        "safe_action=recapture_and_reseal_campaign")
+                    continue
+                if workload not in producer_workloads:
                     reject(
                         "sealed campaign contains a non-producer workload")
                     continue

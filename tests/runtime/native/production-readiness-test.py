@@ -3717,27 +3717,118 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
     def test_physical_audit_malformed_nested_types_are_blocked_nonthrowing(self):
         policy = acceptance_policy()
         policy_raw = encoded(policy)
-        cases = []
+        private_marker = "/private/evidence/never-publish"
 
-        pass_campaign = physical_campaign_evidence(policy_raw)
-        pass_campaign["artifacts"]["pairs"][0]["workload"] = []
-        cases.append(("pair-workload", pass_campaign))
-
-        arm_failure = physical_campaign_failure_evidence(policy_raw)
-        arm_failure["physical_evidence_audit"][
-            "first_failed_evidence"]["workload"] = []
-        cases.append(("failure-witness-workload", arm_failure))
-
-        decision_failure = physical_campaign_decision_failure_evidence(
-            policy_raw)
-        decision_failure["artifacts"]["pairs"][0]["pair_id"] = []
-        cases.append(("decision-pair-id", decision_failure))
-
-        for name, campaign in cases:
-            with self.subTest(name=name):
+        # This exact JSON-compatible [] raised TypeError in the frozen
+        # cohort membership test before a BLOCKED verdict could be returned.
+        for malformed_workload in (
+                [], {}, None, private_marker, False):
+            with self.subTest(field="pair.workload",
+                              observed_type=type(malformed_workload).__name__):
+                campaign = physical_campaign_evidence(policy_raw)
+                campaign["artifacts"]["pairs"][0][
+                    "workload"] = malformed_workload
                 result = evaluate(policy=policy, campaign=campaign)
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
                 self.assertEqual(result["release_verdict"], "BLOCKED")
+                diagnostics = "\n".join(result["code_blockers"])
+                self.assertIn(
+                    "first_failed_phase=physical_evidence_audit", diagnostics)
+                self.assertNotIn(private_marker, diagnostics)
+                if isinstance(malformed_workload, str):
+                    self.assertIn("non-producer workload", diagnostics)
+                else:
+                    for expected in (
+                            "phase=pair_manifest",
+                            "failed_evidence_field=artifacts.pairs[].workload",
+                            "expected_type=str",
+                            f"observed_type={type(malformed_workload).__name__}",
+                            "original_error=unavailable",
+                            "verdict=BLOCKED",
+                            "safe_action=recapture_and_reseal_campaign"):
+                        self.assertIn(expected, diagnostics)
+
+        for malformed_workload in ([], {}, None, "not-a-workload"):
+            with self.subTest(field="audit.first_failed_evidence.workload",
+                              observed_type=type(malformed_workload).__name__):
+                campaign = physical_campaign_failure_evidence(policy_raw)
+                campaign["physical_evidence_audit"][
+                    "first_failed_evidence"]["workload"] = malformed_workload
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertTrue(any(
+                    "first_failed_phase=physical_evidence_audit" in blocker
+                    for blocker in result["code_blockers"]))
+
+        for malformed_identifier in ([], {}, None, ""):
+            with self.subTest(field="decision.pair_id",
+                              observed_type=type(malformed_identifier).__name__):
+                campaign = physical_campaign_decision_failure_evidence(
+                    policy_raw)
+                campaign["artifacts"]["pairs"][0][
+                    "pair_id"] = malformed_identifier
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+
+        for malformed_counts in ([], {}, None, "not-counts"):
+            with self.subTest(field="audit.cohort_pair_counts",
+                              observed_type=type(malformed_counts).__name__):
+                campaign = physical_campaign_evidence(policy_raw)
+                campaign["physical_evidence_audit"][
+                    "cohort_pair_counts"] = malformed_counts
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+
+    def test_physical_audit_malformed_pair_preserves_prior_failed_phase(self):
+        policy = acceptance_policy()
+        campaign = physical_campaign_evidence(encoded(policy))
+        campaign.pop("sealed_at_utc")
+        campaign["artifacts"]["pairs"][0]["workload"] = []
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        diagnostics = "\n".join(result["code_blockers"])
+        # A missing earlier seal still wins the first-phase attribution.
+        self.assertIn("first_failed_phase=sealed_at_utc", diagnostics)
+        self.assertIn("failed_evidence_field=artifacts.pairs[].workload",
+                      diagnostics)
+
+    def test_physical_fail_keeps_independent_witness_with_screened_pairs(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        for campaign_factory in (
+                physical_campaign_failure_evidence,
+                physical_campaign_decision_failure_evidence):
+            campaign = campaign_factory(policy_raw)
+            unrelated = "sd-service-representative"
+            counts = campaign["physical_evidence_audit"][
+                "cohort_pair_counts"][unrelated]
+            retained_pass_pairs = sum(
+                1 for pair in campaign["artifacts"]["pairs"]
+                if pair["workload"] == unrelated and
+                pair["status"] == "PASS" and pair["excluded"] is False)
+            self.assertEqual(counts["attempted_pairs"], retained_pass_pairs)
+            # Issue #100: accepted is analysis-usable, not necessarily every
+            # immutable PASS/non-excluded pair; zero remains a valid lower bound.
+            counts["accepted_pairs"] = 0
+            campaign["physical_evidence_audit"]["diagnostics"].append({
+                "status": "BLOCKED",
+                "metric": "pair.analysis_usable",
+                "expected": True,
+                "observed": None,
+                "workload": unrelated,
+                "pair_index": 1,
+                "arm": None,
+                "reason": "independent synthetic screening gap",
+            })
+            result = evaluate(policy=policy, campaign=campaign)
+            self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+            self.assertEqual(result["release_verdict"], "FAIL")
+            self.assertEqual(
+                result["METADATA_RAM_MEASUREMENT"]["status"],
+                "MEASURED_WITHIN_LIMIT")
 
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
