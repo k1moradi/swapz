@@ -1895,6 +1895,18 @@ int main(int argc, char **argv)
                     r"if\s*\(\s*result\s*<\s*0\s*\)\s*"
                     r"errno\s*=\s*saved_errno\s*;",
                     f"{symbol} does not restore the original failure errno")
+                success_marker = (
+                    "PRIMARY_STOP=COMPLETE"
+                    if symbol == "swapz_primary_stop_active"
+                    else "PRIMARY_RECOVER=COMPLETE")
+                success_gate = executable.index("if (result == 0)", saved_errno)
+                function_return = executable.index("return result;", success_gate)
+                success_window = raw[success_gate:function_return]
+                self.assertRegex(
+                    success_window,
+                    r"if\s*\(\s*result\s*==\s*0\s*\)\s*printf\s*\(\s*\"" +
+                    re.escape(success_marker),
+                    f"{symbol} can report COMPLETE after owner-release failure")
 
                 # COMPLETE recovery admission must reject before any swap or
                 # mapper cleanup. This is source-order evidence only; the
@@ -1945,13 +1957,22 @@ int main(int argc, char **argv)
                     timeout=10, check=False)
 
             failure = invoke("release", inject_fsync_failure=True)
+            observed_state_bytes = state_path.read_bytes()
+            observed_durable = (
+                "COMPLETE" if observed_state_bytes == state_bytes else "CHANGED")
+            observed_owner_marker = (
+                "present" if marker_path.exists() else "absent")
             diagnostic = (
                 "phase=owner-release original_errno=EIO(5) "
-                "durable=COMPLETE expected_release=FAILED "
+                "expected_durable=COMPLETE "
+                f"observed_durable={observed_durable} "
+                "expected_release=FAILED "
+                f"observed_release={failure.stdout.strip()} "
+                "expected_owner_marker=absent "
+                f"observed_owner_marker={observed_owner_marker} "
                 "expected_mapper=UNOBSERVED observed_mapper=UNOBSERVED "
                 "expected_swap=UNOBSERVED observed_swap=UNOBSERVED "
-                "observed_release=" + failure.stdout.strip() +
-                " recovery_disposition=BLOCKED"
+                "expected_recovery=BLOCKED observed_recovery=NOT_RUN"
             )
             self.assertEqual(failure.returncode, 2, diagnostic)
             self.assertIn("phase=owner-release status=FAILED original_errno=5",
@@ -1972,22 +1993,31 @@ int main(int argc, char **argv)
                     before = (state_path.read_bytes(), marker_path.exists())
                     for _ in range(2):
                         recovery = invoke("recover")
+                        after = (
+                            state_path.read_bytes(), marker_path.exists())
+                        observed_durable = (
+                            "COMPLETE" if after[0] == state_bytes else "CHANGED")
+                        expected_owner_marker = (
+                            "present" if marker_persisted else "absent")
+                        observed_owner_marker = (
+                            "present" if after[1] else "absent")
                         recovery_diagnostic = (
                             "phase=recovery-admission original_errno=EPERM(1) "
-                            "durable=COMPLETE expected_recovery=BLOCKED "
-                            f"observed_owner_marker={'present' if marker_persisted else 'absent'} "
+                            "expected_durable=COMPLETE "
+                            f"observed_durable={observed_durable} "
+                            "expected_recovery=BLOCKED "
+                            f"observed_recovery={recovery.stdout.strip()} "
+                            f"expected_owner_marker={expected_owner_marker} "
+                            f"observed_owner_marker={observed_owner_marker} "
                             "expected_mapper=UNOBSERVED observed_mapper=UNOBSERVED "
-                            "expected_swap=UNOBSERVED observed_swap=UNOBSERVED "
-                            "observed_recovery=" + recovery.stdout.strip()
+                            "expected_swap=UNOBSERVED observed_swap=UNOBSERVED"
                         )
                         self.assertEqual(recovery.returncode, 2,
                                          recovery_diagnostic)
                         self.assertIn("phase=recovery-admission status=BLOCKED "
                                       "original_errno=1", recovery.stdout,
                                       recovery_diagnostic)
-                        self.assertEqual(
-                            (state_path.read_bytes(), marker_path.exists()),
-                            before, recovery_diagnostic)
+                        self.assertEqual(after, before, recovery_diagnostic)
 
 
 if __name__ == "__main__":

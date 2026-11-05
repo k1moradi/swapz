@@ -75,7 +75,9 @@ record is not permission to report successful teardown.
 
 The private fixture does not inspect Device Mapper or the kernel swap inventory,
 so its diagnostics must label mapper and swap state UNOBSERVED rather than
-claiming absent or inactive kernel state. Source ordering separately requires
+claiming absent or inactive kernel state. Failure diagnostics must distinguish
+expected from observed durable/owner/recovery state and use NOT_RUN for a
+recovery attempt that has not actually executed. Source ordering separately requires
 the current COMPLETE recovery rejection to occur before mapper/swap cleanup
 calls. Fresh fixture processes must remain BLOCKED with byte-exact COMPLETE
 state whether the unconfirmed unlink is modeled as persisted or the prior
