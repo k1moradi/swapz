@@ -64,15 +64,20 @@ def arm(candidate, timestamp, run_id, workload="sd-service-balanced"):
 
 def pair(index, timestamp, run_id=None, workload="sd-service-balanced"):
     identifier = run_id or f"physical-run-{workload}-{index}"
+    order = QUALIFICATION.WORKLOADS[workload][
+        "counterbalanced_order"][index - 1]
     return {
         "schema": QUALIFICATION.PAIR_SCHEMA, "workload": workload,
         "pair_id": f"pair-{workload}-{index}", "pair_index": index,
-        "order": QUALIFICATION.WORKLOADS[workload][
-            "counterbalanced_order"][index - 1],
+        "order": order,
         "source_sha": SOURCE, "status": "PASS",
         "excluded": False, "analysis_usable": True,
-        "raw": arm("raw", timestamp, identifier, workload),
-        "swapz": arm("swapz", timestamp + 200, identifier, workload),
+        # Synthetic chronology must honor the prospective order, not merely
+        # print its label. These are not physical measurements.
+        "raw": arm("raw", timestamp + (200 if order == "swapz-first" else 0),
+                   identifier, workload),
+        "swapz": arm("swapz", timestamp + (0 if order == "swapz-first" else 200),
+                     identifier, workload),
     }
 
 
@@ -336,8 +341,12 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         decision = QUALIFICATION.service_decision(
             samples, "sd-service-balanced")
         self.assertEqual(decision["status"], "FAIL")
-        audited, metrics = inspect(records, decisions={
-            "sd-service-balanced": decision})
+        # Use a fully accepted synthetic cohort to exercise the numeric
+        # diagnostic. The excluded attempt above is screening evidence only.
+        accepted_records = [pair(i, 1100 + 500 * i) for i in range(1, 6)]
+        audited, metrics = inspect(accepted_records, decisions={
+            "sd-service-balanced": decision}, summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audited["status"], "FAIL")
         self.assertIn("useful_write.paired_95pct_ci_lower", metrics)
         observed = next(
             item for item in audited["diagnostics"]
