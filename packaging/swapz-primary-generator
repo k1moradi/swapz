@@ -672,13 +672,28 @@ if mv -nT -- "$mapper_temporary" "$mapper_dropin" &&
 fi
 # Publish the activation barrier last; any earlier error leaves the mask.
 # A failed or falsely successful unlink must not commit the target graph.
+# The earlier publication checks are not proof that both inode identities
+# still match when the barrier is about to be removed.
+if [ -L "$mapper_dropin" ] || [ -L "$device_dropin" ] ||
+	[ ! "$stage_dir/owned-mapper" -ef "$mapper_dropin" ] ||
+	[ ! "$stage_dir/owned-device" -ef "$device_dropin" ]; then
+	fail 1 publication generator-output pre-release-inode-mismatch mapper-active-job
+fi
 if rm -f -- "$mapper_unit"; then
-	if [ ! -e "$mapper_unit" ] && [ ! -L "$mapper_unit" ]; then
+	# A release wrapper can report success while substituting a published
+	# drop-in. A missing mask is not a committed, owned dependency graph.
+	if [ ! -e "$mapper_unit" ] && [ ! -L "$mapper_unit" ] &&
+		[ ! -L "$mapper_dropin" ] && [ ! -L "$device_dropin" ] &&
+		[ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ] &&
+		[ "$stage_dir/owned-device" -ef "$device_dropin" ]; then
 		transaction_committed=1
 		exit 0
 	fi
 	mask_status=1
-	mask_validation=mask-not-released
+	mask_validation=publication-ownership-not-proven
+	if [ -e "$mapper_unit" ] || [ -L "$mapper_unit" ]; then
+		mask_validation=mask-not-released
+	fi
 else
 	mask_status=$?
 	mask_validation=release-mask

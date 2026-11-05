@@ -5709,7 +5709,20 @@ and a foreign mapper-unit symlink substituted after mask removal. A refused
 generator run must replace that substitution with the early `/dev/null` mask,
 remove both pinned mapper/device drop-ins, preserve the first failing command
 status, report restore status separately from unavailable syscall errno, and
-report the verified rollback outcome without disclosing selector contents. These dependencies are not a
+report the verified rollback outcome without disclosing selector contents.
+A final mask unlink that returns zero does not prove that publication committed:
+recheck both public mapper/device drop-ins against their pinned staging inodes
+immediately before and after mask release, refuse a substituted symlink or
+regular inode, restore the early /dev/null mask, and preserve the foreign
+artifact. In a rootless transaction negative control, inject each kind of
+mapper-drop-in substitution within a zero-status mask-release wrapper; the
+old generator must falsely commit, while the corrected generator must
+report publication ownership failure, rollback incompleteness and the
+verified retained mask. Treat the no-follow mask replacement and EXIT-trap
+postconditions as independent checks after a first genuine command failure:
+zero-status cleanup is never enough to establish absence of stale paths.
+
+These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another
 alias, so deployment must separately ensure the selected partition is not
 activated through that alias. Current units remain disabled and

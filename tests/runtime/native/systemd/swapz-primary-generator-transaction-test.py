@@ -799,6 +799,55 @@ class GeneratorPublicationTest(unittest.TestCase):
                     self.assertEqual(self.device_dropin(SELECTED).readlink(), foreign)
                 self.device_dropin(SELECTED).unlink(missing_ok=True)
 
+    def test_mask_release_rechecks_published_inode_identity(self) -> None:
+        foreign = self.root / "foreign-publication-target"
+        foreign.write_text("preserve-foreign-target", encoding="ascii")
+        removal = self.commands / "rm"
+        removal.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *swapz-primary-mapper.service)
+                /usr/bin/rm "$@" || exit $?
+                /usr/bin/rm -f -- "$MOCK_PUBLISHED_MAPPER" || exit $?
+                case "$MOCK_SUBSTITUTION" in
+                symlink)
+                    /usr/bin/ln -s "$MOCK_FOREIGN" "$MOCK_PUBLISHED_MAPPER" || exit $? ;;
+                regular)
+                    printf '[Foreign]\nImportant=preserve-publication\n' > "$MOCK_PUBLISHED_MAPPER" || exit $? ;;
+                esac
+                exit 0 ;;
+            esac
+            exec /usr/bin/rm "$@"
+            """).lstrip("\n"), encoding="ascii")
+        removal.chmod(0o755)
+        for substitution, observed in (
+            ("symlink", "foreign-symlink"),
+            ("regular", "foreign-inode-retained"),
+        ):
+            with self.subTest(substitution=substitution):
+                result = self.run_generator(
+                    MOCK_FOREIGN=str(foreign),
+                    MOCK_PUBLISHED_MAPPER=str(self.mapper_dropin()),
+                    MOCK_SUBSTITUTION=substitution,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("validation=publication-ownership-not-proven", result.stderr)
+                self.assertIn("phase=rollback", result.stderr)
+                self.assertIn(f"observed_mapper={observed}", result.stderr)
+                self.assertIn("original_status=1", result.stderr)
+                self.assertIn("rollback=incomplete", result.stderr)
+                self.assertEqual(os.readlink(self.mask()), "/dev/null")
+                self.assertFalse(self.device_dropin(SELECTED).exists())
+                self.assertEqual(foreign.read_text(encoding="ascii"), "preserve-foreign-target")
+                self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+                if substitution == "symlink":
+                    self.assertTrue(self.mapper_dropin().is_symlink())
+                    self.assertEqual(self.mapper_dropin().readlink(), foreign)
+                else:
+                    self.assertEqual(self.mapper_dropin().read_text(encoding="ascii"),
+                                     "[Foreign]\nImportant=preserve-publication\n")
+                self.mapper_dropin().unlink()
+
     def test_mask_release_error_rolls_back_published_files(self) -> None:
         command = self.commands / "rm"
         for failure in ("before", "after"):
