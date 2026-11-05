@@ -3741,6 +3741,86 @@ class RuntimeHealthTests(unittest.TestCase):
 
 
 
+    def test_primary_swap_requires_partition_type_and_priority_minus_one(self) -> None:
+        # The inventory parser accepts integer priorities; health must check
+        # the manager's actual -1 activation contract, not just row presence.
+        primary_path = self.dev / "mapper" / "swapz-primary"
+        for swap_type, priority, reason, phase in (
+            ("partition", "42", "mapper_swap_priority_invalid", "swap_inventory_priority"),
+            ("file", "-1", "mapper_swap_type_invalid", "swap_inventory_type"),
+        ):
+            with self.subTest(swap_type=swap_type, priority=priority):
+                (self.proc / "swaps").write_text(
+                    "Filename Type Size Used Priority\n"
+                    f"{primary_path} {swap_type} 108320764 1024 {priority}\n",
+                    encoding="ascii",
+                )
+                observed = self.run_helper("once")
+                self.assertEqual(observed.returncode, 1, observed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+                self.assertIn(reason, observed.stderr)
+                self.assertIn(f"phase={phase} expected=", observed.stderr)
+                self.assertIn("command=read_swap_inventory command_status=0", observed.stderr)
+                self.assertIn("next=inspect_proc_swaps_read_only", observed.stderr)
+                self.assertNotIn(str(self.recovery), observed.stderr)
+                self.assertNotIn(str(self.etc), observed.stderr)
+
+        # Unrelated host swapfiles are not subject to the primary priority.
+        (self.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n"
+            f"{primary_path} partition 108320764 1024 -1\n"
+            "/swapfile file 10000 12 42\n",
+            encoding="ascii",
+        )
+        healthy = self.run_helper("once")
+        self.assertEqual(healthy.returncode, 0, healthy.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", healthy.stderr)
+
+    def test_wrong_primary_priority_survives_a_healthy_second_inventory_read(self) -> None:
+        (self.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n"
+            f"{self.dev / 'mapper' / 'swapz-primary'} partition 108320764 1024 42\n",
+            encoding="ascii",
+        )
+        write_executable(
+            self.bin / "lsblk",
+            textwrap.dedent(
+                r"""\
+                #!/bin/sh
+                [ "$2" = MAJ:MIN ] || exit 1
+                case "$4" in
+                */disk/by-partuuid/*) echo 8:1 ;;
+                */mapper/swapz-primary)
+                    count=0
+                    counter_file="$SWAPZ_PRIMARY_TEST_PROC_ROOT/mapper-probe-count"
+                    if [ -f "$counter_file" ]; then
+                        IFS= read -r count < "$counter_file" || exit 2
+                    fi
+                    count=$((count + 1))
+                    printf '%s\n' "$count" > "$counter_file" || exit 2
+                    if [ "$count" -eq 2 ]; then
+                        printf 'Filename Type Size Used Priority\n%s/mapper/swapz-primary partition 108320764 1024 -1\n' \
+                            "$SWAPZ_PRIMARY_TEST_DEV_ROOT" > "$SWAPZ_PRIMARY_TEST_PROC_ROOT/swaps"
+                    fi
+                    echo 253:0
+                    ;;
+                *) exit 1 ;;
+                esac
+                """
+            ),
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("mapper_swap_priority_invalid", observed.stderr)
+        self.assertIn("swap_inventory_changed_during_observation", observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+        self.assertIn(
+            "phase=swap_inventory_stability expected=stable_complete_inventory "
+            "observed=changed_during_observation",
+            observed.stderr,
+        )
+        self.assertIn(" 108320764 1024 -1\n", (self.proc / "swaps").read_text())
+
     def test_tab_delimited_swap_inventory_tracks_real_occupancy(self) -> None:
         # /proc/swaps uses tab-separated fields and may omit name padding
         # when the source pathname is long.
@@ -4097,6 +4177,28 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(observed.returncode, 1, observed.stderr)
         self.assertIn("selected_target_identity_unavailable", observed.stderr)
         self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+
+    def test_kernel_diagnostic_does_not_print_private_journal_paths(self) -> None:
+        env = self.env.copy()
+        env["MOCK_JOURNAL"] = (
+            "DM-SWAPZ: lower read error at "
+            "/var/lib/swapz/physical-recovery/private-transaction "
+            "/etc/swapz/primary-target\n"
+        )
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=WARN", observed.stderr)
+        self.assertIn("kernel_error_count=1", observed.stderr)
+        self.assertIn(
+            "phase=kernel_log expected=no_relevant_kernel_errors "
+            "observed=relevant_kernel_errors command=journalctl command_status=0 "
+            "identity_mismatch=none service_state=observed "
+            "next=inspect_kernel_journal_read_only",
+            observed.stderr,
+        )
+        self.assertNotIn("/var/lib/swapz/physical-recovery", observed.stderr)
+        self.assertNotIn("/etc/swapz/primary-target", observed.stderr)
+        self.assertNotIn("lower read error", observed.stderr)
 
     def test_kernel_error_tail_is_bounded_and_case_insensitive(self) -> None:
         write_executable(

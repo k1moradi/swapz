@@ -3029,7 +3029,10 @@ Mapper identity and missing sysfs DM name leave incomplete evidence
 also invalidates its stdout even when it looks complete; missing run-bound
 mapper identity remains a definite FAIL rather than optional degradation.
 An active selected raw backing partition or competing primary mapper identity
-is a definite FAIL. Compare each alias using its captured major:minor while
+is a definite FAIL. A matched primary mapper row must be a partition swap at
+priority -1; a different type or priority is a definite FAIL even when a later
+inventory recheck reports an apparently healthy row. Compare each alias using
+its captured major:minor while
 permitting verified unrelated swapfiles and unrelated resolved block devices.
 Emit bounded, path-free observer phase, expected state, classified observed
 state, original probe exit status and a read-only next check only when the
@@ -3040,7 +3043,10 @@ a HEALTHY or inactive conclusion must re-read the normalized inventory and
 require the same rows; a changed or unreadable recheck is incomplete evidence.
 Keep repeated kernel-journal queries capped to a small recent-error window,
 use portable case-insensitive matching, and report cumulative error counts
-from DM status separately from the recent journal window.
+from DM status separately from the recent journal window. Never log raw
+kernel-journal content: even filtered swapz messages can include private
+transaction or configuration paths; emit only fixed, path-free categories and
+a read-only inspection hint.
 
 Production root helpers must use an explicit system executable search path and
 C locale rather than inheriting caller-controlled lookup semantics. External
