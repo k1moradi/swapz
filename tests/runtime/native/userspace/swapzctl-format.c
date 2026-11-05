@@ -706,6 +706,48 @@ static void test_real_cli_exclusive_open_permission_refuses_without_io(void)
 	admission_stop();
 }
 
+/*
+ * A real-CLI open denial carrying EBUSY must retain that originating errno,
+ * even when diagnostic output clobbers errno. No fake media I/O may occur.
+ */
+static void test_real_cli_exclusive_open_busy_refuses_without_io(void)
+{
+	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
+	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+	char errno_field[64];
+	int observed_errno, status;
+	int length;
+
+	length = snprintf(errno_field, sizeof(errno_field), "errno=%d (", EBUSY);
+	assert(length > 0 && (size_t)length < sizeof(errno_field));
+	admission_start(ADMISSION_UNCHANGED);
+	admission_fixture.open_error = EBUSY;
+	test_diagnostic_errno_clobber = ECHILD;
+	status = admission_capture_cli(report, &observed_errno);
+	test_diagnostic_errno_clobber = 0;
+	if (status != 1 || observed_errno != EBUSY ||
+	    !strstr(report, "stage=exclusive open") ||
+	    !strstr(report, "expected=O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW") ||
+	    !strstr(report, errno_field) ||
+	    !strstr(report, "action=inspect the failed stage read-only") ||
+	    strstr(report, ADMISSION_DEVICE) ||
+	    admission_fixture.observed_open_flags !=
+		    (O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW) ||
+	    admission_fixture.opens != 1U ||
+	    admission_fixture.reads != 0U ||
+	    admission_fixture.writes != 0U ||
+	    admission_fixture.syncs != 0U ||
+	    admission_fixture.closes != 0U ||
+	    memcmp(admission_fixture.block_zero, unchanged, sizeof(unchanged))) {
+		fprintf(stderr, "FAIL: phase=exclusive-open prerequisite=EBUSY "
+			"errno=%d expected_errno=%d writes=%u syncs=%u\n",
+			observed_errno, EBUSY, admission_fixture.writes,
+			admission_fixture.syncs);
+		abort();
+	}
+	admission_stop();
+}
+
 static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 {
 	static const struct {
@@ -905,6 +947,8 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		"action=inspect the failed stage read-only; no header write";
 	static const char active_entry_warning[] =
 		"active entry without a verifiable kernel backing identity";
+	static const char authorized_owner_warning[] =
+		"only a separately authenticated owner may change active swap";
 
 	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
 	     ++index) {
@@ -951,9 +995,13 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		    !strstr(report, expected_refusal_action) ||
 		    !strstr(report, strerror(cases[index].expected_errno)) ||
 		    (cases[index].expected_errno == EOPNOTSUPP &&
-		     !strstr(report, active_entry_warning)) ||
+		     (!strstr(report, active_entry_warning) ||
+		      !strstr(report, authorized_owner_warning))) ||
 		    (cases[index].expected_errno != EOPNOTSUPP &&
-		     strstr(report, active_entry_warning)) ||
+		     (strstr(report, active_entry_warning) ||
+		      strstr(report, authorized_owner_warning))) ||
+		    strstr(report, "swapoff") ||
+		    strstr(report, "deactivate active swap") ||
 		    strstr(report, ADMISSION_DEVICE) ||
 		    strstr(report, "/unresolvable/swapfile") ||
 		    strstr(report, "/dev/other") ||
@@ -1041,6 +1089,9 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
 		    "after header write") ||
 	    !strstr(report, "stage=inventory") ||
 	    !active_inventory_reported ||
+	    !strstr(report, "only a separately authenticated owner may change active swap") ||
+	    strstr(report, "swapoff") ||
+	    strstr(report, "deactivate active swap") ||
 	    !strstr(report, errno_field) ||
 	    !strstr(report, "RECOVERY REQUIRED") ||
 	    strstr(report, ADMISSION_DEVICE) ||
@@ -3366,6 +3417,7 @@ int main(void)
 	test_disappearance_after_write_is_never_success();
 	test_truncated_read_and_close_failure_are_not_success();
 	test_real_cli_exclusive_open_permission_refuses_without_io();
+	test_real_cli_exclusive_open_busy_refuses_without_io();
 	test_real_cli_descriptor_access_modes_refuse_without_write();
 	test_real_cli_snapshots_refuse_before_first_header_write();
 	test_real_cli_active_swap_inventory_never_writes();

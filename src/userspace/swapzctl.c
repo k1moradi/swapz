@@ -3258,9 +3258,11 @@ static int format_swap_inventory_clear(dev_t device, dev_t parent_device)
 	if (format_swap_inventory_stream_clear(stream, device, parent_device) < 0) {
 		saved_errno = errno;
 		if (saved_errno == EOPNOTSUPP)
+			/* Active swap backing ownership cannot be inferred from its path. */
 			fputs("swapzctl format: REFUSED: /proc/swaps has an active "
 			      "entry without a verifiable kernel backing identity; "
-			      "deactivate active swap (swapoff) before retry\n", stderr);
+			      "investigate ownership read-only; only a separately "
+			      "authenticated owner may change active swap\n", stderr);
 		(void)fclose(stream);
 		errno = saved_errno;
 		return -1;

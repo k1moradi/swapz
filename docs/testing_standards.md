@@ -5385,7 +5385,12 @@ header publication was attempted, the diagnostic must still avoid unowned
 deactivation advice, retain the originating errno and report status 3
 `UNCERTAIN` with `RECOVERY REQUIRED`; it must not claim a clean no-write
 refusal. Unsafe recovery advice is a regression, not grounds to weaken the
-complete zero-row inventory prerequisite.
+complete zero-row inventory prerequisite. Synthetic production-CLI active-row
+regressions must also assert that diagnostics never suggest `swapoff` or
+unowned swap deactivation in either a prepublication refusal or a
+postpublication UNCERTAIN result; the diagnostic must instead require
+read-only ownership investigation and defer state changes to a separately
+authenticated owner.
 
 This establishes a rootless observed-snapshot safety invariant, not exclusive
 kernel ownership or a bound against swapon racing between the final inventory
