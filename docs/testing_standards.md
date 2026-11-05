@@ -67,6 +67,14 @@ run ID or private resource names. The rootless
 compiles the production errno-preservation helper with an injected
 recovery-state write failure for START, STOP and RECOVER; source ordering must
 bind all three failure epilogues to that helper before any success publication.
+The rootless errno fixture must also seed a bounded private STARTING,
+STOPPING or RECOVERING state file before each child and inspect that file
+after the child exits. A failed recovery-state write preserves the last
+observable interrupted stage, which remains uncertain; a successful injected
+write must publish RECOVERY_REQUIRED rather than merely return zero. Verify
+the original numeric errno and reject failure-path ACTIVE/COMPLETE reporting
+in both cases. File fsync in the synthetic writer does not establish the
+production directory-fsync, mapper or kernel-swap state.
 Lifecycle source-order audits must follow the shared helper to its state-write
 dependency instead of requiring the persistence call to appear inline in each
 coordinator body. Audit the ordinary preprocessed executable function bodies,

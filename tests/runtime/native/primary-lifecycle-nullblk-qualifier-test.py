@@ -547,6 +547,7 @@ int main(int argc, char **argv)
                             state_path.read_text(encoding="ascii"),
                             expected_stage + "\n",
                         )
+                        self.assertLessEqual(state_path.stat().st_size, 4096)
                         self.assertNotIn(
                             str(state_path), result.stdout + result.stderr)
                         self.assertNotIn(
