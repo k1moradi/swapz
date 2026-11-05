@@ -3970,12 +3970,17 @@ mount ID. A root or session rename, replacement, or remount during the bounded
 inspection must block with no deletion. After that pathname/mount revalidation
 and before the first unlink, perform a bounded same-owner /proc inventory and
 retain the session if any process still references an inspected session object
-through cwd, root, an open descriptor, or a live file-backed mapping. A
-bounded /proc/<pid>/maps scan matches mapping device/inode without using
-private path text, including when the process has closed its file descriptor.
+through cwd, root, an open descriptor, or a live file-backed mapping. Check the
+cleanup process's inherited cwd and root separately before skipping its own PID;
+its intentionally pinned cleanup descriptors are not activity evidence, but an
+inherited cwd/root inside the session is. A bounded /proc/<pid>/maps scan
+matches mapping device/inode without using private path text, including when
+the process has closed its file descriptor.
 Unreadable or malformed mapping inventory for a confirmed same-owner process
-blocks cleanup; original I/O errno must remain available. Failure to
-enumerate /proc itself is uncertainty and blocks cleanup. A process that exits during the scan or exposes
+blocks cleanup; original I/O errno must remain available. Failure to enumerate
+/proc itself or to prove the owner of an enumerated process is uncertainty and
+blocks cleanup. Only a process that disappears while ownership is being checked
+is skipped as exited. A process that exits during the scan or exposes
 an individually permission-restricted proc link/descriptor is skipped rather
 than making unrelated same-UID host state a cleanup prerequisite; such a process
 does not provide ownership evidence for this session. Inaccessible mappings

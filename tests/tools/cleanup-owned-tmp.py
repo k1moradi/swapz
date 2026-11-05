@@ -267,14 +267,23 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                          for device, inode in identities}
     process_count = 0
     reference_count = 0
+    # The cleanup process intentionally owns root/session descriptors, so do
+    # not scan its fd table. Its inherited cwd/root are not cleanup-owned and
+    # can keep an otherwise completed session live after parent-name removal.
+    for current in (os.stat("."), os.stat("/")):
+        reference_count += 1
+        require(reference_count <= MAX_PROCESS_REFERENCES,
+                "same-owner process references exceed cleanup bound", "bound")
+        if (current.st_dev, current.st_ino) in identities:
+            return True
     with os.scandir("/proc") as iterator:
         for process in iterator:
             if not process.name.isdecimal():
                 continue
             try:
                 process_stat = process.stat(follow_symlinks=False)
-            except (FileNotFoundError, PermissionError):
-                continue
+            except FileNotFoundError:
+                continue  # Process exited before ownership could be checked.
             if process_stat.st_uid != owner_uid or int(process.name) == os.getpid():
                 continue
             process_count += 1
