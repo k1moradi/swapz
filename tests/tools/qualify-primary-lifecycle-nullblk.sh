@@ -155,16 +155,21 @@ mapper_absence_proven() {
 # Configfs cannot provide an atomic compare-and-rmdir operation or an
 # independent creation generation; uncertainty must retain the resource.
 owned_nullblk_config_identity_unchanged() {
-	local observed_identity
+	local observed_identity observed_power_identity
 
 	[[ "$CONFIGNAME" =~ ^nullb-swapz-[a-f0-9]{16}$ &&
 	   "$CONFIG" == "$CONFIGFS/$CONFIGNAME" &&
 	   "$INDEX" =~ ^(0|[1-9][0-9]*)$ &&
 	   "$CONFIG_IDENTITY" =~ ^[0-9]+:[0-9]+:[0-9]+$ &&
+	   "$CONFIG_POWER_IDENTITY" =~ ^[0-9]+:[0-9]+:[0-9]+$ &&
 	   -d "$CONFIG" && ! -L "$CONFIG" ]] || return 1
 	observed_identity="$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" ||
 		return 1
+	observed_power_identity="$(stat -Lc '%d:%i:%u' -- "$CONFIG/power" 2>/dev/null)" ||
+		return 1
 	[[ "$observed_identity" == "$CONFIG_IDENTITY" &&
+	   "$observed_power_identity" == "$CONFIG_POWER_IDENTITY" &&
+	   -f "$CONFIG/power" && ! -L "$CONFIG/power" &&
 	   ! -L "$CONFIG/index" && -r "$CONFIG/index" &&
 	   "$(cat "$CONFIG/index" 2>/dev/null)" == "$INDEX" &&
 	   ! -L "$CONFIG/memory_backed" && -r "$CONFIG/memory_backed" &&
@@ -173,6 +178,51 @@ owned_nullblk_config_identity_unchanged() {
 	   "$(cat "$CONFIG/size" 2>/dev/null)" == "$NULLBLK_SIZE_MIB" &&
 	   ! -L "$CONFIG/blocksize" && -r "$CONFIG/blocksize" &&
 	   "$(cat "$CONFIG/blocksize" 2>/dev/null)" == 4096 ]]
+}
+
+# Bind the destructive power write to the original configfs power inode.
+# Opening without O_CREAT prevents a switched ordinary directory from gaining
+# a new file, and fstat rejects a same-name replacement before any write.
+owned_nullblk_power_off_pinned() {
+	local python_status=0
+
+	python3 - "$CONFIG/power" "$CONFIG_POWER_IDENTITY" 2>/dev/null <<'PY' ||
+		python_status=$?
+import os
+import stat
+import sys
+
+path, expected_identity = sys.argv[1:3]
+fd = -1
+try:
+    fd = os.open(
+        path,
+        os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+    )
+    identity = os.fstat(fd)
+    observed_identity = f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
+    if (not stat.S_ISREG(identity.st_mode) or
+            observed_identity != expected_identity):
+        raise SystemExit(2)
+    try:
+        written = os.write(fd, b"0\n")
+    except OSError:
+        raise SystemExit(3)
+    if written != 2:
+        raise SystemExit(3)
+finally:
+    if fd >= 0:
+        try:
+            os.close(fd)
+        except OSError:
+            if sys.exc_info()[0] is None:
+                raise SystemExit(3)
+PY
+	case "$python_status" in
+	0) return 0 ;;
+	2) return 1 ;;
+	*) return 2 ;;
+	esac
 }
 
 owned_nullblk_live_identity_unchanged() {
@@ -314,6 +364,7 @@ PARTITION=
 PARTUUID=
 PART_DEVNO=
 CONFIG_IDENTITY=
+CONFIG_POWER_IDENTITY=
 BY_PARTUUID=
 RUN_ID=
 
@@ -1360,21 +1411,33 @@ PY
 	fi
 
 	if (( OWN_NULL )) && (( ! QUARANTINE )); then
+		local power_off_status=0
 		if ! owned_nullblk_live_identity_unchanged ||
 		   ! owned_nullblk_mapper_identity_unchanged ||
 		   ! mapper_absence_proven || [[ -d /sys/module/dm_swapz ]]; then
 			QUARANTINE=1
 			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
-		elif ! printf '0\n' 2>/dev/null > "$CONFIG/power"; then
-			QUARANTINE=1
-			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
-		elif ! owned_nullblk_post_power_identity_unchanged ||
-		     ! mapper_absence_proven || [[ -d /sys/module/dm_swapz ]]; then
-			QUARANTINE=1
-			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
-		elif ! rmdir -- "$CONFIG" 2>/dev/null; then
-			QUARANTINE=1
-			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
+		else
+			owned_nullblk_power_off_pinned
+			power_off_status=$?
+			if (( power_off_status == 1 )); then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
+			elif (( power_off_status != 0 )); then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
+			elif ! mapper_absence_proven || [[ -d /sys/module/dm_swapz ]]; then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
+			# This is the last observable configfs proof before rmdir.
+			# Configfs has no atomic compare-and-remove primitive.
+			elif ! owned_nullblk_post_power_identity_unchanged; then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
+			elif ! rmdir -- "$CONFIG" 2>/dev/null; then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
+			fi
 		fi
 	fi
 
@@ -1534,8 +1597,13 @@ mkdir -- "$CONFIG" || blocked "cannot allocate owned null_blk config"
 OWN_NULL=1
 CONFIG_IDENTITY="$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" ||
 	fail "cannot capture created null_blk configfs identity"
+CONFIG_POWER_IDENTITY="$(stat -Lc '%d:%i:%u' -- "$CONFIG/power" 2>/dev/null)" ||
+	fail "cannot capture created null_blk power identity"
 [[ "$CONFIG_IDENTITY" =~ ^[0-9]+:[0-9]+:0$ &&
-   -d "$CONFIG" && ! -L "$CONFIG" ]] ||
+   "$CONFIG_POWER_IDENTITY" =~ ^[0-9]+:[0-9]+:0$ &&
+   -d "$CONFIG" && ! -L "$CONFIG" &&
+   -f "$CONFIG/power" && ! -L "$CONFIG/power" &&
+   "$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" == "$CONFIG_IDENTITY" ]] ||
 	fail "created null_blk configfs owner or type is unproven"
 echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"
 echo 4096 > "$CONFIG/blocksize"

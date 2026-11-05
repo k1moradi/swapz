@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Canonical rootless contracts for the native owned-null_blk qualifier.
 
-Finalizer safety standard: retain creation identity, refuse same-name inode
-replacement and unobservable/foreign state before any recovery or configfs
-mutation, preserve the first error, and redact private cleanup diagnostics.
+Finalizer safety standard: retain creation and power-inode identity, refuse
+same-name replacement and unobservable/foreign state before recovery, bind
+the destructive power write to the pinned original inode without creation,
+preserve the first error, and redact private cleanup diagnostics.
 """
 
 from pathlib import Path
@@ -574,16 +575,20 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             self.script.index("trap cleanup EXIT")]
         recovery = cleanup.index('if (( OWN_NULL && ! QUARANTINE )) &&')
         first_proof = cleanup.index('! owned_nullblk_live_identity_unchanged')
-        power = cleanup.index("elif ! printf '0\\n'")
+        power = cleanup.index("owned_nullblk_power_off_pinned")
+        post_power_mapper_check = cleanup.index(
+            'elif ! mapper_absence_proven', power)
         post_power_proof = cleanup.index(
-            '! owned_nullblk_post_power_identity_unchanged')
+            'elif ! owned_nullblk_post_power_identity_unchanged', power)
         removal = cleanup.index('elif ! rmdir -- "$CONFIG"')
         self.assertLess(first_proof, recovery)
         self.assertLess(recovery, power)
-        self.assertLess(power, post_power_proof)
+        self.assertLess(power, post_power_mapper_check)
+        self.assertLess(post_power_mapper_check, post_power_proof)
         self.assertLess(post_power_proof, removal)
         self.assertIn('! owned_nullblk_mapper_identity_unchanged', cleanup)
         self.assertIn('! mapper_absence_proven', cleanup)
+        self.assertNotIn('> "$CONFIG/power"', cleanup)
         self.assertIn('QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain',
                       cleanup)
         self.assertIn('PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private',
@@ -594,6 +599,225 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertIn('(( original_rc == 0 )) && original_rc=1', cleanup)
         self.assertIn('exit "$original_rc"', cleanup)
         self.assertIn('CONFIG_IDENTITY="$(stat -c', self.script)
+        power_capture = self.script.index(
+            'CONFIG_POWER_IDENTITY="$(stat -Lc')
+        first_config_write = self.script.index(
+            'echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"', power_capture)
+        self.assertLess(power_capture, first_config_write)
+        self.assertIn(
+            '"$observed_power_identity" == "$CONFIG_POWER_IDENTITY"',
+            self.script)
+        power_helper_start = self.script.index(
+            "owned_nullblk_power_off_pinned() {")
+        power_helper_end = self.script.index("\n}", power_helper_start)
+        power_helper = self.script[power_helper_start:power_helper_end]
+        self.assertIn("os.O_WRONLY", power_helper)
+        self.assertIn("os.O_NOFOLLOW", power_helper)
+        self.assertNotIn("os.O_CREAT", power_helper)
+        self.assertIn("identity = os.fstat(fd)", power_helper)
+        self.assertIn('os.write(fd, b"0\\n")', power_helper)
+
+    def test_rootless_postproof_replacement_cannot_redirect_power_write(self):
+        def shell_function(name):
+            begin = self.script.index(name + "() {")
+            end = self.script.index("\n}", begin) + 2
+            return self.script[begin:end]
+
+        helpers = "\n".join(shell_function(name) for name in (
+            "owned_nullblk_config_identity_unchanged",
+            "owned_nullblk_live_identity_unchanged",
+            "owned_nullblk_mapper_identity_unchanged",
+            "owned_nullblk_power_off_pinned",
+            "owned_nullblk_post_power_identity_unchanged",
+        ))
+        cleanup = shell_function("cleanup")
+        block_marker = (
+            '\tif (( OWN_NULL )) && (( ! QUARANTINE )); then\n'
+            '\t\tlocal power_off_status=0'
+        )
+        current_start = cleanup.index(block_marker)
+        current_end = cleanup.index(
+            '\n\tif (( OWN_NULL )) && (( ! QUARANTINE )); then\n'
+            '\t\tudevadm settle',
+            current_start,
+        )
+        current_power_step = cleanup[current_start:current_end]
+
+        # This is the previous agent's final power/removal block. The fixture
+        # switches the configfs pathname only after all pre-power proof calls.
+        previous_agent_power_step = r'''
+if (( OWN_NULL )) && (( ! QUARANTINE )); then
+    if ! owned_nullblk_live_identity_unchanged ||
+       ! owned_nullblk_mapper_identity_unchanged ||
+       ! mapper_absence_proven || [[ -d "$MODULE_PATH" ]]; then
+        QUARANTINE=1
+        note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
+    elif ! printf '0\n' 2>/dev/null > "$CONFIG/power"; then
+        QUARANTINE=1
+        note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
+    elif ! owned_nullblk_post_power_identity_unchanged ||
+         ! mapper_absence_proven || [[ -d "$MODULE_PATH" ]]; then
+        QUARANTINE=1
+        note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
+    elif ! rmdir -- "$CONFIG" 2>/dev/null; then
+        QUARANTINE=1
+        note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
+    fi
+fi
+'''
+
+        def run_step(step):
+            with TemporaryDirectory(
+                    prefix="swapz-primary-postproof-replacement-") as directory:
+                fixture = Path(directory)
+                configfs = fixture / "configfs"
+                configfs.mkdir()
+                name = "nullb-swapz-" + "c" * 16
+                config = configfs / name
+                config.mkdir()
+                attributes = {
+                    "index": "7\n",
+                    "memory_backed": "1\n",
+                    "size": "256\n",
+                    "blocksize": "4096\n",
+                    "power": "1\n",
+                }
+                for attribute, value in attributes.items():
+                    (config / attribute).write_text(value, encoding="ascii")
+                config_identity = config.stat()
+                power_identity = (config / "power").stat()
+
+                sysblock = fixture / "sys/block"
+                disk = sysblock / "nullb7"
+                partition = disk / "nullb7p1"
+                partition.mkdir(parents=True)
+                (disk / "dev").write_text("240:7\n", encoding="ascii")
+                (partition / "dev").write_text("240:8\n", encoding="ascii")
+                sysdev = fixture / "sys/dev/block"
+                sysdev.mkdir(parents=True)
+                (sysdev / "240:8").symlink_to(
+                    partition, target_is_directory=True)
+                devices = fixture / "devices"
+                devices.mkdir()
+                (devices / "nullb7").write_text("240:7\n", encoding="ascii")
+                (devices / "nullb7p1").write_text(
+                    "240:8\n", encoding="ascii")
+                action_log = fixture / "actions"
+                module_path = fixture / "absent-module"
+
+                fixture_helpers = helpers
+                for before, after in (
+                    ("/sys/dev/block", str(sysdev)),
+                    ("/sys/block", str(sysblock)),
+                    ('"/dev/$DISK"', '"$FAKE_DEV/$DISK"'),
+                    ('"/dev/$PART_NAME"', '"$FAKE_DEV/$PART_NAME"'),
+                ):
+                    fixture_helpers = fixture_helpers.replace(before, after)
+                fixture_step = step.replace(
+                    "/sys/module/dm_swapz", str(module_path))
+
+                settings = {
+                    "CONFIGFS": configfs,
+                    "CONFIGNAME": name,
+                    "CONFIG": config,
+                    "CONFIG_IDENTITY": (
+                        f"{config_identity.st_dev}:"
+                        f"{config_identity.st_ino}:"
+                        f"{config_identity.st_uid}"
+                    ),
+                    "CONFIG_POWER_IDENTITY": (
+                        f"{power_identity.st_dev}:"
+                        f"{power_identity.st_ino}:"
+                        f"{power_identity.st_uid}"
+                    ),
+                    "NULLBLK_SIZE_MIB": "256",
+                    "INDEX": "7",
+                    "DISK": "nullb7",
+                    "PART_NAME": "nullb7p1",
+                    "PART_SYSFS": partition,
+                    "PARTITION": devices / "nullb7p1",
+                    "PART_DEVNO": "240:8",
+                    "PARTITION_NODE_DEVNO": "240:8",
+                    "LOWER": devices / "nullb7",
+                    "DEVNO": "240:7",
+                    "LOWER_NODE_DEVNO": "240:7",
+                    "NULL_MAJOR": "240",
+                    "FAKE_DEV": devices,
+                    "DMNAME": "swapz-primary",
+                    "RUN_ID": "d" * 32,
+                    "RECOVERY_BASE": fixture / "private-evidence",
+                    "OWN_NULL": "1",
+                    "QUARANTINE": "0",
+                    "MAPPER_ABSENCE_CALLS": "0",
+                    "ACTION_LOG": action_log,
+                    "MODULE_PATH": module_path,
+                }
+                setup = "\n".join(
+                    f"{key}={shlex.quote(str(value))}"
+                    for key, value in settings.items())
+                fake_commands = r'''
+note() { printf '%s\n' "$*"; }
+swapz_resolve_owned_disk() {
+    [[ "$1" == "$CONFIGNAME" && "$2" == "$INDEX" &&
+       -f "$3/$DISK/dev" ]] || return 1
+    printf '%s\n' "$DISK"
+}
+block_node_devno() { cat -- "$1"; }
+blockdev() {
+    [[ "$1" == --getsize64 && "$2" == "$LOWER" ]] || return 1
+    printf '268435456\n'
+}
+dmsetup() { return 1; }
+mapper_absence_proven() {
+    MAPPER_ABSENCE_CALLS=$((MAPPER_ABSENCE_CALLS + 1))
+    if [[ "$MAPPER_ABSENCE_CALLS" == 2 ]]; then
+        mv -- "$CONFIG" "$CONFIGFS/retained-original" || return 1
+        mkdir -- "$CONFIG" || return 1
+        printf '7\n' > "$CONFIG/index"
+        printf '1\n' > "$CONFIG/memory_backed"
+        printf '256\n' > "$CONFIG/size"
+        printf '4096\n' > "$CONFIG/blocksize"
+        printf '1\n' > "$CONFIG/power"
+    fi
+    return 0
+}
+rmdir() {
+    printf 'rmdir\n' >> "$ACTION_LOG"
+    rm -rf -- "$CONFIG"
+}
+'''
+                program = (
+                    "set +e\n" + setup + "\n" + fake_commands +
+                    fixture_helpers + "\nrun_power_step() {\n" +
+                    fixture_step + "\n}\nrun_power_step\n")
+                result = subprocess.run(
+                    ["bash", "-c", program], cwd=ROOT,
+                    capture_output=True, text=True, timeout=10, check=False)
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+                self.assertNotIn(name, result.stdout + result.stderr)
+                self.assertNotIn(str(fixture),
+                                 result.stdout + result.stderr)
+                self.assertTrue(config.is_dir())
+                return (
+                    (config / "power").read_text(encoding="ascii").strip(),
+                    action_log.read_text(encoding="ascii").splitlines()
+                    if action_log.exists() else [],
+                    result.stdout,
+                )
+
+        previous_power, previous_actions, _ = run_step(
+            previous_agent_power_step)
+        self.assertEqual(previous_power, "0")
+        self.assertEqual(previous_actions, [])
+
+        current_power, current_actions, current_output = run_step(
+            current_power_step)
+        self.assertEqual(current_power, "1")
+        self.assertEqual(current_actions, [])
+        self.assertIn(
+            "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE="
+            "config_identity_uncertain", current_output)
 
     def test_rootless_configfs_replacement_and_failure_preserve_ownership(self):
         # Only temporary regular files stand in for configfs and block nodes.
@@ -607,6 +831,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             "owned_nullblk_config_identity_unchanged",
             "owned_nullblk_live_identity_unchanged",
             "owned_nullblk_mapper_identity_unchanged",
+            "owned_nullblk_power_off_pinned",
             "owned_nullblk_post_power_identity_unchanged",
         ))
         cleanup = shell_function("cleanup")
@@ -650,6 +875,12 @@ exit 0
                 identity = config.stat()
                 captured_identity = (
                     f"{identity.st_dev}:{identity.st_ino}:{identity.st_uid}"
+                )
+                power_identity = (config / "power").stat()
+                captured_power_identity = (
+                    f"{power_identity.st_dev}:"
+                    f"{power_identity.st_ino}:"
+                    f"{power_identity.st_uid}"
                 )
                 sysblock = fixture / "sys/block"
                 disk = sysblock / "nullb7"
@@ -710,6 +941,7 @@ exit 0
                     "CONFIGNAME": name,
                     "CONFIG": config,
                     "CONFIG_IDENTITY": captured_identity,
+                    "CONFIG_POWER_IDENTITY": captured_power_identity,
                     "NULLBLK_SIZE_MIB": "256",
                     "INDEX": "7",
                     "DISK": "nullb7",
