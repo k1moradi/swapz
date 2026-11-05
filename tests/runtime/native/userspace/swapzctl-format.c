@@ -160,6 +160,8 @@ static struct {
 	int enabled, path_is_symlink, path_is_regular;
 	int open_error, observed_open_flags;
 	int descriptor_mode, descriptor_error, close_error;
+	/* Deterministic failures on the synthetic opened 4,096-byte descriptor. */
+	int read_error, read_error_after_write, write_error, sync_error;
 	int observed_descriptor_flags;
 	unsigned int descriptor_queries;
 	unsigned int swap_inventory_checks_at_descriptor_query;
@@ -480,8 +482,15 @@ static ssize_t admission_pread(int fd, void *buffer, size_t length, off_t offset
 			errno = EINVAL;
 			return -1;
 		}
+		++admission_fixture.reads;
+		if (admission_fixture.read_error &&
+		    (!admission_fixture.read_error_after_write ||
+		     admission_fixture.writes != 0U)) {
+			errno = admission_fixture.read_error;
+			return -1;
+		}
 		memcpy(buffer, admission_fixture.block_zero, length);
-		if (++admission_fixture.reads == 1U)
+		if (admission_fixture.reads == 1U)
 			admission_after_first_read();
 		return (ssize_t)length;
 	}
@@ -492,6 +501,10 @@ static int admission_fsync(int fd)
 {
 	if (admission_fixture.enabled && fd == ADMISSION_DEVICE_FD) {
 		++admission_fixture.syncs;
+		if (admission_fixture.sync_error) {
+			errno = admission_fixture.sync_error;
+			return -1;
+		}
 		return 0;
 	}
 	return fsync(fd);
@@ -840,6 +853,15 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		{ "active-partition", ADMISSION_SWAP_HEADER
 		  "/dev/other partition 4 1 -2\n",
 		  "1", "partition", EOPNOTSUPP, 0, 0 },
+		{ "active-selected-raw", ADMISSION_SWAP_HEADER
+		  ADMISSION_DEVICE " partition 4 1 -2\n",
+		  "1", "selected-raw", EOPNOTSUPP, 0, 0 },
+		{ "active-selected-alias", ADMISSION_SWAP_HEADER
+		  ADMISSION_ALIAS " partition 4 1 -2\n",
+		  "1", "selected-alias", EOPNOTSUPP, 0, 0 },
+		{ "active-parent-raw", ADMISSION_SWAP_HEADER
+		  "/dev/swapz-synthetic-parent partition 4 1 -2\n",
+		  "1", "parent-raw", EOPNOTSUPP, 0, 0 },
 		{ "duplicated", ADMISSION_SWAP_HEADER
 		  "/unresolvable/swapfile file 4 1 -2\n"
 		  "/unresolvable/swapfile file 4 1 -3\n",
@@ -859,6 +881,12 @@ static void test_real_cli_active_swap_inventory_never_writes(void)
 		{ "late-active", ADMISSION_SWAP_HEADER
 		  "/unresolvable/swapfile file 4 1 -2\n",
 		  "1", "regular", EOPNOTSUPP, 1, 0 },
+		{ "late-active-selected", ADMISSION_SWAP_HEADER
+		  ADMISSION_DEVICE " partition 4 1 -2\n",
+		  "1", "selected-raw", EOPNOTSUPP, 1, 0 },
+		{ "late-active-alias", ADMISSION_SWAP_HEADER
+		  ADMISSION_ALIAS " partition 4 1 -2\n",
+		  "1", "selected-alias", EOPNOTSUPP, 1, 0 },
 		{ "late-duplicated", ADMISSION_SWAP_HEADER
 		  "/unresolvable/swapfile file 4 1 -2\n"
 		  "/unresolvable/swapfile file 4 1 -3\n",
@@ -1055,6 +1083,122 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
 	admission_stop();
 }
 
+
+/*
+ * Exercise the actual default formatter callbacks with synthetic opened FDs.
+ * Transport errors before the only 4,096-byte pwrite must leave block zero
+ * unchanged. Once pwrite is attempted, even a torn write is UNCERTAIN and
+ * retains the bytes needed for read-only recovery. No physical device is used.
+ */
+static void test_real_cli_io_faults_keep_recovery_evidence(void)
+{
+	static const struct {
+		const char *scenario;
+		int read_error, read_error_after_write, write_error, sync_error;
+		int close_error, expected_status, expected_errno;
+		const char *expected_stage;
+		unsigned int expected_reads, expected_writes, expected_syncs;
+	} cases[] = {
+		{ "read-before-write", EIO, 0, 0, 0, EOVERFLOW,
+		  1, EIO, "header read", 1U, 0U, 0U },
+		{ "torn-header-write", 0, 0, EIO, 0, EOVERFLOW,
+		  3, EIO, "write", 1U, 1U, 0U },
+		{ "durability-sync", 0, 0, 0, ENOSPC, EOVERFLOW,
+		  3, ENOSPC, "durability", 1U, 1U, 1U },
+		{ "readback-after-write", ENODATA, 1, 0, 0, EOVERFLOW,
+		  3, ENODATA, "durability", 2U, 1U, 1U },
+		{ "close-after-write", 0, 0, 0, 0, ENOTCONN,
+		  3, ENOTCONN, "durability", 2U, 1U, 1U },
+	};
+
+	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
+	     ++index) {
+		unsigned char original_header[SWAPZ_SUPERBLOCK_BYTES];
+		char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+		char errno_field[64], stage_field[64];
+		unsigned int previous_pwrite_calls;
+		int observed_errno, status;
+		int errno_length, stage_length;
+		int header_changed;
+
+		assert(SWAPZ_SUPERBLOCK_BYTES == 4096U);
+		admission_start(ADMISSION_UNCHANGED);
+		memcpy(original_header, admission_fixture.block_zero,
+		       sizeof(original_header));
+		previous_pwrite_calls = test_pwrite_calls;
+		admission_fixture.read_error = cases[index].read_error;
+		admission_fixture.read_error_after_write =
+			cases[index].read_error_after_write;
+		admission_fixture.write_error = cases[index].write_error;
+		admission_fixture.sync_error = cases[index].sync_error;
+		admission_fixture.close_error = cases[index].close_error;
+		errno_length = snprintf(errno_field, sizeof(errno_field),
+					"errno=%d (", cases[index].expected_errno);
+		stage_length = snprintf(stage_field, sizeof(stage_field),
+					"stage=%s", cases[index].expected_stage);
+		assert(errno_length > 0 &&
+		       (size_t)errno_length < sizeof(errno_field));
+		assert(stage_length > 0 &&
+		       (size_t)stage_length < sizeof(stage_field));
+
+		test_diagnostic_errno_clobber = ECHILD;
+		status = admission_capture_cli(report, &observed_errno);
+		test_diagnostic_errno_clobber = 0;
+		header_changed = memcmp(admission_fixture.block_zero,
+					original_header,
+					sizeof(original_header)) != 0;
+
+		if (status != cases[index].expected_status ||
+		    observed_errno != cases[index].expected_errno ||
+		    !strstr(report, stage_field) ||
+		    !strstr(report, errno_field) ||
+		    !strstr(report, "action=") ||
+		    !strstr(report, strerror(cases[index].expected_errno)) ||
+		    strstr(report, ADMISSION_DEVICE) ||
+		    admission_fixture.opens != 1U ||
+		    admission_fixture.reads != cases[index].expected_reads ||
+		    admission_fixture.writes != cases[index].expected_writes ||
+		    admission_fixture.syncs != cases[index].expected_syncs ||
+		    admission_fixture.closes != 1U ||
+		    test_pwrite_calls - previous_pwrite_calls !=
+			    cases[index].expected_writes ||
+		    header_changed != (cases[index].expected_writes != 0U) ||
+		    (cases[index].expected_status == 1 &&
+		     (strstr(report, "UNCERTAIN:") ||
+		      !strstr(report, "no header write attempted"))) ||
+		    (cases[index].expected_status == 3 &&
+		     (!strstr(report, "UNCERTAIN:") ||
+		      !strstr(report, "RECOVERY REQUIRED"))) ||
+		    (cases[index].write_error &&
+		     memcmp(admission_fixture.block_zero +
+				    SWAPZ_SUPERBLOCK_BYTES / 2U,
+			    original_header + SWAPZ_SUPERBLOCK_BYTES / 2U,
+			    SWAPZ_SUPERBLOCK_BYTES / 2U)) ||
+		    (!cases[index].write_error &&
+		     cases[index].expected_writes &&
+		     !swapz_sb_valid(admission_fixture.block_zero,
+				     admission_fixture.geometry_bytes)) ||
+		    (cases[index].expected_status == 1 ||
+		     cases[index].write_error || cases[index].sync_error ||
+		     cases[index].read_error_after_write) &&
+		     !strstr(report, "CLEANUP FAILED: close")) {
+			fprintf(stderr, "FAIL: phase=synthetic-cli-io "
+				"scenario=%s stage=%s original_errno=%d "
+				"expected_errno=%d status=%d expected_status=%d "
+				"reads=%u writes=%u syncs=%u closes=%u "
+				"header_changed=%d\n",
+				cases[index].scenario, cases[index].expected_stage,
+				observed_errno, cases[index].expected_errno,
+				status, cases[index].expected_status,
+				admission_fixture.reads, admission_fixture.writes,
+				admission_fixture.syncs, admission_fixture.closes,
+				header_changed);
+			abort();
+		}
+		admission_stop();
+	}
+}
+
 static void test_missing_partition_slaves_directory_is_empty(void)
 {
 	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
@@ -1190,6 +1334,12 @@ static ssize_t test_format_pwrite(int fd, const void *buffer, size_t length,
 		++admission_fixture.writes;
 		if (offset != 0 || length != sizeof(admission_fixture.block_zero)) {
 			errno = EINVAL;
+			return -1;
+		}
+		if (admission_fixture.write_error) {
+			/* A failed pwrite may already have published 2,048 bytes. */
+			memcpy(admission_fixture.block_zero, buffer, length / 2U);
+			errno = admission_fixture.write_error;
 			return -1;
 		}
 		memcpy(admission_fixture.block_zero, buffer, length);
@@ -3218,6 +3368,7 @@ int main(void)
 	test_real_cli_snapshots_refuse_before_first_header_write();
 	test_real_cli_active_swap_inventory_never_writes();
 	test_real_cli_post_snapshot_swap_exclusion_remains_unproven();
+	test_real_cli_io_faults_keep_recovery_evidence();
 	test_missing_partition_slaves_directory_is_empty();
 	test_missing_partition_slaves_does_not_hide_removal();
 	puts("PASS: swapzctl formatter identity and destructive-action gates");
