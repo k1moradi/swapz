@@ -87,7 +87,24 @@ jobs:
             x86_64:x86_64|arm64:aarch64) ;;
             *) echo "Matrix architecture and runner architecture disagree" >&2; false ;;
           esac
+          phase="compiler-check"
           compiler_version="$(gcc -dumpfullversion -dumpversion)"
+          if ! grep -qx 'CONFIG_CC_IS_GCC=y' "$KDIR/include/config/auto.conf"; then
+            echo "Kernel headers do not record GCC as the kernel compiler" >&2
+            false
+          fi
+          kernel_compiler_text="$(sed -n 's/^CONFIG_CC_VERSION_TEXT=//p' "$KDIR/include/config/auto.conf")"
+          kernel_compiler_version="${kernel_compiler_text##* }"
+          if [[ -z "$kernel_compiler_text" || ! "$kernel_compiler_version" =~ ^[0-9]+([.][0-9]+)*$ ]]; then
+            echo "Kernel headers do not expose a usable GCC version" >&2
+            false
+          fi
+          if [[ "${kernel_compiler_version%%.*}" != "${compiler_version%%.*}" ]]; then
+            echo "Build compiler major version does not match kernel headers" >&2
+            echo "KERNEL_COMPILER_VERSION=$kernel_compiler_version" >&2
+            echo "BUILD_COMPILER_VERSION=$compiler_version" >&2
+            false
+          fi
           source_sha="$(git rev-parse HEAD)"
           target_blob="$(git rev-parse HEAD:src/kernel/dm-target.c)"
           echo "KERNEL_VERSION_RANGE=UNSPECIFIED (runner-selected HWE headers only)"
@@ -95,6 +112,7 @@ jobs:
           echo "KERNEL_RELEASE=$header_release"
           echo "ARCHITECTURE=$runner_arch"
           echo "COMPILER=gcc $compiler_version"
+          echo "KERNEL_COMPILER_VERSION=$kernel_compiler_version"
           echo "SOURCE_SHA=$source_sha"
           echo "TARGET_BLOB=$target_blob"
 
@@ -139,7 +157,7 @@ jobs:
               show_build_failure
               return 1
             fi
-            # Kbuild tool-identity notices are not source/compiler diagnostics.
+            # Compiler-major compatibility is checked before ignoring Kbuild's command-name notice.
             if ! awk '
               /warning:/ &&
               !/^warning: the compiler differs from the one used to build the kernel$/ &&
@@ -168,6 +186,14 @@ jobs:
           # A normal build is deliberately separate from warning variants:
           # it remains the only artifact eligible for owned-RAM loading.
           compile_variant normal build/kernel/experimental/dm-swapz.ko
+          phase="vermagic"
+          module_vermagic="$(modinfo -F vermagic build/kernel/experimental/dm-swapz.ko)"
+          if [[ -z "$module_vermagic" || "${module_vermagic%% *}" != "$header_release" ]]; then
+            echo "Module vermagic does not match selected kernel headers" >&2
+            echo "EXPECTED_KERNEL_RELEASE=$header_release" >&2
+            echo "MODULE_VERMAGIC=${module_vermagic:-unavailable}" >&2
+            false
+          fi
           phase="manifest"
           echo "COMPILE_ONLY_NO_MODULE_INSERTION"
           mkdir -p build/deploy
@@ -178,10 +204,11 @@ jobs:
             echo "kernel_release=$header_release"
             echo "architecture=$runner_arch"
             echo "compiler=gcc $compiler_version"
+            echo "kernel_compiler_version=$kernel_compiler_version"
             echo "kernel_version_range=UNSPECIFIED"
             echo "version=$(cat src/kernel/VERSION)"
             sha256sum build/kernel/experimental/dm-swapz.ko
-            modinfo -F vermagic build/kernel/experimental/dm-swapz.ko
+            echo "vermagic=$module_vermagic"
           } > build/deploy/compiled-module-manifest.txt
       - name: Publish experimental swapz compile-only artifact
         uses: actions/upload-artifact@v4
