@@ -403,6 +403,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             state = supervisor._target_state(target)
         self.assertEqual(
             state["parent_major_minor"], SYNTHETIC_PARENT_MAJOR_MINOR)
+        self.assertEqual(state["original_header_sha256"], original_digest)
 
     def test_observation_uses_bound_physical_parent_for_lower_counters(self):
         ops = FakeOps()

@@ -5184,7 +5184,7 @@ observation. Lower-device accounting must pass that bound parent identity to
 the shared block-stat snapshot helper and reuse the shared lower-delta validator,
 including its exact 17-field Linux ABI, uint64 bounds, reset/wrap rejection and
 512-byte sector conversion. Reject a substituted, truncated or unavailable
-parent snapshot; partition counters are not a substitute for lower-media evidence. Rootless adversarial tests must inject both
+parent snapshot; partition counters are not a substitute for lower-media evidence. Rootless physical-parent admission fixtures use synthetic header bytes and must bind the expected header digest to those exact bytes before exercising parent-identity refusals; a historical real-header digest must not prevent the intended synthetic gate from executing. Rootless adversarial tests must inject both
 termination uncertainty and failed teardown independently of a clean worker,
 including a timeout followed by cgroup-removal failure. No synthetic PASS
 proves actual anonymous-page reclaim, Linux swap-out/swap-in, maximum-capacity
