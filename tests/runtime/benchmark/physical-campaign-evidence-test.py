@@ -476,6 +476,71 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             "_physical_audit_failure_witness_is_valid"](
                 audit, {workload: specification}, [pair_artifact]))
 
+    def test_release_audit_binding_rejects_duplicate_artifact_identity(self):
+        workload = "sd-service-balanced"
+        specification = QUALIFICATION.WORKLOADS[workload]
+        target_partuuid = "12345678-aaaa"
+        target_bytes = 8 * 1024**3
+        pairs = [{
+            "name": f"pair-{index}.json",
+            "size_bytes": 1,
+            "sha256": f"{index:064x}",
+            "workload": workload,
+            "pair_id": f"pair-{index}",
+            "pair_index": index,
+            "order": specification["counterbalanced_order"][index - 1],
+            "status": "PASS",
+            "excluded": False,
+        } for index in range(1, specification["pairs"] + 1)]
+        audit = {
+            "status": "FAIL",
+            "diagnostics": [],
+            "omitted_diagnostic_count": 0,
+            "qualification_status": "FAIL_OR_INCOMPLETE",
+            "first_failed_phase": "qualification",
+            "first_failed_evidence": {
+                "workload": workload, "pair_index": None, "arm": None,
+                "metric": "qualification.decision_status",
+                "evidence_class": "FAIL",
+            },
+            "cohort_pair_counts": {
+                workload: {
+                    "required_pairs": specification["pairs"],
+                    "attempted_pairs": specification["pairs"],
+                    "accepted_pairs": specification["pairs"],
+                },
+            },
+            "admitted_source_sha": SOURCE,
+            "admitted_target_partuuid": target_partuuid,
+            "claim_boundary": QUALIFICATION.CONTRACT["claim_boundary"],
+            "measurement_authority": "host-visible lower I/O, not NAND wear",
+        }
+        validator = READINESS["_physical_audit_binding_is_valid"]
+        arguments = (
+            audit, SOURCE, (target_partuuid, target_bytes),
+            QUALIFICATION.CONTRACT, {workload: specification})
+        self.assertTrue(validator(*arguments, pairs, "FAIL_OR_INCOMPLETE"))
+
+        mutations = {
+            "name": lambda rows: rows[1].__setitem__(
+                "name", rows[0]["name"]),
+            "digest": lambda rows: rows[1].__setitem__(
+                "sha256", rows[0]["sha256"]),
+            "pair-id": lambda rows: rows[1].__setitem__(
+                "pair_id", rows[0]["pair_id"]),
+            "pair-index": lambda rows: rows[1].__setitem__(
+                "pair_index", rows[0]["pair_index"]),
+            "order": lambda rows: rows[1].__setitem__("order", "raw-first"),
+            "disposition": lambda rows: rows[1].update(
+                status="PASS", excluded=True),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                changed = copy.deepcopy(pairs)
+                mutate(changed)
+                self.assertFalse(validator(
+                    *arguments, changed, "FAIL_OR_INCOMPLETE"))
+
     def test_counterbalanced_order_and_duplicate_indices_block_audit(self):
         record = pair(1, 1100)
         record["order"] = "swapz-first"
