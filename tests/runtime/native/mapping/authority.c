@@ -1590,20 +1590,31 @@ static int test_discard_range_prevalidation_blocks_late_sidecar_corruption(void)
 	CHECK(test_mapped_pages[0] == 1U && test_mapped_pages[1] == 1U);
 	test_live[1U] = 0U;
 
-	/* A false-one count cannot hide a surviving map outside the range. */
-	test_maps[1].start_block = 0U;
-	test_live[0] = 2U;
+	/*
+	 * A false-one count plus false-zero physical liveness must not hide an
+	 * authoritative survivor outside the range. Keep the survivor at a
+	 * distinct physical start in the same segment so the physical-liveness
+	 * scan passes and the range-wide full-map proof is the rejecting gate.
+	 */
+	test_maps[1].start_block = 1U;
+	test_live[0] = 1U;
+	test_live[1U] = 0U;
 	test_live[SWAPZ_SEGMENT_BLOCKS] = 0U;
+	test_classes[1U] = 1U;
 	test_classes[SWAPZ_SEGMENT_BLOCKS] = 0U;
 	test_mapped_pages[0] = 1U;
 	CHECK(swapz_prevalidate_discard_range(&test_authority, 0U, 1U) ==
 	      -EUCLEAN);
 	CHECK(test_maps[0].valid && test_maps[0].generation == 1U &&
 	      test_maps[1].valid && test_maps[1].generation == 1U);
-	CHECK(test_live[0] == 2U && test_mapped_pages[0] == 1U);
+	CHECK(test_live[0] == 1U && !test_live[1U] &&
+	      test_mapped_pages[0] == 1U);
 
 	/* Valid shared-extent removal decrements its physical reference exactly
 	 * once per logical map; repeated DISCARD advances only generations. */
+	test_maps[1].start_block = 0U;
+	test_live[0] = 2U;
+	test_classes[1U] = 0U;
 	test_mapped_pages[0] = 2U;
 	CHECK(swapz_prevalidate_discard_range(
 		      &test_authority, 0U, test_logical_pages) == 0);
