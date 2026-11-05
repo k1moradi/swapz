@@ -1079,6 +1079,11 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 	CHECK(swapz_enable_segment_page_lists(
 		      &a, first_page, last_page, previous_page, next_page,
 		      4U, 32U) == 0);
+	/* RAW entries are accepted only by the production-capable batched path. */
+	e.bulk_enabled = 1;
+	e.bulk_scratch = bulk_scratch;
+	e.bulk_txs = bulk_txs;
+	e.io.write_run = lower_write_run;
 
 	/*
 	 * Build the exact production membership order:

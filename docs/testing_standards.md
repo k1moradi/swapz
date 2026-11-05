@@ -1451,8 +1451,10 @@ failed read must perform no successful lower read or write, consume no
 destination blocks, retain the published prefix without a second generation
 increment, and preserve the RAW mapping plus all still-authoritative compressed
 source maps. Retry must use the same authenticated victim/destination ownership,
-relocate the RAW member once, read the three remaining 2072-byte compressed
-survivors from their authoritative source extents, pack them into exactly one
+relocate the RAW member once through the engine's enabled RAW-capable batched
+write-run path (a non-bulk engine invocation is an unsupported fixture, not GC
+evidence), read the three remaining 2072-byte compressed survivors from their
+authoritative source extents, and pack them into exactly one
 two-block extent, and prove its physical start refcount is three (with zero
 interior refcount). A later foreground overwrite of one member must reduce that
 shared reference count to two while preserving the other two maps and their
