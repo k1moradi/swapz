@@ -204,26 +204,24 @@
 "schema": "swapz-host-v1"
 },
 "kernel_release": "7.0.0-42-generic",
-"overall": "BLOCKED",
+"overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
 "reason": "build stage did not pass",
 "status": "UNAVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "ce6512daeb20fe80b6c0ed42d15793cec1d441a7",
+"source_sha": "5be7edac8c9971f07a273ca53003d3ac78938783",
 "stages": [
 {
-"diagnostic": "BLOCKED: Secure Boot module signing: configured MOK certificate is not enrolled",
-"elapsed_s": 14.767,
+"diagnostic": "Child returned nonzero in this non-privileged stage",
+"elapsed_s": 3.909,
 "exit_code": 2,
 "failed_phase": "Build module and helpers",
 "name": "Build module and helpers",
-"signals": [
-"BLOCKED"
-],
-"status": "BLOCKED"
+"signals": [],
+"status": "FAIL"
 }
 ],
-"tested_commit_sha": "ce6512daeb20fe80b6c0ed42d15793cec1d441a7"
+"tested_commit_sha": "5be7edac8c9971f07a273ca53003d3ac78938783"
 }
