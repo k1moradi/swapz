@@ -432,10 +432,15 @@ rmdir() {
     fi
 }
 '''
+        original_session_identity = (
+            self.session.stat().st_dev, self.session.stat().st_ino)
         result = self.execute(preamble=preamble, status=143)
         self.assertEqual(result.returncode, 143, result.stderr)
         self.assertFalse(self.cgroup.exists())
         self.assertTrue(self.session.exists())
+        retained_session_identity = (
+            self.session.stat().st_dev, self.session.stat().st_ino)
+        self.assertEqual(retained_session_identity, original_session_identity)
         self.assertEqual(tuple(self.session.iterdir()), ())
         self.assertEqual(
             (self.root / "session-rmdir-attempts").read_text(encoding="ascii"),
@@ -474,10 +479,15 @@ rmdir() {
     fi
 }
 '''
+        original_session_identity = (
+            self.session.stat().st_dev, self.session.stat().st_ino)
         result = self.execute(preamble=preamble)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertFalse(self.cgroup.exists())
         self.assertTrue(self.session.exists())
+        replacement_session_identity = (
+            self.session.stat().st_dev, self.session.stat().st_ino)
+        self.assertNotEqual(replacement_session_identity, original_session_identity)
         self.assertEqual(tuple(self.session.iterdir()), ())
         self.assertIn("phase:session-post-rmdir", result.stderr)
         self.assertIn("observed:stale", result.stderr)

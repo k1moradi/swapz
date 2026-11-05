@@ -3825,8 +3825,10 @@ refusal retains only the private session.
 A final `rmdir` failure on an otherwise emptied private session, or a
 same-name directory replacement after successful final removal, is a
 session-only refusal. Rootless fixtures must independently inject both, verify
-the original exit and first refusal phase, retain only the remaining session,
-and prohibit synthetic ID36 PASS evidence.
+the original exit and first refusal phase, prove the failed removal retains the
+original device/inode while post-removal path reappearance has a different
+device/inode, retain the remaining session-path obligation, and prohibit
+synthetic ID36 PASS evidence.
 
 Rootless contracts must lint both the pressure helper and shell wrapper, and the
 loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
