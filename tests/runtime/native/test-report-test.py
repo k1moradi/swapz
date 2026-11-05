@@ -3184,6 +3184,120 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
+    def test_report_write_preserves_primary_error_over_cleanup_failure(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory(
+                prefix="report-write-failure-", dir=ROOT / "build/tests") as name:
+            original_root, original_report = runner.ROOT, runner.REPORT
+            try:
+                runner.ROOT = Path(name)
+                runner.REPORT = runner.ROOT / runner.GIT_RESULT
+                runner.REPORT.write_text(
+                    '{"overall":"PASS"}\n', encoding="utf-8")
+                previous = runner.REPORT.read_bytes()
+                with mock.patch.object(
+                        runner.os, "replace",
+                        side_effect=OSError(5, "private primary failure")), \
+                     mock.patch.object(
+                         Path, "unlink",
+                         side_effect=OSError(13, "private cleanup failure")):
+                    with self.assertRaises(OSError) as captured:
+                        runner.write_report({"overall": "FAIL"})
+                self.assertEqual(captured.exception.errno, 5)
+                self.assertEqual(runner.REPORT.read_bytes(), previous)
+            finally:
+                runner.ROOT, runner.REPORT = original_root, original_report
+
+    def test_terminal_report_failure_blocks_publish_and_preserves_exit(self):
+        from unittest import mock
+
+        source_sha = "a" * 40
+        available_artifacts = {
+            "status": "AVAILABLE",
+            "formatter_sha256": "b" * 64,
+            "module_sha256": "c" * 64,
+            "oracle_sha256": "d" * 64,
+        }
+
+        def stage_runner(first_exit):
+            def run(title, command, result, *, parse_bench=False):
+                del command
+                if first_exit and not result["stages"]:
+                    result["stages"].append({
+                        "name": title, "status": "FAIL",
+                        "elapsed_s": 0.0, "exit_code": first_exit,
+                    })
+                    return first_exit
+                result["stages"].append({
+                    "name": title, "status": "PASS",
+                    "elapsed_s": 0.0, "exit_code": 0,
+                })
+                if parse_bench:
+                    benchmarks = result["benchmarks"]
+                    benchmarks["verdicts"] = {
+                        "overall": "PASS_BOUNDED_RAM_MATRIX"}
+                    benchmarks["write_saturation"] = {
+                        "overall": "PASS_WRITE_SATURATION_EVIDENCE"}
+                    benchmarks["delta64_prepare"] = {"overall": "NOT_RUN"}
+                return 0
+            return run
+
+        scenarios = (
+            ("report-write", OSError(28, "private /home/secret"), 0, 1,
+             "observed=os-error origin_errno=28", "INCOMPLETE"),
+            ("report-interrupt", KeyboardInterrupt(), 0, 130,
+             "observed=interrupted origin_errno=unavailable", "INCOMPLETE"),
+            ("prior-test-failure", OSError(28, "private /home/secret"), 7, 7,
+             "observed=os-error origin_errno=28", "FAIL"),
+        )
+        for name, report_error, first_exit, expected_exit, detail, overall in scenarios:
+            with self.subTest(name=name):
+                with mock.patch.object(
+                        runner.argparse.ArgumentParser, "parse_args",
+                        return_value=mock.Mock(kdir="/unused")), \
+                     mock.patch.object(
+                         runner, "report_host_identity",
+                         return_value={"schema": "swapz-host-v1",
+                                       "status": "UNAVAILABLE"}), \
+                     mock.patch.object(runner, "git_sha",
+                                       return_value=source_sha), \
+                     mock.patch.object(
+                         runner, "make_invocation",
+                         return_value=(["make"], "fixture")), \
+                     mock.patch.object(
+                         runner, "run_stage",
+                         side_effect=stage_runner(first_exit)), \
+                     mock.patch.object(
+                         runner, "qualification_artifact_digests",
+                         return_value=available_artifacts), \
+                     mock.patch.object(runner, "lane_gap_attribution_rows",
+                                       return_value=[]), \
+                     mock.patch.object(
+                         runner, "goal_scorecard",
+                         return_value={"overall": "UNAVAILABLE", "rows": []}), \
+                     mock.patch.object(
+                         runner, "write_report", side_effect=report_error), \
+                     mock.patch.object(runner, "print_bench") as print_bench, \
+                     mock.patch.object(runner, "publish") as publish, \
+                     mock.patch.object(runner, "refresh_history") as history, \
+                     contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(runner.main(), expected_exit)
+                rendered = output.getvalue()
+                self.assertIn(
+                    f"Overall qualification: {overall}", rendered)
+                self.assertIn(
+                    "Report integrity: FAIL classification=NOT_PUBLISHED",
+                    rendered)
+                self.assertIn(
+                    "stage=report-write expected=atomic-current-json", rendered)
+                self.assertIn(detail, rendered)
+                self.assertNotIn("/home/secret", rendered)
+                self.assertNotIn("Traceback", rendered)
+                print_bench.assert_not_called()
+                publish.assert_not_called()
+                history.assert_not_called()
+
     def test_qualification_report_hashes_exact_final_artifact_bytes(self):
         previous_root = runner.ROOT
         try:

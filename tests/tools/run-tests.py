@@ -2186,6 +2186,7 @@ def write_report(result):
     payload = json.dumps(result, sort_keys=True, indent=0,
                          allow_nan=False).encode("utf-8") + b"\n"
     temporary = REPORT.with_name(".test_results.json.tmp")
+    primary_error = None
     try:
         with temporary.open("wb") as out:
             out.write(payload)
@@ -2193,8 +2194,17 @@ def write_report(result):
         # Make the report's mode deterministic across caller umasks.
         os.chmod(temporary, 0o644)
         os.replace(temporary, REPORT)
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except BaseException:
+            # Cleanup is secondary: never replace the originating write,
+            # chmod, replace or interruption failure.
+            if primary_error is None:
+                raise
 
 
 def jobserver_fds():
@@ -8541,7 +8551,45 @@ def main():
     result["benchmarks"]["lane_gap_attribution"] = lane_gap_attribution_rows(
         result["benchmarks"])
     result["benchmarks"]["goal_scorecard"] = goal_scorecard(result)
-    write_report(result)
+    report_error = None
+    try:
+        write_report(result)
+    except (Exception, KeyboardInterrupt) as error:
+        report_error = error
+    if report_error is not None:
+        if not exit_code:
+            result["overall"] = "INCOMPLETE"
+        if isinstance(report_error, KeyboardInterrupt):
+            observed = "interrupted"
+        elif isinstance(report_error, OSError):
+            observed = "os-error"
+        elif isinstance(report_error, (TypeError, ValueError)):
+            observed = "invalid-json"
+        else:
+            observed = "internal-error"
+        origin_errno = (
+            report_error.errno
+            if isinstance(report_error, OSError) and
+            type(report_error.errno) is int else "unavailable")
+        print(f"\n  Overall qualification: {result['overall']}")
+        print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
+        print("  Report integrity: FAIL classification=NOT_PUBLISHED", flush=True)
+        print(
+            "        stage=report-write expected=atomic-current-json "
+            f"observed={observed} origin_errno={origin_errno}",
+            flush=True)
+        print(
+            "  Report: NOT PUBLISHED (prior report, if any, is not this run)",
+            flush=True)
+        print(
+            "  Git result: SKIPPED_GIT_SYNC: terminal report publication failed",
+            flush=True)
+        print(
+            "  History plots: NOT UPDATED: terminal report publication failed",
+            flush=True)
+        if exit_code:
+            return exit_code
+        return 130 if isinstance(report_error, KeyboardInterrupt) else 1
     print_bench(result)
     print(f"\n  Overall qualification: {result['overall']}")
     print(f"  Report: {REPORT.relative_to(ROOT)} (single overwriteable artifact)")

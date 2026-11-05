@@ -1934,6 +1934,22 @@ legacy detailed Markdown renderer, but it is not the default terminal report.
 The saved JSON, qualification gates, stage progress, safety checks and exit
 codes are unchanged.
 
+### Terminal report integrity
+
+The local report write is part of qualification integrity and completes before
+Git publication or history refresh. Serialization, temporary-file write/chmod,
+atomic replacement, cleanup failure or interruption must fail closed: never
+publish Git evidence or refresh history for that run. A prior test-stage failure
+remains authoritative if final report handling also fails. When all test gates
+had otherwise passed, a report failure makes the run INCOMPLETE and nonzero;
+an interrupt with no earlier failure returns the conventional interrupted
+status. Cleanup is secondary and must never replace the originating report-write
+exception. Public diagnostics contain only the fixed report-write stage,
+integrity classification, bounded observed category and numeric errno when
+available; they never emit exception text, traceback paths or the temporary
+file name. Any pre-existing report is explicitly not evidence from the failed
+publication attempt.
+
 ### Evidence-monotonic report publication
 
 Report publication must be strictly evidence-monotonic. When publishing `test_results.json` to `origin/main`, if `origin/main` has advanced while the test suite was running, the publisher fetches `origin/main` and inspects the remote `test_results.json`. If `origin/main` already carries qualification evidence from a tested commit that is an ancestor or newer descendant of the local tested source (`git merge-base --is-ancestor local_tested remote_tested`), publication is declined with `SKIPPED_GIT_SYNC` so that delayed or concurrent runs cannot overwrite newer qualification evidence with older results. Furthermore, the ancestor evaluation must fail closed: if `git merge-base` returns an error status (exit code > 1), publication halts with `GIT_SYNC_FAILED` rather than proceeding under uncertain ancestry.
