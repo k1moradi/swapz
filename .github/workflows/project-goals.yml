@@ -210,6 +210,10 @@ jobs:
           python3 -B tests/tools/request-plateau.py --bandwidth 20 --sizes 4,8             --latencies 1 --ratios 1 | grep -Fq 'first_plateau_kib=8'
           SWAPZ_CI_SCRIPT
           python3 -B tests/tools/product_goals.py ci-run --suite documentation-policy -- bash build/ci-documentation-policy.sh
+      - name: Regression-test repository policy on synthetic main-only histories
+        run: python3 -B tests/tools/product_goals.py ci-run --suite repository-policy-regression -- python3 -B tests/runtime/native/repository-policy-test.py -v
+      - name: Require applicable non-whitespace canonical co-change
+        run: python3 -B tests/tools/product_goals.py ci-run --suite standards-applicability -- python3 -B tests/runtime/native/repository-policy-test.py --enforce
       - name: Require standards co-change for implementation work
         shell: bash
         run: |

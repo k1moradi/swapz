@@ -2937,6 +2937,20 @@ owners (for example, PACK_READY closure from write admission to the serialized
 worker), contract assertions must move with that ownership in the same
 standards-backed change rather than preserving historical body-local syntax.
 
+Repository-policy CI audits individual pushed first-parent commits. Each
+implementation, test, packaging, workflow or build-interface path requires a
+non-whitespace edit to an *applicable* canonical standards file in the same
+commit: source accepts coding or testing standards, benchmark tests accept
+testing or benchmark standards, other tests and workflows require testing
+standards, packaging accepts testing or compile standards, and root Make/DKMS
+interfaces require compile standards. Review must still confirm the change is
+semantically meaningful: non-whitespace Git differences cannot establish
+relevance by themselves. A later documentation/report-only follow-up cannot
+retroactively qualify an invalid implementation SHA. Failure diagnostics must
+identify the offending commit/path, required policy, first error and a safe
+non-rewriting correction. Exact-SHA CI requires every prerequisite job to
+succeed; skipped and cancelled jobs never count as PASS.
+
 ID83 dispatcher refinement contracts must prove all scheduling boundaries:
 ordered RAW forcing requires an actually idle lower-WRITE path, stays within the
 first eight-record pressure hand, requires at least eight accepted records
