@@ -586,6 +586,67 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertIn("restore_status=77", result.stderr)
         self.assertIn("rollback=complete", result.stderr)
 
+    def test_initial_mask_restore_refuses_foreign_link_after_false_success(self) -> None:
+        foreign = self.root / "foreign-mapper-unit"
+        foreign.write_text("preserve-foreign-unit", encoding="ascii")
+        substituted = self.root / "mask-substituted"
+        rename = self.commands / "mv"
+        rename.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *swapz-primary-mapper.service)
+                if [ ! -e "$MOCK_SUBSTITUTED" ]; then
+                    /usr/bin/ln -s "$MOCK_FOREIGN" "$MOCK_MASK" || exit $?
+                    : > "$MOCK_SUBSTITUTED"
+                fi
+                exit 92 ;;
+            esac
+            exec /usr/bin/mv "$@"
+            """).lstrip("\n"), encoding="ascii")
+        rename.chmod(0o755)
+        removal = self.commands / "rm"
+        removal.write_text(
+            '#!/bin/sh\ncase "$*" in *swapz-primary-mapper.service) exit 0 ;; esac\n'
+            'exec /usr/bin/rm "$@"\n', encoding="ascii",
+        )
+        removal.chmod(0o755)
+        replacement = self.commands / "ln"
+        replacement.write_text(
+            '#!/bin/sh\ncase "$*" in *-sfnT*) exit 0 ;; esac\n'
+            'exec /usr/bin/ln "$@"\n', encoding="ascii",
+        )
+        replacement.chmod(0o755)
+
+        # Repeat the same deterministic rename/substitution race, including a
+        # falsely successful unlink and no-op final mask replacement.
+        for attempt in range(2):
+            with self.subTest(attempt=attempt):
+                substituted.unlink(missing_ok=True)
+                self.mask().unlink(missing_ok=True)
+                result = self.run_generator(
+                    MOCK_MASK=str(self.mask()),
+                    MOCK_FOREIGN=str(foreign),
+                    MOCK_SUBSTITUTED=str(substituted),
+                )
+                self.assertEqual(result.returncode, 92, result.stderr)
+                self.assertIn("phase=mask", result.stderr)
+                self.assertIn("original_status=92 restore_status=1", result.stderr)
+                self.assertIn("observed_mask=missing-or-substituted", result.stderr)
+                self.assertIn("observed_early_unit=foreign-symlink", result.stderr)
+                self.assertIn("owned_dropins=none", result.stderr)
+                self.assertIn("surviving_artifacts=foreign-early-unit", result.stderr)
+                self.assertIn("rollback=incomplete", result.stderr)
+                self.assertIn("action=mask-unproven-owner-intervention-required",
+                              result.stderr)
+                self.assertNotIn("rollback=complete", result.stderr)
+                self.assertNotIn(SELECTED, result.stderr)
+                self.assertEqual(self.mask().readlink(), foreign)
+                self.assertEqual(foreign.read_text(encoding="ascii"), "preserve-foreign-unit")
+                self.assertFalse(self.mapper_dropin().exists())
+                self.assertFalse(self.device_dropin(SELECTED).exists())
+                self.assertFalse(list(self.early.glob(".swapz-primary-mask.*")))
+
+
     def test_overlapping_failed_run_cannot_remove_graph_before_owner_releases_mask(self) -> None:
         first_ready = self.root / "first-release-ready"
         allow_first_release = self.root / "allow-first-release"

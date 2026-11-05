@@ -136,14 +136,38 @@ install_verified_mask()
 			rollback_outcome=incomplete
 			surviving_artifacts=temporary-mask
 		fi
+		observed_early_unit=owned-mask
+		mask_action=retain-early-mask
 		if mapper_mask_is_active; then
 			observed_mask=/dev/null
 		else
 			observed_mask=missing-or-substituted
 			rollback_outcome=incomplete
+			mask_action=mask-unproven-owner-intervention-required
+			# False-success unlink/replacement may leave a foreign early unit.
+			# Classify the reserved name independently of command status.
+			if [ ! -x "$early_dir" ]; then
+				observed_early_unit=directory-unverifiable
+				surviving_artifacts=unverifiable
+			elif [ -L "$mapper_unit" ]; then
+				observed_early_unit=foreign-symlink
+			elif [ -e "$mapper_unit" ]; then
+				observed_early_unit=foreign-inode
+			else
+				observed_early_unit=absent
+			fi
+			case "$observed_early_unit" in
+			foreign-*)
+				if [ "$surviving_artifacts" = none ]; then
+					surviving_artifacts=foreign-early-unit
+				else
+					surviving_artifacts=temporary-mask-and-foreign-early-unit
+				fi ;;
+			esac
 		fi
-		printf 'swapz-primary-generator: phase=mask expected_mask=/dev/null observed_mask=%s original_status=%s restore_status=%s original_errno=unavailable surviving_artifacts=%s rollback=%s\n' \
-			"$observed_mask" "$mask_status" "$mask_restore_status" "$surviving_artifacts" "$rollback_outcome" >&2
+		printf 'swapz-primary-generator: phase=mask expected_mask=/dev/null observed_mask=%s observed_early_unit=%s owned_dropins=none original_status=%s restore_status=%s original_errno=unavailable surviving_artifacts=%s rollback=%s action=%s\n' \
+			"$observed_mask" "$observed_early_unit" "$mask_status" "$mask_restore_status" \
+			"$surviving_artifacts" "$rollback_outcome" "$mask_action" >&2
 		fail "$mask_status" mask generator-output "$requested_mask_validation" mapper-active-job
 	fi
 }
