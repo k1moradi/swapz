@@ -100,7 +100,7 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
                 "metadata_and_target_peak_ram_bytes_max"],
             1_342_177_280)
 
-    def test_authenticated_over_limit_is_measured_but_missing_arm_is_unavailable(self) -> None:
+    def test_bound_over_limit_value_remains_measured(self) -> None:
         policy_path = Path(__file__).resolve().parents[3] / (
             "docs/production-acceptance.json")
         policy = json.loads(policy_path.read_text(encoding="utf-8"))
@@ -108,26 +108,17 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
             "metadata_and_target_peak_ram_bytes_max"]
         observed_peak = limit + ram.MEMINFO_UNIT_BYTES
 
-        # Missing sustained-arm evidence is unavailable before trace-to-arm
-        # validation can authenticate any later chronology.
-        with self.assertRaisesRegex(
-                ValueError, "arm chronology is missing") as caught:
-            ram.metadata_ram_arm_binding({})
-        missing_arm_diagnostic = str(caught.exception)
-        self.assertEqual(
-            missing_arm_diagnostic.count("peak_ram_bytes=unavailable"), 1)
-        self.assertNotIn(str(observed_peak), missing_arm_diagnostic)
-
-        # A separately well-formed trace above the frozen ceiling must retain
-        # its measured peak; the validator does not turn a measured FAIL into
-        # unavailable evidence merely because the value is over policy.
+        # A well-formed synthetic trace above the frozen ceiling must retain
+        # its sample-derived peak; this proves validator semantics only, not
+        # physical-host qualification.
         trace, host = synthetic_trace()
         baseline_available_kib = trace["samples"][0]["mem_available_kib"]
         self.assertEqual(observed_peak % ram.MEMINFO_UNIT_BYTES, 0)
         trace["samples"][15]["mem_available_kib"] = (
             baseline_available_kib -
             observed_peak // ram.MEMINFO_UNIT_BYTES)
-        summary = self.validate_trace(trace)
+        summary = self.validate_trace(
+            trace, expected_peak_ram_bytes=observed_peak)
         self.assertEqual(summary["peak_ram_bytes"], observed_peak)
         self.assertEqual(summary["gc_peak_ram_bytes"], observed_peak)
         self.assertGreater(summary["peak_ram_bytes"], limit)
@@ -439,6 +430,7 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
             str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
 
     def test_invalid_host_and_arm_bindings_revoke_peak(self) -> None:
+        # Extraction rejects missing proof before trace-to-arm revalidation.
         with self.assertRaisesRegex(
                 ValueError, "arm chronology is missing") as caught:
             ram.metadata_ram_arm_binding({})

@@ -7792,8 +7792,12 @@ must preserve the first failure's field/phase diagnostic and explicitly report
 incomplete sustained-arm telemetry rejected while extracting its compact RAM
 binding, before later trace-to-arm revalidation. Missing counters, incomplete
 sample counts, short baselines and unrecovered teardown must not leave a
-favorable peak implied by surviving observations. This classification does not
-relax the frozen cadence or its conservative minimum-missing-samples bound.
+favorable peak implied by surviving observations. Rootless coverage must invoke
+missing-arm extraction directly before later trace binding and, separately,
+retain a sample-derived over-limit value after synthetic source, mapper, host
+and arm binding; that synthetic value verifies classification semantics only,
+never physical-host qualification. This classification does not relax the
+frozen cadence or its conservative minimum-missing-samples bound.
 
 A trace that labels itself as synthetic/rootless must not pass the loaded-host
 capture/scope declarations. Correct declaration strings alone cannot
