@@ -33,36 +33,46 @@ BOOT = "11111111-2222-3333-4444-555555555555"
 SOURCE = "a" * 40
 
 
-def arm(candidate, timestamp, run_id):
-    return {
+def arm(candidate, timestamp, run_id, workload="sd-service-balanced"):
+    result = {
         "candidate": candidate, "source_sha": SOURCE,
         "workload_id": run_id, "arm_boot_id": BOOT,
         "arm_started_monotonic_ns": timestamp,
         "arm_finished_monotonic_ns": timestamp + 100,
         "read_ops": 1, "write_ops": 1,
-        "throughput": {"logical_write_mbps": 1.0},
+        "throughput": {
+            "logical_write_mbps": 1.0,
+            "useful_read_bytes": 4096,
+        },
         "lower_io": {"lower_write_bytes": 4096,
                      "lower_write_requests": 1},
         "cpu": {"measured_cpu_seconds_per_useful_byte": 1e-9},
         "latency": {"read_p95_ns": 100, "read_p99_ns": 200,
                     "write_p95_ns": 100, "write_p99_ns": 200},
+        "swapin_latency": {"p95_ns": 100, "p99_ns": 200},
         "measurement_snapshots": {
             "lower_before": [0] * 17, "lower_after": [1] * 17},
     }
+    if workload == "sd-high-occupancy-churn":
+        result.update(
+            cold_read={"p99_ns": 200},
+            minute_buckets=[], occupancy_transitions=[])
+        if candidate == "swapz":
+            result["gc"] = {"wall_fraction": 0.01, "gc_wall_ns": 10}
+    return result
 
 
-def pair(index, timestamp, run_id=None):
-    workload = "sd-service-balanced"
-    identifier = run_id or f"physical-run-{index}"
+def pair(index, timestamp, run_id=None, workload="sd-service-balanced"):
+    identifier = run_id or f"physical-run-{workload}-{index}"
     return {
         "schema": QUALIFICATION.PAIR_SCHEMA, "workload": workload,
-        "pair_id": f"pair-{index}", "pair_index": index,
-        "order": QUALIFICATION.CONTRACT["workloads"][workload][
+        "pair_id": f"pair-{workload}-{index}", "pair_index": index,
+        "order": QUALIFICATION.WORKLOADS[workload][
             "counterbalanced_order"][index - 1],
         "source_sha": SOURCE, "status": "PASS",
         "excluded": False, "analysis_usable": True,
-        "raw": arm("raw", timestamp, identifier),
-        "swapz": arm("swapz", timestamp + 200, identifier),
+        "raw": arm("raw", timestamp, identifier, workload),
+        "swapz": arm("swapz", timestamp + 200, identifier, workload),
     }
 
 
@@ -358,8 +368,8 @@ class CapacityRamPropagation(unittest.TestCase):
             if sample["mapper_present"]:
                 sample["mem_available_kib"] = 4_000_000 - peak_bytes // 1024
 
-        record = pair(1, 1100)
-        record["workload"] = "sd-high-occupancy-churn"
+        record = pair(
+            1, 2_100_000_000, workload="sd-high-occupancy-churn")
         swapz = record["swapz"]
         swapz["logical_pages"] = EVIDENCE.RAM_VALIDATOR[
             "maximum_logical_pages_for_partition"](self.DEVICE_BYTES)
@@ -440,6 +450,7 @@ class CapacityRamPropagation(unittest.TestCase):
         snapshot = {
             "source_sha": SOURCE, "source_tree_sha": "b" * 40,
             "captured_at_utc": "2026-11-01T00:00:00Z",
+            "captured_monotonic_ns": 2_000_000_000,
             "kernel": {"boot_id": BOOT},
             "memory": {"total_bytes": self.DEVICE_BYTES},
             "device": {
@@ -452,19 +463,34 @@ class CapacityRamPropagation(unittest.TestCase):
         }
         after = copy.deepcopy(snapshot)
         after["captured_at_utc"] = "2026-11-01T00:00:06Z"
+        after["captured_monotonic_ns"] = 10_000_000_000
         return snapshot, after
 
     def synthetic_seal(self, peak_bytes, *, include_trace=True,
                        conflicting_host_boot=False, summary_mutation=None):
-        record, trace = self.synthetic_capacity(peak_bytes)
+        capacity_record, trace = self.synthetic_capacity(peak_bytes)
         before, after = self.synthetic_hosts()
         if conflicting_host_boot:
             trace["host_boot_id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"
         policy = json.loads(EVIDENCE.ACCEPTANCE_MANIFEST.read_text())
         amendment = json.loads(EVIDENCE.AMENDMENT_MANIFEST.read_text())
-        workload_names = (
-            set(policy["physical_qualification"]["workloads"]) |
-            set(amendment["workloads"]))
+        workload_specs = dict(policy["physical_qualification"]["workloads"])
+        workload_specs.update(amendment["workloads"])
+        workload_names = set(workload_specs)
+        records = []
+        timestamp = 3_000_000_000
+        for workload, specification in workload_specs.items():
+            if workload == "sd-high-occupancy-churn":
+                records.append(capacity_record)
+                continue
+            for index in range(1, specification["pairs"] + 1):
+                records.append(pair(
+                    index, timestamp,
+                    run_id=f"synthetic-{workload}-{index}",
+                    workload=workload))
+                timestamp += 50_000_000
+        self.assertEqual(
+            len(records), sum(item["pairs"] for item in workload_specs.values()))
         summary = {
             "schema": EVIDENCE.SUMMARY_SCHEMA,
             "acceptance_manifest_sha256": EVIDENCE.sha256_bytes(
@@ -474,7 +500,7 @@ class CapacityRamPropagation(unittest.TestCase):
             "evaluation_protocol": "v2", "amendment_active": True,
             "decisions": {
                 workload: {"status": "PASS"} for workload in workload_names},
-            "status": "PASS", "records": [record],
+            "status": "PASS", "records": records,
             "campaign_source_sha": SOURCE,
             "campaign_target_identity":
                 EVIDENCE.qualification_target_identity(before),
@@ -489,10 +515,19 @@ class CapacityRamPropagation(unittest.TestCase):
             summary_mutation(summary)
 
         with tempfile.TemporaryDirectory() as directory:
-            paths = [Path(directory) / name for name in (
-                "before.json", "after.json", "summary.json",
-                "pair.json", "ram.json")]
-            for path, value in zip(paths, (before, after, summary, record, trace)):
+            pair_paths = [
+                Path(directory) /
+                f"pair-{index:02d}-{record['workload']}.json"
+                for index, record in enumerate(records, 1)]
+            paths = [
+                Path(directory) / "before.json",
+                Path(directory) / "after.json",
+                Path(directory) / "summary.json",
+                *pair_paths,
+                Path(directory) / "ram.json",
+            ]
+            values = [before, after, summary, *records, trace]
+            for path, value in zip(paths, values):
                 path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
             stability = {"status": "STABLE",
                          "checks": {"same_boot": True}, "failed_checks": []}
@@ -503,15 +538,12 @@ class CapacityRamPropagation(unittest.TestCase):
                 mock.patch.object(EVIDENCE, "validate_host_snapshot"),
                 mock.patch.object(EVIDENCE, "host_stability",
                                   return_value=stability),
-                mock.patch.object(EVIDENCE, "audit_physical_pairs",
-                                  return_value={"status": "PASS",
-                                                "diagnostics": []}),
                 mock.patch.dict(EVIDENCE.QUALIFICATION, {
                     "evaluate": lambda records, protocol: regenerated_summary}),
             ):
                 return EVIDENCE.seal_campaign(
-                    SOURCE, *paths[:3], [paths[3]],
-                    paths[4] if include_trace else None)
+                    SOURCE, *paths[:3], pair_paths,
+                    paths[-1] if include_trace else None)
 
     def test_sealer_rejects_type_coerced_evaluator_summary(self):
         # Python compares numeric 1 == True and 0 == False. These mutations
