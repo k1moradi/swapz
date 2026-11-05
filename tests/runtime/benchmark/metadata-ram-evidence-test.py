@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -82,6 +83,23 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
         self.assertEqual(derived["steady_peak_ram_bytes"], derived["peak_ram_bytes"])
         ram.validate_metadata_ram_host_binding(trace, host)
 
+    def test_frozen_full_card_geometry_is_not_a_ram_measurement(self) -> None:
+        partition_bytes = 124_787_884_032
+        self.assertEqual(
+            ram.maximum_logical_pages_for_partition(partition_bytes),
+            27_080_192)
+        self.assertEqual(
+            ram.capacity_index_estimate(27_080_192, 30_465_536),
+            {"array_count": 17, "payload_bytes": 776_070_968,
+             "page_rounded_bytes": 776_114_176})
+        policy_path = Path(__file__).resolve().parents[3] / (
+            "docs/production-acceptance.json")
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            policy["physical_qualification"]["acceptance"]["sustained"][
+                "metadata_and_target_peak_ram_bytes_max"],
+            1_342_177_280)
+
     def test_physically_impossible_unreclaim_was_false_acceptance(self) -> None:
         trace, host = synthetic_trace()
         index = 13  # First synthetic steady-state sample.
@@ -118,6 +136,33 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
             "VmallocUsed: 100 kB\n  SUnreclaim: 200 kB\n")
         with self.assertRaisesRegex(ValueError, "SUnreclaim"):
             ram.parse_meminfo_counters(counters)
+
+    def test_malformed_required_meminfo_duplicate_was_false_acceptance(self) -> None:
+        # Previously the malformed duplicate was ignored and 2000 kB won.
+        valid = (
+            "MemAvailable: 2000 kB\nSUnreclaim: 100 kB\n"
+            "VmallocUsed: 100 kB\n")
+        self.assertEqual(
+            ram.parse_meminfo_counters(valid + "MemAvailableExtra: 1 kB\n")[
+                "mem_available_kib"], 2000)
+        for malformed in ("MemAvailable : 1 kB", "  MemAvailable\t: 1 kB",
+                          "MemAvailable"):
+            with self.subTest(malformed=malformed):
+                with self.assertRaisesRegex(
+                        ValueError, "malformed meminfo counter: MemAvailable"):
+                    ram.parse_meminfo_counters(valid + malformed + "\n")
+
+    def test_rejects_explicit_synthetic_capture_scope(self) -> None:
+        for field, invalid in (
+                ("capture", "rootless-synthetic"),
+                ("scope", "synthetic-only")):
+            with self.subTest(field=field):
+                trace, _ = synthetic_trace()
+                trace[field] = invalid
+                with self.assertRaisesRegex(
+                        ValueError,
+                        f"metric={field}.*first_failed_phase=provenance"):
+                    self.validate_trace(trace)
 
     def test_mapper_mismatch_diagnostic_names_field(self) -> None:
         trace, _ = synthetic_trace()
@@ -181,6 +226,60 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 with self.assertRaises(ValueError):
                     self.validate_trace(changed)
+
+    def test_missing_peak_sample_cannot_claim_lower_peak(self) -> None:
+        trace, host = synthetic_trace()
+        # Preserve valid phase counts after dropping one high-water sample.
+        samples = trace["samples"]
+        samples.insert(14, copy.deepcopy(samples[14]))
+        for sample_index, sample in enumerate(samples):
+            sample["monotonic_ns"] = (
+                1_000_000_000 + sample_index * ram.SAMPLING_INTERVAL_NS)
+            timestamp = START_UTC + datetime.timedelta(
+                seconds=1, milliseconds=100 * sample_index)
+            sample["timestamp_utc"] = timestamp.isoformat(
+                timespec="microseconds").replace("+00:00", "Z")
+        samples[14]["mem_available_kib"] = 3_200_000
+        self.assertEqual(
+            self.validate_trace(trace)["peak_ram_bytes"], 800_000 * 1024)
+        ram.validate_metadata_ram_host_binding(trace, host)
+
+        del samples[14]
+        self.assertEqual(sum(sample["phase"] == "steady" for sample in samples), 2)
+        with self.assertRaisesRegex(
+                ValueError,
+                r"metric=monotonic_interval_ns.*"
+                r"first_failed_phase=steady missing_samples=1"):
+            self.validate_trace(trace)
+
+    def test_truncated_phase_and_host_window_fail_closed(self) -> None:
+        trace, host = synthetic_trace()
+        del trace["samples"][-1]
+        with self.assertRaisesRegex(
+                ValueError, r"metric=sample_count.*missing_samples=1.*first_failed_phase=teardown"):
+            self.validate_trace(trace)
+        trace, host = synthetic_trace()
+        host["host_after_captured_at_utc"] = "2026-11-01T00:00:04Z"
+        with self.assertRaisesRegex(ValueError, "outside host snapshot window"):
+            ram.validate_metadata_ram_host_binding(trace, host)
+
+    def test_sustained_arm_and_utc_clock_binding_fail_closed(self) -> None:
+        trace, _ = synthetic_trace()
+        with self.assertRaisesRegex(ValueError, "phases do not bind"):
+            ram.validate_metadata_ram_arm_binding(trace, {
+                "arm_started_monotonic_ns": 2_350_000_000,
+                "arm_finished_monotonic_ns": 2_700_000_000,
+                "gc_activity_intervals": [{
+                    "start_monotonic_ns": 2_450_000_000,
+                    "end_monotonic_ns": 2_650_000_000,
+                    "gc_wall_ns": 1, "gc_victims": 1, "gc_pages": 1,
+                }],
+            })
+        trace, _ = synthetic_trace()
+        trace["samples"][13]["timestamp_utc"] = (
+            trace["samples"][12]["timestamp_utc"])
+        with self.assertRaisesRegex(ValueError, "clocks disagree"):
+            self.validate_trace(trace)
 
     def test_boot_mismatch_and_secret_string_redaction(self) -> None:
         trace, host = synthetic_trace()

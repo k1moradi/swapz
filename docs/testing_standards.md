@@ -6840,7 +6840,22 @@ fixture whose two counters are each in range but whose arithmetic sum exceeds
 the host total must remain acceptable to the host-binding validator; that
 fixture is parser semantics coverage, never physical RAM qualification. Reject
 a malformed or indented second required meminfo counter instead of silently
-ignoring contradictory values. Report a malformed sample's index, precise
+ignoring contradictory values. A duplicate required counter with spaces or
+tabs inserted before its colon, or a truncated required counter name, is
+malformed even when a valid copy precedes it; unrelated meminfo names remain
+ignorable. Rootless regression fixtures must retain a valid positive control
+and reject a deleted low-MemAvailable peak observation even if the remaining
+sample count still meets every phase minimum: the 200 ms gap violates the
+unchanged 50-150 ms adjacent-sample bound. Cadence and missing-phase
+diagnostics identify the first failed phase and a bounded missing-sample count.
+A trace that labels itself as synthetic/rootless must not pass the loaded-host
+capture/scope declarations. Correct declaration strings alone cannot
+authenticate a capture: immutable trace hashes, exact source, host boot,
+mapper and sustained-arm bindings, and actual serialized Codex collection
+remain independent requirements. Capacity and frozen RAM-ceiling decisions
+remain in the campaign sealer and release evaluator; isolated trace validation
+cannot report observed physical capacity or an unseen true peak.
+Report a malformed sample's index, precise
 field and expected/observed numeric bounds without echoing arbitrary evidence
 strings. An exact-mapper mismatch must identify the `mapper_uuid` field
 without printing the supplied identity. Such contradictions are unavailable/BLOCKED evidence, not a measured

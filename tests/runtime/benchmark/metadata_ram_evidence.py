@@ -74,8 +74,9 @@ def parse_meminfo_counters(text: Any) -> dict[str, int]:
     for line in text.splitlines():
         # Even an indented counter is a malformed required field, not an
         # ignorable extra line that could conceal a conflicting value.
+        # Whitespace before its colon can conceal a contradictory duplicate.
         name_match = re.match(
-            r"[ \t]*(MemAvailable|SUnreclaim|VmallocUsed):", line)
+            r"[ \t]*(MemAvailable|SUnreclaim|VmallocUsed)(?=[: \t]|$)", line)
         if name_match is None:
             continue
         match = re.fullmatch(
@@ -522,11 +523,18 @@ def validate_metadata_ram_trace(
             "metadata RAM sample unit declaration is invalid: "
             f"metric=meminfo_unit observed={_bounded_observed(trace['meminfo_unit'])} "
             "expected=kB")
+    # A rootless or synthetic label must not be promoted to loaded-host
+    # evidence. Matching strings alone do not authenticate a host capture.
+    for field, expected in (
+            ("capture", "serialized-loaded-host"),
+            ("scope", "whole-host-conservative-metadata-and-target-ram")):
+        if trace[field] != expected:
+            raise ValueError(
+                "metadata RAM trace capture scope is invalid: "
+                f"metric={field} observed={_bounded_observed(trace[field])} "
+                f"expected={expected} first_failed_phase=provenance")
     if (
             trace["schema"] != "swapz-metadata-ram-samples-v1" or
-            trace["capture"] != "serialized-loaded-host" or
-            trace["scope"] !=
-            "whole-host-conservative-metadata-and-target-ram" or
             trace["meminfo_unit"] != "kB" or
             not isinstance(source_sha, str) or
             not SOURCE_SHA.fullmatch(source_sha) or
@@ -559,10 +567,23 @@ def validate_metadata_ram_trace(
     if not isinstance(samples, list):
         raise ValueError("metadata RAM trace samples are missing")
     if not minimum_samples <= len(samples) <= 1_000_000:
+        first_failed_phase = "unknown"
+        if len(samples) < minimum_samples:
+            phase_sample_counts = {phase: 0 for phase in PHASES}
+            for sample in samples:
+                if isinstance(sample, dict):
+                    phase = sample.get("phase")
+                    if isinstance(phase, str) and phase in phase_sample_counts:
+                        phase_sample_counts[phase] += 1
+            first_failed_phase = next(
+                (phase for phase, minimum in MINIMUM_PHASE_SAMPLES.items()
+                 if phase_sample_counts[phase] < minimum), "unknown")
         raise ValueError(
             "metadata RAM trace sample count is invalid: "
             f"metric=sample_count observed={len(samples)} "
-            f"minimum={minimum_samples} maximum=1000000")
+            f"minimum={minimum_samples} maximum=1000000 "
+            f"missing_samples={max(0, minimum_samples - len(samples))} "
+            f"first_failed_phase={first_failed_phase}")
 
     phase_stage = 0
     phase_samples: dict[str, list[dict[str, Any]]] = {
@@ -650,7 +671,9 @@ def validate_metadata_ram_trace(
                     "metadata RAM sample cadence is invalid: "
                     f"metric=monotonic_interval_ns observed={elapsed_ns} "
                     f"minimum={SAMPLING_INTERVAL_NS // 2} "
-                    f"maximum={SAMPLING_INTERVAL_NS + SAMPLING_INTERVAL_NS // 2}")
+                    f"maximum={SAMPLING_INTERVAL_NS + SAMPLING_INTERVAL_NS // 2} "
+                    f"first_failed_phase={phase} "
+                    f"missing_samples={max(0, (elapsed_ns - SAMPLING_INTERVAL_NS // 2) // SAMPLING_INTERVAL_NS)}")
             wall_elapsed_ns = utc_ns - previous_utc_ns
             if (
                     wall_elapsed_ns <= 0 or
@@ -690,7 +713,9 @@ def validate_metadata_ram_trace(
             raise ValueError(
                 "metadata RAM trace lacks required phase observations: "
                 f"metric={phase}_sample_count "
-                f"observed={len(phase_samples[phase])} minimum={minimum}")
+                f"observed={len(phase_samples[phase])} minimum={minimum} "
+                f"missing_samples={minimum - len(phase_samples[phase])} "
+                f"first_failed_phase={phase}")
 
     baseline = phase_samples["baseline"]
     if any(sample["mapper_present"] for sample in baseline):
