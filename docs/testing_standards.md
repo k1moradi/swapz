@@ -106,6 +106,27 @@ fail closed; a chrooted coordinator must not use the same-namespace shortcut.
 Include a regression proving the shortcut cannot hide a selected-device mount
 already present in the coordinator's table.
 
+For the opt-in host-bound same-root-parent scope, keep the direct production-C
+mount-namespace controls independent from the scope-policy and late-race
+fixtures. Model a root partition and selected target with distinct synthetic
+device numbers on an assumed common physical parent; the root partition and
+unrelated sibling mounts remain positive inventory controls, but a selected
+target mounted locally, as a bind mount, as a foreign namespace root, or under
+another PID still refuses by exact major:minor despite misleading source
+labels. A mounted physical parent also refuses. Under the same synthetic root,
+malformed or unreadable foreign tables and incomplete PID enumeration must
+remain failures. A same-namespace chroot shortcut must not hide a selected
+mount already in the coordinator's full-root table. Check the production
+same-parent and independent recovery-parent relationship gates for changed,
+missing, and identical parents. The reader supplied an out-of-date parent
+argument may return a clean snapshot: this is a positive *reader-only*
+negative control, not physical admission; callers must independently
+re-resolve ancestry, compare against the original, and reject changed topology.
+Log the rejection category (selected target, sibling/root, namespace
+enumeration, device ancestry, or unresolved identity). These synthetic facts
+cannot authorize the host-bound scope, certify physical device ancestry, or
+close the post-snapshot mutation exclusion interval.
+
 The primary-start rootless lifecycle fixture must independently show a
 foreign-PID conflict on the initial admission, a different visible PID appearing
 between scans, and the same numeric PID retaining its name while its mount-

@@ -385,36 +385,211 @@ static unsigned int fixture_failures;
 
 /* expected_errno == 0 means a parsed inventory; in that case a mounted
  * target refuses through target_mounted rather than an errno value. */
-static void expect_mount_admission(const char *case_name, int should_allow,
-                                   int expected_errno)
+static void expect_mount_identity_admission(
+	const char *case_name, dev_t expected_root_device, dev_t parent_device,
+	int should_allow, int expected_errno, const char *safety_gate)
 {
 	struct swapz_primary_mount_facts facts = {0};
 	int result;
 	int allowed;
 
 	errno = 0;
-	result = swapz_primary_read_mount_facts(&facts, makedev(8U, 0U));
+	result = swapz_primary_read_mount_facts(&facts, parent_device);
 	allowed = result == 0 && !facts.target_mounted;
 	if (allowed != should_allow ||
 	    (expected_errno ? (result == 0 || errno != expected_errno) :
 			      result != 0) ||
 	    (result == 0 && (!facts.root_mount_seen ||
-			    facts.root_device != makedev(259U, 0U)))) {
-		fprintf(stderr, "FAIL: %s: result=%d errno=%d target=%d "
-			"root_seen=%d root=%u:%u (expected %s)\n",
-			case_name, result, errno, facts.target_mounted,
+			    facts.root_device != expected_root_device))) {
+		fprintf(stderr, "FAIL: %s: gate=%s result=%d errno=%d target=%d "
+			"root_seen=%d root=%u:%u expected_root=%u:%u "
+			"target_parent=%u:%u (expected %s)\n",
+			case_name, safety_gate, result, errno, facts.target_mounted,
 			facts.root_mount_seen, major(facts.root_device),
-			minor(facts.root_device),
+			minor(facts.root_device), major(expected_root_device),
+			minor(expected_root_device), major(parent_device),
+			minor(parent_device),
 			should_allow ? "admitted" : "refused");
 		++fixture_failures;
 	}
 	if (fixture_mount_fd != -1) {
-		fprintf(stderr, "FAIL: %s: remote mountinfo descriptor leaked\n",
-			case_name);
+		fprintf(stderr, "FAIL: %s: gate=%s remote mountinfo descriptor leaked\n",
+			case_name, safety_gate);
 		++fixture_failures;
 		(void)close(fixture_mount_fd);
 		fixture_mount_fd = -1;
 	}
+}
+
+
+/* Keep the original controls anchored to their original synthetic identities. */
+static void expect_mount_admission(const char *case_name, int should_allow,
+				   int expected_errno)
+{
+	expect_mount_identity_admission(
+		case_name, makedev(259U, 0U), makedev(8U, 0U),
+		should_allow, expected_errno, "selected target/sibling/root/namespace");
+}
+
+/*
+ * The synthetic root 8:4 and selected target 8:1 model different partitions
+ * whose independently verified physical parent would be 8:0. This fixture
+ * checks production mount admission, not a real sysfs ancestry resolution or
+ * an accepted host-bound shared-root scope record.
+ */
+static void fixture_same_parent_root(void)
+{
+	fixture_reset();
+	fixture_file("self/mountinfo",
+		     "36 25 8:4 / / rw - ext4 /dev/root-sibling rw\n");
+}
+
+static void test_shared_root_parent_mount_gates(void)
+{
+	const dev_t root_device = makedev(8U, 4U);
+	const dev_t target_parent = makedev(8U, 0U);
+	const dev_t changed_parent = makedev(8U, 8U);
+
+	fixture_same_parent_root();
+	expect_mount_identity_admission("shared-parent clean root sibling",
+					root_device, target_parent, 1, 0,
+					"sibling/root");
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sibling rw\n");
+	expect_mount_identity_admission("shared-parent unrelated foreign sibling",
+					root_device, target_parent, 1, 0,
+					"sibling/root");
+
+	/* The mountinfo major:minor, not its /dev source label, identifies a bind. */
+	fixture_same_parent_root();
+	fixture_file("self/mountinfo",
+		     "36 25 8:4 / / rw - ext4 /dev/root-sibling rw\n"
+		     "37 36 8:1 /subtree /selected-bind rw - ext4 /dev/unrelated rw\n");
+	expect_mount_identity_admission("shared-parent local selected bind",
+					root_device, target_parent, 0, 0,
+					"selected target");
+	fixture_same_parent_root();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sibling rw\n"
+		     "38 36 8:1 /subtree /selected-bind rw - ext4 /dev/unrelated rw\n");
+	expect_mount_identity_admission("shared-parent foreign selected bind",
+					root_device, target_parent, 0, 0,
+					"selected target/cross-namespace");
+	fixture_same_parent_root();
+	fixture_file("3031/mountinfo",
+		     "36 25 8:1 / / rw - ext4 /dev/foreign-root rw\n");
+	expect_mount_identity_admission("shared-parent foreign root is selected",
+					root_device, target_parent, 0, 0,
+					"selected target/cross-namespace");
+	fixture_same_parent_root();
+	fixture_file("self/mountinfo",
+		     "36 25 8:1 / / rw - ext4 /dev/root-alias rw\n");
+	expect_mount_identity_admission("selected target masquerades as local root",
+					makedev(8U, 1U), target_parent, 0, 0,
+					"selected target/root");
+	fixture_same_parent_root();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		     "37 36 8:0 / /mounted-parent rw - ext4 /dev/not-parent rw\n");
+	expect_mount_identity_admission("shared-parent foreign parent mount",
+					root_device, target_parent, 0, 0,
+					"device ancestry/cross-namespace");
+
+	/* The same-parent relationship never waives a complete PID inventory. */
+	fixture_same_parent_root();
+	fixture_file("3031/mountinfo", "malformed\n");
+	expect_mount_identity_admission("shared-parent unresolved remote identity",
+					root_device, target_parent, 0, EINVAL,
+					"unresolved identity");
+	fixture_same_parent_root();
+	fixture_mount_open_error = EACCES;
+	expect_mount_identity_admission("shared-parent unreadable foreign namespace",
+					root_device, target_parent, 0, EACCES,
+					"namespace enumeration");
+	fixture_same_parent_root();
+	fixture_inventory_readdir_error = EIO;
+	expect_mount_identity_admission("shared-parent incomplete PID enumeration",
+					root_device, target_parent, 0, EIO,
+					"namespace enumeration");
+	fixture_same_parent_root();
+	fixture_share_mount_namespace();
+	fixture_file("3031/mountinfo", "");
+	expect_mount_identity_admission("shared-parent complete same-namespace view",
+					root_device, target_parent, 1, 0,
+					"sibling/root");
+	fixture_file("self/mountinfo",
+		     "36 25 8:4 / / rw - ext4 /dev/root-sibling rw\n"
+		     "37 36 8:1 /subtree /selected-bind rw - ext4 /dev/unrelated rw\n");
+	expect_mount_identity_admission("shared-parent same-namespace skip keeps target",
+					root_device, target_parent, 0, 0,
+					"selected target/namespace identity");
+
+	/*
+	 * A mount reader cannot invent a parent-device identity. Its stale-parent
+	 * snapshot is intentionally a positive control, NOT coordinator admission:
+	 * the caller must re-resolve and compare ancestry before mutation.
+	 */
+	fixture_same_parent_root();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		     "37 36 8:8 / /changed-parent rw - ext4 /dev/other rw\n");
+	expect_mount_identity_admission("stale parent argument alone misses new parent",
+					root_device, target_parent, 1, 0,
+					"device ancestry (caller must revalidate)");
+	expect_mount_identity_admission("re-resolved parent mount must refuse",
+					root_device, changed_parent, 0, 0,
+					"device ancestry/cross-namespace");
+}
+
+static void expect_parent_relationship(
+	const char *case_name, int (*relationship_valid)(dev_t, dev_t),
+	dev_t first_parent, dev_t second_parent, int should_allow,
+	const char *safety_gate)
+{
+	int result;
+
+	errno = 0;
+	result = relationship_valid(first_parent, second_parent);
+	if ((result != 0) != should_allow ||
+	    (!should_allow && errno != EPERM)) {
+		fprintf(stderr,
+			"FAIL: %s: gate=%s result=%d errno=%d parents=%u:%u,%u:%u "
+			"(expected %s)\n",
+			case_name, safety_gate, result, errno,
+			major(first_parent), minor(first_parent),
+			major(second_parent), minor(second_parent),
+			should_allow ? "valid relationship" : "EPERM refusal");
+		++fixture_failures;
+	}
+}
+
+static void test_shared_root_parent_relationship_gates(void)
+{
+	const dev_t shared_parent = makedev(8U, 0U);
+
+	/* A relationship check is not the independent host scope authorization. */
+	expect_parent_relationship("equal target/root parents",
+				   swapz_primary_shared_root_parent_relationship_valid,
+				   shared_parent, shared_parent, 1,
+				   "device ancestry");
+	expect_parent_relationship("changed target/root parent",
+				   swapz_primary_shared_root_parent_relationship_valid,
+				   makedev(8U, 8U), shared_parent, 0,
+				   "device ancestry");
+	expect_parent_relationship("unresolved target parent",
+				   swapz_primary_shared_root_parent_relationship_valid,
+				   0, shared_parent, 0, "unresolved identity");
+	/* Recovery must remain on a different physical parent even in this scope. */
+	expect_parent_relationship("shared recovery parent refused",
+				   swapz_primary_recovery_parent_separation_valid,
+				   shared_parent, shared_parent, 0,
+				   "device ancestry/recovery");
+	expect_parent_relationship("independent recovery parent accepted",
+				   swapz_primary_recovery_parent_separation_valid,
+				   shared_parent, makedev(259U, 0U), 1,
+				   "device ancestry/recovery");
 }
 
 static int fixture_remove_entry(const char *path, const struct stat *info,
@@ -759,6 +934,8 @@ int main(void)
 	fixture_unlink("3031/mountinfo");
 	fixture_unlink("3031/ns/mnt");
 	expect_mount_admission("missing table and vanished namespace", 1, 0);
+	test_shared_root_parent_mount_gates();
+	test_shared_root_parent_relationship_gates();
 	test_active_swapfile_gate();
 	test_independent_admission_gates();
 	assert(nftw(fixture_proc_root, fixture_remove_entry, 16,
