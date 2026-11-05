@@ -1877,6 +1877,7 @@ static void test_status_info_errno_precedence(void)
 			FILE *capture = tmpfile();
 			int saved_stderr = dup(STDERR_FILENO);
 			char diagnostic[1024] = { 0 };
+			char errno_text[32];
 			size_t bytes;
 			int result;
 			int original_errno;
@@ -1893,6 +1894,8 @@ static void test_status_info_errno_precedence(void)
 			rewind(capture);
 			bytes = fread(diagnostic, 1, sizeof(diagnostic) - 1U, capture);
 			diagnostic[bytes] = '\0';
+			assert(snprintf(errno_text, sizeof(errno_text), "errno=%d",
+					failures[failure_index]) > 0);
 			if (result != -2 || original_errno != failures[failure_index] ||
 			    fixture.calls != failing_read + 1U ||
 			    fixture.successful_read.calls != failing_read ||
@@ -1901,6 +1904,7 @@ static void test_status_info_errno_precedence(void)
 			    !strstr(diagnostic, failing_read ? "snapshot 2" : "snapshot 1") ||
 			    !strstr(diagnostic, failures[failure_index] == EOVERFLOW ?
 				    "DM_BUFFER_FULL_FLAG" : "DM target inventory") ||
+			    !strstr(diagnostic, errno_text) ||
 			    strstr(diagnostic, fixture_valid_status)) {
 				fprintf(stderr,
 					"bounded INFO errno case=%zu read=%u: result=%d "

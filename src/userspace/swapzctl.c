@@ -1377,6 +1377,9 @@ static int status_report_problem(const char *state, const char *name,
 			problem->field, problem->expected, problem->observed);
 	if (problem->kernel_errno)
 		fprintf(stderr, "; kernel errno=%d", problem->kernel_errno);
+	if (problem->failure_errno)
+		fprintf(stderr, "; errno=%d (%s)", problem->failure_errno,
+			strerror(problem->failure_errno));
 	fputc('\n', stderr);
 	errno = problem->failure_errno ? problem->failure_errno : EPROTO;
 	return -2;

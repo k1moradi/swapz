@@ -1250,6 +1250,8 @@ live-kernel snapshot.
 Original bounded DM INFO read or snapshot/result allocation errors must retain
 their originating errno after the UNAVAILABLE diagnostic, including
 EOVERFLOW on exhausted bounded reply growth and ENOMEM on allocation failure.
+Print that originating errno in the bounded field-specific diagnostic, not
+only in the process errno; never include raw INFO or mapping reply bytes.
 Malformed wire records without an originating system error remain BLOCKED with
 EPROTO. The rootless native observer regression must exercise both INFO read
 phases using production parser-backed synthetic snapshots, check safe
