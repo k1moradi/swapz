@@ -2442,9 +2442,12 @@ def failure_context(output, *, loaded=True, default_phase=None):
             elif candidate.startswith("Failed during: "):
                 value = candidate.partition(": ")[2]
                 if re.fullmatch(r"[A-Za-z0-9 ._+/-]{1,96}", value):
-                    nested_phase = value
+                    nested_phase = re.sub(
+                        r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", value)
             elif candidate.startswith("Reason: "):
                 value = candidate.partition(": ")[2]
+                value = re.sub(
+                    r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", value)
                 value = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]%]", "?", value)
                 if value:
                     nested_reason = value[:155]
@@ -2453,7 +2456,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 "test_parallel_build_is_incremental_and_test_stages_stay_ordered"
         ) and incremental_phase:
             reason += f" [{incremental_phase}]"
-        if nested_phase and nested_reason:
+        if not rootless_failure_marker_seen and nested_phase and nested_reason:
             reason += f"; nested {nested_phase}: {nested_reason}"
     elif native_diagnostic is not None:
         reason = native_diagnostic
@@ -2580,7 +2583,8 @@ def loaded_progress_line(line):
     """Return concise live stage-5 progress while retaining full captured output."""
     stripped = line.strip()
     if stripped.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION:", "FAIL:")):
-        return stripped
+        # Live child output may contain private paths; stage diagnostics follow.
+        return stripped.split(":", 1)[0] + ": diagnostic retained for stage summary"
     for prefix in (
             "FAIL_PRIMARY_NULLBLK_LIFECYCLE:",
             "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:"):
@@ -2632,6 +2636,7 @@ def run_stage(title, command, result, *, parse_bench=False):
             output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
+    observed_exit_code = rc
     predictor_evidence = parse_predictor_evidence(output)
     gc_scale_evidence = parse_gc_scan_scale_evidence(output)
     extent_geometry_evidence = parse_extent_geometry_evidence(output)
@@ -2734,13 +2739,20 @@ def run_stage(title, command, result, *, parse_bench=False):
     explicit_primary_failure = parse_bench and any(
         line.startswith("FAIL_PRIMARY_NULLBLK_LIFECYCLE:")
         for line in output.splitlines())
-    if explicit_primary_failure and rc == 0:
+    explicit_loaded_failure = parse_bench and any(
+        line.startswith("FAIL: ") for line in output.splitlines())
+    inconsistent_exit = (observed_exit_code == 0 and (
+        blocked_marker or explicit_primary_failure or explicit_loaded_failure))
+    if inconsistent_exit and rc == 0:
         rc = 1
-    status = ("PASS" if rc == 0 else "FAIL" if explicit_primary_failure
+    status = ("PASS" if rc == 0 else
+              "FAIL" if (explicit_primary_failure or explicit_loaded_failure)
               else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
     if rc:
+        if rc != observed_exit_code:
+            record["child_exit_code"] = observed_exit_code
         record["signals"] = safe_lines(output)
         # The sanitized report may be published via Git only.
         # Do not publish an untrusted last log line: it can contain a host
@@ -2749,9 +2761,14 @@ def run_stage(title, command, result, *, parse_bench=False):
         # when the same output is also missing the overall loaded PASS record.
         # Keep the FAIL marker's phase and use failure_context() to attach only
         # its sanitized, allowlisted coordinator detail.
-        if explicit_primary_failure:
+        if explicit_primary_failure or explicit_loaded_failure or blocked_marker:
             record["failed_phase"], record["diagnostic"] = failure_context(
-                output, loaded=True)
+                output, loaded=parse_bench,
+                default_phase=None if parse_bench else title)
+            if inconsistent_exit:
+                record["diagnostic"] += (
+                    f"; expected=nonzero observed_exit={observed_exit_code}"
+                    " evidence=recognized-failure-marker")
         elif predictor_failure:
             record["failed_phase"] = "predictive-compression screening"
             record["diagnostic"] = (

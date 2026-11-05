@@ -872,6 +872,20 @@ completions fail closed.
 
 Stages are ordered and fail fast. Privileged device sessions must never overlap. If noninteractive privilege or safe owned-device provisioning is unavailable, the complete run reports BLOCKED rather than silently skipping loaded work.
 
+The official reporter must treat recognized loaded FAIL/BLOCKED diagnostics and
+build-stage Secure Boot signing BLOCKED evidence as non-PASS even if a child
+returns zero. Preserve the actual child status separately when it differs from
+the fail-closed stage exit, and attribute the recognized diagnostic to that
+stage before considering missing benchmark evidence. Synthetic earlier FAIL
+text in a successful rootless aggregate is not independently a failed stage.
+Loaded progress may show a fixed failure category but must not echo raw child
+stderr. Direct nested unittest diagnostics must redact absolute host paths;
+a final authoritative rootless marker must not inherit earlier suite or later
+nested error detail. Keep incomplete/unexecuted stages non-PASS, retain the first
+causal exit through report-write and cleanup errors, and bind publication to
+`tested_commit_sha` rather than treating a report-only commit as a retest.
+
+
 ### Native/rootless fail-only subprocess attribution
 
 The private `tests/tools/test-rootless.sh` runner must keep the exact registered

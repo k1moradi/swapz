@@ -1685,7 +1685,11 @@ class ReportContract(unittest.TestCase):
             "START_ID36_RESOURCE_PRESSURE")
         self.assertEqual(
             runner.loaded_progress_line("FAIL: owned RAM pair timed out"),
-            "FAIL: owned RAM pair timed out")
+            "FAIL: diagnostic retained for stage summary")
+        for marker in ("FAIL: /home/private/child-secret",
+                       "BLOCKED: /home/private/child-secret"):
+            self.assertNotIn("/home/private",
+                             runner.loaded_progress_line(marker))
 
     def test_host_cpu_record_keeps_aggregate_counters_and_missing_status(self):
         raw = {"status": "AVAILABLE", "wall_ns": 1000000000,
@@ -3617,6 +3621,59 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(stage["failed_phase"],
                          "adjacent READ coalescing A/B evidence")
         self.assertIn("confirmation", stage["diagnostic"])
+
+    def test_zero_exit_with_loaded_failure_evidence_stays_nonpass(self):
+        from unittest import mock
+
+        # A complete PASS transcript must not override later explicit
+        # failure evidence even if the child wrongly reports exit 0.
+        passing = synthetic_log()
+        self.assertEqual(runner.parse_loaded_correctness(passing)["overall"],
+                         "PASS")
+        for marker, expected_status in (
+                ("BLOCKED: /home/private/blocked", "BLOCKED"),
+                ("FAIL: /home/private/failed", "FAIL"),
+                ("FAIL_PRIMARY_NULLBLK_LIFECYCLE: failed", "FAIL")):
+            with self.subTest(marker=marker.split(":", 1)[0]):
+                log = (passing +
+                       "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=stop\n" +
+                       marker + "\n")
+                report = {"schema": "swapz-test-results-v1", "stages": [],
+                          "benchmarks": {"sessions": [], "verdicts": {}}}
+                process = FakeStreamingProcess(log, returncode=0)
+                with mock.patch.object(runner.subprocess, "Popen",
+                                       return_value=process), \
+                     contextlib.redirect_stdout(io.StringIO()) as output:
+                    observed_exit = runner.run_stage(
+                        "Owned RAM smoke + mixed/QD pilot", ["unused"],
+                        report, parse_bench=True)
+                self.assertEqual(observed_exit, 1)
+                stage = report["stages"][-1]
+                self.assertEqual(stage["status"], expected_status)
+                self.assertEqual(stage["exit_code"], 1)
+                self.assertEqual(stage["child_exit_code"], 0)
+                self.assertEqual(stage["failed_phase"],
+                                 "owned RAM primary lifecycle stop")
+                self.assertIn("expected=nonzero observed_exit=0",
+                              stage["diagnostic"])
+                self.assertIn("evidence=recognized-failure-marker",
+                              stage["diagnostic"])
+                self.assertNotIn("/home/private", stage["diagnostic"])
+                self.assertNotIn("/home/private", output.getvalue())
+
+    def test_direct_nested_unittest_diagnostic_redacts_private_paths(self):
+        log = (
+            "FAIL: test_nested (__main__.Contract.test_nested)\n"
+            "Failed during: /home/private/phase\n"
+            "Reason: /home/private/trace failed\n"
+        )
+        phase, reason = runner.failure_context(
+            log, loaded=False,
+            default_phase="Native and rootless contracts")
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertIn("Unit test failed: test_nested", reason)
+        self.assertIn("nested [path]: [path] failed", reason)
+        self.assertNotIn("/home/private", reason)
 
     def test_primary_lifecycle_blocked_marker_classifies_loaded_stage_blocked(self):
         log = (
