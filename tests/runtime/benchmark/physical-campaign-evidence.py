@@ -1244,6 +1244,13 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                      workload=workload, pair_index=index, arm=label,
                      reason="producer FAIL contradicts qualification disposition")
             continue
+        failure_reason = arm.get("failure_reason")
+        if not isinstance(failure_reason, str) or not failure_reason:
+            diagnose("BLOCKED", "arm.verdict",
+                     "original producer failure reason",
+                     workload=workload, pair_index=index, arm=label,
+                     reason="producer FAIL error is missing or invalid")
+            continue
         stage = arm.get("stage")
         stage_is_known = (
             isinstance(stage, str) and len(stage) <= 48 and
