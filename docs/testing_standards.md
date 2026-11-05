@@ -719,8 +719,13 @@ stdout/stderr bytes and exit status remain unchanged and no failure log is
 retained. A relay or relay-cleanup failure after a passing child is a harness
 failure (status 1, `stderr_relay_failure` or
 `stderr_relay_cleanup_failure`); after a failed child, its original status
-takes precedence. Relay diagnostics may not print private filesystem paths.
-Failure-log allocation must not follow a symlinked build/tests directory.
+takes precedence. If cleanup fails before unlinking the capture, reuse that
+surviving regular file as the sole pointed private diagnostic instead of
+orphaning it and allocating a second log. A capture from a nonzero relay is
+diagnostic-only and must not classify the child as a unittest assertion, error
+or timeout because completeness is unknown. Relay diagnostics may not print
+private filesystem paths. Failure-log allocation must not follow a symlinked
+build/tests directory.
 The private `tests/runtime/native/rootless-attribution-test.py` regression runs
 before package transactions in the existing rootless path, using the real
 package-stage Bash functions with bounded synthetic stderr, temporary storage,

@@ -86,6 +86,16 @@ finish_rootless_private_stderr_capture() {
   if (( cleanup_failed != 0 )) && [[ -z $rootless_capture_failure_reason ]]; then
     rootless_capture_failure_reason=stderr_relay_cleanup_failure
   fi
+  # If cleanup failed before unlinking the capture, keep that one private file
+  # as the pointed failure diagnostic instead of orphaning it and allocating a
+  # second log. A failed relay makes its contents non-authoritative below.
+  if (( cleanup_failed != 0 )) &&
+     [[ -n $rootless_capture_directory && -d $rootless_capture_directory &&
+        ! -L $rootless_capture_directory && -n $rootless_capture_path &&
+        -f $rootless_capture_path && ! -L $rootless_capture_path ]]; then
+    rootless_private_diagnostic_path=$rootless_capture_path
+    rootless_private_diagnostic_log="build/tests/${rootless_capture_directory##*/}/diagnostic.log"
+  fi
 
   rootless_capture_directory=
   rootless_capture_path=
@@ -315,8 +325,15 @@ if (( rootless_package_exit_code == 0 )) &&
     "$rootless_capture_failure_reason"
 fi
 if (( rootless_package_exit_code != 0 )); then
-  classify_rootless_private_unittest_failure \
-    "$rootless_private_diagnostic_path"
+  # A nonzero relay can leave a partial capture. Preserve the child's status,
+  # but never promote classifications from bytes whose completeness is unknown.
+  if [[ -z $rootless_capture_failure_reason ]]; then
+    classify_rootless_private_unittest_failure \
+      "$rootless_private_diagnostic_path"
+  else
+    rootless_classified_reason=nonzero_exit
+    rootless_classified_subtest=unavailable
+  fi
   if [[ $rootless_classified_reason == nonzero_exit &&
         $rootless_classified_subtest == unavailable ]]; then
     report_rootless_failure "$rootless_package_exit_code" \

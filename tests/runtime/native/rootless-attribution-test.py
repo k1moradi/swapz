@@ -158,6 +158,9 @@ class RootlessAttribution(unittest.TestCase):
             return None
         self.assertEqual(len(logs), 1)
         log = logs[0]
+        self.assertEqual(
+            set(self.root.glob("build/tests/rootless-failure.*")),
+            {log.parent})
         self.assertIn(
             f"log=build/tests/{log.parent.name}/diagnostic.log", header)
         self.assertEqual(log.stat().st_mode & 0o777, 0o600)
@@ -183,26 +186,27 @@ class RootlessAttribution(unittest.TestCase):
     def test_pass_cleanup_failure_is_reported(self):
         self.stub("rm", '''
 if [[ "$*" == *"/diagnostic.log"* ]]; then
-  "$SWAPZ_REAL_RM" "$@"
   exit 69
 fi
 exec "$SWAPZ_REAL_RM" "$@"
 ''')
         result = self.invoke("pass")
-        self.assert_report(result, status=1,
-                           reason="stderr_relay_cleanup_failure")
+        log = self.assert_report(
+            result, status=1, reason="stderr_relay_cleanup_failure")
+        self.assertIn("SYNTHETIC_STDERR", log.read_text())
 
     def test_first_child_failure_survives_relay_and_cleanup_failures(self):
         self.stub("tee", '"$SWAPZ_REAL_TEE" "$@"\nexit 68\n')
         self.stub("rm", '''
 if [[ "$*" == *"/diagnostic.log"* ]]; then
-  "$SWAPZ_REAL_RM" "$@"
   exit 69
 fi
 exec "$SWAPZ_REAL_RM" "$@"
 ''')
-        result = self.invoke("failure")
-        self.assert_report(result, status=37, reason="nonzero_exit")
+        result = self.invoke("ordered")
+        log = self.assert_report(result, status=37, reason="nonzero_exit")
+        self.assertIn(PRIVATE_SENTINEL, log.read_text())
+        self.assertIn("FAIL: test_first", log.read_text())
         self.assertNotIn("AFTER_PACKAGE", result.stdout)
 
     def test_symlinked_private_storage_never_receives_log(self):
