@@ -34,6 +34,18 @@ MNT_DETACH = 2
 SKIP_EXIT = 77
 CHILD_MARKER = "SWAPZ_PROVENANCE_CHILD_STARTED"
 
+_UNSHARE_NAMESPACE_FAILURE_PREFIXES = (
+    "unshare: unshare failed:",
+    "unshare: write failed ",
+    "unshare: setgroups failed:",
+)
+
+
+def _unshare_namespace_setup_unavailable(returncode: int, stderr: str) -> bool:
+    return returncode != 0 and stderr.startswith(
+        _UNSHARE_NAMESPACE_FAILURE_PREFIXES
+    )
+
 
 def _mount(source: str | None, target: Path, fs_type: str | None, flags: int,
            data: str | None = None) -> None:
@@ -183,11 +195,39 @@ class ActiveSwapProvenanceModel(unittest.TestCase):
             finally:
                 os.close(descriptor)
 
+    def test_unshare_namespace_setup_failure_classifier(self) -> None:
+        setup_failures = (
+            "unshare: unshare failed: Operation not permitted\n",
+            "unshare: write failed /proc/self/uid_map: Operation not permitted\n",
+            "unshare: write failed /proc/self/gid_map: Operation not permitted\n",
+            "unshare: setgroups failed: Operation not permitted\n",
+        )
+        for diagnostic in setup_failures:
+            with self.subTest(diagnostic=diagnostic):
+                self.assertTrue(
+                    _unshare_namespace_setup_unavailable(1, diagnostic)
+                )
+
+        self.assertFalse(
+            _unshare_namespace_setup_unavailable(
+                1,
+                "unshare: failed to execute python3: Permission denied\n",
+            )
+        )
+        self.assertFalse(
+            _unshare_namespace_setup_unavailable(
+                0, "unshare: unshare failed: synthetic success\n"
+            )
+        )
+
     def test_bind_overmount_can_diverge_rendered_name_from_lookup(self) -> None:
         """A covered retained mount can print a name that resolves elsewhere."""
         unshare = shutil.which("unshare")
         if unshare is None:
-            self.skipTest("util-linux unshare is unavailable")
+            self.fail(
+                "util-linux unshare is required; a missing helper is not "
+                "namespace unavailability"
+            )
 
         result = subprocess.run(
             [
@@ -213,12 +253,9 @@ class ActiveSwapProvenanceModel(unittest.TestCase):
         if not child_started:
             # Only namespace setup failures can skip; child failures must fail.
             self.assertTrue(
-                result.returncode != 0
-                and result.stderr.startswith((
-                    "unshare: unshare failed:",
-                    "unshare: write failed:",
-                    "unshare: setgroups failed:",
-                )),
+                _unshare_namespace_setup_unavailable(
+                    result.returncode, result.stderr
+                ),
                 f"unexpected overmount child startup failure: "
                 f"status={result.returncode}; stderr={result.stderr}",
             )
