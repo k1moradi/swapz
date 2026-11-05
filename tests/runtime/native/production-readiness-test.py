@@ -96,6 +96,7 @@ def cold_boot_evidence_raw(**overrides):
         "expected_dm_uuid":
             "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef",
         "dm_uuid": "SWAPZ-PRIMARY-0123456789abcdef0123456789abcdef",
+        "mapper_sysfs_dm_name": "swapz-primary",
         "dm_table": "0 216641536 swapz 8:1 0 64 0 2 0 1 0 0",
         "dm_logical_sectors": "216641536",
         "expected_dm_logical_sectors": "216641536",
@@ -121,6 +122,13 @@ def cold_boot_evidence_raw(**overrides):
         "swapz_upper_write_completed_err": "0",
         "swapz_endio_write_seen_err": "0",
         "swapz_endio_write_forced_err": "0",
+        "gc_victims": "0",
+        "gc_pages": "0",
+        "gc_no_headroom_skips": "0",
+        "gc_reserve_segments_initial": "2",
+        "gc_reserve_segments_current": "1",
+        "gc_destination_advances": "0",
+        "window_gc_pressure": "0",
         "kernel_error_count": "0",
         "kernel_error_log": "/var/lib/swapz/boot/report.kernel-errors.log",
         "failure_reasons": "",
@@ -907,7 +915,17 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     "dm_logical_bytes": "110920462336",
                     "swap_size_kib": "108320760",
                 }, "capacity differs from authorized target"),
-                ("errors", {"swapz_error": "5"}, "runtime error evidence")):
+                ("errors", {"swapz_error": "5"}, "runtime error evidence"),
+                ("mapper-sysfs", {"mapper_sysfs_dm_name": "wrong-mapper"},
+                 "mapper sysfs identity"),
+                ("gc-invalid", {"gc_pages": "unavailable"},
+                 "GC telemetry is malformed"),
+                ("gc-reserve-zero", {"gc_reserve_segments_current": "0"},
+                 "GC reserve telemetry is inconsistent"),
+                ("gc-reserve-growth", {
+                    "gc_reserve_segments_initial": "2",
+                    "gc_reserve_segments_current": "3",
+                }, "GC reserve telemetry is inconsistent")):
             with self.subTest(label=label):
                 raw = cold_boot_evidence_raw(**overrides)
                 evidence = current_evidence(encoded(report), encoded(policy))
@@ -921,6 +939,23 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertTrue(any(
                     reason in blocker
                     for blocker in result["cold_boot_blockers"]))
+
+    def test_cold_boot_fixture_tracks_boot_verifier_report_fields(self):
+        producer = (
+            ROOT / "packaging/swapz-primary-boot-verify"
+        ).read_text(encoding="utf-8")
+        marker = 'cat > "$temporary" <<REPORT\n'
+        self.assertEqual(producer.count(marker), 1)
+        report_body = producer.split(marker, 1)[1].split("\nREPORT\n", 1)[0]
+        producer_fields = {
+            line.split("=", 1)[0]
+            for line in report_body.splitlines()
+            if "=" in line
+        }
+        fixture_fields = set(
+            EVALUATOR.parse_env_strict(cold_boot_evidence_raw()))
+        self.assertEqual(producer_fields, EVALUATOR.COLD_BOOT_REPORT_KEYS)
+        self.assertEqual(fixture_fields, EVALUATOR.COLD_BOOT_REPORT_KEYS)
 
     def test_cold_boot_swap_inventory_cannot_contradict_mapper_witness(self):
         report = owner_report()

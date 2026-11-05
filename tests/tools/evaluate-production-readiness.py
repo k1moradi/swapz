@@ -98,17 +98,20 @@ COLD_BOOT_REPORT_KEYS = {
     "module_artifact", "module_artifact_sha256", "module_build_source_sha",
     "module_build_source_clean", "loaded_module_build_source_sha",
     "loaded_module_build_source_clean", "active_transaction_run_id",
-    "expected_dm_uuid", "dm_uuid", "dm_table", "dm_logical_sectors",
-    "expected_dm_logical_sectors", "dm_logical_bytes", "dm_status_file",
-    "swap_total_entries", "swap_mapper_entries", "swap_path", "swap_type",
-    "swap_size_kib", "swap_used_kib", "swap_priority",
-    "mapper_service_active_state", "mapper_service_sub_state",
-    "mapper_service_result", "swap_unit_active_state", "swap_unit_sub_state",
-    "swap_unit_result", "swapz_failed", "swapz_error", "swapz_flush_err",
+    "expected_dm_uuid", "dm_uuid", "mapper_sysfs_dm_name", "dm_table",
+    "dm_logical_sectors", "expected_dm_logical_sectors", "dm_logical_bytes",
+    "dm_status_file", "swap_total_entries", "swap_mapper_entries",
+    "swap_path", "swap_type", "swap_size_kib", "swap_used_kib",
+    "swap_priority", "mapper_service_active_state",
+    "mapper_service_sub_state", "mapper_service_result",
+    "swap_unit_active_state", "swap_unit_sub_state", "swap_unit_result",
+    "swapz_failed", "swapz_error", "swapz_flush_err",
     "swapz_segment_discards_failed", "swapz_upper_write_completed_err",
     "swapz_endio_write_seen_err", "swapz_endio_write_forced_err",
-    "kernel_error_count", "kernel_error_log", "failure_reasons",
-    "incomplete_reasons",
+    "gc_victims", "gc_pages", "gc_no_headroom_skips",
+    "gc_reserve_segments_initial", "gc_reserve_segments_current",
+    "gc_destination_advances", "window_gc_pressure", "kernel_error_count",
+    "kernel_error_log", "failure_reasons", "incomplete_reasons",
 }
 COLD_BOOT_ARM_KEYS = {
     "schema", "arm_boot_id", "arm_kernel_release", "armed_epoch",
@@ -1876,6 +1879,19 @@ def validate_cold_boot_evidence(
             cold_boot["expected_dm_uuid"] != expected_uuid or
             cold_boot["dm_uuid"] != expected_uuid):
         reject("persistent cold-boot mapper transaction identity is invalid")
+    mapper_sysfs_name = cold_boot["mapper_sysfs_dm_name"]
+    if mapper_sysfs_name != "swapz-primary":
+        safe_mapper_sysfs_name = (
+            mapper_sysfs_name
+            if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", mapper_sysfs_name)
+            else "invalid")
+        reject(
+            "persistent cold-boot mapper sysfs identity is invalid: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=mapper_identity "
+            "required_mapper_sysfs_dm_name=swapz-primary "
+            f"observed_mapper_sysfs_dm_name={safe_mapper_sysfs_name} "
+            "verdict=BLOCKED reason=wrong_mapper_sysfs_identity")
 
     logical_sectors = _bounded_decimal_text(cold_boot["dm_logical_sectors"])
     expected_sectors = _bounded_decimal_text(
@@ -1941,6 +1957,42 @@ def validate_cold_boot_evidence(
     )
     if any(cold_boot[field] != "0" for field in zero_fields):
         reject("persistent cold-boot report contains runtime error evidence")
+
+    gc_counter_fields = (
+        "gc_victims", "gc_pages", "gc_no_headroom_skips",
+        "gc_reserve_segments_initial", "gc_reserve_segments_current",
+        "gc_destination_advances", "window_gc_pressure",
+    )
+    gc_counter_maximum = 10**18 - 1
+    gc_counters = {
+        field: _bounded_decimal_text(
+            cold_boot[field], maximum=gc_counter_maximum)
+        for field in gc_counter_fields
+    }
+    invalid_gc_counters = [
+        field for field, value in gc_counters.items() if value is None]
+    if invalid_gc_counters:
+        reject(
+            "persistent cold-boot GC telemetry is malformed: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=gc_telemetry "
+            "required_counter_format=unsigned_decimal_0..999999999999999999 "
+            f"observed_invalid_counter_count={len(invalid_gc_counters)} "
+            "verdict=BLOCKED reason=malformed_gc_progress_telemetry")
+    else:
+        reserve_initial = gc_counters["gc_reserve_segments_initial"]
+        reserve_current = gc_counters["gc_reserve_segments_current"]
+        if (
+                reserve_initial == 0 or reserve_current == 0 or
+                reserve_current > reserve_initial):
+            reject(
+                "persistent cold-boot GC reserve telemetry is inconsistent: "
+                "evidence_class=persistent_cold_boot "
+                "first_failed_phase=gc_telemetry "
+                "required_reserve=initial>0,current>0,current<=initial "
+                f"observed_initial={reserve_initial} "
+                f"observed_current={reserve_current} "
+                "verdict=BLOCKED reason=invalid_gc_reserve_telemetry")
     if cold_boot["failure_reasons"] or cold_boot["incomplete_reasons"]:
         reject("persistent cold-boot report contains failure/incomplete reasons")
     return issues

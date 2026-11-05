@@ -6958,7 +6958,15 @@ report at least one total swap entry, with a bounded nonnegative integer used
 KiB count no larger than the mapper's reported swap size. Zero or malformed
 total entries and impossible usage contradict the active mapper witness and
 remain BLOCKED, even when the report's digest, source and target match. Other
-unrelated swap entries are permitted. The evaluator must independently
+unrelated swap entries are permitted. The canonical retained report field set
+must exactly match the current boot verifier output. That contract includes the
+mapper sysfs DM name and GC progress/reserve telemetry; release evaluation must
+require the mapper sysfs name to be `swapz-primary`, canonical bounded
+nonnegative GC counters, nonzero initial/current GC reserves, and current
+reserve no greater than initial. Rootless release-evidence tests must compare
+the producer report keys, evaluator whitelist, and synthetic fixture exactly so
+producer/evaluator drift blocks the source contract rather than a valid owner
+report. The evaluator must independently
 recompute the maximum logical mapper sectors from the authorized partition bytes
 using the production one-block header, segment alignment, reserve rule, u32
 physical-index limit and independent 256-block foreground COW headroom; matching
