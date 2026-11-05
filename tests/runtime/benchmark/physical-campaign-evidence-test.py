@@ -895,6 +895,15 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertEqual(len(blocked["diagnostics"]),
                          EVIDENCE.MAX_EVIDENCE_DIAGNOSTICS)
         self.assertGreater(blocked["omitted_diagnostic_count"], 0)
+        first_blocked = blocked["first_failed_evidence"]
+        self.assertEqual(first_blocked["evidence_class"], "BLOCKED")
+        self.assertTrue(any(
+            item["status"] == "BLOCKED" and
+            item["metric"] == first_blocked["metric"] and
+            item["workload"] == first_blocked["workload"] and
+            item["pair_index"] == first_blocked["pair_index"] and
+            item["arm"] == first_blocked["arm"]
+            for item in blocked["diagnostics"]))
         self.assertFalse(any(
             item["status"] == "FAIL" for item in blocked["diagnostics"]))
 
@@ -1098,23 +1107,53 @@ class CapacityRamPropagation(unittest.TestCase):
                     self.assertIsNone(capacity(changed_record, changed_trace))
 
     def synthetic_hosts(self):
+        # Keep the positive stable-host fixture valid under the producer's
+        # snapshot contract. Equal missing fields can otherwise make the
+        # pairwise stability vector look complete through None == None.
         snapshot = {
+            "schema": EVIDENCE.HOST_SCHEMA,
             "source_sha": SOURCE, "source_tree_sha": "b" * 40,
             "captured_at_utc": "2026-11-01T00:00:00Z",
             "captured_monotonic_ns": 2_000_000_000,
-            "kernel": {"boot_id": BOOT, "uptime_seconds": 100.0},
+            "virtualization": "none",
+            "kernel": {
+                "node": "synthetic-host", "release": "synthetic-release",
+                "machine": "x86_64", "version": "synthetic-version",
+                "boot_id": BOOT, "uptime_seconds": 100.0,
+            },
+            "cpu": {
+                "model_names": ["synthetic-cpu"],
+                "configured_cpus": 4, "online_cpus": 4,
+                "affinity_cpus": [0, 1, 2, 3],
+                "governors": ["performance"],
+                "frequency_drivers": ["synthetic-driver"],
+                "scaling_min_khz": [1_000_000],
+                "scaling_max_khz": [2_000_000],
+            },
             "memory": {"total_bytes": self.DEVICE_BYTES},
             "device": {
                 "partuuid": self.PARTUUID,
                 "size_bytes": self.DEVICE_BYTES, "major_minor": "8:17",
-                "parent_major_minor": "8:16", "model": "synthetic",
-                "transport": "usb", "holders": [],
+                "parent_major_minor": "8:16",
+                "physical_disk": "synthetic-disk",
+                "model": "synthetic", "transport": "usb",
+                "serial": "synthetic-serial", "wwid": "synthetic-wwid",
+                "selected_scheduler": "none",
+                "queue": {
+                    "logical_block_size": 512,
+                    "physical_block_size": 4096,
+                },
+                "holders": [],
             },
             "swap_inventory": [], "mount_inventory": "",
+            "pressure": {"cpu": "", "io": "", "memory": ""},
+            "thermal": [],
+            "dm_swapz_module": {"status": "NOT_LOADED", "values": {}},
         }
         after = copy.deepcopy(snapshot)
         after["captured_at_utc"] = "2026-11-01T00:00:06Z"
         after["captured_monotonic_ns"] = 10_000_000_000
+        after["kernel"]["uptime_seconds"] = 106.0
         return snapshot, after
 
     def synthetic_seal(self, peak_bytes, *, include_trace=True,
@@ -1184,7 +1223,6 @@ class CapacityRamPropagation(unittest.TestCase):
                 mock.patch.object(EVIDENCE, "require_clean_source"),
                 mock.patch.object(EVIDENCE, "source_tree_sha",
                                   return_value="b" * 40),
-                mock.patch.object(EVIDENCE, "validate_host_snapshot"),
                 mock.patch.dict(EVIDENCE.QUALIFICATION, {
                     "evaluate": lambda records, protocol: regenerated_summary}),
             ):
@@ -1237,6 +1275,19 @@ class CapacityRamPropagation(unittest.TestCase):
             READINESS["PHYSICAL_HOST_STABILITY_CHECKS"])
         self.assertTrue(all(
             check is True for check in observed_stability["checks"].values()))
+
+        # Stability compares before/after values; it does not by itself prove
+        # that required snapshot fields exist. The sealer must run the
+        # independent snapshot validator before accepting this vector.
+        incomplete_before, incomplete_after = self.synthetic_hosts()
+        del incomplete_before["kernel"]["release"]
+        del incomplete_after["kernel"]["release"]
+        self.assertEqual(
+            EVIDENCE.host_stability(
+                incomplete_before, incomplete_after)["status"], "STABLE")
+        with self.assertRaisesRegex(
+                ValueError, "campaign host kernel identity is incomplete"):
+            EVIDENCE.validate_host_snapshot(incomplete_before, SOURCE)
 
         policy_digest = EVIDENCE.sha256_bytes(
             EVIDENCE.ACCEPTANCE_MANIFEST.read_bytes())

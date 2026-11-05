@@ -8285,10 +8285,13 @@ producer failure on a distinct identity-clean pair when proving FAIL precedence;
 a late duplicate invalidating that same pair must remain BLOCKED regardless of
 which diagnostics fit under the cap. Synthetic capacity/RAM fixtures must
 compute the producer's complete host-stability check vector from their
-before/after snapshots, never mock a one-check STABLE declaration. The release
-validator must reject omitted, false or type-coerced host checks, and must
-rederive within/over-limit RAM from sealed trace evidence rather than a
-contradictory release-receipt scalar. None of these synthetic controls establish
+before/after snapshots, never mock a one-check STABLE declaration. The positive
+stable-host fixture must itself satisfy the producer's host-snapshot validator;
+tests must not patch that validator out merely to obtain a STABLE vector, because
+equal missing before/after fields can otherwise pass pairwise stability through
+`None == None`. The release validator must reject omitted, false or
+type-coerced host checks, and must rederive within/over-limit RAM from sealed
+trace evidence rather than a contradictory release-receipt scalar. None of these synthetic controls establish
 loaded-host acceptance.
 For an explicitly v2 campaign, the physical sealer audit independently checks
 every frozen-parent and prospective-amendment workload, including decisions
