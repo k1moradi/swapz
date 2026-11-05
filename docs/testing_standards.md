@@ -936,7 +936,11 @@ retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.
 
 The GC cost-accounting native regression must force u32 live-byte, u32 I/O-cost
 and u16 minimum-block overflow independently after a compressed generation is
-durably published. Each lower-complete RAW replacement must return -EOVERFLOW
+durably published. The byte-exact readback oracle must enable the actual
+production compressed-extent sequence index before the first publication;
+otherwise -EUCLEAN from missing test metadata is a fixture failure, not a
+corrupted survivor. Retain the actual read errno in fail-only diagnostics.
+Each lower-complete RAW replacement must return -EOVERFLOW
 without publishing the new generation, changing reserve roles, reusing its
 abandoned block or losing the previous byte/CRC-validated payload. After the
 bounded failures, a clean replacement must use fresh blocks and publish exactly

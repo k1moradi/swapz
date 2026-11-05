@@ -488,12 +488,12 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 				"GC_COST_FAIL phase=%s victim=none reserve=untouched "
 				"expected_errno=%d observed_errno=%d "
 				"expected_progress=0 observed_progress=%u "
-				"state_retained=%d byte_exact=%d "
+				"state_retained=%d byte_exact=%d observed_read_errno=%d "
 				"expected_generation=%u observed_generation=%u "
 				"failed_block=%u abandoned=%u\n",
 				phases[failure_case], -EOVERFLOW, actual_error,
 				maps[logical].generation != durable_map.generation,
-				state_retained, byte_exact, durable_map.generation,
+				state_retained, byte_exact, read_error, durable_map.generation,
 				maps[logical].generation, failed_block,
 				a.abandoned_blocks);
 			return 1;
