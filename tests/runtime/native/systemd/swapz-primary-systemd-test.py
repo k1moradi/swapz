@@ -3074,7 +3074,13 @@ class RuntimeHealthTests(unittest.TestCase):
                 case "$property" in
                 LoadState) echo "${MOCK_SYSTEMD_LOAD_STATE:-loaded}" ;;
                 ActiveState) echo "${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;
-                SubState) echo running ;;
+                SubState)
+                    case "$*" in
+                    *swapz-primary-mapper.service)
+                        [ "${MOCK_MAPPER_SUBSTATE_EXIT:-0}" = 0 ] || exit "$MOCK_MAPPER_SUBSTATE_EXIT"
+                        echo "${MOCK_MAPPER_SUBSTATE:-exited}" ;;
+                    *) echo "${MOCK_PASSIVE_SUBSTATE:-active}" ;;
+                    esac ;;
                 Result) echo success ;;
                 *) exit 1 ;;
                 esac
@@ -3164,6 +3170,43 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", result.stderr)
         self.assertIn("swap_remaining_kib=", result.stderr)
         self.assertIn(f"mapper_uuid=SWAPZ-PRIMARY-{ACTIVE_RUN_ID}", result.stderr)
+
+    def test_contradictory_service_substates_are_failures(self) -> None:
+        # ActiveState=active and Result=success cannot prove a live oneshot
+        # mapper or a passive swap unit when their substates disagree.
+        for variable, reason, phase in (
+            ("MOCK_MAPPER_SUBSTATE", "mapper_service_substate_invalid", "mapper_service_substate"),
+            ("MOCK_PASSIVE_SUBSTATE", "passive_swap_unit_substate_invalid", "passive_swap_unit_substate"),
+        ):
+            with self.subTest(variable=variable):
+                env = self.env.copy()
+                env[variable] = "dead"
+                observed = self.run_helper("once", env)
+                self.assertEqual(observed.returncode, 1, observed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+                self.assertIn(reason, observed.stderr)
+                self.assertIn(f"phase={phase} expected=", observed.stderr)
+                self.assertIn("observed=incompatible_substate", observed.stderr)
+                self.assertIn(
+                    "command_status=0 identity_mismatch=none service_state=observed",
+                    observed.stderr,
+                )
+
+    def test_unavailable_substate_keeps_original_systemctl_exit(self) -> None:
+        env = self.env.copy()
+        env["MOCK_MAPPER_SUBSTATE_EXIT"] = "37"
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+        self.assertIn("mapper_service_substate_unavailable", observed.stderr)
+        self.assertIn(
+            "phase=mapper_service_substate expected=exited observed=unavailable",
+            observed.stderr,
+        )
+        self.assertIn(
+            "command_status=37 identity_mismatch=none service_state=inferred",
+            observed.stderr,
+        )
 
     def test_probe_output_after_nonzero_status_never_passes_as_healthy(self) -> None:
         # A plausible partial response followed by an error previously passed,

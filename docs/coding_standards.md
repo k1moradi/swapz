@@ -2850,7 +2850,12 @@ It must not call `swapon`, `swapoff`, mapper removal/creation, formatting,
 The native primary manager remains the only owner of swap activation and
 deactivation. A failed native stop may be followed only by an ignored,
 read-only diagnostic that reports retained mapper/swap state without retrying
-or hiding the native failure.
+or hiding the native failure. The active oneshot mapper service with
+`RemainAfterExit=yes` must report `SubState=exited`, while its passive active
+`.swap` reports `SubState=active`; an observed contradictory substate is FAIL,
+not HEALTHY. Missing or invalid substate telemetry is DEGRADED unless another
+check proves failure. Preserve the originating bounded `systemctl` exit for
+unavailable substates and label service evidence as observed or inferred.
 
 Production observation is bounded to low-frequency polling (normally 60
 seconds) and logs the first snapshot plus state changes and confirmed failures,

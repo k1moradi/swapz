@@ -6565,7 +6565,11 @@ without reading or changing host swap state. Cover exact mapper/run/backing
 identity, foreign mapper rejection, active swap inventory and capacity,
 configured backing-path disappearance as a hard failure, monitoring-command
 failure as degraded evidence, low-noise unchanged polling, kernel/systemd
-telemetry, and sustained GC pressure without progress. The sustained-GC fixture
+telemetry, and sustained GC pressure without progress. A nominally active
+oneshot mapper must have `SubState=exited` and an active passive swap unit
+must have `SubState=active`; synthetic contradictory substates must fail even
+with successful `Result`, while a failed substate probe must degrade with its
+original exit code and inferred-versus-observed attribution. The sustained-GC fixture
 must increase pressure/no-headroom counters across consecutive polls while
 holding victim/page progress constant; reaching the existing stall threshold
 must latch runtime health FAIL, emit one

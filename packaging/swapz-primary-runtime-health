@@ -607,10 +607,10 @@ unit_property()
 {
 	unit=$1
 	property=$2
-	value=$(run_bounded systemctl show --property="$property" --value "$unit" 2>/dev/null) || return 1
+	value=$(run_bounded systemctl show --property="$property" --value "$unit" 2>/dev/null) || return $?
 	# Blank or multiline output is untrusted observation, not an inactive unit.
 	case "$value" in ''|*'
-'*) return 1 ;; esac
+'*) return 2 ;; esac
 	printf '%s\n' "$value"
 }
 
@@ -695,6 +695,8 @@ observe_runtime()
 	swap_unit_active=unavailable
 	swap_unit_sub=unavailable
 	swap_unit_result=unavailable
+	mapper_sub_command_status=0
+	swap_unit_sub_command_status=0
 	failed=unavailable
 	first_error=unavailable
 	flush_err=unavailable
@@ -1041,10 +1043,20 @@ EOF
 		;;
 	esac
 	mapper_active=$(unit_property "$mapper_service" ActiveState 2>/dev/null || printf 'unavailable')
-	mapper_sub=$(unit_property "$mapper_service" SubState 2>/dev/null || printf 'unavailable')
+	if mapper_sub=$(unit_property "$mapper_service" SubState 2>/dev/null); then
+		:
+	else
+		mapper_sub_command_status=$?
+		mapper_sub=unavailable
+	fi
 	mapper_result=$(unit_property "$mapper_service" Result 2>/dev/null || printf 'unavailable')
 	swap_unit_active=$(unit_property "$mapper_swap_unit" ActiveState 2>/dev/null || printf 'unavailable')
-	swap_unit_sub=$(unit_property "$mapper_swap_unit" SubState 2>/dev/null || printf 'unavailable')
+	if swap_unit_sub=$(unit_property "$mapper_swap_unit" SubState 2>/dev/null); then
+		:
+	else
+		swap_unit_sub_command_status=$?
+		swap_unit_sub=unavailable
+	fi
 	swap_unit_result=$(unit_property "$mapper_swap_unit" Result 2>/dev/null || printf 'unavailable')
 	case "$mapper_active" in
 	active) ;;
@@ -1055,6 +1067,19 @@ EOF
 	active) ;;
 	unavailable) append_reason observation_reasons passive_swap_unit_state_unavailable ;;
 	*) append_reason failure_reasons passive_swap_unit_not_active ;;
+	esac
+	# The oneshot mapper remains active/exited; the passive swap is active/active.
+	# Contradictory observed substates must not pass, but missing telemetry is
+	# not itself evidence that either service actually failed.
+	case "$mapper_sub" in
+	exited) ;;
+	unavailable) append_reason observation_reasons mapper_service_substate_unavailable ;;
+	*) append_reason failure_reasons mapper_service_substate_invalid ;;
+	esac
+	case "$swap_unit_sub" in
+	active) ;;
+	unavailable) append_reason observation_reasons passive_swap_unit_substate_unavailable ;;
+	*) append_reason failure_reasons passive_swap_unit_substate_invalid ;;
 	esac
 	case "$mapper_result" in
 	success) ;;
@@ -1091,8 +1116,8 @@ EOF
 # probe output, private transaction data, or unbounded journal content.
 log_observer_diagnostic()
 {
-	printf 'SWAPZ_RUNTIME_OBSERVER phase=%s expected=%s observed=%s command=%s command_status=%s next=%s\n' \
-		"$1" "$2" "$3" "$4" "$5" "$6" >&2
+	printf 'SWAPZ_RUNTIME_OBSERVER phase=%s expected=%s observed=%s command=%s command_status=%s identity_mismatch=%s service_state=%s next=%s\n' \
+		"$1" "$2" "$3" "$4" "$5" "${7:-none}" "${8:-not_applicable}" "$6" >&2
 }
 
 log_runtime_state()
@@ -1125,6 +1150,16 @@ log_runtime_state()
 	unavailable_or_invalid)
 		log_observer_diagnostic swap_inventory complete_five_column_inventory "$swap_inventory_state" read_swap_inventory "$swap_inventory_command_status" inspect_proc_swaps_read_only
 		;;
+	esac
+	case "$mapper_sub" in
+	exited) ;;
+	unavailable) log_observer_diagnostic mapper_service_substate exited unavailable systemctl_show "$mapper_sub_command_status" inspect_systemctl_show_read_only none inferred ;;
+	*) log_observer_diagnostic mapper_service_substate exited incompatible_substate systemctl_show 0 inspect_systemctl_show_read_only none observed ;;
+	esac
+	case "$swap_unit_sub" in
+	active) ;;
+	unavailable) log_observer_diagnostic passive_swap_unit_substate active unavailable systemctl_show "$swap_unit_sub_command_status" inspect_systemctl_show_read_only none inferred ;;
+	*) log_observer_diagnostic passive_swap_unit_substate active incompatible_substate systemctl_show 0 inspect_systemctl_show_read_only none observed ;;
 	esac
 	case "$swap_inventory_consistency_state" in
 	changed_during_observation)
@@ -1211,7 +1246,7 @@ monitor_loop()
 		else
 			capacity_bucket=normal
 		fi
-		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_table_command_status\|$mapper_status_command_status
+		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$mapper_sub\|$swap_unit_sub\|$mapper_sub_command_status\|$swap_unit_sub_command_status\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_table_command_status\|$mapper_status_command_status
 		if [ "$signature" != "$previous_signature" ]; then
 			log_runtime_state
 			previous_signature=$signature
