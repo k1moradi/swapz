@@ -6951,13 +6951,16 @@ the host total must remain acceptable to the host-binding validator; that
 fixture is parser semantics coverage, never physical RAM qualification. Reject
 a malformed or indented second required meminfo counter instead of silently
 ignoring contradictory values. A duplicate required counter with spaces or
-tabs inserted before its colon, or a truncated required counter name, is
-malformed even when a valid copy precedes it; unrelated meminfo names remain
-ignorable. Rootless regression fixtures must retain a valid positive control
-and reject a deleted low-MemAvailable peak observation even if the remaining
-sample count still meets every phase minimum: the 200 ms gap violates the
-unchanged 50-150 ms adjacent-sample bound. Cadence and missing-phase
-diagnostics identify the first failed phase and a bounded missing-sample count.
+tabs inserted before its colon, or a required counter truncated after its
+name, is malformed even when a valid copy precedes it; unrelated meminfo names
+remain ignorable. Rootless regression fixtures must retain a valid positive
+control and reject a deleted low-MemAvailable peak observation even if the
+remaining sample count still meets every phase minimum: the 200 ms gap violates
+the unchanged 50-150 ms adjacent-sample bound. Cadence and missing-phase
+diagnostics identify the first failed phase and a bounded minimum missing-sample
+count. They must not invent an exact missing-sample count from elapsed time:
+given the permitted 150 ms maximum adjacent interval, a 300 ms observed gap
+proves at least one missing observation, not exactly two.
 A trace that labels itself as synthetic/rootless must not pass the loaded-host
 capture/scope declarations. Correct declaration strings alone cannot
 authenticate a capture: immutable trace hashes, exact source, host boot,

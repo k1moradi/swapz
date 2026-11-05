@@ -249,14 +249,28 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(
                 ValueError,
                 r"metric=monotonic_interval_ns.*"
-                r"first_failed_phase=steady missing_samples=1"):
+                r"first_failed_phase=steady missing_samples_minimum=1"):
+            self.validate_trace(trace)
+
+    def test_cadence_gap_reports_only_provable_missing_minimum(self) -> None:
+        trace, _ = synthetic_trace()
+        # The previous diagnostic claimed two missing samples here. Under the
+        # unchanged 50-150 ms policy, two 150 ms intervals prove only that at
+        # least one observation is absent.
+        trace["samples"][14]["monotonic_ns"] += 200_000_000
+        with self.assertRaisesRegex(
+                ValueError,
+                r"observed=300000000.*maximum=150000000.*"
+                r"first_failed_phase=steady missing_samples_minimum=1"):
             self.validate_trace(trace)
 
     def test_truncated_phase_and_host_window_fail_closed(self) -> None:
         trace, host = synthetic_trace()
         del trace["samples"][-1]
         with self.assertRaisesRegex(
-                ValueError, r"metric=sample_count.*missing_samples=1.*first_failed_phase=teardown"):
+                ValueError,
+                r"metric=sample_count.*missing_samples_minimum=1.*"
+                r"first_failed_phase=teardown"):
             self.validate_trace(trace)
         trace, host = synthetic_trace()
         host["host_after_captured_at_utc"] = "2026-11-01T00:00:04Z"

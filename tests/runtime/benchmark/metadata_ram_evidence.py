@@ -582,7 +582,8 @@ def validate_metadata_ram_trace(
             "metadata RAM trace sample count is invalid: "
             f"metric=sample_count observed={len(samples)} "
             f"minimum={minimum_samples} maximum=1000000 "
-            f"missing_samples={max(0, minimum_samples - len(samples))} "
+            f"missing_samples_minimum="
+            f"{max(0, minimum_samples - len(samples))} "
             f"first_failed_phase={first_failed_phase}")
 
     phase_stage = 0
@@ -663,17 +664,25 @@ def validate_metadata_ram_trace(
             first_utc_ns = utc_ns
         if previous_monotonic is not None:
             elapsed_ns = monotonic_ns - previous_monotonic
+            minimum_interval_ns = SAMPLING_INTERVAL_NS // 2
+            maximum_interval_ns = (
+                SAMPLING_INTERVAL_NS + SAMPLING_INTERVAL_NS // 2)
             if (
-                    elapsed_ns < SAMPLING_INTERVAL_NS // 2 or
-                    elapsed_ns > SAMPLING_INTERVAL_NS +
-                                 SAMPLING_INTERVAL_NS // 2):
+                    elapsed_ns < minimum_interval_ns or
+                    elapsed_ns > maximum_interval_ns):
+                # A long gap proves only a lower bound. With the permitted
+                # 150 ms maximum interval, a 300 ms gap can still represent
+                # one omitted observation rather than exactly two.
+                minimum_missing_samples = (
+                    (elapsed_ns - 1) // maximum_interval_ns
+                    if elapsed_ns > maximum_interval_ns else 0)
                 raise ValueError(
                     "metadata RAM sample cadence is invalid: "
                     f"metric=monotonic_interval_ns observed={elapsed_ns} "
-                    f"minimum={SAMPLING_INTERVAL_NS // 2} "
-                    f"maximum={SAMPLING_INTERVAL_NS + SAMPLING_INTERVAL_NS // 2} "
+                    f"minimum={minimum_interval_ns} "
+                    f"maximum={maximum_interval_ns} "
                     f"first_failed_phase={phase} "
-                    f"missing_samples={max(0, (elapsed_ns - SAMPLING_INTERVAL_NS // 2) // SAMPLING_INTERVAL_NS)}")
+                    f"missing_samples_minimum={minimum_missing_samples}")
             wall_elapsed_ns = utc_ns - previous_utc_ns
             if (
                     wall_elapsed_ns <= 0 or
@@ -714,7 +723,8 @@ def validate_metadata_ram_trace(
                 "metadata RAM trace lacks required phase observations: "
                 f"metric={phase}_sample_count "
                 f"observed={len(phase_samples[phase])} minimum={minimum} "
-                f"missing_samples={minimum - len(phase_samples[phase])} "
+                f"missing_samples_minimum="
+                f"{minimum - len(phase_samples[phase])} "
                 f"first_failed_phase={phase}")
 
     baseline = phase_samples["baseline"]
