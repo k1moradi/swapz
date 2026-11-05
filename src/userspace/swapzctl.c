@@ -2461,7 +2461,8 @@ static int format_mountinfo_rw_options_valid(const char *begin,
 	return 1;
 }
 
-static int format_mountinfo_line_device(const char *line, dev_t *device)
+static int format_mountinfo_line_device_with_root(
+	const char *line, dev_t *device, int *root_mountpoint)
 {
 	const char *cursor;
 	const char *separator;
@@ -2469,6 +2470,7 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 	unsigned int mounted_minor = 0U;
 	unsigned int field = 0U;
 	unsigned int optional_fields = 0U;
+	int is_root_mountpoint = 0;
 
 	if (!line || !device)
 		return -1;
@@ -2506,14 +2508,16 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 			if (parse_device_identity_fields(token, &mounted_major,
 							 &mounted_minor, 0) < 0)
 				return -1;
-		} else if (field == 4U &&
-			   !format_mountinfo_path_valid(cursor, token_end)) {
+		} else if (field == 4U) {
 			/*
 			 * The root field is filesystem-specific: nsfs and other
 			 * filesystems may emit a non-path token. The mountpoint is
 			 * always the escaped absolute path that must validate here.
 			 */
-			return -1;
+			if (!format_mountinfo_path_valid(cursor, token_end))
+				return -1;
+			is_root_mountpoint =
+				(size_t)(token_end - cursor) == 1U && *cursor == '/';
 		} else if (field == 5U &&
 			   !format_mountinfo_rw_options_valid(cursor, token_end)) {
 			return -1;
@@ -2550,6 +2554,8 @@ static int format_mountinfo_line_device(const char *line, dev_t *device)
 	if (*cursor != '\0' && (*cursor != '\n' || cursor[1] != '\0'))
 		return -1;
 	*device = makedev(mounted_major, mounted_minor);
+	if (root_mountpoint)
+		*root_mountpoint = is_root_mountpoint;
 	return 0;
 }
 
@@ -2662,8 +2668,9 @@ static int format_mount_identifier_compare(const void *left, const void *right)
 
 
 
-static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
-					 dev_t parent_device)
+static int format_mountinfo_stream_clear_details(
+	FILE *stream, dev_t device, dev_t parent_device,
+	int *root_mountpoint_present, int *empty_table)
 {
 	char line[SWAPZ_FORMAT_PROC_LINE_BYTES];
 	void *mount_identifiers = NULL;
@@ -2672,8 +2679,13 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 	size_t total_bytes = 0;
 	int read_result;
 	int saved_errno;
+	int saw_root_mountpoint = 0;
 
-	if (!stream) {
+	if (root_mountpoint_present)
+		*root_mountpoint_present = 0;
+	if (empty_table)
+		*empty_table = 0;
+	if (!stream || !empty_table) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -2682,8 +2694,10 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 		dev_t mounted_device;
 		unsigned long long mount_identifier;
 		const char *identifier_end;
+		int line_has_root_mountpoint = 0;
 
-		if (format_mountinfo_line_device(line, &mounted_device) < 0 ||
+		if (format_mountinfo_line_device_with_root(
+			    line, &mounted_device, &line_has_root_mountpoint) < 0 ||
 		    parse_unsigned_decimal(line, (unsigned long long)INT_MAX,
 					   &identifier_end, &mount_identifier) < 0 ||
 		    !mount_identifier ||
@@ -2691,6 +2705,8 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 			errno = EPROTO;
 			goto failed;
 		}
+		if (line_has_root_mountpoint)
+			saw_root_mountpoint = 1;
 		if (format_inventory_device_conflicts(mounted_device, device,
 						     parent_device)) {
 			errno = EBUSY;
@@ -2705,8 +2721,9 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 	if (read_result < 0)
 		goto failed;
 	if (!mount_count) {
-		errno = EPROTO;
-		goto failed;
+		*empty_table = 1;
+		free(mount_identifiers);
+		return 0;
 	}
 	qsort(mount_identifiers, mount_count, sizeof(unsigned long long),
 	      format_mount_identifier_compare);
@@ -2718,6 +2735,8 @@ static int format_mountinfo_stream_clear(FILE *stream, dev_t device,
 			goto failed;
 		}
 	}
+	if (root_mountpoint_present)
+		*root_mountpoint_present = saw_root_mountpoint;
 	free(mount_identifiers);
 	return 0;
 
@@ -2729,10 +2748,15 @@ failed:
 }
 
 static int format_mountinfo_path_clear(const char *path, dev_t device,
-				       dev_t parent_device, int *opened)
+				       dev_t parent_device, int *opened,
+				       int *root_mountpoint_present)
 {
 	FILE *stream;
 	int saved_errno;
+	int empty_table = 0;
+
+	if (root_mountpoint_present)
+		*root_mountpoint_present = 0;
 
 	if (opened)
 		*opened = 0;
@@ -2741,13 +2765,21 @@ static int format_mountinfo_path_clear(const char *path, dev_t device,
 		return -1;
 	if (opened)
 		*opened = 1;
-	if (format_mountinfo_stream_clear(stream, device, parent_device) < 0) {
+	if (format_mountinfo_stream_clear_details(
+		    stream, device, parent_device, root_mountpoint_present,
+		    &empty_table) < 0) {
 		saved_errno = errno;
 		(void)fclose(stream);
 		errno = saved_errno;
 		return -1;
 	}
-	return fclose(stream);
+	if (fclose(stream) < 0)
+		return -1;
+	/*
+	 * 1 means the table was fully opened, read, and closed but had no rows.
+	 * It is not clearance by itself; the caller must prove the view redundant.
+	 */
+	return empty_table ? 1 : 0;
 }
 
 static int format_proc_entry_is_pid(const char *name)
@@ -2761,6 +2793,99 @@ static int format_proc_entry_is_pid(const char *name)
 			return 0;
 	}
 	return 1;
+}
+
+static int format_proc_mount_namespace_stat(const char *proc_path,
+					    const char *pid,
+					    struct stat *identity)
+{
+	char path[PATH_MAX];
+	int length;
+
+	if (!proc_path || !pid || !identity ||
+	    (strcmp(pid, "self") && !format_proc_entry_is_pid(pid))) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(path, sizeof(path), "%s/%s/ns/mnt", proc_path, pid);
+	if (length < 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	return stat(path, identity);
+}
+
+static int format_mount_namespace_identity_matches(
+	const struct stat *left, const struct stat *right)
+{
+	return left && right && left->st_dev == right->st_dev &&
+	       left->st_ino == right->st_ino;
+}
+
+static int format_proc_root_is_full(const char *proc_path)
+{
+	char path[PATH_MAX];
+	char resolved[PATH_MAX];
+	int length;
+
+	if (!proc_path) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(path, sizeof(path), "%s/self/root", proc_path);
+	if (length < 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (!realpath(path, resolved))
+		return -1;
+	return !strcmp(resolved, "/");
+}
+
+/*
+ * Some chrooted peers expose an empty process-root-filtered mountinfo view
+ * despite sharing the coordinator's namespace. Skip only after the complete
+ * coordinator table has a root mountpoint, its root resolves to "/", and a
+ * second PID/self namespace identity read still proves the same namespace.
+ */
+static int format_proc_empty_mountinfo_is_redundant(
+	const char *proc_path, const char *pid,
+	const struct stat *self_namespace_before,
+	const struct stat *pid_namespace_before,
+	int self_root_mountpoint_present)
+{
+	struct stat self_namespace_after;
+	struct stat pid_namespace_after;
+	int root_is_full;
+
+	if (!self_root_mountpoint_present ||
+	    !format_mount_namespace_identity_matches(
+		    self_namespace_before, pid_namespace_before)) {
+		errno = EPROTO;
+		return -1;
+	}
+	root_is_full = format_proc_root_is_full(proc_path);
+	if (root_is_full < 0)
+		return -1;
+	if (!root_is_full) {
+		errno = EPROTO;
+		return -1;
+	}
+	if (format_proc_mount_namespace_stat(proc_path, "self",
+					     &self_namespace_after) < 0 ||
+	    format_proc_mount_namespace_stat(proc_path, pid,
+					     &pid_namespace_after) < 0)
+		return -1;
+	if (!format_mount_namespace_identity_matches(
+		    self_namespace_before, &self_namespace_after) ||
+	    !format_mount_namespace_identity_matches(
+		    self_namespace_before, &pid_namespace_after) ||
+	    !format_mount_namespace_identity_matches(
+		    pid_namespace_before, &pid_namespace_after)) {
+		errno = EPROTO;
+		return -1;
+	}
+	return 0;
 }
 
 /*
@@ -2812,6 +2937,8 @@ static int format_mount_inventory_clear_from_proc(
 	char path[PATH_MAX];
 	DIR *directory;
 	struct dirent *entry;
+	struct stat self_mount_namespace;
+	int self_root_mountpoint_present = 0;
 	int length;
 	int saved_errno = 0;
 	size_t pid_tables = 0;
@@ -2825,7 +2952,20 @@ static int format_mount_inventory_clear_from_proc(
 		errno = ENAMETOOLONG;
 		return -1;
 	}
-	if (format_mountinfo_path_clear(path, device, parent_device, NULL) < 0)
+	{
+		int self_table_result = format_mountinfo_path_clear(
+			path, device, parent_device, NULL,
+			&self_root_mountpoint_present);
+
+		if (self_table_result < 0)
+			return -1;
+		if (self_table_result > 0) {
+			errno = EPROTO;
+			return -1;
+		}
+	}
+	if (format_proc_mount_namespace_stat(proc_path, "self",
+					     &self_mount_namespace) < 0)
 		return -1;
 	directory = opendir(proc_path);
 	if (!directory)
@@ -2844,18 +2984,45 @@ static int format_mount_inventory_clear_from_proc(
 			break;
 		}
 		++pid_tables;
-		length = snprintf(path, sizeof(path), "%s/%s/mountinfo",
-				  proc_path, entry->d_name);
-		if (length < 0 || (size_t)length >= sizeof(path)) {
-			saved_errno = ENAMETOOLONG;
-			break;
-		}
 		{
+			struct stat pid_mount_namespace;
+			int pid_namespace_known =
+				format_proc_mount_namespace_stat(
+					proc_path, entry->d_name,
+					&pid_mount_namespace) == 0;
+			int namespace_stat_errno = errno;
 			int mountinfo_opened = 0;
+			int mountinfo_result;
 
-			if (format_mountinfo_path_clear(
-				    path, device, parent_device,
-				    &mountinfo_opened) < 0) {
+			if (!pid_namespace_known && namespace_stat_errno != ENOENT &&
+			    namespace_stat_errno != ESRCH) {
+				saved_errno = namespace_stat_errno;
+				break;
+			}
+			length = snprintf(path, sizeof(path), "%s/%s/mountinfo",
+					  proc_path, entry->d_name);
+			if (length < 0 || (size_t)length >= sizeof(path)) {
+				saved_errno = ENAMETOOLONG;
+				break;
+			}
+			mountinfo_result = format_mountinfo_path_clear(
+				path, device, parent_device, &mountinfo_opened, NULL);
+			if (mountinfo_result > 0) {
+				if (!pid_namespace_known) {
+					saved_errno = EPROTO;
+					break;
+				}
+				if (format_proc_empty_mountinfo_is_redundant(
+					    proc_path, entry->d_name,
+					    &self_mount_namespace,
+					    &pid_mount_namespace,
+					    self_root_mountpoint_present) < 0) {
+					saved_errno = errno ? errno : EPROTO;
+					break;
+				}
+				continue;
+			}
+			if (mountinfo_result < 0) {
 				int mountinfo_error = errno;
 				int ignorable = 0;
 

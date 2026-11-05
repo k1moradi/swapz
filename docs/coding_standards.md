@@ -392,8 +392,15 @@ identities (block `st_rdev`, regular `st_dev` and `st_ino`) are not
 clearance. This catches directly backed swapfiles visible through
 `/proc/swaps` even if their mount is outside the formatter's mount namespace;
 it does not prove ancestry through arbitrary stacked filesystems.
-Mount inventory must inspect the formatter's own mount table and each
-visible process's /proc/<pid>/mountinfo, not just its own mount namespace.
+Mount inventory must inspect the formatter's own mount table and every
+distinct visible mount namespace, not just its own mount namespace. An empty
+opened PID mountinfo table is ambiguous and fails closed except for a peer
+whose mount-namespace device/inode matches the coordinator: that redundant
+view may be skipped only after the coordinator table contains a valid `/`
+mountpoint row, `/proc/self/root` resolves exactly to `/`, and a second
+namespace identity check still matches. The coordinator's full-root mount
+table then covers that shared namespace. A foreign empty table or a chrooted
+coordinator never uses this exception.
 Normal process exit is not storage ambiguity: an EINVAL, ENOENT or ESRCH
 failure to open a PID mount table may be ignored only when that PID's
 /proc/<pid>/ns/mnt is also absent. A still-present mount namespace, any other

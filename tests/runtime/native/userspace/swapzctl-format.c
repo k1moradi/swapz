@@ -71,6 +71,26 @@ static FILE *test_format_fopen(const char *path, const char *mode);
 
 #include <assert.h>
 
+static int test_format_mountinfo_stream_clear(FILE *stream, dev_t device,
+					      dev_t parent_device)
+{
+	int empty_table = 0;
+
+	if (format_mountinfo_stream_clear_details(
+		    stream, device, parent_device, NULL, &empty_table) < 0)
+		return -1;
+	if (empty_table) {
+		errno = EPROTO;
+		return -1;
+	}
+	return 0;
+}
+
+#define format_mountinfo_line_device(line, device) \
+	format_mountinfo_line_device_with_root((line), (device), NULL)
+#define format_mountinfo_stream_clear(stream, device, parent_device) \
+	test_format_mountinfo_stream_clear((stream), (device), (parent_device))
+
 /* Make libc diagnostic errno clobber deterministic in the formatter. */
 static int test_diagnostic_errno_clobber;
 
@@ -504,7 +524,8 @@ static void admission_start(enum admission_change change)
 		ADMISSION_PARENT "/part", ADMISSION_PARENT "/part/holders",
 		ADMISSION_PARENT "/part/slaves", ADMISSION_PARENT "/holders",
 		ADMISSION_PARENT "/slaves", ADMISSION_PARENT "/queue",
-		"/proc", "/proc/self", "/proc/3031", "/proc/3031/ns",
+		"/proc", "/proc/self", "/proc/self/ns", "/proc/3031",
+		"/proc/3031/ns",
 	};
 	char path[PATH_MAX];
 
@@ -525,6 +546,8 @@ static void admission_start(enum admission_change change)
 	assert(symlink("../../devices/usb1/disk/part", path) == 0);
 	assert(admission_route(ADMISSION_PARENT "/device", path) == path);
 	assert(symlink("..", path) == 0);
+	assert(admission_route("/proc/self/root", path) == path);
+	assert(symlink("/", path) == 0);
 	admission_write_text(ADMISSION_PARENT "/part/dev", "8:1\n");
 	admission_write_text(ADMISSION_PARENT "/part/partition", "1\n");
 	admission_write_text("/sys/dev/block/8:1/uevent",
@@ -532,8 +555,11 @@ static void admission_start(enum admission_change change)
 	admission_write_text(ADMISSION_PARENT "/dev", "8:0\n");
 	admission_write_text(ADMISSION_PARENT "/removable", "1\n");
 	admission_write_text("/sys/devices/usb1/model", "Multi-Card\n");
-	admission_write_text("/proc/self/mountinfo",
-			     "36 25 0:20 / /proc rw - proc proc rw\n");
+	admission_write_text("/proc/self/ns/mnt", "self namespace\n");
+	admission_write_text(
+		"/proc/self/mountinfo",
+		"1 42 8:9 / / rw - ext4 /dev/root rw\n"
+		"36 25 0:20 / /proc rw - proc proc rw\n");
 	admission_write_text("/proc/3031/mountinfo",
 			     "37 25 8:2 / /sibling rw - ext4 /dev/sibling rw\n");
 	admission_write_text("/proc/3031/ns/mnt", "namespace\n");
@@ -1545,13 +1571,19 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 	assert(mkdtemp(root));
 	test_mountinfo_fixture_path(path, root, "self");
 	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, root, "self/ns");
+	assert(mkdir(path, 0700) == 0);
 	test_mountinfo_fixture_path(path, root, "3031");
 	assert(mkdir(path, 0700) == 0);
 	test_mountinfo_fixture_path(path, root, "3031/ns");
 	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, root, "self/root");
+	assert(symlink("/", path) == 0);
+	test_mountinfo_fixture_write(root, "self/ns/mnt", "self namespace\n");
 	test_mountinfo_fixture_write(root, "3031/ns/mnt", "namespace\n");
 	test_mountinfo_fixture_write(
 		root, "self/mountinfo",
+		"1 42 8:9 / / rw - ext4 /dev/root rw\n"
 		"36 25 0:20 / /proc rw - proc proc rw\n");
 	test_mountinfo_fixture_write(
 		root, "3031/mountinfo",
@@ -1583,6 +1615,70 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 	errno = 0;
 	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
 	assert(errno == EPROTO);
+
+	/* An empty chrooted peer view is redundant only in the same full-root ns. */
+	test_mountinfo_fixture_path(path, root, "3031/ns/mnt");
+	assert(unlink(path) == 0);
+	assert(symlink("../../self/ns/mnt", path) == 0);
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) == 0);
+
+	/* The coordinator's own selected-device mount remains visible to the gate. */
+	test_mountinfo_fixture_write(
+		root, "self/mountinfo",
+		"1 42 8:9 / / rw - ext4 /dev/root rw\n"
+		"2 1 8:1 / /card rw - ext4 /dev/sda1 rw\n"
+		"36 25 0:20 / /proc rw - proc proc rw\n");
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EBUSY);
+	test_mountinfo_fixture_write(
+		root, "self/mountinfo",
+		"1 42 8:9 / / rw - ext4 /dev/root rw\n"
+		"36 25 0:20 / /proc rw - proc proc rw\n");
+
+	/* A chrooted coordinator cannot use the empty-peer shortcut. */
+	test_mountinfo_fixture_path(path, root, "chroot");
+	assert(mkdir(path, 0700) == 0);
+	{
+		char root_link[PATH_MAX];
+
+		test_mountinfo_fixture_path(root_link, root, "self/root");
+		assert(unlink(root_link) == 0);
+		assert(symlink(path, root_link) == 0);
+	}
+	errno = 0;
+	assert(format_mount_inventory_clear_from_proc(root, device, parent) < 0);
+	assert(errno == EPROTO);
+	test_mountinfo_fixture_path(path, root, "self/root");
+	assert(unlink(path) == 0);
+	assert(symlink("/", path) == 0);
+	test_mountinfo_fixture_path(path, root, "chroot");
+	assert(rmdir(path) == 0);
+
+	/* Namespace replacement after the empty snapshot fails its second check. */
+	{
+		struct stat self_namespace;
+		struct stat peer_namespace;
+
+		test_mountinfo_fixture_path(path, root, "self/ns/mnt");
+		assert(stat(path, &self_namespace) == 0);
+		test_mountinfo_fixture_path(path, root, "3031/ns/mnt");
+		assert(stat(path, &peer_namespace) == 0);
+		assert(format_mount_namespace_identity_matches(
+			&self_namespace, &peer_namespace));
+		assert(unlink(path) == 0);
+		test_mountinfo_fixture_write(root, "3031/ns/mnt",
+					     "replacement namespace\n");
+		errno = 0;
+		assert(format_proc_empty_mountinfo_is_redundant(
+			       root, "3031", &self_namespace,
+			       &peer_namespace, 1) < 0);
+		assert(errno == EPROTO);
+		test_mountinfo_fixture_path(path, root, "3031/ns/mnt");
+		assert(unlink(path) == 0);
+		assert(symlink("../../self/ns/mnt", path) == 0);
+	}
+
 	test_mountinfo_fixture_write(
 		root, "3031/mountinfo",
 		"37 25 8:2 / /other rw - ext4 /dev/sda2 rw\n");
@@ -1592,6 +1688,7 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 	assert(errno == EPROTO);
 	test_mountinfo_fixture_write(
 		root, "self/mountinfo",
+		"1 42 8:9 / / rw - ext4 /dev/root rw\n"
 		"36 25 0:20 / /proc rw - proc proc rw\n");
 
 	/* Malformed or missing evidence for a live mount namespace still fails. */
@@ -1626,6 +1723,12 @@ static void test_mounts_in_other_namespaces_refuse_formatting(void)
 
 	test_mountinfo_fixture_path(path, root, "self/mountinfo");
 	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, root, "self/root");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, root, "self/ns/mnt");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, root, "self/ns");
+	assert(rmdir(path) == 0);
 	test_mountinfo_fixture_path(path, root, "3031/ns");
 	assert(rmdir(path) == 0);
 	test_mountinfo_fixture_path(path, root, "3031");
@@ -2178,12 +2281,19 @@ static void test_namespace_swap_ambiguity_never_writes(void)
 	assert(mkdtemp(proc_root));
 	test_mountinfo_fixture_path(path, proc_root, "self");
 	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "self/ns");
+	assert(mkdir(path, 0700) == 0);
 	test_mountinfo_fixture_path(path, proc_root, "3031");
 	assert(mkdir(path, 0700) == 0);
 	test_mountinfo_fixture_path(path, proc_root, "3031/ns");
 	assert(mkdir(path, 0700) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "self/root");
+	assert(symlink("/", path) == 0);
+	test_mountinfo_fixture_write(proc_root, "self/ns/mnt",
+				     "self namespace\n");
 	test_mountinfo_fixture_write(proc_root, "3031/ns/mnt", "namespace\n");
 	test_mountinfo_fixture_write(proc_root, "self/mountinfo",
+		"1 42 8:9 / / rw - ext4 /dev/root rw\n"
 		"36 25 0:20 / /proc rw unknown:opaque - proc proc rw\n");
 
 	for (size_t index = 0;
@@ -2327,6 +2437,12 @@ static void test_namespace_swap_ambiguity_never_writes(void)
 	assert(rmdir(path) == 0);
 	test_mountinfo_fixture_path(path, proc_root, "self/mountinfo");
 	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "self/root");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "self/ns/mnt");
+	assert(unlink(path) == 0);
+	test_mountinfo_fixture_path(path, proc_root, "self/ns");
+	assert(rmdir(path) == 0);
 	test_mountinfo_fixture_path(path, proc_root, "self");
 	assert(rmdir(path) == 0);
 	assert(rmdir(proc_root) == 0);
