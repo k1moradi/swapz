@@ -255,6 +255,8 @@ grep -Fq 'zero_writes == 9' tests/tools/deploy-nullblk.sh
 grep -Fq 'lower_write_bytes == target_write_bytes' tests/tools/deploy-nullblk.sh
 grep -Fq 'lower_read_bytes != target_read_bytes' tests/tools/deploy-nullblk.sh
 grep -Fq 'swapz_capture_quiescent_io' tests/tools/deploy-nullblk.sh
+grep -Fq 'target/backing not quiescent before oracle: $SWAPZ_QUIET_LAST_FAILURE' tests/tools/deploy-nullblk.sh
+grep -Fq 'target/backing not quiescent after oracle: $SWAPZ_QUIET_LAST_FAILURE' tests/tools/deploy-nullblk.sh
 grep -Fq 'UNATTRIBUTED_LOWER_READ=' tests/tools/deploy-nullblk.sh
 grep -Fq 'PASS_ORACLE_LOWER_READ=' tests/tools/deploy-nullblk.sh
 grep -Fq 'close_total == window_delta' tests/tools/deploy-nullblk.sh

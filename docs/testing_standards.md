@@ -1222,6 +1222,25 @@ those diagnostic samples separate from withheld published counters. Stable
 synthetic fixtures verify only the rootless observer contract, never loaded,
 anonymous-swap or physical I/O attribution.
 
+Malformed or incomplete DM INFO status must also report a sanitized parser
+detail such as expected/observed field count, invalid token index, a rejected
+field key bounded to 64 ASCII characters, or terminal-field mismatch. For a
+longer key, report only its bounded length. Never include the raw status line
+or untrusted counter values. The owned-null_blk wrapper must propagate this
+sub-check detail into its stage diagnostic so status-schema rejection can be
+distinguished from active I/O or worker activity without blindly rerunning.
+When stable status and lower counters still show outstanding target work, name
+the active status field in the diagnostic without printing its value; this
+distinguishes a preparation-slot drain from completion-work drain.
+Terminal-error coverage must also prove that unconsumed READY preparation
+results retire their `prep_ready_current` charge exactly once, while a producer
+that publishes after the BIO is failed observes a cancelled state and cannot
+leave an orphaned ready result.
+The source-derived INFO fixture must include both printf-backed fields and
+literal numeric `key=value` fields; deriving the schema from format
+placeholders alone can omit a real compatibility token and make only loaded
+status parsing fail.
+
 Loaded tests use only newly created, positively owned, RAM-backed `null_blk`. Before and after use, verify device identity, size, major/minor, DM UUID, holders, mounts and active-swap aliases. Never substitute a physical or existing block device.
 
 Before the ordinary loaded smoke target is admitted, qualification must reload

@@ -1382,6 +1382,24 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("atomic64_read(&ctx->preparation_free_mask)", drain)
         self.assertIn("SWAPZ_PREPARATION_FREE_MASK", drain)
 
+    def test_terminal_failure_retires_unconsumed_preparation_results(self):
+        slots = (ROOT / "src/kernel/preparation-slots.h").read_text()
+        retire = source_body("swapz_preparation_retire", slots)
+        consume = source_body("swapz_preparation_consume_ready", slots)
+        complete = body("swapz_complete")
+        accept = body("swapz_accept_write")
+        background = body("swapz_preparation_worker")
+        submitter = body("swapz_submitter_prepare_payload")
+        self.assertIn("SWAPZ_PREPARATION_CANCELLED", retire)
+        self.assertIn("SWAPZ_PREPARATION_CONSUMED", retire)
+        self.assertIn("SWAPZ_PREPARATION_CONSUMED", consume)
+        self.assertLess(complete.index("swapz_preparation_retire("),
+                        complete.index("swapz_release_prepared(bio)"))
+        self.assertIn("atomic_dec(&ctx->preparation_ready_current)", complete)
+        self.assertEqual(accept.count("swapz_preparation_consume_ready("), 2)
+        self.assertIn("publish_state != SWAPZ_PREPARATION_CANCELLED", background)
+        self.assertIn("publish_state == SWAPZ_PREPARATION_CANCELLED", submitter)
+
     def test_delta64_rescue_defaults_on_and_disabled_avoids_scratch(self):
         ctor = body("swapz_ctr")
         producer = body("swapz_preparation_worker")
@@ -2970,18 +2988,30 @@ typedef uint64_t u64;
 typedef int blk_status_t;
 typedef int atomic_t;
 typedef uint64_t atomic64_t;
+typedef int64_t s64;
 #define READ_ONCE(x) (x)
 #define smp_load_acquire(ptr) __atomic_load_n((ptr), __ATOMIC_ACQUIRE)
 #define SWAPZ_MAX_RECORDS 64U
 #define REQ_OP_WRITE 1
 #define DM_ENDIO_DONE 0
 #define container_of(p,t,m) ((t *)((char *)(p)-offsetof(t,m)))
+static int atomic_read_acquire(const atomic_t *p) { return *p; }
+static int atomic_cmpxchg(atomic_t *p,int old,int value);
+static s64 atomic64_read(atomic64_t *p) { return (s64)*p; }
+static s64 atomic64_cmpxchg(atomic64_t *p,s64 old,s64 value) { s64 v=(s64)*p;if(v==old)*p=(atomic64_t)value;return v; }
+static void atomic64_or(s64 bits,atomic64_t *p) { *p|=(atomic64_t)bits; }
+static void atomic_dec(atomic_t *p) { --*p; }
+#define smp_mb__before_atomic() ((void)0)
+#define __ffs64(value) ((unsigned int)__builtin_ctzll(value))
+#include "preparation-slots.h"
 struct swapz_dm;
 /* Keep fields consumed by extracted production completion bodies in sync. */
 struct swapz_ack_dwell_batch { u64 delivered_ns; unsigned count[2]; };
+struct swapz_prepared_page { atomic_t state; };
 struct swapz_bio_ref {
     struct swapz_dm *preparation_ctx;
     struct swapz_ack_dwell_batch *ack_batch;
+    struct swapz_prepared_page *prepared_page;
 };
 struct bio { struct bio *bi_next; struct swapz_bio_ref ref; unsigned id, ended; int bi_status; bool prepared; };
 struct bio_list { struct bio *head, *tail; };
@@ -2994,6 +3024,7 @@ struct swapz_dm {
     struct bio_list deferred_upper_completions, completion_bios;
     struct work_struct completion_work;
     atomic_t completion_active;
+    atomic_t preparation_ready_current;
     u64 completion_offloaded_batches, deferred_upper_completion_bios;
     u64 deferred_upper_completion_wall_ns;
     atomic64_t upper_write_completed_ok, upper_write_completed_err;
@@ -3136,6 +3167,7 @@ int main(void) {
             (path / "probe.c").write_text(source)
             built = subprocess.run(
                 ["cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+                 "-I", str(ROOT / "src/kernel"),
                  str(path / "probe.c"), "-o", str(path / "probe")],
                 capture_output=True, text=True)
             self.assertEqual(built.returncode, 0, built.stderr)

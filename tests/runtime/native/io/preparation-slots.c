@@ -189,6 +189,41 @@ static int test_representation_race(void)
 	return 0;
 }
 
+static int test_terminal_failure_retires_preparation_result(void)
+{
+	atomic_t state;
+	int retired;
+
+	atomic_init(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_retire(&state) ==
+	      SWAPZ_PREPARATION_CANCELLED);
+	CHECK(swapz_preparation_publish_codec_result(&state, 2048) ==
+	      SWAPZ_PREPARATION_CANCELLED);
+	CHECK(swapz_preparation_read_state(&state) ==
+	      SWAPZ_PREPARATION_CANCELLED);
+
+	atomic_store(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_publish_codec_result(&state, 2048) ==
+	      SWAPZ_PREPARATION_PREPARING);
+	retired = swapz_preparation_retire(&state);
+	CHECK(retired == SWAPZ_PREPARATION_READY_COMPRESSED);
+	CHECK(swapz_preparation_read_state(&state) ==
+	      SWAPZ_PREPARATION_CONSUMED);
+	CHECK(swapz_preparation_retire(&state) ==
+	      SWAPZ_PREPARATION_CONSUMED);
+	CHECK(swapz_preparation_consume_ready(&state) ==
+	      SWAPZ_PREPARATION_CONSUMED);
+
+	atomic_store(&state.value, SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_publish_codec_result(&state, 0) ==
+	      SWAPZ_PREPARATION_PREPARING);
+	CHECK(swapz_preparation_consume_ready(&state) ==
+	      SWAPZ_PREPARATION_READY_RAW);
+	CHECK(swapz_preparation_read_state(&state) ==
+	      SWAPZ_PREPARATION_CONSUMED);
+	return 0;
+}
+
 /*
  * Negative control for the READY publication oracle below. This intentionally
  * weakens only the failed-CAS reread to relaxed ordering while preserving the
@@ -1238,6 +1273,7 @@ static int test_generation_handoff_after_cancel_or_completion(void)
 int main(void)
 {
 	CHECK(!test_representation_race());
+	CHECK(!test_terminal_failure_retires_preparation_result());
 	CHECK(!test_ready_publication_wins_raw_cas());
 	CHECK(!test_thread_published_terminal_metadata_after_failed_cas());
 	CHECK(!test_closed_admission_suppresses_producer_owner_wake());
@@ -1246,6 +1282,6 @@ int main(void)
 	CHECK(!test_two_producers_reclaim_only_after_final_consumer());
 	CHECK(!test_concurrent_reuse());
 	CHECK(!test_generation_handoff_after_cancel_or_completion());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=9");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=10");
 	return 0;
 }

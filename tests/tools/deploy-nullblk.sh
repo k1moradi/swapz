@@ -693,7 +693,7 @@ if command -v udevadm >/dev/null 2>&1; then
         fail "udev queue did not settle before owned oracle"
 fi
 swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
-    fail "target/backing not quiescent before oracle"
+    fail "target/backing not quiescent before oracle: $SWAPZ_QUIET_LAST_FAILURE"
 status_before="$SWAPZ_QUIET_STATUS"
 lower_before=("${SWAPZ_QUIET_LOWER[@]}")
 note "QUIESCENT_BEFORE=attempt:$SWAPZ_QUIET_ATTEMPTS"
@@ -702,7 +702,7 @@ note "LOWER_STATS_BEFORE=${lower_before[*]}"
 timeout --signal=TERM --kill-after=5s 40s "$ORACLE" "/dev/mapper/$DMNAME" ||
     fail "loaded test roundtrip failed or timed out"
 swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
-    fail "target/backing not quiescent after oracle"
+    fail "target/backing not quiescent after oracle: $SWAPZ_QUIET_LAST_FAILURE"
 status_after="$SWAPZ_QUIET_STATUS"
 lower_after=("${SWAPZ_QUIET_LOWER[@]}")
 note "QUIESCENT_AFTER=attempt:$SWAPZ_QUIET_ATTEMPTS"

@@ -1607,8 +1607,9 @@ static void swapz_complete(struct bio *bio, int error)
 {
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 	struct swapz_dm *ctx = entry ? entry->preparation_ctx : NULL;
+	struct swapz_prepared_page *prepared = entry ?
+		READ_ONCE(entry->prepared_page) : NULL;
 
-	swapz_release_prepared(bio);
 	/* Any BIO still owned when the target becomes terminally failed must
 	 * never receive a fresh success, even if its caller missed the error.
 	 * Preserve the preexisting BIO error (if any) rather than clearing it. */
@@ -1617,6 +1618,17 @@ static void swapz_complete(struct bio *bio, int error)
 		if (!error)
 			error = -EIO;
 	}
+	if (error && ctx && prepared) {
+		int retired = swapz_preparation_retire(&prepared->state);
+
+		/* A READY page that failed before normal consumption still owns
+		 * one prep_ready_current charge. Retire it exactly once here. A
+		 * CANCELLED producer drops its own charge if it publishes later. */
+		if (retired == SWAPZ_PREPARATION_READY_COMPRESSED ||
+		    retired == SWAPZ_PREPARATION_READY_RAW)
+			atomic_dec(&ctx->preparation_ready_current);
+	}
+	swapz_release_prepared(bio);
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
 	if (ctx && bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio)) {
@@ -3431,7 +3443,8 @@ static void swapz_submitter_prepare_payload(struct swapz_dm *ctx,
 	publish_state = swapz_preparation_publish_codec_result(&prepared->state,
 							       prepared->length);
 	if (final_state == SWAPZ_PREPARATION_ERROR) {
-		if (publish_state != SWAPZ_PREPARATION_PREPARING)
+		if (publish_state != SWAPZ_PREPARATION_PREPARING &&
+		    publish_state != SWAPZ_PREPARATION_CANCELLED)
 			swapz_fail(ctx, -EUCLEAN);
 	} else if (publish_state == SWAPZ_PREPARATION_PREPARING) {
 		peak = atomic_read(&ctx->preparation_ready_max);
@@ -3442,6 +3455,8 @@ static void swapz_submitter_prepare_payload(struct swapz_dm *ctx,
 				break;
 			peak = observed;
 		}
+	} else if (publish_state == SWAPZ_PREPARATION_CANCELLED) {
+		atomic_dec(&ctx->preparation_ready_current);
 	} else {
 		atomic_dec(&ctx->preparation_ready_current);
 		swapz_fail(ctx, -EUCLEAN);
@@ -3698,7 +3713,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			&prepared->state, prepared->length);
 		if (final_state == SWAPZ_PREPARATION_ERROR) {
 			if (publish_state != SWAPZ_PREPARATION_PREPARING &&
-			    publish_state != SWAPZ_PREPARATION_RAW_SELECTED)
+			    publish_state != SWAPZ_PREPARATION_RAW_SELECTED &&
+			    publish_state != SWAPZ_PREPARATION_CANCELLED)
 				swapz_fail(ctx, -EUCLEAN);
 		} else if (publish_state == SWAPZ_PREPARATION_PREPARING) {
 			peak = atomic_read(&ctx->preparation_ready_max);
@@ -3713,7 +3729,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			atomic_dec(&ctx->preparation_ready_current);
 			if (publish_state == SWAPZ_PREPARATION_RAW_SELECTED)
 				lane->late_results_discarded++;
-			else
+			else if (publish_state != SWAPZ_PREPARATION_CANCELLED)
 				swapz_fail(ctx, -EUCLEAN);
 		}
 		complete(&prepared->result_ready);
@@ -5838,6 +5854,11 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			swapz_preparation_read_state(&prepared->state);
 		swapz_observe_prepared_lz4_cost(ctx, prepared, prepared_state);
 		if (prepared_state == SWAPZ_PREPARATION_READY_COMPRESSED) {
+			if (swapz_preparation_consume_ready(&prepared->state) !=
+			    SWAPZ_PREPARATION_READY_COMPRESSED) {
+				swapz_fail(ctx, -EUCLEAN);
+				return -EUCLEAN;
+			}
 			atomic_dec(&ctx->preparation_ready_current);
 			ctx->work_conserving_compressed_ready++;
 			ctx->work_conserving_window = true;
@@ -5855,6 +5876,11 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 					&ctx->ordered_write_copy_wall_ns,
 					&ctx->ordered_write_copy_bytes);
 		} else if (prepared_state == SWAPZ_PREPARATION_READY_RAW) {
+			if (swapz_preparation_consume_ready(&prepared->state) !=
+			    SWAPZ_PREPARATION_READY_RAW) {
+				swapz_fail(ctx, -EUCLEAN);
+				return -EUCLEAN;
+			}
 			atomic_dec(&ctx->preparation_ready_current);
 			if (unlikely(prepared->length != 0)) {
 				swapz_fail(ctx, -EUCLEAN);

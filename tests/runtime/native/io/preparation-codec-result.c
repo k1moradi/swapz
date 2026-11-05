@@ -124,7 +124,8 @@ static int test_raw_selection_wins_late_codec_error(void)
 
 /*
  * Terminal publications are one-shot: neither a later successful codec
- * result nor a late failure may overwrite READY, ERROR or RAW_SELECTED.
+ * result nor a late failure may overwrite READY, ERROR, RAW_SELECTED,
+ * CANCELLED or CONSUMED.
  * Invalid direct ready-state requests must not mutate PREPARING either.
  */
 static int test_terminal_states_reject_republication(void)
@@ -132,7 +133,9 @@ static int test_terminal_states_reject_republication(void)
 	const int states[] = { SWAPZ_PREPARATION_READY_COMPRESSED,
 			       SWAPZ_PREPARATION_READY_RAW,
 			       SWAPZ_PREPARATION_ERROR,
-			       SWAPZ_PREPARATION_RAW_SELECTED };
+			       SWAPZ_PREPARATION_RAW_SELECTED,
+			       SWAPZ_PREPARATION_CANCELLED,
+			       SWAPZ_PREPARATION_CONSUMED };
 	atomic_t state;
 	unsigned int index;
 

@@ -21,6 +21,10 @@ enum swapz_preparation_state {
 	SWAPZ_PREPARATION_READY_RAW,
 	SWAPZ_PREPARATION_RAW_SELECTED,
 	SWAPZ_PREPARATION_ERROR,
+	/* Consumer abandoned a still-running candidate after terminal failure. */
+	SWAPZ_PREPARATION_CANCELLED,
+	/* A READY representation has been consumed or discarded exactly once. */
+	SWAPZ_PREPARATION_CONSUMED,
 };
 
 static inline int swapz_preparation_read_state(const atomic_t *state)
@@ -49,6 +53,48 @@ static inline int swapz_preparation_select_raw(atomic_t *state)
 	}
 	return observed == SWAPZ_PREPARATION_PREPARING ?
 		SWAPZ_PREPARATION_RAW_SELECTED : observed;
+}
+
+/*
+ * Terminal failure may complete a BIO before its speculative codec producer
+ * publishes. CANCELLED prevents that late result from becoming orphaned READY
+ * work. If READY already won, transition it to CONSUMED so its ready counter
+ * has exactly one owner responsible for decrementing it.
+ */
+static inline int swapz_preparation_retire(atomic_t *state)
+{
+	int observed = swapz_preparation_read_state(state);
+
+	for (;;) {
+		int replacement;
+
+		if (observed == SWAPZ_PREPARATION_PREPARING)
+			replacement = SWAPZ_PREPARATION_CANCELLED;
+		else if (observed == SWAPZ_PREPARATION_READY_COMPRESSED ||
+			 observed == SWAPZ_PREPARATION_READY_RAW)
+			replacement = SWAPZ_PREPARATION_CONSUMED;
+		else
+			return observed;
+
+		if (atomic_cmpxchg(state, observed, replacement) == observed)
+			return replacement == SWAPZ_PREPARATION_CANCELLED ?
+				SWAPZ_PREPARATION_CANCELLED : observed;
+		/* Failed conditional RMW is not an acquire of READY publication. */
+		observed = swapz_preparation_read_state(state);
+	}
+}
+
+/* Return the READY state only for the caller that consumes it exactly once. */
+static inline int swapz_preparation_consume_ready(atomic_t *state)
+{
+	int observed = swapz_preparation_read_state(state);
+
+	if (observed != SWAPZ_PREPARATION_READY_COMPRESSED &&
+	    observed != SWAPZ_PREPARATION_READY_RAW)
+		return observed;
+	if (atomic_cmpxchg(state, observed, SWAPZ_PREPARATION_CONSUMED) == observed)
+		return observed;
+	return swapz_preparation_read_state(state);
 }
 
 static inline int swapz_preparation_publish_result(atomic_t *state,

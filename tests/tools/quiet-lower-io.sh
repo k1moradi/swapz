@@ -34,49 +34,99 @@ swapz_quiet_observe_dmsetup() {
 swapz_quiet_parse_status() {
     local status_text="$1" token key value required_field
     local -n parsed_values="$2"
-    local expected_field_count=476
+    local expected_field_count=477
+    local token_index=0
     local -a fields=()
     local -A seen_fields=()
     local IFS=$' \t\n'
 
     SWAPZ_QUIET_PARSE_REASON=malformed-status
-    [[ -n $status_text && ${#status_text} -le 65536 &&
-       $status_text != *$'\n'* && $status_text != *$'\r'* ]] || return 1
+    SWAPZ_QUIET_PARSE_DETAIL=""
+    [[ -n $status_text ]] || {
+        SWAPZ_QUIET_PARSE_DETAIL=empty-line
+        return 1
+    }
+    (( ${#status_text} <= 65536 )) || {
+        SWAPZ_QUIET_PARSE_DETAIL="line-too-long:length=${#status_text}"
+        return 1
+    }
+    [[ $status_text != *$'\n'* && $status_text != *$'\r'* ]] || {
+        SWAPZ_QUIET_PARSE_DETAIL=multiline-status
+        return 1
+    }
     [[ $status_text != *" status_snapshot_error="* ]] || {
         SWAPZ_QUIET_PARSE_REASON=status-snapshot-error
+        SWAPZ_QUIET_PARSE_DETAIL=status-snapshot-error-field
         return 1
     }
     read -r -a fields <<< "$status_text"
-    # Current production INFO has three DM header fields plus 473 complete
-    # key/value fields. Schema drift blocks qualification until this oracle
-    # and its source-derived rootless fixture are updated together.
+    # Current production INFO has three DM header fields plus 474 complete
+    # key/value fields, including a literal numeric compatibility token.
+    # Schema drift blocks qualification until this oracle and its
+    # source-derived rootless fixture are updated together.
     if (( ${#fields[@]} < expected_field_count )); then
         SWAPZ_QUIET_PARSE_REASON=incomplete-status
+        SWAPZ_QUIET_PARSE_DETAIL="field-count:expected=${expected_field_count}:actual=${#fields[@]}"
         return 1
     fi
-    (( ${#fields[@]} == expected_field_count )) || return 1
-    swapz_quiet_valid_counter "${fields[0]}" &&
-        swapz_quiet_valid_counter "${fields[1]}" &&
-        [[ ${fields[2]} == swapz ]] || return 1
-    [[ ${fields[1]} != 0 ]] || return 1
+    (( ${#fields[@]} == expected_field_count )) || {
+        SWAPZ_QUIET_PARSE_DETAIL="field-count:expected=${expected_field_count}:actual=${#fields[@]}"
+        return 1
+    }
+    if ! swapz_quiet_valid_counter "${fields[0]}" ||
+       ! swapz_quiet_valid_counter "${fields[1]}"; then
+        SWAPZ_QUIET_PARSE_DETAIL=invalid-dm-header-number
+        return 1
+    fi
+    [[ ${fields[2]} == swapz ]] || {
+        SWAPZ_QUIET_PARSE_DETAIL=target-name-mismatch
+        return 1
+    }
+    [[ ${fields[1]} != 0 ]] || {
+        SWAPZ_QUIET_PARSE_DETAIL=zero-length-target
+        return 1
+    }
     SWAPZ_QUIET_PARSED_HEADER="${fields[0]} ${fields[1]} ${fields[2]}"
     parsed_values=()
     for token in "${fields[@]:3}"; do
-        [[ $token =~ ^([a-z][a-z0-9_]*)=(.+)$ ]] || return 1
+        (( token_index += 1 ))
+        [[ $token =~ ^([a-z][a-z0-9_]*)=(.+)$ ]] || {
+            SWAPZ_QUIET_PARSE_DETAIL="invalid-field-token:index=${token_index}"
+            return 1
+        }
         key="${BASH_REMATCH[1]}"
         value="${BASH_REMATCH[2]}"
-        [[ -z ${seen_fields[$key]+present} && $key != status_snapshot_error ]] || return 1
+        (( ${#key} <= 64 )) || {
+            SWAPZ_QUIET_PARSE_DETAIL="field-key-too-long:length=${#key}"
+            return 1
+        }
+        [[ -z ${seen_fields[$key]+present} && $key != status_snapshot_error ]] || {
+            SWAPZ_QUIET_PARSE_DETAIL="duplicate-or-reserved-field:key=${key}"
+            return 1
+        }
         seen_fields["$key"]=1
         case "$key" in
             version|mode)
-                [[ $value =~ ^[a-zA-Z0-9._-]+$ ]] || return 1 ;;
+                [[ $value =~ ^[a-zA-Z0-9._-]+$ ]] || {
+                    SWAPZ_QUIET_PARSE_DETAIL="invalid-text-field:key=${key}"
+                    return 1
+                } ;;
             error)
                 if [[ $value == -* ]]; then
-                    [[ $value != -0 ]] && swapz_quiet_valid_counter "${value#-}" || return 1
+                    [[ $value != -0 ]] && swapz_quiet_valid_counter "${value#-}" || {
+                        SWAPZ_QUIET_PARSE_DETAIL=invalid-error-field
+                        return 1
+                    }
                 else
-                    swapz_quiet_valid_counter "$value" || return 1
+                    swapz_quiet_valid_counter "$value" || {
+                        SWAPZ_QUIET_PARSE_DETAIL=invalid-error-field
+                        return 1
+                    }
                 fi ;;
-            *) swapz_quiet_valid_counter "$value" || return 1 ;;
+            *) swapz_quiet_valid_counter "$value" || {
+                SWAPZ_QUIET_PARSE_DETAIL="invalid-counter-field:key=${key}"
+                return 1
+            } ;;
         esac
         parsed_values["$key"]="$value"
     done
@@ -89,11 +139,18 @@ swapz_quiet_parse_status() {
             upper_write_completed_ok upper_write_completed_err endio_write_forced_err; do
         [[ -n ${seen_fields[$required_field]+present} ]] || {
             SWAPZ_QUIET_PARSE_REASON="missing-status-field:$required_field"
+            SWAPZ_QUIET_PARSE_DETAIL="missing-required-field:key=${required_field}"
             return 1
         }
     done
-    [[ ${fields[-1]} == "endio_write_forced_err=${parsed_values[endio_write_forced_err]}" ]] &&
-        [[ ${parsed_values[failed]} == 0 || ${parsed_values[failed]} == 1 ]] || return 1
+    [[ ${fields[-1]} == "endio_write_forced_err=${parsed_values[endio_write_forced_err]}" ]] || {
+        SWAPZ_QUIET_PARSE_DETAIL=terminal-field-mismatch
+        return 1
+    }
+    [[ ${parsed_values[failed]} == 0 || ${parsed_values[failed]} == 1 ]] || {
+        SWAPZ_QUIET_PARSE_DETAIL=invalid-failed-flag
+        return 1
+    }
 }
 
 swapz_quiet_observe_identity() {
@@ -159,6 +216,10 @@ swapz_quiet_unavailable() {
     SWAPZ_QUIET_LAST_FAILURE="phase=$phase reason=$reason attempts=$attempts/$budget retained_status=$retained_status retained_evidence=$retained_evidence"
     [[ -n $SWAPZ_QUIET_FAILURE_DETAIL ]] &&
         SWAPZ_QUIET_LAST_FAILURE+=" detail=$SWAPZ_QUIET_FAILURE_DETAIL"
+    if [[ ($phase == initial-status || $phase == final-status) &&
+          -n $SWAPZ_QUIET_PARSE_DETAIL ]]; then
+        SWAPZ_QUIET_LAST_FAILURE+=" parse_detail=$SWAPZ_QUIET_PARSE_DETAIL"
+    fi
     printf 'UNAVAILABLE: quiet-lower-io %s published=none\n' "$SWAPZ_QUIET_LAST_FAILURE" >&2
     return 1
 }
@@ -168,7 +229,7 @@ swapz_capture_quiescent_io() {
     local interval_seconds="$4" initial_status final_status initial_identity
     local final_identity baseline_identity="" baseline_header="" baseline_width=0
     local initial_header="" attempt counter_key counter_index sleep_rc mismatch_reason
-    local target_work_active
+    local target_work_active active_counter_key
     local -a initial_lower=() final_lower=() previous_final_lower=()
     local -A initial_values=() final_values=() previous_final_values=()
     local -a monotonic_status_fields=(logical_write logical_read physical_write
@@ -199,6 +260,8 @@ swapz_capture_quiescent_io() {
         return 1
     }
     for ((attempt=1; attempt<=maximum_attempts; ++attempt)); do
+        active_counter_key=""
+        SWAPZ_QUIET_FAILURE_DETAIL=""
         SWAPZ_QUIET_RETAINED_STATUS_BEFORE=""
         SWAPZ_QUIET_RETAINED_STATUS_AFTER=""
         SWAPZ_QUIET_RETAINED_LOWER_BEFORE=()
@@ -318,6 +381,7 @@ swapz_capture_quiescent_io() {
                     for counter_key in "${active_status_fields[@]}"; do
                         if (( initial_values[$counter_key] != 0 )); then
                             target_work_active=1
+                            active_counter_key="$counter_key"
                             break
                         fi
                     done
@@ -334,6 +398,9 @@ swapz_capture_quiescent_io() {
                         SWAPZ_QUIET_RETAINED_IDENTITY_AFTER=""
                         return 0
                     fi
+                    # Identify the outstanding work class without exposing
+                    # its counter value or any raw status text.
+                    SWAPZ_QUIET_FAILURE_DETAIL="active_field=$active_counter_key"
                 fi
             fi
         fi

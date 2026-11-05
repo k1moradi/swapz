@@ -26,7 +26,13 @@ end = source.index("static int swapz_message", start)
 status_source = source[start:end]
 fields = re.findall(r"([A-Za-z0-9_]+)=%(?:[0-9.*]*)(?:[A-Za-z]+)", status_source)
 fields = [field for field in fields if field != "status_snapshot_error"]
+# Include fixed numeric key/value tokens as well as printf-backed fields.
+# The production INFO schema has a compatibility token emitted as a literal.
+literal_fields = re.findall(r"([A-Za-z0-9_]+)=([0-9]+)", status_source)
 tokens = []
+for field, value in literal_fields:
+    if field not in fields and field != "status_snapshot_error":
+        tokens.append(f"{field}={value}")
 for field in fields:
     if field == "version":
         tokens.extend(("version=1", "mode=alpha-live-gc"))
@@ -35,7 +41,8 @@ for field in fields:
 print("0 32768 swapz " + " ".join(tokens))
 PY
 )" || fail 'cannot construct production status fixture'
-[[ $(wc -w <<< "$EXPECTED_STATUS") == 476 &&
+LONG_FIELD="$(printf '%065d' 0 | tr '0' 'a')"
+[[ $(wc -w <<< "$EXPECTED_STATUS") == 477 &&
    $EXPECTED_STATUS == *' gc_pages=0 '* &&
    $EXPECTED_STATUS == *' prep_slots_in_use=0 '* &&
    $EXPECTED_STATUS == *' submitter_prepare_active=0 '* &&
@@ -149,8 +156,10 @@ dmsetup() {
         internal_truncated_status) status_text="${status_text/ gc_pages=0 / }" ;;
         duplicate_status) status_text="${status_text/ gc_pages=0 / physical_read=0 }" ;;
         malformed_status) status_text="${status_text/ endio_write_forced_err=0/ opaque=invalid endio_write_forced_err=0}" ;;
+        malformed_token) status_text="${status_text/ gc_pages=0 / malformed-token }" ;;
+        long_field_key) status_text="${status_text/ gc_pages=0 / ${LONG_FIELD}=0 }" ;;
         snapshot_error) status_text='0 32768 swapz status_snapshot_error=-12' ;;
-        wrong_target) status_text="${status_text/swapz version=/linear version=}" ;;
+        wrong_target) status_text="${status_text/32768 swapz /32768 linear }" ;;
         newline_status) status_text="$status_text"$'\n''0 32768 swapz physical_read=0' ;;
         noncanonical_failure) status_text="${status_text/failed=0/failed=01}" ;;
         negative_read_fault_calls) status_text="${status_text/read_fault_calls=0/read_fault_calls=-1}" ;;
@@ -178,7 +187,8 @@ expect_success() {
     if ! swapz_capture_quiescent_io owned-test-mapper "$STAT" 3 0 > "$TMP/out" 2> "$TMP/err"; then
         fail "$mode unexpectedly unavailable: $(command cat "$TMP/err")"
     fi
-    [[ ! -s "$TMP/out" && ! -s "$TMP/err" ]] || fail "$mode logged on success"
+    [[ ! -s "$TMP/out" && ! -s "$TMP/err" ]] ||
+        fail "$mode logged on success: stdout=$(command cat "$TMP/out") stderr=$(command cat "$TMP/err")"
     [[ $SWAPZ_QUIET_ATTEMPTS == "$expected_attempts" &&
        ${#SWAPZ_QUIET_LOWER[@]} == "$expected_width" &&
        $SWAPZ_QUIET_STATUS == *'endio_write_forced_err=0' &&
@@ -188,6 +198,8 @@ expect_success() {
 }
 expect_unavailable() {
     local phase="$1" reason="$2" retained="$3" attempts="${4:-3}"
+    local parse_detail="${5:-}"
+    local failure_detail="${6:-}"
     if swapz_capture_quiescent_io owned-test-mapper "$STAT" "$attempts" 0 > "$TMP/out" 2> "$TMP/err"; then
         fail "$mode false quiescence"
     fi
@@ -198,6 +210,14 @@ expect_unavailable() {
     grep -Fq "retained_status=$retained " "$TMP/err" &&
         grep -Fq 'published=none' "$TMP/err" ||
         fail "$mode wrong retained evidence: $(command cat "$TMP/err")"
+    if [[ -n $parse_detail ]]; then
+        grep -Fq "parse_detail=$parse_detail" "$TMP/err" ||
+            fail "$mode wrong parser detail: $(command cat "$TMP/err")"
+    fi
+    if [[ -n $failure_detail ]]; then
+        grep -Fq "detail=$failure_detail" "$TMP/err" ||
+            fail "$mode wrong failure detail: $(command cat "$TMP/err")"
+    fi
     [[ -z $SWAPZ_QUIET_STATUS && ${#SWAPZ_QUIET_LOWER[@]} == 0 &&
        $SWAPZ_QUIET_ATTEMPTS == 0 &&
        $SWAPZ_QUIET_LAST_FAILURE == *"reason=$reason"* ]] ||
@@ -227,7 +247,7 @@ expect_success 2 17
 reset_case lower_inflight_once
 expect_success 2 17
 reset_case target_active
-expect_unavailable attempt-budget exhausted:active-target-work initial+final
+expect_unavailable attempt-budget exhausted:active-target-work initial+final 3 "" active_field=completion_active
 reset_case lower_inflight
 printf '%s\n' '3 0 24 0 0 0 0 0 1 0 0 0 0 0 0 0 0' > "$STAT"
 expect_unavailable attempt-budget exhausted:lower-io-in-flight initial+final
@@ -249,19 +269,24 @@ expect_unavailable final-lower lower-counter-width-changed initial+final
 reset_case width_change_later
 expect_unavailable initial-lower lower-counter-width-changed initial
 reset_case truncated_status
-expect_unavailable initial-status incomplete-status none
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=477:actual=476'
 reset_case partial_status
-expect_unavailable initial-status incomplete-status none
+expect_unavailable initial-status incomplete-status none 3 'field-count:expected=477:actual=6'
 reset_case internal_truncated_status
 expect_unavailable initial-status incomplete-status none
 reset_case duplicate_status
-expect_unavailable initial-status malformed-status none
+expect_unavailable initial-status malformed-status none 3 'duplicate-or-reserved-field:key=physical_read'
+reset_case malformed_token
+expect_unavailable initial-status malformed-status none 3 'invalid-field-token:index='
+reset_case long_field_key
+expect_unavailable initial-status malformed-status none 3 'field-key-too-long:length=65'
+! grep -Fq "$LONG_FIELD" "$TMP/err" || fail 'oversized status key leaked into diagnostics'
 reset_case malformed_status
 expect_unavailable initial-status malformed-status none
 reset_case snapshot_error
-expect_unavailable initial-status status-snapshot-error none
+expect_unavailable initial-status status-snapshot-error none 3 status-snapshot-error-field
 reset_case wrong_target
-expect_unavailable initial-status malformed-status none
+expect_unavailable initial-status malformed-status none 3 target-name-mismatch
 reset_case newline_status
 expect_unavailable initial-status malformed-status none
 reset_case leading_zero_status
