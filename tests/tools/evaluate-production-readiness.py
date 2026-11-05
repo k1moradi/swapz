@@ -2008,6 +2008,154 @@ def validate_cold_boot_evidence(
     return issues
 
 
+def validate_cold_boot_failure_evidence(
+        cold_boot: dict[str, str],
+        source_sha: str,
+        target: tuple[str, int] | None,
+        report_artifacts: dict[str, Any] | None,
+        owner_kernel_release: Any,
+        cold_boot_arm: dict[str, str] | None = None) -> list[str]:
+    """Authenticate a complete exact-source retained cold-boot FAIL."""
+    issues: list[str] = []
+
+    def reject(message: str) -> None:
+        if message not in issues:
+            issues.append(message)
+
+    if set(cold_boot) != COLD_BOOT_REPORT_KEYS:
+        reject(
+            "persistent cold-boot failure report field set is non-canonical: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            f"required_field_count={len(COLD_BOOT_REPORT_KEYS)} "
+            f"observed_field_count={len(cold_boot)} "
+            "verdict=BLOCKED reason=malformed_failure_report")
+        return issues
+    if cold_boot["schema"] != "swapz-primary-cold-boot-v1":
+        reject(
+            "persistent cold-boot failure report schema is invalid: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            "verdict=BLOCKED reason=malformed_failure_report")
+    if cold_boot["status"] != "FAIL" or cold_boot["cold_boot_observed"] != "yes":
+        reject(
+            "persistent cold-boot failure report is not an observed FAIL: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            "required_status=FAIL required_cold_boot_observed=yes "
+            f"observed_status={cold_boot['status'] if cold_boot['status'] in ('FAIL', 'PASS', 'INCOMPLETE') else 'invalid'} "
+            "verdict=BLOCKED reason=nonterminal_or_inconclusive_failure")
+    if (
+            not BOOT_ID_RE.fullmatch(cold_boot["boot_id"]) or
+            not BOOT_ID_RE.fullmatch(cold_boot["armed_boot_id"]) or
+            cold_boot["boot_id"] == cold_boot["armed_boot_id"]):
+        reject(
+            "persistent cold-boot failure boot identity is invalid: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            "verdict=BLOCKED reason=invalid_boot_identity")
+    if cold_boot_arm is None:
+        reject(
+            "persistent cold-boot failure report has no validated arm record: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            "verdict=BLOCKED reason=missing_arm_authentication")
+    else:
+        if cold_boot["armed_boot_id"] != cold_boot_arm.get("arm_boot_id"):
+            reject(
+                "persistent cold-boot failure report is not bound to the arm boot: "
+                "evidence_class=persistent_cold_boot "
+                "first_failed_phase=failure_authentication "
+                "verdict=BLOCKED reason=arm_boot_mismatch")
+        for observed_key, armed_key in (
+                ("selected_partuuid", "expected_partuuid"),
+                ("selected_target_size_bytes", "expected_target_size_bytes"),
+                ("selected_target_model", "expected_target_model"),
+                ("selected_target_serial", "expected_target_serial"),
+                ("selected_target_wwn", "expected_target_wwn"),
+                ("selected_target_transport", "expected_target_transport"),
+                ("selected_target_removable", "expected_target_removable")):
+            if cold_boot[observed_key] != cold_boot_arm.get(armed_key):
+                reject(
+                    "persistent cold-boot failure target differs from arm record: "
+                    "evidence_class=persistent_cold_boot "
+                    "first_failed_phase=failure_authentication "
+                    "verdict=BLOCKED reason=wrong_target_identity")
+                break
+
+    if (
+            not isinstance(owner_kernel_release, str) or
+            cold_boot["kernel_release"] != owner_kernel_release):
+        reject(
+            "persistent cold-boot failure kernel differs from owner qualification: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            "verdict=BLOCKED reason=wrong_kernel_identity")
+
+    selected_size = _bounded_decimal_text(cold_boot["selected_target_size_bytes"])
+    if (
+            target is None or selected_size is None or
+            cold_boot["selected_partuuid"] != target[0] or
+            selected_size != target[1] or
+            not MAJOR_MINOR_RE.fullmatch(
+                cold_boot["selected_target_major_minor"]) or
+            cold_boot["selected_target_removable"] != "1" or
+            not re.fullmatch(
+                r"[A-Za-z0-9._-]+", cold_boot["selected_target_parent"]) or
+            (cold_boot["selected_target_serial"] == "unavailable" and
+             cold_boot["selected_target_wwn"] == "unavailable")):
+        reject(
+            "persistent cold-boot failure target identity is not exact: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            f"required_target={target if target is not None else 'invalid'} "
+            "observed_target=invalid_or_mismatched "
+            "verdict=BLOCKED reason=wrong_target_identity")
+
+    module_hash = (
+        report_artifacts.get("module_sha256")
+        if isinstance(report_artifacts, dict) else None)
+    observed_source = cold_boot["loaded_module_build_source_sha"]
+    observed_module = cold_boot["module_artifact_sha256"]
+    if (
+            not isinstance(module_hash, str) or
+            not SHA256_RE.fullmatch(module_hash) or
+            cold_boot["module_artifact_sha256"] != module_hash or
+            cold_boot["module_build_source_sha"] != source_sha or
+            cold_boot["module_build_source_clean"] != "1" or
+            observed_source != source_sha or
+            cold_boot["loaded_module_build_source_clean"] != "1"):
+        reject(
+            "persistent cold-boot failure source/artifact identity is not exact: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            f"required_source_sha={source_sha} "
+            f"observed_source_sha={observed_source if _valid_source(observed_source) else 'invalid'} "
+            f"required_module_sha256={module_hash if isinstance(module_hash, str) and SHA256_RE.fullmatch(module_hash) else 'invalid'} "
+            f"observed_module_sha256={observed_module if SHA256_RE.fullmatch(observed_module) else 'invalid'} "
+            "verdict=BLOCKED reason=wrong_source_or_artifact_identity")
+
+    failure_reasons = cold_boot["failure_reasons"]
+    if (
+            not failure_reasons or
+            re.fullmatch(r"[a-z0-9_]+(?:,[a-z0-9_]+)*",
+                         failure_reasons) is None):
+        reject(
+            "persistent cold-boot failure reason set is missing or malformed: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            "required_failure_reason_count>=1 observed_failure_reason_count=0_or_invalid "
+            "verdict=BLOCKED reason=unauthenticated_failure_disposition")
+    if cold_boot["incomplete_reasons"]:
+        reject(
+            "persistent cold-boot failure report is also incomplete: "
+            "evidence_class=persistent_cold_boot "
+            "first_failed_phase=failure_authentication "
+            "required_incomplete_reason_count=0 observed_incomplete_reason_count>=1 "
+            "verdict=BLOCKED reason=inconclusive_failure_evidence")
+    return issues
+
+
 def evaluate_release(
         source_sha: str,
         test_results: dict[str, Any],
@@ -2744,7 +2892,40 @@ def evaluate_release(
                 reboot.get("status") == "FAIL" and
                 reboot.get("observed") is True and
                 reboot.get("overall") == "FAIL"):
-            cold_boot_observed = "FAIL"
+            if cold_boot_evidence is None or cold_boot_evidence_raw is None:
+                cold_boot_blockers.append(
+                    "owner_observed_reboot: persistent cold-boot failure "
+                    "evidence is missing; first_failed_phase="
+                    "failure_authentication verdict=BLOCKED")
+            elif reboot.get("evidence_sha256") != sha256_bytes(
+                    cold_boot_evidence_raw):
+                cold_boot_blockers.append(
+                    "owner_observed_reboot: persistent cold-boot failure "
+                    "evidence digest mismatch; first_failed_phase="
+                    "failure_authentication verdict=BLOCKED")
+            elif not harness_armed or bound_cold_boot_arm_evidence is None:
+                cold_boot_blockers.append(
+                    "owner_observed_reboot: persistent cold-boot failure "
+                    "evidence has no validated arm record; first_failed_phase="
+                    "failure_authentication verdict=BLOCKED")
+            else:
+                try:
+                    bound_cold_boot_evidence = _bound_env_record(
+                        cold_boot_evidence, cold_boot_evidence_raw,
+                        "cold-boot failure evidence")
+                except EvidenceError as exc:
+                    cold_boot_blockers.append(
+                        "owner_observed_reboot: " + str(exc))
+                else:
+                    failure_issues = validate_cold_boot_failure_evidence(
+                        bound_cold_boot_evidence, source_sha, target,
+                        report_artifacts, owner_kernel_release,
+                        bound_cold_boot_arm_evidence)
+                    for issue in failure_issues:
+                        cold_boot_blockers.append(
+                            "owner_observed_reboot: " + issue)
+                    if not failure_issues:
+                        cold_boot_observed = "FAIL"
 
     # Only a failed execution bound to this exact source is a FAIL.
     # Missing, malformed or previous-source evidence remains BLOCKED.

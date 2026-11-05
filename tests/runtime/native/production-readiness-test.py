@@ -852,7 +852,19 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["release_verdict"], "PASS")
 
         reboot.update(status="FAIL", observed=True, overall="FAIL")
-        result = evaluate(report, evidence, policy)
+        missing_failure = evaluate(report, evidence, policy)
+        self.assertEqual(missing_failure["COLD_BOOT_OBSERVED"], "NO")
+        self.assertEqual(missing_failure["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "persistent cold-boot failure evidence is missing" in blocker
+            for blocker in missing_failure["cold_boot_blockers"]))
+
+        failure_raw = cold_boot_evidence_raw(
+            status="FAIL", swapz_error="5",
+            failure_reasons="swapz_target_error")
+        reboot["evidence_sha256"] = hashlib.sha256(failure_raw).hexdigest()
+        result = evaluate(
+            report, evidence, policy, cold_boot_raw=failure_raw)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "FAIL")
@@ -864,13 +876,54 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         evidence = current_evidence(encoded(report), encoded(policy))
         evidence["release_evidence"]["installed_artifact_identity"][
             "installed"] = False
+        failure_raw = cold_boot_evidence_raw(
+            status="FAIL", swapz_error="5",
+            failure_reasons="swapz_target_error")
         evidence["release_evidence"]["owner_observed_reboot"].update(
-            status="FAIL", observed=True, overall="FAIL")
-        result = evaluate(report, evidence, policy)
+            status="FAIL", observed=True, overall="FAIL",
+            evidence_sha256=hashlib.sha256(failure_raw).hexdigest())
+        result = evaluate(
+            report, evidence, policy, cold_boot_raw=failure_raw)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS")
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "FAIL")
         self.assertEqual(result["release_verdict"], "FAIL")
+
+    def test_owner_reboot_failure_requires_complete_exact_evidence(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        for label, overrides, expected_reason in (
+                ("incomplete", {
+                    "status": "INCOMPLETE",
+                    "failure_reasons": "",
+                    "incomplete_reasons": "kernel_log_unavailable",
+                }, "not an observed FAIL"),
+                ("wrong-source", {
+                    "status": "FAIL",
+                    "loaded_module_build_source_sha": "b" * 40,
+                    "failure_reasons": "loaded_module_source_mismatch",
+                }, "source/artifact identity is not exact"),
+                ("mixed-incomplete", {
+                    "status": "FAIL",
+                    "swapz_error": "5",
+                    "failure_reasons": "swapz_target_error",
+                    "incomplete_reasons": "kernel_log_unavailable",
+                }, "failure report is also incomplete")):
+            with self.subTest(label=label):
+                failure_raw = cold_boot_evidence_raw(**overrides)
+                evidence = current_evidence(report_raw, policy_raw)
+                evidence["release_evidence"]["owner_observed_reboot"].update(
+                    status="FAIL", observed=True, overall="FAIL",
+                    evidence_sha256=hashlib.sha256(failure_raw).hexdigest())
+                result = evaluate(
+                    report, evidence, policy, cold_boot_raw=failure_raw)
+                self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertTrue(any(
+                    expected_reason in blocker
+                    for blocker in result["cold_boot_blockers"]))
 
     def test_owner_reboot_pass_requires_persistent_cold_boot_evidence(self):
         report = owner_report()

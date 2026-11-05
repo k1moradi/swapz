@@ -6988,10 +6988,17 @@ Missing, malformed, digest-mismatched,
 source/target-mismatched or non-PASS retained boot evidence keeps
 `COLD_BOOT_OBSERVED=NO` and the final release BLOCKED; it does not erase an
 otherwise valid pre-reboot code/deployment readiness result. A reboot summary
-can drive PASS or FAIL only when it is current, exact-source/target bound,
-marked observed, carries a strict UTC `observed_at_utc` timestamp, and its
-`overall` disposition matches the summary status. A structurally incomplete
-reboot summary remains NO/BLOCKED rather than fabricating an observation.
+can drive PASS only when it is current, exact-source/target bound, marked
+observed, carries a strict UTC `observed_at_utc` timestamp, its `overall`
+disposition matches PASS, and it SHA-256 binds the separately validated retained
+PASS report. A reboot FAIL summary likewise cannot establish release FAIL by
+itself. It must bind a retained `swapz-primary-cold-boot-v1` FAIL report from a
+distinct observed boot, the validated arm record, exact current kernel,
+source/module artifact and authorized target, at least one canonical failure
+reason, and no incomplete reason. Missing, malformed, stale, wrong-source,
+wrong-artifact, wrong-target or mixed FAIL/INCOMPLETE reboot evidence remains
+NO/BLOCKED. A structurally incomplete reboot summary remains NO/BLOCKED rather
+than fabricating an observation.
 Owner `test_results.json` ingestion is strict: a qualifying PASS stage list
 must contain exactly the five canonical stages in order, each with
 `status: PASS` and an integer `exit_code: 0`; duplicate, reordered, missing,
