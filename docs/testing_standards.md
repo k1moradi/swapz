@@ -502,7 +502,10 @@ Used bytes must equal the dedicated cgroup's swap charge. Any difference is
 BLOCKED because traffic attribution or mapper ownership is ambiguous.
 The byte oracle expands the run/worker/round seed into position-distinct 4 KiB
 pages; swap-in checks every byte, counts every corrupt page and byte, and caps
-only the diagnostic samples. The cgroup's OOM event keys must be present and parseable.
+only the diagnostic samples. Rootless regression must corrupt multiple bytes
+in a page beyond that sample cap and prove full byte-mismatch accounting and a
+nonzero result, even when a terminal record is emitted. The cgroup's OOM event
+keys must be present and parseable.
 An `ORACLE_VERIFIED` record is terminal only after complete byte readback
 and successful anonymous-mapping close. Rootless terminal fixtures must assert
 exactly one ordered WAITING/FILLED/VERIFIED sequence after clean readback,

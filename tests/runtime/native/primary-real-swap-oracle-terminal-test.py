@@ -36,8 +36,9 @@ class TerminalEvidenceContracts(unittest.TestCase):
             "real-swap admission rejects a non-executable source oracle")
 
     def run_fixture(self, *, short_read=False, interrupted=False, corrupt=False,
-                    corrupt_pages=(), page_count=2, read_errno=None,
-                    report_errno=None, close_fails=False, closed_output_at=None):
+                    corrupt_pages=(), corrupt_offsets=(), page_count=2,
+                    read_errno=None, report_errno=None, close_fails=False,
+                    closed_output_at=None):
         class AnonymousMemoryFixture:
             def __init__(self):
                 self.contents = bytearray(page_count * oracle.PAGE_BYTES)
@@ -76,6 +77,8 @@ class TerminalEvidenceContracts(unittest.TestCase):
                     allocation.contents[9] ^= 1
                 for page_index in corrupt_pages:
                     allocation.contents[page_index * oracle.PAGE_BYTES + 9] ^= 1
+                for byte_offset in corrupt_offsets:
+                    allocation.contents[byte_offset] ^= 1
             return command
 
         original_emit = oracle._emit
@@ -205,6 +208,53 @@ class TerminalEvidenceContracts(unittest.TestCase):
             "expected_page_mismatches=0 observed_page_mismatches=17", stderr)
         self.assertIn(
             "expected_byte_mismatches=0 observed_byte_mismatches=17", stderr)
+        self.assertNotIn("ab" * 16, stderr)
+
+    def test_multi_byte_tail_corruption_is_not_hidden_by_sample_cap(self):
+        sample_cap = qualify.MAX_ORACLE_MISMATCH_SAMPLES
+        page_count = sample_cap + 2
+        corrupt_offsets = [
+            page_index * oracle.PAGE_BYTES + 9
+            for page_index in range(page_count)
+        ]
+        corrupt_offsets.extend((
+            (page_count - 1) * oracle.PAGE_BYTES + 10,
+            page_count * oracle.PAGE_BYTES - 1,
+        ))
+        status, stdout, stderr, allocation = self.run_fixture(
+            page_count=page_count, corrupt_offsets=corrupt_offsets)
+        self.assertEqual(status, 1)
+        self.assertTrue(allocation.closed)
+
+        terminal_lines = [line for line in stdout.splitlines()
+                          if line.startswith("ORACLE_VERIFIED=")]
+        self.assertEqual(len(terminal_lines), 1)
+        verified = json.loads(terminal_lines[0].split("=", 1)[1])
+        self.assertEqual(verified["verified_pages"], page_count)
+        self.assertEqual(
+            verified["verified_bytes"], page_count * oracle.PAGE_BYTES)
+        self.assertEqual(verified["mismatched_pages"], page_count)
+        self.assertEqual(verified["mismatches"], page_count + 2)
+        self.assertEqual(
+            verified["mismatch_samples"],
+            [{"page": page_index, "byte": 9}
+             for page_index in range(sample_cap)])
+        self.assertNotEqual(verified["digest"], verified["expected_digest"])
+        qualify.require_oracle_verification_details([verified])
+
+        self.assertIn(
+            f"phase=verify verified_pages={page_count}/{page_count}", stderr)
+        self.assertIn(
+            f"verified_bytes={page_count * oracle.PAGE_BYTES}/"
+            f"{page_count * oracle.PAGE_BYTES}", stderr)
+        self.assertIn(
+            f"expected_page_mismatches=0 observed_page_mismatches={page_count}",
+            stderr)
+        self.assertIn(
+            f"expected_byte_mismatches=0 observed_byte_mismatches={page_count + 2}",
+            stderr)
+        self.assertIn(
+            "error=byte_mismatch errno=none cleanup_complete=true", stderr)
         self.assertNotIn("ab" * 16, stderr)
 
     def test_interrupt_before_fill_returns_bounded_failure_without_allocating(self):
