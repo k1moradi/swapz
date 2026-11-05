@@ -2025,11 +2025,17 @@ operation and strerror-shaped tail. Path-, ID-, or arbitrary-text-shaped tails
 remain excluded from published diagnostics. An explicit
 `FAIL_PRIMARY_NULLBLK_LIFECYCLE:` marker takes precedence over a
 missing overall lifecycle PASS record: classify it as FAIL and use the named
-phase plus only the sanitized coordinator detail, rather than the generic
-a validated `PRIMARY_PREPARE=FAILED phase=... errno=... error=...` record is
-itself sufficient for the sanitized prepare sub-check, even when the helper
+phase plus only the sanitized coordinator detail. A validated
+`PRIMARY_PREPARE=FAILED phase=... errno=... error=...` record is itself
+sufficient for the sanitized prepare sub-check, even when the helper
 intentionally omits its captured command-wrapper line; parser regressions must
-cover both output shapes. Each owned-null_blk lifecycle rehearsal must allocate
+cover both output shapes. If an explicit lifecycle FAIL marker is paired with
+child exit 0, the report must still classify the stage as FAIL, preserve
+`child_exit_code: 0`, and append
+`expected=nonzero observed_exit=0 evidence=recognized-failure-marker` to the
+sanitized diagnostic. Its regression must cover both the matching nonzero
+child exit and the contradictory zero exit. Each owned-null_blk lifecycle
+rehearsal must allocate
 a fresh root-owned evidence directory bound to the same
 random ownership token used for its null_blk config. Clean teardown may remove
 only that exact token-bound directory after the holder/mount/swap identity

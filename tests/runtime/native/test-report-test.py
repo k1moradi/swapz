@@ -3922,10 +3922,21 @@ class ReportContract(unittest.TestCase):
                 self.assertEqual(report["stages"][-1]["status"], "FAIL")
                 self.assertEqual(report["stages"][-1]["failed_phase"],
                                  "owned RAM primary lifecycle start")
-                self.assertEqual(
-                    report["stages"][-1]["diagnostic"],
+                expected_diagnostic = (
                     "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator start: "
                     "No such file or directory")
+                if child_exit == 0:
+                    expected_diagnostic += (
+                        "; expected=nonzero observed_exit=0 "
+                        "evidence=recognized-failure-marker")
+                    self.assertEqual(
+                        report["stages"][-1]["child_exit_code"], 0)
+                else:
+                    self.assertNotIn("child_exit_code",
+                                     report["stages"][-1])
+                self.assertEqual(
+                    report["stages"][-1]["diagnostic"],
+                    expected_diagnostic)
         finally:
             runner.subprocess.Popen = original_popen
 
