@@ -23,6 +23,8 @@
  */
 static char fixture_proc_root[PATH_MAX];
 static int fixture_mount_open_error;
+static int fixture_task_mount_open_error;
+static int fixture_task_mount_open_error_injected;
 static int fixture_self_mount_open_error;
 static int fixture_inventory_error;
 static int fixture_inventory_readdir_error;
@@ -31,6 +33,9 @@ static int fixture_task_readdir_error;
 static int fixture_task_seen_thread;
 static int fixture_task_namespace_reuse_on_stat;
 static int fixture_task_namespace_reuse_injected;
+static unsigned int fixture_coordinator_task_mountinfo_opens;
+static unsigned int fixture_foreign_task_mountinfo_opens;
+static int fixture_coordinator_task_mount_fd = -1;
 static DIR *fixture_proc_directory;
 static DIR *fixture_task_directory;
 static int fixture_same_namespace_mount_after_self_snapshot;
@@ -71,6 +76,29 @@ static const char *fixture_path(const char *path, char converted[PATH_MAX])
 	return converted;
 }
 
+static int fixture_path_has_suffix(const char *path, const char *suffix)
+{
+	size_t length = strlen(path);
+	size_t suffix_length = strlen(suffix);
+
+	return length >= suffix_length &&
+	       !strcmp(path + length - suffix_length, suffix) &&
+	       (length == suffix_length ||
+		path[length - suffix_length - 1U] == '/');
+}
+
+static void fixture_track_task_mountinfo_open(const char *path, int fd)
+{
+	if (fd < 0)
+		return;
+	if (fixture_path_has_suffix(path, "self/task/65536/mountinfo")) {
+		++fixture_coordinator_task_mountinfo_opens;
+		fixture_coordinator_task_mount_fd = fd;
+	}
+	if (fixture_path_has_suffix(path, "3031/task/3032/mountinfo"))
+		++fixture_foreign_task_mountinfo_opens;
+}
+
 static int fixture_other_mountinfo(const char *path)
 {
 	static const char *const suffixes[] = {
@@ -105,6 +133,12 @@ static int fixture_open(const char *path, int flags, ...)
 		mode = (mode_t)va_arg(arguments, int);
 		va_end(arguments);
 	}
+	if (fixture_path_has_suffix(path, "3031/task/3032/mountinfo") &&
+	    fixture_task_mount_open_error) {
+		fixture_task_mount_open_error_injected = 1;
+		errno = fixture_task_mount_open_error;
+		return -1;
+	}
 	if (fixture_other_mountinfo(path) && fixture_mount_open_error) {
 		errno = fixture_mount_open_error;
 		return -1;
@@ -120,6 +154,7 @@ static int fixture_open(const char *path, int flags, ...)
 			strstr(path, "/3031/mountinfo") != NULL;
 		fixture_peer_mountinfo_read_eof = 0;
 	}
+	fixture_track_task_mountinfo_open(path, fd);
 	return fd;
 }
 
@@ -138,6 +173,12 @@ static int fixture_openat(int directory_fd, const char *path, int flags, ...)
 		mode = (mode_t)va_arg(arguments, int);
 		va_end(arguments);
 	}
+	if (fixture_path_has_suffix(path, "3031/task/3032/mountinfo") &&
+	    fixture_task_mount_open_error) {
+		fixture_task_mount_open_error_injected = 1;
+		errno = fixture_task_mount_open_error;
+		return -1;
+	}
 	if (fixture_other_mountinfo(path) && fixture_mount_open_error) {
 		errno = fixture_mount_open_error;
 		return -1;
@@ -153,6 +194,7 @@ static int fixture_openat(int directory_fd, const char *path, int flags, ...)
 			strstr(path, "/3031/mountinfo") != NULL;
 		fixture_peer_mountinfo_read_eof = 0;
 	}
+	fixture_track_task_mountinfo_open(path, fd);
 	return fd;
 }
 
@@ -255,6 +297,7 @@ static struct dirent *fixture_readdir(DIR *directory)
 static int fixture_close(int fd)
 {
 	int is_remote = fd == fixture_mount_fd;
+	int is_coordinator_task = fd == fixture_coordinator_task_mount_fd;
 	int peer_leader_read_complete =
 		is_remote && fixture_mount_fd_is_peer_leader &&
 		fixture_peer_mountinfo_read_eof;
@@ -268,6 +311,8 @@ static int fixture_close(int fd)
 	result = close(fd);
 	if (result < 0)
 		return result;
+	if (is_coordinator_task)
+		fixture_coordinator_task_mount_fd = -1;
 	if (is_remote && fixture_mount_close_error) {
 		errno = fixture_mount_close_error;
 		return -1;
@@ -283,6 +328,12 @@ static FILE *fixture_fopen(const char *path, const char *mode)
 {
 	char converted[PATH_MAX];
 
+	if (fixture_path_has_suffix(path, "3031/task/3032/mountinfo") &&
+	    fixture_task_mount_open_error) {
+		fixture_task_mount_open_error_injected = 1;
+		errno = fixture_task_mount_open_error;
+		return NULL;
+	}
 	if (fixture_other_mountinfo(path) && fixture_mount_open_error) {
 		errno = fixture_mount_open_error;
 		return NULL;
@@ -519,6 +570,8 @@ static void fixture_share_mount_namespace(void)
 static void fixture_reset(void)
 {
 	fixture_mount_open_error = 0;
+	fixture_task_mount_open_error = 0;
+	fixture_task_mount_open_error_injected = 0;
 	fixture_self_mount_open_error = 0;
 	fixture_inventory_error = 0;
 	fixture_inventory_readdir_error = 0;
@@ -527,6 +580,9 @@ static void fixture_reset(void)
 	fixture_task_seen_thread = 0;
 	fixture_task_namespace_reuse_on_stat = 0;
 	fixture_task_namespace_reuse_injected = 0;
+	fixture_coordinator_task_mountinfo_opens = 0U;
+	fixture_foreign_task_mountinfo_opens = 0U;
+	fixture_coordinator_task_mount_fd = -1;
 	fixture_proc_directory = NULL;
 	fixture_task_directory = NULL;
 	fixture_same_namespace_mount_after_self_snapshot = 0;
@@ -604,8 +660,89 @@ static void expect_mount_identity_admission(
 		++fixture_failures;
 	}
 	if (fixture_mount_fd != -1) {
-		fprintf(stderr, "FAIL: %s: gate=%s remote mountinfo descriptor leaked\n",
-			case_name, safety_gate);
+		fprintf(stderr,
+			"FAIL: phase=descriptor-closure case=%s "
+			"expected=closed foreign mountinfo descriptor actual_fd=%d "
+			"observed_errno=%d header_write=NOT_INTERCEPTED "
+			"mapper=NOT_INTERCEPTED mkswap=NOT_INTERCEPTED "
+			"swapon=NOT_INTERCEPTED limitation=reader-only-procfs-snapshot "
+			"safe_action=retain_inactive_target gate=%s\n",
+			case_name, fixture_mount_fd, errno, safety_gate);
+		++fixture_failures;
+		(void)close(fixture_mount_fd);
+		fixture_mount_fd = -1;
+	}
+	if (fixture_coordinator_task_mount_fd != -1) {
+		fprintf(stderr,
+			"FAIL: phase=descriptor-closure case=%s "
+			"expected=closed coordinator non-leader mountinfo descriptor "
+			"actual_fd=%d observed_errno=%d header_write=NOT_INTERCEPTED "
+			"mapper=NOT_INTERCEPTED mkswap=NOT_INTERCEPTED "
+			"swapon=NOT_INTERCEPTED limitation=reader-only-procfs-snapshot "
+			"safe_action=retain_inactive_target gate=%s\n",
+			case_name, fixture_coordinator_task_mount_fd, errno,
+			safety_gate);
+		++fixture_failures;
+		(void)close(fixture_coordinator_task_mount_fd);
+		fixture_coordinator_task_mount_fd = -1;
+	}
+}
+
+static void expect_task_mountinfo_open_count(
+	const char *case_name, unsigned int actual_count,
+	unsigned int expected_count)
+{
+	if (actual_count == expected_count)
+		return;
+	fprintf(stderr,
+		"FAIL: phase=task-mountinfo-attribution case=%s "
+		"expected_opens=%u actual_opens=%u observed_errno=%d "
+		"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+		"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+		"limitation=reader-only-procfs-snapshot "
+		"safe_action=retain_inactive_target\n",
+		case_name, expected_count, actual_count, errno);
+	++fixture_failures;
+}
+
+static void expect_nonleader_bound_refusal(
+	const char *case_name, size_t visible_task_count, size_t total_bytes,
+	unsigned int expected_task_opens)
+{
+	struct swapz_primary_mount_facts facts = {0};
+	struct stat self_namespace_info;
+	int result;
+
+	assert(fixture_stat("/proc/self/ns/mnt", &self_namespace_info) == 0);
+	fixture_foreign_task_mountinfo_opens = 0U;
+	errno = 0;
+	result = swapz_primary_read_nonleader_mount_facts(
+		"/proc/3031/task", "/proc/3031/ns/mnt", "3031", 0,
+		makedev(8U, 0U), &self_namespace_info, 0, &facts,
+		&visible_task_count, &total_bytes);
+	if (result == 0 || errno != EOVERFLOW) {
+		fprintf(stderr,
+			"FAIL: phase=task-bound case=%s expected=EOVERFLOW refusal "
+			"actual_result=%d observed_errno=%d "
+			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+			"limitation=reader-only-procfs-snapshot "
+			"safe_action=retain_inactive_target\n",
+			case_name, result, errno);
+		++fixture_failures;
+	}
+	expect_task_mountinfo_open_count(
+		case_name, fixture_foreign_task_mountinfo_opens,
+		expected_task_opens);
+	if (fixture_mount_fd != -1) {
+		fprintf(stderr,
+			"FAIL: phase=descriptor-closure case=%s "
+			"expected=closed bounded-task mountinfo descriptor actual_fd=%d "
+			"observed_errno=%d header_write=NOT_INTERCEPTED "
+			"mapper=NOT_INTERCEPTED mkswap=NOT_INTERCEPTED "
+			"swapon=NOT_INTERCEPTED limitation=reader-only-procfs-snapshot "
+			"safe_action=retain_inactive_target\n",
+			case_name, fixture_mount_fd, errno);
 		++fixture_failures;
 		(void)close(fixture_mount_fd);
 		fixture_mount_fd = -1;
@@ -1263,11 +1400,18 @@ int main(void)
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
 	expect_mount_admission("unrelated sibling in coordinator non-leader thread",
 			       1, 0);
+	expect_task_mountinfo_open_count(
+		"unrelated sibling in coordinator non-leader thread",
+		fixture_coordinator_task_mountinfo_opens, 1U);
+	fixture_coordinator_task_mountinfo_opens = 0U;
 	fixture_file("self/task/65536/mountinfo",
 		     "36 25 259:10 / / rw - ext4 /thread-root rw\n"
 		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
 	expect_mount_admission("selected partition in coordinator non-leader thread",
 			       0, 0);
+	expect_task_mountinfo_open_count(
+		"selected partition in coordinator non-leader thread",
+		fixture_coordinator_task_mountinfo_opens, 1U);
 	fixture_unlink("self/task/65536/ns/mnt");
 	fixture_unlink("self/task/65536/mountinfo");
 	assert(snprintf(path, sizeof(path), "%s/self/task/65536/ns",
@@ -1318,18 +1462,27 @@ int main(void)
 		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
 	expect_mount_admission("selected partition in non-leader thread namespace",
 			       0, 0);
+	expect_task_mountinfo_open_count(
+		"selected partition in non-leader thread namespace",
+		fixture_foreign_task_mountinfo_opens, 1U);
 	fixture_reset();
 	fixture_file("3031/task/3032/mountinfo",
 		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
 	expect_mount_admission("selected parent in non-leader thread namespace",
 			       0, 0);
+	expect_task_mountinfo_open_count(
+		"selected parent in non-leader thread namespace",
+		fixture_foreign_task_mountinfo_opens, 1U);
 	fixture_reset();
 	fixture_file("3031/task/3032/mountinfo",
 		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
 	expect_mount_admission("unrelated sibling in non-leader thread namespace",
 			       1, 0);
+	expect_task_mountinfo_open_count(
+		"unrelated sibling in non-leader thread namespace",
+		fixture_foreign_task_mountinfo_opens, 1U);
 	fixture_reset();
 	fixture_share_mount_namespace();
 	fixture_file("3031/task/3032/ns/mnt",
@@ -1337,9 +1490,20 @@ int main(void)
 	fixture_file("3031/task/3032/mountinfo",
 		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
-	fixture_mount_open_error = EACCES;
+	fixture_task_mount_open_error = EACCES;
 	expect_mount_admission("unreadable non-leader task mountinfo", 0,
 			       EACCES);
+	if (!fixture_task_mount_open_error_injected) {
+		fprintf(stderr,
+			"FAIL: phase=task-mountinfo-access "
+			"case=unreadable non-leader task mountinfo "
+			"expected=task-specific EACCES refusal actual=injection-not-run "
+			"observed_errno=%d header_write=NOT_INTERCEPTED "
+			"mapper=NOT_INTERCEPTED mkswap=NOT_INTERCEPTED "
+			"swapon=NOT_INTERCEPTED limitation=reader-only-procfs-snapshot "
+			"safe_action=retain_inactive_target\n", errno);
+		++fixture_failures;
+	}
 	fixture_reset();
 	fixture_share_mount_namespace();
 	fixture_file("3031/task/3032/ns/mnt",
@@ -1349,15 +1513,24 @@ int main(void)
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
 	fixture_task_readdir_error = EIO;
 	expect_mount_admission("non-leader task enumeration error", 0, EIO);
+	expect_task_mountinfo_open_count(
+		"non-leader task enumeration error",
+		fixture_foreign_task_mountinfo_opens, 1U);
 	fixture_reset();
 	fixture_file("3031/task/3032/mountinfo", "malformed\n");
 	expect_mount_admission("malformed non-leader task mountinfo", 0, EINVAL);
+	expect_task_mountinfo_open_count(
+		"malformed non-leader task mountinfo",
+		fixture_foreign_task_mountinfo_opens, 1U);
 	fixture_reset();
 	fixture_file("3031/task/3032/mountinfo",
 		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
 	fixture_task_namespace_reuse_on_stat = 1;
 	expect_mount_admission("reused non-leader TID changes namespace", 0, EAGAIN);
+	expect_task_mountinfo_open_count(
+		"reused non-leader TID changes namespace",
+		fixture_foreign_task_mountinfo_opens, 1U);
 	if (!fixture_task_namespace_reuse_injected) {
 		fprintf(stderr,
 			"FAIL: phase=task-namespace case=reused TID "
@@ -1371,8 +1544,25 @@ int main(void)
 	}
 	if (fixture_task_namespace_reuse_injected)
 		fixture_unlink("3031/task/3032/ns/mnt.retired");
+
+	/* Exercise both finite task-count and aggregate mountinfo-byte ceilings. */
+	fixture_reset();
+	expect_nonleader_bound_refusal(
+		"non-leader visible task ceiling",
+		SWAPZ_PRIMARY_VISIBLE_TASKS_MAX, 0U, 0U);
+	fixture_reset();
+	expect_nonleader_bound_refusal(
+		"aggregate non-leader mountinfo byte ceiling",
+		1U, SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES, 1U);
+
+	/* A task that is gone before namespace inspection is safe to skip. */
+	fixture_reset();
 	fixture_unlink("3031/task/3032/mountinfo");
 	fixture_unlink("3031/task/3032/ns/mnt");
+	expect_mount_admission("vanished non-leader TID", 1, 0);
+	expect_task_mountinfo_open_count(
+		"vanished non-leader TID",
+		fixture_foreign_task_mountinfo_opens, 0U);
 	assert(snprintf(path, sizeof(path), "%s/3031/task/3032/ns", fixture_proc_root) > 0);
 	assert(rmdir(path) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031/task/3032", fixture_proc_root) > 0);

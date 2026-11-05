@@ -153,9 +153,18 @@ physical parent only in a synthetic `/proc/<pid>/task/<tid>/mountinfo`, and
 require refusal; an unrelated sibling in that non-leader thread remains a
 positive control. For the coordinator's own non-leader task, first admit a
 sibling-only table while the leader remains unchanged, then replace only the
-task's table with a selected mount and require refusal. Reject malformed
-non-leader task mountinfo, and fail closed when a reused TID changes its
-mount-namespace identity between the initial and confirming stats.
+task's table with a selected mount and require refusal. Each thread-only
+selected/parent assertion must independently prove that its task-specific
+mountinfo was actually opened, so an inherited leader conflict cannot satisfy
+the case accidentally; coordinator-task coverage must also prove that opened
+descriptor closes. Inject unreadable task mountinfo on the task path only and
+require proof that the task-specific injection fired, so a leader access error
+cannot satisfy that case. Reject malformed non-leader task mountinfo, fail
+closed when a reused TID changes its mount-namespace identity between the initial and
+confirming stats, and permit a task already absent at namespace inspection.
+Directly exercise the production non-leader helper at the shared visible-task
+ceiling and aggregate mountinfo-byte ceiling, requiring EOVERFLOW without
+constructing millions of synthetic proc entries.
 A production scanner must enumerate those task views (or
 establish equivalent complete namespace coverage) with the same bounded,
 fail-closed rules. Count thread-group leaders and non-leader tasks against one
