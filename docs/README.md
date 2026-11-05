@@ -193,7 +193,6 @@ never authority for the current dedicated card.
 - [handoff/README.md](handoff/README.md): index separating active supplementary
   handoff references, historical evidence, abandoned/rejected experiments and
   deferred optimization research.
-- [handoff/old-host-physical-and-live-swap-evidence.md](handoff/old-host-physical-and-live-swap-evidence.md): historical `/dev/sda4` physical/capacity/live-swap evidence and transitional primary-manager implementation notes; not current policy.
 - [compile.md](compile.md): build/install/test interface and artifacts.
 - [benchmark.md](benchmark.md): current benchmark methodology and qualification
   interpretation; source-pinned experiment narratives are archived under

@@ -61,12 +61,10 @@ systemd service unlocks these gates before exact-source and card qualification.
 
 ## Release evidence still required
 
-Before promotion, use one immutable source SHA and exact artifact digests for
-all required gates. Required evidence includes the fast rootless
-systemd/package gate, the broader mandatory CI, exact-source physical lifecycle
-and capacity qualification, install/upgrade/uninstall verification,
-daemon-reload generation of all three hibernation guards, real monitor
-state-change evidence, controlled native stop-failure diagnostics, actual
-initramfs/UKI resume inspection, and the owner-triggered cold-boot
-arm/reboot/observe result. No rootless fixture may manufacture a physical or
-cold-boot PASS.
+The exact-source gates belong to the [operating context](../AGENT_CONTEXT.md#production-readiness-definition)
+and [systemd test contract](../testing_standards.md#runtime-systemd-health-and-non-hibernation-regression),
+not this supplementary handoff. Rootless systemd/package CI cannot establish
+physical-card acceptance or a deployed-host/boot PASS. Code/deployment readiness
+and verifier arming can precede the **owner-triggered** reboot; only its durable
+observation can establish `COLD_BOOT_OBSERVED=PASS`. Apply the separate
+[frozen physical policy](../production-acceptance.json) to exact-source evidence.
