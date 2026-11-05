@@ -51,6 +51,34 @@ def git_status(*arguments: str) -> int:
     return result.returncode
 
 
+def standard_has_nonwhitespace_text_change(
+        parent: str, commit_sha: str, standard: str) -> bool:
+    """Require changed standards text; metadata-only diffs cannot qualify."""
+    return_code = git_status(
+        "diff", "--ignore-all-space", "--ignore-blank-lines", "--no-renames",
+        "--quiet", parent, commit_sha, "--", standard)
+    if return_code not in (0, 1):
+        raise PolicyError("canonical standards diff unavailable")
+    if return_code == 0:
+        return False
+
+    statistics = git(
+        "diff", "--ignore-all-space", "--ignore-blank-lines", "--no-renames",
+        "--numstat", parent, commit_sha, "--", standard).decode(
+            "utf-8", errors="surrogateescape").splitlines()
+    if len(statistics) != 1:
+        raise PolicyError("canonical standards diff metadata malformed")
+    fields = statistics[0].split("\t", 2)
+    if len(fields) != 3 or fields[2] != standard:
+        raise PolicyError("canonical standards diff metadata malformed")
+    try:
+        additions = int(fields[0])
+        deletions = int(fields[1])
+    except ValueError:
+        return False
+    return additions > 0 or deletions > 0
+
+
 def applicable_standard_indexes(path: str) -> tuple[int, ...]:
     # Build metadata is source-controlled implementation, but its governing
     # operational contract also lives in compile.md. Keep these exceptions
@@ -97,14 +125,10 @@ def audit_commit(commit_sha: str) -> int:
                   commit_sha, "--")
     if changed and not changed.endswith(b"\0"):
         raise PolicyError("truncated NUL-delimited changeset")
-    standards_changed = []
-    for standard in STANDARDS:
-        return_code = git_status(
-            "diff", "--ignore-all-space", "--ignore-blank-lines",
-            "--quiet", parent, commit_sha, "--", standard)
-        if return_code not in (0, 1):
-            raise PolicyError("canonical standards diff unavailable")
-        standards_changed.append(return_code == 1)
+    standards_changed = [
+        standard_has_nonwhitespace_text_change(parent, commit_sha, standard)
+        for standard in STANDARDS
+    ]
     for raw_path in changed.split(b"\0")[:-1]:
         if not raw_path:
             raise PolicyError("empty changed-path metadata")
@@ -232,6 +256,17 @@ class SyntheticRepositoryPolicy(unittest.TestCase):
         result = self.audit()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("tests/runtime/native/check.py", result.stderr)
+
+    def test_mode_only_standard_change_does_not_qualify(self):
+        self.write("tests/runtime/native/check.py", "assert True\n")
+        (self.repository / "docs/testing_standards.md").chmod(0o755)
+        offending_sha = self.commit("mode-only standards metadata")
+        result = self.audit()
+        self.assertNotEqual(result.returncode, 0)
+        for expected in (offending_sha, "tests/runtime/native/check.py",
+                         "docs/testing_standards.md",
+                         "first_error=missing applicable"):
+            self.assertIn(expected, result.stderr)
 
     def test_compile_standard_is_applicable_to_kernel_build_metadata(self):
         self.write("src/kernel/Makefile", "obj-m += dm-swapz.o\n")

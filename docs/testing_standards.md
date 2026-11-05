@@ -2992,10 +2992,13 @@ standards. Build/package-focused workflows (`product-codec.yml`,
 `kernel-debug.yml`, and `systemd-package-readiness.yml`) accept testing or
 compile standards; other workflows require testing standards. Packaging accepts
 testing or compile standards, and root Make/DKMS interfaces require compile
-standards. Review must still confirm the change is semantically meaningful:
-non-whitespace Git differences cannot establish relevance by themselves. A
-later documentation/report-only follow-up cannot retroactively qualify an
-invalid implementation SHA. Failure diagnostics must identify the offending
+standards. Metadata-only changes such as a mode-bit flip do not count as a
+standards co-change: the automated applicability guard requires at least one
+changed non-whitespace text line in an applicable canonical standards file.
+Review must still confirm the change is semantically meaningful: textual Git
+differences cannot establish relevance by themselves. A later
+documentation/report-only follow-up cannot retroactively qualify an invalid
+implementation SHA. Failure diagnostics must identify the offending
 commit/path, required policy, first error and a safe non-rewriting correction.
 Exact-SHA CI requires every prerequisite job to succeed; skipped and cancelled
 jobs never count as PASS.
