@@ -4,7 +4,8 @@ Old "Current" headings, PASS claims, approvals, SHAs and device paths are
 history, not device authorization. Start with [AGENTS](../../AGENTS.md),
 [current context](../AGENT_CONTEXT.md),
 [frozen acceptance](../production-acceptance.json) and the
-[exact-source report](../../test_results.json).
+[latest owner test report](../../test_results.json), whose recorded source SHA
+must be checked against the source being evaluated.
 [Vision](../VISION.md), [coding standards](../coding_standards.md) and
 [testing standards](../testing_standards.md) remain canonical.
 
@@ -19,7 +20,8 @@ history, not device authorization. Start with [AGENTS](../../AGENTS.md),
 - **Secure Boot:** [MOK enrollment and module signing](../compile.md#secure-boot-module-signing); a valid signature is not kernel-load evidence.
 - **Development-only card smoke:** [strict admission](../testing_standards.md#development-only-card-backed-data-path-smoke) and [triage](../README.md#diagnose-the-first-record); `make fast_test` is not qualifying `make test` or real swap.
 - **Primary mount namespaces (issue #94):** [non-leader task scan change](https://github.com/k1moradi/swapz/commit/7c7bc9743580d7592315be00bdc8eaf7b019a1d2) and [follow-up rootless coverage](https://github.com/k1moradi/swapz/commit/650b9249dd96b70dfbbab28047625b4acdd62181) do not by themselves establish current exact-source release qualification, owner `make test` or loaded kernel-side exclusion. The issue body predates those commits; use the [canonical contract](../testing_standards.md#primary-cross-namespace-mount-admission-evidence-issue-94) and [post-fix audit trail](https://github.com/k1moradi/swapz/issues/94#issuecomment-6668214334) for remaining source/evidence gaps before closure.
-- **Real swap/physical:** [native-host qualification](../testing_standards.md#primary-real-swap-native-host-qualification) and [physical benchmark scope](../benchmark.md#physical-media-and-workload-validity); frozen policy above.
+- **Real Linux swap:** [native-host qualification](../testing_standards.md#primary-real-swap-native-host-qualification) covers bounded production-primary anonymous reclaim, swap-out/in attribution, byte-exact readback and normal teardown on the exact target. It is not the full physical performance/capacity campaign.
+- **Full physical qualification:** [physical benchmark scope](../benchmark.md#physical-media-and-workload-validity) plus the frozen policy above covers the selected protocol's physical service, sustained maximum-capacity/high-occupancy GC/churn, cold-read and anonymous-swap cohorts. It is separate from boot acceptance and does not directly prove NAND lifetime.
 - **Release blockers:** [readiness gates](../AGENT_CONTEXT.md#production-readiness-definition) and [evidence integrity](../testing_standards.md#qualification-discovery-and-release-evidence-integrity); [readiness snapshot](production-readiness.json) is **HISTORICAL**.
 - **Exact-source CI:** [same-commit standards](../compile.md#direct-main-ci-standards-co-changes); mandatory [project-goals](../../.github/workflows/project-goals.yml), [product-codec](../../.github/workflows/product-codec.yml) and [systemd/package](../../.github/workflows/systemd-package-readiness.yml). CI is not loaded-host PASS.
 

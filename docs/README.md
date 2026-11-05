@@ -113,7 +113,8 @@ explicitly **historical**, not a live release verdict.
 | `make fast_test` | Development build, native/replay and any owned-RAM scenarios executed | Exact-source qualification or an official report PASS |
 | `PHYSICAL_DEVELOPMENT_SMOKE=PASS` | Source-bound 16 MiB mapper oracle, byte comparisons and header recovery | `swapon`, anonymous swap, full-card capacity or physical acceptance |
 | Five-stage owner `make test` on owned `null_blk` | Loaded RAM-backed byte-oracle, GC, pressure and service checks actually run | Physical behavior, anonymous swap-in or cold boot |
-| Separately admitted real-swap/physical gates | Only full-capacity, anonymous-swap, GC/churn and lifecycle phases actually completed | A skipped gate, NAND lifetime, boot or hibernation |
+| Primary real-swap native-host qualification | Bounded production-primary cycles on the exact authorized target with actual anonymous reclaim/swap-in/out, independent cgroup/mapper/backing/kernel traffic attribution, byte-exact readback and normal teardown | Maximum-capacity sustained service, physical GC/churn/performance acceptance, boot or endurance |
+| Full physical qualification (selected frozen protocol) | Required physical service, sustained maximum-logical-capacity/high-occupancy GC/churn, cold-read and anonymous-swap cohorts actually completed on the exact card | A skipped cohort, boot, hibernation or direct NAND-wear/lifetime proof |
 | Owner-observed next boot | The durable verifier's matching boot ID, source, PARTUUID/parent, mapper and services | Recovery of pre-crash swap pages or hibernation |
 
 See the normative [evidence levels](testing_standards.md#evidence-levels),
