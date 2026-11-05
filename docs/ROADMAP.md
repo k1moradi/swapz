@@ -614,15 +614,23 @@ authorization; the archived wording does not override that policy.
 
 ## Immediate work queue
 
-**Current execution order:** follow the [production decision order](AGENT_CONTEXT.md)
-and exact-source qualification requirements in AGENT_CONTEXT, rather than
-resuming a past performance proposal. The current priorities are deterministic
-primary lifecycle interruption/recovery, owned-RAM execution evidence, then
-safe physical-card correctness, capacity/peak-memory and sustained-GC proof,
-followed by deployment/boot qualification. Performance optimization remains
-secondary until those correctness and lifecycle gates close. Read live source,
-CI and [the canonical test report](../test_results.json) before claiming a
-source is qualified.
+**Debugging-only hold (owner direction, 2026-11-05):** No new features,
+optimization pilots, speculative concurrency/layout changes, interface changes,
+broad refactors or alternative test entry points. First bind the live `main`
+source to [the canonical test report](../test_results.json) and
+[first-failure triage](README.md#diagnose-the-first-record); an older report is
+historical, not a present-source failure or PASS. Reproduce a specific defect
+before editing, keep ownership and fail-closed behavior intact, and require a
+regression that fails before and passes after the smallest justified fix.
+Host-only or missing evidence remains BLOCKED/UNPROVEN, never inferred PASS.
+Use the existing [production gates](AGENT_CONTEXT.md#production-readiness-definition)
+and [qualification contract](testing_standards.md), not a new release policy.
+
+**Current execution order:** primary lifecycle interruption/recovery and
+owned-RAM correctness evidence, then authorized physical-card correctness,
+capacity/peak-memory and sustained-GC proof, followed by deployment/boot
+qualification. Do not resume performance work while this debugging-only hold
+applies; recheck live source and exact-source CI before attributing any result.
 
 **Historical optimization queue (2026-11-02):** the ID181 retirement plan,
 old-host QD4 measurements, ID169/ID175 follow-ups and prior experimental
