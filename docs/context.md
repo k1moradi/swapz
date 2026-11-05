@@ -14,25 +14,21 @@ historical host-specific authorization text. Historical qualification,
 rejected pilots and deferred research are catalogued in the
 [handoff index](handoff/README.md), not maintained as active instructions here.
 
-**Current contracts (linked rather than restated):** [VISION.md](VISION.md)
-defines immutable product/module/SWZ names and the sole official qualification
-interface `make test`; `make fast_test` remains development-only and never
-qualifies a source. [AGENTS.md](../AGENTS.md) and
-[AGENT_CONTEXT.md](AGENT_CONTEXT.md) govern ownership and execution safety.
-
-**Device safety:** generic loaded qualification continues to use newly created,
-positively identified RAM-backed `null_blk`. The current dedicated physical
-development target is separately governed by the standing owner scope in
-[AGENT_CONTEXT.md](AGENT_CONTEXT.md), which permits repeated destructive and
-live-swap work on the positively identified SD card while still forbidding
-unrelated-device mutation and Codex-initiated reboot. This technical reference
-does not broaden that device scope; see [VISION.md](VISION.md).
+**Operating authority:** [VISION.md](VISION.md) defines product identity and
+the official `make test` qualification interface; `make fast_test` remains
+development-only. [AGENTS.md](../AGENTS.md) and
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md) govern execution, device ownership and
+reboot restrictions. Loaded qualification uses positively identified,
+RAM-backed `null_blk`; dedicated physical-card authorization is separate and
+lives only in the current operating context. This technical reference grants
+no device-operation permission.
 
 The upstream functions cited here were inspected on Linux master at
 `c339f4010dea8b0d754f84ace70cd1b089878ef8` and on tag `v7.0`; where the two
-differ, the text names the version. At that source inspection, the development host reported Ubuntu
-`7.0.0-42-generic` (7.0.14 base), so the `v7.0` behavior is the nearest
-upstream model for it; distribution backports can still differ. Kernel
+differ, the text names the version. The historical audit host reported
+Ubuntu `7.0.0-42-generic` (7.0.14 base); `v7.0` was its nearest
+upstream model, not a claim about the current host. Distribution backports
+can still differ. Kernel
 internals are not a stable ABI; recheck the target kernel source before
 implementing a coupled feature. The SWZ-specific descriptions record the implementation at that inspection;
 recheck current source and the normative standards before changing code.
