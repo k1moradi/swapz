@@ -630,17 +630,18 @@ results are preserved without changing their original conclusions in
 [handoff/2026-11-02-optimization-work-queue.md](handoff/2026-11-02-optimization-work-queue.md).
 Those dated instructions are not current code-change or test authorization.
 
-## Next-cycle Agent 17 — Cold swap-slot reclamation after application exit
+## Current-cycle Agent 17 — Cold swap-slot reclamation after application exit
 
-**Owner request / priority:** reserve this as a specific **next-cycle** debugging and
-correctness assignment for **Agent 17**, a rootless/remote-edit agent. The next
-cycle has **not** started. Do not interrupt Codex 1's first actual
+**Owner request / priority:** append this as a **current-cycle**, parallel
+rootless debugging/correctness assignment for **Agent 17**, a remote-edit
+agent. Begin source inspection and isolated regressions now, but do not
+interrupt Codex 1's first actual
 `/dev/sda1` mapper-page oracle, Codex 2's shared-root/lifecycle work, or
 current exact-source CI repairs. Agent 14 (GC/authority) and Agent 7
-(real-swap/oracle) should independently review Agent 17's results in that
-cycle without duplicating its edits. This is not a new current-cycle
-production-code mandate, a new acceptance threshold, or permission for
-remote agents to change host swap configuration.
+(real-swap/oracle) should independently review Agent 17's results during
+this cycle without duplicating its edits. This is a **rootless debugging
+assignment**, not a blanket production-code change mandate, a new acceptance
+threshold, or permission for remote agents to change host swap configuration.
 
 ### User scenario and desired behavior
 
@@ -699,7 +700,7 @@ References: [swapon(8) discard policies](https://man7.org/linux/man-pages/man8/s
 [Linux swap cluster discard implementation](https://linux.googlesource.com/linux/kernel/git/torvalds/linux.git/+/refs/heads/master/mm/swapfile.c),
 and the existing [technical swap context](context.md).
 
-### Next-cycle Agent 17 — exclusive remote scope and investigation order
+### Current-cycle Agent 17 — exclusive remote scope and investigation order
 
 1. **Baseline before editing.** Fetch current clean `main`, read
    `AGENTS.md`, the source and standards, and reproduce the existing
@@ -775,8 +776,9 @@ handoff. Preserve existing comments and apply the owner's maintainability,
 ownership, high-warning, failure-only diagnostic and no-speculative-churn
 standards. If the existing implementation already does everything possible
 with the notifications Linux supplies, **report that finding and do not add
-redundant code**. This planned item remains behind the current first-card
-debugging/qualification blockers and does not relax the frozen release gates.
+redundant code**. This current-cycle investigation runs **in parallel** with the first-card
+debugging/qualification work, but no Agent 17 edit or test may disrupt or
+bypass those P0 blockers or relax the frozen release gates.
 
 
 ## Deferred asynchronous segment TRIM design for review
