@@ -3051,14 +3051,28 @@ class BootVerifierTests(unittest.TestCase):
                 """\
                 #!/bin/sh
                 if [ "$1" = is-enabled ]; then
-                    printf '%s\\n' "$MOCK_PASSIVE_ENABLEMENT"
+                    printf '%s\n' "$MOCK_PASSIVE_ENABLEMENT"
                     exit "$MOCK_PASSIVE_ENABLEMENT_EXIT"
                 fi
                 exec "$MOCK_SYSTEMCTL_ORIGINAL" "$@"
                 """
             ),
         )
-        for state, exit_status in (("static", "41"), ("disabled", "0")):
+        safe_env = self.env.copy()
+        safe_env["MOCK_PASSIVE_ENABLEMENT"] = "static"
+        safe_env["MOCK_PASSIVE_ENABLEMENT_EXIT"] = "0"
+        safe_env["MOCK_SYSTEMCTL_ORIGINAL"] = str(original_systemctl)
+
+        # Safe-state contradictions, failed unsafe-looking probes, and unknown
+        # output are all incomplete telemetry. None can certify PASS or a
+        # definite enabled-state FAIL.
+        for state, exit_status in (
+            ("static", "41"),
+            ("disabled", "0"),
+            ("enabled", "124"),
+            ("linked", "0"),
+            ("unknown", "3"),
+        ):
             with self.subTest(state=state, exit_status=exit_status):
                 env = self.env.copy()
                 env["MOCK_PASSIVE_ENABLEMENT"] = state
@@ -3073,6 +3087,30 @@ class BootVerifierTests(unittest.TestCase):
                     (self.report / "runtime" / "primary-execution.env").exists()
                 )
 
+                preflight = self.run_verifier("preflight", env=safe_env)
+                self.assertEqual(preflight.returncode, 0, preflight.stderr)
+                observed = self.run_verifier("observe", env=env)
+                self.assertEqual(observed.returncode, 2, observed.stderr)
+                latest = (self.report / "latest.env").read_text(encoding="utf-8")
+                self.assertIn("status=INCOMPLETE", latest)
+                self.assertIn(
+                    "passive_swap_unit_enablement_unavailable_or_inconsistent",
+                    latest,
+                )
+                self.assertIn("phase=passive_swap_enablement", observed.stderr)
+                self.assertIn(f"observed={state}", observed.stderr)
+                self.assertIn(f"exit_status={exit_status}", observed.stderr)
+                self.assertIn(
+                    "token_consumption_state=claimed_non_authoritative",
+                    observed.stderr,
+                )
+                self.assertFalse(
+                    (self.report / "runtime" / "primary-execution.env").exists()
+                )
+                self.assertFalse(
+                    (self.report / "runtime" / ".primary-execution.observed.env").exists()
+                )
+
         valid_env = self.env.copy()
         valid_env["MOCK_PASSIVE_ENABLEMENT"] = "disabled"
         valid_env["MOCK_PASSIVE_ENABLEMENT_EXIT"] = "1"
@@ -3083,6 +3121,7 @@ class BootVerifierTests(unittest.TestCase):
         self.assertEqual(observed.returncode, 0, observed.stderr)
         self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
 
+    def test_changed_selector_and_missing_media_never_pick_another_card(self) -> None:
     def test_changed_selector_and_missing_media_never_pick_another_card(self) -> None:
         for scenario in ("selected_card_removed", "wrong_partuuid"):
             with self.subTest(scenario=scenario):

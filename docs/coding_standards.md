@@ -3047,7 +3047,12 @@ Cold-boot verification treats nonzero read-only `dmsetup info`, `table` or
 a valid mapper identity or healthy target. A multiline mapper UUID is
 ambiguous and cannot be accepted by examining its first line. Passive swap
 enablement is admitted only as `static` with exit 0 or `disabled` with exit 1;
-text/status contradictions block authorization and acceptance. Fail-only,
+text/status contradictions block arm/preflight authorization and remain
+INCOMPLETE when encountered by the post-boot observer. Only documented
+activation-capable pairs (`enabled`/0, `enabled-runtime`/0, `alias`/0,
+`linked`/1 or `linked-runtime`/1) are definite FAIL observations; unsafe-looking
+text paired with another exit status remains unavailable/inconsistent evidence.
+Fail-only,
 path-free diagnostics must name the observation phase, expected and observed
 state, original failed-probe exit, authorization-consumption disposition and
 safe report inspection/rearm action. These checks never mutate swap or mapper

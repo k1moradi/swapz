@@ -677,15 +677,28 @@ package_transaction_guard()
 
 passive_swap_unit_guard()
 {
-	# systemctl reports 'disabled' with exit 1 and 'static' with exit 0.
-	# A failed lookalike or contradictory response cannot prove that this
-	# otherwise passive swap unit has no separate activation job.
+	# Bind systemctl's state text to its documented exit semantics. Partial
+	# output from a timeout or other failed probe is not affirmative evidence.
 	enablement_exit_status=0
 	enablement=$(systemctl is-enabled "$mapper_swap_unit" 2>/dev/null) ||
 		enablement_exit_status=$?
 	case "$enablement:$enablement_exit_status" in
 	static:0|disabled:1) return 0 ;;
+	enabled:0|enabled-runtime:0|alias:0|linked:1|linked-runtime:1)
+		enablement_token_state=not_minted
+		if [ "$mode" = observe ]; then
+			if [ "$observation_runtime_authorization_claimed" -eq 1 ]; then
+				enablement_token_state=claimed_non_authoritative
+			else
+				enablement_token_state=missing_or_claim_failed
+			fi
+		fi
+		printf 'swapz-primary-boot-verify: phase=passive_swap_enablement expected=static_exit_0_or_disabled_exit_1 observed=%s exit_status=%s token_consumption_state=%s action=inspect_passive_swap_unit_before_rearming; passive mapper .swap is enabled\n' \
+			"$enablement" "$enablement_exit_status" "$enablement_token_state" >&2
+		return 1
+		;;
 	esac
+
 	enablement_token_state=not_minted
 	if [ "$mode" = observe ]; then
 		if [ "$observation_runtime_authorization_claimed" -eq 1 ]; then
@@ -695,20 +708,22 @@ passive_swap_unit_guard()
 		fi
 	fi
 	case "$enablement" in
-	enabled|enabled-runtime|linked|linked-runtime|alias)
-		printf 'swapz-primary-boot-verify: phase=passive_swap_enablement expected=static_exit_0_or_disabled_exit_1 observed=enabled exit_status=%s token_consumption_state=%s action=inspect_passive_swap_unit_before_rearming; passive mapper .swap is enabled\n' "$enablement_exit_status" "$enablement_token_state" >&2
+	static|disabled|enabled|enabled-runtime|alias|linked|linked-runtime)
+		observed_enablement=$enablement
 		;;
 	*)
-		case "$enablement" in
-		static|disabled) observed_enablement=$enablement ;;
-		*) observed_enablement=untrusted ;;
-		esac
-		printf 'swapz-primary-boot-verify: phase=passive_swap_enablement expected=static_exit_0_or_disabled_exit_1 observed=%s exit_status=%s token_consumption_state=%s action=inspect_passive_swap_unit_before_rearming; passive mapper .swap enablement is untrusted\n' "$observed_enablement" "$enablement_exit_status" "$enablement_token_state" >&2
+		observed_enablement=untrusted
 		;;
 	esac
-	return 1
+	printf 'swapz-primary-boot-verify: phase=passive_swap_enablement expected=static_exit_0_or_disabled_exit_1 observed=%s exit_status=%s token_consumption_state=%s action=inspect_passive_swap_unit_before_rearming; passive mapper .swap enablement is untrusted\n' \
+		"$observed_enablement" "$enablement_exit_status" "$enablement_token_state" >&2
+	# Arm/preflight treat every nonzero result as BLOCKED. Observe distinguishes
+	# unavailable/inconsistent evidence from a definite enabled state.
+	return 2
 }
 
+valid_runtime_preflight_authorization()
+{
 
 valid_runtime_preflight_authorization()
 {
@@ -1245,9 +1260,13 @@ observe_boot()
 		if [ "$authorization_claim_command_failed" -eq 1 ]; then
 			append_failure runtime_preflight_authorization_claim_failed
 		fi
-		if ! passive_swap_unit_guard; then
-			append_failure passive_swap_unit_enabled_or_uninspectable
-		fi
+		passive_swap_unit_status=0
+		passive_swap_unit_guard || passive_swap_unit_status=$?
+		case "$passive_swap_unit_status" in
+		0) ;;
+		1) append_failure passive_swap_unit_enabled_or_uninspectable ;;
+		*) append_incomplete passive_swap_unit_enablement_unavailable_or_inconsistent ;;
+		esac
 		# Package rollback journals also exclude a cold-boot acceptance.
 		# This call emits an explicit FAIL diagnostic if admission was unsafe.
 		if [ -L "$package_transaction_parent" ]; then
