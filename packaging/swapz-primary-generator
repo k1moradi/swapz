@@ -68,6 +68,16 @@ mapper_mask_is_active()
 		return 1
 	fi
 }
+replace_with_verified_mask()
+{
+	# The early-priority mapper name is reserved for the safety barrier.
+	# Replace a substituted symlink without following its foreign target
+	# even if a prior rm claimed success without consuming the pathname.
+	if ln -sfnT -- /dev/null "$mapper_unit"; then :; else
+		return $?
+	fi
+	mapper_mask_is_active
+}
 install_verified_mask()
 {
 	requested_mask_validation=$1
@@ -106,6 +116,13 @@ install_verified_mask()
 				else
 					mask_restore_status=$?
 				fi
+			fi
+		fi
+		if ! mapper_mask_is_active; then
+			if replace_with_verified_mask; then
+				mask_restore_status=0
+			else
+				mask_restore_status=$?
 			fi
 		fi
 		if rm -f -- "$mask_temporary"; then :; else
@@ -175,20 +192,101 @@ transaction_committed=0
 preserve_stage_dir=0
 cleanup()
 {
+	cleanup_original_status=$?
+	cleanup_command_status=0
 	# Remove a partial graph while the mapper mask is still in force. Never
 	# follow a substituted symlink to an external destination.
 	if [ "$transaction_committed" -eq 0 ]; then
 		if [ "$published_mapper" -eq 1 ] && [ ! -L "$mapper_dropin" ] &&
 			[ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ]; then
-			rm -f -- "$mapper_dropin" || :
+			if rm -f -- "$mapper_dropin"; then :; else
+				cleanup_remove_status=$?
+				[ "$cleanup_command_status" -ne 0 ] ||
+					cleanup_command_status=$cleanup_remove_status
+			fi
 		fi
 		if [ "$published_device" -eq 1 ] && [ ! -L "$device_dropin" ] &&
 			[ "$stage_dir/owned-device" -ef "$device_dropin" ]; then
-			rm -f -- "$device_dropin" || :
+			if rm -f -- "$device_dropin"; then :; else
+				cleanup_remove_status=$?
+				[ "$cleanup_command_status" -ne 0 ] ||
+					cleanup_command_status=$cleanup_remove_status
+			fi
+		fi
+	fi
+	# Classify survivors against the pinned inode before discarding staging.
+	cleanup_observed_mapper=absent
+	cleanup_observed_device=absent
+	if [ "$published_mapper" -eq 1 ]; then
+		if [ -L "$mapper_dropin" ]; then
+			cleanup_observed_mapper=foreign-symlink
+		elif [ -e "$mapper_dropin" ]; then
+			if [ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ]; then
+				cleanup_observed_mapper=owned-inode-retained
+			else
+				cleanup_observed_mapper=foreign-inode-retained
+			fi
+		fi
+	fi
+	if [ "$published_device" -eq 1 ]; then
+		if [ -L "$device_dropin" ]; then
+			cleanup_observed_device=foreign-symlink
+		elif [ -e "$device_dropin" ]; then
+			if [ "$stage_dir/owned-device" -ef "$device_dropin" ]; then
+				cleanup_observed_device=owned-inode-retained
+			else
+				cleanup_observed_device=foreign-inode-retained
+			fi
 		fi
 	fi
 	if [ -n "$stage_dir" ] && [ "$preserve_stage_dir" -eq 0 ]; then
-		rm -rf -- "$stage_dir" || :
+		if rm -rf -- "$stage_dir"; then :; else
+			cleanup_remove_status=$?
+			[ "$cleanup_command_status" -ne 0 ] ||
+				cleanup_command_status=$cleanup_remove_status
+		fi
+	fi
+	if [ "$cleanup_original_status" -ne 0 ] &&
+		{ [ "$published_mapper" -eq 1 ] || [ "$published_device" -eq 1 ]; }; then
+		# A zero command status never proves unlink or private-stage cleanup.
+		if [ -e "$mapper_dropin" ] || [ -L "$mapper_dropin" ]; then
+			[ "$cleanup_observed_mapper" != absent ] ||
+				cleanup_observed_mapper=late-substitution
+		else
+			cleanup_observed_mapper=absent
+		fi
+		if [ -e "$device_dropin" ] || [ -L "$device_dropin" ]; then
+			[ "$cleanup_observed_device" != absent ] ||
+				cleanup_observed_device=late-substitution
+		else
+			cleanup_observed_device=absent
+		fi
+		cleanup_observed_stage=absent
+		if [ -n "$stage_dir" ] &&
+			{ [ -e "$stage_dir" ] || [ -L "$stage_dir" ]; }; then
+			cleanup_observed_stage=retained
+		fi
+		cleanup_observed_mask=missing-or-substituted
+		if mapper_mask_is_active; then
+			cleanup_observed_mask=/dev/null
+		fi
+		cleanup_rollback=complete
+		cleanup_action=retain-early-mask
+		if [ "$cleanup_observed_mapper" != absent ] ||
+			[ "$cleanup_observed_device" != absent ] ||
+			[ "$cleanup_observed_stage" != absent ] ||
+			[ "$cleanup_observed_mask" != /dev/null ]; then
+			cleanup_rollback=incomplete
+			cleanup_action=retain-mask-and-refuse-activation
+		fi
+		if [ "$cleanup_observed_mask" != /dev/null ]; then
+			cleanup_action=mask-unproven-owner-intervention-required
+		fi
+		printf 'swapz-primary-generator: phase=rollback expected=owned-dropins-absent expected_mask=/dev/null observed_mapper=%s observed_device=%s observed_stage=%s observed_mask=%s original_status=%s cleanup_status=%s original_errno=unavailable rollback=%s action=%s\n' \
+			"$cleanup_observed_mapper" "$cleanup_observed_device" \
+			"$cleanup_observed_stage" "$cleanup_observed_mask" \
+			"$cleanup_original_status" "$cleanup_command_status" \
+			"$cleanup_rollback" "$cleanup_action" >&2
 	fi
 }
 trap cleanup EXIT
@@ -618,6 +716,13 @@ if ! mapper_mask_is_active; then
 			fi
 		fi
 		mapper_mask_is_active && mask_restore_status=0 || :
+		if ! mapper_mask_is_active; then
+			if replace_with_verified_mask; then
+				mask_restore_status=0
+			else
+				mask_restore_status=$?
+			fi
+		fi
 	fi
 fi
 # The unlink result is the original failure. Check rollback without

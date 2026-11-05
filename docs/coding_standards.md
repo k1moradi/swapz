@@ -769,7 +769,21 @@ early-priority safety name before reporting rollback. Diagnose the original
 command status, separate restore status, expected/observed mask and drop-in
 ownership, and verified rollback outcome without printing the selected
 PARTUUID; shell command exit status is not a recoverable syscall errno and must
-not be misreported as one. Publish the
+not be misreported as one.
+
+After a first nonzero publication command, EXIT-trap cleanup must retain the
+original status and independently verify each published pathname while its
+pinned staged inode is still available. A zero exit from cleanup rm does not
+prove retirement, and a failed rm may already have removed its target; report
+the actual owned/foreign inode or symlink survivor, private-stage survivor,
+verified early-mask state, secondary cleanup status, and retained-state action.
+If final mask release failed and rename restoration and unlink fallback both
+failed or lied, retry direct no-follow replacement at the reserved early mapper
+name and verify the link is /dev/null before declaring rollback complete. Do
+not follow or delete the targets of substituted foreign symlinks; absent
+proof of an effective mask must be reported as incomplete, not safe.
+
+Publish the
 complete selected graph before releasing the mask; any validation, command,
 publication or rollback failure must leave the mapper blocked rather than
 fall back to a device path or reveal a partially active job. Diagnostics must

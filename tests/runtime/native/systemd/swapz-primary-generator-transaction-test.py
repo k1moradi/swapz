@@ -689,6 +689,116 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertIn("expected_mask=/dev/null observed_mask=/dev/null", result.stderr)
         self.assertIn("surviving_artifacts=none rollback=early-mask-retained", result.stderr)
 
+    def test_failed_mask_release_rename_and_false_success_cleanup_restore_barrier(self) -> None:
+        outside = self.root / "foreign-mapper-unit"
+        outside.write_text("preserve-foreign-target", encoding="ascii")
+        release_marker = self.root / "first-release-failed"
+        removal = self.commands / "rm"
+        removal.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *swapz-primary-mapper.service)
+                for destination do :; done
+                if [ -e "$MOCK_RELEASE_MARKER" ]; then
+                    # Secondary cleanup claims success without removing the foreign link.
+                    exit 0
+                fi
+                /usr/bin/rm "$@" || exit $?
+                /usr/bin/ln -s "$MOCK_EXTERNAL" "$destination" || exit $?
+                : > "$MOCK_RELEASE_MARKER"
+                exit 83 ;;
+            esac
+            exec /usr/bin/rm "$@"
+            """).lstrip("\n"), encoding="ascii")
+        removal.chmod(0o755)
+        rename = self.commands / "mv"
+        rename.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *swapz-primary-mapper.service)
+                [ ! -e "$MOCK_RELEASE_MARKER" ] || exit 92 ;;
+            esac
+            exec /usr/bin/mv "$@"
+            """).lstrip("\n"), encoding="ascii")
+        rename.chmod(0o755)
+
+        result = self.run_generator(
+            MOCK_EXTERNAL=str(outside),
+            MOCK_RELEASE_MARKER=str(release_marker),
+        )
+        self.assertEqual(result.returncode, 83, result.stderr)
+        self.assertTrue(release_marker.exists())
+        self.assertIn("phase=rollback", result.stderr)
+        self.assertIn("original_status=83 restore_status=0", result.stderr)
+        self.assertIn("rollback=complete", result.stderr)
+        self.assertEqual(os.readlink(self.mask()), "/dev/null")
+        self.assertFalse(self.mapper_dropin().exists())
+        self.assertFalse(self.device_dropin(SELECTED).exists())
+        self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+        self.assertEqual(outside.read_text(encoding="ascii"), "preserve-foreign-target")
+
+    def test_exit_trap_observes_cleanup_postconditions_not_command_status(self) -> None:
+        rename = self.commands / "mv"
+        rename.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *50-selected-target.conf)
+                /usr/bin/mv "$@" || exit $?
+                exit 71 ;;
+            esac
+            exec /usr/bin/mv "$@"
+            """).lstrip("\n"), encoding="ascii")
+        rename.chmod(0o755)
+        removal = self.commands / "rm"
+        removal.write_text(textwrap.dedent(r"""
+            #!/bin/sh
+            case "$*" in
+            *50-swapz-timeout.conf)
+                case "$MOCK_CLEANUP_MODE" in
+                false-success) exit 0 ;;
+                error) exit 96 ;;
+                after-error) /usr/bin/rm "$@" || exit $?; exit 96 ;;
+                foreign)
+                    for destination do :; done
+                    /usr/bin/rm "$@" || exit $?
+                    /usr/bin/ln -s "$MOCK_FOREIGN" "$destination" || exit $?
+                    exit 0 ;;
+                esac ;;
+            esac
+            exec /usr/bin/rm "$@"
+            """).lstrip("\n"), encoding="ascii")
+        removal.chmod(0o755)
+        foreign = self.root / "foreign-device-dropin"
+        foreign.write_text("preserve-foreign-device", encoding="ascii")
+        cases = (
+            ("false-success", "owned-inode-retained", "0", "incomplete"),
+            ("error", "owned-inode-retained", "96", "incomplete"),
+            ("after-error", "absent", "96", "complete"),
+            ("foreign", "foreign-symlink", "0", "incomplete"),
+        )
+        for mode, observed, cleanup_status, rollback in cases:
+            with self.subTest(mode=mode):
+                result = self.run_generator(
+                    MOCK_CLEANUP_MODE=mode, MOCK_FOREIGN=str(foreign),
+                )
+                self.assertEqual(result.returncode, 71, result.stderr)
+                self.assertIn("phase=publication", result.stderr)
+                self.assertIn("status=71", result.stderr)
+                self.assertIn("phase=rollback expected=owned-dropins-absent", result.stderr)
+                self.assertIn(f"observed_device={observed}", result.stderr)
+                self.assertIn(f"original_status=71 cleanup_status={cleanup_status}", result.stderr)
+                self.assertIn(f"rollback={rollback}", result.stderr)
+                self.assertEqual(os.readlink(self.mask()), "/dev/null")
+                self.assertFalse(self.mapper_dropin().exists())
+                self.assertEqual(self.device_dropin(SELECTED).exists(),
+                                 observed != "absent")
+                self.assertEqual(foreign.read_text(encoding="ascii"), "preserve-foreign-device")
+                self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+                if mode == "foreign":
+                    self.assertTrue(self.device_dropin(SELECTED).is_symlink())
+                    self.assertEqual(self.device_dropin(SELECTED).readlink(), foreign)
+                self.device_dropin(SELECTED).unlink(missing_ok=True)
+
     def test_mask_release_error_rolls_back_published_files(self) -> None:
         command = self.commands / "rm"
         for failure in ("before", "after"):
