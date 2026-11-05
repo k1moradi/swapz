@@ -36,6 +36,7 @@ static const char *fixture_peer_mountinfo_after_peer_scan;
 static int fixture_peer_mountinfo_after_peer_scan_injected;
 static int fixture_peer_namespace_changes_between_stats;
 static int fixture_peer_namespace_changed;
+static const char *fixture_peer_mountinfo_after_namespace_change;
 static int fixture_mount_vanish_on_read;
 static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
@@ -255,14 +256,20 @@ static int fixture_stat(const char *path, struct stat *info)
 	if (strstr(path, "/3031/ns/mnt") &&
 	    fixture_peer_namespace_changes_between_stats) {
 		/*
-		 * First stat reports the old shared inode; the confirming stat
-		 * must notice that the PID now points at another namespace.
+		 * Capture the old shared inode for the first production stat, then
+		 * switch both namespace identity and mount table before production
+		 * performs its confirming stat. This keeps the synthetic procfs view
+		 * coherent across the modeled PID namespace transition.
 		 */
 		int result = stat(fixture_path(path, converted), info);
 
 		if (result == 0) {
+			assert(fixture_peer_mountinfo_after_namespace_change != NULL);
 			assert(unlink(converted) == 0);
 			fixture_file("3031/ns/mnt", "changed foreign namespace\n");
+			fixture_file("3031/mountinfo",
+				     fixture_peer_mountinfo_after_namespace_change);
+			fixture_peer_mountinfo_after_namespace_change = NULL;
 			fixture_peer_namespace_changes_between_stats = 0;
 			fixture_peer_namespace_changed = 1;
 		}
@@ -430,6 +437,7 @@ static void fixture_reset(void)
 	fixture_peer_mountinfo_after_peer_scan_injected = 0;
 	fixture_peer_namespace_changes_between_stats = 0;
 	fixture_peer_namespace_changed = 0;
+	fixture_peer_mountinfo_after_namespace_change = NULL;
 	fixture_mount_vanish_on_read = 0;
 	fixture_namespace_stat_error = 0;
 	fixture_mount_read_error = 0;
@@ -732,7 +740,10 @@ static void test_controlled_mount_snapshot_timings(void)
 	 */
 	fixture_same_parent_root();
 	fixture_share_mount_namespace();
-	fixture_file("3031/mountinfo", foreign_selected_mount);
+	/* Before the transition, both synthetic views describe the shared namespace. */
+	fixture_file("3031/mountinfo",
+		     "36 25 8:4 / / rw - ext4 /dev/root-sibling rw\n");
+	fixture_peer_mountinfo_after_namespace_change = foreign_selected_mount;
 	fixture_peer_namespace_changes_between_stats = 1;
 	expect_mount_identity_admission("PID namespace changes before confirming skip",
 					root_device, target_parent, 0, 0,
