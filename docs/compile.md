@@ -178,16 +178,18 @@ The signing hook parses the Linux module-signature trailer and verifies the
 appended detached PKCS#7/CMS signature over the exact module payload against
 the configured certificate. Enrollment is checked separately against the
 firmware MOK list with `mokutil --ignore-keyring --test-key`; Mokutil versions
-that return status 1 with the exact `<certificate path> is already enrolled`
-message are accepted as affirmative. Mixed output, another path, other
-nonzero statuses, and unrecognized responses remain blocked. This
-command-line result does not claim current kernel-keyring visibility or module
-acceptance; those are distinct runtime facts. `modinfo` signer/key identifiers
-are metadata and are not accepted as cryptographic proof. An unchanged module
-is not signed again only when its existing signature is already
-cryptographically valid for the configured enrolled certificate. A
-pre-existing malformed, invalid, or differently signed module is refused
-instead of receiving another appended signature.
+use a status of 1 for the exact `<certificate path> is already enrolled`
+response. For the supported mokutil 0.7.2 behavior, status 0 means the key is
+not enrolled. The hook accepts only status 1 with that exact certificate-bound
+output; empty output, status 0, a different path, localized or mixed output,
+and other statuses remain blocked. This command-line result does not claim
+current kernel-keyring visibility or module acceptance; those are distinct
+runtime facts. `modinfo` signer/key identifiers are metadata and are not
+accepted as cryptographic proof. An unchanged module is not signed again only
+when its existing signature is already cryptographically valid for the
+configured enrolled certificate. A pre-existing malformed, invalid, or
+differently signed module is refused instead of receiving another appended
+signature.
 
 This verification establishes exact-payload signature validity plus configured
 certificate enrollment. It does not by itself claim that the running kernel

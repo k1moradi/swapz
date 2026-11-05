@@ -333,8 +333,14 @@ case "${1:-}" in
       *) echo 'unknown'; exit 1;;
     esac
     ;;
-  --test-key)
-    [[ "$SWAPZ_FAKE_MOK_ENROLLED" == 1 ]]
+  --ignore-keyring)
+    [[ $# == 3 && "$2" == --test-key ]] || exit 2
+    if [[ "$SWAPZ_FAKE_MOK_ENROLLED" == 1 ]]; then
+      printf '%s is already enrolled\n' "$3"
+      exit 1
+    fi
+    printf '%s is not enrolled\n' "$3"
+    exit 0
     ;;
   *) exit 2 ;;
 esac
@@ -745,11 +751,22 @@ exec "{flock_binary}" "$@"
         mokutil = crypto_bin / "mokutil"
         mokutil.write_text(
             "#!/bin/sh\n"
-            "case \"$1\" in\n"
-            "  --sb-state) echo 'SecureBoot enabled';;\n"
-            "  --test-key) exit 0;;\n"
-            "  *) exit 2;;\n"
-            "esac\n")
+            "set -eu\n"
+            "if [ \"$#\" -eq 1 ] && [ \"$1\" = --sb-state ]; then\n"
+            "  printf '%s\\n' 'SecureBoot enabled'\n"
+            "  if [ \"${SWAPZ_TEST_MOK_REMOVE_AFTER_STATE:-0}\" = 1 ]; then\n"
+            "    rm -f -- \"$0\"\n"
+            "  fi\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"$#\" -ne 3 ] || [ \"$1\" != --ignore-keyring ] ||\n"
+            "   [ \"$2\" != --test-key ]; then exit 92; fi\n"
+            "printf '%s\\n' \"${LC_ALL:-unset}|$1|$2|$3\" > \"$SWAPZ_TEST_MOK_LOG\"\n"
+            "printf '%s\\n' \"$SWAPZ_TEST_MOK_STDOUT\"\n"
+            "if [ -n \"$SWAPZ_TEST_MOK_STDERR\" ]; then\n"
+            "  printf '%s\\n' \"$SWAPZ_TEST_MOK_STDERR\" >&2\n"
+            "fi\n"
+            "exit \"$SWAPZ_TEST_MOK_STATUS\"\n")
         mokutil.chmod(0o755)
 
         private_key = self.home / "crypto-test.key"
@@ -789,6 +806,11 @@ exec "{flock_binary}" "$@"
                  os.pathsep + "/usr/bin:/bin",
             SWAPZ_SIGN_TEST_ROOT=str(self.home),
             SWAPZ_MOK_CERT=str(certificate_der),
+            SWAPZ_TEST_MOK_LOG=str(self.home / "mokutil-call.log"),
+            SWAPZ_TEST_MOK_STATUS="1",
+            SWAPZ_TEST_MOK_STDOUT=(
+                f"{certificate_der} is already enrolled"),
+            SWAPZ_TEST_MOK_STDERR="",
         )
         verified = subprocess.run(
             ["bash", str(ROOT / "packaging/sign-module.sh"),
@@ -796,9 +818,168 @@ exec "{flock_binary}" "$@"
             cwd=ROOT, env=verify_env, capture_output=True, text=True)
         self.assertEqual(verified.returncode, 0, verified.stderr)
         self.assertIn("cryptographic signature verified", verified.stdout)
+        self.assertEqual(
+            (self.home / "mokutil-call.log").read_text().strip(),
+            f"C|--ignore-keyring|--test-key|{certificate_der}")
         # Detached CMS verification is not proof that the running kernel will
         # accept a module under its active Secure Boot policy.
         self.assertIn("kernel acceptance is not claimed", verified.stdout)
+
+        def verify_with_mokutil(*, cert=certificate_der, status="1",
+                                stdout=None, stderr="", path=crypto_bin,
+                                isolated_path=False, extra_env=None):
+            environment = dict(
+                verify_env,
+                PATH=(str(path) if isolated_path else
+                      str(path) + os.pathsep + os.path.dirname(openssl) +
+                      os.pathsep + "/usr/bin:/bin"),
+                SWAPZ_MOK_CERT=str(cert),
+                SWAPZ_TEST_MOK_STATUS=status,
+                SWAPZ_TEST_MOK_STDOUT=(
+                    f"{cert} is already enrolled" if stdout is None
+                    else stdout),
+                SWAPZ_TEST_MOK_STDERR=stderr,
+            )
+            if extra_env:
+                environment.update(extra_env)
+            return subprocess.run(
+                ["bash", str(ROOT / "packaging/sign-module.sh"),
+                 "--verify", str(signed_module)],
+                cwd=ROOT, env=environment, capture_output=True, text=True)
+
+        not_enrolled = verify_with_mokutil(
+            status="0", stdout=f"{certificate_der} is not enrolled")
+        self.assertEqual(not_enrolled.returncode, 2)
+        self.assertIn("not enrolled or enrollment could not be verified",
+                      not_enrolled.stderr)
+
+        silent_success = verify_with_mokutil(status="0", stdout="")
+        self.assertEqual(silent_success.returncode, 2)
+
+        wrong_path = verify_with_mokutil(
+            stdout=f"{self.home / 'different.der'} is already enrolled")
+        self.assertEqual(wrong_path.returncode, 2)
+
+        ambiguous = verify_with_mokutil(
+            stdout=f"{certificate_der} is already enrolled\nwarning")
+        self.assertEqual(ambiguous.returncode, 2)
+
+        extra_error = verify_with_mokutil(
+            stderr="mokutil: EFI variable access failed")
+        self.assertEqual(extra_error.returncode, 2)
+
+        permission_denied = verify_with_mokutil(
+            stdout="Failed to read MokListRT: Permission denied")
+        self.assertEqual(permission_denied.returncode, 2)
+
+        localized = verify_with_mokutil(
+            stdout=f"{certificate_der} ist bereits eingeschrieben",
+            extra_env={"LANG": "de_DE.UTF-8"})
+        self.assertEqual(localized.returncode, 2)
+        self.assertEqual(
+            (self.home / "mokutil-call.log").read_text().split("|", 1)[0],
+            "C")
+
+        positive_wrong_status = verify_with_mokutil(status="0")
+        self.assertEqual(positive_wrong_status.returncode, 2)
+
+        # The affirmative enrollment response is not a signature check: a
+        # different valid certificate cannot verify this module's CMS bytes.
+        wrong_key = self.home / "wrong-certificate.key"
+        wrong_pem = self.home / "wrong-certificate.pem"
+        wrong_der = self.home / "wrong-certificate.der"
+        subprocess.run(
+            [openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(wrong_key), "-out", str(wrong_pem),
+             "-subj", "/CN=swapz-package-wrong-mok-test", "-days", "1"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [openssl, "x509", "-in", str(wrong_pem), "-outform", "DER",
+             "-out", str(wrong_der)], check=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        wrong_signature_cert = verify_with_mokutil(cert=wrong_der)
+        self.assertEqual(wrong_signature_cert.returncode, 2)
+        self.assertIn("not cryptographically valid",
+                      wrong_signature_cert.stderr)
+
+        malformed_cert = self.home / "malformed-certificate.der"
+        malformed_cert.write_bytes(b"not a DER X.509 certificate")
+        malformed = verify_with_mokutil(cert=malformed_cert)
+        self.assertEqual(malformed.returncode, 2)
+        self.assertNotIn("cryptographic signature verified", malformed.stdout)
+
+        missing_bin = self.home / "missing-mokutil-bin"
+        missing_bin.mkdir()
+        for command in (
+                "bash", "id", "realpath", "openssl", "python3", "mktemp", "rm"):
+            command_path = shutil.which(command)
+            self.assertIsNotNone(command_path, command)
+            (missing_bin / command).symlink_to(command_path)
+        missing_mokutil = missing_bin / "mokutil"
+        missing_mokutil.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$#\" -eq 1 ] && [ \"$1\" = --sb-state ]; then\n"
+            "  printf '%s\\n' 'SecureBoot enabled'\n"
+            "  rm -f -- \"$0\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 93\n")
+        missing_mokutil.chmod(0o755)
+        missing = verify_with_mokutil(
+            path=missing_bin, isolated_path=True)
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("mokutil is required to verify MOK enrollment",
+                      missing.stderr)
+
+        if os.geteuid() != 0:
+            inaccessible_cert = self.home / "inaccessible-certificate.der"
+            inaccessible_cert.write_bytes(certificate_der.read_bytes())
+            inaccessible_cert.chmod(0)
+            try:
+                inaccessible = verify_with_mokutil(cert=inaccessible_cert)
+            finally:
+                inaccessible_cert.chmod(0o600)
+            self.assertEqual(inaccessible.returncode, 2)
+            self.assertIn(
+                "MOK certificate is unavailable for signature verification",
+                inaccessible.stderr)
+
+            protected_bin = self.home / "protected-mok-bin"
+            protected_bin.mkdir()
+            for command in (
+                    "bash", "id", "realpath", "openssl", "python3",
+                    "mktemp", "rm"):
+                command_path = shutil.which(command)
+                self.assertIsNotNone(command_path, command)
+                (protected_bin / command).symlink_to(command_path)
+            (protected_bin / "mokutil").symlink_to(crypto_bin / "mokutil")
+            (protected_bin / "kmodsign").write_text(
+                "#!/bin/sh\nexit 94\n")
+            (protected_bin / "kmodsign").chmod(0o755)
+            (protected_bin / "sudo").write_text(
+                "#!/bin/sh\nprintf '%s\\n' 'sudo: a password is required' >&2\n"
+                "exit 1\n")
+            (protected_bin / "sudo").chmod(0o755)
+            inaccessible_cert.chmod(0)
+            try:
+                denied_env = dict(
+                    verify_env,
+                    PATH=str(protected_bin) + os.pathsep + "/usr/bin:/bin",
+                    SWAPZ_MOK_CERT=str(inaccessible_cert),
+                    SWAPZ_MOK_PRIVATE_KEY=str(
+                        self.home / "inaccessible-private-key"),
+                )
+                denied = subprocess.run(
+                    ["bash", str(ROOT / "packaging/sign-module.sh"),
+                     str(signed_module)],
+                    cwd=ROOT, env=denied_env,
+                    capture_output=True, text=True)
+            finally:
+                inaccessible_cert.chmod(0o600)
+            self.assertEqual(denied.returncode, 2)
+            self.assertIn(
+                "MOK certificate is missing, unsafe, or sudo authorization is unavailable",
+                denied.stderr)
 
         tampered = bytearray(signed_module.read_bytes())
         tampered[0] ^= 1

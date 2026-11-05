@@ -6334,9 +6334,13 @@ that exact configured and enrolled certificate.
 Certificate identity, `mokutil --ignore-keyring --test-key` firmware-MOK
 enrollment, embedded signer/key metadata, cryptographic signature validity,
 kernel-keyring visibility, and target-kernel acceptance are separate facts.
-The signing-hook regression must accept status 1 only with the exact
-certificate-bound `<path> is already enrolled` response and reject mixed
-diagnostics, a different path, negative output, and other failure statuses.
+The signing-hook regression must accept mokutil 0.7.2 status 1 only with the
+exact certificate-bound `<path> is already enrolled` response; status 0 is
+the producer's negative `not enrolled` result. Cover positive enrollment,
+absence, wrong certificate/path, malformed and inaccessible certificate
+material, ambiguous or extra diagnostics, locale normalization, missing
+`mokutil`, permission failures, and unexpected statuses. No substring match,
+empty success output, or arbitrary nonzero status may qualify enrollment.
 `modinfo` signer or `sig_key` metadata is diagnostic only and must never
 substitute for cryptographic verification. Packaging may report cryptographic
 validity plus enrollment, but it must not claim that the target kernel

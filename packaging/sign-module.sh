@@ -142,14 +142,9 @@ mokutil_reports_enrolled() {
         fi
     fi
 
-    # Mokutil releases disagree on the exit status for the exact affirmative
-    # message. Accept the documented zero status only with empty output or
-    # that exact message; accept status 1 only with that exact certificate-
-    # bound message. Every other diagnostic or status remains a hard failure.
-    if (( status == 0 )) &&
-       { [[ -z "$output" ]] || [[ "$output" == "$cert is already enrolled" ]]; }; then
-        return 0
-    fi
+    # mokutil 0.7.2 returns 1 when the key is already enrolled and prints this
+    # exact path-bound message. Its status 0 says "not enrolled"; silence or
+    # any other status/output is not enrollment evidence.
     if (( status == 1 )) &&
        [[ "$output" == "$cert is already enrolled" ]]; then
         return 0
