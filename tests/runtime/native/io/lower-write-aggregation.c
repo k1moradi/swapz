@@ -1373,9 +1373,299 @@ static int test_immutable_run_failure_quarantines_all(void)
 	return 0;
 }
 
+
+/*
+ * The extra test pin keeps the immutable run alive through a deliberately
+ * repeated completion delivery. It does not model a second legitimate dm_io
+ * callback: the loaded callback-once and BIO lifetime contract is separate.
+ */
+struct synthetic_lower_write_owner {
+	unsigned int accepted_writes;
+	unsigned int references;
+	unsigned int upper_final_completions;
+	unsigned int upper_success_completions;
+	int original_lower_errno;
+};
+
+static int check_lower_completion_phase(const char *scenario, const char *phase,
+					int condition,
+					const struct synthetic_lower_write_owner *owner,
+					unsigned int expected_references,
+					unsigned int expected_final_completions,
+					unsigned int expected_publications,
+					unsigned long long expected_lower_bytes,
+					unsigned int expected_pending,
+					unsigned int expected_visible)
+{
+	unsigned long long observed_lower_bytes =
+		(unsigned long long)e.completed_blocks * SWAPZ_BLOCK_BYTES;
+	unsigned int visible = 0, index;
+
+	for (index = 0; index < owner->accepted_writes; ++index)
+		visible += maps[index].valid != 0;
+	if (condition && owner->references == expected_references &&
+	    owner->upper_final_completions == expected_final_completions &&
+	    published_calls == expected_publications &&
+	    observed_lower_bytes == expected_lower_bytes &&
+	    a.batch_pending == expected_pending && visible == expected_visible)
+		return 0;
+	fprintf(stderr,
+		"FAIL: lower-write-aggregation scenario=%s phase=%s condition=%d "
+		"owner_expected=%u owner_observed=%u accepted=%u "
+		"final_expected=%u final_observed=%u success_observed=%u "
+		"publication_expected=%u publication_observed=%u "
+		"lower_bytes_expected=%llu lower_bytes_observed=%llu "
+		"pending_expected=%u pending_observed=%u "
+		"visible_expected=%u visible_observed=%u original_lower_errno=%d\n",
+		scenario, phase, condition, expected_references, owner->references,
+		owner->accepted_writes, expected_final_completions,
+		owner->upper_final_completions, owner->upper_success_completions,
+		expected_publications, published_calls, expected_lower_bytes,
+		observed_lower_bytes, expected_pending, a.batch_pending,
+		expected_visible, visible, owner->original_lower_errno);
+	return 1;
+}
+
+static int test_duplicate_lower_completion_accounted_once(void)
+{
+	static const struct {
+		const char *name;
+		int lower_errno;
+		int completion_errno;
+		unsigned int mode;
+	} scenarios[] = {
+		{ "full-then-duplicate", 0, 0, 0 },
+		{ "zero-eio-then-duplicate", -EIO, -EIO, 1 },
+		{ "partial-eio-then-duplicate", -EIO, -EIO, 2 },
+		{ "short-success-then-duplicate", 0, -EIO, 3 },
+		{ "unsupported-then-duplicate", -EOPNOTSUPP, -EOPNOTSUPP, 4 },
+	};
+	unsigned int scenario;
+
+	for (scenario = 0; scenario < sizeof(scenarios) / sizeof(scenarios[0]);
+	     ++scenario) {
+		struct swapz_io_run run = { .bytes = bulk, .txs = bulk_txs };
+		struct synthetic_lower_write_owner owner = {};
+		struct swapz_tx next_transaction;
+		swapz_u8 prepared = 0, published = 99, duplicate_published = 99;
+		swapz_u16 completed = 0;
+		swapz_u32 next_logical_page = 100;
+		swapz_u32 saved_abandoned, saved_committed, saved_next;
+		swapz_u32 run_end;
+		unsigned int expected_visible, expected_publications;
+		unsigned long long completed_bytes;
+		int error, lower_error, duplicate_error;
+
+		error = setup();
+		if (check_lower_completion_phase(scenarios[scenario].name, "setup",
+				error == 0, &owner, 0, 0, 0, 0, 0, 0))
+			return 1;
+		error = swapz_engine_prepare_batched_run(&e, pages, 16, &run,
+							 &prepared, 0);
+		owner.accepted_writes = prepared;
+		/* Ordered owner, lower request and test-only lifetime pin. */
+		owner.references = 3;
+		run_end = run.start_block + run.blocks;
+		if (check_lower_completion_phase(scenarios[scenario].name, "prepared",
+				error == 0 && prepared && prepared <= 16 &&
+				run.blocks && run.extent_count &&
+				run_end <= PHYSICAL && !a.in_flight,
+				&owner, 3, 0, 0, 0, run.extent_count, 0))
+			return 1;
+
+		/* A delayed lower completion cannot publish or release the extent. */
+		error = swapz_stage(&a, &next_logical_page, 1, 1,
+				    &next_transaction);
+		if (check_lower_completion_phase(scenarios[scenario].name, "delayed",
+				error == -EBUSY && a.next_block >= run_end,
+				&owner, 3, 0, 0, 0, run.extent_count, 0))
+			return 1;
+
+		if (scenarios[scenario].mode == 1)
+			fail_on_run = 1;
+		else if (scenarios[scenario].mode == 2)
+			partial_fail_on_run = 1;
+		else if (scenarios[scenario].mode == 3)
+			short_on_run = 1;
+		else if (scenarios[scenario].mode == 4)
+			unsupported_on_run = 1;
+		write_sealed(NULL, prepared);
+		lower_error = write_run(NULL, run.start_block, run.blocks,
+					run.bytes, &completed);
+		owner.original_lower_errno = lower_error;
+		/* Only the lower request's reference is released at notification. */
+		owner.references--;
+		completed_bytes = (unsigned long long)completed * SWAPZ_BLOCK_BYTES;
+		if (check_lower_completion_phase(scenarios[scenario].name,
+				"lower-notified",
+				lower_error == scenarios[scenario].lower_errno &&
+				completed <= run.blocks && run_calls == 1 &&
+				!maps_visible_during_run && !ownership_violation &&
+				!sealed_missing_before_lower,
+				&owner, 2, 0, 0, 0, run.extent_count, 0))
+			return 1;
+
+		error = swapz_engine_complete_batched_run(&e, &run, completed,
+							  lower_error, &published);
+		expected_visible = scenarios[scenario].mode == 0 ? prepared : 0;
+		expected_publications = scenarios[scenario].mode == 0 ? 1 : 0;
+		if (!error && published == prepared) {
+			write_published(NULL, published);
+			owner.upper_success_completions = published;
+		}
+		/* The ordered owner completes every accepted upper request once. */
+		owner.upper_final_completions = prepared;
+		owner.references--;
+		saved_abandoned = a.abandoned_blocks;
+		saved_committed = a.committed_blocks;
+		saved_next = a.next_block;
+		if (check_lower_completion_phase(scenarios[scenario].name,
+				"first-finalization",
+				error == scenarios[scenario].completion_errno &&
+				published == expected_visible && !a.in_flight &&
+				!a.batch_replaying && !publication_visibility_errors &&
+				(expected_visible || saved_abandoned > 0) &&
+				owner.upper_success_completions == expected_visible,
+				&owner, 1, prepared, expected_publications,
+				completed_bytes, 0, expected_visible))
+			return 1;
+
+		/*
+		 * Deliberately deliver the old completion a second time while the
+		 * test pin still owns its storage. It cannot re-credit completed
+		 * lower bytes, republish or change the first upper completion.
+		 */
+		duplicate_error = swapz_engine_complete_batched_run(
+			&e, &run, completed, lower_error, &duplicate_published);
+		if (check_lower_completion_phase(scenarios[scenario].name,
+				"duplicate-finalization",
+				duplicate_error == (lower_error ?
+						   lower_error : -ESTALE) &&
+				duplicate_published == 0 &&
+				a.abandoned_blocks == saved_abandoned &&
+				a.committed_blocks == saved_committed &&
+				a.next_block == saved_next && !a.in_flight,
+				&owner, 1, prepared, expected_publications,
+				completed_bytes, 0, expected_visible))
+			return 1;
+
+		/* A new reservation must not reuse a possibly torn old run. */
+		error = swapz_stage(&a, &next_logical_page, 1, 1,
+				    &next_transaction);
+		if (check_lower_completion_phase(scenarios[scenario].name,
+				"new-reservation",
+				error == 0 && next_transaction.start_block >= run_end &&
+				a.next_block >= saved_next,
+				&owner, 1, prepared, expected_publications,
+				completed_bytes, 0, expected_visible))
+			return 1;
+		error = swapz_abort(&a, &next_transaction);
+		owner.references--; /* Drop the test pin only after stale replay. */
+		if (check_lower_completion_phase(scenarios[scenario].name,
+				"owner-released", error == 0,
+				&owner, 0, prepared, expected_publications,
+				completed_bytes, 0, expected_visible))
+			return 1;
+	}
+	return 0;
+}
+
+
+/* A delivered predecessor must not consume a younger still-paused run. */
+static int test_stale_lower_completion_keeps_successor_reserved(void)
+{
+	static struct swapz_tx successor_txs[SWAPZ_MAX_RECORDS];
+	struct swapz_io_run first = { .bytes = bulk, .txs = bulk_txs };
+	struct swapz_io_run second = {
+		.bytes = (swapz_u8 *)raw_payloads,
+		.txs = successor_txs,
+	};
+	struct synthetic_lower_write_owner owner = {};
+	swapz_u8 first_prepared = 0, second_prepared = 0;
+	swapz_u8 first_published = 0, duplicate_published = 99;
+	swapz_u16 first_completed = 0;
+	swapz_u32 previous_next, previous_abandoned;
+	swapz_u8 successor_pending;
+	unsigned long long first_lower_bytes;
+	int error;
+
+	error = setup();
+	if (check_lower_completion_phase("stale-predecessor", "setup",
+			error == 0, &owner, 0, 0, 0, 0, 0, 0))
+		return 1;
+	error = swapz_engine_prepare_batched_run(&e, pages, 8, &first,
+						 &first_prepared, 0);
+	owner.accepted_writes = first_prepared;
+	owner.references = 3;
+	if (check_lower_completion_phase("stale-predecessor", "first-prepared",
+			error == 0 && first_prepared && first.extent_count &&
+			first.blocks, &owner, 3, 0, 0, 0,
+			first.extent_count, 0))
+		return 1;
+	write_sealed(NULL, first_prepared);
+	error = write_run(NULL, first.start_block, first.blocks,
+			  first.bytes, &first_completed);
+	owner.references--;
+	if (check_lower_completion_phase("stale-predecessor", "first-lower",
+			error == 0 && first_completed == first.blocks,
+			&owner, 2, 0, 0, 0, first.extent_count, 0))
+		return 1;
+	error = swapz_engine_complete_batched_run(&e, &first, first_completed,
+						  0, &first_published);
+	if (!error && first_published == first_prepared)
+		write_published(NULL, first_published);
+	owner.upper_final_completions = first_prepared;
+	owner.upper_success_completions = first_published;
+	owner.references--;
+	first_lower_bytes = (unsigned long long)first_completed *
+			    SWAPZ_BLOCK_BYTES;
+	if (check_lower_completion_phase("stale-predecessor", "first-finalized",
+			error == 0 && first_published == first_prepared,
+			&owner, 1, first_prepared, 1, first_lower_bytes,
+			0, first_prepared))
+		return 1;
+
+	/* The next immutable run uses disjoint, still-live backing buffers. */
+	error = swapz_engine_prepare_batched_run(&e, pages + 8, 8, &second,
+						 &second_prepared, 0);
+	successor_pending = a.batch_pending;
+	previous_next = a.next_block;
+	previous_abandoned = a.abandoned_blocks;
+	if (check_lower_completion_phase("stale-predecessor", "successor-paused",
+			error == 0 && second_prepared &&
+			successor_pending == second.extent_count &&
+			second.txs[0].sequence != first.txs[0].sequence,
+			&owner, 1, first_prepared, 1, first_lower_bytes,
+			successor_pending, first_prepared))
+		return 1;
+
+	error = swapz_engine_complete_batched_run(
+		&e, &first, first_completed, 0, &duplicate_published);
+	if (check_lower_completion_phase("stale-predecessor", "old-callback",
+			error == -ESTALE && duplicate_published == 0 &&
+			a.next_block == previous_next &&
+			a.abandoned_blocks == previous_abandoned,
+			&owner, 1, first_prepared, 1, first_lower_bytes,
+			successor_pending, first_prepared))
+		return 1;
+
+	/* The successor was never submitted: tail cancellation owns its cleanup. */
+	error = swapz_engine_abort_batched_run_tail(&e, &second);
+	owner.references--;
+	if (check_lower_completion_phase("stale-predecessor", "tail-cancelled",
+			error == 0 && a.abandoned_blocks > previous_abandoned,
+			&owner, 0, first_prepared, 1, first_lower_bytes,
+			0, first_prepared))
+		return 1;
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
+
+	CHECK(test_stale_lower_completion_keeps_successor_reserved() == 0); passed++;
+	CHECK(test_duplicate_lower_completion_accounted_once() == 0); passed++;
 
 	CHECK(test_planned_write_preserves_nonoverlap_read_residency() == 0); passed++;
 	CHECK(test_immutable_run_prepare_then_complete() == 0); passed++;

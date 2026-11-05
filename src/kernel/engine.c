@@ -1723,6 +1723,16 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 	    run->blocks > SWAPZ_BULK_BLOCKS || !committed_pages)
 		return -EINVAL;
 	*committed_pages = 0;
+	/*
+	 * A stale or repeated completion must not credit lower bytes again,
+	 * or mistake a later paused run for the run being finalized. A caller
+	 * may prepare that successor after the prior run has been consumed.
+	 * Preserve the original lower error on rejected stale deliveries.
+	 */
+	if (e->authority->in_flight || e->authority->batch_replaying ||
+	    e->authority->batch_pending < run->extent_count ||
+	    e->authority->batch_first_sequence != run->txs[0].sequence)
+		return io_error ? io_error : -ESTALE;
 	if (completed_blocks > run->blocks) {
 		completed_blocks = 0;
 		error = -EUCLEAN;

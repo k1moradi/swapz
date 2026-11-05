@@ -1956,6 +1956,16 @@ depend on `struct bio`. A future async target may reuse a run buffer only after
 its lower completion has been finalized and every paused transaction has been
 published or aborted.
 
+Completion accounting is a one-shot owner operation, not an idempotent counter
+increment. Before counting credible lower-completed blocks or consuming any
+paused snapshot, the portable completion entry point must prove that its run
+still names the oldest paused sequence (which may coexist with a younger
+prepared run). A stale or repeated delivery must not alter committed-lower-byte
+counters, publication, or younger reservations; if the delivery also carries a
+lower error, retain that original error. This guards engine replay only:
+duplicate dm-io callbacks, upper BIO reference release, and the lifetime of
+a reused packed buffer still require separate loaded completion qualification.
+
 
 ### K=1 ping-pong write pipeline
 

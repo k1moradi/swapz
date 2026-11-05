@@ -3163,6 +3163,16 @@ published, while each individual prepared prefix remains immutable and
 unpublished until its own lower completion. A failed first prefix must publish
 nothing and quarantine all reservations belonging to that prefix.
 
+The linked production-C lower-write aggregation fixture must also exercise
+bounded delayed, zero/partial EIO, successful-short, unsupported and duplicate
+finalization sequences. It must check the explicit synthetic owner/reference
+lifetime, accepted upper writes, final and successful upper completion counts,
+single publication, credible completed lower bytes, unchanged original errno,
+paused-transaction drain and nonreuse of torn reservations. The duplicate
+probe must retain a test-only owner pin while replaying a completed run so it
+never dereferences freed storage. Rootless success does not qualify the
+loaded dm-io callback-once assumption or actual upper BIO lifetime.
+
 
 Source contracts for the immutable-run split must assert semantic ownership,
 not retired helper names. The prepare function may test whether a synchronous
