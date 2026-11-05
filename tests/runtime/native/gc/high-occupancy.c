@@ -1009,6 +1009,7 @@ static int test_closed_segment_last_discard_rejects_hidden_survivor(void)
 	const swapz_u32 last_logical = SWAPZ_SEGMENT_BLOCKS - 1U;
 	const swapz_u32 hidden_logical = SWAPZ_SEGMENT_BLOCKS;
 	struct swapz_map saved_hidden;
+	unsigned long long probes_before_reuse;
 	swapz_u32 prior_generation, logical;
 	int error;
 
@@ -1059,7 +1060,9 @@ static int test_closed_segment_last_discard_rejects_hidden_survivor(void)
 	/* Consume the last spare block, then reuse only the proven-dead victim. */
 	CHECK(write_page(0U, 3U) == 0);
 	CHECK(a.next_block == FOREGROUND_SEGMENTS * SWAPZ_SEGMENT_BLOCKS);
+	probes_before_reuse = a.alloc_probe_full_scans;
 	CHECK(write_page(last_logical, 2U) == 0);
+	CHECK(a.alloc_probe_full_scans == probes_before_reuse + 1ULL);
 	CHECK(a.open_segment == victim && a.next_block == 1U);
 	CHECK(maps[last_logical].start_block == 0U &&
 	      maps[last_logical].generation == prior_generation + 2U);
