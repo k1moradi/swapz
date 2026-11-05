@@ -322,6 +322,92 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                     "safe_action=recapture_and_reseal_campaign", reason)
                 self.assertNotIn("/private/host/secret", str(audit))
 
+    def test_malformed_decision_checks_cannot_hide_producer_failure(self):
+        failed = pair(1, 1100)
+        failed["status"] = "EXCLUDED"
+        failed["excluded"] = True
+        failed["analysis_usable"] = False
+        failed["raw"]["verdict"] = "FAIL"
+        failed["raw"]["stage"] = "measure"
+        failed["raw"]["failure_reason"] = "synthetic measurement failure"
+        private_marker = "/private/physical/never-publish"
+
+        for malformed_checks in ([False, private_marker], private_marker):
+            with self.subTest(observed_type=type(malformed_checks).__name__):
+                decisions = {
+                    "sd-service-representative": {
+                        "status": "PASS",
+                        "checks": malformed_checks,
+                    },
+                }
+                audit, metrics = inspect(
+                    [failed], decisions=decisions,
+                    summary_status="FAIL_OR_INCOMPLETE")
+                self.assertEqual(audit["status"], "FAIL", audit["diagnostics"])
+                self.assertIn("qualification.decision.checks", metrics)
+                self.assertEqual(audit["first_failed_phase"], "measure")
+                self.assertEqual(
+                    audit["first_failed_evidence"]["evidence_class"], "FAIL")
+                reason = next(
+                    diagnostic["reason"] for diagnostic in audit["diagnostics"]
+                    if diagnostic["metric"] == "qualification.decision.checks")
+                for expected in (
+                        "failed_evidence_field=decisions[].checks",
+                        "expected_type=dict",
+                        f"observed_type={type(malformed_checks).__name__}",
+                        "safe_action=recapture_and_reseal_campaign"):
+                    self.assertIn(expected, reason)
+                self.assertNotIn(private_marker, str(audit))
+
+                blocked, _ = inspect([], decisions=decisions)
+                self.assertEqual(blocked["status"], "BLOCKED")
+                self.assertIsNone(blocked["first_failed_phase"])
+
+    def test_malformed_anonymous_decision_cannot_hide_producer_failure(self):
+        failed = pair(1, 1100)
+        failed["status"] = "EXCLUDED"
+        failed["excluded"] = True
+        failed["analysis_usable"] = False
+        failed["raw"]["verdict"] = "FAIL"
+        failed["raw"]["stage"] = "measure"
+        failed["raw"]["failure_reason"] = "synthetic measurement failure"
+        anonymous_rows = [
+            pair(index, 2000 + 700 * index, workload="anonymous-swap")
+            for index in range(1, 4)
+        ]
+        private_marker = "/private/physical/never-publish"
+        malformed = (
+            (private_marker, "decisions[].pairs", "list"),
+            ([private_marker], "decisions[].pairs[]", "dict"),
+            ([{"ratios": private_marker}],
+             "decisions[].pairs[].ratios", "dict"),
+        )
+        for decision_pairs, field, expected_type in malformed:
+            with self.subTest(field=field):
+                decisions = {
+                    "anonymous-swap": {
+                        "status": "PASS",
+                        "pairs": decision_pairs,
+                    },
+                }
+                audit, _ = inspect(
+                    [failed, *anonymous_rows], decisions=decisions,
+                    summary_status="FAIL_OR_INCOMPLETE")
+                self.assertEqual(audit["status"], "FAIL", audit["diagnostics"])
+                self.assertEqual(audit["first_failed_phase"], "measure")
+                self.assertEqual(
+                    audit["first_failed_evidence"]["evidence_class"], "FAIL")
+                reason = next(
+                    diagnostic["reason"] for diagnostic in audit["diagnostics"]
+                    if f"failed_evidence_field={field}" in diagnostic["reason"])
+                self.assertIn(f"expected_type={expected_type}", reason)
+                self.assertIn("safe_action=recapture_and_reseal_campaign", reason)
+                self.assertNotIn(private_marker, str(audit))
+
+                blocked, _ = inspect(anonymous_rows, decisions=decisions)
+                self.assertEqual(blocked["status"], "BLOCKED")
+                self.assertIsNone(blocked["first_failed_phase"])
+
     def test_missing_or_unknown_producer_phase_is_blocked(self):
         # A FAIL verdict without the producer's real measurement phase cannot
         # be promoted by inventing a generic audit phase.

@@ -1381,6 +1381,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             all((workload, pair_index) in pair_indices for pair_index
                 in range(1, spec["pairs"] + 1)))
         decision_status = decision.get("status")
+        decision_checks = decision.get("checks")
         if decision_status == "FAIL":
             if qualification_status != "FAIL_OR_INCOMPLETE":
                 diagnose("BLOCKED", "qualification.decision_authentication",
@@ -1427,8 +1428,20 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                      workload=workload,
                      reason="cohort decision is incomplete or unavailable")
             continue
-        elif any(value is False for value in
-                 (decision.get("checks") or {}).values()):
+        elif decision_checks is not None and not isinstance(
+                decision_checks, dict):
+            diagnose(
+                "BLOCKED", "qualification.decision.checks",
+                "decision checks mapping (dict)", workload=workload,
+                reason=(
+                    "phase=qualification "
+                    "failed_evidence_field=decisions[].checks "
+                    f"expected_type=dict observed_type="
+                    f"{type(decision_checks).__name__} "
+                    "original_error=unavailable verdict=BLOCKED "
+                    "safe_action=recapture_and_reseal_campaign"))
+            continue
+        elif any(value is False for value in (decision_checks or {}).values()):
             diagnose("BLOCKED", "qualification.decision_authentication",
                      "PASS consistent with measured checks",
                      workload=workload,
@@ -1449,7 +1462,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                     ("write_p95", "upper", "<=", "tail_ci_upper_max"),
                     ("write_p99", "upper", "<=", "tail_ci_upper_max"),
                     ("cpu", "upper", "<=", "cpu_ci_upper_max")):
-                if (decision.get("checks") or {}).get(name) is False:
+                if (decision_checks or {}).get(name) is False:
                     ci = (decision.get("confidence_intervals") or {}).get(name)
                     value = ci.get(endpoint) if isinstance(ci, dict) else None
                     diagnose("FAIL", name + ".paired_95pct_ci_" + endpoint,
@@ -1469,7 +1482,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                     ("cold_read_p99", "<=", "tail_ratio_max"),
                     ("throughput_drift", ">=", "throughput_drift_ratio_min"),
                     ("p99_drift", "<=", "p99_drift_ratio_max")):
-                if (decision.get("checks") or {}).get(name) is False:
+                if (decision_checks or {}).get(name) is False:
                     diagnose("FAIL", name + ".swapz_raw_ratio",
                              {"operator": op, "value": bounds[bound], "unit": "ratio"},
                              (decision.get("ratios") or {}).get(name),
@@ -1477,7 +1490,47 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                              reason="frozen 3600-second directional bound failed")
         elif workload == "anonymous-swap":
             bounds = QUALIFICATION["CONTRACT"]["acceptance"]["anonymous"]
-            for position, result in enumerate(decision.get("pairs") or [], 1):
+            decision_pairs = decision.get("pairs")
+            if not isinstance(decision_pairs, list):
+                diagnose(
+                    "BLOCKED", "qualification.decision.pairs",
+                    "anonymous decision pair results (list)", workload=workload,
+                    reason=(
+                        "phase=qualification "
+                        "failed_evidence_field=decisions[].pairs "
+                        f"expected_type=list observed_type="
+                        f"{type(decision_pairs).__name__} "
+                        "original_error=unavailable verdict=BLOCKED "
+                        "safe_action=recapture_and_reseal_campaign"))
+                continue
+            for position, result in enumerate(decision_pairs, 1):
+                if not isinstance(result, dict):
+                    diagnose(
+                        "BLOCKED", "qualification.decision.pairs[]",
+                        "anonymous decision pair result (dict)",
+                        workload=workload, pair_index=position,
+                        reason=(
+                            "phase=qualification "
+                            "failed_evidence_field=decisions[].pairs[] "
+                            f"expected_type=dict observed_type="
+                            f"{type(result).__name__} "
+                            "original_error=unavailable verdict=BLOCKED "
+                            "safe_action=recapture_and_reseal_campaign"))
+                    continue
+                ratios = result.get("ratios")
+                if not isinstance(ratios, dict):
+                    diagnose(
+                        "BLOCKED", "qualification.decision.pairs[].ratios",
+                        "anonymous decision ratio mapping (dict)",
+                        workload=workload, pair_index=position,
+                        reason=(
+                            "phase=qualification "
+                            "failed_evidence_field=decisions[].pairs[].ratios "
+                            f"expected_type=dict observed_type="
+                            f"{type(ratios).__name__} "
+                            "original_error=unavailable verdict=BLOCKED "
+                            "safe_action=recapture_and_reseal_campaign"))
+                    continue
                 for name, op, bound in (
                         ("swapin_p95", "<=", "swapin_tail_ratio_max"),
                         ("swapin_p99", "<=", "swapin_tail_ratio_max"),
@@ -1485,7 +1538,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                         ("lower_write_bytes", "<=", "lower_write_bytes_ratio_max"),
                         ("lower_write_requests", "<=", "lower_write_requests_ratio_max"),
                         ("cpu", "<=", "cpu_ratio_max")):
-                    value = (result.get("ratios") or {}).get(name)
+                    value = ratios.get(name)
                     if type(value) not in (int, float) or not math.isfinite(value):
                         continue
                     if value >= bounds[bound] if op == ">=" else value <= bounds[bound]:
