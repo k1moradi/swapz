@@ -966,7 +966,12 @@ durably published. The byte-exact readback oracle must enable the actual
 production compressed-extent sequence index before the first publication;
 otherwise -EUCLEAN from missing test metadata is a fixture failure, not a
 corrupted survivor. Retain the actual read errno in fail-only diagnostics.
-Each lower-complete RAW replacement must return -EOVERFLOW
+Before reporting a RAW replacement as lower-complete, the fixture must copy its
+bytes into a bounded contiguous lower-media image and pass those exact modeled
+media bytes to authority completion. Survivor validation must read the prior
+mapping from that same media image; passing source bytes directly as a completed
+write surrogate is insufficient for this adversary. Each lower-complete RAW
+replacement must return -EOVERFLOW
 without publishing the new generation, changing reserve roles, reusing its
 abandoned block or losing the previous byte/CRC-validated payload. After the
 bounded failures, a clean replacement must use fresh blocks and publish exactly

@@ -392,8 +392,10 @@ static int test_failed_lower_writes_preserve_committed_costs(void)
  */
 static int test_saturated_gc_accounting_preserves_durable_generation(void)
 {
+	enum { LOWER_MEDIA_BLOCKS = 8 };
 	static swapz_u8 previous_extent[SWAPZ_BLOCK_BYTES];
 	static swapz_u8 raw_replacement[SWAPZ_BLOCK_BYTES];
+	static swapz_u8 lower_media[LOWER_MEDIA_BLOCKS * SWAPZ_BLOCK_BYTES];
 	static swapz_u8 sequence_deltas[4U * SWAPZ_SEGMENT_BLOCKS];
 	static swapz_u32 sequence_bases[4];
 	const char *const phases[] = {
@@ -404,6 +406,7 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 	struct swapz_tx transaction;
 	struct swapz_map durable_map;
 	struct swapz_decoded decoded;
+	const swapz_u8 *durable_media;
 	const swapz_u8 *readback;
 	swapz_u8 durable_roles[sizeof(segment_roles)];
 	swapz_u32 durable_live_bytes, durable_io_cost;
@@ -420,6 +423,7 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 	      &a, segment_bytes, segment_io, segment_min_blocks, 4) == 0);
 	memset(p0, 0x3c, sizeof(p0));
 	memset(raw_replacement, 0xa7, sizeof(raw_replacement));
+	memset(lower_media, 0, sizeof(lower_media));
 	CHECK(swapz_stage(&a, &logical, 1, 1, &transaction) == 0);
 	CHECK(swapz_begin(&builder, previous_extent, sizeof(previous_extent),
 			  transaction.sequence) == 0);
@@ -427,9 +431,18 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 			   transaction.records[0].generation,
 			   p0, sizeof(p0)) == 0);
 	CHECK(swapz_seal(&builder) == 0);
-	CHECK(swapz_finish(&a, &transaction, previous_extent,
-			   sizeof(previous_extent), 1, 0) == 0);
+	CHECK(transaction.extent_blocks == 1U &&
+	      transaction.start_block < LOWER_MEDIA_BLOCKS);
+	memcpy(lower_media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+	       previous_extent, sizeof(previous_extent));
+	CHECK(swapz_finish(
+	      &a, &transaction,
+	      lower_media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+	      sizeof(previous_extent), 1, 0) == 0);
 	durable_map = maps[logical];
+	CHECK(durable_map.start_block < LOWER_MEDIA_BLOCKS);
+	durable_media = lower_media +
+		(size_t)durable_map.start_block * SWAPZ_BLOCK_BYTES;
 	durable_live_bytes = segment_bytes[0];
 	durable_io_cost = segment_io[0];
 	durable_min_blocks = segment_min_blocks[0];
@@ -440,9 +453,10 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 
 	for (failure_case = 0; failure_case < 3; ++failure_case) {
 		struct gc_cost_snapshot expected;
-		swapz_u32 failed_block;
+		swapz_u8 *failed_media;
+		swapz_u32 failed_block, observed_cursor_advance;
 		int actual_error, read_error;
-		int state_retained, byte_exact;
+		int state_retained, failed_media_retained, byte_exact;
 
 		if (failure_case == 0)
 			segment_bytes[0] = ~(swapz_u32)0;
@@ -453,9 +467,13 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 		expected = gc_cost_capture(logical);
 		CHECK(swapz_stage(&a, &logical, 1, 1, &transaction) == 0);
 		failed_block = transaction.start_block;
-		/* A lower-complete write is not an authority publication. */
-		actual_error = swapz_finish_raw(&a, &transaction,
-					       raw_replacement, 1, 0);
+		CHECK(failed_block < LOWER_MEDIA_BLOCKS);
+		failed_media = lower_media +
+			(size_t)failed_block * SWAPZ_BLOCK_BYTES;
+		/* Materialize the completed lower write before authority replay. */
+		memcpy(failed_media, raw_replacement, SWAPZ_BLOCK_BYTES);
+		actual_error = swapz_finish_raw(
+			&a, &transaction, failed_media, 1, 0);
 		state_retained = !memcmp(&maps[logical], &durable_map,
 					 sizeof(durable_map)) &&
 			!a.in_flight && !a.gc_allocation &&
@@ -472,30 +490,38 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 			classes[durable_map.start_block] == 1U &&
 			!memcmp(segment_roles, durable_roles,
 				sizeof(durable_roles));
+		failed_media_retained = !memcmp(
+			failed_media, raw_replacement, SWAPZ_BLOCK_BYTES);
+		observed_cursor_advance = a.next_block >= failed_block ?
+			a.next_block - failed_block : ~(swapz_u32)0;
 		readback = NULL;
-		read_error = swapz_peek(previous_extent, sizeof(previous_extent),
+		read_error = swapz_peek(durable_media, SWAPZ_BLOCK_BYTES,
 					durable_map.record_index, &decoded);
 		if (!read_error)
 			read_error = swapz_read_authoritative_peeked(
-				&a, logical, &durable_map, previous_extent,
-				sizeof(previous_extent), &decoded, &readback);
+				&a, logical, &durable_map, durable_media,
+				SWAPZ_BLOCK_BYTES, &decoded, &readback);
 		byte_exact = !read_error && readback &&
 			     decoded.generation == durable_map.generation &&
 			     decoded.payload_length == sizeof(p0) &&
 			     !memcmp(readback, p0, sizeof(p0));
-		if (actual_error != -EOVERFLOW || !state_retained || !byte_exact) {
+		if (actual_error != -EOVERFLOW || !state_retained ||
+		    !failed_media_retained || !byte_exact) {
 			fprintf(stderr,
-				"GC_COST_FAIL phase=%s victim=none reserve=untouched "
+				"GC_COST_FAIL phase=%s victim=none reserve_class=foreground "
 				"expected_errno=%d observed_errno=%d "
-				"expected_progress=0 observed_progress=%u "
-				"state_retained=%d byte_exact=%d observed_read_errno=%d "
+				"expected_authority_progress=0 observed_authority_progress=%u "
+				"expected_cursor_advance=1 observed_cursor_advance=%u "
+				"state_retained=%d failed_media_retained=%d "
+				"byte_exact=%d observed_read_errno=%d "
 				"expected_generation=%u observed_generation=%u "
 				"failed_block=%u abandoned=%u\n",
 				phases[failure_case], -EOVERFLOW, actual_error,
 				maps[logical].generation != durable_map.generation,
-				state_retained, byte_exact, read_error, durable_map.generation,
-				maps[logical].generation, failed_block,
-				a.abandoned_blocks);
+				observed_cursor_advance, state_retained,
+				failed_media_retained, byte_exact, read_error,
+				durable_map.generation, maps[logical].generation,
+				failed_block, a.abandoned_blocks);
 			return 1;
 		}
 		/* Undo only synthetic corrupt sidecars, never the failed cursor. */
@@ -506,10 +532,19 @@ static int test_saturated_gc_accounting_preserves_durable_generation(void)
 
 	/* A later valid publication must use fresh media and generation two. */
 	CHECK(swapz_stage(&a, &logical, 1, 1, &transaction) == 0);
-	CHECK(transaction.start_block == 4U);
-	CHECK(swapz_finish_raw(&a, &transaction, raw_replacement, 1, 0) == 0);
+	CHECK(transaction.start_block == 4U &&
+	      transaction.start_block < LOWER_MEDIA_BLOCKS);
+	memcpy(lower_media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+	       raw_replacement, SWAPZ_BLOCK_BYTES);
+	CHECK(swapz_finish_raw(
+	      &a, &transaction,
+	      lower_media + (size_t)transaction.start_block * SWAPZ_BLOCK_BYTES,
+	      1, 0) == 0);
 	CHECK(maps[logical].raw && maps[logical].generation == 2U);
-	CHECK(swapz_verify_raw(&a, logical, raw_replacement) == 0);
+	CHECK(swapz_verify_raw(
+	      &a, logical,
+	      lower_media +
+		(size_t)maps[logical].start_block * SWAPZ_BLOCK_BYTES) == 0);
 	CHECK(segment_bytes[0] == SWAPZ_BLOCK_BYTES);
 	CHECK(segment_io[0] == 2U * SWAPZ_BLOCK_BYTES);
 	CHECK(segment_min_blocks[0] == 1U);
