@@ -6153,15 +6153,18 @@ completion, then complete the required lower FUA flush before publishing its
 generation or acknowledging success. Failure at any stage propagates the
 original lower errno, preserves the prior authoritative mapping, latches
 terminal failure and bars later drain/retry from creating a success ACK. A
-zero-sector Linux upper flush is `REQ_OP_WRITE|REQ_PREFLUSH`, optionally with
-`REQ_FUA`: it needs the preflush result but has no data WRITE or extra
-post-write FUA command. `REQ_OP_FLUSH` is not a valid upper BIO opcode.
+zero-sector Linux upper flush is `REQ_OP_WRITE|REQ_PREFLUSH`; with no data,
+only PREFLUSH is meaningful, so native fixtures must not invent a separate
+empty-FUA durability step. `REQ_OP_FLUSH` is not a valid upper BIO opcode.
 Rootless fixtures must check separate flush submissions/success/failure counts,
-the exact single data-BIO completion owner, callback notification duplication
-without inventing independently completed BIOs, and durable-publication/upper
-completion counts. Their finite faults are not loaded-kernel, device-cache,
-KASAN or physical-media evidence.
-
+the exact single data-BIO completion owner, duplicate notifications of that same
+completion without inventing independently completed BIOs, explicit
+durable-publication counts, and a fresh upper retry completed from the latched
+terminal error without additional lower I/O. The preflush-fence negative
+control must continue through data completion and the FUA gate far enough to
+demonstrate a forbidden successful upper ACK, rather than stop merely because a
+failed preflush allowed data submission. Their finite faults are not
+loaded-kernel, device-cache, KASAN or physical-media evidence.
 Mandatory Python qualification suites must remain syntactically valid; a path that exists but cannot execute does not satisfy discovery coverage.
 
 

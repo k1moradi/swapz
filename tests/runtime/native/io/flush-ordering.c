@@ -294,6 +294,8 @@ static int test_first_terminal_error_and_no_late_success(void)
  * Every modeled data callback refers to ONE submitted, owned lower BIO.
  * A duplicate notification is a protocol-invalid repeat of that callback,
  * not evidence of a second lower BIO or independent completion.
+ * Empty flush cases model only zero-sector WRITE|PREFLUSH: without data,
+ * Linux's flush state machine has no meaningful FUA data or postflush step.
  */
 enum ordered_upper_kind {
 	ORDERED_DATA_WRITE,
@@ -318,11 +320,13 @@ struct ordered_fixture {
 	unsigned int generation;
 	unsigned int authoritative_extent;
 	unsigned int successful_acks;
+	unsigned int durable_publications;
 	unsigned int data_submissions;
 	unsigned int data_completions;
 	unsigned int callback_notifications;
 	unsigned int duplicate_notifications;
 	unsigned int upper_completions;
+	unsigned int retry_upper_completions;
 	bool drained;
 	bool preflush_done;
 	bool data_submitted;
@@ -342,11 +346,12 @@ static int ordered_check(const struct ordered_fixture *fixture,
 	fprintf(stderr,
 		"flush request=%s phase=%s original_lower_errno=%d "
 		"expected_ack_errno=%d actual_ack_errno=%d "
-		"expected=%d actual=%d acks=%u generations=%u\n",
+		"expected=%d actual=%d acks=%u publications=%u generations=%u\n",
 		fixture->scenario->name, phase, fixture->original_lower_errno,
 		fixture->scenario->expected_errno, fixture->upper_done ?
 		fixture->upper_errno : -EAGAIN, expected, actual,
-		fixture->successful_acks, fixture->generation);
+		fixture->successful_acks, fixture->durable_publications,
+		fixture->generation);
 	return 1;
 }
 
@@ -376,6 +381,7 @@ static int ordered_complete_upper(struct ordered_fixture *fixture, int error)
 	} else {
 		fixture->successful_acks++;
 		if (fixture->scenario->kind == ORDERED_DATA_WRITE) {
+			fixture->durable_publications++;
 			fixture->generation++;
 			fixture->authoritative_extent = 0x92U;
 		}
@@ -438,10 +444,14 @@ static void ordered_data_callback(struct ordered_fixture *fixture, int error)
 
 static int ordered_retry_after_failure(struct ordered_fixture *fixture)
 {
-	/* Once terminal, the target rejects a fresh upper BIO before lower I/O. */
-	if (fixture->terminal_errno)
-		return fixture->terminal_errno;
-	return -EINVAL;
+	/*
+	 * This is a fresh upper BIO completed from the latched terminal error.
+	 * It is not another completion of the already-owned lower data BIO.
+	 */
+	if (!fixture->terminal_errno)
+		return -EINVAL;
+	fixture->retry_upper_completions++;
+	return fixture->terminal_errno;
 }
 
 static int test_ordered_preflush_data_fua_matrix(void)
@@ -455,14 +465,12 @@ static int test_ordered_preflush_data_fua_matrix(void)
 		  true, true, 0, -EIO, 0, -EIO },
 		{ "WRITE|PREFLUSH FUA-failure", ORDERED_DATA_WRITE,
 		  true, true, 0, 0, -EIO, -EIO },
-		{ "WRITE|FUA lower-failure", ORDERED_DATA_WRITE,
+		{ "WRITE|FUA FUA-failure", ORDERED_DATA_WRITE,
 		  false, true, 0, 0, -EOPNOTSUPP, -EOPNOTSUPP },
 		{ "WRITE|PREFLUSH without-FUA", ORDERED_DATA_WRITE,
 		  true, false, 0, 0, 0, 0 },
 		{ "empty WRITE|PREFLUSH", ORDERED_EMPTY_PREFLUSH_WRITE,
 		  true, false, 0, 0, 0, 0 },
-		{ "empty WRITE|PREFLUSH|FUA", ORDERED_EMPTY_PREFLUSH_WRITE,
-		  true, true, 0, 0, 0, 0 },
 		{ "empty WRITE|PREFLUSH failure", ORDERED_EMPTY_PREFLUSH_WRITE,
 		  true, false, -EIO, 0, 0, -EIO },
 	};
@@ -471,6 +479,8 @@ static int test_ordered_preflush_data_fua_matrix(void)
 	for (index = 0; index < sizeof(scenarios) / sizeof(scenarios[0]);
 	     ++index) {
 		const struct ordered_scenario *scenario = &scenarios[index];
+		const char *completion_phase = scenario->fua ?
+			"data-fua-completion" : "data-completion";
 		struct ordered_fixture fixture = {
 			.scenario = scenario,
 			.generation = 7,
@@ -480,8 +490,22 @@ static int test_ordered_preflush_data_fua_matrix(void)
 			ORDERED_DATA_WRITE && !scenario->preflush_errno;
 		unsigned int expected_flushes = scenario->preflush ? 1U : 0U;
 		unsigned int expected_acks = !scenario->expected_errno;
+		unsigned int expected_publications;
 		unsigned int expected_failed_flushes;
 		int result;
+
+#ifdef SWAPZ_TEST_BYPASS_PREFLUSH_FENCE
+		/*
+		 * Drive the broken path through the delayed data completion and
+		 * FUA so the mutant demonstrates a forbidden success ACK, rather
+		 * than stopping merely because data submission became possible.
+		 */
+		if (scenario->kind == ORDERED_DATA_WRITE &&
+		    scenario->preflush_errno)
+			expected_data = 1U;
+#endif
+		expected_publications =
+			expected_data && expected_acks ? 1U : 0U;
 
 		/* Both previous work and this request are fenced by drain. */
 		result = ordered_advance(&fixture);
@@ -505,12 +529,12 @@ static int test_ordered_preflush_data_fua_matrix(void)
 				-EAGAIN, result);
 			ordered_data_callback(&fixture, scenario->data_errno);
 			/* Duplicate notification is NOT a second owned lower BIO. */
-			ordered_data_callback(&fixture, 0);
+			ordered_data_callback(&fixture, scenario->data_errno);
 			result = ordered_advance(&fixture);
-			ORDERED_CHECK(&fixture, "data-fua-completion",
+			ORDERED_CHECK(&fixture, completion_phase,
 				result == scenario->expected_errno,
 				scenario->expected_errno, result);
-			ordered_data_callback(&fixture, -EIO);
+			ordered_data_callback(&fixture, scenario->data_errno);
 			ORDERED_CHECK(&fixture, "duplicate-terminal-callback",
 				fixture.data_completions == 1 &&
 				fixture.callback_notifications == 3 &&
@@ -525,11 +549,12 @@ static int test_ordered_preflush_data_fua_matrix(void)
 			 scenario->fua && !scenario->data_errno);
 		ORDERED_CHECK(&fixture, "upper-completion",
 			fixture.upper_done && fixture.upper_completions == 1 &&
+			!fixture.retry_upper_completions &&
 			fixture.successful_acks == expected_acks &&
-			fixture.generation == 7 +
-				(expected_data && expected_acks ? 1U : 0U) &&
+			fixture.durable_publications == expected_publications &&
+			fixture.generation == 7 + expected_publications &&
 			fixture.authoritative_extent ==
-				(expected_data && expected_acks ? 0x92U : 0x91U) &&
+				(expected_publications ? 0x92U : 0x91U) &&
 			fixture.original_lower_errno == scenario->expected_errno &&
 			fixture.data_submissions == expected_data &&
 			fixture.data_completions == expected_data &&
@@ -540,21 +565,33 @@ static int test_ordered_preflush_data_fua_matrix(void)
 			!fixture.flush_meter.injected &&
 			fixture.lower.called == expected_flushes,
 			(int)expected_acks, (int)fixture.successful_acks);
-		/* Repeated drain and a new retry after error cannot add an ACK. */
+		/* Repeated drain cannot complete the same upper BIO again. */
 		result = ordered_advance(&fixture);
 		ORDERED_CHECK(&fixture, "drain-after-terminal",
 			result == scenario->expected_errno &&
 			fixture.upper_completions == 1 &&
+			!fixture.retry_upper_completions &&
 			fixture.successful_acks == expected_acks &&
-			fixture.flush_meter.attempts == expected_flushes,
+			fixture.durable_publications == expected_publications &&
+			fixture.data_submissions == expected_data &&
+			fixture.data_completions == expected_data &&
+			fixture.flush_meter.attempts == expected_flushes &&
+			fixture.lower.called == expected_flushes,
 			scenario->expected_errno, result);
 		if (scenario->expected_errno) {
 			result = ordered_retry_after_failure(&fixture);
 			ORDERED_CHECK(&fixture, "retry-after-error",
 				result == scenario->expected_errno &&
+				fixture.retry_upper_completions == 1 &&
+				fixture.upper_completions == 1 &&
 				fixture.successful_acks == 0 &&
+				fixture.durable_publications == 0 &&
 				fixture.generation == 7 &&
-				fixture.authoritative_extent == 0x91U,
+				fixture.authoritative_extent == 0x91U &&
+				fixture.data_submissions == expected_data &&
+				fixture.data_completions == expected_data &&
+				fixture.flush_meter.attempts == expected_flushes &&
+				fixture.lower.called == expected_flushes,
 				scenario->expected_errno, result);
 		}
 	}
