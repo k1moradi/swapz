@@ -176,6 +176,18 @@ identity is BLOCKED; at least 1 GiB `MemAvailable`; readable kernel diagnostics;
 swap, PSI, OOM, and zswap controls. A missing storage-separation fact is
 BLOCKED, not equivalent to false.
 
+Rootless selector qualification must reproduce replacement after the first
+lstat and after opening the descriptor, symlink and hard-link refusal, file
+truncation/oversize, invalid/non-ASCII PARTUUID, read errno, and changed
+ownership/mode. A valid unchanged protected selector is admitted; a changed
+selector inode, even with identical PARTUUID bytes, is not. Per-cycle source
+approval must be followed by a fresh descriptor-bound selector comparison and
+the same frozen authorization-snapshot/partition/parent check before any
+primary prepare. Each negative fixture must show BLOCKED before a primary
+operation, with bounded redacted phase, expected/observed category, errno and
+safe next action. These synthetic proofs do not qualify a live physical reader
+or prove the coordinator's last-use target binding.
+
 The real-swap byte oracle is qualification authority: `--oracle` must resolve
 to the exact source-controlled `tests/tools/primary-real-swap-oracle.py`, never
 an arbitrary replacement. The unprivileged admission parent derives the

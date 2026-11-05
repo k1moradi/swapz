@@ -45,6 +45,8 @@ else:
         raise RuntimeError("invalid commit-bound source root")
     ROOT = Path(_BOOTSTRAP_SOURCE_ROOT)
 SELECTOR = Path("/etc/swapz/primary-target")
+# PARTUUID= (9 bytes), up to 64 ASCII characters, and optional CRLF.
+SELECTOR_MAX_BYTES = len("PARTUUID=") + 64 + 2
 RECOVERY_BASE = Path("/var/lib/swapz/physical-recovery")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 AUTHORIZATION_SNAPSHOT = ROOT / "docs/handoff/production-readiness.json"
@@ -1221,17 +1223,120 @@ def parse_selector(text: str) -> str:
     return normalized
 
 
-def _read_selector() -> str:
+@dataclass(frozen=True)
+class SelectorEvidence:
+    """An admitted selector's bytes and filesystem identity."""
+
+    partuuid: str
+    identity: tuple[int, ...]
+
+
+def _selector_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _reject_selector(phase: str, expected: str, observed: str,
+                     original_errno: int | None = None) -> None:
+    raise Blocked(
+        f"primary selector phase={phase} expected={expected} observed={observed} "
+        f"errno={original_errno if original_errno is not None else 'none'}; "
+        "action=BLOCK-before-prepare-and-inspect-protected-selector")
+
+
+def _check_selector_info(info: os.stat_result, phase: str) -> None:
+    expected = "root-owned-0600-regular-single-link"
+    if not stat.S_ISREG(info.st_mode):
+        _reject_selector(phase, expected, "nonregular")
+    if info.st_uid != 0:
+        _reject_selector(phase, expected, "owner-mismatch")
+    if stat.S_IMODE(info.st_mode) != 0o600:
+        _reject_selector(phase, expected, "mode-mismatch")
+    if info.st_nlink != 1:
+        _reject_selector(phase, expected, "link-count-mismatch")
+    if info.st_size > SELECTOR_MAX_BYTES:
+        _reject_selector(phase, "bounded-ASCII-selector", "oversized")
+
+
+def _read_selector_evidence() -> SelectorEvidence:
+    """Bind inspected path and final path to one opened descriptor.
+
+    The context-managed file exclusively owns the O_NOFOLLOW/O_CLOEXEC
+    descriptor. No independent pathname read supplies selection bytes.
+    """
     try:
-        info = SELECTOR.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or \
-                stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
-            raise Blocked("primary target selector must be root-owned mode 0600 regular file")
-        return parse_selector(SELECTOR.read_text(encoding="ascii"))
-    except Blocked:
-        raise
+        inspected = SELECTOR.lstat()
     except OSError as exc:
-        raise Blocked(f"cannot read primary target selector: {exc}") from exc
+        _reject_selector("inspect", "protected-selector", "stat-error", exc.errno)
+    _check_selector_info(inspected, "inspect")
+    inspected_identity = _selector_identity(inspected)
+
+    phase = "open"
+    try:
+        with open(
+                SELECTOR, "rb", buffering=0,
+                opener=lambda path, flags: os.open(
+                    path, flags | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        ) as selector_file:
+            phase = "fstat"
+            opened = os.fstat(selector_file.fileno())
+            _check_selector_info(opened, phase)
+            if _selector_identity(opened) != inspected_identity:
+                _reject_selector(phase, "inspected-inode", "substituted-inode-or-metadata")
+
+            phase = "read"
+            payload = selector_file.read(SELECTOR_MAX_BYTES + 1)
+            if len(payload) > SELECTOR_MAX_BYTES:
+                _reject_selector(phase, "bounded-ASCII-selector", "oversized")
+            if len(payload) != opened.st_size:
+                _reject_selector(phase, "complete-opened-file", "truncated-or-changed")
+            try:
+                partuuid = parse_selector(payload.decode("ascii"))
+            except (Blocked, UnicodeError) as exc:
+                _reject_selector(phase, "single-ASCII-PARTUUID-line", "malformed")
+
+            phase = "revalidate"
+            reread_info = os.fstat(selector_file.fileno())
+            _check_selector_info(reread_info, phase)
+            if _selector_identity(reread_info) != inspected_identity:
+                _reject_selector(phase, "unchanged-opened-inode", "changed-file-metadata")
+            pathname_info = SELECTOR.lstat()
+            _check_selector_info(pathname_info, phase)
+            if _selector_identity(pathname_info) != inspected_identity:
+                _reject_selector(phase, "unchanged-opened-inode", "replaced-selector-path")
+            phase = "close"
+    except OSError as exc:
+        _reject_selector(phase, "descriptor-bound-selector", "io-error", exc.errno)
+
+    return SelectorEvidence(partuuid, inspected_identity)
+
+
+def _read_selector() -> str:
+    return _read_selector_evidence().partuuid
+
+
+def _require_selector_at_policy_use(
+        expected: SelectorEvidence, plan: dict, authorization_snapshot: dict,
+        target_device: tuple[int, int], parent_device: tuple[int, int]) -> None:
+    """Reject stale selector or target admission before coordinator prepare."""
+    observed = _read_selector_evidence()
+    if observed != expected:
+        _reject_selector("policy_use", "admitted-selector-identity",
+                         "changed-selector-identity")
+    try:
+        _target_path, current_target, current_parent = verify_authorized_target(
+            plan, expected.partuuid, authorization_snapshot)
+    except (Blocked, OSError) as exc:
+        original_error = exc.__cause__ if isinstance(exc.__cause__, OSError) else exc
+        _reject_selector(
+            "policy_use", "frozen-authorized-target-and-parent",
+            "authorization-unavailable-or-mismatch",
+            getattr(original_error, "errno", None))
+    if current_target != target_device or current_parent != parent_device:
+        _reject_selector("policy_use", "admitted-target-and-parent",
+                         "changed-target-or-parent")
+
+
 
 
 def parse_swap_rows(contents: str,
@@ -3513,7 +3618,8 @@ def _normal_stop(swapzctl: Path, manifest: dict, active: dict | None,
 
 
 def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source: str,
-              plan: dict, selector_partuuid: str, target_device: tuple[int, int],
+              plan: dict, selector_partuuid: str, selector_evidence: SelectorEvidence,
+              authorization_snapshot: dict, target_device: tuple[int, int],
               target_parent_device: tuple[int, int],
               workload_mib: int, resident_mib: int, swap_limit_mib: int,
               timeout_seconds: int, prior_run_ids: set[str], prior_swap_uuids: set[str],
@@ -3527,6 +3633,9 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
     # The unprivileged parent owns Git/network source admission. Revalidate
     # immediately before this cycle's first durable/card mutation.
     admission.require(f"cycle-{index}")
+    _require_selector_at_policy_use(
+        selector_evidence, plan, authorization_snapshot,
+        target_device, target_parent_device)
 
     prepared = _primary(swapzctl, "prepare", timeout_seconds, admitted=True)
     if prepared.returncode != 0:
@@ -3791,7 +3900,8 @@ def _execute_admitted(
             raise Blocked(
                 "private physical execution control is not distinct from "
                 "the installed qualified control")
-        selector_partuuid = _read_selector()
+        selector_evidence = _read_selector_evidence()
+        selector_partuuid = selector_evidence.partuuid
         _target_path, target_device, target_parent_device = verify_authorized_target(
             plan, selector_partuuid, authorization_snapshot)
         # The verifier has already matched this value against live block
@@ -3866,6 +3976,8 @@ def _execute_admitted(
                 validated_source=arguments.validated_source,
                 plan=plan,
                 selector_partuuid=selector_partuuid,
+                selector_evidence=selector_evidence,
+                authorization_snapshot=authorization_snapshot,
                 target_device=target_device,
                 target_parent_device=target_parent_device,
                 workload_mib=arguments.workload_mib,

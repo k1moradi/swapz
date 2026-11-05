@@ -2,6 +2,9 @@
 """Rootless contracts for the private primary real-swap qualification helper."""
 
 from dataclasses import replace
+from types import SimpleNamespace
+import builtins
+import errno
 import contextlib
 import importlib.util
 import io
@@ -210,6 +213,233 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 "PARTUUID=deadbeef-01\nextra\n", "UUID=deadbeef-01\n"):
             with self.subTest(text=text), self.assertRaises(qualify.Blocked):
                 qualify.parse_selector(text)
+
+
+    @staticmethod
+    def _root_owned_selector_stat(info, *, owner_uid=0):
+        # Only the stat report is synthetic; the on-disk fixture stays rootless.
+        return SimpleNamespace(
+            st_dev=info.st_dev, st_ino=info.st_ino, st_mode=info.st_mode,
+            st_uid=owner_uid, st_nlink=info.st_nlink, st_size=info.st_size,
+            st_mtime_ns=info.st_mtime_ns, st_ctime_ns=info.st_ctime_ns)
+
+    @contextlib.contextmanager
+    def _selector_fixture(self, selector_path, *, after_inspection=None,
+                          after_open=None, descriptor_owner_uid=0):
+        inspections = 0
+
+        class SyntheticSelectorPath:
+            def __fspath__(self):
+                return os.fspath(selector_path)
+
+            def lstat(self):
+                nonlocal inspections
+                inspected = selector_path.lstat()
+                if inspections == 0 and after_inspection is not None:
+                    after_inspection()
+                inspections += 1
+                return PrimaryRealSwapContracts._root_owned_selector_stat(inspected)
+
+        original_fstat = os.fstat
+        descriptor_inspections = 0
+
+        def descriptor_stat(file_descriptor):
+            nonlocal descriptor_inspections
+            inspected = original_fstat(file_descriptor)
+            if descriptor_inspections == 0 and after_open is not None:
+                after_open()
+            descriptor_inspections += 1
+            return self._root_owned_selector_stat(
+                inspected, owner_uid=descriptor_owner_uid)
+
+        with mock.patch.object(qualify, "SELECTOR", SyntheticSelectorPath()), \
+                mock.patch.object(qualify.os, "fstat", side_effect=descriptor_stat):
+            yield
+
+    def test_selector_unchanged_descriptor_reads_only_pinned_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            selector.write_bytes(b"PARTUUID=AAAAAAAA\n")
+            selector.chmod(0o600)
+            original_open = os.open
+            flags_seen = []
+
+            def capture_open(path, flags, *args):
+                flags_seen.append(flags)
+                return original_open(path, flags, *args)
+
+            with self._selector_fixture(selector), \
+                    mock.patch.object(qualify.os, "open", side_effect=capture_open):
+                evidence = qualify._read_selector_evidence()
+                self.assertEqual(qualify._read_selector(), "aaaaaaaa")
+            self.assertEqual(evidence.partuuid, "aaaaaaaa")
+            self.assertEqual(len(flags_seen), 2)
+            for flags in flags_seen:
+                self.assertTrue(flags & os.O_NOFOLLOW)
+                self.assertTrue(flags & os.O_CLOEXEC)
+                self.assertTrue(flags & os.O_NONBLOCK)
+
+    def test_selector_symlink_and_hard_link_block(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            real_file = Path(directory) / "target"
+            real_file.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            real_file.chmod(0o600)
+            selector.symlink_to(real_file)
+            with self._selector_fixture(selector), \
+                    self.assertRaisesRegex(qualify.Blocked, "observed=nonregular"):
+                qualify._read_selector()
+            selector.unlink()
+            os.link(real_file, selector)
+            with self._selector_fixture(selector), \
+                    self.assertRaisesRegex(qualify.Blocked, "observed=link-count-mismatch"):
+                qualify._read_selector()
+
+    def test_selector_replacement_between_inspection_and_open_blocks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            replacement = Path(directory) / "replacement"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            replacement.write_bytes(b"PARTUUID=bbbbbbbb\n")
+            selector.chmod(0o600)
+            replacement.chmod(0o600)
+            with self._selector_fixture(
+                    selector, after_inspection=lambda: os.replace(
+                        replacement, selector)), \
+                    self.assertRaisesRegex(
+                        qualify.Blocked, "phase=fstat.*observed=substituted-inode"):
+                qualify._read_selector()
+
+    def test_selector_path_replacement_after_open_blocks_even_with_same_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            replacement = Path(directory) / "replacement"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            replacement.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o600)
+            replacement.chmod(0o600)
+            with self._selector_fixture(
+                    selector, after_open=lambda: os.replace(
+                        replacement, selector)), \
+                    self.assertRaisesRegex(
+                        qualify.Blocked, "phase=revalidate.*replaced-selector-path"):
+                qualify._read_selector()
+
+    def test_selector_malformed_truncated_non_ascii_and_oversized_block(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            for payload in (
+                    b"", b"PARTUUID=abc\n", b"PARTUUID=aaaaaaaa\nextra\n",
+                    b"PARTUUID=aaaa\xffaaa\n",
+                    b"PARTUUID=" + b"a" * 65 + b"\n"):
+                with self.subTest(length=len(payload), payload_index=payload[:1]):
+                    selector.write_bytes(payload)
+                    selector.chmod(0o600)
+                    with self._selector_fixture(selector), \
+                            self.assertRaises(qualify.Blocked) as raised:
+                        qualify._read_selector()
+                    self.assertIn("phase=", str(raised.exception))
+                    self.assertIn("action=BLOCK-before-prepare", str(raised.exception))
+                    self.assertNotIn(os.fspath(selector), str(raised.exception))
+
+    def test_selector_mode_and_owner_inconsistency_block(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o644)
+            with self._selector_fixture(selector), \
+                    self.assertRaisesRegex(qualify.Blocked, "observed=mode-mismatch"):
+                qualify._read_selector()
+            selector.chmod(0o600)
+            with self._selector_fixture(selector, descriptor_owner_uid=1000), \
+                    self.assertRaisesRegex(qualify.Blocked, "observed=owner-mismatch"):
+                qualify._read_selector()
+
+    def test_selector_read_error_and_in_place_truncation_block(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            original_open = builtins.open
+
+            class InjectedRead:
+                def __init__(self, stream, action):
+                    self.stream = stream
+                    self.action = action
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exception_type, exception, traceback):
+                    return self.stream.__exit__(
+                        exception_type, exception, traceback)
+
+                def fileno(self):
+                    return self.stream.fileno()
+
+                def read(self, limit):
+                    self.action()
+                    return self.stream.read(limit)
+
+            for action, expected in (
+                    (lambda: (_ for _ in ()).throw(
+                        OSError(errno.EIO, "synthetic private path")), 
+                     "phase=read.*errno=5"),
+                    (lambda: selector.write_bytes(b""),
+                     "phase=read.*observed=truncated-or-changed")):
+                selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+                selector.chmod(0o600)
+
+                def fake_open(*args, **kwargs):
+                    return InjectedRead(original_open(*args, **kwargs), action)
+
+                with self._selector_fixture(selector), \
+                        mock.patch.object(
+                            qualify, "open", create=True, side_effect=fake_open), \
+                        self.assertRaisesRegex(qualify.Blocked, expected) as raised:
+                    qualify._read_selector()
+                self.assertNotIn(os.fspath(selector), str(raised.exception))
+                self.assertNotIn("synthetic private path", str(raised.exception))
+
+    def test_selector_last_use_refuses_replacement_before_authorization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            replacement = Path(directory) / "replacement"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o600)
+            with self._selector_fixture(selector):
+                admitted = qualify._read_selector_evidence()
+            replacement.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            replacement.chmod(0o600)
+            os.replace(replacement, selector)
+            with self._selector_fixture(selector), \
+                    mock.patch.object(
+                        qualify, "verify_authorized_target") as verify, \
+                    self.assertRaisesRegex(
+                        qualify.Blocked, "phase=policy_use.*changed-selector-identity"):
+                qualify._require_selector_at_policy_use(
+                    admitted, {}, {}, (8, 1), (8, 0))
+            verify.assert_not_called()
+
+    def test_selector_last_use_requires_authorized_live_target_and_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o600)
+            contract = {"authorized_target": {}}
+            with self._selector_fixture(selector):
+                admitted = qualify._read_selector_evidence()
+                with mock.patch.object(
+                        qualify, "verify_authorized_target",
+                        return_value=(Path("/synthetic"), (8, 1), (8, 0))) as verify:
+                    qualify._require_selector_at_policy_use(
+                        admitted, {}, contract, (8, 1), (8, 0))
+                    verify.assert_called_once_with({}, "aaaaaaaa", contract)
+                with mock.patch.object(
+                        qualify, "verify_authorized_target",
+                        return_value=(Path("/synthetic"), (8, 2), (8, 0))), \
+                        self.assertRaisesRegex(
+                            qualify.Blocked, "phase=policy_use.*changed-target-or-parent"):
+                    qualify._require_selector_at_policy_use(
+                        admitted, {}, contract, (8, 1), (8, 0))
 
     def test_swap_inventory_resolves_block_identity_and_preserves_used_as_volatile(self):
         contents = (
@@ -1111,8 +1341,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                                 "privileged_execution_enabled": False}))
                     stack.enter_context(
                         mock.patch.object(
-                            qualify, "_read_selector",
-                            return_value="f13428f6-01"))
+                            qualify, "_read_selector_evidence",
+                            return_value=qualify.SelectorEvidence(
+                                "f13428f6-01", (1,))))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "_read_readiness_snapshot",
@@ -2621,11 +2852,43 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 oracle_path=Path("/synthetic/oracle"),
                 validated_source="2" * 40,
                 plan={}, selector_partuuid="f13428f6-01",
+                selector_evidence=qualify.SelectorEvidence("f13428f6-01", (1,)),
+                authorization_snapshot={},
                 target_device=(8, 1), target_parent_device=(8, 0),
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
                 timeout_seconds=60, prior_run_ids=set(),
                 prior_swap_uuids=set(), admission=admission)
         admission.require.assert_called_once_with("cycle-1")
+        primary.assert_not_called()
+
+
+    def test_run_cycle_selector_revalidation_blocks_before_any_primary_operation(self):
+        admission = mock.Mock()
+        primary = mock.Mock()
+        with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+                mock.patch.object(qualify, "_validate_precycle_state"), \
+                mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
+                mock.patch.object(
+                    qualify, "_require_selector_at_policy_use",
+                    side_effect=qualify.Blocked(
+                        "primary selector phase=policy_use expected=pinned "
+                        "observed=changed errno=none; action=BLOCK-before-prepare")
+                ) as revalidate, \
+                mock.patch.object(qualify, "_primary", primary), \
+                self.assertRaisesRegex(qualify.Blocked, "phase=policy_use"):
+            qualify.run_cycle(
+                1, swapzctl=Path("/synthetic/swapzctl"),
+                oracle_path=Path("/synthetic/oracle"),
+                validated_source="2" * 40, plan={},
+                selector_partuuid="f13428f6-01",
+                selector_evidence=qualify.SelectorEvidence("f13428f6-01", (1,)),
+                authorization_snapshot={}, target_device=(8, 1),
+                target_parent_device=(8, 0),
+                workload_mib=384, resident_mib=128, swap_limit_mib=384,
+                timeout_seconds=60, prior_run_ids=set(), prior_swap_uuids=set(),
+                admission=admission)
+        admission.require.assert_called_once_with("cycle-1")
+        revalidate.assert_called_once()
         primary.assert_not_called()
 
     def test_independent_active_verification_failure_still_requests_normal_stop(self):
@@ -2641,6 +2904,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 mock.patch.object(qualify, "_validate_precycle_state", return_value=None), \
                 mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
                 mock.patch.object(qualify, "_reject_relevant_kernel_errors", return_value=None), \
+                mock.patch.object(qualify, "_require_selector_at_policy_use"), \
                 mock.patch.object(qualify, "_primary", side_effect=[prepare, start]), \
                 mock.patch.object(qualify, "read_state", side_effect=[
                     {"run_id": run_id, "stage": "READY"},
@@ -2658,7 +2922,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             qualify.run_cycle(
                 1, swapzctl=Path("/synthetic/swapzctl"),
                 oracle_path=Path("/synthetic/oracle"), validated_source="2" * 40,
-                plan={}, selector_partuuid="f13428f6-01", target_device=(8, 1),
+                plan={}, selector_partuuid="f13428f6-01",
+                selector_evidence=qualify.SelectorEvidence("f13428f6-01", (1,)),
+                authorization_snapshot={}, target_device=(8, 1),
                 target_parent_device=(8, 0),
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
                 timeout_seconds=60, prior_run_ids=set(), prior_swap_uuids=set(),
@@ -2703,6 +2969,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 mock.patch.object(qualify, "_validate_precycle_state"), \
                 mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
                 mock.patch.object(qualify, "_reject_relevant_kernel_errors"), \
+                mock.patch.object(qualify, "_require_selector_at_policy_use"), \
                 mock.patch.object(qualify, "_primary", side_effect=[prepare, start]), \
                 mock.patch.object(qualify, "read_state", side_effect=[
                     {"run_id": run_id, "stage": "READY"},
@@ -2727,6 +2994,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 oracle_path=Path("/synthetic/oracle"),
                 validated_source="2" * 40,
                 plan={}, selector_partuuid="f13428f6-01",
+                selector_evidence=qualify.SelectorEvidence("f13428f6-01", (1,)),
+                authorization_snapshot={},
                 target_device=(8, 1), target_parent_device=(8, 0),
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
                 timeout_seconds=60, prior_run_ids=set(),

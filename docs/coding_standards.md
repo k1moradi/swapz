@@ -561,6 +561,21 @@ must clear caller-visible selector output before any failure, including malforme
 record envelopes and overlength values, so stale authorization cannot survive a
 rejected update.
 
+The private real-swap qualification helper must bind the protected physical
+selector to one context-managed O_NOFOLLOW/O_CLOEXEC descriptor. Inspect the
+pathname before opening, fstat the opened regular root-owned mode-0600
+single-link inode, read no more than the ASCII PARTUUID envelope (including
+optional CRLF) plus one overflow-detection byte, and require matching opened
+and named inode/metadata after the read. Reject short, oversized, malformed,
+unreadable or substituted selector bytes; never consume a second pathname
+lookup or fall back to another target. Pin the admitted selector identity,
+then repeat the selector and frozen target authorization proof after per-cycle
+source admission and before primary prepare. Diagnostics may report only
+phase, expected/observed identity category, original errno when present,
+and a safe BLOCK action; never payload or private pathname. This helper-level
+check does not establish a physical-card or reader identity lock across
+the coordinator's last-use boundary.
+
 Primary userspace mapper sizing must exactly match kernel authority admission.
 After SWZ-header removal and 1MiB segment rounding, keep
 `max(ceil(logical_pages / 8), 512)` GC-reserve blocks plus one independent
