@@ -5409,7 +5409,15 @@ use `BindsTo` on the removable device, because
 media removal must not automatically stop a mapper that may own live swap
 pages. Rootless package tests must use at least two selected PARTUUIDs and
 verify the generated names and dependencies change, and malformed selector
-output must fail without emitting a drop-in. These dependencies are not a
+output must fail without emitting a drop-in. The isolated generator transaction
+test must additionally reject stale raw by-PARTUUID `.swap` files and dangling
+`swap.target.wants` links for a previous selector across all three output
+directories. Inject final early-mask unlink failure both before and after the
+unlink, false-success unlink, and mask-restore rename failure before and after
+the rename. A refused generator run must keep the early `/dev/null` mask,
+remove both pinned mapper/device drop-ins, preserve the first failing command
+status and distinguish that shell status from unavailable syscall errno, and
+report the verified rollback outcome without disclosing selector contents. These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another
 alias, so deployment must separately ensure the selected partition is not
 activated through that alias. Current units remain disabled and

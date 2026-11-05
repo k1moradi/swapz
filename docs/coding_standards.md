@@ -702,7 +702,17 @@ manager response bytes. Reject output directories reached through
 symlinked ancestors, dot-component aliases or duplicate directory identities.
 Validate bounded manager output, refuse duplicate generated
 unit identities and symlink-substituted output paths, and remove only
-generator-owned stale drop-ins from a previously selected PARTUUID. Publish the
+generator-owned stale drop-ins from a previously selected PARTUUID.
+Reject stale by-PARTUUID raw `.swap` files and `swap.target.wants` aliases
+in every supplied generator output directory, including names from a prior
+selector, rather than treating a collision-free current pair as proof that no
+raw swap job can start. The final early-mask unlink commits the generated
+drop-ins only when it both reports success and leaves the mask absent;
+failed or falsely successful unlink must restore the early barrier and roll
+back only pinned generated inodes. Diagnose the original command status,
+expected/observed mask and drop-in ownership, and verified rollback outcome
+without printing the selected PARTUUID; shell command exit status is not
+a recoverable syscall errno and must not be misreported as one. Publish the
 complete selected graph before releasing the mask; any validation, command,
 publication or rollback failure must leave the mapper blocked rather than
 fall back to a device path or reveal a partially active job. Diagnostics must

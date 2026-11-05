@@ -304,6 +304,15 @@ for duplicate_output_dir in "$normal_dir" "$early_dir" "$late_dir"; do
 			fail 1 publication generator-output duplicate-selected-unit mapper-active-job
 		fi
 	done
+	# An old by-PARTUUID .swap alias (or enabled wants link) can bypass
+	# the manager even when the current selected pair is collision-free.
+	for stale_swap in "$duplicate_output_dir"/dev-disk-by\\x2dpartuuid-*.swap \
+		"$duplicate_output_dir"/swap.target.wants/dev-disk-by\\x2dpartuuid-*.swap; do
+		if [ -e "$stale_swap" ] || [ -L "$stale_swap" ]; then
+			printf 'swapz-primary-generator: phase=publication expected=manager-only-swap observed=stale-raw-swap-alias original_errno=not-applicable rollback=early-mask-retained\n' >&2
+			fail 1 publication generator-output stale-raw-swap-alias mapper-active-job
+		fi
+	done
 done
 mapper_dropin=$mapper_dropin_dir/50-selected-target.conf
 device_dropin=$device_dropin_dir/50-swapz-timeout.conf
@@ -347,17 +356,51 @@ if mv -nT -- "$mapper_temporary" "$mapper_dropin" &&
 	fail "$?" publication generator-output publish-mapper-dropin mapper-active-job
 fi
 # Publish the activation barrier last; any earlier error leaves the mask.
-transaction_committed=1
-if rm -f -- "$mapper_unit"; then :; else
+# A failed or falsely successful unlink must not commit the target graph.
+if rm -f -- "$mapper_unit"; then
+	if [ ! -e "$mapper_unit" ] && [ ! -L "$mapper_unit" ]; then
+		transaction_committed=1
+		exit 0
+	fi
+	mask_status=1
+	mask_validation=mask-not-released
+else
 	mask_status=$?
-	# An unlink may have succeeded despite a failing wrapper/status. Restore
-	# the fail-closed barrier before reporting that publication failed.
-	if [ ! -L "$mapper_unit" ]; then
-		if ln -s /dev/null "$mask_temporary" &&
-			mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
-			fail "$?" publication generator-output restore-mask mapper-active-job
+	mask_validation=release-mask
+fi
+# An unlink may have succeeded despite a failing wrapper/status. Restore
+# the fail-closed barrier before reporting that publication failed.
+if [ ! -L "$mapper_unit" ]; then
+	if ln -s /dev/null "$mask_temporary" &&
+		mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
+		mask_restore_status=$?
+		# A failed rename can still leave a missing destination. Fall back to
+		# a direct symlink without clobbering any substituted foreign unit.
+		rm -f -- "$mask_temporary" || :
+		if [ -L "$mapper_unit" ] &&
+			[ "$(readlink -- "$mapper_unit")" = /dev/null ]; then :
+		elif ln -s /dev/null "$mapper_unit"; then :; else
+			printf 'swapz-primary-generator: phase=rollback expected=early-mask observed=mask-restore-failed original_status=%s restore_status=%s original_errno=unavailable rollback=incomplete\n' \
+				"$mask_status" "$mask_restore_status" >&2
+			fail "$mask_restore_status" publication generator-output restore-mask mapper-active-job
 		fi
 	fi
-	fail "$mask_status" publication generator-output release-mask mapper-active-job
 fi
-exit 0
+# The unlink result is the original failure. Check rollback without
+# exposing the selected identity or overwriting that status.
+cleanup
+trap - EXIT
+rollback_outcome=complete
+if [ -e "$mapper_dropin" ] || [ -L "$mapper_dropin" ] ||
+	[ -e "$device_dropin" ] || [ -L "$device_dropin" ]; then
+	rollback_outcome=incomplete
+fi
+if [ -L "$mapper_unit" ] && [ "$(readlink -- "$mapper_unit")" = /dev/null ]; then
+	observed_mask=early-mask-retained
+else
+	observed_mask=early-mask-missing-or-substituted
+	rollback_outcome=incomplete
+fi
+printf 'swapz-primary-generator: phase=rollback expected=early-mask-and-no-owned-dropins observed=%s original_status=%s original_errno=unavailable rollback=%s\n' \
+	"$observed_mask" "$mask_status" "$rollback_outcome" >&2
+fail "$mask_status" publication generator-output "$mask_validation" mapper-active-job

@@ -353,6 +353,110 @@ class GeneratorPublicationTest(unittest.TestCase):
                 destination.unlink()
         command.unlink()
 
+    def test_mask_release_error_rolls_back_published_files(self) -> None:
+        command = self.commands / "rm"
+        for failure in ("before", "after"):
+            with self.subTest(failure=failure):
+                # A command can unlink the early mask and still return an
+                # error. Both owned drop-ins must roll back under the mask.
+                command.write_text(
+                    '#!/bin/sh\ncase "$*" in\n'
+                    '*swapz-primary-mapper.service)\n'
+                    '    if [ "$MOCK_RM_FAILURE" = after ]; then '
+                    '/usr/bin/rm "$@" || exit $?; fi\n'
+                    '    exit 83 ;;\n'
+                    'esac\nexec /usr/bin/rm "$@"\n',
+                    encoding="ascii",
+                )
+                command.chmod(0o755)
+                result = self.run_generator(MOCK_RM_FAILURE=failure)
+                self.assert_blocked(result, "publication")
+                self.assertIn("validation=release-mask", result.stderr)
+                self.assertIn("original_status=83", result.stderr)
+                self.assertIn("rollback=complete", result.stderr)
+                self.assertEqual(result.returncode, 83)
+                self.assertFalse(self.device_dropin(SELECTED).exists())
+        command.unlink()
+
+    def test_mask_unlink_false_success_is_not_committed(self) -> None:
+        command = self.commands / "rm"
+        command.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*swapz-primary-mapper.service) exit 0 ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n',
+            encoding="ascii",
+        )
+        command.chmod(0o755)
+        result = self.run_generator()
+        self.assert_blocked(result, "publication")
+        self.assertIn("validation=mask-not-released", result.stderr)
+        self.assertIn("rollback=complete", result.stderr)
+        self.assertFalse(self.device_dropin(SELECTED).exists())
+
+    def test_mask_restore_rename_failure_keeps_barrier(self) -> None:
+        release_marker = self.root / "mask-release-observed"
+        removal_command = self.commands / "rm"
+        removal_command.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*swapz-primary-mapper.service)\n'
+            '    /usr/bin/rm "$@" || exit $?\n'
+            '    : > "$MOCK_RELEASE_MARKER"\n'
+            '    exit 86 ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n',
+            encoding="ascii",
+        )
+        removal_command.chmod(0o755)
+        rename_command = self.commands / "mv"
+        for failure in ("before", "after"):
+            with self.subTest(failure=failure):
+                rename_command.write_text(
+                    '#!/bin/sh\ncase "$*" in\n'
+                    '*swapz-primary-mapper.service)\n'
+                    '    if [ -e "$MOCK_RELEASE_MARKER" ]; then\n'
+                    '        if [ "$MOCK_RESTORE_FAILURE" = after ]; then '
+                    '/usr/bin/mv "$@" || exit $?; fi\n'
+                    '        exit 92\n'
+                    '    fi ;;\n'
+                    'esac\nexec /usr/bin/mv "$@"\n',
+                    encoding="ascii",
+                )
+                rename_command.chmod(0o755)
+                result = self.run_generator(
+                    MOCK_RELEASE_MARKER=str(release_marker),
+                    MOCK_RESTORE_FAILURE=failure,
+                )
+                self.assert_blocked(result, "publication")
+                self.assertEqual(result.returncode, 86)
+                self.assertIn("original_status=86", result.stderr)
+                self.assertIn("rollback=complete", result.stderr)
+                self.assertFalse(self.device_dropin(SELECTED).exists())
+                release_marker.unlink()
+        removal_command.unlink()
+        rename_command.unlink()
+
+    def test_stale_raw_swap_alias_after_selector_change_remains_masked(self) -> None:
+        self.assertEqual(self.run_generator().returncode, 0)
+        self.set_selector(CHANGED)
+        old_raw_swap = identities(SELECTED)[1]
+        for output in (self.normal, self.early, self.late):
+            for enabled_alias in (False, True):
+                with self.subTest(output=output.name, enabled_alias=enabled_alias):
+                    candidate = output / ("swap.target.wants" if enabled_alias else "") / old_raw_swap
+                    candidate.parent.mkdir(exist_ok=True)
+                    if enabled_alias:
+                        candidate.symlink_to("/nonexistent/stale-raw-swap")
+                    else:
+                        candidate.write_text("[Swap]\n", encoding="ascii")
+                    result = self.run_generator()
+                    self.assert_blocked(result, "publication")
+                    self.assertIn("validation=stale-raw-swap-alias", result.stderr)
+                    self.assertIn("observed=stale-raw-swap-alias", result.stderr)
+                    self.assertFalse(self.device_dropin(SELECTED).exists())
+                    self.assertFalse(self.device_dropin(CHANGED).exists())
+                    candidate.unlink()
+        self.assertEqual(self.run_generator().returncode, 0)
+        self.assertTrue(self.device_dropin(CHANGED).exists())
+
     def test_hibernation_guards_survive_refused_selector(self) -> None:
         result = self.run_generator(MOCK_UNITS="garbage")
         self.assert_blocked(result, "selection")
