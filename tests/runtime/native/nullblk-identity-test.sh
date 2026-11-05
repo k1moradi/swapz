@@ -66,6 +66,9 @@ import sys
 source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 root = pathlib.Path(sys.argv[3])
 path_replacements = {
+    # Match nested paths first: /dev also prefixes /sys/dev/block and /proc/devices.
+    "/proc/devices": str(root / "proc/devices"),
+    "/sys/dev/block": str(root / "sys/dev/block"),
     "/var/lib/swapz-package-transactions": str(root / "var/lib/swapz-package-transactions"),
     "/lib/modules/": str(root / "lib/modules/"),
     "/proc": str(root / "proc"),

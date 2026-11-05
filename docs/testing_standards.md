@@ -538,9 +538,10 @@ directory, then write only through the power descriptor opened at acquisition.
 The rootless power-helper fixture must prove that the matching regular power
 inode transitions from 1 to 0, while missing paths and FIFO substitutes refuse
 without writes.
-The preflight's rootless identity fixture must translate the original /proc,
-/sys and /dev paths in a single pass, retaining /proc/devices and /sys/dev/block
-as distinct synthetic namespaces. It must provide its own writable fake
+The preflight's rootless identity fixture must translate original paths in
+one pass, matching nested /proc/devices and /sys/dev/block prefixes before
+shorter /proc, /sys and /dev prefixes, so each maps to its own synthetic
+namespace. It must provide its own writable fake
 /dev/null for redirected diagnostics; a missing synthetic sink must not masquerade
 as an ownership refusal. All original host resources remain untouched.
  Shell failure-status capture belongs outside the Python
