@@ -186,8 +186,8 @@ owned_nullblk_config_identity_unchanged() {
 owned_nullblk_power_off_pinned() {
 	local python_status=0
 
-	python3 - "$CONFIG/power" "$CONFIG_POWER_IDENTITY" 2>/dev/null <<'PY' ||
-		python_status=$?
+	# Keep the failure handler on the opener; otherwise it becomes Python input.
+	python3 - "$CONFIG/power" "$CONFIG_POWER_IDENTITY" 2>/dev/null <<'PY' || python_status=$?
 import os
 import stat
 import sys

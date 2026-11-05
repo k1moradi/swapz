@@ -515,7 +515,11 @@ plus the original pinned configfs/lower proof. Remove by exact mapper UUID,
 never by an unverified reused name or with force. Before power-off, require the
 same pinned configfs object, unchanged live lower proof and an empty holder
 directory, then write only through the power descriptor opened at acquisition.
-After power-off invalidates sysfs block telemetry, retain the captured configfs
+The rootless power-helper fixture must prove that the matching regular power
+inode transitions from 1 to 0, while missing paths and FIFO substitutes refuse
+without writes. Shell failure-status capture belongs outside the Python
+here-document input: a Python parse or open error must never be reported as
+successful power-off. After power-off invalidates sysfs block telemetry, retain the captured configfs
 proof and both pinned descriptor identities through the last immediately
 preceding `rmdir` check. A pathname-based `rmdir` still lacks an atomic
 compare-and-unlink primitive, so its residual concurrent-name-reuse boundary
