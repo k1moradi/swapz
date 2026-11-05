@@ -211,11 +211,12 @@ try:
     if written != 2:
         raise SystemExit(3)
 finally:
+    pending_exception = sys.exc_info()[0]
     if fd >= 0:
         try:
             os.close(fd)
         except OSError:
-            if sys.exc_info()[0] is None:
+            if pending_exception is None:
                 raise SystemExit(3)
 PY
 	case "$python_status" in

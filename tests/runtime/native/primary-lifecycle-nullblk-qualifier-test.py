@@ -616,6 +616,11 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertNotIn("os.O_CREAT", power_helper)
         self.assertIn("identity = os.fstat(fd)", power_helper)
         self.assertIn('os.write(fd, b"0\\n")', power_helper)
+        self.assertIn("pending_exception = sys.exc_info()[0]", power_helper)
+        self.assertLess(
+            power_helper.index("pending_exception = sys.exc_info()[0]"),
+            power_helper.index("os.close(fd)"),
+        )
 
     def test_rootless_postproof_replacement_cannot_redirect_power_write(self):
         def shell_function(name):
