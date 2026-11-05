@@ -242,12 +242,18 @@ class GeneratorPublicationTest(unittest.TestCase):
     def test_manager_response_rejects_extra_bytes_and_missing_terminator(self) -> None:
         device, raw = identities(SELECTED)
         canonical = f"{device} {raw}\n"
-        for response in (canonical + "\n", canonical + "\n\n", canonical[:-1],
-                         canonical.replace("\n", "\r\n")):
+        cases = (
+            (canonical + "\n", "noncanonical-response"),
+            (canonical + "\n\n", "noncanonical-response"),
+            (canonical[:-1], "noncanonical-response"),
+            # CRLF preserves the raw record but is not a valid unit identity.
+            (canonical.replace("\n", "\r\n"), "invalid-raw-swap-unit"),
+        )
+        for response, validation in cases:
             with self.subTest(response=repr(response)):
                 result = self.run_generator(MOCK_UNITS=response)
                 self.assert_blocked(result, "selection")
-                self.assertIn("validation=noncanonical-response", result.stderr)
+                self.assertIn(f"validation={validation}", result.stderr)
         # Environment variables cannot contain NUL; the stub emits it itself.
         nul_result = self.run_generator(MOCK_UNITS=canonical, MOCK_APPEND_NUL="1")
         self.assert_blocked(nul_result, "selection")
