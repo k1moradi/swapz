@@ -576,15 +576,27 @@ static int parse_swapz_ratio_status_diagnostic(
 		return STATUS_UNAVAILABLE;
 	}
 	if (parse_status_unsigned(status, "failed", 1ULL,
-				  &ratio->failed, problem) < 0)
+				  &ratio->failed, problem) < 0 ||
+	    parse_status_errno(status, "error", 0, &ratio->error, problem) < 0)
 		return STATUS_BLOCKED;
 	if (ratio->failed) {
+		/*
+		 * The kernel publishes last_error before the terminal failed flag,
+		 * but INFO field reads are observational and may straddle that
+		 * publication. Retry failed=1/error=0 rather than emit FAILED
+		 * without the terminal errno.
+		 */
+		if (!ratio->error) {
+			status_set_problem(problem, "failed/error",
+					   "failed=1 paired with kernel errno -1..-4095",
+					   "failed flag observed before terminal errno");
+			return STATUS_RETRY;
+		}
 		status_set_problem(problem, "failed", "0 for a healthy target",
 				   "1: kernel target is failed");
+		problem->kernel_errno = ratio->error;
 		return STATUS_FAILED;
 	}
-	if (parse_status_errno(status, "error", 0, &ratio->error, problem) < 0)
-		return STATUS_BLOCKED;
 	if (ratio->error) {
 		status_set_problem(problem, "error",
 				   "0 for a healthy target (-1..-4095 indicates errno)",
@@ -1525,6 +1537,8 @@ static int status_validate_list_generation(
 	status_set_problem(problem, "dm_ioctl.event_nr",
 			   "same event generation as DM_LIST_DEVICES",
 			   "mapping generation changed after device enumeration");
+	/* Preserve the transient generation-drift errno through diagnostics. */
+	problem->failure_errno = EAGAIN;
 	errno = EAGAIN;
 	return -1;
 }

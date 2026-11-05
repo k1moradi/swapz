@@ -123,9 +123,14 @@ static void test_failed_target_refuses_ratio(void)
 		"logical_write=4096 physical_write=8192 gc_write=0 "
 		"compressed=1 raw=0 zero_elided=0 bulk_mode=1 bulk_padding=0 failed=1 error=-5";
 	struct swapz_ratio_status ratio;
+	struct status_problem problem = { 0 };
 
-	assert(parse_swapz_ratio_status(status, &ratio) == 2);
+	assert(parse_swapz_ratio_status_diagnostic(status, &ratio, &problem) ==
+	       STATUS_FAILED);
 	assert(ratio.failed == 1ULL);
+	assert(ratio.error == -5);
+	assert(problem.kernel_errno == -5);
+	assert(problem.field && !strcmp(problem.field, "failed"));
 }
 
 static void test_ratio_snapshot_equality_covers_all_inputs(void)
@@ -208,7 +213,11 @@ static void test_required_tokens_duplicates_and_canonical_numbers(void)
 	assert_status_problem(
 		"failed=0 error=-5", STATUS_FAILED, "error", "negative kernel");
 	assert_status_problem(
-		"failed=1", STATUS_FAILED, "failed", "kernel target is failed");
+		"failed=1", STATUS_BLOCKED, "error", "missing");
+	assert_status_problem(
+		"failed=1 error=0", STATUS_RETRY, "failed/error", "terminal errno");
+	assert_status_problem(
+		"failed=1 error=-5", STATUS_FAILED, "failed", "kernel target is failed");
 	assert_status_problem(
 		"status_snapshot_error=-12", STATUS_UNAVAILABLE,
 		"status_snapshot_error", "kernel could not produce");
@@ -475,6 +484,7 @@ static void test_list_generation_binding(void)
 	assert(status_validate_list_generation(&observation, 11, &problem,
 					       &problem_target) < 0);
 	assert(errno == EAGAIN);
+	assert(problem.failure_errno == EAGAIN);
 	assert(problem_target == UINT_MAX);
 	assert(!strcmp(problem.field, "dm_ioctl.event_nr"));
 
@@ -850,13 +860,15 @@ static void test_snapshot_retry_exhaustion_and_failures(void)
 	struct status_ready_report report = { 0 };
 	char diagnostic[2048] = { 0 };
 	FILE *capture = tmpfile();
+	FILE *failed_capture = tmpfile();
 	FILE *stdout_capture = tmpfile();
 	int saved_stdout = dup(STDOUT_FILENO);
 	int saved_stderr = dup(STDERR_FILENO);
 	size_t bytes;
 	int result;
 
-	assert(capture && stdout_capture && saved_stderr >= 0 && saved_stdout >= 0);
+	assert(capture && failed_capture && stdout_capture &&
+	       saved_stderr >= 0 && saved_stdout >= 0);
 	assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
 	result = report_device_status_with_reader(&fixture, read_fixture_observation,
 						   "fixture", 1, &report);
@@ -873,9 +885,20 @@ static void test_snapshot_retry_exhaustion_and_failures(void)
 	assert(!strstr(diagnostic, fixture_valid_status));
 
 	fixture = (struct status_reader_fixture){ .statuses = failed, .count = 2 };
+	assert(dup2(fileno(failed_capture), STDERR_FILENO) >= 0);
 	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
 						"fixture", 1, &report) == -2);
+	fflush(stderr);
+	assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
 	assert(!report.count && fixture.calls == 2);
+	memset(diagnostic, 0, sizeof(diagnostic));
+	rewind(failed_capture);
+	bytes = fread(diagnostic, 1, sizeof(diagnostic) - 1U, failed_capture);
+	diagnostic[bytes] = '\0';
+	assert(strstr(diagnostic, "FAILED"));
+	assert(strstr(diagnostic, "target 2 snapshot 2"));
+	assert(strstr(diagnostic, "kernel errno=-5"));
+	assert(!strstr(diagnostic, fixture_valid_status));
 	fixture = (struct status_reader_fixture){ .statuses = torn, .count = 1 };
 	assert(report_device_status_with_reader(&fixture, read_fixture_observation,
 						"fixture", 1, &report) == -2);
@@ -918,6 +941,7 @@ static void test_snapshot_retry_exhaustion_and_failures(void)
 	close(saved_stdout);
 	close(saved_stderr);
 	fclose(capture);
+	fclose(failed_capture);
 	fclose(stdout_capture);
 }
 
@@ -1797,9 +1821,11 @@ static void test_adversarial_failed_info_after_staging(void)
 		    !strstr(diagnostic,
 			    changes[case_index] == FAKE_INFO_FAILURE_AFTER_STAGE ?
 			    "DM_TABLE_STATUS errno=5" : "dm_ioctl.event_nr") ||
+		    (changes[case_index] == FAKE_INFO_GENERATION_AFTER_STAGE &&
+		     !strstr(diagnostic, "errno=11")) ||
 		    original_errno !=
 		    (changes[case_index] == FAKE_INFO_FAILURE_AFTER_STAGE ?
-		     EIO : EPROTO)) {
+		     EIO : EAGAIN)) {
 			fprintf(stderr,
 				"adversarial staged INFO case=%zu phase=%s: expected complete "
 				"first inventory and no published bytes, wire bound=%zu; "

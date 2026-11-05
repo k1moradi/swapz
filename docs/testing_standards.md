@@ -1279,9 +1279,15 @@ EOVERFLOW on exhausted bounded reply growth and ENOMEM on allocation failure.
 Print that originating errno in the bounded field-specific diagnostic, not
 only in the process errno; never include raw INFO or mapping reply bytes.
 Malformed wire records without an originating system error remain BLOCKED with
-EPROTO. The rootless native observer regression must exercise both INFO read
-phases using production parser-backed synthetic snapshots, check safe
-mapping/device/generation/field context, and prevent staged numeric output.
+EPROTO. LIST event-generation drift is transient UNAVAILABLE state and must
+retain EAGAIN through both the bounded diagnostic and caller errno rather than
+being rewritten to EPROTO. A canonical terminal target status contains both
+failed and error: failed=1 with a negative error is FAILED and the diagnostic
+must report that kernel errno; failed=1/error=0 is a torn observation that must
+retry, while a missing or malformed error token is BLOCKED. The rootless native
+observer regression must exercise both INFO read phases using production
+parser-backed synthetic snapshots, check safe mapping/device/generation/field
+context, and prevent staged numeric output.
 
 The status implementation must require two consecutive identical relevant
 snapshots before printing a ratio. The compressed-only result is available only
