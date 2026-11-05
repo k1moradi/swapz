@@ -1261,6 +1261,11 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     helpers = (
         "swapz_primary_parse_u64", "swapz_primary_parse_priority",
         "swapz_primary_parse_dev_number", "swapz_primary_split_fields",
+        "swapz_primary_mountinfo_path_valid",
+        "swapz_primary_mountinfo_device_valid",
+        "swapz_primary_mountinfo_rw_options_valid",
+        "swapz_primary_mountinfo_optional_valid",
+        "swapz_primary_mount_identifier_compare",
         "swapz_primary_parse_swaps", "swapz_primary_swap_inventory_target_is_quiescent",
         "swapz_primary_parse_mountinfo",
     )

@@ -49,7 +49,7 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_NAME "primary-execution.env"
 #define SWAPZ_PRIMARY_BOOT_ID_LENGTH 36U
 #define SWAPZ_PRIMARY_EXECUTION_RECORD_BYTES 512U
-#define SWAPZ_PRIMARY_VISIBLE_PIDS_MAX 16384U
+#define SWAPZ_PRIMARY_VISIBLE_PIDS_MAX 4194304U
 #define SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES (64U * 1024U * 1024U)
 #if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && \
 	defined(SWAPZ_PRIMARY_PHYSICAL_QUALIFICATION_TEST)
@@ -3253,6 +3253,130 @@ static int swapz_primary_sysfs_dev_number(const char *path, dev_t *device)
 	return swapz_primary_parse_dev_number(buffer, device);
 }
 
+
+static int swapz_primary_mountinfo_path_valid(const char *path)
+{
+	size_t length;
+	size_t index = 0;
+
+	if (!path || path[0] != '/')
+		return 0;
+	length = strlen(path);
+	while (index < length) {
+		unsigned int escaped_byte;
+
+		if (path[index] != '\\') {
+			++index;
+			continue;
+		}
+		if (length - index < 4U || path[index + 1U] < '0' ||
+		    path[index + 1U] > '7' || path[index + 2U] < '0' ||
+		    path[index + 2U] > '7' || path[index + 3U] < '0' ||
+		    path[index + 3U] > '7')
+			return 0;
+		escaped_byte = ((unsigned int)(path[index + 1U] - '0') << 6) |
+			       ((unsigned int)(path[index + 2U] - '0') << 3) |
+			       (unsigned int)(path[index + 3U] - '0');
+		if (escaped_byte != ' ' && escaped_byte != '\t' &&
+		    escaped_byte != '\n' && escaped_byte != '\\')
+			return 0;
+		index += 4U;
+	}
+	return 1;
+}
+
+static int swapz_primary_mountinfo_device_valid(const char *identity,
+						dev_t *device)
+{
+	const char *colon;
+
+	if (!identity || !device)
+		return 0;
+	colon = strchr(identity, ':');
+	if (!colon || colon == identity || !colon[1] || strchr(colon + 1, ':'))
+		return 0;
+	if ((identity[0] == '0' && colon != identity + 1) ||
+	    (colon[1] == '0' && colon[2] != '\0'))
+		return 0;
+	return swapz_primary_parse_dev_number(identity, device) == 0;
+}
+
+static int swapz_primary_mountinfo_rw_options_valid(const char *options)
+{
+	size_t length;
+
+	if (!options)
+		return 0;
+	length = strlen(options);
+	if (length < 2U)
+		return 0;
+	if ((memcmp(options, "ro", 2U) && memcmp(options, "rw", 2U)) ||
+	    (length > 2U && options[2] != ','))
+		return 0;
+	return 1;
+}
+
+static int swapz_primary_mountinfo_optional_valid(const char *field,
+						   unsigned int *seen_fields)
+{
+	static const struct {
+		const char *name;
+		unsigned int bit;
+	} numeric_fields[] = {
+		{ "shared", 1U << 0 },
+		{ "master", 1U << 1 },
+		{ "propagate_from", 1U << 2 },
+	};
+	size_t index;
+
+	if (!field || !field[0] || !seen_fields)
+		return 0;
+	if (!strcmp(field, "unbindable")) {
+		const unsigned int bit = 1U << 3;
+
+		if (*seen_fields & bit)
+			return 0;
+		*seen_fields |= bit;
+		return 1;
+	}
+	if (!strncmp(field, "unbindable:", sizeof("unbindable:") - 1U))
+		return 0;
+	for (index = 0;
+	     index < sizeof(numeric_fields) / sizeof(numeric_fields[0]);
+	     ++index) {
+		const size_t name_length = strlen(numeric_fields[index].name);
+		const char *number;
+		uint64_t identifier;
+
+		if (!strcmp(field, numeric_fields[index].name))
+			return 0;
+		if (strncmp(field, numeric_fields[index].name, name_length) ||
+		    field[name_length] != ':')
+			continue;
+		number = field + name_length + 1U;
+		if ((*seen_fields & numeric_fields[index].bit) || !number[0] ||
+		    number[0] == '0' ||
+		    swapz_primary_parse_u64(number, &identifier) < 0 ||
+		    !identifier || identifier > (uint64_t)INT_MAX)
+			return 0;
+		if (numeric_fields[index].bit == (1U << 2) &&
+		    !(*seen_fields & (1U << 1)))
+			return 0;
+		*seen_fields |= numeric_fields[index].bit;
+		return 1;
+	}
+	return 1;
+}
+
+static int swapz_primary_mount_identifier_compare(const void *left,
+						   const void *right)
+{
+	const uint32_t first = *(const uint32_t *)left;
+	const uint32_t second = *(const uint32_t *)right;
+
+	return (first > second) - (first < second);
+}
+
 struct swapz_primary_mount_facts {
 	dev_t root_device;
 	int root_mount_seen;
@@ -3265,9 +3389,26 @@ static int swapz_primary_parse_mountinfo(const char *text,
 					       struct swapz_primary_mount_facts *facts)
 {
 	const char *line = text;
+	const char *cursor;
 	struct swapz_primary_mount_facts parsed = {0};
+	uint32_t *mount_ids = NULL;
+	size_t mount_count = 0;
+	size_t mount_capacity = 0;
 
-	if (!text || !facts)
+	if (!text || !facts) {
+		errno = EINVAL;
+		return -1;
+	}
+	for (cursor = text; *cursor; ++cursor)
+		if (*cursor == '\n')
+			++mount_capacity;
+	if (!mount_capacity ||
+	    mount_capacity > SIZE_MAX / sizeof(*mount_ids)) {
+		errno = EINVAL;
+		return -1;
+	}
+	mount_ids = malloc(mount_capacity * sizeof(*mount_ids));
+	if (!mount_ids)
 		return -1;
 	while (*line) {
 		char buffer[8192];
@@ -3277,52 +3418,81 @@ static int swapz_primary_parse_mountinfo(const char *text,
 		size_t field_count = 0;
 		size_t i;
 		size_t separator_index = SIZE_MAX;
+		unsigned int optional_fields = 0;
 		uint64_t mount_id;
 		uint64_t parent_id;
 		dev_t mounted_device;
 		const char *end = strchr(line, '\n');
 
-		length = end ? (size_t)(end - line) : strlen(line);
+		if (!end)
+			goto invalid;
+		length = (size_t)(end - line);
 		if (!length || length >= sizeof(buffer))
-			return -1;
+			goto invalid;
 		memcpy(buffer, line, length);
 		buffer[length] = '\0';
-		line = end ? end + 1 : line + length;
+		line = end + 1;
 		separator = strstr(buffer, " - ");
-		if (!separator || strstr(separator + 3, " - "))
-			return -1;
+		if (!separator)
+			goto invalid;
 		if (swapz_primary_split_fields(buffer, fields,
 					      sizeof(fields) / sizeof(fields[0]),
-					      &field_count) < 0 || field_count < 10U ||
+					      &field_count) < 0 ||
+		    field_count < 10U || fields[0][0] == '0' ||
+		    fields[1][0] == '0' ||
 		    swapz_primary_parse_u64(fields[0], &mount_id) < 0 ||
 		    swapz_primary_parse_u64(fields[1], &parent_id) < 0 ||
-		    !mount_id || !parent_id ||
-		    swapz_primary_parse_dev_number(fields[2], &mounted_device) < 0 ||
-		    !fields[3][0] || fields[4][0] != '/')
-			return -1;
-		for (i = 0; i < field_count; ++i) {
-			if (strcmp(fields[i], "-"))
-				continue;
-			if (separator_index != SIZE_MAX)
-				return -1;
-			separator_index = i;
-		}
-		if (separator_index < 6U || separator_index + 3U >= field_count)
-			return -1;
+		    !mount_id || !parent_id || mount_id > (uint64_t)INT_MAX ||
+		    parent_id > (uint64_t)INT_MAX ||
+		    !swapz_primary_mountinfo_device_valid(
+			    fields[2], &mounted_device) ||
+		    !fields[3][0] ||
+		    !swapz_primary_mountinfo_path_valid(fields[4]) ||
+		    !swapz_primary_mountinfo_rw_options_valid(fields[5]))
+			goto invalid;
+		for (i = 0; i < field_count; ++i)
+			if (fields[i] == separator + 1) {
+				separator_index = i;
+				break;
+			}
+		if (separator_index < 6U ||
+		    separator_index + 4U != field_count)
+			goto invalid;
+		for (i = 6U; i < separator_index; ++i)
+			if (!swapz_primary_mountinfo_optional_valid(
+				    fields[i], &optional_fields))
+				goto invalid;
+		if (!swapz_primary_mountinfo_rw_options_valid(
+			    fields[separator_index + 3U]))
+			goto invalid;
+		if (mount_count >= mount_capacity)
+			goto invalid;
+		mount_ids[mount_count++] = (uint32_t)mount_id;
 		if (mounted_device == target_device ||
 		    (parent_device && mounted_device == parent_device))
 			parsed.target_mounted = 1;
 		if (!strcmp(fields[4], "/")) {
 			if (parsed.root_mount_seen)
-				return -1;
+				goto invalid;
 			parsed.root_mount_seen = 1;
 			parsed.root_device = mounted_device;
 		}
 	}
-	if (!parsed.root_mount_seen)
-		return -1;
+	if (!parsed.root_mount_seen || mount_count != mount_capacity)
+		goto invalid;
+	qsort(mount_ids, mount_count, sizeof(*mount_ids),
+	      swapz_primary_mount_identifier_compare);
+	for (size_t index = 1U; index < mount_count; ++index)
+		if (mount_ids[index] == mount_ids[index - 1U])
+			goto invalid;
+	free(mount_ids);
 	*facts = parsed;
 	return 0;
+
+invalid:
+	free(mount_ids);
+	errno = EINVAL;
+	return -1;
 }
 
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -3375,12 +3545,15 @@ static int swapz_primary_mountinfo_read_fd(
 	}
 	if (close(fd) < 0)
 		return -1;
-	buffer[used] = '\0';
-	if (swapz_primary_parse_mountinfo(
-		    buffer, SWAPZ_PRIMARY_TARGET_DEVICE, parent_device, facts) < 0) {
+	if (!used || buffer[used - 1U] != '\n' ||
+	    memchr(buffer, '\0', used)) {
 		errno = EINVAL;
 		return -1;
 	}
+	buffer[used] = '\0';
+	if (swapz_primary_parse_mountinfo(
+		    buffer, SWAPZ_PRIMARY_TARGET_DEVICE, parent_device, facts) < 0)
+		return -1;
 	if (bytes_read)
 		*bytes_read = used;
 	return 0;

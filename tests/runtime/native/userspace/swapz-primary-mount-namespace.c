@@ -282,6 +282,22 @@ static void fixture_file(const char *relative, const char *contents)
 	assert(fclose(stream) == 0);
 }
 
+
+static void fixture_bytes(const char *relative, const void *contents,
+			  size_t contents_length)
+{
+	char path[PATH_MAX];
+	FILE *stream;
+	int length = snprintf(path, sizeof(path), "%s/%s", fixture_proc_root,
+			      relative);
+
+	assert(length > 0 && (size_t)length < sizeof(path));
+	stream = fopen(path, "wb");
+	assert(stream != NULL);
+	assert(fwrite(contents, 1U, contents_length, stream) == contents_length);
+	assert(fclose(stream) == 0);
+}
+
 /* Exceed the production per-table cap with bounded, fixed-size writes. */
 static void fixture_oversized_file(const char *relative)
 {
@@ -602,6 +618,47 @@ int main(void)
 	fixture_reset();
 	fixture_file("3031/mountinfo", "malformed\n");
 	expect_mount_admission("malformed remote mount table", 0, EINVAL);
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw future:field - ext4 /dev/other-root rw\n");
+	expect_mount_admission("unknown optional field remains extensible", 1, 0);
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / bogus - ext4 /dev/other-root rw\n");
+	expect_mount_admission("invalid mount options", 0, EINVAL);
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw shared:1 shared:2 - ext4 /dev/other-root rw\n");
+	expect_mount_admission("duplicate known optional field", 0, EINVAL);
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 0259:9 / / rw - ext4 /dev/other-root rw\n");
+	expect_mount_admission("noncanonical mounted device", 0, EINVAL);
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / /bad\\141 rw - ext4 /dev/other-root rw\n");
+	expect_mount_admission("invalid mountpoint escape", 0, EINVAL);
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n"
+		     "37 36 8:3 / /other rw - ext4 /dev/sda3 rw\n");
+	expect_mount_admission("duplicate mount identifier", 0, EINVAL);
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw");
+	expect_mount_admission("unterminated complete remote mount row", 0, EINVAL);
+	fixture_reset();
+	{
+		static const unsigned char embedded_nul_mountinfo[] =
+			"36 25 259:9 / / rw - ext4 /dev/other-root rw\n\0"
+			"37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n";
+
+		fixture_bytes("3031/mountinfo", embedded_nul_mountinfo,
+			      sizeof(embedded_nul_mountinfo) - 1U);
+	}
+	expect_mount_admission("embedded NUL cannot hide selected mount", 0, EINVAL);
 	fixture_reset();
 	fixture_file("3031/mountinfo", "");
 	expect_mount_admission("empty remote mount table", 0, EINVAL);
