@@ -116,6 +116,7 @@ enum admission_change {
 	ADMISSION_OPENED_READ_ONLY,
 	ADMISSION_SWAP_INVENTORY_MALFORMED,
 	ADMISSION_EXITED_PID_CONTROL,
+	ADMISSION_PARTITION_DISAPPEARS,
 };
 #define ADMISSION_DIAGNOSTIC_BYTES 1024U
 #define ADMISSION_DEVICE_FD 987654
@@ -133,6 +134,7 @@ static struct {
 	ino_t path_inode;
 	enum admission_change change;
 	unsigned int opens, reads, writes, syncs, closes;
+	unsigned int partition_path_stats;
 	const char *observed_identity;
 	unsigned int observed_identity_calls;
 	int enabled, path_is_symlink, path_is_regular;
@@ -250,6 +252,7 @@ static void admission_after_first_read(void)
 	case ADMISSION_UNCHANGED:
 	case ADMISSION_OPENED_RO_QUERY_FAILED:
 	case ADMISSION_OPENED_READ_ONLY:
+	case ADMISSION_PARTITION_DISAPPEARS:
 		break;
 	}
 }
@@ -273,6 +276,13 @@ static int admission_stat(const char *path, struct stat *info)
 			admission_observe_identity("by-partuuid-alias");
 		*info = admission_block_stat(admission_fixture.alias_device, 17U);
 		return 0;
+	}
+	if (admission_fixture.enabled &&
+	    admission_fixture.change == ADMISSION_PARTITION_DISAPPEARS &&
+	    !strcmp(path, ADMISSION_PARENT "/part") &&
+	    ++admission_fixture.partition_path_stats > 1U) {
+		errno = ENOENT;
+		return -1;
 	}
 	if (admission_fixture.enabled && !strncmp(path, "/dev/", 5U)) {
 		errno = ENOENT;
@@ -753,6 +763,55 @@ static void test_real_cli_snapshots_refuse_before_first_header_write(void)
 			      admission_fixture.geometry_bytes));
 	admission_stop();
 	puts("PASS: rootless CLI snapshot admission; kernel exclusivity NOT PROVEN");
+}
+
+static void test_missing_partition_slaves_directory_is_empty(void)
+{
+	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+	char path[PATH_MAX];
+	int observed_errno;
+
+	/*
+	 * Real physical partition sysfs nodes may not expose "slaves". The
+	 * synthetic topology keeps the parent edges and all other identity checks.
+	 */
+	admission_start(ADMISSION_UNCHANGED);
+	assert(admission_route(ADMISSION_PARENT "/part/slaves", path) == path);
+	assert(rmdir(path) == 0);
+	assert(admission_capture_cli(report, &observed_errno) == 0);
+	assert(admission_fixture.opens == 1U);
+	assert(admission_fixture.reads == 2U);
+	assert(admission_fixture.writes == 1U);
+	assert(admission_fixture.syncs == 1U);
+	assert(admission_fixture.closes == 1U);
+	assert(swapz_sb_valid(admission_fixture.block_zero,
+			      admission_fixture.geometry_bytes));
+	admission_stop();
+}
+
+static void test_missing_partition_slaves_does_not_hide_removal(void)
+{
+	const unsigned char unchanged[SWAPZ_SUPERBLOCK_BYTES] = {0};
+	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+	char path[PATH_MAX];
+	int observed_errno;
+
+	admission_start(ADMISSION_PARTITION_DISAPPEARS);
+	assert(admission_route(ADMISSION_PARENT "/part/slaves", path) == path);
+	assert(rmdir(path) == 0);
+	assert(admission_capture_cli(report, &observed_errno) == 2);
+	assert(observed_errno == ENOENT);
+	assert(strstr(report, "stage=topology"));
+	assert(strstr(report, "errno=2 ("));
+	assert(admission_fixture.partition_path_stats == 2U);
+	assert(admission_fixture.opens == 0U);
+	assert(admission_fixture.reads == 0U);
+	assert(admission_fixture.writes == 0U);
+	assert(admission_fixture.syncs == 0U);
+	assert(admission_fixture.closes == 0U);
+	assert(memcmp(admission_fixture.block_zero, unchanged,
+		      sizeof(unchanged)) == 0);
+	admission_stop();
 }
 
 /* The fake descriptor exercises the real final mode check, not BLK_EXCL. */
@@ -2775,6 +2834,8 @@ int main(void)
 	test_real_cli_exclusive_open_permission_refuses_without_io();
 	test_real_cli_descriptor_access_modes_refuse_without_write();
 	test_real_cli_snapshots_refuse_before_first_header_write();
+	test_missing_partition_slaves_directory_is_empty();
+	test_missing_partition_slaves_does_not_hide_removal();
 	puts("PASS: swapzctl formatter identity and destructive-action gates");
 	return 0;
 }

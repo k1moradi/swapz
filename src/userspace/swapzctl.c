@@ -1934,6 +1934,49 @@ static int format_sysfs_directory_empty(const char *path)
 	return 1;
 }
 
+/*
+ * Linux block partitions may omit their own "slaves" directory entirely.
+ * Treat only that genuine absence as empty, and recheck that the verified
+ * partition object still exists so device removal cannot look like no slaves.
+ */
+static int format_partition_slaves_empty(const char *partition_path)
+{
+	char path[PATH_MAX];
+	struct stat attribute_info;
+	struct stat partition_info;
+	int length;
+	int empty;
+
+	if (!partition_path) {
+		errno = EINVAL;
+		return -1;
+	}
+	length = snprintf(path, sizeof(path), "%s/slaves", partition_path);
+	if (length < 0 || (size_t)length >= sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	empty = format_sysfs_directory_empty(path);
+	if (empty >= 0)
+		return empty;
+	if (errno != ENOENT)
+		return -1;
+	if (lstat(path, &attribute_info) == 0) {
+		errno = ENOTDIR;
+		return -1;
+	}
+	if (errno != ENOENT)
+		return -1;
+	if (stat(partition_path, &partition_info) < 0)
+		return -1;
+	if (!S_ISDIR(partition_info.st_mode)) {
+		errno = ENODEV;
+		return -1;
+	}
+	errno = 0;
+	return 1;
+}
+
 static int format_parent_only_partition(const char *parent_path,
 					const char *partition_path)
 {
@@ -2220,10 +2263,8 @@ static int format_verify_parent_topology(
 	partition_holders_empty = format_sysfs_directory_empty(path);
 	if (partition_holders_empty < 0)
 		return -1;
-	length = snprintf(path, sizeof(path), "%s/slaves", partition_path);
-	if (length < 0 || (size_t)length >= sizeof(path))
-		goto path_overflow;
-	partition_slaves_empty = format_sysfs_directory_empty(path);
+	partition_slaves_empty =
+		format_partition_slaves_empty(partition_path);
 	if (partition_slaves_empty < 0)
 		return -1;
 	length = snprintf(path, sizeof(path), "%s/holders", parent_path);

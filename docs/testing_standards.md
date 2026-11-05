@@ -4440,7 +4440,14 @@ lowercase normalization. This is a Codex-owned integration requirement; the
 standalone formatter tests do not authorize edits to primary-manager source.
 
 The standalone CLI requires the complete partition/PARTUUID/geometry/removable-
-parent identity bundle documented in coding_standards.md. The older private
+parent identity bundle documented in coding_standards.md. Linux may omit a
+`slaves/` directory on a physical partition sysfs node; the formatter treats
+only that absent partition-level directory as empty after rechecking that the
+partition sysfs object still exists. Errors other than `ENOENT`, a present but
+unreadable/non-directory entry, and any nonempty `holders/` or `slaves/`
+directory still fail closed. Parent `holders/` and `slaves/` directories remain
+mandatory and must be empty. Partition `holders/` remains mandatory; partition
+`slaves/` must be empty when present. The older private
 physical-swap correctness probe remains historical machinery; do not relax the
 standalone formatter or repurpose that helper for production lifecycle
 activation merely to preserve its former formatter argument list.
