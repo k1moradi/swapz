@@ -272,18 +272,23 @@ parent replacement; it does not establish a matching primary mount-reader
 path or a destructive admission. Preserve **UNPROVEN** for unclosed snapshot
 intervals; do not label them FIXED solely from repeated namespace stats.
 
-A live non-leader task whose initial namespace `stat()` fails with `EINVAL`
-must not be conflated with a task proven to have exited: the current helper
-groups `EINVAL` with exit errors at that initial stat and requires an
-additional live-task refusal regression and production-owner review before
-claiming this source path fail-closed. Malformed mountinfo still requires its
-originating `EINVAL`; namespace identity changes detected after a successful
-table read require `EAGAIN`. These are running-test refusals, not setup SKIPs.
-The optional rootless `unshare` child-failure control must mark SKIP only for
-an identified namespace setup rejection before the child-start marker.
-Once that marker is observed, any unexpected child error or wrong namespace
-identity is FAIL, preserving the original child exit status and never exposing
-host namespace inode numbers in diagnostics.
+Do not promote a synthetic initial namespace-`stat()` `EINVAL` into a
+production defect unless a matching Linux procfs path is established. The
+mountinfo open path itself can use `EINVAL` while a task is disappearing, so
+the errno is not globally synonymous with malformed input. The contractual
+cases remain source-specific: malformed mountinfo preserves `EINVAL`, while a
+namespace identity change detected after a successful table read refuses with
+`EAGAIN`. A still-live task whose initial namespace stat somehow returns
+`EINVAL` remains **UNPROVEN** until a matching kernel path is reproduced; any
+production change for that case stays with the production owner.
+
+The optional rootless `unshare` child-failure control must first run an
+assertion-free namespace-setup probe. Only failure of that preflight is an
+environmental SKIP. Once setup has succeeded, a missing child-start marker, an
+unexpected child error, or a wrong namespace identity is FAIL and must never be
+reclassified as setup unavailability. Keep an open parent namespace fd as the
+pinned namespace reference for the comparison rather than passing raw host
+namespace device/inode values through argv or diagnostics.
 
 The primary-start rootless lifecycle fixture must independently show a
 foreign-PID conflict on the initial admission, a different visible PID appearing
