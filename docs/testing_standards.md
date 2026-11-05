@@ -116,16 +116,27 @@ another PID still refuses by exact major:minor despite misleading source
 labels. A mounted physical parent also refuses. Under the same synthetic root,
 malformed or unreadable foreign tables and incomplete PID enumeration must
 remain failures. A same-namespace chroot shortcut must not hide a selected
-mount already in the coordinator's full-root table. Check the production
-same-parent and independent recovery-parent relationship gates for changed,
-missing, and identical parents. The reader supplied an out-of-date parent
-argument may return a clean snapshot: this is a positive *reader-only*
-negative control, not physical admission; callers must independently
-re-resolve ancestry, compare against the original, and reject changed topology.
-Log the rejection category (selected target, sibling/root, namespace
-enumeration, device ancestry, or unresolved identity). These synthetic facts
-cannot authorize the host-bound scope, certify physical device ancestry, or
-close the post-snapshot mutation exclusion interval.
+mount already present in the coordinator's full-root table. Also inject a
+selected-target mount after that local full-root table has been read but before
+a same-namespace peer is identity-checked and skipped. If the current bounded
+reader still returns its earlier clean snapshot, report that observation as
+**UNPROVEN** with `prevented=none`; do not call it a PASS and do not lock the
+unsafe result into an expected-failure assertion. A future reader that observes
+the target or fails closed is acceptable. This within-scan race is part of the
+same non-atomic exclusion problem as a change immediately after the final
+snapshot returns, but it starts earlier and can span the remainder of PID
+enumeration.
+
+Check the production same-parent and independent recovery-parent relationship
+gates for changed, identical, and unresolved identities on either side. The
+reader supplied an out-of-date parent argument may return a clean snapshot:
+this is a positive *reader-only* negative control, not physical admission;
+callers must independently re-resolve ancestry, compare against the original,
+and reject changed topology. Log the rejection category (selected target,
+sibling/root, namespace enumeration, device ancestry, or unresolved identity).
+These synthetic facts cannot authorize the host-bound scope, certify physical
+device ancestry, or close either the within-scan or post-snapshot mutation
+exclusion interval.
 
 The primary-start rootless lifecycle fixture must independently show a
 foreign-PID conflict on the initial admission, a different visible PID appearing

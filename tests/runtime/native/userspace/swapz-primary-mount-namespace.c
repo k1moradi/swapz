@@ -27,6 +27,8 @@ static int fixture_self_mount_open_error;
 static int fixture_inventory_error;
 static int fixture_inventory_readdir_error;
 static int fixture_inventory_seen_foreign_pid;
+static int fixture_same_namespace_mount_after_self_snapshot;
+static int fixture_same_namespace_mount_injected;
 static int fixture_mount_vanish_on_read;
 static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
@@ -35,6 +37,8 @@ static int fixture_mount_fd = -1;
 static const char *fixture_regular_swap_path;
 static dev_t fixture_regular_swap_device;
 static char fixture_self_root[PATH_MAX] = "/";
+
+static void fixture_file(const char *relative, const char *contents);
 
 static const char *fixture_path(const char *path, char converted[PATH_MAX])
 {
@@ -148,8 +152,24 @@ static struct dirent *fixture_readdir(DIR *directory)
 		return NULL;
 	}
 	entry = readdir(directory);
-	if (entry && !strcmp(entry->d_name, "3031"))
+	if (entry && !strcmp(entry->d_name, "3031")) {
 		fixture_inventory_seen_foreign_pid = 1;
+		/*
+		 * Reproduce a mount racing the already-read self snapshot while the
+		 * foreign PID is still provably in the same mount namespace. Both
+		 * synthetic views change because a real same-namespace mount is shared.
+		 */
+		if (fixture_same_namespace_mount_after_self_snapshot) {
+			fixture_file("self/mountinfo",
+				     "36 25 8:4 / / rw - ext4 /dev/root-sibling rw\n"
+				     "37 36 8:1 /subtree /selected-bind rw - ext4 /dev/selected rw\n");
+			fixture_file("3031/mountinfo",
+				     "36 25 8:4 / / rw - ext4 /dev/root-sibling rw\n"
+				     "37 36 8:1 /subtree /selected-bind rw - ext4 /dev/selected rw\n");
+			fixture_same_namespace_mount_after_self_snapshot = 0;
+			fixture_same_namespace_mount_injected = 1;
+		}
+	}
 	return entry;
 }
 
@@ -362,6 +382,8 @@ static void fixture_reset(void)
 	fixture_inventory_error = 0;
 	fixture_inventory_readdir_error = 0;
 	fixture_inventory_seen_foreign_pid = 0;
+	fixture_same_namespace_mount_after_self_snapshot = 0;
+	fixture_same_namespace_mount_injected = 0;
 	fixture_mount_vanish_on_read = 0;
 	fixture_namespace_stat_error = 0;
 	fixture_mount_read_error = 0;
@@ -543,6 +565,62 @@ static void test_shared_root_parent_mount_gates(void)
 					"device ancestry/cross-namespace");
 }
 
+
+static void probe_shared_root_parent_same_namespace_snapshot_gap(void)
+{
+	const dev_t root_device = makedev(8U, 4U);
+	const dev_t target_parent = makedev(8U, 0U);
+	struct swapz_primary_mount_facts facts = {0};
+	int result;
+
+	fixture_same_parent_root();
+	fixture_share_mount_namespace();
+	/*
+	 * Production has already consumed self/mountinfo when readdir(3) yields
+	 * PID 3031. Injecting here models a selected-target mount created in that
+	 * shared namespace before the shortcut's two identity checks and skip.
+	 */
+	fixture_same_namespace_mount_after_self_snapshot = 1;
+	errno = 0;
+	result = swapz_primary_read_mount_facts(&facts, target_parent);
+	if (!fixture_same_namespace_mount_injected) {
+		fprintf(stderr,
+			"FAIL: shared-parent same-namespace snapshot race: "
+			"gate=selected target/namespace identity injection did not run\n");
+		++fixture_failures;
+		return;
+	}
+	if (fixture_mount_fd != -1) {
+		fprintf(stderr,
+			"FAIL: shared-parent same-namespace snapshot race: "
+			"gate=namespace enumeration remote mountinfo descriptor leaked\n");
+		++fixture_failures;
+		(void)close(fixture_mount_fd);
+		fixture_mount_fd = -1;
+	}
+	if (result == 0 &&
+	    (!facts.root_mount_seen || facts.root_device != root_device)) {
+		fprintf(stderr,
+			"FAIL: shared-parent same-namespace snapshot race: "
+			"gate=sibling/root root_seen=%d root=%u:%u expected=%u:%u\n",
+			facts.root_mount_seen, major(facts.root_device),
+			minor(facts.root_device), major(root_device),
+			minor(root_device));
+		++fixture_failures;
+		return;
+	}
+	if (result == 0 && !facts.target_mounted) {
+		/*
+		 * Do not turn a known non-atomic snapshot gap into a passing safety
+		 * claim. A future production fix may instead report target_mounted or
+		 * fail closed; either outcome safely retires this UNPROVEN observation.
+		 */
+		puts("UNPROVEN: shared-parent same-namespace selected target appeared "
+		     "after self mount snapshot and before peer skip; "
+		     "gate=selected target/namespace identity prevented=none");
+	}
+}
+
 static void expect_parent_relationship(
 	const char *case_name, int (*relationship_valid)(dev_t, dev_t),
 	dev_t first_parent, dev_t second_parent, int should_allow,
@@ -581,11 +659,21 @@ static void test_shared_root_parent_relationship_gates(void)
 	expect_parent_relationship("unresolved target parent",
 				   swapz_primary_shared_root_parent_relationship_valid,
 				   0, shared_parent, 0, "unresolved identity");
+	expect_parent_relationship("unresolved root parent",
+				   swapz_primary_shared_root_parent_relationship_valid,
+				   shared_parent, 0, 0, "unresolved identity");
 	/* Recovery must remain on a different physical parent even in this scope. */
 	expect_parent_relationship("shared recovery parent refused",
 				   swapz_primary_recovery_parent_separation_valid,
 				   shared_parent, shared_parent, 0,
 				   "device ancestry/recovery");
+	expect_parent_relationship("unresolved recovery target parent",
+				   swapz_primary_recovery_parent_separation_valid,
+				   0, makedev(259U, 0U), 0,
+				   "unresolved identity");
+	expect_parent_relationship("unresolved recovery parent",
+				   swapz_primary_recovery_parent_separation_valid,
+				   shared_parent, 0, 0, "unresolved identity");
 	expect_parent_relationship("independent recovery parent accepted",
 				   swapz_primary_recovery_parent_separation_valid,
 				   shared_parent, makedev(259U, 0U), 1,
@@ -935,6 +1023,7 @@ int main(void)
 	fixture_unlink("3031/ns/mnt");
 	expect_mount_admission("missing table and vanished namespace", 1, 0);
 	test_shared_root_parent_mount_gates();
+	probe_shared_root_parent_same_namespace_snapshot_gap();
 	test_shared_root_parent_relationship_gates();
 	test_active_swapfile_gate();
 	test_independent_admission_gates();
