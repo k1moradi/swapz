@@ -309,14 +309,13 @@ claim_runtime_authorization()
 	fi
 }
 
-# GNU timeout places its command in an independent process group unless
-# --foreground is used. This verifier owns the timeout PID, not arbitrary host
-# processes. Stop that group and wait for timeout to reap its direct child.
+# Keep timeout as the owned supervisor in the observer process group. With
+# --foreground, its kill-after path can reap a TERM-resistant direct journal
+# child instead of killing the timeout supervisor as part of the child group.
 stop_journal_observation()
 {
 	journal_child_status=none
 	[ -n "$journal_timeout_pid" ] || return 0
-	kill -TERM -- "-$journal_timeout_pid" 2>/dev/null || :
 	kill -TERM "$journal_timeout_pid" 2>/dev/null || :
 	if wait "$journal_timeout_pid" 2>/dev/null; then
 		journal_child_status=0
@@ -324,6 +323,24 @@ stop_journal_observation()
 		journal_child_status=$?
 	fi
 	journal_timeout_pid=
+}
+
+handle_observation_signal()
+{
+	# A signal may arrive after the asynchronous child starts but before $! is
+	# captured. Preserve the first signal and finish acquiring ownership before
+	# attempting cleanup, so no timeout child can escape unowned.
+	if [ -n "$observation_deferred_signal_exit_status" ]; then
+		[ -z "$journal_timeout_pid" ] && return 0
+		interrupted_observation "$observation_deferred_signal_exit_status" \
+			"$observation_deferred_signal_name"
+	fi
+	if [ "$journal_launch_in_progress" -eq 1 ] && [ -z "$journal_timeout_pid" ]; then
+		observation_deferred_signal_exit_status=$1
+		observation_deferred_signal_name=$2
+		return 0
+	fi
+	interrupted_observation "$1" "$2"
 }
 
 interrupted_observation()
@@ -334,7 +351,7 @@ interrupted_observation()
 	observation_signal_name=$2
 	trap '' HUP INT TERM
 	observation_child_ownership=none
-	[ -z "$journal_timeout_pid" ] || observation_child_ownership=owned_timeout_group
+	[ -z "$journal_timeout_pid" ] || observation_child_ownership=owned_timeout_child
 	stop_journal_observation
 	observation_token_disposition=unknown
 	observation_token_cleanup_phase=none
@@ -1584,11 +1601,19 @@ SWAPS
 	if valid_boot_id "$boot_id" 2>/dev/null && command -v journalctl >/dev/null 2>&1 &&
 	   command -v timeout >/dev/null 2>&1; then
 		# A foreground external command delays POSIX shell TERM traps until
-		# its deadline. Own the background child and reap it on every path.
-		timeout --signal=TERM --kill-after=1s 5s journalctl --boot "$boot_id" --kernel \
-			--priority=err..alert --lines=256 --no-pager --output=short-monotonic \
-			>"$journal_raw" 2>/dev/null &
+		# its deadline. Background the owned supervisor so the shell wait is
+		# interruptible; --foreground keeps the supervisor alive to reap the
+		# direct journal child if kill-after escalation is required.
+		journal_launch_in_progress=1
+		timeout --foreground --signal=TERM --kill-after=1s 5s journalctl \
+			--boot "$boot_id" --kernel --priority=err..alert --lines=256 \
+			--no-pager --output=short-monotonic >"$journal_raw" 2>/dev/null &
 		journal_timeout_pid=$!
+		journal_launch_in_progress=0
+		if [ -n "$observation_deferred_signal_exit_status" ]; then
+			handle_observation_signal "$observation_deferred_signal_exit_status" \
+				"$observation_deferred_signal_name"
+		fi
 		if wait "$journal_timeout_pid"; then
 			journal_command_status=0
 		else
@@ -1727,10 +1752,13 @@ observe)
 	observation_runtime_authorization_claimed=0
 	authorization_claim_command_failed=0
 	journal_timeout_pid=
+	journal_launch_in_progress=0
+	observation_deferred_signal_exit_status=
+	observation_deferred_signal_name=
 	trap 'observation_exit "$?"' EXIT
-	trap 'interrupted_observation 129 HUP' HUP
-	trap 'interrupted_observation 130 INT' INT
-	trap 'interrupted_observation 143 TERM' TERM
+	trap 'handle_observation_signal 129 HUP' HUP
+	trap 'handle_observation_signal 130 INT' INT
+	trap 'handle_observation_signal 143 TERM' TERM
 	observe_boot
 	trap - EXIT HUP INT TERM
 	;;

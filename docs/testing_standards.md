@@ -6879,15 +6879,22 @@ cannot make that noncanonical file activation authority. An observer interrupted
 by HUP/INT/TERM must explicitly exit through this cleanup (an EXIT-only trap is
 insufficient for POSIX sh), report the signal exit status and unknown retention
 of partial evidence, and never claim PASS. During kernel-journal collection,
-the bounded timeout must be an owned background child with an interruptible
-shell wait: on interruption signal the timeout-owned process group and direct
-child, wait for descendant reaping, then revoke authorization. The fail-only
+the bounded timeout must be an owned background supervisor with an interruptible
+shell wait. Run GNU timeout in foreground-command mode so the supervisor remains
+in the observer process group and can reap its direct journal child after
+kill-after escalation; do not put the supervisor in the child process group
+that escalation may kill. A signal received between asynchronous launch and
+capturing `$!` must be deferred until the timeout PID is owned, preserving the
+first signal reason. On interruption signal only that owned timeout supervisor,
+wait for its direct child status, then revoke authorization. The fail-only
 signal diagnostic must retain the original 128+signal status even if token
 cleanup and its EXIT retry fail, and identify signal, process ownership, child
 status, token disposition, cleanup phase/status and retained evidence without
 runtime token paths. Rootless regression must trace parent/PGID and output FD
-ownership, assert prompt exit and no surviving child chain, inject cleanup
-failure, and reject a repeated observation without a new preflight. A failed canonical unlink may safely
+ownership, assert prompt exit and no surviving timeout/journal process for both
+ordinary TERM and a TERM-resistant journal that requires bounded KILL escalation,
+inject cleanup failure, and reject a repeated observation without a new
+preflight. A failed canonical unlink may safely
 invalidate a still-owned regular 0600 single-link token without following
 substituted symlinks; preserve the original unlink error and refuse PASS even if
 invalidation is impossible. An active oneshot mapper requires SubState=exited

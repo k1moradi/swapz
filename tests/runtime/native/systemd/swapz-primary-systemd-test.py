@@ -1938,11 +1938,11 @@ class BootVerifierTests(unittest.TestCase):
                 line.split()[1] for line in journal_status.splitlines()
                 if line.startswith("PPid:")
             ))
-            # Timeout owns the journal child in a distinct process group.
-            # Only the verifier holds the test's stdout/stderr pipe writers.
+            # Timeout remains in the verifier process group and directly owns
+            # the journal child. Only the verifier holds the capture-pipe writers.
             self.assertEqual(os.getpgid(verifier.pid), verifier.pid)
-            self.assertEqual(os.getpgid(timeout_pid), timeout_pid)
-            self.assertEqual(os.getpgid(journal_pid), timeout_pid)
+            self.assertEqual(os.getpgid(timeout_pid), verifier.pid)
+            self.assertEqual(os.getpgid(journal_pid), verifier.pid)
             self.assertTrue(os.readlink(f"/proc/{verifier.pid}/fd/1").startswith("pipe:["))
             self.assertTrue(os.readlink(f"/proc/{verifier.pid}/fd/2").startswith("pipe:["))
             self.assertIn("/.kernel-journal.", os.readlink(f"/proc/{journal_pid}/fd/1"))
@@ -1957,7 +1957,7 @@ class BootVerifierTests(unittest.TestCase):
                 stderr,
             )
             self.assertIn(
-                "signal=TERM process_ownership=owned_timeout_group "
+                "signal=TERM process_ownership=owned_timeout_child "
                 "child_status=143 token_disposition=revoked",
                 stderr,
             )
@@ -1972,12 +1972,6 @@ class BootVerifierTests(unittest.TestCase):
             if verifier.poll() is None:
                 os.killpg(verifier.pid, signal.SIGKILL)
                 verifier.communicate(timeout=5)
-            # The journal group is not in the verifier's session process group.
-            if timeout_pid is not None:
-                try:
-                    os.killpg(timeout_pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
 
         # A second attempt cannot accept a token consumed by an interruption.
         write_executable(self.bin / "journalctl", "#!/bin/sh\nexit 0\n")
@@ -1997,7 +1991,8 @@ class BootVerifierTests(unittest.TestCase):
         write_executable(
             self.bin / "journalctl",
             "#!/bin/sh\n"
-            'printf "%s\\n" "$" > "$MOCK_OBSERVE_JOURNAL_PID"\n'
+            "trap '' TERM\n"
+            'printf "%s\\n" "$$" > "$MOCK_OBSERVE_JOURNAL_PID"\n'
             'printf "started\\n" > "$MOCK_OBSERVE_JOURNAL_STARTED"\n'
             "exec sleep 15\n",
         )
@@ -2028,12 +2023,19 @@ class BootVerifierTests(unittest.TestCase):
                 line.split()[1] for line in journal_status.splitlines()
                 if line.startswith("PPid:")
             ))
+            self.assertEqual(os.getpgid(timeout_pid), verifier.pid)
+            self.assertEqual(os.getpgid(journal_pid), verifier.pid)
             os.killpg(verifier.pid, signal.SIGTERM)
             stdout, stderr = verifier.communicate(timeout=4)
             self.assertEqual(verifier.returncode, 143, stderr)
             self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", stdout)
             self.assertIn(
                 "phase=observe_signal observed=interrupted exit_status=143", stderr
+            )
+            self.assertIn(
+                "signal=TERM process_ownership=owned_timeout_child "
+                "child_status=137",
+                stderr,
             )
             self.assertIn(
                 "token_disposition=unknown "
@@ -2046,17 +2048,14 @@ class BootVerifierTests(unittest.TestCase):
                 stderr,
             )
             self.assertNotIn(str(authorization), stderr)
+            self.assertFalse(Path(f"/proc/{timeout_pid}").exists())
+            self.assertFalse(Path(f"/proc/{journal_pid}").exists())
             self.assertFalse(authorization.exists())
             self.assertTrue(consumed.is_file())
         finally:
             if verifier.poll() is None:
                 os.killpg(verifier.pid, signal.SIGKILL)
                 verifier.communicate(timeout=5)
-            if timeout_pid is not None:
-                try:
-                    os.killpg(timeout_pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
 
         # Even a failed claimed-token unlink never restores canonical authority.
         write_executable(self.bin / "rm", '#!/bin/sh\nexec /usr/bin/rm "$@"\n')
