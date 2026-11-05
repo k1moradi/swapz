@@ -203,5 +203,43 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertNotIn("ab" * 16, stderr)
 
 
+    def test_clean_readback_has_exactly_one_ordered_terminal_record(self):
+        status, stdout, stderr, allocation = self.run_fixture()
+        self.assertEqual(status, 0)
+        self.assertTrue(allocation.closed)
+        self.assertEqual(stderr, "")
+        records = stdout.splitlines()
+        self.assertEqual(
+            [record.partition("=")[0] for record in records],
+            ["ORACLE_WAITING", "ORACLE_FILLED", "ORACLE_VERIFIED"])
+        waiting, filled, verified = [
+            json.loads(record.partition("=")[2]) for record in records
+        ]
+        self.assertEqual((waiting["pages"], waiting["bytes"]), (2, 8192))
+        self.assertEqual((filled["pages"], filled["bytes"]), (2, 8192))
+        self.assertEqual(
+            (verified["verified_pages"], verified["verified_bytes"]), (2, 8192))
+        self.assertEqual(verified["mismatched_pages"], 0)
+        self.assertEqual(verified["mismatches"], 0)
+        self.assertEqual(verified["mismatch_samples"], [])
+        self.assertEqual(verified["digest"], verified["expected_digest"])
+        self.assertEqual(filled["digest"], verified["expected_digest"])
+
+    def test_clean_readback_report_failure_keeps_original_errno(self):
+        status, stdout, stderr, allocation = self.run_fixture(report_errno=32)
+        self.assertEqual(status, 1)
+        self.assertTrue(allocation.closed)
+        self.assertIn("ORACLE_FILLED=", stdout)
+        self.assertNotIn("ORACLE_VERIFIED=", stdout)
+        self.assertIn("phase=report", stderr)
+        self.assertIn("verified_pages=2/2 verified_bytes=8192/8192", stderr)
+        self.assertIn(
+            "expected_page_mismatches=0 observed_page_mismatches=0", stderr)
+        self.assertIn(
+            "expected_byte_mismatches=0 observed_byte_mismatches=0", stderr)
+        self.assertIn("error=OSError errno=32 cleanup_complete=true", stderr)
+        self.assertNotIn("ab" * 16, stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
