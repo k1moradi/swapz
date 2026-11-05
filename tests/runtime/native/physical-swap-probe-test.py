@@ -315,29 +315,40 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                              for command in commands))
 
     def test_development_recovery_rejects_noncanonical_inactive_state(self):
-        with tempfile.TemporaryDirectory() as directory:
-            state_dir = Path(directory) / "state"
-            state, _ = self.make_recovery_state(state_dir)
-            state.update({
-                "swap_was_active": False,
-                "swap_path": None,
-                "swap_size_kib": None,
-                "swap_priority": None,
-                "swap_used_kib": None,
-                "development_only": True,
-                "development_scope": "wrong scope",
-            })
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
-            with mock.patch.object(probe, "_validate_state_dir"), \
-                    mock.patch.object(
-                        probe, "inspect_target_identity_for_recovery") as inspect, \
-                    mock.patch.object(probe, "_run") as command:
-                with self.assertRaisesRegex(
-                        probe.ProbeError, "canonical_inactive_development_state"):
-                    probe.recover(
-                        state_dir, state["device_arg"], state["device_arg"])
-            inspect.assert_not_called()
-            command.assert_not_called()
+        cases = (
+            ("development_scope", "wrong scope"),
+            ("swap_path", "/dev/synthetic-stale-swap"),
+            ("swap_size_kib", 1),
+            ("swap_priority", -1),
+            ("swap_used_kib", 0),
+        )
+        for field, value in cases:
+            with self.subTest(field=field), \
+                    tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory) / "state"
+                state, _ = self.make_recovery_state(state_dir)
+                state.update({
+                    "swap_was_active": False,
+                    "swap_path": None,
+                    "swap_size_kib": None,
+                    "swap_priority": None,
+                    "swap_used_kib": None,
+                    "development_only": True,
+                    "development_scope": probe.DEVELOPMENT_SCOPE,
+                })
+                state[field] = value
+                (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+                with mock.patch.object(probe, "_validate_state_dir"), \
+                        mock.patch.object(
+                            probe, "inspect_target_identity_for_recovery") as inspect, \
+                        mock.patch.object(probe, "_run") as command:
+                    with self.assertRaisesRegex(
+                            probe.ProbeError,
+                            "canonical_inactive_development_state"):
+                        probe.recover(
+                            state_dir, state["device_arg"], state["device_arg"])
+                inspect.assert_not_called()
+                command.assert_not_called()
 
     def test_development_run_directory_uses_its_fresh_run_id(self):
         run_id = "abcdef0123456789abcdef0123456789"
