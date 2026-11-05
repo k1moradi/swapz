@@ -261,6 +261,21 @@ hash_file() {
   sha256sum -- "$path" | awk '{print $1}'
 }
 
+# Report only named artifact classes and canonical digests, never private paths.
+# A stored installed marker is diagnostic evidence, not qualification authority.
+report_qualified_digest() {
+  local artifact_name="$1" expected_hash="$2" artifact_path="$3" provenance="$4"
+  local observed_hash=missing_or_unsafe
+  if [[ -f "$artifact_path" && ! -L "$artifact_path" ]]; then
+    observed_hash="$(hash_file "$artifact_path" 2>/dev/null || true)"
+    [[ "$observed_hash" =~ ^[0-9a-f]{64}$ ]] || observed_hash=unavailable
+  fi
+  [[ "$observed_hash" == "$expected_hash" ]] && return 0
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=%s check=sha256 provenance=%s expected_sha256=%s observed_sha256=%s next=inspect_qualification_and_artifact_bytes_read_only retained_state=unchanged\n' \
+    "$artifact_name" "$provenance" "$expected_hash" "$observed_hash" >&2
+  return 1
+}
+
 query_dkms_status() {
   local output_name="$1"
   local output rc=0
@@ -598,6 +613,26 @@ verify_owned() {
   installed_file_metadata "$installed_module" 644 || return 1
   verify_qualification_identity || return 1
   verify_binary_manifest
+}
+
+# Called only on a definitively rejected existing install. Recorded digests
+# help explain the rejection but cannot make an unverified marker authoritative.
+report_existing_package_drift() {
+  local stored_module_sha stored_cli_sha
+  installed_directory_metadata "$src" 755 || return 0
+  installed_file_metadata "$src/$qualification_marker" 644 || return 0
+  stored_module_sha="$(sed -n 's/^module_sha256=\([0-9a-f]\{64\}\)$/\1/p' "$src/$qualification_marker" 2>/dev/null || true)"
+  stored_cli_sha="$(sed -n 's/^swapzctl_sha256=\([0-9a-f]\{64\}\)$/\1/p' "$src/$qualification_marker" 2>/dev/null || true)"
+  if [[ "$stored_module_sha" =~ ^[0-9a-f]{64}$ ]]; then
+    report_qualified_digest installed_dm-swapz.ko "$stored_module_sha" "$installed_module" installed_marker_unverified || true
+    report_qualified_digest installed_module_snapshot "$stored_module_sha" "$module_snapshot" installed_marker_unverified || true
+  fi
+  if [[ "$stored_cli_sha" =~ ^[0-9a-f]{64}$ ]]; then
+    report_qualified_digest installed_swapzctl "$stored_cli_sha" "$cli" installed_marker_unverified || true
+  fi
+  if ! verify_source_manifest >/dev/null 2>&1; then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=installed_kernel_sources check=source_manifest expected=recorded_source_hashes observed=mismatch_or_unavailable next=inspect_source_manifest_read_only retained_state=unchanged\n' >&2
+  fi
 }
 
 # An interrupted atomic CLI publish/restore may leave a separate executable.
@@ -2050,8 +2085,15 @@ qualification_report_sha256="$(hash_file "$qualification_report")" || blocked "c
 
 build_source_sha="$(sed -n 's/^#define SWAPZ_BUILD_SOURCE_SHA "\([0-9a-f]\{40\}\)"$/\1/p' "$build_info")"
 build_source_clean="$(sed -n 's/^#define SWAPZ_BUILD_SOURCE_CLEAN \([01]\)$/\1/p' "$build_info")"
-[[ "$build_source_sha" == "$qualified_source_sha" && "$build_source_clean" == 1 ]] ||
+if [[ "$build_source_sha" != "$qualified_source_sha" || "$build_source_clean" != 1 ]]; then
+  observed_source_sha="$build_source_sha"
+  observed_clean_state="$build_source_clean"
+  [[ "$observed_source_sha" =~ ^[0-9a-f]{40}$ ]] || observed_source_sha=unavailable
+  [[ "$observed_clean_state" == 0 || "$observed_clean_state" == 1 ]] || observed_clean_state=unavailable
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=qualified_kernel_build_info check=source_provenance expected_source_sha=%s observed_source_sha=%s expected_clean=1 observed_clean=%s next=inspect_qualification_and_build_info_read_only retained_state=unchanged\n' \
+    "$qualified_source_sha" "$observed_source_sha" "$observed_clean_state" >&2
   blocked "build provenance does not match the qualified clean source"
+fi
 if [[ -z "$test_root" ]]; then
   export GIT_OPTIONAL_LOCKS=0
   git -c safe.directory="$root" merge-base --is-ancestor "$qualified_source_sha" HEAD >/dev/null 2>&1 ||
@@ -2063,11 +2105,11 @@ if [[ -z "$test_root" ]]; then
     blocked "package inputs or qualification report are dirty"
 fi
 
-[[ "$(hash_file "$cli_artifact")" == "$qualified_cli_sha256" ]] ||
+report_qualified_digest qualified_swapzctl "$qualified_cli_sha256" "$cli_artifact" qualified_report ||
   blocked "swapzctl digest does not match qualification"
-[[ "$(hash_file "$module_artifact")" == "$qualified_module_sha256" ]] ||
+report_qualified_digest qualified_dm-swapz.ko "$qualified_module_sha256" "$module_artifact" qualified_report ||
   blocked "module digest does not match qualification"
-[[ "$(hash_file "$oracle_artifact")" == "$qualified_oracle_sha256" ]] ||
+report_qualified_digest qualified_roundtrip_oracle "$qualified_oracle_sha256" "$oracle_artifact" qualified_report ||
   blocked "round-trip oracle digest does not match qualification"
 
 kernel_build_link="$modules_root/$kernel_release/build"
@@ -2085,14 +2127,23 @@ module_vermagic_status=0
 module_vermagic="$(modinfo -F vermagic "$module_artifact" 2>/dev/null)" ||
   module_vermagic_status=$?
 module_kernel_release="${module_vermagic%% *}"
-[[ "$module_kernel_release" == "$kernel_release" ]] ||
+if [[ "$module_kernel_release" != "$kernel_release" ]]; then
+  module_vermagic_observed=foreign_kernel
+  if (( module_vermagic_status != 0 )); then
+    module_vermagic_observed=modinfo_probe_failed
+  elif [[ -z "$module_kernel_release" ]]; then
+    module_vermagic_observed=missing_vermagic
+  fi
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=qualified_dm-swapz.ko check=module_vermagic expected=running_kernel observed=%s command_status=%s next=inspect_modinfo_vermagic_read_only retained_state=unchanged\n' \
+    "$module_vermagic_observed" "$module_vermagic_status" >&2
   blocked "qualified module does not match the running kernel; phase=module_vermagic; command_status=$module_vermagic_status"
+fi
 if [[ -n "$test_root" ]]; then
   SWAPZ_SIGN_TEST_ROOT="$sandbox" bash packaging/sign-module.sh --verify "$module_artifact"
 else
   bash packaging/sign-module.sh --verify "$module_artifact"
 fi
-[[ "$(hash_file "$module_artifact")" == "$qualified_module_sha256" ]] ||
+report_qualified_digest qualified_dm-swapz.ko "$qualified_module_sha256" "$module_artifact" qualified_report ||
   blocked "module bytes changed during signature verification"
 
 incoming_identity() {
@@ -2115,6 +2166,7 @@ if package_paths_present; then
        verify_owned_legacy; then
     existing_kind="legacy"
   else
+    report_existing_package_drift
     blocked "existing package is partial, foreign, or modified"
   fi
 fi
@@ -2123,6 +2175,7 @@ current_dkms_status=""
 query_dkms_status current_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
   blocked "cannot inspect current-kernel DKMS state"
 if [[ -n "$existing_kind" ]] && ! dkms_status_exact_installed "$current_dkms_status"; then
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=exact_installed_state expected=one_exact_installed_record observed=missing_stale_or_ambiguous next=inspect_dkms_status_read_only retained_state=unchanged\n' >&2
   blocked "verified package does not have an installed current-kernel DKMS state"
 fi
 assert_single_kernel_dkms_scope
@@ -2524,7 +2577,7 @@ if [[ "$dkms_installed_module" != "$installed_module" ]]; then
 fi
 install -d -m0755 "$installed_module_dir"
 install -m0644 "$module_artifact" "$installed_module"
-[[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
+report_qualified_digest installed_dm-swapz.ko "$qualified_module_sha256" "$installed_module" qualified_report ||
   blocked "installed module digest mismatch"
 durable_package_paths "$installed_module"
 persist_transaction_state module-promoted
@@ -2532,7 +2585,7 @@ install_test_checkpoint module-promoted
 
 persist_transaction_state depmod-pending
 "$depmod_bin" "$kernel_release"
-[[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
+report_qualified_digest installed_dm-swapz.ko "$qualified_module_sha256" "$installed_module" qualified_report ||
   blocked "installed module changed during depmod"
 verify_module_resolution ||
   blocked "module lookup does not resolve to the qualified installed image"
@@ -2606,7 +2659,7 @@ for ((file_index=0; file_index<${#pre_activation_files[@]}; ++file_index)); do
       "${pre_activation_files[file_index]}" ||
     blocked "installed userspace or unit bytes changed before CLI publication"
 done
-[[ "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
+report_qualified_digest installed_dm-swapz.ko "$qualified_module_sha256" "$installed_module" qualified_report ||
   blocked "installed module digest changed before CLI publication"
 
 persist_transaction_state publishing-cli
@@ -2621,7 +2674,7 @@ durable_package_paths "$cli"
 persist_transaction_state cli-published
 install_test_checkpoint cli-published
 verify_owned || blocked "installed ownership or digest verification failed"
-[[ "$(hash_file "$cli")" == "$qualified_cli_sha256" ]] ||
+report_qualified_digest installed_swapzctl "$qualified_cli_sha256" "$cli" qualified_report ||
   blocked "installed CLI digest mismatch"
 persist_transaction_state committed
 

@@ -9,9 +9,31 @@ blocked() {
 
 blocked_phase() {
     local phase="$1" command_status="$2"
+    local expected_state=qualified_module_identity observed_state=unverified
+    local next_action=inspect_signing_evidence_read_only
     shift 2
-    printf 'BLOCKED: Secure Boot module signing: %s; phase=%s; command_status=%s\n' \
-        "$*" "$phase" "$command_status" >&2
+    case "$phase" in
+        certificate_enrollment)
+            expected_state=configured_certificate_enrolled
+            observed_state=enrollment_unverified
+            next_action=inspect_public_mok_enrollment_read_only ;;
+        certificate_material)
+            expected_state=readable_configured_public_certificate
+            observed_state=certificate_unavailable
+            next_action=inspect_public_certificate_permissions_read_only ;;
+        detached_signature)
+            expected_state=valid_signature_from_enrolled_certificate
+            observed_state=unsigned_malformed_or_unverified
+            next_action=inspect_qualified_module_signature_read_only ;;
+        signature_generation)
+            expected_state=valid_build_time_module_signature
+            observed_state=signing_failed
+            next_action=inspect_signing_tool_status_without_key_material ;;
+    esac
+    # Never replay signer output, private key/certificate paths or material,
+    # and never claim that the running kernel accepted the signed module.
+    printf 'BLOCKED: Secure Boot module signing: %s; artifact=dm-swapz.ko phase=%s expected=%s observed=%s command_status=%s next=%s kernel_acceptance=unproven\n' \
+        "$*" "$phase" "$expected_state" "$observed_state" "$command_status" "$next_action" >&2
     exit 2
 }
 
@@ -49,7 +71,7 @@ else
 fi
 
 [[ -f "$module" && ! -L "$module" ]] ||
-    blocked "built dm-swapz.ko is missing or not a regular file"
+    blocked_phase module_presence 1 "built dm-swapz.ko is missing or not a regular file"
 
 secure_boot_state() {
     local output value
@@ -87,7 +109,7 @@ secure_boot_state() {
 state="$(secure_boot_state)"
 [[ "$state" != disabled ]] || exit 0
 [[ "$state" == enabled ]] ||
-    blocked "cannot determine EFI Secure Boot state"
+    blocked_phase secure_boot_state 1 "cannot determine EFI Secure Boot state"
 
 key="${SWAPZ_MOK_PRIVATE_KEY:-/var/lib/shim-signed/mok/MOK.priv}"
 cert="${SWAPZ_MOK_CERT:-/var/lib/shim-signed/mok/MOK.der}"

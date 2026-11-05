@@ -677,6 +677,8 @@ exec "{flock_binary}" "$@"
         self.assertNotEqual(missing_state.returncode, 0)
         self.assertIn("does not have an installed current-kernel DKMS state",
                       missing_state.stderr)
+        self.assertIn("artifact=current_kernel_dkms_registration check=exact_installed_state", missing_state.stderr)
+        self.assertIn("observed=missing_stale_or_ambiguous", missing_state.stderr)
         self.assert_installed_exact()
 
         missing_state_uninstall = self.invoke("uninstall")
@@ -684,6 +686,22 @@ exec "{flock_binary}" "$@"
         self.assertIn("does not have an installed current-kernel DKMS state",
                       missing_state_uninstall.stderr)
         self.assert_installed_exact()
+
+    def test_mismatched_compiled_source_provenance_is_attributed(self):
+        foreign_source = "f" * 40
+        self.build_info.write_text(
+            f'#define SWAPZ_BUILD_SOURCE_SHA "{foreign_source}"\n'
+            "#define SWAPZ_BUILD_SOURCE_CLEAN 1\n"
+            '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n')
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("build provenance does not match", result.stderr)
+        self.assertIn("artifact=qualified_kernel_build_info check=source_provenance", result.stderr)
+        self.assertIn(f"expected_source_sha={SOURCE_SHA}", result.stderr)
+        self.assertIn(f"observed_source_sha={foreign_source}", result.stderr)
+        self.assertIn("next=inspect_qualification_and_build_info_read_only", result.stderr)
+        self.assertNotIn(str(self.home), result.stderr)
+        self.assert_absent()
 
     def test_uninstall_dkms_status_query_failure_preserves_package(self):
         self.assertEqual(self.invoke("install").returncode, 0)
@@ -732,6 +750,10 @@ exec "{flock_binary}" "$@"
                 result.returncode, 0,
                 "phase=detached_signature producer_status=47 command_status=0")
             self.assertIn("not cryptographically valid", result.stderr)
+            self.assertIn("artifact=dm-swapz.ko phase=detached_signature", result.stderr)
+            self.assertIn("expected=valid_signature_from_enrolled_certificate", result.stderr)
+            self.assertIn("next=inspect_qualified_module_signature_read_only", result.stderr)
+            self.assertIn("kernel_acceptance=unproven", result.stderr)
             self.assertIn("phase=detached_signature", result.stderr)
             self.assertIn("command_status=47", result.stderr)
         self.assert_absent()
@@ -749,6 +771,9 @@ exec "{flock_binary}" "$@"
                 result.returncode, 0,
                 "phase=module_vermagic producer_status=0 command_status=0")
             self.assertIn("does not match the running kernel", result.stderr)
+            self.assertIn("artifact=qualified_dm-swapz.ko check=module_vermagic", result.stderr)
+            self.assertIn("expected=running_kernel observed=foreign_kernel", result.stderr)
+            self.assertIn("next=inspect_modinfo_vermagic_read_only", result.stderr)
             self.assertIn("phase=module_vermagic", result.stderr)
             self.assertIn("command_status=0", result.stderr)
         self.assert_absent()
@@ -1358,6 +1383,8 @@ exec "{flock_binary}" "$@"
             "install", {"SWAPZ_FAKE_TAMPER_INSTALLED": "1"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("changed during depmod", result.stderr)
+        self.assertIn("artifact=installed_dm-swapz.ko check=sha256 provenance=qualified_report", result.stderr)
+        self.assertIn("next=inspect_qualification_and_artifact_bytes_read_only", result.stderr)
         self.assert_absent()
 
         self.tamper_marker.unlink(missing_ok=True)
@@ -2426,6 +2453,9 @@ exec "{flock_binary}" "$@"
         result = self.invoke("install")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertIn("artifact=installed_swapzctl check=sha256 provenance=installed_marker_unverified", result.stderr)
+        self.assertIn(f"expected_sha256={hashlib.sha256(self.cli.read_bytes()).hexdigest()}", result.stderr)
+        self.assertIn(f"observed_sha256={hashlib.sha256(binary.read_bytes()).hexdigest()}", result.stderr)
         self.assertNotIn(str(self.home), result.stderr)
         self.assertEqual(binary.read_bytes(), b"tampered-userspace\n")
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
@@ -2436,10 +2466,25 @@ exec "{flock_binary}" "$@"
         result = self.invoke("install")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertIn("artifact=installed_dm-swapz.ko check=sha256 provenance=installed_marker_unverified", result.stderr)
+        self.assertIn(f"expected_sha256={hashlib.sha256(self.module.read_bytes()).hexdigest()}", result.stderr)
+        self.assertIn(f"observed_sha256={hashlib.sha256(self.installed_module.read_bytes()).hexdigest()}", result.stderr)
+        self.assertNotIn(str(self.home), result.stderr)
         self.assertEqual(
             self.installed_module.read_bytes(),
             b"tampered-installed-module\n")
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
+
+    def test_missing_installed_control_binary_reports_absent_artifact(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        (self.prefix / "sbin/swapzctl").unlink()
+        result = self.invoke("install")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("partial, foreign, or modified", result.stderr)
+        self.assertIn("artifact=installed_swapzctl check=sha256", result.stderr)
+        self.assertIn("observed_sha256=missing_or_unsafe", result.stderr)
+        self.assertIn("next=inspect_qualification_and_artifact_bytes_read_only", result.stderr)
+        self.assertNotIn(str(self.home), result.stderr)
 
     def test_interrupt_during_dkms_build_rolls_back(self):
         env = dict(self.env, SWAPZ_FAKE_BUILD_SLEEP="30")

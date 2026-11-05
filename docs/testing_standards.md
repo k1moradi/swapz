@@ -7302,6 +7302,18 @@ accepted the module under its configured enforcement policy until the same
 exact installed bytes have been safely and authoritatively loaded by that
 kernel.
 
+Package and Secure Boot refusals must emit bounded, fail-only diagnostics
+that name the artifact or status check, its expected versus observed digest or
+provenance/status class, any known command exit status, retained-state
+disposition, and the next read-only inspection. Never include absolute host
+paths, private signing-key or certificate material, or machine-specific
+identifiers. An installed qualification marker is a claim to inspect, **not**
+independent proof that the bytes are qualified; mark its comparison provenance
+unverified. Missing installed `swapzctl`, mismatched installed module bytes,
+wrong module vermagic, stale/missing DKMS registration and Secure Boot
+signature/enrollment failure must all remain BLOCKED. A verified detached
+signature plus an enrolled MOK must never imply kernel load acceptance.
+
 DKMS remains the compatibility/header integration mechanism, not the artifact
 authority. After a successful current-kernel DKMS build/install, packaging must
 replace the DKMS-produced module with the exact qualified module, verify its
