@@ -2070,7 +2070,10 @@ class LiveSwapSupervisorTests(unittest.TestCase):
 
     def test_failure_evidence_write_error_does_not_skip_restoration(self):
         """An ENOSPC on first failure report is not permission to abandon swap."""
-        for mode in ("mismatch", "stop"):
+        # "stop" is intentionally consumed by _activate_trial as a normal
+        # SAFE_STOP, not propagated as an activation failure. Exercise the
+        # outer failure-record path with a genuine byte-oracle mismatch.
+        for mode in ("mismatch",):
             with self.subTest(mode=mode):
                 ops = FakeOps(pressure_mode=mode)
                 saved = supervisor._save_results
