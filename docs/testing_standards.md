@@ -4252,8 +4252,12 @@ or replace an already failing original status (including 143) or prior cleanup
 refusal. If cleanup began successfully, the first such signal supplies its
 129/130/143 status, suppresses PASS even if both resources are removed, and
 produces one path-free cleanup-signal diagnostic with proven ownership,
-resumption and exact retention. Inject TERM at the synthetic cgroup rmdir
-boundary for both a retained refusal and a fully removed session.
+resumption and exact retention. If that signal precedes a later cleanup
+refusal, the public phase remains cleanup-signal; the delayed diagnostic records
+the bounded refusal and whether both resources or only the private session
+remain. Inject TERM at the synthetic cgroup rmdir boundary for both a retained
+refusal and a fully removed session, and at final session rmdir for session-only
+retention.
 
 Rootless contracts must lint both the pressure helper and shell wrapper, and the
 loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
