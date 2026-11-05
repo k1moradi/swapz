@@ -489,8 +489,9 @@ runner/official-pipeline registration; Agent 8 must not edit that wiring.
 
 ### Loaded-preflight ownership and retained cleanup
 
-The unprivileged rootless runner must `bash -n` the original preflight and
-its isolated fixture copy before attempting any loaded operation. Multiline
+The loaded preflight must retain executable mode 0755, and the unprivileged
+rootless runner must `bash -n` the original preflight and its isolated fixture
+copy before attempting any loaded operation. Multiline
 `[[ ... ]]` binary comparisons must keep each operand on the same logical
 shell line as `==` (with an explicit continuation when wrapped): a Bash
 parse-time exit 2 is not a simulated authorization refusal. The rootless
