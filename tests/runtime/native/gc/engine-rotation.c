@@ -995,6 +995,9 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	const swapz_u32 victim = 0U;
 	const swapz_u32 blocked_destination = 2U;
 	const swapz_u32 replacement_destination = 3U;
+	static swapz_u32 mapped_pages[4];
+	static swapz_u32 first_page[4], last_page[4];
+	static swapz_u32 previous_page[32], next_page[32];
 	struct swapz_compressed_page compressed_pages[2] = {
 		{ .logical_page = 1U, .payload = contents[1], .length = 2072 },
 		{ .logical_page = 2U, .payload = contents[2], .length = 2072 },
@@ -1012,6 +1015,12 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	int error;
 
 	CHECK(setup() == 0);
+	/* Production relocation walks this exact intrusive membership list.
+	 * Enable it here so RAW-first ordering is proved, not inferred. */
+	CHECK(swapz_enable_segment_mapping_counts(&a, mapped_pages, 4U) == 0);
+	CHECK(swapz_enable_segment_page_lists(
+		      &a, first_page, last_page, previous_page, next_page,
+		      4U, 32U) == 0);
 	e.bulk_enabled = 1;
 	e.bulk_scratch = bulk_scratch;
 	e.bulk_txs = bulk_txs;
@@ -1034,6 +1043,9 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	      maps[1].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
 	      maps[2].start_block / SWAPZ_SEGMENT_BLOCKS == victim &&
 	      maps[0].start_block / SWAPZ_SEGMENT_BLOCKS == 1U);
+	CHECK(mapped_pages[victim] == 3U && first_page[victim] == 8U &&
+	      last_page[victim] == 2U && next_page[8U] == 1U &&
+	      next_page[1U] == 2U && next_page[2U] == ~(swapz_u32)0);
 	prior_compressed[0] = maps[1];
 	prior_compressed[1] = maps[2];
 
