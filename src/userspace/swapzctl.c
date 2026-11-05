@@ -347,6 +347,8 @@ struct status_problem {
 	const char *expected;
 	const char *observed;
 	int kernel_errno;
+	/* Zero for wire/parser faults; keep the originating bounded-read errno. */
+	int failure_errno;
 };
 
 struct swapz_target_snapshot {
@@ -403,6 +405,7 @@ static void status_set_problem(struct status_problem *problem,
 	problem->expected = expected;
 	problem->observed = observed;
 	problem->kernel_errno = 0;
+	problem->failure_errno = 0;
 }
 
 static int status_separator(char character)
@@ -1110,6 +1113,7 @@ static int parse_dm_status_observation(
 					   "bounded snapshot allocation",
 					   "allocation failed");
 			errno = ENOMEM;
+			problem->failure_errno = errno;
 			return -1;
 		}
 	}
@@ -1269,6 +1273,7 @@ static int read_dm_status_observation(
 			status_set_problem(problem, "DM_BUFFER_FULL_FLAG",
 					   "complete INFO reply within 1048576 bytes",
 					   "reply remained buffer-full");
+		problem->failure_errno = errno;
 		return -1;
 	}
 	observation->reply = buffer;
@@ -1373,7 +1378,7 @@ static int status_report_problem(const char *state, const char *name,
 	if (problem->kernel_errno)
 		fprintf(stderr, "; kernel errno=%d", problem->kernel_errno);
 	fputc('\n', stderr);
-	errno = EPROTO;
+	errno = problem->failure_errno ? problem->failure_errno : EPROTO;
 	return -2;
 }
 
@@ -1636,7 +1641,8 @@ static int report_device_status_with_reader(
 				struct status_problem allocation_problem = {
 					.field = "validated status results",
 					.expected = "bounded output inventory allocation",
-					.observed = "allocation failed or result limit exceeded"
+					.observed = "allocation failed or result limit exceeded",
+					.failure_errno = errno
 				};
 
 				status_free_observation(&first);

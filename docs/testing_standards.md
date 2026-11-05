@@ -1195,6 +1195,14 @@ errno without dumping payload bytes. Preserve valid zero-target and
 saturated-padding conservatism. This synthetic evidence is not an atomic
 live-kernel snapshot.
 
+Original bounded DM INFO read or snapshot/result allocation errors must retain
+their originating errno after the UNAVAILABLE diagnostic, including
+EOVERFLOW on exhausted bounded reply growth and ENOMEM on allocation failure.
+Malformed wire records without an originating system error remain BLOCKED with
+EPROTO. The rootless native observer regression must exercise both INFO read
+phases using production parser-backed synthetic snapshots, check safe
+mapping/device/generation/field context, and prevent staged numeric output.
+
 The status implementation must require two consecutive identical relevant
 snapshots before printing a ratio. The compressed-only result is available only
 when committed counters can partition compressed SWZ extent bytes exactly; an

@@ -1822,6 +1822,102 @@ static void test_adversarial_failed_info_after_staging(void)
 	}
 }
 
+
+/*
+ * Reproduce INFO bounded-read errors through the production observation
+ * reporter. A successful neighboring read uses the production DM parser.
+ * Do not substitute EPROTO for the original EOVERFLOW/ENOMEM diagnosis.
+ */
+struct fake_status_errno_reader {
+	struct fake_status_snapshot_reader successful_read;
+	unsigned int calls;
+	unsigned int failing_read;
+	int failure_errno;
+};
+
+static int fake_status_errno_observation(
+	void *context, const char *name, uint64_t expected_device,
+	struct dm_status_observation *observation,
+	struct status_problem *problem, unsigned int *problem_target)
+{
+	struct fake_status_errno_reader *fixture = context;
+	unsigned int read_index = fixture->calls++;
+
+	if (read_index != fixture->failing_read)
+		return fake_read_status_observation_ioctl(
+			&fixture->successful_read, name, expected_device,
+			observation, problem, problem_target);
+	*problem_target = UINT_MAX;
+	if (fixture->failure_errno == EOVERFLOW)
+		status_set_problem(problem, "DM_BUFFER_FULL_FLAG",
+				   "complete INFO reply within 1048576 bytes",
+				   "reply remained buffer-full");
+	else
+		status_set_problem(problem, "DM target inventory",
+				   "bounded snapshot allocation", "allocation failed");
+	problem->failure_errno = fixture->failure_errno;
+	errno = fixture->failure_errno;
+	return -1;
+}
+
+static void test_status_info_errno_precedence(void)
+{
+	const int failures[] = { EOVERFLOW, ENOMEM };
+	size_t failure_index;
+	unsigned int failing_read;
+
+	for (failure_index = 0; failure_index < sizeof(failures) / sizeof(failures[0]);
+	     ++failure_index) {
+		for (failing_read = 0; failing_read < 2U; ++failing_read) {
+			struct fake_status_errno_reader fixture = {
+				.failing_read = failing_read,
+				.failure_errno = failures[failure_index]
+			};
+			struct status_ready_report report = { 0 };
+			FILE *capture = tmpfile();
+			int saved_stderr = dup(STDERR_FILENO);
+			char diagnostic[1024] = { 0 };
+			size_t bytes;
+			int result;
+			int original_errno;
+
+			assert(capture && saved_stderr >= 0);
+			fflush(stderr);
+			assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
+			result = report_device_status_with_reader(
+				&fixture, fake_status_errno_observation,
+				"fixture", 1, &report);
+			original_errno = errno;
+			fflush(stderr);
+			assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+			rewind(capture);
+			bytes = fread(diagnostic, 1, sizeof(diagnostic) - 1U, capture);
+			diagnostic[bytes] = '\0';
+			if (result != -2 || original_errno != failures[failure_index] ||
+			    fixture.calls != failing_read + 1U ||
+			    fixture.successful_read.calls != failing_read ||
+			    report.count || !strstr(diagnostic, "UNAVAILABLE") ||
+			    !strstr(diagnostic, "mapping 'fixture' device 0:1") ||
+			    !strstr(diagnostic, failing_read ? "snapshot 2" : "snapshot 1") ||
+			    !strstr(diagnostic, failures[failure_index] == EOVERFLOW ?
+				    "DM_BUFFER_FULL_FLAG" : "DM target inventory") ||
+			    strstr(diagnostic, fixture_valid_status)) {
+				fprintf(stderr,
+					"bounded INFO errno case=%zu read=%u: result=%d "
+					"errno=%d expected=%d calls=%u parsed=%u staged=%zu "
+					"diagnostic_bytes=%zu\n",
+					failure_index, failing_read, result, original_errno,
+					failures[failure_index], fixture.calls,
+					fixture.successful_read.calls, report.count, bytes);
+				abort();
+			}
+			free(report.targets);
+			close(saved_stderr);
+			fclose(capture);
+		}
+	}
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -1872,6 +1968,7 @@ int main(void)
 	test_adversarial_dm_list_header_bounds();
 	test_adversarial_wire_boundaries();
 	test_adversarial_failed_info_after_staging();
+	test_status_info_errno_precedence();
 	test_status_is_read_only();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
