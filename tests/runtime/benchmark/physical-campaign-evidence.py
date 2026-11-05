@@ -1352,25 +1352,30 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                          workload=workload,
                          reason="unusable cohort cannot claim measured FAIL")
                 continue
-            checks = decision.get("checks")
-            if (spec["evidence"] == "statistical_paired" or
-                    workload == "sd-high-occupancy-churn"):
-                coherent = (
-                    isinstance(checks, dict) and
-                    any(value is False for value in checks.values()) and
-                    all(type(value) is bool for value in checks.values()))
-            else:
-                pair_decisions = decision.get("pairs")
-                coherent = (
-                    isinstance(pair_decisions, list) and
-                    len(pair_decisions) == spec["pairs"] and
-                    any(row.get("status") == "FAIL" for row in pair_decisions
-                        if isinstance(row, dict)))
-            if not coherent:
+            accepted_rows = [
+                row for row in attempts if row.get("analysis_usable") is True]
+            try:
+                if spec["evidence"] == "statistical_paired":
+                    regenerated_decision = QUALIFICATION["service_decision"](
+                        accepted_rows, workload)
+                elif workload == "sd-high-occupancy-churn":
+                    regenerated_decision = QUALIFICATION["sustained_decision"](
+                        accepted_rows[0])
+                else:
+                    regenerated_decision = QUALIFICATION["anonymous_decision"](
+                        accepted_rows)
+            except (AttributeError, IndexError, KeyError, TypeError, ValueError,
+                    ZeroDivisionError):
+                regenerated_decision = None
+            if (
+                    not isinstance(regenerated_decision, dict) or
+                    regenerated_decision.get("status") != "FAIL" or
+                    not identical_json_types_and_values(
+                        regenerated_decision, decision)):
                 diagnose("BLOCKED", "qualification.decision_authentication",
-                         "consistent measured FAIL checks",
+                         "failure rederived from retained accepted records",
                          workload=workload,
-                         reason="reported failure contradicts decision evidence")
+                         reason="reported failure is detached from record measurements")
                 continue
             diagnose("FAIL", "qualification.decision_status", "PASS",
                      workload=workload,
