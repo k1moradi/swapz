@@ -805,6 +805,11 @@ remain BLOCKED even for two complete-looking simultaneous objects. Only the
 original creator, acting under independently proven creation authority and
 revalidated live identity, can undertake bounded recovery; the preflight
 must never adopt, power off, unlink or remove those pre-existing objects.
+The legitimate cleanup path is creator-local: a helper such as
+`deploy-nullblk.sh` may act on its own same-process creation flags only after
+revalidating the exact live mapper/lower identity. A later preflight process
+does not inherit those flags. If the original creator is gone and no
+independent creator proof survives, recovery remains read-only and BLOCKED.
 No owner is instructed to delete ambiguous objects merely to unblock tests.
 
 For diagnostics, read-only checks may evaluate the single-mapper inventory,
@@ -827,27 +832,32 @@ Every BLOCKED diagnostic must identify the failing `check`, expected and
 observed proof classes, `original_errno_or_exit` (or `unavailable`),
 a retained-resource action and a read-only safe next action, without
 exposing private tokens, names, paths, device numbers or PID inventories.
-Preserve a captured nonzero shell exit status both in diagnostics and as
-the script exit status when representable in 1..255; an unavailable error
-retains generic refusal exit 1. Never fabricate a kernel errno from a shell
-exit code. Unexpected internal failures are FAIL, not ownership BLOCKED.
+A classified safety refusal has stable process exit status 1. Preserve an
+external command or parser status exactly in `original_errno_or_exit`; do
+not copy that shell status into the top-level `errno=` field, because it is
+not a kernel errno. Only an independently captured syscall errno may populate
+that field. Exit status 2 is reserved by the loaded wrapper for an
+unclassified shell/runtime failure before a normal safety diagnostic.
+Unexpected internal failures retain their actual status and are FAIL, not
+ownership BLOCKED.
 
 The private `tests/runtime/native/nullblk-identity-test.sh` fixture must
 rewrite host /proc, /sys, /dev and package paths in a single ordered pass
 and use only fake utilities and regular files. Its legacy path-only
 false-admission demonstration is **not** counted as a preflight case.
 It must cover two unclaimed token-shaped objects, a complete-looking
-unclaimed object, an untrusted old owner record, a foreign decoy, ambiguous
-name/index aliases (including dangling alternate dev symlinks), wrong major,
-mismatched lower devno and index, malformed mapper/swap inventory, active
-swap aliases, incomplete configfs attributes, foreign holders/dependencies,
-substituted configfs inode, failed dependency probes and uncertain cleanup.
+unclaimed object, an untrusted old owner record and injected token hint, a
+foreign decoy, ambiguous name/index aliases (including dangling alternate dev
+symlinks), wrong null_blk driver major, mismatched lower devno and index,
+malformed mapper/swap inventory, owned and unrelated foreign active swap,
+incomplete configfs attributes, foreign holders/dependencies, substituted
+configfs inode, failed dependency probes and uncertain cleanup.
 The fixture checks both pinned descriptor identities against path reuse,
 refuses every case before destructive operations, and verifies zero
 attempted mapper removal, configfs power-off/rmdir, module unload or host
 swap mutation. It must preserve both the first numeric status and the
 retained fake inventory. Its final PASS marker must report the actual
-number of `run_case` invocations. Synthetic PASS is not real host ownership,
+number of `run_case` invocations (currently 59). Synthetic PASS is not real host ownership,
 loaded qualification or permission to recover the first host's objects.
 
 ### Development decision loop
