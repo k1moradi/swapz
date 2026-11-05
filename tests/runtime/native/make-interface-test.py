@@ -1445,7 +1445,23 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                 "\n          SWAPZ_CI_SCRIPT", 1)[0].splitlines()) + "\n"
         cls.conclusion_script = "\n".join(
             line.removeprefix("          ")
-            for line in workflow.split(conclusion_marker, 1)[1].splitlines()) + "\n"
+            for line in workflow.split(conclusion_marker, 1)[1].split(
+                "\n      - name: Audit current-run mandatory jobs", 1
+            )[0].splitlines()) + "\n"
+        audit_marker = (
+            "      - name: Audit current-run mandatory jobs\n"
+            "        shell: bash\n"
+            "        env:\n"
+            "          GITHUB_TOKEN: ${{ github.token }}\n"
+            "        run: |\n"
+            "          python3 -B - <<\x27PY\x27\n"
+        )
+        if workflow.count(audit_marker) != 1:
+            raise ValueError("exact-SHA job-census script marker missing or ambiguous")
+        cls.audit_script = "\n".join(
+            line.removeprefix("          ")
+            for line in workflow.split(audit_marker, 1)[1].split(
+                "\n          PY", 1)[0].splitlines()) + "\n"
 
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory(
@@ -1683,7 +1699,8 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                                 env=environment, capture_output=True,
                                 text=True, timeout=6)
         self.assertEqual(passed.returncode, 0, passed.stderr)
-        self.assertEqual(passed.stdout, f"EXACT_SHA_ROOTLESS_CI_COMPLETE={sha}\n")
+        # The initial needs check alone must never emit the qualification marker.
+        self.assertEqual(passed.stdout, "")
         for failed_result in ("failure", "skipped", "cancelled", ""):
             with self.subTest(result=failed_result):
                 environment["POLICY_RESULT"] = failed_result
@@ -1696,6 +1713,114 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                     failed.stdout)
                 self.assertNotIn("EXACT_SHA_ROOTLESS_CI_COMPLETE", failed.stdout)
 
+
+    def test_job_census_requires_every_current_source_job(self):
+        """A green aggregate cannot hide a missing or conflicting matrix member."""
+        import contextlib
+        import io
+        from unittest import mock
+
+        source_sha = self.git("rev-parse", "HEAD")
+        prefixes = (
+            "Native rootless", "Make interface", "Rootless source-contract",
+            "Rootless primary-lifecycle-audit", "Rootless production-readiness",
+            "Repository policy", "Exact-SHA CI result",
+        )
+        passing_jobs = [
+            {"name": f"{prefix} {source_sha}", "head_sha": source_sha,
+             "run_id": 12345, "run_attempt": 1,
+             "status": "completed" if index < 6 else "in_progress",
+             "conclusion": "success" if index < 6 else None}
+            for index, prefix in enumerate(prefixes)
+        ]
+        environment = {
+            "GITHUB_SHA": source_sha, "GITHUB_RUN_ID": "12345",
+            "GITHUB_RUN_ATTEMPT": "1", "GITHUB_REPOSITORY": "fixture/swapz",
+            "GITHUB_TOKEN": "fixture-private-token",
+            "GITHUB_API_URL": "https://api.github.com",
+        }
+
+        def census(rows, *, total_count=None, checkout_sha=None, api_error=None):
+            payload = json.dumps({
+                "total_count": len(rows) if total_count is None else total_count,
+                "jobs": rows,
+            }).encode()
+            response = (mock.patch("urllib.request.urlopen",
+                                   side_effect=OSError(api_error))
+                        if api_error is not None else
+                        mock.patch("urllib.request.urlopen",
+                                   return_value=io.BytesIO(payload)))
+            with mock.patch.dict(os.environ, environment), \
+                 mock.patch(
+                     "subprocess.run",
+                     return_value=subprocess.CompletedProcess(
+                         [], 0, stdout=checkout_sha or source_sha)), \
+                 response, contextlib.redirect_stdout(io.StringIO()) as output, \
+                 contextlib.redirect_stderr(io.StringIO()) as errors:
+                try:
+                    exec(compile(self.audit_script, "<exact-SHA CI census>",
+                                 "exec"), {"__name__": "__main__"})
+                    exit_code = 0
+                except SystemExit as error:
+                    exit_code = error.code
+            return exit_code, output.getvalue(), errors.getvalue()
+
+        code, output, errors = census(passing_jobs)
+        self.assertEqual((code, output, errors),
+                         (0, f"EXACT_SHA_ROOTLESS_CI_COMPLETE={source_sha}\n", ""))
+
+        for scenario in (
+                "missing", "missing-matrix-member", "extra",
+                "duplicate", "failure", "skipped", "cancelled",
+                "in_progress", "stale-source", "wrong-run",
+                "wrong-attempt", "checkout-mismatch", "partial-page",
+                "conclusion-completed"):
+            with self.subTest(scenario=scenario):
+                jobs = json.loads(json.dumps(passing_jobs))
+                total_count = None
+                checkout_sha = None
+                if scenario == "missing":
+                    jobs.pop(0)
+                elif scenario == "missing-matrix-member":
+                    jobs[2]["name"] = f"Unrequired green job {source_sha}"
+                elif scenario == "extra":
+                    jobs.append(dict(jobs[0]))
+                elif scenario == "duplicate":
+                    jobs[1] = dict(jobs[0])
+                elif scenario in ("failure", "skipped", "cancelled"):
+                    jobs[0]["conclusion"] = scenario
+                elif scenario == "in_progress":
+                    jobs[0]["status"] = "in_progress"
+                    jobs[0]["conclusion"] = None
+                elif scenario == "stale-source":
+                    jobs[2]["head_sha"] = "e" * 40
+                elif scenario == "wrong-run":
+                    jobs[2]["run_id"] = 23456
+                elif scenario == "wrong-attempt":
+                    jobs[2]["run_attempt"] = 2
+                elif scenario == "checkout-mismatch":
+                    checkout_sha = "f" * 40
+                elif scenario == "partial-page":
+                    total_count = 8
+                else:
+                    jobs[-1]["status"] = "completed"
+                code, output, errors = census(
+                    jobs, total_count=total_count, checkout_sha=checkout_sha)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(output, "")
+                for field in ("gate=", "required=", "observed=",
+                              "corrective_procedure="):
+                    self.assertIn(field, errors)
+                self.assertNotIn("fixture-private-token", errors)
+                self.assertLessEqual(len(errors.strip()), 255)
+
+        code, output, errors = census(
+            passing_jobs, api_error="token=fixture-private-token /home/private")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(output, "")
+        self.assertIn("gate=job-census-api", errors)
+        self.assertNotIn("fixture-private-token", errors)
+        self.assertNotIn("/home/private", errors)
 
 class CiFailureDiagnosticContract(unittest.TestCase):
     """Synthetic rootless diagnostics must never misrepresent CI outcomes."""

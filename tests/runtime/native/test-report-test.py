@@ -5161,6 +5161,9 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
             ("overall", "PASS", "BLOCKED",
              "inspect-first-non-PASS-stage-and-rerun-make-test",
              lambda report: report.update(overall="BLOCKED")),
+            ("qualification", "RAM_BACKED_NULL_BLK_ONLY", "ROOTLESS_ONLY",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report.update(qualification="ROOTLESS_ONLY")),
         )
         for field, expected, observed, next_step, mutate in scenarios:
             with self.subTest(field=field, observed=observed):
@@ -5539,10 +5542,20 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                 ("status", "queued"),
                 ("status", "in_progress"),
                 ("status", "cancelled"),
+                ("status", "skipped"),
+                ("status", "failure"),
                 ("status", None),
                 ("conclusion", "cancelled"),
                 ("conclusion", "failure"),
+                ("conclusion", "skipped"),
+                ("conclusion", "neutral"),
+                ("conclusion", "timed_out"),
                 ("conclusion", None),
+                ("result", "FAIL"),
+                ("result", "BLOCKED"),
+                ("result", "NOT_RUN"),
+                ("head_sha", "e" * 40),
+                ("head_sha", None),
                 ("run_id", False),
                 ("run_id", 0),
                 ("run_id", -1),
@@ -5566,7 +5579,8 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                     verdict["CODE_PRODUCTION_READY"], "BLOCKED")
 
     def test_required_ci_rejects_duplicate_run_ids_and_extra_rows(self):
-        for mutation in ("shared_run_id", "extra_workflow", "malformed_row"):
+        for mutation in ("shared_run_id", "extra_workflow", "malformed_row",
+                         "duplicate_workflow", "missing_workflow"):
             with self.subTest(mutation=mutation):
                 snapshot = self.passing_snapshot()
                 runs = snapshot["release_evidence"]["required_ci"]["runs"]
@@ -5580,6 +5594,12 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
                         "status": "completed", "conclusion": "success",
                         "run_id": "4",
                     })
+                elif mutation == "duplicate_workflow":
+                    # A duplicate green row cannot replace a missing workflow.
+                    runs[1] = dict(runs[0])
+                    runs[1]["run_id"] = "8"
+                elif mutation == "missing_workflow":
+                    runs.pop(1)
                 else:
                     runs.append(None)
                 verdict = runner.evaluate_production_readiness(

@@ -3773,7 +3773,23 @@ documentation/report-only follow-up cannot retroactively qualify an invalid
 implementation SHA. Failure diagnostics must identify the offending
 commit/path, required policy, first error and a safe non-rewriting correction.
 Exact-SHA CI requires every prerequisite job to succeed; skipped and cancelled
-jobs never count as PASS.
+jobs never count as PASS. The project-goals final result must also fetch the
+authenticated current-run Actions job census and require exactly one completed,
+successful job for native-rootless, Make interface, each of the three focused
+rootless matrix members, and repository policy, plus its own still-running
+conclusion job. Match every job to the checked-out source SHA, run ID and
+attempt. A missing, repeated, cancelled, skipped, failed, stale, malformed or
+additional job, an unavailable Actions API, or an incomplete response is
+BLOCKED even when a subset of other jobs is green. A bounded failure-only
+refusal identifies the failed gate, required proof, observed classification
+and corrective action, without exposing credentials, host paths or unbounded
+external text. Keep the native-rootless aggregate required even if the
+independent Make-contract job runs the full rootless report-parser regression;
+a later successful test cannot hide the earlier failed rootless phase.
+Rootless CI is not a substitute for the official source-bound `make test`
+report with all five successful stages and final formatter/module/oracle
+SHA-256 digests, owner-loaded null_blk qualification, or the separately
+authorized physical Linux swap and card acceptance evidence.
 
 ID83 dispatcher refinement contracts must prove all scheduling boundaries:
 ordered RAW forcing requires an actually idle lower-WRITE path, stays within the
