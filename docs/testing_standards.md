@@ -4557,6 +4557,18 @@ never print page payload bytes. These finite C11 schedules remain supporting
 evidence, not loaded KCSAN, lockdep, or proof of kernel execution under
 suspend/drain.
 
+The native preparation-slot continuation additionally forces a simultaneous
+retire-versus-consume collision once both readers acquire READY_COMPRESSED or
+READY_RAW. Its reader-only barrier stops at the production CAS sites and
+cannot serve as producer-to-consumer payload publication. Exactly one claimant
+must own the ready-residency charge and modeled upper completion; the losing
+conditional exchange must acquire-reread CONSUMED. Slot 63 remains unavailable
+while the consumer reference survives, and immediate reuse after the final put
+must clear the previous terminal state before publishing an exact negative
+codec ERROR with a separate, once-only modeled completion and no ready charge.
+These checks are rootless C11 counter/state evidence, not proof of loaded BIO
+completion, kernel memory ordering, KCSAN, or lockdep qualification.
+
 
 The submitter-path continuation adds 256 deterministic handoffs that model its
 release/acquire active-descriptor gate, one-reference prepared page, separately
