@@ -352,7 +352,7 @@ static int ordered_check(const struct ordered_fixture *fixture,
 		!fixture->scenario->preflush_errno &&
 		!fixture->scenario->data_errno ? 1U : 0U;
 	const unsigned int observed_completed_blocks =
-		fixture->data_done && !fixture->scenario->data_errno ? 1U : 0U;
+		fixture->data_done && !fixture->data_errno ? 1U : 0U;
 	const char *generation_category = fixture->durable_publications ?
 		"published-new" : "preserved-old";
 	const char *ownership_category =

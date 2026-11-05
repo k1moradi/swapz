@@ -7877,8 +7877,10 @@ latched target errno. Repeat drain and retry must not issue additional lower
 I/O. On failure, report submission phase, expected/observed completed lower
 blocks, original lower errno, expected/observed ACK errno, publication/generation
 counts, explicit generation/ownership category, safe disposition and outstanding
-lower/upper completion owners. These rootless models do not claim a loaded callback race or
-real-media cache persistence.
+lower/upper completion owners. Expected completed blocks come from the scenario;
+observed completed blocks must derive from the callback's actual completion/error
+state, never the expected fault. These rootless models do not claim a loaded callback
+race or real-media cache persistence.
 Mandatory Python qualification suites must remain syntactically valid; a path that exists but cannot execute does not satisfy discovery coverage.
 
 
