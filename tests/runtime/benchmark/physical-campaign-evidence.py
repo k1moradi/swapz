@@ -1241,28 +1241,30 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                      reason="producer FAIL contradicts qualification disposition")
             continue
         stage = arm.get("stage")
-        stage_is_valid = (
+        stage_is_known = (
             isinstance(stage, str) and len(stage) <= 48 and
             re.fullmatch(
                 r"(?:preflight|fill|warmup|measure|steady|gc|teardown|"
                 r"publish|round-[1-9][0-9]*(?:-verify)?)", stage) is not None)
-        if not stage_is_valid:
+        if not stage_is_known:
             diagnose("BLOCKED", "arm.verdict",
-                     "authenticated non-setup producer phase",
+                     "authenticated producer phase",
                      workload=workload, pair_index=index, arm=label,
                      reason="producer FAIL phase is missing or invalid")
             continue
-        # Setup failures are real producer errors, but not authenticated
-        # terminal measurements of a completed physical workload.
-        if stage in ("preflight", "fill", "warmup"):
-            diagnose("BLOCKED", "arm.verdict", "terminal measured workload",
+        measurement_phase = re.fullmatch(
+            r"(?:measure|steady|gc|round-[1-9][0-9]*(?:-verify)?)",
+            stage) is not None
+        if not measurement_phase:
+            diagnose("BLOCKED", "arm.verdict",
+                     "terminal measurement phase",
                      workload=workload, pair_index=index, arm=label,
-                     reason="producer failed before the measurement phase")
+                     reason="producer failed outside the measurement phase")
             continue
         diagnose(
             "FAIL", "arm.verdict", "PASS",
             workload=workload, pair_index=index, arm=label,
-            reason="authenticated physical producer terminal failure",
+            reason="authenticated physical producer terminal measurement failure",
             producer_status="FAIL", failure_phase=stage)
 
     decisions = summary.get("decisions")
