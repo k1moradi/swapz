@@ -75,6 +75,9 @@ class CleanupState:
     phase: str = "invocation"
     removed: int = 0
     retained: int = 0
+    reclaimed_logical_bytes: int = 0
+    retained_unproved: int = 0
+    retained_identity: int = 0
     partial: bool = False
 
 
@@ -317,6 +320,7 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                         candidate_stat.st_uid == owner_uid and
                         stat.S_IMODE(candidate_stat.st_mode) == 0o700):
                     state.retained += 1
+                    state.retained_identity += 1
                     state.phase = "root-inventory"
                     continue  # Unproved or foreign data must survive.
                 candidate = os.open(name, os.O_DIRECTORY | OPEN_FLAGS, dir_fd=root)
@@ -329,14 +333,31 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                     state.phase = "session-provenance"
                     if not owned_complete(candidate, owner_uid, expected_mount):
                         state.retained += 1
+                        state.retained_unproved += 1
                         continue  # Incomplete/quarantined/live benchmark.
                     budget.sessions += 1
                     require(budget.sessions <= MAX_SESSIONS,
                             "too many completed sessions", "bound")
                     state.phase = "session-inspection"
+                    previous_inspected_bytes = budget.bytes
                     entries = inspect(candidate, expected_mount, owner_uid,
                                       budget, [0], 0)
+                    # Inspection may outlive the original path binding. Refuse
+                    # to delete through a renamed directory descriptor.
                     state.phase = "session-removal"
+                    require(directory_identity(os.lstat(root_path)) == directory_identity(root_stat),
+                            "temporary root changed before session removal", "substitution")
+                    current = os.stat(name, dir_fd=root, follow_symlinks=False)
+                    require(directory_identity(current) == directory_identity(candidate_stat),
+                            "session directory substituted before removal", "substitution")
+                    rebound = os.open(name, os.O_DIRECTORY | OPEN_FLAGS, dir_fd=root)
+                    try:
+                        require(directory_identity(os.fstat(rebound)) ==
+                                directory_identity(candidate_stat) and
+                                mount_id(rebound) == expected_mount,
+                                "session directory or mount changed before removal", "substitution")
+                    finally:
+                        close_preserving_first_error(rebound)
                     state.partial = True  # An unlink may succeed before a later error.
                     remove_tree(candidate, entries, expected_mount, preserve_markers=True)
                 finally:
@@ -348,6 +369,8 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                         "substitution")
                 os.rmdir(name, dir_fd=root)
                 state.removed += 1
+                # Logical bytes unlinked, not a claim of immediate tmpfs RAM release.
+                state.reclaimed_logical_bytes += budget.bytes - previous_inspected_bytes
                 state.partial = False
                 state.phase = "root-inventory"
         state.phase = "root-recheck"
@@ -386,7 +409,10 @@ def main() -> int:
               f"original_errno={original_errno} exit_code={exit_code} "
               f"retained={retained} removed={state.removed}", file=sys.stderr)
         return exit_code
-    print(f"SWAPZ_TMP_CLEANUP=completed-owned-only removed:{removed} retained:{state.retained}")
+    print(f"SWAPZ_TMP_CLEANUP=completed-owned-only removed:{removed} retained:{state.retained} "
+          f"reclaimed_logical_bytes:{state.reclaimed_logical_bytes} "
+          f"retained_unproved:{state.retained_unproved} "
+          f"retained_identity:{state.retained_identity}")
     return 0
 
 

@@ -71,6 +71,8 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         foreign_directory.mkdir()
         (foreign_directory / "important").write_bytes(b"data")
         owned = self.session("Abcd1234")
+        expected_reclaimed_bytes = sum(file.stat().st_size for file in owned.rglob("*")
+                                       if file.is_file())
         incomplete = self.session("Bcde1234", complete=False)
         conflicting = self.session("Cdef1234", identity=self.record.replace("a" * 40, "b" * 40))
         unrelated_prefix = self.root / "swapz-id36.DeadBeef"
@@ -82,6 +84,8 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         result = self.run_cleanup()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("removed:1 retained:3", result.stdout)
+        self.assertIn(f"reclaimed_logical_bytes:{expected_reclaimed_bytes}", result.stdout)
+        self.assertIn("retained_unproved:2 retained_identity:1", result.stdout)
         self.assertFalse(owned.exists())
         self.assertTrue(incomplete.exists())
         self.assertTrue(conflicting.exists())
@@ -474,6 +478,75 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertTrue(state.partial)
         self.assertEqual((owned / "foreign.txt").read_text(), "DO NOT DELETE")
         self.assertTrue(moved.exists())
+
+    def test_session_renamed_during_inspection_blocks_before_any_unlink(self):
+        owned = self.session("Abcd1234")
+        moved = self.root / "moved-original"
+        original_inspect = cleanup_module.inspect
+
+        def rename_after_inspection(*args, **kwargs):
+            entries = original_inspect(*args, **kwargs)
+            if args[-1] == 0:
+                owned.rename(moved)
+                owned.mkdir(mode=0o700)
+                (owned / "foreign.txt").write_bytes(b"DO NOT DELETE")
+            return entries
+
+        state = cleanup_module.CleanupState()
+        with mock.patch.object(cleanup_module, "inspect", side_effect=rename_after_inspection):
+            with self.assertRaisesRegex(cleanup_module.CleanupBlocked,
+                                        "substituted before removal"):
+                cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700, state)
+        self.assertEqual(state.phase, "session-removal")
+        self.assertFalse(state.partial)
+        self.assertEqual((moved / "fixture.bin").read_bytes(), b"owned payload")
+        self.assertEqual((owned / "foreign.txt").read_bytes(), b"DO NOT DELETE")
+
+    def test_root_renamed_during_inspection_blocks_before_any_unlink(self):
+        owned = self.session("Abcd1234")
+        moved_root = self.root.with_name(self.root.name + "-moved")
+        original_inspect = cleanup_module.inspect
+
+        def rename_after_inspection(*args, **kwargs):
+            entries = original_inspect(*args, **kwargs)
+            if args[-1] == 0:
+                self.root.rename(moved_root)
+                self.root.mkdir(mode=0o700)
+            return entries
+
+        try:
+            with mock.patch.object(cleanup_module, "inspect",
+                                   side_effect=rename_after_inspection):
+                with self.assertRaisesRegex(cleanup_module.CleanupBlocked,
+                                            "root changed before session removal"):
+                    cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700)
+            self.assertEqual((moved_root / owned.name / "fixture.bin").read_bytes(),
+                             b"owned payload")
+        finally:
+            if moved_root.exists():
+                self.root.rmdir()
+                moved_root.rename(self.root)
+
+    def test_session_mount_change_before_removal_blocks_before_unlink(self):
+        owned = self.session("Abcd1234")
+        original_mount_id = cleanup_module.mount_id
+        session_mount_checks = 0
+
+        def substitute_mount(descriptor):
+            nonlocal session_mount_checks
+            if os.fstat(descriptor).st_ino == owned.stat().st_ino:
+                session_mount_checks += 1
+                if session_mount_checks == 2:
+                    return "999999999"
+            return original_mount_id(descriptor)
+
+        state = cleanup_module.CleanupState()
+        with mock.patch.object(cleanup_module, "mount_id", side_effect=substitute_mount):
+            with self.assertRaisesRegex(cleanup_module.CleanupBlocked,
+                                        "mount changed before removal"):
+                cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700, state)
+        self.assertFalse(state.partial)
+        self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
 
 
 if __name__ == "__main__":

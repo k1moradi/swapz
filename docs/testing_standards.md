@@ -3808,14 +3808,24 @@ records until scratch removal ends; after proof removal, a failed final rmdir
 leaves non-resumable retained state, never a fabricated cleanup PASS. Rootless
 native fixtures must cover foreign occupants, symlinks, hardlinks, metadata
 changes, substitutions, interrupted removal, unreadable entries, and injected
-unlink/rmdir/close errors.
+unlink/rmdir/close errors. Before the first unlink, revalidate that the root
+pathname still identifies the original pinned root and reopen the named session
+without following symlinks to confirm its original device/inode/owner/mode and
+mount ID. A root or session rename, replacement, or remount during the bounded
+inspection must block with no deletion. Keep the independent final session
+identity check before rmdir; these checks do not claim atomicity against a
+privileged same-UID actor concurrently mutating private directories.
 
 On refusal, the private helper emits the phase, category, original errno (when
 present) or process exit code, prior fully removed count, and conservative
 retained-state disposition without echoing paths or PID inventories. The first
 operation error takes precedence over secondary descriptor-close failure.
-Successful output is a single bounded aggregate of completed removals and
-unproved retained candidates, never per-entry success chatter. The existing
+Successful output is a single bounded aggregate of completed removals,
+unproved retained candidates, identity-rejected candidates, and logical bytes
+unlinked by fully removed sessions, never per-entry success chatter. Logical
+file bytes are not a claim of immediate physical or tmpfs RAM release: sparse
+files and still-open descriptors can make actual reclamation differ. A failed
+or partial session never contributes to successful reclaimed-byte totals. The existing
 external 30-second watchdog bounds the caller's wait under normal scheduling;
 a journal-blocked uninterruptible syscall may outlive a kill signal, so the
 watchdog is not proof of a strict kernel-side I/O deadline.
