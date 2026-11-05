@@ -1937,8 +1937,9 @@ int swapz_verify_raw(const struct swapz_authority *a, swapz_u32 logical_page,
 /*
  * Validate every authority-side failure condition which can be known before a
  * multi-page upper DISCARD starts publishing generation changes. The ordered
- * owner is the only mutator. Temporary mapped/GC accounting is restored before
- * return; maps, generations, physical liveness and page lists are never changed.
+ * owner is the only mutator. Temporary physical-liveness, mapped and GC
+ * accounting is restored before return; maps, generations and page lists are
+ * never changed.
  *
  * The final full-map pass is required only when the range would make a closed
  * segment appear dead. It treats logical pages inside this authenticated range
@@ -2017,12 +2018,16 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 			}
 		}
 
-		if (a->segment_mapped_pages) {
+		/*
+		 * Model the exact post-DISCARD physical and cached state without
+		 * publishing it. If this is the final logical map in a closed
+		 * segment, the later dead-segment callback will require every
+		 * physical START/interior liveness entry in that 1MiB segment to
+		 * be zero. Prove that now, before any generation can advance.
+		 */
+		a->live_records[map->start_block]--;
+		if (a->segment_mapped_pages)
 			a->segment_mapped_pages[segment]--;
-			if (!a->segment_mapped_pages[segment] &&
-			    segment != a->open_segment)
-				needs_full_map_proof = 1;
-		}
 		if (gc_enabled) {
 			a->segment_gc_live_bytes[segment] -= live_bytes;
 			a->segment_gc_io_cost[segment] -= io_cost;
@@ -2030,6 +2035,24 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 				min_live_blocks;
 		}
 		processed++;
+		if (a->segment_mapped_pages &&
+		    !a->segment_mapped_pages[segment] &&
+		    segment != a->open_segment) {
+			swapz_u32 block;
+			swapz_u32 segment_start =
+				segment * SWAPZ_SEGMENT_BLOCKS;
+
+			for (block = segment_start;
+			     block < segment_start + SWAPZ_SEGMENT_BLOCKS;
+			     ++block)
+				if (a->live_records[block]) {
+					error = -EUCLEAN;
+					break;
+				}
+			if (error)
+				break;
+			needs_full_map_proof = 1;
+		}
 	}
 
 	if (!error && needs_full_map_proof) {
@@ -2081,6 +2104,7 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 		if (!map->valid)
 			continue;
 		segment = map->start_block / SWAPZ_SEGMENT_BLOCKS;
+		a->live_records[map->start_block]++;
 		if (a->segment_mapped_pages)
 			a->segment_mapped_pages[segment]++;
 		if (!gc_enabled)

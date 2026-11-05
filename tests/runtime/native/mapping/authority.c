@@ -1573,6 +1573,23 @@ static int test_discard_range_prevalidation_blocks_late_sidecar_corruption(void)
 	      test_live[SWAPZ_SEGMENT_BLOCKS] == 1U);
 	CHECK(test_mapped_pages[0] == 1U && test_mapped_pages[1] == 0U);
 
+	/*
+	 * A non-authoritative physical liveness entry in a segment that this
+	 * range would make dead must be refused before the first page changes.
+	 * This is exactly the later swapz_discard_dead_segment() corruption
+	 * check, moved into the allocation-free transactional preflight.
+	 */
+	test_mapped_pages[1] = 1U;
+	test_live[1U] = 1U;
+	CHECK(swapz_prevalidate_discard_range(
+		      &test_authority, 0U, test_logical_pages) == -EUCLEAN);
+	CHECK(test_maps[0].valid && test_maps[0].generation == 1U &&
+	      test_maps[1].valid && test_maps[1].generation == 1U);
+	CHECK(test_live[0] == 1U && test_live[1U] == 1U &&
+	      test_live[SWAPZ_SEGMENT_BLOCKS] == 1U);
+	CHECK(test_mapped_pages[0] == 1U && test_mapped_pages[1] == 1U);
+	test_live[1U] = 0U;
+
 	/* A false-one count cannot hide a surviving map outside the range. */
 	test_maps[1].start_block = 0U;
 	test_live[0] = 2U;
