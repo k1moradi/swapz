@@ -411,6 +411,49 @@ rm() {
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
+    def test_final_private_session_rmdir_failure_preserves_signal_exit(self):
+        # An identity-validated, emptied session can still fail its final
+        # rmdir. The already removed cgroup must not be reported as retained.
+        preamble = '''
+rmdir() {
+    if [[ $1 == "$SESSION" ]]; then
+        printf x >> "$SESSION/../session-rmdir-attempts"
+        return 16
+    fi
+    if [[ $1 == "$CGROUP" ]]; then
+        if [[ -f $CGROUP/cgroup.procs && ! -s $CGROUP/cgroup.procs ]]; then
+            command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+            command rmdir -- "$CGROUP"
+        else
+            return 1
+        fi
+    else
+        command rmdir "$@"
+    fi
+}
+'''
+        result = self.execute(preamble=preamble, status=143)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertEqual(tuple(self.session.iterdir()), ())
+        self.assertEqual(
+            (self.root / "session-rmdir-attempts").read_text(encoding="ascii"),
+            "x")
+        self.assertIn("FAIL: ID36 private scratch cleanup did not complete",
+                      result.stderr)
+        self.assertIn("phase:session-remove", result.stderr)
+        self.assertIn("required:same created removable private session with only known entries",
+                      result.stderr)
+        self.assertIn("observed:occupied-or-unremovable", result.stderr)
+        self.assertIn("original_exit:143", result.stderr)
+        self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertNotIn("retained_cleanup:child-cgroup-and-private-session",
+                         result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
     def test_interrupted_session_unlink_keeps_original_failure_and_evidence(self):
         # Model an interrupted unlink after one known file was removed.
         # Earlier FAIL wins, and the remaining session is still quarantined.

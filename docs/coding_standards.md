@@ -1591,7 +1591,12 @@ original FAIL/signal status takes precedence over cleanup BLOCKED. A refusal
 before cgroup teardown retains both resources; after successful cgroup removal,
 a session-identity or session-inventory refusal reports only private-session
 retention. Partial removal of known session files must not change the earliest
-FAIL or misreport a removed cgroup as retained. Rootless regression fixtures
+FAIL or misreport a removed cgroup as retained. A final private-session `rmdir` refusal after successful cgroup removal
+and deletion of all inventoried entries retains only the empty session. A
+rootless regression must inject this independent removal failure, preserve the
+original signal/nonzero exit and exclude any synthetic ID36 PASS marker.
+
+Rootless regression fixtures
 must inject reaped or reused PIDs, delayed departure, PID-identity mismatch,
 late membership between snapshots (without any new signal authority), same-path
 directory replacement, stop-marker substitution, unknown session entries and
