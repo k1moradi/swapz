@@ -17,10 +17,30 @@ def shell_function(name: str) -> str:
     beginning = re.search(rf"^{re.escape(name)}\(\) \{{\n", source, re.MULTILINE)
     if beginning is None:
         raise AssertionError(f"missing production helper: {name}")
-    ending = re.search(r"^\}\n", source[beginning.end():], re.MULTILINE)
-    if ending is None:
-        raise AssertionError(f"unterminated production helper: {name}")
-    return source[beginning.start():beginning.end() + ending.end()]
+
+    # Production helpers embed Python here-docs, whose dictionary braces can
+    # look like a shell function terminator. Skip each complete here-doc before
+    # accepting the function's standalone closing brace.
+    here_doc = re.compile(r"<<(?P<strip>-)?\s*(?P<quote>['\"]?)(?P<word>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)")
+    offset = beginning.end()
+    delimiter = None
+    strip_tabs = False
+    for line in source[beginning.end():].splitlines(keepends=True):
+        if delimiter is not None:
+            candidate = line.lstrip("\t") if strip_tabs else line
+            if candidate.rstrip("\r\n") == delimiter:
+                delimiter = None
+                strip_tabs = False
+            offset += len(line)
+            continue
+        if re.fullmatch(r"\}\r?\n?", line):
+            return source[beginning.start():offset + len(line)]
+        match = here_doc.search(line)
+        if match is not None:
+            delimiter = match.group("word")
+            strip_tabs = match.group("strip") is not None
+        offset += len(line)
+    raise AssertionError(f"unterminated production helper: {name}")
 
 
 class CleanupOwnershipFixtures(unittest.TestCase):
@@ -113,6 +133,13 @@ rmdir() {
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn(" 123", result.stderr)
+
+    def test_function_extractor_keeps_heredoc_dictionary_body(self):
+        function = shell_function("classify_cleanup_session_entries")
+        self.assertIn("allowed = {", function)
+        self.assertIn("for name in names:", function)
+        self.assertIn("\nPY\n    )\"; then", function)
+        self.assertTrue(function.rstrip().endswith("}"))
 
     def test_preexisting_nonempty_guard_would_kill_foreign_process(self):
         # Exact former predicate: nonempty cgroup.procs was treated as authority
@@ -395,8 +422,15 @@ printf '%s\n' "$signal_status"
                       self.source)
         self.assertIn('local membership_path="/proc/self/fd/$CGROUP_DIRECTORY_FD/cgroup.procs"',
                       self.source)
-        self.assertIn('local session_fd_path="/proc/self/fd/$SESSION_DIRECTORY_FD"',
-                      self.source)
+        cleanup = shell_function("cleanup")
+        self.assertIn("local current_identity child_cleanup_status session_fd_path",
+                      cleanup)
+        session_path_assignment = (
+            'session_fd_path="/proc/self/fd/$SESSION_DIRECTORY_FD"')
+        self.assertIn(session_path_assignment, cleanup)
+        self.assertLess(
+            cleanup.index("if [[ -z ${SESSION_DIRECTORY_FD:-}"),
+            cleanup.index(session_path_assignment))
         self.assertIn("classify_cleanup_session_entries", self.source)
         self.assertIn("read_open_directory_identity", self.source)
         self.assertIn("report_cleanup_refusal", self.source)
