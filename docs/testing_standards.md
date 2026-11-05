@@ -261,7 +261,9 @@ and successful anonymous-mapping close. Short reads, interruption and failed
 unmapping must not produce a complete-looking record. Failure-only diagnostics
 identify the first failure phase, fully compared versus allocated pages/bytes,
 expected-zero versus observed byte mismatches, original errno when present,
-and whether cleanup finished. Diagnostic samples may contain page/byte offsets
+and whether cleanup finished. Later cleanup/reporting errors must not replace
+an earlier byte/digest mismatch or its counts. Diagnostic samples may contain
+page/byte offsets
 but not raw expected/observed values or seeds. Byte-exact comparison alone is
 not evidence of actual target swap-out/in without the independent cgroup,
 mapper, lower-device and kernel swap-traffic observations required above.

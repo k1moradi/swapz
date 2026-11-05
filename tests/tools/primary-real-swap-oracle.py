@@ -110,9 +110,11 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
     phase = "fill"
     verified_pages = 0
     byte_mismatches = 0
+    comparison_failed = False
     verification_record = None
     original_error = None
     cleanup_error = None
+    report_error = None
     try:
         for page_index in range(pages):
             expected = _page_pattern_from_seed(seed, page_index)
@@ -169,8 +171,8 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
             "expected_digest": expected_hex,
             "elapsed_seconds": round(time.monotonic() - verify_started, 6),
         }
-        result = (
-            0 if byte_mismatches == 0 and actual_digest == expected_hex else 1)
+        comparison_failed = byte_mismatches != 0 or actual_digest != expected_hex
+        result = 1 if comparison_failed else 0
     except (OSError, RuntimeError, MemoryError, KeyboardInterrupt) as exc:
         original_error = exc
         result = 1
@@ -187,20 +189,23 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         try:
             _emit("ORACLE_VERIFIED=", verification_record)
         except (OSError, RuntimeError, KeyboardInterrupt) as exc:
-            original_error = exc
-            phase = "report"
+            report_error = exc
             result = 1
     if original_error is not None:
         print(f"FAIL: oracle workload failed: {original_error}", file=sys.stderr)
     if cleanup_error is not None:
         print(f"FAIL: oracle allocation cleanup failed: {cleanup_error}",
               file=sys.stderr)
+    if report_error is not None:
+        print(f"FAIL: oracle evidence reporting failed: {report_error}",
+              file=sys.stderr)
     if result != 0:
-        failure_phase = phase
-        if (cleanup_error is not None and original_error is None and
-                byte_mismatches == 0):
-            failure_phase = "cleanup"
-        failure_error = original_error if original_error is not None else cleanup_error
+        failure_phase = (phase if original_error is not None else
+                         "verify" if comparison_failed else
+                         "report" if report_error is not None else "cleanup")
+        failure_error = (original_error if original_error is not None else
+                         None if comparison_failed else
+                         report_error if report_error is not None else cleanup_error)
         original_errno = getattr(failure_error, "errno", None)
         failure_type = (type(failure_error).__name__ if failure_error is not None else
                         "byte_mismatch" if byte_mismatches else "digest_mismatch")

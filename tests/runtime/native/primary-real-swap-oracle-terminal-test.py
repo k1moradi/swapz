@@ -17,8 +17,8 @@ SPEC.loader.exec_module(oracle)
 
 
 class TerminalEvidenceContracts(unittest.TestCase):
-    def run_fixture(self, *, short_read=False, interrupted=False,
-                    read_errno=None, close_fails=False):
+    def run_fixture(self, *, short_read=False, interrupted=False, corrupt=False,
+                    read_errno=None, report_errno=None, close_fails=False):
         class AnonymousMemoryFixture:
             def __init__(self):
                 self.contents = bytearray(2 * oracle.PAGE_BYTES)
@@ -53,12 +53,22 @@ class TerminalEvidenceContracts(unittest.TestCase):
             command = next(commands)
             if command == "VERIFY":
                 allocation.verify_started = True
+                if corrupt:
+                    allocation.contents[9] ^= 1
             return command
+
+        original_emit = oracle._emit
+
+        def emit_record(prefix, payload):
+            if prefix == "ORACLE_VERIFIED=" and report_errno is not None:
+                raise OSError(report_errno, "synthetic evidence report error")
+            original_emit(prefix, payload)
 
         with mock.patch.object(oracle, "MIB", 2 * oracle.PAGE_BYTES), \
                 mock.patch.object(oracle, "MIN_MIB", 1), \
                 mock.patch.object(oracle, "MAX_MIB", 1), \
                 mock.patch.object(oracle, "_disable_dumps"), \
+                mock.patch.object(oracle, "_emit", side_effect=emit_record), \
                 mock.patch.object(oracle, "_read_command", side_effect=read_command), \
                 mock.patch.object(oracle.mmap, "mmap", return_value=allocation), \
                 contextlib.redirect_stdout(standard_output), \
@@ -102,6 +112,30 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertIn("verified_pages=1/2", stderr)
         self.assertIn("error=OSError errno=5 cleanup_complete=false", stderr)
         self.assertIn("[Errno 9] synthetic close error", stderr)
+        self.assertNotIn("ab" * 16, stderr)
+
+    def test_integrity_mismatch_remains_primary_after_unmap_failure(self):
+        status, stdout, stderr, allocation = self.run_fixture(
+            corrupt=True, close_fails=True)
+        self.assertEqual(status, 1)
+        self.assertFalse(allocation.closed)
+        self.assertNotIn("ORACLE_VERIFIED=", stdout)
+        self.assertIn("phase=verify", stderr)
+        self.assertIn("expected_mismatches=0 observed_mismatches=1", stderr)
+        self.assertIn("error=byte_mismatch errno=none cleanup_complete=false", stderr)
+        self.assertIn("[Errno 9] synthetic close error", stderr)
+        self.assertNotIn("ab" * 16, stderr)
+
+    def test_integrity_mismatch_remains_primary_after_reporting_failure(self):
+        status, stdout, stderr, allocation = self.run_fixture(
+            corrupt=True, report_errno=32)
+        self.assertEqual(status, 1)
+        self.assertTrue(allocation.closed)
+        self.assertNotIn("ORACLE_VERIFIED=", stdout)
+        self.assertIn("phase=verify", stderr)
+        self.assertIn("expected_mismatches=0 observed_mismatches=1", stderr)
+        self.assertIn("error=byte_mismatch errno=none cleanup_complete=true", stderr)
+        self.assertIn("[Errno 32] synthetic evidence report error", stderr)
         self.assertNotIn("ab" * 16, stderr)
 
     def test_interrupted_readback_cleans_up_without_reporting_verification(self):
