@@ -3885,6 +3885,93 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 for blocker in result["code_blockers"]),
                 result["code_blockers"])
 
+    def test_physical_audit_truncation_preserves_only_retained_failure(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        private_marker = "/private/physical-campaign/never-publish"
+        for campaign_factory in (
+                physical_campaign_failure_evidence,
+                physical_campaign_decision_failure_evidence):
+            with self.subTest(campaign_factory=campaign_factory.__name__):
+                campaign = campaign_factory(policy_raw)
+                audit = campaign["physical_evidence_audit"]
+                # Producer truncation does not invalidate the first FAIL if its
+                # matching diagnostic and sealed pair/count proof are retained.
+                audit["omitted_diagnostic_count"] = 96
+                audit["diagnostics"].append({
+                    "status": "BLOCKED",
+                    "metric": "unrelated.screen",
+                    "reason": private_marker,
+                })
+                authenticated = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(authenticated["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(authenticated["release_verdict"], "FAIL")
+                diagnostics = "\n".join(authenticated["code_blockers"])
+                self.assertIn("verdict=FAIL reason=authenticated_producer_failure",
+                              diagnostics)
+                self.assertIn(f"required_source_sha={SOURCE}", diagnostics)
+                self.assertNotIn(private_marker, diagnostics)
+
+                # A first-failure claim without its retained matching diagnostic
+                # is not authenticated, even if omitted diagnostics might have
+                # contained that missing witness.
+                audit["diagnostics"].pop(0)
+                unverifiable = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(unverifiable["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(unverifiable["release_verdict"], "BLOCKED")
+                self.assertTrue(any(
+                    "first_failed_phase=physical_evidence_audit" in blocker and
+                    "verdict=BLOCKED" in blocker and
+                    "reason=missing_or_contradictory_campaign_proof" in blocker
+                    for blocker in unverifiable["code_blockers"]),
+                    unverifiable["code_blockers"])
+
+    def test_physical_audit_failure_rejects_count_and_digest_substitution(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        for campaign_factory in (
+                physical_campaign_failure_evidence,
+                physical_campaign_decision_failure_evidence):
+            for fault in (
+                    "boolean_accepted_count", "list_attempted_count",
+                    "inflated_accepted_count", "missing_evaluator_digest",
+                    "missing_sealer_digest", "stale_audit_source",
+                    "wrong_audit_target"):
+                with self.subTest(campaign_factory=campaign_factory.__name__,
+                                  fault=fault):
+                    campaign = campaign_factory(policy_raw)
+                    audit = campaign["physical_evidence_audit"]
+                    counts = audit["cohort_pair_counts"]["sd-service-balanced"]
+                    if fault == "boolean_accepted_count":
+                        counts["accepted_pairs"] = True
+                    elif fault == "list_attempted_count":
+                        counts["attempted_pairs"] = []
+                    elif fault == "inflated_accepted_count":
+                        counts["accepted_pairs"] = counts["attempted_pairs"] + 1
+                    elif fault == "missing_evaluator_digest":
+                        campaign["policy"]["evaluator"].pop("sha256")
+                    elif fault == "missing_sealer_digest":
+                        campaign["policy"]["evidence_sealer"].pop("sha256")
+                    elif fault == "stale_audit_source":
+                        audit["admitted_source_sha"] = "b" * 40
+                    else:
+                        audit["admitted_target_partuuid"] = "ffffffff-01"
+                    result = evaluate(policy=policy, campaign=campaign)
+                    self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                    self.assertEqual(result["release_verdict"], "BLOCKED")
+                    self.assertTrue(any(
+                        "verdict=BLOCKED" in blocker and
+                        "reason=missing_or_contradictory_campaign_proof"
+                        in blocker for blocker in result["code_blockers"]),
+                        result["code_blockers"])
+
+        # A PASS audit cannot be complete if it silently drops diagnostics.
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign["physical_evidence_audit"]["omitted_diagnostic_count"] = 1
+        incomplete = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(incomplete["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(incomplete["release_verdict"], "BLOCKED")
+
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
         policy = acceptance_policy()
