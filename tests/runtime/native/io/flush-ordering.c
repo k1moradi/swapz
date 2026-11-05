@@ -347,14 +347,33 @@ struct ordered_fixture {
 static int ordered_check(const struct ordered_fixture *fixture,
 			 const char *phase, bool valid, int expected, int actual)
 {
+	const unsigned int expected_completed_blocks =
+		fixture->scenario->kind == ORDERED_DATA_WRITE &&
+		!fixture->scenario->preflush_errno &&
+		!fixture->scenario->data_errno ? 1U : 0U;
+	const unsigned int observed_completed_blocks =
+		fixture->data_done && !fixture->scenario->data_errno ? 1U : 0U;
+	const char *generation_category = fixture->durable_publications ?
+		"published-new" : "preserved-old";
+	const char *ownership_category =
+		fixture->data_submissions != fixture->data_completions ?
+		"lower-owned" : !fixture->upper_done ? "upper-owned" : "finalized";
+	const char *safe_disposition = fixture->terminal_errno ?
+		"reject-later-write" : fixture->upper_done ?
+		"complete-once" : "retain-owner";
+
 	if (valid)
 		return 0;
 	fprintf(stderr,
-		"flush request=%s phase=%s original_lower_errno=%d "
+		"flush request=%s submission_phase=%s original_lower_errno=%d "
+		"expected_completed_blocks=%u observed_completed_blocks=%u "
+		"generation_category=%s ownership_category=%s safe_disposition=%s "
 		"expected_ack_errno=%d actual_ack_errno=%d "
 		"expected=%d actual=%d acks=%u publications=%u generations=%u "
 		"outstanding_lower_owners=%u outstanding_upper_owners=%u\n",
 		fixture->scenario->name, phase, fixture->original_lower_errno,
+		expected_completed_blocks, observed_completed_blocks,
+		generation_category, ownership_category, safe_disposition,
 		fixture->scenario->expected_errno, fixture->upper_done ?
 		fixture->upper_errno : -EAGAIN, expected, actual,
 		fixture->successful_acks, fixture->durable_publications,

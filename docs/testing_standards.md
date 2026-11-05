@@ -7865,9 +7865,10 @@ If the callback wins that election, later failures cannot replace its errno.
 If another terminal failure wins first, the current run may still report its
 own later lower callback errno, while a fresh upper retry observes the already
 latched target errno. Repeat drain and retry must not issue additional lower
-I/O. On failure, report phase, original lower errno, expected/observed ACK
-errno, publication/generation counts and outstanding lower/upper completion
-owners. These rootless models do not claim a loaded callback race or
+I/O. On failure, report submission phase, expected/observed completed lower
+blocks, original lower errno, expected/observed ACK errno, publication/generation
+counts, explicit generation/ownership category, safe disposition and outstanding
+lower/upper completion owners. These rootless models do not claim a loaded callback race or
 real-media cache persistence.
 Mandatory Python qualification suites must remain syntactically valid; a path that exists but cannot execute does not satisfy discovery coverage.
 
