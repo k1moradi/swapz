@@ -365,13 +365,14 @@ static int ordered_check(const struct ordered_fixture *fixture,
 	if (valid)
 		return 0;
 	fprintf(stderr,
-		"flush request=%s submission_phase=%s original_lower_errno=%d "
+		"flush request=%s phase=%s first_error=%d original_lower_errno=%d "
 		"expected_completed_blocks=%u observed_completed_blocks=%u "
 		"generation_category=%s ownership_category=%s safe_disposition=%s "
 		"expected_ack_errno=%d actual_ack_errno=%d "
 		"expected=%d actual=%d acks=%u publications=%u generations=%u "
 		"outstanding_lower_owners=%u outstanding_upper_owners=%u\n",
-		fixture->scenario->name, phase, fixture->original_lower_errno,
+		fixture->scenario->name, phase, fixture->terminal_errno,
+		fixture->original_lower_errno,
 		expected_completed_blocks, observed_completed_blocks,
 		generation_category, ownership_category, safe_disposition,
 		fixture->scenario->expected_errno, fixture->upper_done ?
@@ -878,6 +879,26 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 					-EAGAIN, error);
 				ordered_data_callback(&fixture, data_error);
 			}
+			/*
+			 * Fresh upper admission may race the ordered drain after the
+			 * callback elects terminal failure. It must reject the new
+			 * WRITE without consuming or replacing the pending lower owner.
+			 */
+			error = ordered_retry_after_failure(&fixture);
+			ORDERED_CHECK(&fixture, "callback-latch-new-upper-before-drain",
+				error == expected_terminal &&
+				fixture.terminal_errno == expected_terminal &&
+				fixture.retry_upper_completions == 1 &&
+				fixture.data_submissions == 1 &&
+				fixture.data_completions == 1 &&
+				!fixture.upper_done && !fixture.upper_completions &&
+				!fixture.flush_meter.attempts &&
+				!fixture.lower.called &&
+				!fixture.successful_acks &&
+				!fixture.durable_publications &&
+				fixture.generation == 7 &&
+				fixture.authoritative_extent == 0x91U,
+				expected_terminal, error);
 			error = ordered_advance(&fixture);
 			ORDERED_CHECK(&fixture, "terminal-final-owner",
 				error == expected_ack &&
@@ -904,7 +925,7 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 			error = ordered_retry_after_failure(&fixture);
 			ORDERED_CHECK(&fixture, "fresh-upper-after-terminal",
 				error == expected_terminal &&
-				fixture.retry_upper_completions == 1 &&
+				fixture.retry_upper_completions == 2 &&
 				fixture.upper_completions == 1 &&
 				!fixture.flush_meter.attempts &&
 				!fixture.lower.called,
