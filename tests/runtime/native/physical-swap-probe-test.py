@@ -1833,6 +1833,64 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                     directory, "/reviewed/review.json")
         return events, state, target
 
+    def test_development_active_inventory_blocks_before_test_or_header_write(self):
+        rows = (
+            "/swapfile file 524284 478600 -1\n",
+            "/dev/foreign-swap partition 262140 0 -2\n",
+        )
+        for row in rows:
+            with self.subTest(row_kind=row.split()[1]):
+                contents = "Filename Type Size Used Priority\n" + row
+
+                def read_inventory(path, *args, **kwargs):
+                    del args, kwargs
+                    if str(path) != "/proc/swaps":
+                        self.fail(f"unexpected read before inventory refusal: {path}")
+                    return contents
+
+                with mock.patch.object(probe.os, "geteuid", return_value=0), \
+                        mock.patch.object(
+                            probe.Path, "read_text", autospec=True,
+                            side_effect=read_inventory), \
+                        mock.patch.object(
+                            probe, "current_development_evidence") as evidence, \
+                        mock.patch.object(probe, "inspect_target") as inspect, \
+                        mock.patch.object(probe, "_write_block0") as write:
+                    with self.assertRaisesRegex(
+                            probe.ProbeError,
+                            "phase=preflight .*formatter_inventory .*"
+                            "active_rows count=1 header_mutation=not_attempted"):
+                        probe.run_probe(
+                            "/dev/disk/by-uuid/test-swap",
+                            "/dev/disk/by-uuid/test-swap", None, None,
+                            development_only=True)
+                evidence.assert_not_called()
+                inspect.assert_not_called()
+                write.assert_not_called()
+
+    def test_development_formatter_inventory_fails_closed_without_a_full_table(self):
+        with mock.patch.object(
+                probe.Path, "read_text",
+                return_value="Filename Type Size Used Priority\n"):
+            self.assertIsNone(
+                probe.require_development_formatter_inventory_clear())
+
+        with mock.patch.object(
+                probe.Path, "read_text", return_value="Filename Type\n"):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "expected=complete_table observed=malformed"):
+                probe.require_development_formatter_inventory_clear()
+
+        with mock.patch.object(
+                probe.Path, "read_text",
+                side_effect=PermissionError(13, "inventory unavailable")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "expected=readable_complete_table observed=errno_13 "
+                    "header_mutation=not_attempted"):
+                probe.require_development_formatter_inventory_clear()
+
     def test_formatter_and_oracle_use_exact_reviewed_identity_arguments(self):
         events, state, target = self.simulate_physical_run()
         commands = [event[1] for event in events if event[0] == "command"]

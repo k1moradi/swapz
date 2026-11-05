@@ -156,6 +156,38 @@ def parse_swap_rows(contents):
     return rows
 
 
+def require_development_formatter_inventory_clear():
+    """Fail before any card work the formatter would reject later anyway."""
+    try:
+        contents = Path("/proc/swaps").read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ProbeError(
+            "phase=preflight operation=formatter_inventory "
+            "expected=readable_complete_table "
+            f"observed=errno_{exc.errno} header_mutation=not_attempted"
+        ) from exc
+    except UnicodeError as exc:
+        raise ProbeError(
+            "phase=preflight operation=formatter_inventory "
+            "expected=readable_complete_table observed=invalid_encoding "
+            "header_mutation=not_attempted"
+        ) from exc
+    try:
+        rows = parse_swap_rows(contents)
+    except ProbeError as exc:
+        raise ProbeError(
+            "phase=preflight operation=formatter_inventory "
+            f"expected=complete_table observed=malformed ({exc}) "
+            "header_mutation=not_attempted"
+        ) from exc
+    if rows:
+        raise ProbeError(
+            "phase=preflight operation=formatter_inventory "
+            "expected=complete_zero_rows observed=active_rows "
+            f"count={len(rows)} header_mutation=not_attempted"
+        )
+
+
 def block_identity(path):
     try:
         info = os.stat(path)
@@ -2278,6 +2310,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         raise ProbeError("run action requires root")
     start_timestamp = _utc_timestamp()
     if development_only:
+        # The production formatter requires a complete zero-row inventory.
+        # Detect known refusal before spending a fresh fast_test run, creating
+        # recovery state, or clearing block zero. The formatter repeats its
+        # own authoritative last prewrite check later.
+        require_development_formatter_inventory_clear()
         evidence = current_development_evidence(None)
         target = inspect_target(
             device_arg, confirm_arg, allow_inactive_swap=True)

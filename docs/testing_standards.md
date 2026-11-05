@@ -4769,6 +4769,14 @@ record or artifact mismatch blocks the card run. This narrow admission is only
 for the development smoke and does not replace the complete five-stage
 `make test` gate for physical qualification or production readiness.
 
+Before running that fresh `make fast_test`, creating recovery state, or clearing
+block zero, development-only mode must parse `/proc/swaps` and require a
+complete zero-row table. Any active row, including an unrelated swapfile, or
+an unreadable/malformed inventory blocks with `header_mutation=not_attempted`.
+This early check prevents a header-only recovery cycle when the strict
+formatter would refuse later; it does not authenticate active swap pathnames
+or replace the formatter's final prewrite inventory check.
+
 The selected authorized partition must already be inactive swap. This mode
 must not call `swapoff` or `swapon`, and must not activate the raw partition or
 the SWZ mapper as Linux swap. It saves the exact original 4096-byte block-zero
