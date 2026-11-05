@@ -440,6 +440,14 @@ int swapz_finish_raw(struct swapz_authority *authority, const struct swapz_tx *t
 /* Check raw payload integrity against volatile authoritative CRC. */
 int swapz_verify_raw(const struct swapz_authority *authority,
 		   swapz_u32 logical_page, const void *raw_page);
+/*
+ * Allocation-free multi-page DISCARD preflight. It temporarily models cached
+ * authority accounting under the serialized owner and restores it before
+ * return; success authorizes only the subsequent ordinary discard-page calls.
+ */
+int swapz_prevalidate_discard_range(struct swapz_authority *authority,
+				    swapz_u32 first_logical,
+				    swapz_u32 page_count);
 /* Serialized explicit logical discard: invalidate and advance generation. */
 int swapz_discard_page(struct swapz_authority *authority, swapz_u32 logical_page);
 /*

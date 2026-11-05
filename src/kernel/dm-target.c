@@ -6382,6 +6382,11 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 	    remaining / SWAPZ_SECTORS >
 			ctx->logical_pages - sector / SWAPZ_SECTORS)
 		return -ERANGE;
+	error = swapz_prevalidate_discard_range(
+		&ctx->authority, (swapz_u32)(sector / SWAPZ_SECTORS),
+		(swapz_u32)(remaining / SWAPZ_SECTORS));
+	if (error)
+		return error;
 	/*
 	 * The discard must be all-or-nothing on any detectable mapping,
 	 * generation or liveness corruption. Validate every affected logical

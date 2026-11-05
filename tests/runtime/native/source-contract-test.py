@@ -1947,6 +1947,9 @@ static swapz_u16 swapz_probe_set(
 
     def test_discard_validates_entire_range_before_mutating(self):
         discard = body("swapz_discard")
+        self.assertIn("swapz_prevalidate_discard_range(", discard)
+        self.assertLess(discard.index("swapz_prevalidate_discard_range("),
+                        discard.index("while (check_remaining)"))
         self.assertLess(discard.index("while (check_remaining)"),
                         discard.index("while (remaining)"))
         self.assertLess(discard.index("if (m->generation =="),
@@ -1999,12 +2002,28 @@ struct bio { struct { sector_t bi_sector; } bi_iter; sector_t sectors; };
 static struct swapz_dm *current;
 static unsigned discarded;
 static sector_t bio_sectors(struct bio *bio) { return bio->sectors; }
+static int swapz_prevalidate_discard_range(struct swapz_authority *authority,
+                                           swapz_u32 first, swapz_u32 count) {
+    swapz_u32 logical;
+    assert(authority == &current->authority);
+    for (logical = first; logical < first + count; ++logical) {
+        const struct swapz_map *map = &current->maps[logical];
+        if (map->valid &&
+            !current->segment_mapped_pages[
+                map->start_block / SWAPZ_SEGMENT_BLOCKS])
+            return -EUCLEAN;
+    }
+    return 0;
+}
 static int swapz_discard_page(struct swapz_authority *authority, swapz_u32 logical) {
     struct swapz_map *map = &current->maps[logical];
+    swapz_u32 segment = map->start_block / SWAPZ_SEGMENT_BLOCKS;
     assert(authority == &current->authority && map->valid);
     assert(current->live_records[map->start_block]);
+    if (!current->segment_mapped_pages[segment])
+        return -EUCLEAN;
     --current->live_records[map->start_block];
-    --current->segment_mapped_pages[map->start_block / SWAPZ_SEGMENT_BLOCKS];
+    --current->segment_mapped_pages[segment];
     map->valid = 0;
     ++map->generation;
     ++discarded;
@@ -2057,6 +2076,12 @@ int main(void) {
     assert(swapz_discard(&ctx,&whole)==-EUCLEAN);
     assert(!discarded && !ctx.discard_pages && live[0]==1 &&
            live[SWAPZ_SEGMENT_BLOCKS-1]==1 && maps[0].valid && maps[1].valid &&
+           maps[0].generation==1 && maps[1].generation==1);
+    initialize(SWAPZ_SEGMENT_BLOCKS,1); /* Later authority sidecar is corrupt. */
+    segments[1]=0;
+    assert(swapz_discard(&ctx,&whole)==-EUCLEAN);
+    assert(!discarded && !ctx.discard_pages && live[0]==1 &&
+           live[SWAPZ_SEGMENT_BLOCKS]==1 && maps[0].valid && maps[1].valid &&
            maps[0].generation==1 && maps[1].generation==1);
     initialize(4,2); /* Valid two-page DISCARD still succeeds. */
     assert(swapz_discard(&ctx,&whole)==0);

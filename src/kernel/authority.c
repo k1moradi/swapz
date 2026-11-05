@@ -1933,6 +1933,169 @@ int swapz_verify_raw(const struct swapz_authority *a, swapz_u32 logical_page,
 	return 0;
 }
 
+
+/*
+ * Validate every authority-side failure condition which can be known before a
+ * multi-page upper DISCARD starts publishing generation changes. The ordered
+ * owner is the only mutator. Temporary mapped/GC accounting is restored before
+ * return; maps, generations, physical liveness and page lists are never changed.
+ *
+ * The final full-map pass is required only when the range would make a closed
+ * segment appear dead. It treats logical pages inside this authenticated range
+ * as the pending removals, so a false-low mapped count or hidden survivor is
+ * refused before the first swapz_discard_page() commit.
+ */
+int swapz_prevalidate_discard_range(struct swapz_authority *a,
+				    swapz_u32 first_logical,
+				    swapz_u32 page_count)
+{
+	swapz_u32 processed = 0;
+	int error = 0;
+	int needs_full_map_proof = 0;
+	int gc_enabled;
+
+	if (!a || !a->maps || first_logical >= a->logical_pages ||
+	    page_count > a->logical_pages - first_logical)
+		return -EINVAL;
+	if (!page_count)
+		return 0;
+	if (a->in_flight || a->batch_pending)
+		return -EBUSY;
+
+	gc_enabled = swapz_gc_accounting_enabled(a);
+	while (processed < page_count) {
+		swapz_u32 logical = first_logical + processed;
+		const struct swapz_map *map = &a->maps[logical];
+		swapz_u32 segment = 0, live_bytes = 0, io_cost = 0;
+		swapz_u16 min_live_blocks = 0;
+
+		if (map->generation == ~(swapz_u32)0) {
+			error = -EOVERFLOW;
+			break;
+		}
+		if (map->valid) {
+			if (map->start_block >= a->physical_blocks ||
+			    !swapz_legal_class(map->extent_blocks) ||
+			    map->extent_blocks >
+				    a->physical_blocks - map->start_block ||
+			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+				    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+			    a->extent_classes[map->start_block] !=
+				    map->extent_blocks ||
+			    !a->live_records[map->start_block]) {
+				error = -EUCLEAN;
+				break;
+			}
+			segment = map->start_block / SWAPZ_SEGMENT_BLOCKS;
+			if (a->segment_mapped_pages &&
+			    (segment >= a->segment_count ||
+			     !a->segment_mapped_pages[segment])) {
+				error = -EUCLEAN;
+				break;
+			}
+		}
+		if (swapz_page_list_validate_entry(a, logical)) {
+			error = -EUCLEAN;
+			break;
+		}
+		if (!map->valid) {
+			processed++;
+			continue;
+		}
+		if (gc_enabled) {
+			error = swapz_gc_account_costs(a, map, &segment,
+						       &live_bytes, &io_cost,
+						       &min_live_blocks);
+			if (error)
+				break;
+			if (a->segment_gc_live_bytes[segment] < live_bytes ||
+			    a->segment_gc_io_cost[segment] < io_cost ||
+			    a->segment_gc_min_live_blocks[segment] <
+				    min_live_blocks) {
+				error = -EUCLEAN;
+				break;
+			}
+		}
+
+		if (a->segment_mapped_pages) {
+			a->segment_mapped_pages[segment]--;
+			if (!a->segment_mapped_pages[segment] &&
+			    segment != a->open_segment)
+				needs_full_map_proof = 1;
+		}
+		if (gc_enabled) {
+			a->segment_gc_live_bytes[segment] -= live_bytes;
+			a->segment_gc_io_cost[segment] -= io_cost;
+			a->segment_gc_min_live_blocks[segment] -=
+				min_live_blocks;
+		}
+		processed++;
+	}
+
+	if (!error && needs_full_map_proof) {
+		swapz_u32 logical;
+
+		for (logical = 0; logical < a->logical_pages; ++logical) {
+			const struct swapz_map *map = &a->maps[logical];
+			swapz_u32 segment;
+
+			swapz_map_proof_resched(logical);
+			if (!map->valid)
+				continue;
+			if (map->start_block >= a->physical_blocks ||
+			    !swapz_legal_class(map->extent_blocks) ||
+			    map->extent_blocks >
+				    a->physical_blocks - map->start_block ||
+			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+				    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS) {
+				error = swapz_map_proof_refuse(
+					"discard_range", "extent_geometry",
+					-EUCLEAN);
+				break;
+			}
+			segment = map->start_block / SWAPZ_SEGMENT_BLOCKS;
+			if (segment >= a->segment_count) {
+				error = swapz_map_proof_refuse(
+					"discard_range", "segment_index",
+					-EUCLEAN);
+				break;
+			}
+			if (a->segment_mapped_pages &&
+			    !a->segment_mapped_pages[segment] &&
+			    (logical < first_logical ||
+			     logical - first_logical >= page_count)) {
+				error = swapz_map_proof_refuse(
+					"discard_range", "hidden_survivor",
+					-EUCLEAN);
+				break;
+			}
+		}
+	}
+
+	while (processed) {
+		swapz_u32 logical = first_logical + --processed;
+		const struct swapz_map *map = &a->maps[logical];
+		swapz_u32 segment, live_bytes, io_cost;
+		swapz_u16 min_live_blocks;
+
+		if (!map->valid)
+			continue;
+		segment = map->start_block / SWAPZ_SEGMENT_BLOCKS;
+		if (a->segment_mapped_pages)
+			a->segment_mapped_pages[segment]++;
+		if (!gc_enabled)
+			continue;
+		live_bytes = swapz_gc_live_byte_cost(map);
+		io_cost = swapz_gc_estimated_io_cost_with_bytes(map, live_bytes);
+		min_live_blocks = swapz_gc_min_live_blocks(map);
+		a->segment_gc_live_bytes[segment] += live_bytes;
+		a->segment_gc_io_cost[segment] += io_cost;
+		a->segment_gc_min_live_blocks[segment] += min_live_blocks;
+	}
+
+	return error;
+}
+
 int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 {
 	struct swapz_map *old;

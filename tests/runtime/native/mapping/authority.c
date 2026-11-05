@@ -1519,6 +1519,93 @@ static int test_small_index_failure_and_repeated_lifecycle(void)
 	return 0;
 }
 
+
+static int test_discard_range_prevalidation_blocks_late_sidecar_corruption(void)
+{
+	enum {
+		test_logical_pages = 2U,
+		test_physical_blocks = 4U * SWAPZ_SEGMENT_BLOCKS,
+		test_segments = 4U,
+	};
+	struct swapz_authority test_authority;
+	struct swapz_map test_maps[test_logical_pages];
+	swapz_u16 test_live[test_physical_blocks];
+	swapz_u8 test_classes[test_physical_blocks];
+	swapz_u8 test_roles[test_segments];
+	swapz_u32 test_mapped_pages[test_segments];
+
+	CHECK(swapz_authority_init(&test_authority, test_maps, test_live,
+				   test_classes, test_logical_pages,
+				   test_physical_blocks) == 0);
+	CHECK(swapz_enable_segment_rotation(&test_authority, test_roles,
+					    test_segments) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(&test_authority,
+						   test_mapped_pages,
+						   test_segments) == 0);
+	test_maps[0] = (struct swapz_map) {
+		.start_block = 0U,
+		.generation = 1U,
+		.payload_length = SWAPZ_BLOCK_BYTES,
+		.extent_blocks = 1U,
+		.raw = 1U,
+		.valid = 1U,
+	};
+	test_maps[1] = (struct swapz_map) {
+		.start_block = SWAPZ_SEGMENT_BLOCKS,
+		.generation = 1U,
+		.payload_length = SWAPZ_BLOCK_BYTES,
+		.extent_blocks = 1U,
+		.raw = 1U,
+		.valid = 1U,
+	};
+	test_live[0] = 1U;
+	test_live[SWAPZ_SEGMENT_BLOCKS] = 1U;
+	test_classes[0] = 1U;
+	test_classes[SWAPZ_SEGMENT_BLOCKS] = 1U;
+	test_mapped_pages[0] = 1U;
+	test_mapped_pages[1] = 0U; /* Corrupt only the later page's cached count. */
+
+	CHECK(swapz_prevalidate_discard_range(
+		      &test_authority, 0U, test_logical_pages) == -EUCLEAN);
+	CHECK(test_maps[0].valid && test_maps[0].generation == 1U &&
+	      test_maps[1].valid && test_maps[1].generation == 1U);
+	CHECK(test_live[0] == 1U &&
+	      test_live[SWAPZ_SEGMENT_BLOCKS] == 1U);
+	CHECK(test_mapped_pages[0] == 1U && test_mapped_pages[1] == 0U);
+
+	/* A false-one count cannot hide a surviving map outside the range. */
+	test_maps[1].start_block = 0U;
+	test_live[0] = 2U;
+	test_live[SWAPZ_SEGMENT_BLOCKS] = 0U;
+	test_classes[SWAPZ_SEGMENT_BLOCKS] = 0U;
+	test_mapped_pages[0] = 1U;
+	CHECK(swapz_prevalidate_discard_range(&test_authority, 0U, 1U) ==
+	      -EUCLEAN);
+	CHECK(test_maps[0].valid && test_maps[0].generation == 1U &&
+	      test_maps[1].valid && test_maps[1].generation == 1U);
+	CHECK(test_live[0] == 2U && test_mapped_pages[0] == 1U);
+
+	/* Valid shared-extent removal decrements its physical reference exactly
+	 * once per logical map; repeated DISCARD advances only generations. */
+	test_mapped_pages[0] = 2U;
+	CHECK(swapz_prevalidate_discard_range(
+		      &test_authority, 0U, test_logical_pages) == 0);
+	CHECK(test_live[0] == 2U && test_mapped_pages[0] == 2U);
+	CHECK(swapz_discard_page(&test_authority, 0U) == 0);
+	CHECK(test_live[0] == 1U && test_mapped_pages[0] == 1U);
+	CHECK(swapz_discard_page(&test_authority, 1U) == 0);
+	CHECK(!test_live[0] && !test_mapped_pages[0]);
+	CHECK(!test_maps[0].valid && test_maps[0].generation == 2U &&
+	      !test_maps[1].valid && test_maps[1].generation == 2U);
+	CHECK(swapz_prevalidate_discard_range(
+		      &test_authority, 0U, test_logical_pages) == 0);
+	CHECK(swapz_discard_page(&test_authority, 0U) == 0);
+	CHECK(swapz_discard_page(&test_authority, 1U) == 0);
+	CHECK(!test_live[0] && !test_mapped_pages[0]);
+	CHECK(test_maps[0].generation == 3U && test_maps[1].generation == 3U);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -1545,6 +1632,7 @@ int main(void)
 	CHECK(test_compact_extent_sequence_overflow_fails_closed() == 0); passed++;
 	CHECK(test_short_write_always_quarantines() == 0); passed++;
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;
+	CHECK(test_discard_range_prevalidation_blocks_late_sidecar_corruption() == 0); passed++;
 	printf("SWAPZ_EXACT_AUTHORITY_TESTS_PASS=%d\n", passed);
 	return 0;
 }
