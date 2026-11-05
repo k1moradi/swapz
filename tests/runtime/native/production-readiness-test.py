@@ -2897,6 +2897,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         campaign["record_count"] = 1
         result = evaluate(policy=policy, campaign=campaign)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(
+            result["METADATA_RAM_MEASUREMENT"]["status"],
+            "MEASURED_WITHIN_LIMIT")
         self.assertTrue(any(
             f"required={required_pair_count} observed=1" in blocker
             for blocker in result["code_blockers"]))

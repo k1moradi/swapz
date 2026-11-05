@@ -6948,7 +6948,12 @@ for structural/measurement-only callers and loads tracked policy authority,
 but it does not establish release completeness. `evaluate_release` supplies
 the validated policy as the sixth argument and is the path that enforces the
 14 frozen pairs, complete current v2 producer cohort and physical-audit release
-gates. Missing or stale sealed campaign evidence is BLOCKED.
+gates. Performance-cohort incompleteness still blocks code readiness, but it
+does not erase an independently valid source/target/policy/trace-bound
+maximum-capacity/RAM measurement from the same sealed artifact; that measurement
+uses the structural/measurement validation path and retains its own
+within-limit/over-limit disposition. Missing or stale sealed campaign evidence
+is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
 derives maximum logical pages/bytes and measured target/metadata peak RAM from
 the accepted `sd-high-occupancy-churn` swapz arm, and a PASS campaign is invalid

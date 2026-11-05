@@ -2361,6 +2361,7 @@ def evaluate_release(
         "teardown_recovery_span_ns": None,
     }
     campaign_issues = None
+    campaign_structural_issues = None
     campaign_sealed_at = None
     campaign_sealed_time = None
     physical_campaign_failure_proven = False
@@ -2393,6 +2394,12 @@ def evaluate_release(
                 "contains producer-proven FAIL execution evidence")
     if (physical_campaign_evidence is not None and
             physical_campaign_evidence_raw is not None):
+        # Capacity/RAM is an independent measured gate. Release-performance
+        # completeness must block the release without erasing valid sealed
+        # capacity/RAM samples from the same artifact.
+        campaign_structural_issues = validate_physical_campaign_evidence(
+            physical_campaign_evidence, physical_campaign_evidence_raw,
+            source_sha, policy_sha256, target)
         campaign_issues = validate_physical_campaign_evidence(
             physical_campaign_evidence, physical_campaign_evidence_raw,
             source_sha, policy_sha256, target, policy)
@@ -2442,9 +2449,10 @@ def evaluate_release(
                 campaign_sealed_at)
 
     def require_campaign_chronology(
-            name: str, record: dict[str, Any] | None) -> bool:
+            name: str, record: dict[str, Any] | None,
+            validation_issues: list[str] | None) -> bool:
         if (
-                record is None or campaign_issues != [] or
+                record is None or validation_issues != [] or
                 campaign_sealed_time is None or
                 not isinstance(campaign_sealed_at, str)):
             return False
@@ -2461,7 +2469,7 @@ def evaluate_release(
         return True
 
     capacity_chronology_valid = require_campaign_chronology(
-        "maximum_capacity_and_ram", capacity)
+        "maximum_capacity_and_ram", capacity, campaign_structural_issues)
     if capacity is not None:
         logical = capacity.get("logical_capacity_bytes")
         peak = capacity.get("peak_ram_bytes")
@@ -2480,7 +2488,7 @@ def evaluate_release(
                 "maximum_capacity_and_ram: claimed peak exceeds frozen limit "
                 f"(metric=metadata_and_target_peak_ram_bytes "
                 f"observed={peak} limit={peak_ram_limit})")
-        if campaign_issues is None:
+        if campaign_structural_issues is None:
             block_code(
                 "maximum_capacity_and_ram: NOT_MEASURED; "
                 "persistent loaded-host campaign evidence is missing")
@@ -2500,12 +2508,12 @@ def evaluate_release(
             if not matches_campaign:
                 block_code(
                     "maximum_capacity_and_ram: sealed campaign measurement mismatch")
-            for issue in campaign_issues:
+            for issue in campaign_structural_issues:
                 block_code("maximum_capacity_and_ram: " + issue)
             # Only actual, sealed, source-bound samples can set a measured
             # verdict. An interrupted/missing trace cannot inherit PASS from
             # calculated capacity or a self-declared scalar report.
-            if (not campaign_issues and matches_campaign and
+            if (not campaign_structural_issues and matches_campaign and
                     peak_ram_limit is not None and
                     capacity_chronology_valid and
                     capacity.get("policy_sha256") == policy_sha256 and
@@ -2542,7 +2550,8 @@ def evaluate_release(
     physical = pass_record("sustained_physical_performance")
     require_target("sustained_physical_performance", physical)
     require_policy("sustained_physical_performance", physical)
-    require_campaign_chronology("sustained_physical_performance", physical)
+    require_campaign_chronology(
+        "sustained_physical_performance", physical, campaign_issues)
     if physical is not None:
         if campaign_issues is None:
             block_code(
