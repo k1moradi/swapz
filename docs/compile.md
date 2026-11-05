@@ -79,7 +79,10 @@ Exactly five commands are public:
   run native/replay contract checks and the selected owned-null_blk scenarios
   (three paired repeats per scenario by default), and print compact raw/swapz,
   critical-path and synchronous-cycle tables. It never qualifies a source or
-  writes the report. `CONTENT=representative` additionally requires the
+  writes the report. `make fast_test RESUME=1` reuses matching private,
+  input/artifact-fingerprinted native/replay results; it refreshes the
+  product build, reruns loaded preflight and starts benchmark pairs fresh.
+  `CONTENT=representative` additionally requires the
   owner-supplied `ANON_PAGE_SAMPLE` described under ID177 in the testing
   standards.
 

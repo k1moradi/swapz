@@ -830,7 +830,8 @@ def current_development_evidence(nonce):
         result = subprocess.run(
             [runuser, "--user", operator, "--", env,
              f"SWAPZ_DEVELOPMENT_ADMISSION_NONCE={nonce}", make,
-             "fast_test", "SCENARIOS=fast-mixed", "REPEAT=1"],
+             "fast_test", "SCENARIOS=fast-mixed", "REPEAT=1",
+             "RESUME=1"],
             cwd=ROOT, check=False, timeout=1200)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ProbeError(f"source-bound development test failed to run: {exc}") from exc

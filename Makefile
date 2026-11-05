@@ -95,6 +95,8 @@ test:
 # null_blk-only work-conserving hand
 # threshold (8 is the unchanged production default). HOST_LOAD_PROFILE=
 # browser-video-144p labels background-load results without relaxing screens.
+# RESUME=1 reuses only matching private native/replay checkpoints;
+# product build and environment-dependent loaded preflight always rerun.
 # It accepts dirty trees, honors the noise screen, never writes
 # test_results.json and never qualifies a source. Override with
 # SCENARIOS=... and/or REPEAT=1..10 when narrowing a follow-up.

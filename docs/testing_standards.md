@@ -774,6 +774,40 @@ select scenarios and repeats. Every emulated scenario must use the production
 delta64 + `DELTA64_SHUF8` byte-plane shuffle (byte shuffle) + LZ4
 stack. Delta64-off benchmark arms are retired and must not be added to
 `make test`, `make fast_test`, report plots, or performance history.
+
+`make fast_test RESUME=1` may reuse a successful native/replay stage from a
+private checkpoint under `build/tests/fast-test/resume/`. This cache is
+separate from the fresh nonce-bound `development-evidence.json`; every
+invocation replaces that admission record with its current HEAD, dirty state
+and nonce. The product build always runs so embedded source provenance is
+refreshed, and the environment-dependent loaded preflight always runs again.
+Native/replay contracts may be skipped only when the working-tree content
+fingerprint for their kernel production sources, native build definitions,
+replay inputs and fast-test runner, the host/compiler identity, and hashes of
+every required native test artifact match a previously completed PASS. Changes
+to unrelated userspace sources, documentation or native tests that `fast_test`
+does not execute need not invalidate that cache; a change to any fingerprinted
+input, build environment or artifact does.
+Missing, malformed, unreadable or non-private checkpoint state is ignored and
+causes the required checks to run normally. The first invocation after this
+resume implementation has no matching checkpoint and therefore runs the
+native/replay stage once. Benchmark pairs always run fresh; an interrupted
+benchmark reruns its selected pairs on resume.
+An invocation without `RESUME=1` invalidates a matching old PASS before it
+starts a fresh native/replay run, so a newly observed failure cannot leave that
+same checkpoint available for a later resume.
+
+Checkpoint data is bounded, mode 0600 inside a mode 0700 directory, and
+atomically replaced. The physical development helper requests `RESUME=1` to
+avoid repeating valid native/replay work after unrelated main-branch advances,
+while its own source, artifact, nonce and final pre-mutation checks remain
+mandatory. Resume never changes `make test`, qualifies a source, or lets
+cached environment-dependent preflight satisfy a new invocation.
+Rootless regression must prove an exact matching checkpoint skips only the
+native/replay stage while refreshing the product build and loaded preflight;
+input, host or artifact drift must rerun native checks, and a forced fresh run
+must invalidate its matching old PASS before those checks begin.
+
 Retiring the comparison does not retire positive-path correctness: the loaded
 default-policy smoke writes and byte-exactly reads back 128 delta64-positive
 counter-sequence pages (`--delta64-write-series`/`--delta64-verify-series`) and

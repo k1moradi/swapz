@@ -6,6 +6,9 @@ to three raw-versus-swapz repeats per owned null_blk scenario, then prints
 development tables. Dirty trees are allowed so a policy change can be measured
 before it is committed.
 
+`RESUME=1` may reuse a matching completed native/replay stage; the current
+product build, loaded preflight and selected benchmark pairs still run fresh.
+
 `make fast_test` never qualifies a source revision, never writes or publishes
 test_results.json and never replaces `make test`. Repeats are noise-screened
 directional observations, not the matched confidence intervals required for
@@ -17,6 +20,7 @@ import json
 import os
 import re
 import runpy
+import shlex
 import shutil
 import stat
 import statistics
@@ -35,6 +39,15 @@ import private_memory  # noqa: E402
 HOST_CPU = runpy.run_path(str(ROOT / "tests/runtime/benchmark/io-replay.py"))
 OUT_DIR = ROOT / "build/tests/fast-test"
 ADMISSION_EVIDENCE = OUT_DIR / "development-evidence.json"
+RESUME_DIR = OUT_DIR / "resume"
+RESUME_SCHEMA = "swapz-fast-test-resume"
+RESUME_STATE_MAX_BYTES = 1024 * 1024
+RESUME_INPUT_PATHS = (
+    "Makefile", "src/kernel", "tests/suites", "tests/runtime/benchmark",
+    "tests/runtime/native/io", "tests/runtime/native/codec/anon-page-analyzer.c",
+    "tests/runtime/native/codec/anon-page-analyzer-test.py",
+    "tests/tools/fast-test.py",
+)
 PAIR = "tests/tools/benchmark-owned-pair.sh"
 STRIPED_PAIR = "tests/tools/benchmark-striped-owned.sh"
 PREFLIGHT = "tests/tools/loaded-preflight.sh"
@@ -214,6 +227,309 @@ def write_development_evidence(evidence):
         raise
 
 
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _open_resume_directory(create=False):
+    directories = (ROOT / "build", ROOT / "build/tests", OUT_DIR, RESUME_DIR)
+    for directory in directories:
+        try:
+            info = directory.lstat()
+        except FileNotFoundError:
+            if not create:
+                return -1
+            try:
+                os.mkdir(directory, 0o700)
+            except FileExistsError:
+                pass
+            info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or
+                info.st_uid != os.geteuid()):
+            raise OSError("resume storage is not an owned directory")
+
+    descriptor = os.open(
+        RESUME_DIR, os.O_RDONLY | os.O_DIRECTORY |
+        getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+    info = os.fstat(descriptor)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        os.close(descriptor)
+        raise OSError("resume storage identity changed")
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        if not create:
+            os.close(descriptor)
+            return -1
+        os.fchmod(descriptor, 0o700)
+    return descriptor
+
+
+def read_resume_checkpoint():
+    """Read only a private, stable checkpoint; invalid cache is never evidence."""
+    directory_fd = -1
+    descriptor = -1
+    try:
+        directory_fd = _open_resume_directory()
+        if directory_fd < 0:
+            return None
+        descriptor = os.open(
+            "checkpoint.json", os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+            getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd)
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid() or
+                stat.S_IMODE(before.st_mode) != 0o600 or
+                before.st_size > RESUME_STATE_MAX_BYTES):
+            return None
+        chunks = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                return None
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                before.st_ctime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+                after.st_ctime_ns):
+            return None
+        checkpoint = json.loads(
+            b"".join(chunks), object_pairs_hook=_unique_json_object)
+        if (not isinstance(checkpoint, dict) or
+                checkpoint.get("schema") != RESUME_SCHEMA):
+            return None
+        return checkpoint
+    except (OSError, ValueError, TypeError, RecursionError,
+            json.JSONDecodeError):
+        return None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
+def write_resume_checkpoint(checkpoint):
+    """Durably replace the bounded private resume state, never admission evidence."""
+    directory_fd = -1
+    descriptor = -1
+    temporary = None
+    try:
+        payload = (json.dumps(checkpoint, sort_keys=True, separators=(",", ":")) +
+                   "\n").encode()
+        if len(payload) > RESUME_STATE_MAX_BYTES:
+            return False
+        directory_fd = _open_resume_directory(create=True)
+        temporary = f"checkpoint.{os.getpid()}.{time.monotonic_ns()}.tmp"
+        descriptor = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+            getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600, dir_fd=directory_fd)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=False) as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, "checkpoint.json", src_dir_fd=directory_fd,
+                   dst_dir_fd=directory_fd)
+        temporary = None
+        os.fsync(directory_fd)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if directory_fd >= 0:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary, dir_fd=directory_fd)
+                except OSError:
+                    pass
+            os.close(directory_fd)
+
+
+def invalidate_resume_checkpoint():
+    """Remove a matching old PASS before an explicitly fresh native run."""
+    directory_fd = -1
+    try:
+        directory_fd = _open_resume_directory()
+        if directory_fd < 0:
+            return True
+        try:
+            os.unlink("checkpoint.json", dir_fd=directory_fd)
+        except FileNotFoundError:
+            return True
+        os.fsync(directory_fd)
+        return True
+    except OSError:
+        return False
+    finally:
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
+def _stable_file_digest(path):
+    try:
+        initial = path.lstat()
+    except FileNotFoundError:
+        raise
+    if not stat.S_ISREG(initial.st_mode):
+        raise OSError("resume input is not a regular file")
+    descriptor = os.open(
+        path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+        getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError("resume input is not a regular file")
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                before.st_ctime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+                after.st_ctime_ns):
+            raise OSError("resume input changed while hashing")
+        return digest.hexdigest(), stat.S_IMODE(before.st_mode)
+    finally:
+        os.close(descriptor)
+
+
+def resume_input_fingerprint():
+    """Hash only fast-test dependencies; unrelated rootless files may advance main."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "--", *RESUME_INPUT_PATHS], cwd=ROOT,
+        capture_output=True, check=True).stdout.split(b"\0")
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z", "--",
+         *RESUME_INPUT_PATHS], cwd=ROOT, capture_output=True,
+        check=True).stdout.split(b"\0")
+    paths = sorted({os.fsdecode(path) for path in (*tracked, *untracked) if path})
+    if not paths:
+        raise OSError("no fast-test inputs found")
+    digest = hashlib.sha256()
+    for relative in paths:
+        input_path = ROOT / relative
+        digest.update(relative.encode("utf-8", "surrogateescape") + b"\0")
+        try:
+            file_digest, mode = _stable_file_digest(input_path)
+        except FileNotFoundError:
+            digest.update(b"MISSING\0")
+            continue
+        digest.update(f"{mode:o}\0{file_digest}\n".encode("ascii"))
+    return digest.hexdigest()
+
+
+def resume_host_fingerprint():
+    uname = os.uname()
+    compiler = os.environ.get("CC", "cc")
+    try:
+        compiler_command = shlex.split(compiler)
+        compiler_executable = (shutil.which(compiler_command[0])
+                               if compiler_command else None)
+        compiler_result = subprocess.run(
+            [*compiler_command, "--version"], cwd=ROOT, capture_output=True,
+            text=True, check=False, timeout=5)
+        compiler_version = (compiler_result.stdout or compiler_result.stderr
+                            ).splitlines()[0][:200]
+    except (OSError, IndexError, subprocess.TimeoutExpired, ValueError):
+        compiler_executable = None
+        compiler_version = "unavailable"
+    python3_executable = shutil.which("python3")
+    build_environment = {
+        name: os.environ.get(name, "")
+        for name in ("CFLAGS", "CPPFLAGS", "LDFLAGS", "OBJDUMP",
+                     "SANITIZE", "THREAD_SANITIZE", "LD_LIBRARY_PATH",
+                     "LD_PRELOAD", "PYTHONPATH", "ASAN_OPTIONS",
+                     "UBSAN_OPTIONS", "LSAN_OPTIONS", "TSAN_OPTIONS",
+                     "SWAPZ_PRIVATE_FIXTURE")
+    }
+    return {
+        "architecture": uname.machine,
+        "kernel_release": uname.release,
+        "python": sys.version.splitlines()[0],
+        "python_executable": os.path.realpath(sys.executable),
+        "python3_executable": (os.path.realpath(python3_executable)
+                                if python3_executable else None),
+        "compiler": compiler,
+        "compiler_executable": compiler_executable,
+        "compiler_version": compiler_version,
+        "build_environment_sha256": _canonical_sha256(build_environment),
+    }
+
+
+def _native_artifact_paths():
+    names = (
+        "io-replay-native", "flush-ordering", "lower-write-aggregation",
+        "window-policy", "preparation-slots", "preparation-codec-result",
+        "preparation-publication-lifetime", "lane-gap", "anon-page-analyzer",
+    )
+    paths = [ROOT / "build/tests/native" / name for name in names]
+    paths.append(ROOT / "build/tests/native/predictor-core.o")
+    architecture_objects = {
+        "x86_64": ("predictor-sse2.o", "predictor-avx2.o", "predictor-avx512.o"),
+        "aarch64": ("predictor-neon.o",),
+    }.get(os.uname().machine, ())
+    paths.extend(ROOT / "build/tests/native" / name
+                 for name in architecture_objects)
+    return paths
+
+
+def native_artifact_fingerprint():
+    digest = hashlib.sha256()
+    for path in _native_artifact_paths():
+        try:
+            file_digest, mode = _stable_file_digest(path)
+        except OSError:
+            return None
+        digest.update(path.relative_to(ROOT).as_posix().encode() + b"\0")
+        digest.update(f"{mode:o}\0{file_digest}\n".encode("ascii"))
+    return digest.hexdigest()
+
+
+def _canonical_sha256(value):
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                         allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def checkpoint_matches_native(checkpoint, input_sha256, host):
+    if not isinstance(checkpoint, dict):
+        return False
+    native = checkpoint.get("native")
+    if not isinstance(native, dict):
+        return False
+    return (native.get("status") == "PASS" and
+            native.get("input_sha256") == input_sha256 and
+            re.fullmatch(r"[0-9a-f]{64}",
+                         str(native.get("artifacts_sha256", ""))) is not None and
+            re.fullmatch(r"[0-9a-f]{40}",
+                         str(native.get("measurement_head", ""))) is not None and
+            isinstance(native.get("completed_at_ns"), int) and
+            not isinstance(native.get("completed_at_ns"), bool) and
+            native.get("completed_at_ns") > 0 and
+            native.get("host") == host and
+            native.get("artifacts_sha256") == native_artifact_fingerprint())
+
+
+def checkpoint_state(checkpoint):
+    if not isinstance(checkpoint, dict) or checkpoint.get("schema") != RESUME_SCHEMA:
+        return {"schema": RESUME_SCHEMA, "native": None}
+    return checkpoint
+
+
 def loaded_preflight_diagnostic(output):
     pattern = re.compile(
         r"^BLOCKED: LOADED_PREFLIGHT=([A-Z_]+) check=([a-z0-9_]+) "
@@ -232,6 +548,10 @@ def loaded_preflight_diagnostic(output):
 def build():
     jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
     run(["make", jobs, "--no-print-directory"], stdout=subprocess.DEVNULL)
+
+
+def build_native_checks():
+    jobs = f"-j{max(1, min(os.cpu_count() or 1, 16))}"
     run(["make", jobs, "--no-print-directory", "-C", "tests/suites",
          "test-replay-helper", "test-lower-io", "test-anon-page-analyzer"],
         stdout=subprocess.DEVNULL)
@@ -967,6 +1287,12 @@ def print_profile(rows):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    resume_setting = os.environ.get("RESUME", "0")
+    if resume_setting not in ("0", "1"):
+        parser.error("RESUME must be 0 or 1")
+    parser.add_argument("--resume", action="store_true",
+                        default=resume_setting == "1",
+                        help="reuse only matching private fast-test checkpoints")
     parser.add_argument("--scenarios", default=os.environ.get("SCENARIOS", ""))
     parser.add_argument("--repeat", type=int,
                         default=int(os.environ.get("REPEAT", "3") or 3))
@@ -1040,6 +1366,7 @@ def main():
           f"hand_records={args.hand_records} "
           f"mixed_ops={args.mixed_ops} "
           f"host_load={args.host_load_profile} "
+          f"resume={'enabled' if args.resume else 'disabled'} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
     nonce = os.environ.get("SWAPZ_DEVELOPMENT_ADMISSION_NONCE")
     if nonce is not None and not re.fullmatch(r"[0-9a-f]{32}", nonce):
@@ -1053,14 +1380,85 @@ def main():
         "native_status": "PENDING",
         "loaded_preflight": {"status": "NOT_RUN"},
         "fast_test_status": "IN_PROGRESS",
+        "resume": {"requested": args.resume, "native_reused": False},
     }
     write_development_evidence(evidence)
     started = time.monotonic()
     build()
+    try:
+        input_sha256 = resume_input_fingerprint()
+        host_fingerprint = resume_host_fingerprint()
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        input_sha256 = None
+        host_fingerprint = None
+    checkpoint = checkpoint_state(read_resume_checkpoint())
+    checkpoint_matches_current = bool(
+        input_sha256 and host_fingerprint and
+        checkpoint_matches_native(checkpoint, input_sha256, host_fingerprint))
+    native_reused = args.resume and checkpoint_matches_current
+    new_native_checkpoint = None
+    if native_reused:
+        evidence["resume"]["native_reused"] = True
+        evidence["resume"]["native_checkpoint_head"] = (
+            checkpoint["native"].get("measurement_head"))
+        print("  build + native/replay contract checks: PASS "
+              "(matching checkpoint reused; product build refreshed)", flush=True)
+    else:
+        if (not args.resume and checkpoint_matches_current and
+                not invalidate_resume_checkpoint()):
+            evidence["native_status"] = "BLOCKED"
+            evidence["fast_test_status"] = "BLOCKED"
+            evidence["blocker"] = "matching_resume_checkpoint_could_not_be_invalidated"
+            write_development_evidence(evidence)
+            print("BLOCKED phase=native_replay expected=fresh_checkpoint_invalidated "
+                  "observed=checkpoint_removal_failed; checks=not_run",
+                  file=sys.stderr, flush=True)
+            return 2
+        if args.resume:
+            print("  resume: no matching native checkpoint; running native/replay checks",
+                  flush=True)
+        build_native_checks()
+        if input_sha256 and host_fingerprint:
+            artifacts_sha256 = native_artifact_fingerprint()
+            if artifacts_sha256:
+                new_native_checkpoint = {
+                    "status": "PASS",
+                    "input_sha256": input_sha256,
+                    "host": host_fingerprint,
+                    "artifacts_sha256": artifacts_sha256,
+                    "measurement_head": head,
+                    "completed_at_ns": time.time_ns(),
+                }
+    try:
+        head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+            text=True, check=True).stdout.strip()
+        input_after = resume_input_fingerprint() if input_sha256 else None
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        head_after = None
+        input_after = None
+    if (head_after != head or
+            (input_sha256 and input_after != input_sha256)):
+        evidence["native_status"] = "BLOCKED"
+        evidence["fast_test_status"] = "BLOCKED"
+        evidence["blocker"] = "source_changed_during_native_checks"
+        write_development_evidence(evidence)
+        print("BLOCKED phase=native_replay expected=stable_source_inputs "
+              "observed=source_changed_or_unreadable; loaded_preflight=not_run",
+              file=sys.stderr, flush=True)
+        return 2
+    if new_native_checkpoint:
+        checkpoint["native"] = new_native_checkpoint
+        if not write_resume_checkpoint(checkpoint):
+            print("  resume: private checkpoint unavailable; "
+                  "successful checks remain usable for this invocation",
+                  file=sys.stderr, flush=True)
     evidence["native_status"] = "PASS"
+    evidence["resume"]["input_sha256"] = input_sha256
     write_development_evidence(evidence)
-    print(f"  build + native/replay contract checks: PASS "
-          f"({time.monotonic() - started:.1f}s)", flush=True)
+    if not native_reused:
+        print(f"  build + native/replay contract checks: PASS "
+              f"({time.monotonic() - started:.1f}s)", flush=True)
     preflight = privileged(60, PREFLIGHT)
     if preflight.returncode:
         diagnostic = preflight.stdout + preflight.stderr
@@ -1209,6 +1607,11 @@ def main():
     result_name = "latest-calibration.json" if calibration else "latest.json"
     (OUT_DIR / result_name).write_text(
         json.dumps({"head": head, "dirty": bool(dirty),
+                    "input_fingerprint_sha256": input_sha256,
+                    "resume": {
+                        "requested": args.resume,
+                        "native_contracts_reused": native_reused,
+                    },
                     "calibration": args.calibration,
                     # CALIBRATION=linear replays a DM-linear target: no swapz
                     # module or compression stack is involved in that file.

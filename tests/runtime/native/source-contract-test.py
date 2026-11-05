@@ -3097,6 +3097,182 @@ int main(void) {
                 fast["loaded_preflight_diagnostic"](
                     "unrelated diagnostic\n")["check"], "unclassified")
 
+    def test_fast_test_resume_checkpoint_is_private_and_artifact_bound(self):
+        import os
+        import runpy
+        import stat
+        import tempfile
+
+        fast = runpy.run_path(str(ROOT / "tests/tools/fast-test.py"))
+        namespace = fast["write_resume_checkpoint"].__globals__
+        input_sha = "d" * 64
+        artifact_sha = "e" * 64
+        host = {"architecture": "synthetic"}
+        checkpoint = {
+            "schema": namespace["RESUME_SCHEMA"],
+            "native": {
+                "status": "PASS",
+                "input_sha256": input_sha,
+                "host": host,
+                "artifacts_sha256": artifact_sha,
+                "measurement_head": "a" * 40,
+                "completed_at_ns": 1,
+            },
+        }
+        with tempfile.TemporaryDirectory(prefix="swapz-fast-resume-") as temp:
+            root = Path(temp)
+            namespace["ROOT"] = root
+            namespace["OUT_DIR"] = root / "build/tests/fast-test"
+            namespace["RESUME_DIR"] = namespace["OUT_DIR"] / "resume"
+            namespace["native_artifact_fingerprint"] = lambda: artifact_sha
+
+            self.assertTrue(fast["write_resume_checkpoint"](checkpoint))
+            resume_directory = namespace["RESUME_DIR"]
+            checkpoint_path = resume_directory / "checkpoint.json"
+            self.assertEqual(stat.S_IMODE(resume_directory.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(checkpoint_path.stat().st_mode), 0o600)
+            loaded = fast["read_resume_checkpoint"]()
+            self.assertEqual(loaded, checkpoint)
+            self.assertTrue(fast["checkpoint_matches_native"](
+                loaded, input_sha, host))
+            self.assertFalse(fast["checkpoint_matches_native"](
+                loaded, "f" * 64, host))
+            self.assertFalse(fast["checkpoint_matches_native"](
+                loaded, input_sha, {"architecture": "different"}))
+            namespace["native_artifact_fingerprint"] = lambda: "0" * 64
+            self.assertFalse(fast["checkpoint_matches_native"](
+                loaded, input_sha, host))
+            self.assertTrue(fast["invalidate_resume_checkpoint"]())
+            self.assertIsNone(fast["read_resume_checkpoint"]())
+            checkpoint_path.write_text('{"schema":', encoding="utf-8")
+            checkpoint_path.chmod(0o600)
+            self.assertIsNone(fast["read_resume_checkpoint"]())
+            checkpoint_path.unlink()
+            outside = root / "outside.json"
+            outside.write_text("{}", encoding="utf-8")
+            checkpoint_path.symlink_to(outside)
+            self.assertIsNone(fast["read_resume_checkpoint"]())
+
+    def test_fast_test_resume_reuses_only_native_stage_and_forced_run_invalidates(self):
+        import contextlib
+        import copy
+        import io
+        import os
+        import runpy
+        import subprocess
+        import sys
+        from unittest import mock
+
+        head = "c" * 40
+        input_sha = "d" * 64
+        artifact_sha = "e" * 64
+        host = {"architecture": "synthetic"}
+        checkpoint = {
+            "schema": "swapz-fast-test-resume",
+            "native": {
+                "status": "PASS",
+                "input_sha256": input_sha,
+                "host": host,
+                "artifacts_sha256": artifact_sha,
+                "measurement_head": "a" * 40,
+                "completed_at_ns": 1,
+            },
+        }
+        blocked = subprocess.CompletedProcess(
+            args=[], returncode=1,
+            stdout=("BLOCKED: LOADED_PREFLIGHT=BLOCKED "
+                    "check=unclaimed_null_blk errno=EBUSY\n"), stderr="")
+
+        def run_case(resume, current_input=input_sha, current_host=host,
+                     current_artifact=artifact_sha, invalidate_success=True):
+            fast = runpy.run_path(str(ROOT / "tests/tools/fast-test.py"))
+            namespace = fast["main"].__globals__
+            events = []
+            evidence = []
+
+            def fake_subprocess_run(command, **kwargs):
+                if command == ["git", "rev-parse", "HEAD"]:
+                    return subprocess.CompletedProcess(
+                        command, 0, head + "\n", "")
+                if command == ["git", "status", "--porcelain", "--", "src", "tests"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                raise AssertionError(f"unexpected subprocess: {command!r}")
+
+            namespace["build"] = lambda: events.append("product-build")
+            namespace["build_native_checks"] = lambda: events.append("native")
+            namespace["resume_input_fingerprint"] = lambda: current_input
+            namespace["resume_host_fingerprint"] = lambda: current_host
+            namespace["native_artifact_fingerprint"] = lambda: current_artifact
+            namespace["read_resume_checkpoint"] = (
+                lambda: copy.deepcopy(checkpoint))
+            namespace["write_resume_checkpoint"] = (
+                lambda value: events.append("checkpoint-write") or True)
+            namespace["invalidate_resume_checkpoint"] = (
+                lambda: events.append("invalidate") or invalidate_success)
+            namespace["privileged"] = (
+                lambda timeout, script: events.append("preflight") or blocked)
+            namespace["write_development_evidence"] = (
+                lambda value: evidence.append(copy.deepcopy(value)))
+
+            arguments = ["fast-test", "--scenarios", "fast-mixed", "--repeat", "1"]
+            if resume:
+                arguments.append("--resume")
+            with (mock.patch.object(os, "geteuid", return_value=0),
+                  mock.patch.object(namespace["subprocess"], "run",
+                                    side_effect=fake_subprocess_run),
+                  mock.patch.object(sys, "argv", arguments),
+                  mock.patch.dict(os.environ, {
+                      "RESUME": "1" if resume else "0",
+                      "SWAPZ_DEVELOPMENT_ADMISSION_NONCE": "f" * 32,
+                  }),
+                  contextlib.redirect_stdout(io.StringIO()),
+                  contextlib.redirect_stderr(io.StringIO())):
+                result = fast["main"]()
+            self.assertEqual(result, 2)
+            failed_to_invalidate = not resume and not invalidate_success
+            self.assertEqual(len(evidence), 2 if failed_to_invalidate else 3)
+            if failed_to_invalidate:
+                self.assertEqual(evidence[-1]["native_status"], "BLOCKED")
+                self.assertEqual(evidence[-1]["blocker"],
+                                 "matching_resume_checkpoint_could_not_be_invalidated")
+            else:
+                self.assertEqual(evidence[-1]["native_status"], "PASS")
+                self.assertEqual(evidence[-1]["loaded_preflight"]["check"],
+                                 "unclaimed_null_blk")
+            self.assertEqual(evidence[-1]["head"], head)
+            self.assertFalse(evidence[-1]["dirty"])
+            self.assertEqual(evidence[-1]["nonce"], "f" * 32)
+            return events, evidence[-1]
+
+        reused_events, reused_evidence = run_case(True)
+        self.assertEqual(reused_events, ["product-build", "preflight"])
+        self.assertTrue(reused_evidence["resume"]["native_reused"])
+
+        for label, kwargs in (
+                ("input", {"current_input": "f" * 64}),
+                ("host", {"current_host": {"architecture": "changed"}}),
+                ("artifact", {"current_artifact": "0" * 64})):
+            with self.subTest(mismatch=label):
+                events, evidence = run_case(True, **kwargs)
+                self.assertEqual(events, [
+                    "product-build", "native", "checkpoint-write", "preflight",
+                ])
+                self.assertFalse(evidence["resume"]["native_reused"])
+
+        fresh_events, fresh_evidence = run_case(False)
+        self.assertEqual(fresh_events, [
+            "product-build", "invalidate", "native", "checkpoint-write",
+            "preflight",
+        ])
+        self.assertFalse(fresh_evidence["resume"]["native_reused"])
+
+        failed_invalidation_events, failed_invalidation_evidence = run_case(
+            False, invalidate_success=False)
+        self.assertEqual(failed_invalidation_events,
+                         ["product-build", "invalidate"])
+        self.assertEqual(failed_invalidation_evidence["fast_test_status"],
+                         "BLOCKED")
+
     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
         """Exercise actual target C under controlled queue/close/reuse interleavings."""
         import subprocess

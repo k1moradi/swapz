@@ -40,6 +40,10 @@ swap. See [the root Make API](compile.md#root-make-api).
 `make fast_test` accepts dirty trees, runs native/replay checks and defaults
 to three raw-versus-swapz repeats per owned-RAM `null_blk` scenario.
 `make fast_test SCENARIOS=fast-mixed,fast-w8 REPEAT=3` narrows the loop.
+Use `make fast_test RESUME=1` to reuse only matching private checkpoints;
+the product build and loaded preflight still run for the current invocation.
+Completed benchmark pairs run again; only the successful native/replay stage
+can be reused.
 It needs noninteractive privilege for owned-device work; its noise-screened
 results are directional, not matched confidence-interval evidence. It
 never qualifies a source or publishes `test_results.json`. Every emulated

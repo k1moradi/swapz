@@ -177,6 +177,9 @@ safe path to a correct maintainable product:
   reason;
 - use `make fast_test` for development decisions and `make test` for exact
   source qualification;
+- use `make fast_test RESUME=1` after interruptions or unrelated main advances;
+  it reuses only matching private input/artifact checkpoints and always reruns
+  the current product build and loaded preflight;
 - when early card-backed data-path evidence is needed before full
   qualification, use only the private physical helper's explicit
   `--development-only` mode: bind a fresh current-main `make fast_test` record,
