@@ -18,6 +18,7 @@ rootless_capture_directory=
 rootless_capture_path=
 rootless_capture_input_fd=2
 rootless_capture_pid=
+rootless_capture_failure_reason=
 rootless_classified_reason=nonzero_exit
 rootless_classified_subtest=unavailable
 
@@ -26,6 +27,7 @@ begin_rootless_private_stderr_capture() {
   rootless_capture_path=
   rootless_capture_input_fd=2
   rootless_capture_pid=
+  rootless_capture_failure_reason=
   command -v tee >/dev/null 2>&1 || return 0
   mkdir -p "$ROOT/build/tests" >/dev/null 2>&1 || return 0
   [[ -d $ROOT/build/tests && ! -L $ROOT/build/tests ]] || return 0
@@ -37,7 +39,8 @@ begin_rootless_private_stderr_capture() {
   # those bytes unchanged while retaining one private copy for a failed run.
   coproc ROOTLESS_STDERR_CAPTURE {
     umask 077
-    tee "$rootless_capture_path" >&2
+    # Relay diagnostics are private; never print a failed tee pathname.
+    tee "$rootless_capture_path" >&2 2>/dev/null
   }
   rootless_capture_input_fd=${ROOTLESS_STDERR_CAPTURE[1]}
   rootless_capture_pid=$ROOTLESS_STDERR_CAPTURE_PID
@@ -46,21 +49,23 @@ begin_rootless_private_stderr_capture() {
 finish_rootless_private_stderr_capture() {
   local original_exit_code=$1
   local capture_exit_code=0
+  local cleanup_failed=0
   if [[ -n $rootless_capture_pid ]]; then
     exec {rootless_capture_input_fd}>&-
     if wait "$rootless_capture_pid"; then
       :
     else
       capture_exit_code=$?
+      rootless_capture_failure_reason=stderr_relay_failure
     fi
   fi
 
   if (( original_exit_code == 0 )); then
     if [[ -n $rootless_capture_path ]]; then
-      rm -f -- "$rootless_capture_path"
+      rm -f -- "$rootless_capture_path" 2>/dev/null || cleanup_failed=1
     fi
     if [[ -n $rootless_capture_directory ]]; then
-      rmdir -- "$rootless_capture_directory" 2>/dev/null || true
+      rmdir -- "$rootless_capture_directory" 2>/dev/null || cleanup_failed=1
     fi
   elif (( capture_exit_code == 0 )) &&
        [[ -n $rootless_capture_path && -f $rootless_capture_path &&
@@ -69,11 +74,17 @@ finish_rootless_private_stderr_capture() {
     rootless_private_diagnostic_log="build/tests/${rootless_capture_directory##*/}/diagnostic.log"
   else
     if [[ -n $rootless_capture_path ]]; then
-      rm -f -- "$rootless_capture_path"
+      rm -f -- "$rootless_capture_path" 2>/dev/null || cleanup_failed=1
     fi
     if [[ -n $rootless_capture_directory ]]; then
-      rmdir -- "$rootless_capture_directory" 2>/dev/null || true
+      rmdir -- "$rootless_capture_directory" 2>/dev/null || cleanup_failed=1
     fi
+  fi
+
+  # A cleanup error must not replace the first failed child status. A passing
+  # child with a broken relay is reported as a harness failure instead.
+  if (( cleanup_failed != 0 )) && [[ -z $rootless_capture_failure_reason ]]; then
+    rootless_capture_failure_reason=stderr_relay_cleanup_failure
   fi
 
   rootless_capture_directory=
@@ -90,7 +101,7 @@ classify_rootless_private_unittest_failure() {
   local found_failure_header=0
   rootless_classified_reason=nonzero_exit
   rootless_classified_subtest=unavailable
-  [[ -f $diagnostic_path && ! -L $diagnostic_path ]] || return 0
+  [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
 
   while IFS= read -r line || [[ -n $line ]]; do
     if (( found_failure_header == 0 )); then
@@ -142,9 +153,10 @@ report_rootless_failure() {
   # may already have a private stderr capture, which is retained only on fail.
   if [[ -z $private_diagnostic_path ]]; then
     mkdir -p "$ROOT/build/tests" >/dev/null 2>&1
-    if private_directory=$(
-      mktemp -d "$ROOT/build/tests/rootless-failure.XXXXXXXX" 2>/dev/null
-    ); then
+    if [[ -d $ROOT/build/tests && ! -L $ROOT/build/tests ]] &&
+       private_directory=$(
+         mktemp -d "$ROOT/build/tests/rootless-failure.XXXXXXXX" 2>/dev/null
+       ); then
       private_diagnostic_path="$private_directory/diagnostic.log"
       private_diagnostic_log="build/tests/${private_directory##*/}/diagnostic.log"
       if ! (umask 077; : > "$private_diagnostic_path"); then
@@ -158,9 +170,27 @@ report_rootless_failure() {
         ! -L $private_diagnostic_path ]]; then
     local captured_bytes
     captured_bytes=$(wc -c < "$private_diagnostic_path" 2>/dev/null)
-    if [[ $captured_bytes =~ ^[0-9]+$ ]] && (( captured_bytes > 262144 )); then
-      if tail -c 258048 -- "$private_diagnostic_path" \
-           > "$private_diagnostic_path.tail" 2>/dev/null &&
+    if [[ ! $captured_bytes =~ ^[0-9]+$ ]]; then
+      rm -f -- "$private_diagnostic_path" 2>/dev/null
+      private_diagnostic_path=
+      private_diagnostic_log=unavailable
+    elif (( captured_bytes > 262144 )); then
+      # Keep the first unittest traceback even when large progress output
+      # pushes it outside the tail. Bound this excerpt and the trailing bytes.
+      if LC_ALL=C awk -v limit=65536 '
+           /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.PackageLifecycle\.test_[A-Za-z0-9_]+\)/ && !seen { seen=1 }
+           seen {
+             if ($0 == "======================================================================") exit
+             line = $0 "\n"
+             remaining = limit - written
+             if (length(line) > remaining) line = substr(line, 1, remaining)
+             printf "%s", line
+             written += length(line)
+             if (written >= limit) exit
+           }
+         ' "$private_diagnostic_path" > "$private_diagnostic_path.tail" 2>/dev/null &&
+         tail -c 192512 -- "$private_diagnostic_path" \
+           >> "$private_diagnostic_path.tail" 2>/dev/null &&
          chmod 0600 "$private_diagnostic_path.tail" 2>/dev/null &&
          mv -f -- "$private_diagnostic_path.tail" \
            "$private_diagnostic_path" 2>/dev/null; then
@@ -265,6 +295,9 @@ python3 -B tests/runtime/native/test-report-test.py -v
 rootless_phase='tests/runtime/native/production-readiness-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/production-readiness-test.py -v
+rootless_phase='tests/runtime/native/rootless-attribution-test.py'
+rootless_phase_started_seconds=$SECONDS
+python3 -B tests/runtime/native/rootless-attribution-test.py -v
 rootless_phase='tests/runtime/native/package-dkms-test.py'
 rootless_phase_started_seconds=$SECONDS
 begin_rootless_private_stderr_capture
@@ -276,6 +309,11 @@ else
   rootless_package_exit_code=$?
 fi
 finish_rootless_private_stderr_capture "$rootless_package_exit_code"
+if (( rootless_package_exit_code == 0 )) &&
+   [[ -n $rootless_capture_failure_reason ]]; then
+  report_rootless_failure 1 "$rootless_package_command_line" \
+    "$rootless_capture_failure_reason"
+fi
 if (( rootless_package_exit_code != 0 )); then
   classify_rootless_private_unittest_failure \
     "$rootless_private_diagnostic_path"

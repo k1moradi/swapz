@@ -704,9 +704,11 @@ The long package unittest is the sole rootless suite that may keep a transient
 private stderr copy while it runs. One relay process may preserve stderr
 byte-for-byte into a mode-0600 file inside the mode-0700 failure directory; do
 not add a relay process to every passing suite. On PASS the file and directory
-are removed immediately. On failure retain at most a 256-KiB tail plus bounded
-attribution metadata, so the private log contains the unittest subtest header,
-traceback and original exception/errno when they are present. Classification
+are removed immediately. On failure, retain a bounded 64-KiB excerpt of the first detailed unittest
+failure block plus at most 188 KiB of trailing stderr, followed by bounded
+attribution metadata. This fits the existing 256-KiB capture budget and keeps
+the first traceback even when unrelated progress stderr displaces it from the
+tail. Classification
 must stop at the first detailed unittest failure block so a later subtest cannot
 replace the first failing checkpoint. The public marker may expose only an
 allowlisted `phase='[a-z0-9-]+'` value and classify that first private failure
@@ -714,10 +716,19 @@ as `unittest_timeout`, `unittest_assertion`, `unittest_error`, or the
 generic nonzero reason. Exit 124 remains ambiguous unless that first private
 unittest traceback itself contains `subprocess.TimeoutExpired`. Successful
 stdout/stderr bytes and exit status remain unchanged and no failure log is
-retained. Synthetic regular-file/stub-command tests must cover success, ordinary
-nonzero child failure, timeout-style 124, explicit shell exit, failing shell
-assertions, first-subtest extraction and private-log permissions; they are not
-substitutes for the single official `make test`.
+retained. A relay or relay-cleanup failure after a passing child is a harness
+failure (status 1, `stderr_relay_failure` or
+`stderr_relay_cleanup_failure`); after a failed child, its original status
+takes precedence. Relay diagnostics may not print private filesystem paths.
+Failure-log allocation must not follow a symlinked build/tests directory.
+The private `tests/runtime/native/rootless-attribution-test.py` regression runs
+before package transactions in the existing rootless path, using the real
+package-stage Bash functions with bounded synthetic stderr, temporary storage,
+and a genuine Python `subprocess.TimeoutExpired`. It must also cover
+first-failure ordering, oversized capture, no-log storage, cleanup failures,
+and privacy of public markers. Explicit shell exits and failing shell
+assertions remain part of the general rootless attribution contract.
+These regressions are not substitutes for the single official `make test`.
 
 ### Native CI failure evidence contract
 
