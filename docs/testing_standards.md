@@ -2323,9 +2323,13 @@ terminal failure authenticated against the exact source, host boot, physical
 arm chronology and prospective pair identity, or a complete accepted cohort
 with a coherent measured failure decision. A failing preflight or an unknown
 measurement provenance remains BLOCKED even when an original arm says FAIL.
-Check every attempted index, duplicate pair/run identifier, exact counterbalanced
-raw/swapz temporal order, source and admitted-target binding; retain excluded
-attempts rather than filling them with replacements. The audit must retain the
+A missing or unrecognized producer phase must remain BLOCKED; the audit must
+never synthesize a generic failure phase. Check every attempted index, duplicate
+pair/run identifier, exact counterbalanced raw/swapz temporal order, source and
+admitted-target binding; a duplicate identity or overlapping chronology
+invalidates every implicated failure witness, not only the later record.
+Retain excluded attempts rather than filling them with replacements. The audit
+must retain the
 first failing cohort/pair/arm, required versus attempted/accepted pair counts,
 evidence class and validated source SHA/target PARTUUID without printing private
 host paths or unsanitized producer errors. The original producer stage, error
@@ -7345,8 +7349,12 @@ A source/target/policy/tool-bound campaign can establish producer-proven FAIL
 only from the current audit's retained first-failure witness. The first failure
 must match a retained FAIL diagnostic and either (a) be an authenticated
 non-setup `arm.verdict` producer FAIL with the same workload/pair/arm and one
-matching EXCLUDED pair-manifest entry, or (b) be a
-`qualification.decision_status` FAIL for a complete accepted measured cohort.
+matching EXCLUDED pair-manifest entry with the producer-recorded non-setup
+failure phase, or (b) be a `qualification.decision_status` FAIL for a complete
+accepted measured cohort. Before either witness can drive release FAIL, the
+retained pair manifest must have type-strict PASS/EXCLUDED dispositions and
+unique workload pair indices, pair IDs, artifact basenames and SHA-256 digests,
+with the prescribed counterbalanced order.
 The audit qualification status and campaign qualification status must both be
 `FAIL_OR_INCOMPLETE`. A hand-edited FAIL diagnostic paired with an all-PASS
 manifest is synthetic logic evidence only and remains BLOCKED. A missing or
@@ -8052,17 +8060,19 @@ cannot substitute for an integer arm counter or frozen numeric limit, even
 when Python would compare their values equal. The public diagnostic limit
 must retain at least one field-level reason for every encountered FAIL,
 BLOCKED and UNAVAILABLE classification; displaced
-entries remain counted without publishing private samples. A known FAIL
-dominates BLOCKED, which dominates UNAVAILABLE, so a later prerequisite or
-observation gap cannot relabel already failed/excluded evidence.
+entries remain counted without publishing private samples. An authenticated FAIL dominates BLOCKED, which dominates UNAVAILABLE, so a
+later unrelated prerequisite or observation gap cannot relabel already failed
+evidence. Identity ambiguity, duplicate IDs or overlapping chronology discovered
+while authenticating that witness are part of the witness itself and therefore
+keep it BLOCKED.
 For an explicitly v2 campaign, the physical sealer audit independently checks
 every frozen-parent and prospective-amendment workload, including decisions
 omitted by the supplied summary. Missing decisions or short attempted/accepted
 cohorts are BLOCKED prerequisites, never automatically producer-proven FAIL.
 An excluded or evaluator-unusable pair is incomplete evidence and remains
 BLOCKED unless an independent producer or measured check proves failure. A
-terminal arm producer verdict of FAIL and a failed measured decision remain
-FAIL even when another cohort is missing. Raw-repeat spread beyond the frozen
+authenticated terminal arm producer verdict of FAIL and a failed measured
+decision remain FAIL even when another cohort is missing. Raw-repeat spread beyond the frozen
 screening maximum remains BLOCKED/INCOMPLETE rather than becoming a
 producer-proven failure. The bounded audit retains the
 original qualification status and numeric expected/observed pair counts; its
