@@ -6341,6 +6341,11 @@ absence, wrong certificate/path, malformed and inaccessible certificate
 material, ambiguous or extra diagnostics, locale normalization, missing
 `mokutil`, permission failures, and unexpected statuses. No substring match,
 empty success output, or arbitrary nonzero status may qualify enrollment.
+The rootless signing regression must also model `sudo kmodsign` replacing the
+module inode with a root-owned output, require restoration to the invoking
+build user's uid/gid after cryptographic verification (including a later
+already-signed invocation), and verify that `--verify` remains ownership-read-
+only.
 `modinfo` signer or `sig_key` metadata is diagnostic only and must never
 substitute for cryptographic verification. Packaging may report cryptographic
 validity plus enrollment, but it must not claim that the target kernel

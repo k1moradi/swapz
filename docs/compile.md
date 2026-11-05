@@ -202,6 +202,13 @@ material, or an indeterminate EFI Secure Boot state is BLOCKED rather than
 silently producing an unloadable qualification module. The warning-only W=1/W=2
 artifacts are never loaded and are not signed by this hook.
 
+When non-root `kmodsign` runs through sudo, it can replace the module inode and
+leave the build output root-owned. After signature verification, sign mode
+restores the artifact to the invoking build user's ownership so the Makefile
+can set its final mode and a later incremental build can replace it. This also
+repairs a valid already-signed build artifact left root-owned by an interrupted
+earlier build. Verification-only mode never changes module ownership.
+
 ## Packaging
 
 DKMS uses `AUTOINSTALL="no"`. `make install` is an admission operation rather

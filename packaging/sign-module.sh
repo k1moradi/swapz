@@ -155,6 +155,32 @@ mokutil_reports_enrolled() {
 mokutil_reports_enrolled ||
     blocked "configured MOK certificate is not enrolled or enrollment could not be verified"
 
+restore_build_module_owner() {
+    [[ "$mode" == sign ]] || return 0
+    (( EUID != 0 )) || return 0
+    command -v stat >/dev/null 2>&1 ||
+        blocked "stat is required to preserve build-module ownership"
+
+    local current_owner expected_owner
+    current_owner="$(stat -c '%u:%g' -- "$module")" ||
+        blocked "cannot inspect build-module ownership after signing"
+    [[ "$current_owner" =~ ^[0-9]+:[0-9]+$ ]] ||
+        blocked "build-module ownership result is malformed"
+    expected_owner="$(id -u):$(id -g)" ||
+        blocked "cannot determine build user ownership"
+    [[ "$current_owner" == "$expected_owner" ]] && return 0
+
+    # sudo kmodsign can replace the output inode with a root-owned file. The
+    # surrounding Makefile must be able to set the final mode and rebuild it.
+    need_sudo
+    "${sudo_command[@]}" chown -- "$expected_owner" "$module" ||
+        blocked "cannot restore build-module ownership after signing"
+    current_owner="$(stat -c '%u:%g' -- "$module")" ||
+        blocked "cannot verify build-module ownership after signing"
+    [[ "$current_owner" == "$expected_owner" ]] ||
+        blocked "build-module ownership was not restored after signing"
+}
+
 extract_module_signature() {
     local payload_path="$1" signature_path="$2"
     python3 - "$module" "$payload_path" "$signature_path" <<'PY'
@@ -260,6 +286,7 @@ if [[ "$mode" == verify ]]; then
 fi
 
 if (( signature_status == 0 )); then
+    restore_build_module_owner
     printf '%s\n' \
         "Secure Boot: dm-swapz.ko already has a cryptographically valid signature from the enrolled configured MOK"
     exit 0
@@ -283,5 +310,6 @@ fi
 
 verify_module_signature ||
     blocked "new module signature failed cryptographic verification against the enrolled configured MOK"
+restore_build_module_owner
 printf '%s\n' \
     "Secure Boot: signed dm-swapz.ko and cryptographically verified it against the enrolled configured MOK"

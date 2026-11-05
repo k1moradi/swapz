@@ -812,11 +812,15 @@ exec "{flock_binary}" "$@"
                 f"{certificate_der} is already enrolled"),
             SWAPZ_TEST_MOK_STDERR="",
         )
+        verified_owner = (signed_module.stat().st_uid,
+                          signed_module.stat().st_gid)
         verified = subprocess.run(
             ["bash", str(ROOT / "packaging/sign-module.sh"),
              "--verify", str(signed_module)],
             cwd=ROOT, env=verify_env, capture_output=True, text=True)
         self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertEqual((signed_module.stat().st_uid,
+                          signed_module.stat().st_gid), verified_owner)
         self.assertIn("cryptographic signature verified", verified.stdout)
         self.assertEqual(
             (self.home / "mokutil-call.log").read_text().strip(),
@@ -824,6 +828,99 @@ exec "{flock_binary}" "$@"
         # Detached CMS verification is not proof that the running kernel will
         # accept a module under its active Secure Boot policy.
         self.assertIn("kernel acceptance is not claimed", verified.stdout)
+
+        # kmodsign may replace the output inode while running through sudo.
+        # The Makefile must still be able to chmod the built artifact, both
+        # after a new signature and on a later already-signed build.
+        stat_mock = crypto_bin / "stat"
+        stat_mock.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$#\" -eq 4 ] && [ \"$1\" = -c ] &&\n"
+            "   [ \"$2\" = '%u:%g' ] && [ \"$3\" = -- ] &&\n"
+            "   [ \"$4\" = \"$SWAPZ_TEST_OWNER_MODULE\" ]; then\n"
+            "  if [ -f \"$SWAPZ_TEST_CHOWN_DONE\" ]; then\n"
+            "    printf '%s\\n' \"$SWAPZ_TEST_RESTORED_OWNER\"\n"
+            "  else\n"
+            "    printf '%s\\n' '0:0'\n"
+            "  fi\n"
+            "  exit 0\n"
+            "fi\n"
+            "exec \"$SWAPZ_TEST_REAL_STAT\" \"$@\"\n")
+        stat_mock.chmod(0o755)
+        sudo_mock = crypto_bin / "sudo"
+        sudo_mock.write_text(
+            "#!/bin/sh\n"
+            "[ \"${1:-}\" = -n ] && shift\n"
+            "printf '%s\\n' \"$*\" >> \"$SWAPZ_TEST_SUDO_LOG\"\n"
+            "if [ \"${1:-}\" = chown ]; then\n"
+            "  [ \"$#\" -eq 4 ] && [ \"$2\" = -- ] &&\n"
+            "    [ \"$3\" = \"$SWAPZ_TEST_RESTORED_OWNER\" ] &&\n"
+            "    [ \"$4\" = \"$SWAPZ_TEST_OWNER_MODULE\" ] || exit 95\n"
+            "  : > \"$SWAPZ_TEST_CHOWN_DONE\"\n"
+            "  exit 0\n"
+            "fi\n"
+            "exec \"$@\"\n")
+        sudo_mock.chmod(0o755)
+        kmodsign_mock = crypto_bin / "kmodsign"
+        kmodsign_mock.write_text(
+            "#!/bin/sh\n"
+            "[ \"$#\" -eq 4 ] && [ \"$1\" = sha512 ] || exit 96\n"
+            "printf '%s\\n' called >> \"$SWAPZ_TEST_KMODSIGN_LOG\"\n"
+            "cp -- \"$SWAPZ_TEST_SIGNED_TEMPLATE\" \"$4\"\n")
+        kmodsign_mock.chmod(0o755)
+
+        unsigned_build_module = self.home / "unsigned-build-module.ko"
+        unsigned_build_module.write_bytes(payload.read_bytes())
+        chown_done = self.home / "module-chown-done"
+        sudo_log = self.home / "sudo-command.log"
+        kmodsign_log = self.home / "kmodsign-command.log"
+        restored_owner = f"{os.getuid()}:{os.getgid()}"
+        real_stat = shutil.which("stat")
+        self.assertIsNotNone(real_stat)
+        sign_env = dict(
+            verify_env,
+            PATH=(str(crypto_bin) + os.pathsep + os.path.dirname(openssl) +
+                  os.pathsep + "/usr/bin:/bin"),
+            SWAPZ_MOK_PRIVATE_KEY=str(private_key),
+            SWAPZ_SIGN_NONINTERACTIVE="1",
+            SWAPZ_TEST_OWNER_MODULE=str(unsigned_build_module),
+            SWAPZ_TEST_REAL_STAT=real_stat,
+            SWAPZ_TEST_RESTORED_OWNER=restored_owner,
+            SWAPZ_TEST_CHOWN_DONE=str(chown_done),
+            SWAPZ_TEST_SUDO_LOG=str(sudo_log),
+            SWAPZ_TEST_KMODSIGN_LOG=str(kmodsign_log),
+            SWAPZ_TEST_SIGNED_TEMPLATE=str(signed_module),
+        )
+        private_key.chmod(0)
+        try:
+            signed = subprocess.run(
+                ["bash", str(ROOT / "packaging/sign-module.sh"),
+                 str(unsigned_build_module)],
+                cwd=ROOT, env=sign_env, capture_output=True, text=True)
+        finally:
+            private_key.chmod(0o600)
+        self.assertEqual(signed.returncode, 0, signed.stderr)
+        self.assertIn("signed dm-swapz.ko", signed.stdout)
+        self.assertEqual(unsigned_build_module.read_bytes(),
+                         signed_module.read_bytes())
+        self.assertIn(f"chown -- {restored_owner} {unsigned_build_module}",
+                      sudo_log.read_text())
+        self.assertEqual(kmodsign_log.read_text().splitlines(), ["called"])
+
+        # A valid signature is a no-op for signing, but a root-owned artifact
+        # left by an interrupted earlier build still has to regain its owner.
+        chown_done.unlink()
+        sudo_log.write_text("")
+        already_signed = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             str(unsigned_build_module)],
+            cwd=ROOT, env=sign_env, capture_output=True, text=True)
+        self.assertEqual(already_signed.returncode, 0, already_signed.stderr)
+        self.assertIn("already has a cryptographically valid signature",
+                      already_signed.stdout)
+        self.assertIn(f"chown -- {restored_owner} {unsigned_build_module}",
+                      sudo_log.read_text())
+        self.assertEqual(kmodsign_log.read_text().splitlines(), ["called"])
 
         def verify_with_mokutil(*, cert=certificate_der, status="1",
                                 stdout=None, stderr="", path=crypto_bin,
