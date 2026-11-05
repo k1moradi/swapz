@@ -2425,6 +2425,66 @@ class BootVerifierTests(unittest.TestCase):
             (self.report / "latest.env").read_text(encoding="utf-8"),
         )
 
+    def test_failed_dm_probes_cannot_reuse_positive_looking_stdout(self) -> None:
+        self.arm_then_reboot()
+        original_dmsetup = self.bin / "dmsetup-original"
+        shutil.copy2(self.bin / "dmsetup", original_dmsetup)
+        write_executable(
+            self.bin / "dmsetup",
+            textwrap.dedent(
+                """\
+                #!/bin/sh
+                if [ "$MOCK_DM_FAIL_COMMAND" = all ] ||
+                   [ "$1" = "$MOCK_DM_FAIL_COMMAND" ]; then
+                    "$MOCK_DM_ORIGINAL" "$@"
+                    exit 79
+                fi
+                exec "$MOCK_DM_ORIGINAL" "$@"
+                """
+            ),
+        )
+        for command, expected_status, expected_reason, first_phase in (
+            ("info", "INCOMPLETE", "mapper_uuid_unavailable", "dm_info"),
+            ("table", "FAIL", "mapper_table_unavailable", "dm_table"),
+            ("status", "INCOMPLETE", "mapper_status_unavailable", "dm_status"),
+            ("all", "FAIL", "mapper_table_unavailable", "dm_info"),
+        ):
+            with self.subTest(command=command):
+                env = self.env.copy()
+                env["MOCK_DM_FAIL_COMMAND"] = command
+                env["MOCK_DM_ORIGINAL"] = str(original_dmsetup)
+                observed = self.run_verifier("observe", env=env)
+                self.assertNotEqual(observed.returncode, 0, observed.stderr)
+                self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", observed.stdout)
+                latest = (self.report / "latest.env").read_text(encoding="utf-8")
+                self.assertIn(f"status={expected_status}", latest)
+                self.assertIn(expected_reason, latest)
+                self.assertIn(f"phase={first_phase}", observed.stderr)
+                self.assertIn("exit_status=79", observed.stderr)
+                self.assertIn("token_consumption_state=claimed_non_authoritative",
+                              observed.stderr)
+                self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
+                self.assertFalse(
+                    (self.report / "runtime" / ".primary-execution.observed.env").exists()
+                )
+                if command != "all":
+                    preflight = self.run_verifier("preflight")
+                    self.assertEqual(preflight.returncode, 0, preflight.stderr)
+
+    def test_multiline_mapper_uuid_cannot_pass_on_first_line(self) -> None:
+        self.arm_then_reboot()
+        env = self.env.copy()
+        env["MOCK_DM_UUID"] = (
+            f"SWAPZ-PRIMARY-{ACTIVE_RUN_ID}\nSWAPZ-PRIMARY-{'f' * 32}"
+        )
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn(
+            "mapper_uuid_ambiguous",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
+        self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
+
     def test_foreign_mapper_uuid_with_valid_prefix_cannot_pass(self) -> None:
         self.arm_then_reboot()
         env = self.env.copy()
@@ -2980,6 +3040,48 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("passive_swap_unit_enabled_or_uninspectable",
                       (self.report / "latest.env").read_text())
         self.assert_activation_revoked()
+
+    def test_passive_enablement_requires_matching_command_status(self) -> None:
+        self.arm_then_reboot()
+        original_systemctl = self.bin / "systemctl-original"
+        shutil.copy2(self.bin / "systemctl", original_systemctl)
+        write_executable(
+            self.bin / "systemctl",
+            textwrap.dedent(
+                """\
+                #!/bin/sh
+                if [ "$1" = is-enabled ]; then
+                    printf '%s\\n' "$MOCK_PASSIVE_ENABLEMENT"
+                    exit "$MOCK_PASSIVE_ENABLEMENT_EXIT"
+                fi
+                exec "$MOCK_SYSTEMCTL_ORIGINAL" "$@"
+                """
+            ),
+        )
+        for state, exit_status in (("static", "41"), ("disabled", "0")):
+            with self.subTest(state=state, exit_status=exit_status):
+                env = self.env.copy()
+                env["MOCK_PASSIVE_ENABLEMENT"] = state
+                env["MOCK_PASSIVE_ENABLEMENT_EXIT"] = exit_status
+                env["MOCK_SYSTEMCTL_ORIGINAL"] = str(original_systemctl)
+                blocked = self.run_verifier("preflight", env=env)
+                self.assertEqual(blocked.returncode, 1, blocked.stderr)
+                self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
+                self.assertIn("phase=passive_swap_enablement", blocked.stderr)
+                self.assertIn(f"exit_status={exit_status}", blocked.stderr)
+                self.assertFalse(
+                    (self.report / "runtime" / "primary-execution.env").exists()
+                )
+
+        valid_env = self.env.copy()
+        valid_env["MOCK_PASSIVE_ENABLEMENT"] = "disabled"
+        valid_env["MOCK_PASSIVE_ENABLEMENT_EXIT"] = "1"
+        valid_env["MOCK_SYSTEMCTL_ORIGINAL"] = str(original_systemctl)
+        preflight = self.run_verifier("preflight", env=valid_env)
+        self.assertEqual(preflight.returncode, 0, preflight.stderr)
+        observed = self.run_verifier("observe", env=valid_env)
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
 
     def test_changed_selector_and_missing_media_never_pick_another_card(self) -> None:
         for scenario in ("selected_card_removed", "wrong_partuuid"):

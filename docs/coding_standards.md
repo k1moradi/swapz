@@ -3039,6 +3039,17 @@ mapping. A zero-headroom maximum or capacity derived directly from raw backing
 bytes must fail boot verification rather than being accepted as equivalent
 geometry.
 
+Cold-boot verification treats nonzero read-only `dmsetup info`, `table` or
+`status` exits as unavailable evidence even when their stdout resembles
+a valid mapper identity or healthy target. A multiline mapper UUID is
+ambiguous and cannot be accepted by examining its first line. Passive swap
+enablement is admitted only as `static` with exit 0 or `disabled` with exit 1;
+text/status contradictions block authorization and acceptance. Fail-only,
+path-free diagnostics must name the observation phase, expected and observed
+state, original failed-probe exit, authorization-consumption disposition and
+safe report inspection/rearm action. These checks never mutate swap or mapper
+state.
+
 Hibernation/resume is unsupported because primary swapz mapping authority is
 volatile across a fresh boot. Arming and boot preflight must fail closed when
 kernel, initramfs, boot-loader, sysfs resume, or persistent swap aliases select

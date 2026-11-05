@@ -252,13 +252,13 @@ clear_runtime_authorization()
 
 report_observation_revocation_failure()
 {
-	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s observed=authorization_cleanup_failed evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s observed=authorization_cleanup_failed expected=both_runtime_token_paths_revoked token_consumption_state=unknown evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
 		"$authorization_revoke_phase" "$authorization_revoke_exit_status" "$authorization_revoke_reason" >&2
 }
 
 report_observation_claim_failure()
 {
-	printf 'swapz-primary-boot-verify: phase=%s exit_status=%s reason=%s observed=authorization_claim_failed evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
+	printf 'swapz-primary-boot-verify: phase=%s exit_status=%s reason=%s observed=authorization_claim_failed expected=canonical_token_atomically_consumed token_consumption_state=unknown evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
 		"$authorization_claim_phase" "$authorization_claim_exit_status" "$authorization_claim_reason" >&2
 }
 
@@ -677,20 +677,38 @@ package_transaction_guard()
 
 passive_swap_unit_guard()
 {
-	# The passive unit may reflect active swap but must never activate it.
-	enablement=$(systemctl is-enabled "$mapper_swap_unit" 2>/dev/null) || :
+	# systemctl reports 'disabled' with exit 1 and 'static' with exit 0.
+	# A failed lookalike or contradictory response cannot prove that this
+	# otherwise passive swap unit has no separate activation job.
+	enablement_exit_status=0
+	enablement=$(systemctl is-enabled "$mapper_swap_unit" 2>/dev/null) ||
+		enablement_exit_status=$?
+	case "$enablement:$enablement_exit_status" in
+	static:0|disabled:1) return 0 ;;
+	esac
+	enablement_token_state=not_minted
+	if [ "$mode" = observe ]; then
+		if [ "$observation_runtime_authorization_claimed" -eq 1 ]; then
+			enablement_token_state=claimed_non_authoritative
+		else
+			enablement_token_state=missing_or_claim_failed
+		fi
+	fi
 	case "$enablement" in
-	static|disabled) return 0 ;;
 	enabled|enabled-runtime|linked|linked-runtime|alias)
-		echo "swapz-primary-boot-verify: passive mapper .swap is enabled ($enablement); disable its activation job" >&2
-		return 1
+		printf 'swapz-primary-boot-verify: phase=passive_swap_enablement expected=static_exit_0_or_disabled_exit_1 observed=enabled exit_status=%s token_consumption_state=%s action=inspect_passive_swap_unit_before_rearming; passive mapper .swap is enabled\n' "$enablement_exit_status" "$enablement_token_state" >&2
 		;;
 	*)
-		echo "swapz-primary-boot-verify: passive mapper .swap enablement is untrusted (state=$enablement)" >&2
-		return 1
+		case "$enablement" in
+		static|disabled) observed_enablement=$enablement ;;
+		*) observed_enablement=untrusted ;;
+		esac
+		printf 'swapz-primary-boot-verify: phase=passive_swap_enablement expected=static_exit_0_or_disabled_exit_1 observed=%s exit_status=%s token_consumption_state=%s action=inspect_passive_swap_unit_before_rearming; passive mapper .swap enablement is untrusted\n' "$observed_enablement" "$enablement_exit_status" "$enablement_token_state" >&2
 		;;
 	esac
+	return 1
 }
+
 
 valid_runtime_preflight_authorization()
 {
@@ -1328,9 +1346,52 @@ observe_boot()
 	mapper_sysfs_dm_name=unavailable
 	dm_status_file=$report_base/report-$boot_id.dm-status.txt
 	if command -v dmsetup >/dev/null 2>&1; then
-		dm_uuid=$(dmsetup info --columns --noheadings --separator '|' -o uuid swapz-primary 2>/dev/null | awk 'NR == 1 { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }' || true)
-		dm_table=$(dmsetup table swapz-primary 2>/dev/null || true)
-		dm_status=$(dmsetup status swapz-primary 2>/dev/null || true)
+		dm_probe_failure_phase=none
+		dm_probe_failure_exit_status=0
+		# A nonzero read-only probe exit invalidates its stdout, even when
+		# that output resembles a valid mapper identity or healthy status.
+		if dm_info_output=$(dmsetup info --columns --noheadings --separator '|' -o uuid swapz-primary 2>/dev/null); then
+			:
+		else
+			dm_probe_failure_exit_status=$?
+			dm_probe_failure_phase=dm_info
+			dm_info_output=
+		fi
+		dm_uuid_issue=mapper_uuid_unavailable
+		case "$dm_info_output" in
+		*'
+'*) dm_uuid=; dm_uuid_issue=mapper_uuid_ambiguous ;;
+		*) dm_uuid=$(printf '%s\n' "$dm_info_output" | awk 'NR == 1 { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit }') ;;
+		esac
+		if dm_table=$(dmsetup table swapz-primary 2>/dev/null); then
+			:
+		else
+			dm_table_exit_status=$?
+			dm_table=
+			if [ "$dm_probe_failure_phase" = none ]; then
+				dm_probe_failure_phase=dm_table
+				dm_probe_failure_exit_status=$dm_table_exit_status
+			fi
+		fi
+		if dm_status=$(dmsetup status swapz-primary 2>/dev/null); then
+			:
+		else
+			dm_status_exit_status=$?
+			dm_status=
+			if [ "$dm_probe_failure_phase" = none ]; then
+				dm_probe_failure_phase=dm_status
+				dm_probe_failure_exit_status=$dm_status_exit_status
+			fi
+		fi
+		if [ "$dm_probe_failure_phase" != none ]; then
+			if [ "$observation_runtime_authorization_claimed" -eq 1 ]; then
+				token_consumption_state=claimed_non_authoritative
+			else
+				token_consumption_state=missing_or_claim_failed
+			fi
+			printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION phase=%s expected=complete_run_bound_mapper_telemetry observed=probe_nonzero_exit exit_status=%s token_consumption_state=%s action=inspect_cold_boot_report_before_rearming\n' \
+				"$dm_probe_failure_phase" "$dm_probe_failure_exit_status" "$token_consumption_state" >&2
+		fi
 		mapper_major_minor=$(lsblk -dnro MAJ:MIN -- "$mapper_path" 2>/dev/null || printf 'unavailable')
 		# The pathname must resolve to the exact DM object being observed.
 		if [ "$observation_expected" -eq 1 ] &&
@@ -1377,7 +1438,7 @@ observe_boot()
 		fi
 		if [ "$observation_expected" -eq 1 ]; then
 			if [ -z "$dm_uuid" ]; then
-				append_incomplete mapper_uuid_unavailable
+				append_incomplete "$dm_uuid_issue"
 			else
 				printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$' ||
 					append_failure mapper_uuid_invalid

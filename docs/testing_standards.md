@@ -8314,7 +8314,17 @@ invalidation is impossible. An active oneshot mapper requires SubState=exited
 and the passive active .swap requires SubState=active; unknown substates are
 INCOMPLETE and contradictions FAIL.
 Each malformed kernel-status observation must reissue its own token, then
-verify that non-PASS handling revoked it.
+verify that non-PASS handling revoked it. A further rootless boot-verifier
+negative control must inject nonzero `dmsetup info`, `table`, and `status`
+exits carrying positive-looking stdout, proving that the failed command's
+bytes never certify PASS. A dual-fault case retains the original first
+failed-probe exit and phase. Multiline otherwise valid DM UUID output is
+ambiguous rather than a trusted first line. Passive `systemctl is-enabled`
+status/text contradictions (`static`/nonzero and `disabled`/zero) must
+BLOCK; the documented `disabled`/1 combination remains admitted. Reissue
+the one-use preflight authorization after each observed FAIL/INCOMPLETE and
+verify canonical and claimed token paths are absent. All controls are
+private and rootless; none starts or stops swap.
 
 Boot-verifier contracts must prove that a retained package transaction is
 detected by both preflight and post-boot observation after selector parsing.
