@@ -47,6 +47,7 @@ MAX_LINE_BYTES = 4096
 MAX_COMMIT_SOURCE_INPUT_BYTES = 16 * 1024 * 1024
 MAX_CYCLES = 4
 SAFE_COMMAND_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
+_POPEN_TYPE = subprocess.Popen
 PRIVILEGED_HELPER_BOOTSTRAP = (
     "import sys\n"
     "path = sys.argv[1]\n"
@@ -787,7 +788,7 @@ def _start_privileged_child(
             env=_source_command_environment(), start_new_session=True)
     except OSError as exc:
         raise Blocked("cannot start commit-bound privileged qualifier") from exc
-    if isinstance(child, subprocess.Popen) and type(child.pid) is int and child.pid > 1:
+    if isinstance(child, _POPEN_TYPE) and type(child.pid) is int and child.pid > 1:
         setattr(child, "_swapz_owned_process_group", child.pid)
     if child.stdin is None:
         failure = Blocked("privileged qualifier source pipe is unavailable")
