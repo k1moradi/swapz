@@ -338,6 +338,12 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
             str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
 
     def test_invalid_host_and_arm_bindings_revoke_peak(self) -> None:
+        with self.assertRaisesRegex(
+                ValueError, "arm chronology is missing") as caught:
+            ram.metadata_ram_arm_binding({})
+        self.assertEqual(
+            str(caught.exception).count("peak_ram_bytes=unavailable"), 1)
+
         trace, host = synthetic_trace()
         host["host_boot_id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"
         with self.assertRaisesRegex(ValueError, "metric=host_boot_id"

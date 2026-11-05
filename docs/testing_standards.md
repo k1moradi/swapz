@@ -7571,7 +7571,9 @@ proves at least one missing observation, not exactly two.
 
 A rejected RAM trace, sustained-arm chronology or sealed-host binding
 must preserve the first failure's field/phase diagnostic and explicitly report
-`peak_ram_bytes=unavailable`, exactly once. Missing counters, incomplete
+`peak_ram_bytes=unavailable`, exactly once. This includes malformed or
+incomplete sustained-arm telemetry rejected while extracting its compact RAM
+binding, before later trace-to-arm revalidation. Missing counters, incomplete
 sample counts, short baselines and unrecovered teardown must not leave a
 favorable peak implied by surviving observations. This classification does not
 relax the frozen cadence or its conservative minimum-missing-samples bound.

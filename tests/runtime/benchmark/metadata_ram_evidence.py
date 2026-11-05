@@ -293,6 +293,23 @@ def _timedelta_ns(value: datetime.timedelta) -> int:
         value.microseconds * 1000)
 
 
+def _mark_rejected_peak_unavailable(validation_function: Any) -> Any:
+    """Preserve the first validation failure and revoke rejected peak evidence."""
+    @functools.wraps(validation_function)
+    def validation_with_unavailable_peak(
+            *arguments: Any, **keyword_arguments: Any) -> Any:
+        try:
+            return validation_function(*arguments, **keyword_arguments)
+        except ValueError as failure:
+            if "peak_ram_bytes=unavailable" in str(failure):
+                raise
+            raise ValueError(
+                f"{failure} peak_ram_bytes=unavailable") from None
+
+    return validation_with_unavailable_peak
+
+
+@_mark_rejected_peak_unavailable
 def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
     """Extract the minimum sustained-arm chronology needed to revalidate RAM."""
     if not isinstance(swapz_arm, dict):
@@ -341,22 +358,6 @@ def metadata_ram_arm_binding(swapz_arm: Any) -> dict[str, Any]:
         "arm_finished_monotonic_ns": finished,
         "gc_activity_intervals": gc_activity_intervals,
     }
-
-
-def _mark_rejected_peak_unavailable(validation_function: Any) -> Any:
-    """Preserve the first validation failure and revoke rejected peak evidence."""
-    @functools.wraps(validation_function)
-    def validation_with_unavailable_peak(
-            *arguments: Any, **keyword_arguments: Any) -> Any:
-        try:
-            return validation_function(*arguments, **keyword_arguments)
-        except ValueError as failure:
-            if "peak_ram_bytes=unavailable" in str(failure):
-                raise
-            raise ValueError(
-                f"{failure} peak_ram_bytes=unavailable") from None
-
-    return validation_with_unavailable_peak
 
 
 @_mark_rejected_peak_unavailable
