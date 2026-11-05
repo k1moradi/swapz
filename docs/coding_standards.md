@@ -570,11 +570,16 @@ and named inode/metadata after the read. Reject short, oversized, malformed,
 unreadable or substituted selector bytes; never consume a second pathname
 lookup or fall back to another target. Pin the admitted selector identity,
 then repeat the selector and frozen target authorization proof after per-cycle
-source admission and before primary prepare. Diagnostics may report only
-phase, expected/observed identity category, original errno when present,
-and a safe BLOCK action; never payload or private pathname. This helper-level
-check does not establish a physical-card or reader identity lock across
-the coordinator's last-use boundary.
+source admission and before primary prepare. Post-read validation compares the
+named inode with the still-open descriptor before interpreting unlink metadata,
+so a substituted path is classified as substitution rather than an incidental
+link-count change. Live authorization command failure or malformed identity
+evidence at this boundary is BLOCKED, not qualification FAIL; retain the
+original command status when available. Diagnostics may report only phase,
+expected/observed identity category, original errno/status when present, and a
+safe BLOCK action; never payload or private pathname. This helper-level check
+does not establish a physical-card or reader identity lock across the
+coordinator's last-use boundary.
 
 Primary userspace mapper sizing must exactly match kernel authority admission.
 After SWZ-header removal and 1MiB segment rounding, keep

@@ -419,6 +419,44 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     admitted, {}, {}, (8, 1), (8, 0))
             verify.assert_not_called()
 
+    def test_selector_last_use_command_failure_is_blocked_and_redacted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o600)
+            with self._selector_fixture(selector):
+                admitted = qualify._read_selector_evidence()
+                with mock.patch.object(
+                        qualify, "verify_authorized_target",
+                        side_effect=qualify.QualificationFailure(
+                            "command failed rc=7: /private/lsblk: hidden")), \
+                        self.assertRaisesRegex(
+                            qualify.Blocked,
+                            "phase=policy_use.*authorization-command-failed"
+                            ".*errno=none.*status=7") as raised:
+                    qualify._require_selector_at_policy_use(
+                        admitted, {}, {}, (8, 1), (8, 0))
+            self.assertNotIn("/private", str(raised.exception))
+            self.assertNotIn("hidden", str(raised.exception))
+
+    def test_selector_last_use_malformed_authorization_is_blocked_and_redacted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o600)
+            with self._selector_fixture(selector):
+                admitted = qualify._read_selector_evidence()
+                with mock.patch.object(
+                        qualify, "verify_authorized_target",
+                        side_effect=ValueError("/private/malformed")), \
+                        self.assertRaisesRegex(
+                            qualify.Blocked,
+                            "phase=policy_use.*authorization-unavailable-or-mismatch"
+                            ".*errno=none") as raised:
+                    qualify._require_selector_at_policy_use(
+                        admitted, {}, {}, (8, 1), (8, 0))
+            self.assertNotIn("/private", str(raised.exception))
+
     def test_selector_last_use_requires_authorized_live_target_and_parent(self):
         with tempfile.TemporaryDirectory() as directory:
             selector = Path(directory) / "selector"

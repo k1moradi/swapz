@@ -1236,11 +1236,24 @@ def _selector_identity(info: os.stat_result) -> tuple[int, ...]:
             info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+def _selector_inode_identity(info: os.stat_result) -> tuple[int, int]:
+    return info.st_dev, info.st_ino
+
+
+def _qualification_failure_exit_status(error: QualificationFailure) -> int | None:
+    match = re.match(r"command failed rc=(-?\d+):", str(error))
+    return int(match.group(1)) if match is not None else None
+
+
 def _reject_selector(phase: str, expected: str, observed: str,
-                     original_errno: int | None = None) -> None:
+                     original_errno: int | None = None,
+                     original_status: int | None = None) -> None:
+    status_detail = (
+        f" status={original_status}" if original_status is not None else "")
     raise Blocked(
         f"primary selector phase={phase} expected={expected} observed={observed} "
-        f"errno={original_errno if original_errno is not None else 'none'}; "
+        f"errno={original_errno if original_errno is not None else 'none'}"
+        f"{status_detail}; "
         "action=BLOCK-before-prepare-and-inspect-protected-selector")
 
 
@@ -1297,13 +1310,19 @@ def _read_selector_evidence() -> SelectorEvidence:
 
             phase = "revalidate"
             reread_info = os.fstat(selector_file.fileno())
+            pathname_info = SELECTOR.lstat()
+            if _selector_inode_identity(pathname_info) != \
+                    _selector_inode_identity(reread_info):
+                _reject_selector(
+                    phase, "opened-selector-inode", "replaced-selector-path")
             _check_selector_info(reread_info, phase)
             if _selector_identity(reread_info) != inspected_identity:
-                _reject_selector(phase, "unchanged-opened-inode", "changed-file-metadata")
-            pathname_info = SELECTOR.lstat()
+                _reject_selector(
+                    phase, "unchanged-opened-inode", "changed-file-metadata")
             _check_selector_info(pathname_info, phase)
             if _selector_identity(pathname_info) != inspected_identity:
-                _reject_selector(phase, "unchanged-opened-inode", "replaced-selector-path")
+                _reject_selector(
+                    phase, "unchanged-selector-metadata", "changed-path-metadata")
             phase = "close"
     except OSError as exc:
         _reject_selector(phase, "descriptor-bound-selector", "io-error", exc.errno)
@@ -1326,7 +1345,12 @@ def _require_selector_at_policy_use(
     try:
         _target_path, current_target, current_parent = verify_authorized_target(
             plan, expected.partuuid, authorization_snapshot)
-    except (Blocked, OSError) as exc:
+    except QualificationFailure as exc:
+        _reject_selector(
+            "policy_use", "frozen-authorized-target-and-parent",
+            "authorization-command-failed",
+            original_status=_qualification_failure_exit_status(exc))
+    except (Blocked, OSError, TypeError, ValueError) as exc:
         original_error = exc.__cause__ if isinstance(exc.__cause__, OSError) else exc
         _reject_selector(
             "policy_use", "frozen-authorized-target-and-parent",

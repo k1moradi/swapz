@@ -208,10 +208,15 @@ ownership/mode. A valid unchanged protected selector is admitted; a changed
 selector inode, even with identical PARTUUID bytes, is not. Per-cycle source
 approval must be followed by a fresh descriptor-bound selector comparison and
 the same frozen authorization-snapshot/partition/parent check before any
-primary prepare. Each negative fixture must show BLOCKED before a primary
-operation, with bounded redacted phase, expected/observed category, errno and
-safe next action. These synthetic proofs do not qualify a live physical reader
-or prove the coordinator's last-use target binding.
+primary prepare. Replacement after an opened descriptor must be classified by
+the named/opened inode mismatch even when unlinking the original inode also
+changes its link count. A nonzero live-authorization command status or malformed
+authorization observation at this boundary must likewise become BLOCKED before
+prepare, retain the numeric status when available, and redact command/path
+details. Each negative fixture must show BLOCKED before a primary operation,
+with bounded redacted phase, expected/observed category, errno/status and safe
+next action. These synthetic proofs do not qualify a live physical reader or
+prove the coordinator's last-use target binding.
 
 The real-swap byte oracle is qualification authority: `--oracle` must resolve
 to the exact source-controlled `tests/tools/primary-real-swap-oracle.py`, never
