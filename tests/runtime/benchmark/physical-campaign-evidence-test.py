@@ -409,7 +409,11 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         missing = copy.deepcopy(baseline)
         missing["raw"]["latency"].pop("read_p95_ns")
         unavailable, _ = inspect([missing])
-        self.assertEqual(unavailable["status"], "UNAVAILABLE")
+        # UNAVAILABLE describes the field; missing required evidence must have
+        # a BLOCKED campaign disposition, never a measured FAIL.
+        self.assertEqual(unavailable["status"], "BLOCKED")
+        self.assertIn("UNAVAILABLE", {
+            entry["status"] for entry in unavailable["diagnostics"]})
         blocked = copy.deepcopy(baseline)
         blocked["raw"]["source_sha"] = "b" * 40
         # Match the evaluator consequence of stale provenance. This must not
