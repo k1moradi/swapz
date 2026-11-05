@@ -507,6 +507,13 @@ def _serve_admission(server: socket.socket,
                                 child, peer_pid, expected_phase) != owned_peer_lineage:
                             raise _peer_identity_refusal(
                                 expected_phase, child, "changed_peer_run")
+                        _check_git_source(validated_source, git)
+                        # Source queries may block: reprove process identity before
+                        # any response can authorize or classify this phase.
+                        if _owned_peer_process_lineage(
+                                child, peer_pid, expected_phase) != owned_peer_lineage:
+                            raise _peer_identity_refusal(
+                                expected_phase, child, "changed_peer_run")
                     except Blocked as exc:
                         parent_rejected = True
                         _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))
@@ -529,21 +536,6 @@ def _serve_admission(server: socket.socket,
                             f"child_exit={child_exit if child_exit is not None else 'running'}:"
                             "authorization=BLOCKED:"
                             "next=extend_admission_protocol_before_physical_retry",
-                            file=sys.stderr)
-                        break
-                    try:
-                        _check_git_source(validated_source, git)
-                        # Source queries may block: reprove process identity before
-                        # the bootstrap response, not only when the socket connects.
-                        if _owned_peer_process_lineage(
-                                child, peer_pid, expected_phase) != owned_peer_lineage:
-                            raise _peer_identity_refusal(
-                                expected_phase, child, "changed_peer_run")
-                    except Blocked as exc:
-                        parent_rejected = True
-                        _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))
-                        print(
-                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
                             file=sys.stderr)
                         break
                     _reply(stream, request, "PASS", oracle_sha256)

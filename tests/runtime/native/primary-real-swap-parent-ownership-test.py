@@ -119,7 +119,7 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             "observed=validated_source_owned_child_phase_source_evidence_only",
             diagnostic)
         self.assertIn("authorization=BLOCKED", diagnostic)
-        self.assertEqual(check.call_count, 1)
+        self.assertEqual(check.call_count, 2)
 
     def test_initial_source_bootstrap_requires_fresh_git_proof(self):
         result, responses, _diagnostic, _child, check = self.run_exchange(
