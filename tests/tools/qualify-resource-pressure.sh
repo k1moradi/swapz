@@ -928,6 +928,13 @@ report_cleanup_refusal() {
     local phase="$1" observed="$2" original_exit="$3" severity=BLOCKED
     (( original_exit == 0 || original_exit == 2 )) || severity=FAIL
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    # Bash functions see cleanup() locals dynamically. Keep only the first
+    # bounded cleanup refusal; later cleanup failures may strengthen retention
+    # but must not replace or duplicate the earliest cleanup diagnostic.
+    if (( ${cleanup_diagnostic_reported:-0} )); then
+        return 0
+    fi
+    cleanup_diagnostic_reported=1
     case "$phase" in
         rmdir)
             printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
@@ -957,8 +964,12 @@ cleanup() {
     local result=$? original_result observed initially_retained
     local current_identity child_cleanup_status session_fd_path
     local session_entry_snapshot session_entry nested_resume_disposition
+    local cleanup_diagnostic_reported
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
+    # An earlier admission/ownership refusal already owns the cleanup report.
+    # Suppress secondary cleanup diagnostics while still preserving retention.
+    cleanup_diagnostic_reported=$initially_retained
     trap - EXIT HUP INT TERM
     set +e
 

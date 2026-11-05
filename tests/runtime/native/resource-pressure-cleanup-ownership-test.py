@@ -318,6 +318,74 @@ signal_nested_owned_child() { : > "$SESSION/../signal-called"; return 0; }
                 if (self.root / "signal-called").exists():
                     (self.root / "signal-called").unlink()
 
+    def test_prior_retention_keeps_one_nested_resume_cleanup_diagnostic(self):
+        # An earlier admission/ownership refusal owns the cleanup diagnostic.
+        # A later wait/SIGCONT failure must retain resources and original exit
+        # without adding a second pair-resume phase.
+        for failure in ("wait", "signal"):
+            with self.subTest(failure=failure):
+                preamble = r'''
+PAIR_PID=111
+PAIR_PROCESS_IDENTITY=222
+PAIR_CGROUP_PROCESS_PID=333
+PAIR_CGROUP_PROCESS_IDENTITY=444
+stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
+wait_nested_child_stopped() { : > "$SESSION/../wait-called"; return 0; }
+signal_nested_owned_child() { : > "$SESSION/../signal-called"; return 0; }
+'''
+                if failure == "wait":
+                    preamble += 'wait_nested_child_stopped() { : > "$SESSION/../wait-called"; return 2; }\n'
+                else:
+                    preamble += 'signal_nested_owned_child() { : > "$SESSION/../signal-called"; return 2; }\n'
+                result = self.execute(
+                    preamble=preamble, status=143, retain=True)
+                self.assertEqual(result.returncode, 143, result.stderr)
+                self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+                self.assertIn("phase:prior-admission", result.stderr)
+                self.assertIn("nested_resume:attempted", result.stderr)
+                self.assertNotIn("phase:pair-resume", result.stderr)
+                self.assertIn("original_exit:143", result.stderr)
+                self.assertTrue((self.root / "wait-called").exists())
+                self.assertEqual((self.root / "signal-called").exists(),
+                                 failure == "signal")
+                self.assertFalse((self.root / "unexpected-stop").exists())
+                self.assertTrue(self.cgroup.exists())
+                self.assertTrue(self.session.exists())
+                self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"),
+                                 "untouched\n")
+                (self.root / "wait-called").unlink()
+                if (self.root / "signal-called").exists():
+                    (self.root / "signal-called").unlink()
+
+    def test_first_cleanup_refusal_suppresses_later_nested_resume_diagnostic(self):
+        # A session-identity refusal can happen before nested-child cleanup.
+        # The nested wait still runs to avoid changing cleanup authority, but
+        # its later failure must not overwrite the first bounded diagnostic.
+        preamble = r'''
+PAIR_PID=111
+PAIR_PROCESS_IDENTITY=222
+PAIR_CGROUP_PROCESS_PID=333
+PAIR_CGROUP_PROCESS_IDENTITY=444
+read_owned_directory_identity() { printf '%s\n' '0:0'; }
+wait_nested_child_stopped() { : > "$SESSION/../wait-called"; return 2; }
+signal_nested_owned_child() { : > "$SESSION/../unexpected-signal"; return 0; }
+stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
+'''
+        result = self.execute(preamble=preamble, status=143)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertIn("phase:session-signal", result.stderr)
+        self.assertIn("observed:stale", result.stderr)
+        self.assertNotIn("phase:pair-resume", result.stderr)
+        self.assertIn("original_exit:143", result.stderr)
+        self.assertTrue((self.root / "wait-called").exists())
+        self.assertFalse((self.root / "unexpected-signal").exists())
+        self.assertFalse((self.root / "unexpected-stop").exists())
+        self.assertTrue(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"),
+                         "untouched\n")
+
     def test_function_extractor_keeps_heredoc_dictionary_body(self):
         function = shell_function("classify_cleanup_session_entries")
         self.assertIn("allowed = {", function)

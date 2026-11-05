@@ -3968,7 +3968,11 @@ a live foreign process
 survives, and both uncertain resources remain. Inject identity-bound wait
 and SIGCONT failures to verify one bounded attempted-versus-skipped diagnostic
 and that the original EXIT/signal status wins over subsequent cleanup failure.
-Existing final-directory replacement and rmdir-failure regressions still prove
+If an earlier admission or cleanup refusal already owns that bounded cleanup
+diagnostic, later wait, SIGCONT, child-stop, cgroup or session failures may
+strengthen retention but must not emit a second cleanup phase; first-error
+attribution remains stable. Existing final-directory replacement and
+rmdir-failure regressions still prove
 first refusal and remaining session ownership; no cgroup.kill or loaded host
 pressure cleanup is permitted by these rootless proofs.
 
