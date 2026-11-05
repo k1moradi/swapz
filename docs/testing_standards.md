@@ -5383,13 +5383,16 @@ A mismatched parent source/run identity is rejected before cgroup creation or
 workload invocation, with `phase=pressure_admission`,
 `original=identity_mismatch`, `errno=None`, `admission=source/run`,
 exact expected pages/bytes, `UNVERIFIED` observations and retained
-`LIVE_SWAP_ACTIVE` stage; it creates no workload phase and cannot inherit
-counts or PASS from a prior run. Rootless cases must clone the initial,
-unmodified state as well as results so a previous pressure run cannot donate
-its `pressure_cgroup` and undermine the pre-admission assertion. A same-run
-child reporting three corrupt pages instead fails `phase=pressure_verify` with
-`oracle=verified_page_count_mismatch`, exact lower observed pages/bytes
-and original nonzero child exit. A foreign-run child fails
+`LIVE_SWAP_ACTIVE` stage; it creates no workload phase. Exercise that
+pre-admission refusal from pristine state and result evidence so a prior
+`pressure_cgroup` or phase cannot confuse attribution. Separately retain an
+otherwise valid `PASS`/`BYTE_EXACT` pressure phase, change only the top-level
+run ID, and require `_actual_swap_io` to reject it because the child report
+remains bound to the previous run. A same-run child reporting three corrupt
+pages instead fails `phase=pressure_verify` with
+`oracle=verified_page_count_mismatch`, exact observed pages/bytes and original
+nonzero child exit, and must not be mislabeled as a run-identity failure. A
+foreign-run child fails
 `oracle=run_identity_mismatch` even when its counts equal expectations
 and it exits zero. Post-workload failures retain `status=FAIL`,
 `oracle_outcome=UNVERIFIED`, original exit and retained stage rather than

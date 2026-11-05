@@ -792,9 +792,18 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         regressed["observations"][1]["dmsetup_status"]["counters"]["logical_read"] = -1
         self.assertFalse(supervisor._actual_swap_io(regressed))
 
+        stale_pressure_run = json.loads(json.dumps(result))
+        stale_pressure_run["run_id"] = "e" * 32
+        self.assertEqual(stale_pressure_run["pressure_phase"]["status"], "PASS")
+        self.assertEqual(
+            stale_pressure_run["pressure_phase"]["oracle_outcome"],
+            "BYTE_EXACT")
+        self.assertEqual(
+            stale_pressure_run["pressure_phase"]["child"]["run_id"], RUN_ID)
+        self.assertFalse(supervisor._actual_swap_io(stale_pressure_run))
+
         for field, value in (
                 ("qualified_source", "0" * 40),
-                ("run_id", "e" * 32),
                 ("helper_sha256", "b" * 63),
                 ("parent_major_minor", "8:9")):
             bad_identity = json.loads(json.dumps(result))
@@ -1314,6 +1323,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                     supervisor._run_pressure_phase(
                         Path(directory), state, results, ops)
             mismatch_message = str(caught.exception)
+            self.assertNotIn("run_identity_mismatch", mismatch_message)
             for expected_detail in (
                     "phase=pressure_verify",
                     "oracle=verified_page_count_mismatch",
@@ -1344,7 +1354,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             self.assertEqual(phase["exit_code"], 1)
             self.assertEqual(ops.pressure_calls, 1)
 
-            # A fresh rejected run must not inherit the previous oracle report.
+            # Admission refusal starts from pristine state and result evidence.
             rejected_state = dict(baseline_state)
             rejected = dict(baseline_results, run_id="e" * 32)
             with self.assertRaisesRegex(
@@ -1378,6 +1388,8 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                         Path(directory), dict(baseline_state),
                         wrong_run_results, wrong_run_ops)
             wrong_run_message = str(caught.exception)
+            self.assertNotIn("verified_page_count_mismatch", wrong_run_message)
+            self.assertNotIn("e" * 32, wrong_run_message)
             for expected_detail in (
                     "phase=pressure_verify",
                     "oracle=run_identity_mismatch",
@@ -1393,6 +1405,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             self.assertEqual(wrong_run_phase["oracle_outcome"], "UNVERIFIED")
             self.assertEqual(
                 wrong_run_phase["oracle_failure"], "run_identity_mismatch")
+            self.assertEqual(wrong_run_phase["child"]["mismatches"], 0)
             self.assertEqual(wrong_run_phase["retained_state"], "LIVE_SWAP_ACTIVE")
             self.assertEqual(
                 wrong_run_phase["observed_verified_pages"],
