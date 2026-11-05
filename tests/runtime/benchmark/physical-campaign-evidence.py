@@ -1245,7 +1245,9 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                      reason="producer FAIL contradicts qualification disposition")
             continue
         failure_reason = arm.get("failure_reason")
-        if not isinstance(failure_reason, str) or not failure_reason:
+        if (
+                not isinstance(failure_reason, str) or
+                not failure_reason.strip()):
             diagnose("BLOCKED", "arm.verdict",
                      "original producer failure reason",
                      workload=workload, pair_index=index, arm=label,
