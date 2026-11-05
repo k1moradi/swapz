@@ -740,6 +740,7 @@ class GeneratorPublicationTest(unittest.TestCase):
     def test_exit_trap_repairs_mask_after_failed_publication_and_cleanup(self) -> None:
         foreign = self.root / "foreign-mapper-unit"
         foreign.write_text("preserve-foreign-mapper", encoding="ascii")
+        recovery_marker = self.root / "mask-substituted-during-rollback"
         rename = self.commands / "mv"
         rename.write_text(textwrap.dedent(r"""
             #!/bin/sh
@@ -747,6 +748,11 @@ class GeneratorPublicationTest(unittest.TestCase):
             *50-selected-target.conf)
                 /usr/bin/mv "$@" || exit $?
                 exit 71 ;;
+            *swapz-primary-mapper.service)
+                if [ "$MOCK_CLEANUP_MODE" = after-error ] &&
+                    [ -e "$MOCK_MASK_SUBSTITUTED" ]; then
+                    exit 91
+                fi ;;
             esac
             exec /usr/bin/mv "$@"
             """).lstrip("\n"), encoding="ascii")
@@ -761,6 +767,7 @@ class GeneratorPublicationTest(unittest.TestCase):
                 fi
                 /usr/bin/rm -f -- "$MOCK_MASK" || exit $?
                 /usr/bin/ln -s "$MOCK_FOREIGN" "$MOCK_MASK" || exit $?
+                : > "$MOCK_MASK_SUBSTITUTED"
                 [ "$MOCK_CLEANUP_MODE" != after-error ] || exit 97
                 exit 0 ;;
             esac
@@ -780,8 +787,10 @@ class GeneratorPublicationTest(unittest.TestCase):
             ("after-error", "absent", 97, "complete"),
         ):
             with self.subTest(mode=mode):
+                recovery_marker.unlink(missing_ok=True)
                 result = self.run_generator(
                     MOCK_CLEANUP_MODE=mode,
+                    MOCK_MASK_SUBSTITUTED=str(recovery_marker),
                     MOCK_MASK=str(self.mask()),
                     MOCK_FOREIGN=str(foreign),
                 )
@@ -792,6 +801,8 @@ class GeneratorPublicationTest(unittest.TestCase):
                 self.assertIn(f"observed_device={survivor}", result.stderr)
                 self.assertIn(f"original_status=71 cleanup_status={cleanup_status}", result.stderr)
                 self.assertIn("mask_repair_first_status=1", result.stderr)
+                rename_status = 91 if mode == "after-error" else 0
+                self.assertIn(f"mask_rename_status={rename_status}", result.stderr)
                 self.assertIn("mask_restore_status=0", result.stderr)
                 self.assertIn(f"rollback={outcome}", result.stderr)
                 self.assertEqual(os.readlink(self.mask()), "/dev/null")

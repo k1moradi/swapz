@@ -5817,6 +5817,11 @@ before any selected-target drop-in has been published. Explicit post-release
 rollback must carry the original unlink or ownership failure status into its
 cleanup observer instead of treating a successful mask-restoration command as
 the original status; foreign inode survivors still require full diagnostics.
+When both direct link replacement reports false success and staged mask rename
+fails, cleanup must try a final verified unlink/direct-link at the reserved
+early mapper-unit name. A false-success or failing unlink must be classified
+using source-path absence, and the rename error status must remain visible
+separately from the original generator failure and the final mask state.
 
 These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another

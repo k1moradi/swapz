@@ -254,6 +254,7 @@ cleanup()
 	# their command statuses do not prove the mask is still in force.
 	cleanup_mask_restore_status=0
 	cleanup_mask_repair_first_status=0
+	cleanup_mask_rename_status=0
 	cleanup_mask_was_missing=0
 	if [ "$cleanup_original_status" -ne 0 ] && ! mapper_mask_is_active; then
 		cleanup_mask_was_missing=1
@@ -264,7 +265,8 @@ cleanup()
 			# Try an independently staged, no-follow rename.
 			if ln -s /dev/null "$mask_temporary"; then
 				if mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
-					cleanup_mask_restore_status=$?
+					cleanup_mask_rename_status=$?
+					cleanup_mask_restore_status=$cleanup_mask_rename_status
 				fi
 			else
 				cleanup_mask_restore_status=$?
@@ -279,6 +281,20 @@ cleanup()
 			if ! mapper_mask_is_active; then
 				if replace_with_verified_mask; then :; else
 					cleanup_mask_restore_status=$?
+					# If direct replacement lies and staged rename fails, the
+					# reserved early name can still be recovered by unlinking
+					# only that pathname, never its foreign symlink target.
+					if rm -f -- "$mapper_unit"; then :; else
+						cleanup_remove_status=$?
+						[ "$cleanup_command_status" -ne 0 ] ||
+							cleanup_command_status=$cleanup_remove_status
+					fi
+					# Even a failed unlink may have removed its source.
+					if [ ! -e "$mapper_unit" ] && [ ! -L "$mapper_unit" ]; then
+						if ln -s /dev/null "$mapper_unit"; then :; else
+							cleanup_mask_restore_status=$?
+						fi
+					fi
 				fi
 			fi
 		fi
@@ -328,12 +344,13 @@ cleanup()
 		if [ "$cleanup_observed_mask" != /dev/null ]; then
 			cleanup_action=mask-unproven-owner-intervention-required
 		fi
-		printf 'swapz-primary-generator: phase=rollback expected=owned-dropins-absent expected_mask=/dev/null observed_mapper=%s observed_device=%s observed_stage=%s observed_temporary_mask=%s observed_mask=%s original_status=%s cleanup_status=%s mask_repair_first_status=%s mask_restore_status=%s original_errno=unavailable rollback=%s action=%s\n' \
+		printf 'swapz-primary-generator: phase=rollback expected=owned-dropins-absent expected_mask=/dev/null observed_mapper=%s observed_device=%s observed_stage=%s observed_temporary_mask=%s observed_mask=%s original_status=%s cleanup_status=%s mask_repair_first_status=%s mask_rename_status=%s mask_restore_status=%s original_errno=unavailable rollback=%s action=%s\n' \
 			"$cleanup_observed_mapper" "$cleanup_observed_device" \
 			"$cleanup_observed_stage" "$cleanup_observed_temporary_mask" \
 			"$cleanup_observed_mask" "$cleanup_original_status" \
 			"$cleanup_command_status" "$cleanup_mask_repair_first_status" \
-			"$cleanup_mask_restore_status" "$cleanup_rollback" "$cleanup_action" >&2
+			"$cleanup_mask_rename_status" "$cleanup_mask_restore_status" \
+			"$cleanup_rollback" "$cleanup_action" >&2
 	fi
 }
 trap cleanup EXIT
