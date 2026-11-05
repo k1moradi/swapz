@@ -21,7 +21,9 @@ LATE_RACE_TEST = "swapz-primary-late-race-test.py"
 PACKAGE_PHASE = "tests/runtime/native/package-dkms-test.py"
 PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
 OWNERSHIP_PHASE = "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
+GENERATOR_PHASE = "tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py"
 PRIVATE_SENTINEL = "PRIVATE_ONLY_TRACEBACK_PAYLOAD"
+GENERATOR_SUBTEST_SENTINEL = "PRIVATE_GENERATOR_SUBTEST_PAYLOAD"
 LATER_TEARDOWN_SENTINEL = "LATER_TEARDOWN_PRIVATE_PAYLOAD"
 
 # This runs the actual runner functions and exact captured-suite stage calls,
@@ -30,7 +32,7 @@ FIXTURE = r'''
 python3() {
   [[ $# == 3 && $1 == -B && $3 == -v ]] || return 89
   case "$2" in
-    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py) ;;
+    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py|tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py) ;;
     *) return 89 ;;
   esac
   printf 'SYNTHETIC_STDOUT\n'
@@ -93,6 +95,14 @@ PY
         "FAIL: test_teardown (__main__.PrimaryRealSwapContracts.test_teardown)" \
         'AssertionError: later cleanup failed' >&2
       return 52 ;;
+    generator_subtest)
+      printf '%s\n' \
+        "test_manager_response_mutants_and_wrong_aliases (__main__.GeneratorPublicationTest.test_manager_response_mutants_and_wrong_aliases) (response='PRIVATE_GENERATOR_SUBTEST_PAYLOAD') ... FAIL" \
+        '======================================================================' \
+        "FAIL: test_manager_response_mutants_and_wrong_aliases (__main__.GeneratorPublicationTest.test_manager_response_mutants_and_wrong_aliases) (response='PRIVATE_GENERATOR_SUBTEST_PAYLOAD')" \
+        'Traceback (most recent call last):' \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' >&2
+      return 61 ;;
     primary_oversized)
       printf '%s\n' \
         "test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first) ... FAIL" \
@@ -214,9 +224,17 @@ class RootlessAttribution(unittest.TestCase):
             "rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'",
             primary_end)
         cls.ownership_stage = source[primary_end:ownership_end]
+        generator_begin = source.index(f"rootless_phase='{GENERATOR_PHASE}'")
+        generator_end = source.index(
+            "rootless_phase='tests/runtime/native/physical-swap-probe-test.py'",
+            generator_begin)
+        cls.generator_stage = source[generator_begin:generator_end]
         assert source.count(f"python3 -B {OWNERSHIP_PHASE} -v") == 1
         assert cls.ownership_stage.count(
             f"python3 -B {OWNERSHIP_PHASE} -v") == 1
+        assert source.count(f"python3 -B {GENERATOR_PHASE} -v") == 1
+        assert cls.generator_stage.count(
+            f"python3 -B {GENERATOR_PHASE} -v") == 1
         assert cls.primary_stage.count(
             "python3 -B tests/runtime/native/primary-real-swap-test.py -v") == 1
         # Keep the rootless invocation tied to the real registered test.
@@ -262,7 +280,8 @@ class RootlessAttribution(unittest.TestCase):
             + {MAKE_PHASE: self.make_stage,
                PACKAGE_PHASE: self.package_stage,
                PRIMARY_PHASE: self.primary_stage,
-               OWNERSHIP_PHASE: self.ownership_stage}[stage]
+               OWNERSHIP_PHASE: self.ownership_stage,
+               GENERATOR_PHASE: self.generator_stage}[stage]
             + "printf 'AFTER_PACKAGE\\n'\n"
         )
         environment = dict(os.environ)
@@ -493,6 +512,21 @@ exec "$SWAPZ_REAL_RM" "$@"
                         evidence.index("FAIL: test_primary"))
         self.assertIn("AssertionError: " + PRIVATE_SENTINEL, evidence)
         self.assertIn("OSError: " + LATER_TEARDOWN_SENTINEL, evidence)
+        self.assertIn("unittest_kind=FAIL\n", evidence)
+
+    def test_generator_nonphase_subtest_reports_method_without_public_details(self):
+        result = self.invoke("generator_subtest", stage=GENERATOR_PHASE)
+        log = self.assert_report(
+            result, status=61, reason="unittest_assertion",
+            test="test_manager_response_mutants_and_wrong_aliases",
+            stage=GENERATOR_PHASE)
+        markers = "\n".join(
+            line for line in result.stderr.splitlines()
+            if line.startswith(("FAIL: rootless ", "Failed during: ",
+                                "Reason: ", "NEXT: ")))
+        self.assertNotIn(GENERATOR_SUBTEST_SENTINEL, markers)
+        evidence = log.read_text()
+        self.assertIn(GENERATOR_SUBTEST_SENTINEL, evidence)
         self.assertIn("unittest_kind=FAIL\n", evidence)
 
     def test_primary_pass_preserves_streams_and_removes_capture(self):

@@ -6182,7 +6182,10 @@ failed adversarial assertion names its responsible test method without exposing
 private generator stderr in the public failure marker.
 Generator subtest context with arbitrary keys remains private; its allowlisted
 method is still identified, while only a validated `phase=` tag can appear as
-a public subtest value.
+a public subtest value. The rootless attribution regression must execute the
+actual registered generator stage with a synthetic non-`phase=` subtest,
+retain the method and failure kind in the public marker, and keep that subtest's
+value confined to the private diagnostic.
 The suite needs Python 3, Bash and GNU userspace commands, and operates only on
 private temporary directories with a stubbed manager. Generator subprocesses
 have a 30-second bound, and the official rootless stage keeps the original
