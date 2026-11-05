@@ -49,6 +49,15 @@ class FakeStat:
 
 
 class PrimaryRealSwapContracts(unittest.TestCase):
+    @contextlib.contextmanager
+    def _mock_owned_admission_peer(self):
+        # These tests exercise admission sequencing with an in-memory child;
+        # the real /proc ancestry contract has dedicated live-process tests.
+        with mock.patch.object(
+                parent, "_owned_peer_process_lineage",
+                return_value=((123, 456, 789),)):
+            yield
+
     @staticmethod
     def physical_dependency_output(source_root: Path) -> str:
         dependencies = sorted(
@@ -1643,8 +1652,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify.Blocked, "source admission response is malformed"):
             client.require("initial")
 
-    def test_parent_revalidates_changed_main_at_final_publication_boundary(self):
-        # All four admission phases are synthetic; no privileged child is launched.
+    def test_parent_rejects_source_only_initial_before_publication(self):
+        # Source-only phase messages are not sufficient to admit a physical
+        # run; later synthetic phases must remain unconsumed after refusal.
         source_sha = "a" * 40
         hashes = {relative: "c" * 64
                   for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
@@ -1687,41 +1697,20 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         server = mock.Mock()
         server.accept.return_value = (connection, None)
         child = mock.Mock()
-        child.wait.return_value = 2
-        with mock.patch.object(
-                parent, "_check_git_source",
-                side_effect=[None, None, None,
-                             parent.Blocked("production source tree is not clean")]
-                ) as check:
-            result = parent._serve_admission(
-                server, child, source_sha, "/usr/bin/git",
-                "d" * 64, hashes, "8" * 64, 2)
-        self.assertEqual(result, 2)
-        self.assertEqual(check.call_count, 4)
-        responses = [json.loads(line) for line in stream.output.getvalue().splitlines()]
-        self.assertEqual([reply["status"] for reply in responses],
-                         ["PASS", "PASS", "PASS", "BLOCKED"])
-        self.assertEqual(responses[-1]["phase"], "final")
-        self.assertEqual(
-            responses[-1]["reason"], "production source tree is not clean")
-
-        # The parent must retain BLOCKED when its explicit final source
-        # refusal makes the privileged child exit with a generic FAIL code.
-        stream.input.seek(0)
-        stream.output = io.BytesIO()
+        child.poll.return_value = None
         child.wait.return_value = 1
-        with mock.patch.object(
-                parent, "_check_git_source",
-                side_effect=[None, None, None,
-                             parent.Blocked("production source tree is not clean")]):
+        with self._mock_owned_admission_peer(), mock.patch.object(
+                parent, "_check_git_source") as check:
             result = parent._serve_admission(
                 server, child, source_sha, "/usr/bin/git",
                 "d" * 64, hashes, "8" * 64, 2)
         self.assertEqual(result, 2)
+        self.assertEqual(check.call_count, 1)
+        responses = [json.loads(line) for line in stream.output.getvalue().splitlines()]
+        self.assertEqual([reply["status"] for reply in responses], ["BLOCKED"])
+        self.assertEqual(responses[0]["phase"], "initial")
         self.assertEqual(
-            [json.loads(line)["status"]
-             for line in stream.output.getvalue().splitlines()],
-            ["PASS", "PASS", "PASS", "BLOCKED"])
+            responses[0]["reason"], "physical_admission_identity_missing")
 
     def test_missing_initial_parent_admission_blocks_even_on_child_failure(self):
         # A failed child cannot qualify or FAIL physical work before the first
@@ -1745,7 +1734,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         child.poll.return_value = 1
         child.wait.return_value = 1
         stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
+        with self._mock_owned_admission_peer(), contextlib.redirect_stderr(stderr):
             result = parent._serve_admission(
                 server, child, "a" * 40, "/usr/bin/git", "d" * 64,
                 {path: "c" * 64
@@ -1764,7 +1753,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         child.poll.return_value = None
         child.wait.side_effect = [-15, -15]
         stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
+        with self._mock_owned_admission_peer(), \
+                contextlib.redirect_stderr(stderr):
             result = parent._serve_admission(
                 server, child, "a" * 40, "/usr/bin/git", "d" * 64,
                 {path: "c" * 64
@@ -1780,9 +1770,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             child.wait.call_args_list,
             [mock.call(timeout=10), mock.call(timeout=45)])
 
-    def test_parent_bounds_abnormal_child_teardown_after_admission(self):
-        # A child that disconnects after initial admission must not hang the
-        # unprivileged parent indefinitely or erase a termination error.
+    def test_parent_bounds_unadmitted_child_teardown_after_refusal(self):
+        # A source-only request lacks physical target identity and must be
+        # refused. If the privileged child then resists bounded cleanup, keep
+        # that original refusal and the cleanup failure in the diagnostic.
         source_sha = "a" * 40
         hashes = {relative: "c" * 64
                   for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
@@ -1817,41 +1808,37 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
         stream = FakeStream()
         connection = mock.MagicMock()
-        connection.getsockopt.return_value = struct.pack("3i", 123, 0, 0)
+        connection.getsockopt.return_value = struct.pack(
+            "3i", os.getpid(), 0, 0)
         connection.makefile.return_value = stream
         server = mock.Mock()
         server.accept.return_value = (connection, None)
         child = mock.Mock()
+        child.pid = os.getpid()
         child.poll.return_value = None
         child.wait.side_effect = [
-            subprocess.TimeoutExpired("qualifier", 45), None,
+            subprocess.TimeoutExpired("qualifier", 10),
+            subprocess.TimeoutExpired("qualifier", 5),
         ]
+        stderr = io.StringIO()
         with mock.patch.object(parent, "_check_git_source"):
-            with self.assertRaisesRegex(
-                    parent.Blocked, "abnormal teardown: child did not exit"):
-                parent._serve_admission(
-                    server, child, source_sha, "/usr/bin/git", "d" * 64,
-                    hashes, "8" * 64, 2)
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaisesRegex(
+                        parent.Blocked,
+                        "unadmitted privileged qualifier did not terminate after kill"):
+                    parent._serve_admission(
+                        server, child, source_sha, "/usr/bin/git", "d" * 64,
+                        hashes, "8" * 64, 2)
         self.assertEqual(
             child.wait.call_args_list,
-            [mock.call(timeout=45), mock.call(timeout=10)])
+            [mock.call(timeout=10), mock.call(timeout=5)])
         child.terminate.assert_called_once_with()
-        self.assertEqual(
-            json.loads(stream.output.getvalue().splitlines()[0])["status"],
-            "PASS")
-
-        # If termination also fails, both reasons must remain actionable.
-        stream.input.seek(0)
-        child.wait.side_effect = [subprocess.TimeoutExpired("qualifier", 45)]
-        child.terminate.side_effect = OSError("synthetic termination refusal")
-        with mock.patch.object(parent, "_check_git_source"):
-            with self.assertRaisesRegex(
-                    parent.Blocked,
-                    "abnormal teardown:.*cleanup also failed: "
-                    "cannot terminate unadmitted privileged qualifier"):
-                parent._serve_admission(
-                    server, child, source_sha, "/usr/bin/git", "d" * 64,
-                    hashes, "8" * 64, 2)
+        child.kill.assert_called_once_with()
+        response = json.loads(stream.output.getvalue().splitlines()[0])
+        self.assertEqual(response["status"], "BLOCKED")
+        self.assertEqual(response["reason"], "physical_admission_identity_missing")
+        self.assertIn(
+            "physical_admission_identity:phase=initial:", stderr.getvalue())
 
     def test_parent_runtime_channel_failure_reaps_unadmitted_child(self):
         source_sha = "a" * 40
@@ -1891,7 +1878,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         # cleanup; do not misclassify that parent-induced status as a crash.
         child.wait.side_effect = [-15, -15]
         stderr = io.StringIO()
-        with mock.patch.object(parent, "_check_git_source"), \
+        with self._mock_owned_admission_peer(), \
+                mock.patch.object(parent, "_check_git_source"), \
                 mock.patch.object(
                     parent, "_reply",
                     side_effect=BrokenPipeError("synthetic broken pipe")), \
@@ -1910,7 +1898,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             child.wait.call_args_list,
             [mock.call(timeout=10), mock.call(timeout=45)])
 
-    def test_parent_classifies_precycle_and_abnormal_child_exits(self):
+    def test_parent_keeps_source_only_admission_blocked_for_child_failures(self):
         source_sha = "a" * 40
         hashes = {relative: "c" * 64
                   for relative in parent.PHYSICAL_CONTROL_INPUT_PATHS}
@@ -1956,33 +1944,20 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             child.poll.return_value = returncode
             child.wait.return_value = returncode
             stderr = io.StringIO()
-            with mock.patch.object(parent, "_check_git_source"), \
+            with self._mock_owned_admission_peer(), \
+                    mock.patch.object(parent, "_check_git_source"), \
                     contextlib.redirect_stderr(stderr):
                 result = parent._serve_admission(
                     server, child, source_sha, "/usr/bin/git", "d" * 64,
                     hashes, "8" * 64, 2)
             return result, stderr.getvalue()
 
-        result, stderr = run(["initial"], 1)
-        self.assertEqual(result, 2)
-        self.assertIn(
-            "privileged_qualifier_abnormal_teardown:"
-            "failed_before_first_cycle_source_admission", stderr)
-
-        # Once a cycle has been source-admitted, rc=1 remains a real FAIL.
-        result, stderr = run(["initial", "cycle-1"], 1)
-        self.assertEqual(result, 1)
-        self.assertEqual(stderr, "")
-
-        for returncode, reason in (
-                (-9, "terminated_by_signal:9"),
-                (3, "unexpected_exit_status:3")):
+        for returncode in (1, -9, 3):
             with self.subTest(returncode=returncode):
-                result, stderr = run(["initial", "cycle-1"], returncode)
+                result, stderr = run(["initial"], returncode)
                 self.assertEqual(result, 2)
-                self.assertIn(
-                    "privileged_qualifier_abnormal_teardown:" + reason,
-                    stderr)
+                self.assertIn("physical_admission_identity:", stderr)
+                self.assertIn("authorization=BLOCKED", stderr)
 
     def test_parent_rejects_malformed_oracle_before_peer_admission(self):
         child = mock.Mock()
@@ -2104,7 +2079,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         child.wait.return_value = 1
         diagnostics = io.StringIO()
 
-        with mock.patch.object(
+        with self._mock_owned_admission_peer(), mock.patch.object(
                     parent, "_stop_unadmitted_child") as stop_child, \
                 contextlib.redirect_stderr(diagnostics):
             result = parent._serve_admission(
@@ -2130,7 +2105,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         child.poll.return_value = None
         child.wait.return_value = -15
         diagnostics = io.StringIO()
-        with mock.patch.object(parent.json, "loads",
+        with self._mock_owned_admission_peer(), mock.patch.object(parent.json, "loads",
                                side_effect=RecursionError("nested request")), \
                 contextlib.redirect_stderr(diagnostics):
             result = parent._serve_admission(
