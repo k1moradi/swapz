@@ -2367,7 +2367,7 @@ int main(void) {
         self.assertIn("struct swapz_io_run", engine_h)
         self.assertIn("swapz_u8 *bytes", engine_h)
         self.assertIn("struct swapz_tx *txs", engine_h)
-        self.assertIn("swapz_batch_pause(e->authority, tx)", prepare)
+        self.assertIn("swapz_batch_pause_run(e->authority, tx, raw)", prepare)
         self.assertNotIn("e->io.write_run(", prepare)
         self.assertIn("swapz_batch_resume(e->authority, tx)", complete)
         self.assertIn("swapz_finish(", complete)
@@ -2382,13 +2382,13 @@ int main(void) {
         writer = source_body("swapz_engine_write_window_batched_read_cap", engine)
         prepare = source_body("swapz_engine_prepare_batched_run", engine)
         complete = source_body("swapz_engine_complete_batched_run", engine)
-        pause = source_body("swapz_batch_pause", authority)
+        pause = source_body("swapz_batch_pause_representation", authority)
         resume = source_body("swapz_batch_resume", authority)
         self.assertIn("SWAPZ_BULK_BLOCKS 64U",
                       (ROOT / "src/kernel/engine.h").read_text())
         self.assertIn("swapz_engine_write_window_batched_read_cap(&ctx->engine", DM)
         self.assertIn("ctx->engine.io.write_run = swapz_lower_write_run", DM)
-        self.assertIn("swapz_batch_pause(e->authority, tx)", prepare)
+        self.assertIn("swapz_batch_pause_run(e->authority, tx, raw)", prepare)
         self.assertIn("swapz_engine_prepare_batched_run(", writer)
         planner = source_body("swapz_engine_plan_bounded_policy", engine)
         self.assertIn("swapz_u32 alignment_cursor", engine)
@@ -2401,6 +2401,7 @@ int main(void) {
         self.assertLess(complete.index("swapz_batch_resume(e->authority, tx)"),
                         complete.index("swapz_finish("))
         self.assertIn("swapz_bulk_abort(e, run, 0)", complete)
+        self.assertIn("a->batch_raw[snapshot_index] = raw", pause)
         self.assertIn("a->batch_pending++", pause)
         self.assertIn("a->batch_replaying = 1", resume)
         self.assertIn("ctx->engine.bulk_writes", body("swapz_status"))
@@ -2470,7 +2471,7 @@ int main(void) {
     def test_authority_snapshot_copies_only_active_transaction_prefix(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
         stage = source_body("swapz_stage_policy", authority)
-        pause = source_body("swapz_batch_pause", authority)
+        pause = source_body("swapz_batch_pause_representation", authority)
         resume = source_body("swapz_batch_resume", authority)
         forget = source_body("swapz_forget_active", authority)
 
@@ -2506,7 +2507,9 @@ int main(void) {
         self.assertIn("ctx->batch_count++", accept)
         self.assertIn(".raw = 1", accept)
         self.assertIn("ctx->batch[index].raw", body("swapz_order_window"))
+        self.assertIn("swapz_batch_pause_run(e->authority, tx, raw)", prepare)
         self.assertIn("run->raw[staged] = raw", prepare)
+        self.assertIn("run->raw, run->extent_count", engine_complete)
         self.assertIn("swapz_finish_raw(", engine_complete)
         self.assertLess(writer.index("e->io.write_run"),
                         writer.index("swapz_engine_complete_batched_run"))
