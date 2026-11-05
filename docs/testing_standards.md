@@ -7737,4 +7737,16 @@ BLOCKED and UNAVAILABLE classification; displaced
 entries remain counted without publishing private samples. A known FAIL
 dominates BLOCKED, which dominates UNAVAILABLE, so a later prerequisite or
 observation gap cannot relabel already failed/excluded evidence.
+For an explicitly v2 campaign, the physical sealer audit independently checks
+every frozen-parent and prospective-amendment workload, including decisions
+omitted by the supplied summary. Missing decisions or short attempted/accepted
+cohorts are BLOCKED prerequisites, never automatically producer-proven FAIL.
+A genuine failed/excluded pair or failed measured decision remains FAIL even
+when another cohort is missing. The bounded failure-only audit retains the
+original qualification status, the first failing audit phase, numeric
+expected/observed pair counts and per-pair producer status (only safe enum
+values); arbitrary producer strings, artifact fingerprints and host paths
+must never enter public diagnostics. The two separate complete cohort
+requirements remain 14 designated frozen pairs and 24 current v2 producer
+pairs; rootless controls provide no physical acceptance.
 No pending prospective-v2 amendment is applied as a retroactive replacement.

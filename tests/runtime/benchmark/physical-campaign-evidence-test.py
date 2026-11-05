@@ -103,6 +103,54 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertNotEqual(
             QUALIFICATION.evaluate(rows, protocol="v2")["status"], "PASS")
 
+    def test_incomplete_v2_cohort_is_blocked_without_measured_fail(self):
+        # The producer must not turn an omitted frozen or amendment pair into
+        # a physical FAIL merely because an evaluator summary is incomplete.
+        records = [pair(1, 1600)]
+        decisions = {
+            workload: {"status": "INCOMPLETE"}
+            for workload in QUALIFICATION.WORKLOADS
+        }
+        omitted_workload = next(iter(QUALIFICATION.AMENDMENT["workloads"]))
+        for reported_status in ("FAIL_OR_INCOMPLETE", "PASS"):
+            for omit_decision in (False, True):
+                with self.subTest(reported_status=reported_status,
+                                  omit_decision=omit_decision):
+                    before, after = host_snapshots()
+                    supplied_decisions = dict(decisions)
+                    if omit_decision:
+                        del supplied_decisions[omitted_workload]
+                    audit = EVIDENCE.audit_physical_pairs({
+                        "status": reported_status, "evaluation_protocol": "v2",
+                        "records": records, "decisions": supplied_decisions,
+                    }, before, after)
+                    self.assertEqual(audit["status"], "BLOCKED",
+                                     audit["diagnostics"])
+                    self.assertEqual(audit["qualification_status"],
+                                     reported_status)
+                    self.assertEqual(audit["first_failed_phase"],
+                                     "qualification")
+                    missing = {
+                        item["workload"]: (
+                            item["expected"]["value"], item["observed"])
+                        for item in audit["diagnostics"]
+                        if item["metric"] == "qualification.attempted_pairs"
+                    }
+                    self.assertEqual(len(missing), len(QUALIFICATION.WORKLOADS))
+                    self.assertEqual(
+                        sum(expected for expected, _ in missing.values()), 24)
+                    self.assertEqual(
+                        sum(observed for _, observed in missing.values()), 1)
+                    for workload in QUALIFICATION.AMENDMENT["workloads"]:
+                        self.assertEqual(missing[workload][1], 0)
+                    if omit_decision:
+                        self.assertTrue(any(
+                            item["metric"] == "qualification.decision" and
+                            item["workload"] == omitted_workload
+                            for item in audit["diagnostics"]))
+                    self.assertFalse(any(
+                        item["status"] == "FAIL" for item in audit["diagnostics"]))
+
     def test_duplicate_pair_and_run_identifiers(self):
         records = [pair(1, 1100, "duplicate"),
                    pair(2, 1600, "duplicate")]
@@ -316,6 +364,10 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         excluded["analysis_usable"] = False
         failed, _ = inspect([excluded])
         self.assertEqual(failed["status"], "FAIL")
+        producer_failure = next(
+            item for item in failed["diagnostics"]
+            if item["metric"] == "pair.status")
+        self.assertEqual(producer_failure["producer_status"], "EXCLUDED")
 
     def test_different_workload_trace_excludes_pair(self):
         record = pair(1, 1100)

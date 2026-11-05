@@ -833,6 +833,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
     """
     diagnostics = []
     omitted = 0
+    first_failed_phase = None
     encountered_statuses = set()
     # A known failed check must not be downgraded by a later prerequisite gap.
     diagnostic_priority = {"UNAVAILABLE": 0, "BLOCKED": 1, "FAIL": 2}
@@ -842,9 +843,13 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
 
     def diagnose(status, metric_name, expected, observed=None,
                  workload=None, pair_index=None, arm=None,
-                 reason="physical evidence missing or inconsistent"):
-        nonlocal omitted
+                 reason="physical evidence missing or inconsistent",
+                 producer_status=None):
+        nonlocal omitted, first_failed_phase
         encountered_statuses.add(status)
+        if first_failed_phase is None:
+            # This is the first failed *audit* phase, not a claim about host I/O.
+            first_failed_phase = metric_name.partition(".")[0]
         replacement_index = None
         if len(diagnostics) == MAX_EVIDENCE_DIAGNOSTICS:
             omitted += 1
@@ -879,6 +884,11 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             "observed": value, "workload": workload, "pair_index": pair_index,
             "arm": arm, "reason": reason,
         }
+        if producer_status is not None:
+            # Never echo an arbitrary producer string or a private host path.
+            detail["producer_status"] = (
+                producer_status if producer_status in ("PASS", "FAIL", "EXCLUDED")
+                else "INVALID")
         if replacement_index is None:
             diagnostics.append(detail)
         else:
@@ -900,9 +910,11 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         diagnose("UNAVAILABLE", "host.captured_monotonic_ns",
                  "strict same-boot host before/after",
                  reason="host monotonic window unavailable or reversed")
-    if summary.get("status") != "PASS":
-        diagnose("FAIL", "qualification.status", "PASS",
-                 reason="frozen evaluator has rejected or excluded attempts")
+    qualification_status = summary.get("status")
+    if qualification_status != "PASS":
+        # INCOMPLETE includes absent evidence, not necessarily a measured FAIL.
+        diagnose("BLOCKED", "qualification.status", "PASS",
+                 reason="qualification is incomplete or rejected")
 
     pair_identifiers, run_identifiers, windows = set(), set(), []
     for record in records:
@@ -925,7 +937,8 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         if record.get("status") != "PASS" or record.get("excluded") is not False:
             diagnose("FAIL", "pair.status", "PASS and excluded=false",
                      workload=workload, pair_index=index,
-                     reason="failed or excluded trials cannot be dropped")
+                     reason="failed or excluded trials cannot be dropped",
+                     producer_status=record.get("status"))
         if record.get("analysis_usable") is not True:
             diagnose("FAIL", "pair.analysis_usable", True,
                      workload=workload, pair_index=index,
@@ -1039,11 +1052,28 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                          reason="later pair reuses earlier physical time")
             last_end = end
 
-    decisions = summary.get("decisions") or {}
-    for workload, decision in decisions.items():
-        if workload not in workloads or not isinstance(decision, dict):
-            continue
+    decisions = summary.get("decisions")
+    if not isinstance(decisions, dict):
+        diagnose("BLOCKED", "qualification.decisions", "workload decision object")
+        decisions = {}
+    protocol = summary.get("evaluation_protocol")
+    if protocol == "v2":
+        required_workloads = workloads
+    elif protocol == "v1":
+        required_workloads = QUALIFICATION["CONTRACT"]["workloads"]
+    else:
+        # Isolated rootless record audits have no campaign protocol. The
+        # campaign sealer always supplies one and checks its policy identity.
+        required_workloads = decisions
+        if protocol is not None:
+            diagnose("BLOCKED", "qualification.evaluation_protocol", "v1 or v2")
+    for workload in required_workloads:
         spec = workloads[workload]
+        decision = decisions.get(workload)
+        if not isinstance(decision, dict):
+            diagnose("BLOCKED", "qualification.decision",
+                     "required workload decision", workload=workload,
+                     reason="frozen or v2 cohort decision is missing")
         attempts = [r for r in records if isinstance(r, dict) and
                     r.get("workload") == workload]
         for name, count in (
@@ -1051,10 +1081,20 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                 ("accepted_pairs",
                  sum(r.get("analysis_usable") is True for r in attempts))):
             if count != spec["pairs"]:
-                diagnose("FAIL", "qualification." + name,
+                diagnose("BLOCKED", "qualification." + name,
                          {"operator": "==", "value": spec["pairs"], "unit": "pairs"},
                          count, workload=workload,
-                         reason="frozen plan requires every attempted pair")
+                         reason="frozen or v2 cohort is incomplete")
+        if not isinstance(decision, dict):
+            continue
+        if decision.get("status") == "FAIL":
+            diagnose("FAIL", "qualification.decision_status", "PASS",
+                     workload=workload,
+                     reason="frozen evaluated measurements failed")
+        elif decision.get("status") != "PASS":
+            diagnose("BLOCKED", "qualification.decision_status", "PASS",
+                     workload=workload,
+                     reason="cohort decision is incomplete or unavailable")
         if spec["evidence"] == "statistical_paired":
             limits = QUALIFICATION["service_limits"](workload)
             for name, endpoint, op, bound in (
@@ -1124,6 +1164,10 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                    else "BLOCKED" if "BLOCKED" in encountered_statuses
                    else "UNAVAILABLE"),
         "diagnostics": diagnostics, "omitted_diagnostic_count": omitted,
+        "qualification_status": (
+            qualification_status if qualification_status in
+            ("PASS", "FAIL_OR_INCOMPLETE") else "INVALID"),
+        "first_failed_phase": first_failed_phase,
         "claim_boundary": QUALIFICATION["CONTRACT"]["claim_boundary"],
         "measurement_authority": "host-visible lower I/O, not NAND wear",
     }
