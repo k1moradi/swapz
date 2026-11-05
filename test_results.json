@@ -246,76 +246,27 @@
 ],
 "scope": "OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY"
 },
-"gc_scan_scale": {
-"rows": [
-{
-"incremental_select_ns": 1774,
-"legacy_dead_probe_ns": 190817,
-"legacy_score_scan_ns": 1767765,
-"logical_pages": 262144,
-"mapped_dead_probe_ns": 933,
-"relocation_list_ns": 662,
-"relocation_scan_ns": 514915,
-"segments": 1024,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 6027,
-"legacy_dead_probe_ns": 768219,
-"legacy_score_scan_ns": 7389005,
-"logical_pages": 1048576,
-"mapped_dead_probe_ns": 3012,
-"relocation_list_ns": 1063,
-"relocation_scan_ns": 1953033,
-"segments": 4096,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 22680,
-"legacy_dead_probe_ns": 2623928,
-"legacy_score_scan_ns": 20503071,
-"logical_pages": 4194304,
-"mapped_dead_probe_ns": 10481,
-"relocation_list_ns": 1095,
-"relocation_scan_ns": 6957771,
-"segments": 16384,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 81505,
-"legacy_dead_probe_ns": 12826507,
-"legacy_score_scan_ns": 97622999,
-"logical_pages": 27080192,
-"mapped_dead_probe_ns": 46877,
-"relocation_list_ns": 662,
-"relocation_scan_ns": 32599382,
-"segments": 105782,
-"victim_records": 256
-}
-],
-"scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
-},
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 191,
+"inverse_ns_per_page": 184,
 "name": "scalar",
 "transform_ns_per_page": 251
 },
 {
-"inverse_ns_per_page": 281,
+"inverse_ns_per_page": 277,
 "name": "sse2",
-"transform_ns_per_page": 177
+"transform_ns_per_page": 174
 },
 {
-"inverse_ns_per_page": 127,
+"inverse_ns_per_page": 128,
 "name": "avx2",
-"transform_ns_per_page": 83
+"transform_ns_per_page": 86
 },
 {
-"inverse_ns_per_page": 90,
+"inverse_ns_per_page": 86,
 "name": "avx512",
-"transform_ns_per_page": 71
+"transform_ns_per_page": 70
 }
 ],
 "classifier": {
@@ -325,9 +276,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 75,
+"ns_per_page": 74,
 "sample_pairs": 32,
-"scalar_ns_per_page": 75,
+"scalar_ns_per_page": 74,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -342,7 +293,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2462
+"wall_ns_per_page": 2389
 },
 {
 "acceleration": 2,
@@ -350,7 +301,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2247
+"wall_ns_per_page": 2200
 },
 {
 "acceleration": 3,
@@ -358,7 +309,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2128
+"wall_ns_per_page": 2095
 },
 {
 "acceleration": 4,
@@ -366,7 +317,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2098
+"wall_ns_per_page": 2079
 }
 ],
 "negative_pages": 256,
@@ -383,9 +334,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1693,
-"modeled_wall_ns_total": 975616,
-"ns_per_saved_block": 18761,
+"modeled_wall_ns_per_page": 1652,
+"modeled_wall_ns_total": 951808,
+"ns_per_saved_block": 18304,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -410,29 +361,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 183,
+"baseline_ns_per_page": 181,
 "order": "baseline_first",
-"unrolled_ns_per_page": 175
+"unrolled_ns_per_page": 174
 },
 {
-"baseline_ns_per_page": 185,
+"baseline_ns_per_page": 182,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 178
+"unrolled_ns_per_page": 176
 },
 {
-"baseline_ns_per_page": 186,
+"baseline_ns_per_page": 180,
 "order": "baseline_first",
-"unrolled_ns_per_page": 178
+"unrolled_ns_per_page": 174
 },
 {
-"baseline_ns_per_page": 185,
+"baseline_ns_per_page": 184,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 178
+"unrolled_ns_per_page": 174
 },
 {
 "baseline_ns_per_page": 184,
 "order": "baseline_first",
-"unrolled_ns_per_page": 182
+"unrolled_ns_per_page": 174
 }
 ],
 "repeats_per_arm": 64,
@@ -481,14 +432,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19235,
+"ns_per_saved_block": 18765,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1903,
-"routed_cpu_ns_total": 1096429,
+"routed_cpu_ns_per_page": 1856,
+"routed_cpu_ns_total": 1069618,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -536,14 +487,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 19336,
+"ns_per_saved_block": 18863,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1846,
-"routed_cpu_ns_total": 1063480,
+"routed_cpu_ns_per_page": 1801,
+"routed_cpu_ns_total": 1037488,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -591,14 +542,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18761,
+"ns_per_saved_block": 18304,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1693,
-"routed_cpu_ns_total": 975616,
+"routed_cpu_ns_per_page": 1652,
+"routed_cpu_ns_total": 951808,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -646,14 +597,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18761,
+"ns_per_saved_block": 18304,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1693,
-"routed_cpu_ns_total": 975616,
+"routed_cpu_ns_per_page": 1652,
+"routed_cpu_ns_total": 951808,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -701,14 +652,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 18761,
+"ns_per_saved_block": 18304,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1693,
-"routed_cpu_ns_total": 975616,
+"routed_cpu_ns_per_page": 1652,
+"routed_cpu_ns_total": 951808,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -725,17 +676,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "avx512",
-"inverse_ns_per_page": 90,
+"inverse_ns_per_page": 86,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 191,
+"scalar_inverse_ns_per_page": 184,
 "scalar_transform_ns_per_page": 251,
-"second_lz4_ns_per_page": 3590,
+"second_lz4_ns_per_page": 3500,
 "transform_backend": "avx512",
-"transform_ns_per_page": 71
+"transform_ns_per_page": 70
 }
 ]
 }
@@ -749,23 +700,23 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "5c8d7e6622883556ca49441bb5fd659bd5dbc68acb3f9ca0c5ccdf5bf416fba6",
-"module_sha256": "aa602008abad2a3054b5401e969935ba4441995447772e8adc26738d6b3ea8c2",
+"formatter_sha256": "d03387f5ba2218a4a89652c11bfd5f78c14f696939b3ddc64209f259b02e9eb2",
+"module_sha256": "2b02e91d96229008b30309f9bfa5e4e642e0b0a49f7d1d9f16fea43e8ac304c3",
 "oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "9b68e50d9a2f68d2d96d33d166aac0c20a21b7c0",
+"source_sha": "58c8c3d839294db0437825e3cc82cdc5241cc5f0",
 "stages": [
 {
-"elapsed_s": 3.671,
+"elapsed_s": 3.908,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_parallel_build_is_incremental_and_test_stages_stay_ordered [unchanged]; nested tests/runtime/native/make-interface-test.py: exit=1 reason=nonzero_exit subtest=unavailable phase_wall_s=3 stage_wall_s=137 line=347 log=build/tests/rootless-failure.FsQFS02W/diagnostic.log",
-"elapsed_s": 137.571,
+"diagnostic": "FAIL: rootless phase=tmp-cleanup-test.py subtest=unavailable test=unavailable exit=1 reason=nonzero_exit phase_s=0 stage_s=37 line=496 log=build/tests/rootless-f",
+"elapsed_s": 37.247,
 "exit_code": 1,
 "failed_phase": "Native and rootless contracts",
 "name": "Native and rootless contracts",
@@ -777,5 +728,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "9b68e50d9a2f68d2d96d33d166aac0c20a21b7c0"
+"tested_commit_sha": "58c8c3d839294db0437825e3cc82cdc5241cc5f0"
 }
