@@ -6847,7 +6847,9 @@ from the clock shared by the arms. A PASS requires strict same-boot
 before/after coverage, globally nonoverlapping arm windows, ascending pair
 indices within each cohort, distinct physical run identifiers, exact source,
 module and parent-device bindings, immutable fixture hashes, and complete
-unscreened attempts. Synthetic file replay and stale/cached samples are not
+unscreened attempts. Each paired raw/swapz attempt must carry one matching,
+nonempty physical `workload_id`; a cross-arm mismatch is BLOCKED rather than
+eligible evidence. Synthetic file replay and stale/cached samples are not
 physical measurements. Diskstats index 8 is an in-flight gauge; every other
 cumulative counter must not reverse, and 512-byte sector multiplication is
 checked against unsigned 64-bit bytes. The evaluator remains authoritative
@@ -6862,8 +6864,9 @@ pair index and arm without copying private representative payload hashes.
 Lower-device bytes/requests are host-visible I/O, **not NAND wear**.
 Sealer provenance comparisons are type-exact at every JSON depth: a boolean
 cannot substitute for an integer arm counter or frozen numeric limit, even
-when Python would compare their values equal. The public diagnostic limit must retain at least one field-level reason for
-every encountered FAIL, BLOCKED and UNAVAILABLE classification; displaced
+when Python would compare their values equal. The public diagnostic limit
+must retain at least one field-level reason for every encountered FAIL,
+BLOCKED and UNAVAILABLE classification; displaced
 entries remain counted without publishing private samples. A known FAIL
 dominates BLOCKED, which dominates UNAVAILABLE, so a later prerequisite or
 observation gap cannot relabel already failed/excluded evidence.

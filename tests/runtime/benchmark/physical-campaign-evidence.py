@@ -930,6 +930,19 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             diagnose("FAIL", "pair.analysis_usable", True,
                      workload=workload, pair_index=index,
                      reason="screened, wrong cohort, invalid or incomplete pair")
+        raw_arm = record.get("raw")
+        swapz_arm = record.get("swapz")
+        if isinstance(raw_arm, dict) and isinstance(swapz_arm, dict):
+            raw_run_id = raw_arm.get("workload_id")
+            swapz_run_id = swapz_arm.get("workload_id")
+            if (isinstance(raw_run_id, str) and raw_run_id and
+                    isinstance(swapz_run_id, str) and swapz_run_id and
+                    raw_run_id != swapz_run_id):
+                diagnose(
+                    "BLOCKED", "pair.workload_id",
+                    "matching raw/swapz physical run identity",
+                    workload=workload, pair_index=index,
+                    reason="paired raw/swapz run identity mismatch")
         for label in ("raw", "swapz"):
             arm = record.get(label)
             if not isinstance(arm, dict):

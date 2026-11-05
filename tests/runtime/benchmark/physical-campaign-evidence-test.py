@@ -100,6 +100,23 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         records[1]["pair_id"] = records[0]["pair_id"]
         self.assertIn("pair.pair_id", inspect(records)[1])
 
+    def test_mismatched_paired_run_identity(self):
+        record = pair(1, 1100)
+        record["swapz"]["workload_id"] = "different-physical-run"
+        audit, metrics = inspect([record])
+        self.assertEqual(audit["status"], "BLOCKED")
+        self.assertIn("pair.workload_id", metrics)
+        problem = next(
+            item for item in audit["diagnostics"]
+            if item["metric"] == "pair.workload_id")
+        self.assertEqual(
+            problem["expected"], "matching raw/swapz physical run identity")
+        self.assertIsNone(problem["observed"])
+        self.assertEqual(problem["pair_index"], 1)
+        self.assertIsNone(problem["arm"])
+        self.assertEqual(
+            problem["reason"], "paired raw/swapz run identity mismatch")
+
     def test_mixed_boot_and_changed_source(self):
         records = [pair(1, 1100)]
         records[0]["swapz"]["arm_boot_id"] = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
