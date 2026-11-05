@@ -7805,7 +7805,9 @@ cohorts are BLOCKED prerequisites, never automatically producer-proven FAIL.
 An excluded or evaluator-unusable pair is incomplete evidence and remains
 BLOCKED unless an independent producer or measured check proves failure. A
 terminal arm producer verdict of FAIL and a failed measured decision remain
-FAIL even when another cohort is missing. The bounded audit retains the
+FAIL even when another cohort is missing. Raw-repeat spread beyond the frozen
+screening maximum remains BLOCKED/INCOMPLETE rather than becoming a
+producer-proven failure. The bounded audit retains the
 original qualification status and numeric expected/observed pair counts; its
 failure-only fields retain the first producer-proven/derived failed audit phase
 and safe producer status. BLOCKED/UNAVAILABLE evidence must not manufacture a

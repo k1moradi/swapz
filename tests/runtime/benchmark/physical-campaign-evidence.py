@@ -1135,10 +1135,10 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             bound = QUALIFICATION["CONTRACT"]["screening"][
                 "same_workload_raw_spread_max"]
             if type(spread) in (int, float) and math.isfinite(spread) and spread > bound:
-                diagnose("FAIL", "raw_repeat_spread",
+                diagnose("BLOCKED", "raw_repeat_spread",
                          {"operator": "<=", "value": bound, "unit": "fraction"},
                          spread, workload=workload,
-                         reason="raw drift excludes entire cohort")
+                         reason="raw drift screens out the cohort")
         elif workload == "sd-high-occupancy-churn":
             bounds = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"]
             for name, op, bound in (

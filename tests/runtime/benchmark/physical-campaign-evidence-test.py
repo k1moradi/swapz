@@ -86,11 +86,12 @@ def host_snapshots():
 
 
 def inspect(rows, before=None, after=None, decisions=None,
-            summary_status="PASS"):
+            summary_status="PASS", raw_repeat_spread=None):
     baseline, finished = host_snapshots()
     result = EVIDENCE.audit_physical_pairs(
         {"status": summary_status, "records": rows,
-         "decisions": decisions or {}, "raw_repeat_spread": {}},
+         "decisions": decisions or {},
+         "raw_repeat_spread": raw_repeat_spread or {}},
         baseline if before is None else before,
         finished if after is None else after)
     return result, {d["metric"] for d in result["diagnostics"]}
@@ -323,7 +324,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         audit, _ = inspect(
             records, summary_status="FAIL_OR_INCOMPLETE")
-        # FAIL is authoritative once a failed/excluded attempt is known;
+        # FAIL is authoritative once a producer arm failure is known;
         # later prerequisite blocks and unavailable observations stay distinct.
         self.assertEqual(audit["status"], "FAIL")
         self.assertEqual(len(audit["diagnostics"]),
@@ -377,6 +378,24 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             [excluded], summary_status="FAIL_OR_INCOMPLETE")
         self.assertEqual(incomplete["status"], "BLOCKED")
         self.assertIsNone(incomplete["first_failed_phase"])
+
+        drift_records = [pair(index, 1100 + 500 * index)
+                         for index in range(1, 6)]
+        drift_bound = QUALIFICATION.CONTRACT["screening"][
+            "same_workload_raw_spread_max"]
+        drift, _ = inspect(
+            drift_records,
+            decisions={"sd-service-balanced": {"status": "INCOMPLETE"}},
+            summary_status="FAIL_OR_INCOMPLETE",
+            raw_repeat_spread={"sd-service-balanced": drift_bound + 0.01})
+        self.assertEqual(drift["status"], "BLOCKED")
+        self.assertIsNone(drift["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in drift["diagnostics"]))
+        self.assertTrue(any(
+            item["metric"] == "raw_repeat_spread" and
+            item["status"] == "BLOCKED"
+            for item in drift["diagnostics"]))
 
         producer_failed = copy.deepcopy(excluded)
         producer_failed["raw"]["verdict"] = "FAIL"
