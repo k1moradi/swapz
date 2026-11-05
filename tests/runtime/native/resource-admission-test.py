@@ -123,6 +123,8 @@ sample_host_memory_admission
         self.assertIn("BLOCKED: ID36 " + gate, result.stderr)
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("ADMITTED", result.stdout)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stderr)
 
     def test_exact_1_gib_host_boundary_admits_two_stable_samples(self):
         result = self.host_samples([meminfo(FLOOR_KIB)] * 2)
@@ -162,7 +164,14 @@ sample_host_memory_admission
         admission = shell_function(QUALIFIER, "sample_host_memory_admission")
         script = f"MIN_AVAILABLE_KIB={FLOOR_KIB}\n" + original + admission + (
             'sample_host_memory_admission "$1"\n')
-        self.assert_blocked(self.run_shell(script, self.root / "unreadable"), "MemAvailable unavailable")
+        self.assert_blocked(
+            self.run_shell(script, self.root / "absent-meminfo"),
+            "MemAvailable unavailable")
+        unreadable = self.root / "unreadable-meminfo"
+        unreadable.mkdir()
+        result = self.run_shell(script, unreadable)
+        self.assert_blocked(result, "MemAvailable unavailable")
+        self.assertIn("/proc/meminfo must be readable", result.stderr)
 
     def test_finite_parent_high_u64_exact_boundary(self):
         current = U64_MAX - FLOOR_BYTES
@@ -341,39 +350,77 @@ sample_host_memory_admission
                 self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
     def test_controller_admission_distinguishes_absence_from_unavailability(self):
-        controller_file = self.root / "controllers"
-        helper = shell_function(QUALIFIER, "require_cgroup_word")
-        script = helper + (
-            'require_cgroup_word "$1" "$2" "$3" "$4"\n')
-        for telemetry_name, required_word in (
-                ("cgroup.controllers", "memory"),
-                ("cgroup.controllers", "cpu"),
-                ("cgroup.subtree_control", "memory"),
-                ("cgroup.subtree_control", "cpu")):
-            with self.subTest(telemetry=telemetry_name, word=required_word):
-                missing_message = f"{required_word} controller not delegated"
-                args = (controller_file, telemetry_name, required_word,
-                        missing_message)
-                controller_file.write_text("memory cpu\n", encoding="ascii")
-                self.assertEqual(self.run_shell(script, *args).returncode, 0)
-                controller_file.write_text(
-                    "cpu\n" if required_word == "memory" else "memory\n",
-                    encoding="ascii")
-                missing = self.run_shell(script, *args)
-                self.assert_blocked(missing, missing_message)
-                self.assertNotIn("telemetry unavailable", missing.stderr)
+        cgroup_root = self.root / "cgroup"
+        cgroup_root.mkdir()
+        controllers = cgroup_root / "cgroup.controllers"
+        subtree = cgroup_root / "cgroup.subtree_control"
+        source = QUALIFIER.read_text(encoding="utf-8")
+        begin = source.index("[[ -f $CGROUP_ROOT/cgroup.controllers &&")
+        end = source.index("\n[[ -r $PRESSURE_SCRIPT", begin)
+        controller_gate = source[begin:end]
+        script = (
+            "CGROUP_ROOT=$1\n"
+            + controller_gate
+            + "\nprintf 'SYNTHETIC_CONTROLLER_GATE_ADMITTED\\n'\n"
+        )
 
-                controller_file.unlink()
-                unavailable = self.run_shell(script, *args)
-                self.assert_blocked(
-                    unavailable, f"{telemetry_name} telemetry unavailable")
-                self.assertIn(f"checking {required_word}", unavailable.stderr)
-                self.assertNotIn(missing_message, unavailable.stderr)
-                controller_file.mkdir()
-                unreadable = self.run_shell(script, *args)
-                self.assert_blocked(
-                    unreadable, f"{telemetry_name} telemetry unavailable")
-                controller_file.rmdir()
+        controllers.write_text("cpu memory\n", encoding="ascii")
+        subtree.write_text("cpu memory\n", encoding="ascii")
+        admitted = self.run_shell(script, cgroup_root)
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.assertEqual(admitted.stdout, "SYNTHETIC_CONTROLLER_GATE_ADMITTED\n")
+
+        refusal_cases = (
+            (controllers, "cpu\n",
+             "cgroup v2 memory controller unavailable"),
+            (controllers, "memory\n",
+             "cgroup v2 CPU controller unavailable"),
+            (subtree, "cpu\n",
+             "parent cgroup has no delegated memory controller"),
+            (subtree, "memory\n",
+             "parent cgroup has no delegated CPU controller"),
+        )
+        for telemetry_path, contents, expected in refusal_cases:
+            with self.subTest(telemetry=telemetry_path.name, expected=expected):
+                controllers.write_text("cpu memory\n", encoding="ascii")
+                subtree.write_text("cpu memory\n", encoding="ascii")
+                telemetry_path.write_text(contents, encoding="ascii")
+                result = self.run_shell(script, cgroup_root)
+                self.assert_blocked(result, expected)
+                self.assertNotIn("SYNTHETIC_CONTROLLER_GATE_ADMITTED",
+                                 result.stdout)
+
+        controllers.unlink()
+        missing = self.run_shell(script, cgroup_root)
+        self.assert_blocked(
+            missing,
+            "requires a cgroup v2 hierarchy with controller delegation support")
+        self.assertNotIn("telemetry unavailable", missing.stderr)
+        controllers.write_text("cpu memory\n", encoding="ascii")
+
+        # Keep the production file predicates true and inject only the read
+        # failure, so unavailable telemetry is not confused with absence.
+        for unavailable_name in ("cgroup.controllers", "cgroup.subtree_control"):
+            with self.subTest(unavailable=unavailable_name):
+                injected = (
+                    "CGROUP_ROOT=$1\n"
+                    "grep() {\n"
+                    f'    if [[ ${{3:-}} == "$CGROUP_ROOT/{unavailable_name}" ]]; then\n'
+                    "        return 2\n"
+                    "    fi\n"
+                    '    command grep "$@"\n'
+                    "}\n"
+                    + controller_gate
+                )
+                result = self.run_shell(injected, cgroup_root)
+                expected = (
+                    "cgroup.controllers telemetry unavailable"
+                    if unavailable_name == "cgroup.controllers"
+                    else "cgroup.subtree_control telemetry unavailable"
+                )
+                self.assert_blocked(result, expected)
+                self.assertNotIn("SYNTHETIC_CONTROLLER_GATE_ADMITTED",
+                                 result.stdout)
 
     def test_parent_mount_provenance_and_boolean_counters_are_not_authority(self):
         directory = self.root / "parent-cgroup"
@@ -477,46 +524,211 @@ sample_host_memory_admission
         self.assert_blocked(missing, "cpu.pressure some telemetry unreadable")
         self.assertIn("observed:unavailable", missing.stderr)
 
-    def test_changed_ready_and_active_pressure_evidence_cannot_admit(self):
+    def test_changed_pressure_observations_use_production_parser_and_first_failure(self):
         source = QUALIFIER.read_text(encoding="utf-8")
+        parser = shell_function(QUALIFIER, "read_memory_event_inventory")
         counter_guard = shell_function(QUALIFIER, "require_monotonic_counter")
-        for begin_marker, end_marker, baseline, observations in (
-                ('memory_events_ready="$(read_memory_event_inventory)" || exit 2',
-                 "# Base memory.high", "oom_start=0\noom_kill_start=0\n",
-                 (("0 0 0", 0, ""),
-                  ("0 1 0", 1, "pressure startup encountered OOM events"),
-                  ("0 0 1", 1, "pressure startup encountered OOM events"),
-                  ("0 -1 0", 2, "memory.events oom counter regressed"))),
-                ('memory_events_active="$(read_memory_event_inventory)" || exit 2',
-                 "# CPU PSI qualification", "high_before=5\noom_before=0\noom_kill_before=0\n",
-                 (("6 0 0", 0, ""),
-                  ("5 0 0", 1, "controlled pressure ramp did not trigger memory.high"),
-                  ("6 1 0", 1, "staged pressure encountered OOM events"),
-                  ("4 0 0", 2, "memory.events high counter regressed")))):
+        cgroup = self.root / "pressure-gates"
+        cgroup.mkdir()
+        events = cgroup / "memory.events"
+
+        gate_cases = (
+            (
+                'memory_events_ready="$(read_memory_event_inventory)" || exit 2',
+                "# Base memory.high",
+                "oom_start=2\noom_kill_start=3\n",
+                (
+                    ("high 0\noom 2\noom_kill 3\n", 0, ""),
+                    ("high 0\noom 3\noom_kill 3\n", 1,
+                     "pressure startup encountered OOM events"),
+                    ("high 0\noom 2\noom_kill 4\n", 1,
+                     "pressure startup encountered OOM events"),
+                    ("high 0\noom 1\noom_kill 3\n", 2,
+                     "memory.events oom counter regressed"),
+                ),
+            ),
+            (
+                'memory_events_before="$(read_memory_event_inventory)" || exit 2',
+                "printf 'START_ID36_RESOURCE_PRESSURE=",
+                "oom_ready=2\noom_kill_ready=3\n",
+                (
+                    ("high 5\noom 2\noom_kill 3\n", 0, ""),
+                    ("high 5\noom 3\noom_kill 3\n", 1,
+                     "pressure-boundary setup encountered OOM events"),
+                    ("high 5\noom 2\noom_kill 4\n", 1,
+                     "pressure-boundary setup encountered OOM events"),
+                    ("high 5\noom 1\noom_kill 3\n", 2,
+                     "memory.events oom counter regressed"),
+                ),
+            ),
+            (
+                'memory_events_active="$(read_memory_event_inventory)" || exit 2',
+                "# CPU PSI qualification",
+                "high_before=5\noom_before=2\noom_kill_before=3\n",
+                (
+                    ("high 6\noom 2\noom_kill 3\n", 0, ""),
+                    ("high 5\noom 2\noom_kill 3\n", 1,
+                     "controlled pressure ramp did not trigger memory.high"),
+                    ("high 6\noom 3\noom_kill 3\n", 1,
+                     "staged pressure encountered OOM events"),
+                    ("high 4\noom 2\noom_kill 3\n", 2,
+                     "memory.events high counter regressed"),
+                ),
+            ),
+        )
+        for begin_marker, end_marker, baseline, observations in gate_cases:
             start = source.index(begin_marker)
             end = source.index(end_marker, start)
-            # Execute the production gate excerpt, never its privileged
-            # children, cgroup controls, or live memory-pressure workload.
             gate = source[start:end]
-            for observed, exit_status, reason in observations:
-                with self.subTest(gate=begin_marker, observed=observed):
+            for observation, exit_status, reason in observations:
+                with self.subTest(gate=begin_marker, observation=observation):
+                    events.write_text(observation, encoding="ascii")
                     script = (
-                        counter_guard + baseline
-                        + 'OBSERVED_EVENTS=$1\n'
-                        + 'read_memory_event_inventory() {\n'
-                        + '    printf "%s\\n" "$OBSERVED_EVENTS"\n}\n'
-                        + gate + '\nprintf "SYNTHETIC_GATE_ADMITTED\\n"\n'
+                        "CGROUP=$1\n"
+                        + parser
+                        + counter_guard
+                        + baseline
+                        + gate
+                        + "\nprintf 'SYNTHETIC_PRESSURE_GATE_ADMITTED\\n'\n"
                     )
-                    result = self.run_shell(script, observed)
+                    result = self.run_shell(script, cgroup)
                     self.assertEqual(result.returncode, exit_status,
                                      (result.stdout, result.stderr))
                     if exit_status:
                         self.assertIn(reason, result.stderr)
-                        self.assertNotIn("SYNTHETIC_GATE_ADMITTED", result.stdout)
-                        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+                        self.assertNotIn("SYNTHETIC_PRESSURE_GATE_ADMITTED",
+                                         result.stdout)
+                        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=",
+                                         result.stdout + result.stderr)
                     else:
-                        self.assertEqual(result.stdout, "SYNTHETIC_GATE_ADMITTED\n")
+                        self.assertEqual(
+                            result.stdout, "SYNTHETIC_PRESSURE_GATE_ADMITTED\n")
                         self.assertEqual(result.stderr, "")
+
+    def test_ready_memory_pressure_thresholds_are_exact_and_bounded(self):
+        source = QUALIFIER.read_text(encoding="utf-8")
+        cgroup = self.root / "pressure-thresholds"
+        cgroup.mkdir()
+        current_path = cgroup / "memory.current"
+
+        ready_begin = source.index(
+            'pressure_current="$(cat "$CGROUP/memory.current" 2>/dev/null)"')
+        ready_end = source.index(
+            'memory_events_ready="$(read_memory_event_inventory)"', ready_begin)
+        ready_gate = source[ready_begin:ready_end]
+        ready_constants = (
+            "PRESSURE_MIB=576\n"
+            "PRESSURE_RAMP_MIB=80\n"
+            "READY_PRESSURE_MIB=$((PRESSURE_MIB - PRESSURE_RAMP_MIB))\n"
+        )
+        required_ready = (576 - 80) * 1024 * 1024
+        for observed, exit_status, reason in (
+                (required_ready, 0, ""),
+                (required_ready - 1, 1,
+                 "ready-stage resident pressure too small"),
+                ("True", 2, "ready-stage memory.current malformed"),
+                ("01", 2, "ready-stage memory.current malformed"),
+                ("9999999999999999999", 2,
+                 "ready-stage memory.current malformed")):
+            with self.subTest(observed=observed):
+                current_path.write_text(f"{observed}\n", encoding="ascii")
+                script = (
+                    "CGROUP=$1\n"
+                    + ready_constants
+                    + ready_gate
+                    + "\nprintf 'SYNTHETIC_READY_THRESHOLD_ADMITTED\\n'\n"
+                )
+                result = self.run_shell(script, cgroup)
+                self.assertEqual(result.returncode, exit_status,
+                                 (result.stdout, result.stderr))
+                if exit_status:
+                    self.assertIn(reason, result.stderr)
+                    self.assertNotIn("SYNTHETIC_READY_THRESHOLD_ADMITTED",
+                                     result.stdout)
+                    if observed == required_ready - 1:
+                        self.assertIn(f"observed:{observed}", result.stderr)
+                        self.assertIn(f"required:{required_ready}", result.stderr)
+                else:
+                    self.assertEqual(
+                        result.stdout, "SYNTHETIC_READY_THRESHOLD_ADMITTED\n")
+                    self.assertEqual(result.stderr, "")
+
+        current_path.unlink()
+        current_path.mkdir()
+        unreadable = self.run_shell(
+            "CGROUP=$1\n" + ready_constants + ready_gate, cgroup)
+        self.assert_blocked(unreadable, "ready-stage memory.current unreadable")
+
+        boundary_begin = source.index(
+            "MEMORY_HIGH_BYTES=$((pressure_current + MEMORY_HEADROOM_BYTES))")
+        boundary_end = source.index(
+            "\n# Establish high-pressure evidence deliberately", boundary_begin)
+        boundary_gate = source[boundary_begin:boundary_end]
+        memory_max = 896 * 1024 * 1024
+        ramp = 80 * 1024 * 1024
+        headroom = 64 * 1024 * 1024
+        boundary_constants = (
+            f"MEMORY_MAX_BYTES={memory_max}\n"
+            f"PRESSURE_RAMP_BYTES={ramp}\n"
+            f"MEMORY_HEADROOM_BYTES={headroom}\n"
+            "write_cgroup_control() { :; }\n"
+        )
+        for observed, exit_status, reason in (
+                (memory_max - ramp - 1, 0, ""),
+                (memory_max - ramp, 2,
+                 "staged pressure would exceed memory.max safety bound"),
+                (memory_max - headroom, 2,
+                 "ready-state charge cannot fit the memory.high boundary")):
+            with self.subTest(boundary_observed=observed):
+                script = (
+                    boundary_constants
+                    + f"pressure_current={observed}\n"
+                    + boundary_gate
+                    + "\nprintf 'SYNTHETIC_BOUNDARY_ADMITTED\\n'\n"
+                )
+                result = self.run_shell(script)
+                self.assertEqual(result.returncode, exit_status,
+                                 (result.stdout, result.stderr))
+                if exit_status:
+                    self.assertIn(reason, result.stderr)
+                    self.assertIn(f"observed:{observed}", result.stderr)
+                    self.assertIn(f"memory.max:{memory_max}", result.stderr)
+                    self.assertNotIn("SYNTHETIC_BOUNDARY_ADMITTED",
+                                     result.stdout)
+                    if observed == memory_max - headroom:
+                        self.assertNotIn("staged pressure would exceed",
+                                         result.stderr)
+                else:
+                    self.assertEqual(
+                        result.stdout, "SYNTHETIC_BOUNDARY_ADMITTED\n")
+                    self.assertEqual(result.stderr, "")
+
+    def test_admission_stream_identifies_cleanup_attempt_state_by_gate_order(self):
+        source = QUALIFIER.read_text(encoding="utf-8")
+        start = source.index("START_ID36_RESOURCE_PRESSURE=admission")
+        controller = source.index(
+            'require_cgroup_word "$CGROUP_ROOT/cgroup.controllers"')
+        cleanup_call = source.index("swapz_clear_tmp_before_memory_check ||")
+        cleanup_complete = source.index(
+            "ID36_TMP_CLEANUP=completed-owned-only")
+        host_gate = source.index("sample_host_memory_admission || exit 2")
+        parent_gate_start = source.index(
+            'if ! parent_memory_inventory="$(read_cgroup_root_memory_inventory)"; then')
+        pressure_ready = source.index(
+            'pressure_current="$(cat "$CGROUP/memory.current" 2>/dev/null)"')
+        self.assertLess(start, controller)
+        self.assertLess(controller, cleanup_call)
+        self.assertLess(cleanup_call, cleanup_complete)
+        self.assertLess(cleanup_complete, host_gate)
+        self.assertLess(host_gate, parent_gate_start)
+        self.assertLess(parent_gate_start, pressure_ready)
+        self.assertEqual(
+            source.count("ID36_TMP_CLEANUP=completed-owned-only"), 1)
+        self.assertIn(
+            "completed-owned /tmp cleanup refused; verify session completion "
+            "proofs, ownership, mounts and helper availability "
+            "(no broad cleanup attempted)",
+            source)
 
     def test_bounded_child_diagnostics_preserve_reason_without_private_paths(self):
         directory = self.root / "logs"

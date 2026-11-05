@@ -1507,16 +1507,23 @@ CPU burners against shared deadlines with owned-child TERM/KILL escalation.
 Private logs are bounded; memory samples and private paths are not exposed.
 Regression coverage must use synthetic proc/cgroup fixtures and fake workers,
 never actual host memory pressure or privileged cgroup mutation.
-Rootless ID36 admission fixtures must execute extracted production gate bodies
-against bounded synthetic observations: the exact 1 GiB MemAvailable floor and
-two-sample stability, finite/unbounded parent headroom and true-root provenance,
-missing versus unreadable CPU/memory controller delegation, absent/malformed
-OOM and CPU-PSI counters (including Boolean-like tokens and overflow), and
-changed readiness/active pressure snapshots. Refusals must name the first
-gate, its required versus observed safe state and unavailable evidence;
-pre-admission fixtures attempt no privileged cleanup and cannot emit an ID36
-PASS or impersonate loaded qualification. Exercise these without a real
-cgroup, real host /proc reads, or reducing the memory safety floor.
+Rootless ID36 admission fixtures must execute extracted production parsers and
+gate bodies against bounded synthetic observations: the exact 1 GiB
+MemAvailable floor and two-sample stability, finite/unbounded parent headroom
+and true-root provenance, missing versus unavailable CPU/memory controller
+delegation, absent/malformed OOM and CPU-PSI counters (including Boolean-like
+tokens and overflow), exact ready-residency/memory.high/ramp boundaries, and
+changed zero-OOM/high snapshots. Changed event snapshots must pass through the
+production memory.events parser rather than injecting impossible parsed tuples.
+Refused fixtures must preserve the first gate, expected/observed safe values
+where the gate has a numeric bound, and unavailable evidence, while globally
+rejecting any ID36 PASS marker. Source-order coverage must distinguish
+controller refusals before the completed-owned cleanup call from host,
+parent-cgroup and pressure refusals after the single
+ID36_TMP_CLEANUP=completed-owned-only marker. These fixtures are rootless
+evidence only: never use a real cgroup, host /proc observation, loaded kernel,
+or reduced memory safety floor, and never present a synthetic admission marker
+as full ID36 qualification.
 
 ID36 cleanup never writes group-wide `cgroup.kill`: a membership snapshot cannot
 authenticate a process that enters before the later group-wide signal. The
