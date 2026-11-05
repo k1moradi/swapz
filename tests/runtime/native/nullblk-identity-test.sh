@@ -60,19 +60,26 @@ STUBS="$FIXTURE/stubs"
 mkdir -p "$TOOLS" "$STUBS"
 python3 - "$ROOT/tests/tools/loaded-preflight.sh" "$TOOLS/loaded-preflight.sh" "$FIXTURE" <<'PY'
 import pathlib
+import re
 import sys
 
 source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 root = pathlib.Path(sys.argv[3])
-for original, replacement in (
-    ("/var/lib/swapz-package-transactions", str(root / "var/lib/swapz-package-transactions")),
-    ("/lib/modules/", str(root / "lib/modules/")),
-    ("/proc", str(root / "proc")),
-    ("/sys", str(root / "sys")),
-    ("/boot", str(root / "boot")),
-    ("/dev", str(root / "dev")),
-):
-    source = source.replace(original, replacement)
+path_replacements = {
+    "/var/lib/swapz-package-transactions": str(root / "var/lib/swapz-package-transactions"),
+    "/lib/modules/": str(root / "lib/modules/"),
+    "/proc": str(root / "proc"),
+    "/sys": str(root / "sys"),
+    "/boot": str(root / "boot"),
+    "/dev": str(root / "dev"),
+}
+# Replace original host paths only once. Replacing /dev in an already-mapped
+# /proc/devices or /sys/dev/block path would destroy the isolated evidence.
+source = re.sub(
+    "|".join(re.escape(original) for original in path_replacements),
+    lambda match: path_replacements[match.group(0)],
+    source,
+)
 source = source.replace(
     '[[ -n $mapper_node && -b $mapper_node ]] ||',
     '[[ -n $mapper_node && -e $mapper_node ]] ||',
@@ -299,6 +306,8 @@ reset_fake() {
         "$FIXTURE/unexpected-rmmod"
     mkdir -p "$FIXTURE/proc/self" "$FIXTURE/sys/kernel/config" \
         "$FIXTURE/sys/module" "$FIXTURE/dev/mapper"
+    # Keep rewritten stderr suppression inside the private fixture filesystem.
+    : > "$FIXTURE/dev/null"
     printf 'CapEff:\t0000000000200000\n' > "$FIXTURE/proc/self/status"
     printf 'MemAvailable: 2097152 kB\n' > "$FIXTURE/proc/meminfo"
     printf 'Filename Type Size Used Priority\n' > "$FIXTURE/proc/swaps"
