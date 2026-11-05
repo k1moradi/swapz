@@ -140,8 +140,14 @@ physical parent only in a synthetic `/proc/<pid>/task/<tid>/mountinfo`, and
 require refusal; an unrelated sibling in that non-leader thread remains a
 positive control. A production scanner must enumerate those task views (or
 establish equivalent complete namespace coverage) with the same bounded,
-fail-closed rules. This is a stable inventory blind spot, not a post-snapshot
-TOCTOU observation and must not be labelled UNPROVEN.
+fail-closed rules. Count thread-group leaders and non-leader tasks against one
+4,194,304-entry ceiling, and apply the aggregate 64 MiB mountinfo-byte limit
+across parsed leader and task tables. Revalidate each task's namespace identity
+after reading its mountinfo; a task that changes namespace during the read must
+refuse the inventory. A task-directory enumeration failure or a still-present
+namespace whose mountinfo cannot be opened is ambiguity and must fail closed.
+This is a stable inventory blind spot, not a post-snapshot TOCTOU observation
+and must not be labelled UNPROVEN.
 Also cover a chrooted peer whose mount-namespace device/inode matches the
 coordinator while its process-root-filtered mountinfo is empty. The coordinator
 may skip that redundant view only after its own mountinfo has a valid root row,

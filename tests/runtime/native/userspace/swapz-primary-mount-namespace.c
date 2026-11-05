@@ -27,6 +27,10 @@ static int fixture_self_mount_open_error;
 static int fixture_inventory_error;
 static int fixture_inventory_readdir_error;
 static int fixture_inventory_seen_foreign_pid;
+static int fixture_task_readdir_error;
+static int fixture_task_seen_thread;
+static DIR *fixture_proc_directory;
+static DIR *fixture_task_directory;
 static int fixture_same_namespace_mount_after_self_snapshot;
 static int fixture_same_namespace_mount_injected;
 /* Timed synthetic procfs changes; these do not create actual mounts. */
@@ -166,12 +170,21 @@ static struct dirent *fixture_readdir(DIR *directory)
 	struct dirent *entry;
 
 	/* Fail after delivering the foreign PID, not at opendir(3). */
-	if (fixture_inventory_readdir_error &&
+	if (directory == fixture_proc_directory &&
+	    fixture_inventory_readdir_error &&
 	    fixture_inventory_seen_foreign_pid) {
 		errno = fixture_inventory_readdir_error;
 		return NULL;
 	}
+	if (directory == fixture_task_directory &&
+	    fixture_task_readdir_error && fixture_task_seen_thread) {
+		errno = fixture_task_readdir_error;
+		return NULL;
+	}
 	entry = readdir(directory);
+	if (entry && directory == fixture_task_directory &&
+	    !strcmp(entry->d_name, "3032"))
+		fixture_task_seen_thread = 1;
 	if (!entry && !errno && fixture_peer_mountinfo_after_peer_scan) {
 		/*
 		 * The peer's table was already read. A subsequent mount must not
@@ -253,12 +266,20 @@ static FILE *fixture_fopen(const char *path, const char *mode)
 static DIR *fixture_opendir(const char *path)
 {
 	char converted[PATH_MAX];
+	DIR *directory;
 
 	if (!strcmp(path, "/proc") && fixture_inventory_error) {
 		errno = fixture_inventory_error;
 		return NULL;
 	}
-	return opendir(fixture_path(path, converted));
+	directory = opendir(fixture_path(path, converted));
+	if (directory && !strcmp(path, "/proc"))
+		fixture_proc_directory = directory;
+	if (directory && strstr(path, "/task")) {
+		fixture_task_directory = directory;
+		fixture_task_seen_thread = 0;
+	}
+	return directory;
 }
 
 static int fixture_stat(const char *path, struct stat *info)
@@ -267,7 +288,9 @@ static int fixture_stat(const char *path, struct stat *info)
 {
 	char converted[PATH_MAX];
 
-	if (strstr(path, "/3031/ns/mnt") && fixture_namespace_stat_error) {
+	if ((strstr(path, "/3031/ns/mnt") ||
+	     strstr(path, "/3031/task/3032/ns/mnt")) &&
+	    fixture_namespace_stat_error) {
 		errno = fixture_namespace_stat_error;
 		return -1;
 	}
@@ -447,6 +470,10 @@ static void fixture_reset(void)
 	fixture_inventory_error = 0;
 	fixture_inventory_readdir_error = 0;
 	fixture_inventory_seen_foreign_pid = 0;
+	fixture_task_readdir_error = 0;
+	fixture_task_seen_thread = 0;
+	fixture_proc_directory = NULL;
+	fixture_task_directory = NULL;
 	fixture_same_namespace_mount_after_self_snapshot = 0;
 	fixture_same_namespace_mount_injected = 0;
 	fixture_peer_mountinfo_before_peer_scan = NULL;
@@ -1046,9 +1073,19 @@ int main(void)
 	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/self/ns", fixture_proc_root) > 0);
 	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/self/task", fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/self/task/65535",
+			fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031", fixture_proc_root) > 0);
 	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031/ns", fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/3031/task", fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/3031/task/3031",
+			fixture_proc_root) > 0);
 	assert(mkdir(path, 0700) == 0);
 	strcpy(swapz_primary_selected_target.partuuid, "f13428f6-01");
 	swapz_primary_selected_target.device_major = 8U;
@@ -1057,6 +1094,28 @@ int main(void)
 		16ULL * 1024ULL * 1024ULL * 1024ULL;
 	fixture_reset();
 	expect_mount_admission("only local root mount", 1, 0);
+	assert(snprintf(path, sizeof(path), "%s/self/task/65536",
+			fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/self/task/65536/ns",
+			fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	fixture_file("self/task/65536/ns/mnt",
+		     "coordinator non-leader mount namespace\n");
+	fixture_file("self/task/65536/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /thread-root rw\n"
+		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
+	expect_mount_admission("selected partition in coordinator non-leader thread",
+			       0, 0);
+	fixture_unlink("self/task/65536/ns/mnt");
+	fixture_unlink("self/task/65536/mountinfo");
+	assert(snprintf(path, sizeof(path), "%s/self/task/65536/ns",
+			fixture_proc_root) > 0);
+	assert(rmdir(path) == 0);
+	assert(snprintf(path, sizeof(path), "%s/self/task/65536",
+			fixture_proc_root) > 0);
+	assert(rmdir(path) == 0);
+	fixture_reset();
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:2 / /other rw - ext4 /dev/sda2 rw\n");
@@ -1088,8 +1147,6 @@ int main(void)
 	 * mount namespace, so a process-leader-only scan must not authorize a
 	 * selected target or parent that is mounted only in that thread's view.
 	 */
-	assert(snprintf(path, sizeof(path), "%s/3031/task", fixture_proc_root) > 0);
-	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031/task/3032", fixture_proc_root) > 0);
 	assert(mkdir(path, 0700) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031/task/3032/ns", fixture_proc_root) > 0);
@@ -1112,13 +1169,30 @@ int main(void)
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
 	expect_mount_admission("unrelated sibling in non-leader thread namespace",
 			       1, 0);
+	fixture_reset();
+	fixture_share_mount_namespace();
+	fixture_file("3031/task/3032/ns/mnt",
+		     "non-leader thread mount namespace\n");
+	fixture_file("3031/task/3032/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
+	fixture_mount_open_error = EACCES;
+	expect_mount_admission("unreadable non-leader task mountinfo", 0,
+			       EACCES);
+	fixture_reset();
+	fixture_share_mount_namespace();
+	fixture_file("3031/task/3032/ns/mnt",
+		     "non-leader thread mount namespace\n");
+	fixture_file("3031/task/3032/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
+	fixture_task_readdir_error = EIO;
+	expect_mount_admission("non-leader task enumeration error", 0, EIO);
 	fixture_unlink("3031/task/3032/mountinfo");
 	fixture_unlink("3031/task/3032/ns/mnt");
 	assert(snprintf(path, sizeof(path), "%s/3031/task/3032/ns", fixture_proc_root) > 0);
 	assert(rmdir(path) == 0);
 	assert(snprintf(path, sizeof(path), "%s/3031/task/3032", fixture_proc_root) > 0);
-	assert(rmdir(path) == 0);
-	assert(snprintf(path, sizeof(path), "%s/3031/task", fixture_proc_root) > 0);
 	assert(rmdir(path) == 0);
 	fixture_reset();
 	fixture_file("self/mountinfo",

@@ -223,6 +223,7 @@ static int fixture_mount_close_error;
 static int fixture_inventory_error;
 static int fixture_inventory_readdir_error;
 static int fixture_inventory_seen_foreign_pid;
+static DIR *fixture_proc_directory;
 static unsigned int fixture_mount_open_count;
 static unsigned int fixture_mount_read_count;
 
@@ -314,6 +315,7 @@ static void fixture_reset_mount_inventory(void)
     fixture_mount_open_error = fixture_mount_read_error = 0;
     fixture_mount_close_error = fixture_inventory_error = 0;
     fixture_inventory_readdir_error = fixture_inventory_seen_foreign_pid = 0;
+    fixture_proc_directory = NULL;
     fixture_mount_open_count = fixture_mount_read_count = 0U;
     /* Remove a preceding case's no-follow symlink before recreating the file. */
     {
@@ -517,25 +519,31 @@ static int fixture_proc_close(int fd)
 static DIR *fixture_proc_opendir(const char *path)
 {
     char converted[PATH_MAX];
+    DIR *directory;
 
     if (!strcmp(path, "/proc") && fixture_inventory_error) {
         errno = fixture_inventory_error;
         return NULL;
     }
-    return opendir(fixture_proc_path(path, converted));
+    directory = opendir(fixture_proc_path(path, converted));
+    if (directory && !strcmp(path, "/proc"))
+        fixture_proc_directory = directory;
+    return directory;
 }
 
 static struct dirent *fixture_proc_readdir(DIR *directory)
 {
     struct dirent *entry;
 
-    if (fixture_inventory_readdir_error &&
+    if (directory == fixture_proc_directory &&
+        fixture_inventory_readdir_error &&
         fixture_inventory_seen_foreign_pid) {
         errno = fixture_inventory_readdir_error;
         return NULL;
     }
     entry = readdir(directory);
-    if (entry && (!strcmp(entry->d_name, "3031") ||
+    if (entry && directory == fixture_proc_directory &&
+        (!strcmp(entry->d_name, "3031") ||
                   !strcmp(entry->d_name, "4040")))
         fixture_inventory_seen_foreign_pid = 1;
     return entry;
@@ -632,10 +640,24 @@ static void fixture_create_proc_root(void)
     length = snprintf(path, sizeof(path), "%s/self/ns", fixture_proc_root);
     assert(length > 0 && (size_t)length < sizeof(path));
     assert(mkdir(path, 0700) == 0);
+    length = snprintf(path, sizeof(path), "%s/self/task", fixture_proc_root);
+    assert(length > 0 && (size_t)length < sizeof(path));
+    assert(mkdir(path, 0700) == 0);
+    length = snprintf(path, sizeof(path), "%s/self/task/65535",
+                      fixture_proc_root);
+    assert(length > 0 && (size_t)length < sizeof(path));
+    assert(mkdir(path, 0700) == 0);
     length = snprintf(path, sizeof(path), "%s/3031", fixture_proc_root);
     assert(length > 0 && (size_t)length < sizeof(path));
     assert(mkdir(path, 0700) == 0);
     length = snprintf(path, sizeof(path), "%s/3031/ns", fixture_proc_root);
+    assert(length > 0 && (size_t)length < sizeof(path));
+    assert(mkdir(path, 0700) == 0);
+    length = snprintf(path, sizeof(path), "%s/3031/task", fixture_proc_root);
+    assert(length > 0 && (size_t)length < sizeof(path));
+    assert(mkdir(path, 0700) == 0);
+    length = snprintf(path, sizeof(path), "%s/3031/task/3031",
+                      fixture_proc_root);
     assert(length > 0 && (size_t)length < sizeof(path));
     assert(mkdir(path, 0700) == 0);
 }
@@ -1350,7 +1372,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     production_defines = '\n'.join(production_define(source, name) for name in (
         "SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES",
         "SWAPZ_PRIMARY_SWAP_ROWS_MAX",
-        "SWAPZ_PRIMARY_VISIBLE_PIDS_MAX",
+        "SWAPZ_PRIMARY_VISIBLE_TASKS_MAX",
         "SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES",
         "SWAPZ_PRIMARY_STATE_RECORD_MAX",
         "SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT",
@@ -1366,6 +1388,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         "swapz_primary_proc_entry_is_pid",
         "swapz_primary_mountinfo_read_fd",
         "swapz_primary_mountinfo_exit_error",
+        "swapz_primary_read_nonleader_mount_facts",
         "swapz_primary_read_mount_facts",
     ))
     recovery_failure_helper = production_function(

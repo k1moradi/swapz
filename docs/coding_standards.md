@@ -410,12 +410,22 @@ mountpoint row, `/proc/self/root` resolves exactly to `/`, and a second
 namespace identity check still matches. The coordinator's full-root mount
 table then covers that shared namespace. A foreign empty table or a chrooted
 coordinator never uses this exception.
-Normal process exit is not storage ambiguity: an EINVAL, ENOENT or ESRCH
-failure to open a PID mount table may be ignored only when that PID's
-/proc/<pid>/ns/mnt is also absent. A still-present mount namespace, any other
-open failure, or any failure after the mount table was opened refuses
-formatting. These are repeated snapshots, not an atomic freeze against new
-mounts, detached namespace file descriptors or inaccessible mount namespaces.
+Top-level `/proc` enumeration exposes thread-group leaders only. Enumerate
+each visible `/proc/<pid>/task` directory and inspect every non-leader
+`/proc/<pid>/task/<tid>/ns/mnt` plus its task-specific `mountinfo`; mount
+namespace membership can differ between threads. Count visible leaders and
+non-leader tasks against one finite 4,194,304-entry ceiling, and cap the
+combined bytes parsed from all mount tables at 64 MiB. A task namespace may be
+skipped only when its identity is revalidated and matches the coordinator's
+namespace whose complete root table was already validated. Normal process or
+thread exit is not storage ambiguity: an EINVAL, ENOENT or ESRCH failure to
+open a PID or task mount table may be ignored only when the corresponding
+namespace path is also absent. A still-present namespace, unreadable or
+incomplete task directory, any other open failure, or any failure after a
+mount table was opened refuses formatting. After reading a task table,
+revalidate that its namespace identity did not change. These are repeated
+snapshots, not an atomic freeze against new mounts, detached namespace file
+descriptors or inaccessible mount namespaces.
 Mount inventory parsing
 must accept Linux pseudo-filesystem major-zero device identifiers (for example
 `0:20`) without mistaking them for the selected nonzero-major block device.
@@ -428,10 +438,10 @@ required. The root field is filesystem-specific and may be a non-path token
 propagation tags must validate, while unknown optional fields are ignored as
 required by the extensible Linux mountinfo grammar. Known propagation tags may appear at most once and the mount/superblock option
 fields must carry the kernel's ro/rw prefix. Duplicate mount IDs within one
-table are malformed. The visible-PID scan is finite at Linux's 64-bit
-PID_MAX_LIMIT ceiling (4,194,304 tables), avoiding a lower arbitrary process
-cap that could reject a valid large host. An empty table or a structurally
-incomplete unrelated sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
+table are malformed. The combined process/task scan is finite at Linux's
+64-bit PID_MAX_LIMIT ceiling (4,194,304 task entries), avoiding a lower
+arbitrary process cap that could reject a valid large host. An empty table or
+a structurally incomplete unrelated sibling entry is ambiguity, not clearance. Malformed mountinfo rows and
 unverified target identities still fail closed.
 Missing evidence for an existing mount namespace, malformed, unreadable,
 permission-denied, changing or ambiguous evidence fails closed.
