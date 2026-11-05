@@ -296,7 +296,7 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                         "same-owner process references exceed cleanup bound", "bound")
                 try:
                     current = os.stat(os.path.join(process_path, reference_name))
-                except (FileNotFoundError, PermissionError):
+                except FileNotFoundError:
                     continue
                 if (current.st_dev, current.st_ino) in identities:
                     return True
@@ -308,12 +308,12 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                                 "same-owner process references exceed cleanup bound", "bound")
                         try:
                             current = descriptor.stat(follow_symlinks=True)
-                        except (FileNotFoundError, PermissionError):
+                        except FileNotFoundError:
                             continue
                         if (current.st_dev, current.st_ino) in identities:
                             return True
-            except (FileNotFoundError, PermissionError):
-                pass
+            except FileNotFoundError:
+                continue  # Process exited during descriptor inventory.
             # A process can retain mapped file pages after its last fd closes.
             # Match /proc mappings by device/inode, never by private paths.
             try:
@@ -520,11 +520,13 @@ def main() -> int:
         ownership_identity = ("proven" if state.phase in (
             "session-inspection", "session-activity", "session-removal",
             "session-finalization") else "unproved-or-unexamined")
+        safe_next_action = ("verify-arguments-read-only" if category == "invalid-arguments"
+                            else "inspect-retained-evidence-read-only")
         print(f"BLOCKED: tmp-cleanup phase={state.phase} category={category} "
               f"original_errno={original_errno} observed_uncertainty={observed_uncertainty} "
               f"exit_code={exit_code} retained={retained} removed={state.removed} "
               f"session_class=swapz-benchmark ownership_identity={ownership_identity} "
-              "safe_next_action=inspect-retained-evidence-read-only", file=sys.stderr)
+              f"safe_next_action={safe_next_action}", file=sys.stderr)
         return exit_code
     print(f"SWAPZ_TMP_CLEANUP=completed-owned-only removed:{removed} retained:{state.retained} "
           f"reclaimed_logical_bytes:{state.reclaimed_logical_bytes} "

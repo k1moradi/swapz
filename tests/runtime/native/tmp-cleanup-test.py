@@ -148,16 +148,25 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertFalse(owned.exists())
 
     def test_invalid_cli_arguments_report_safe_disposition(self):
-        result = subprocess.run(
+        invocations = (
             [sys.executable, "-B", str(HELPER)],
-            capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stdout, "")
-        self.assertIn(
-            "phase=invocation category=invalid-arguments original_errno=none "
-            "observed_uncertainty=invalid-input exit_code=2", result.stderr)
-        self.assertIn("retained=unexamined removed=0", result.stderr)
-        self.assertIn("safe_next_action=verify-arguments-read-only", result.stderr)
+            [sys.executable, "-B", str(HELPER), str(self.root), "not-a-uid", "700"],
+        )
+        for arguments in invocations:
+            with self.subTest(arguments=arguments[3:]):
+                result = subprocess.run(
+                    arguments, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(
+                    "phase=invocation category=invalid-arguments original_errno=none",
+                    result.stderr)
+                self.assertIn("observed_uncertainty=", result.stderr)
+                self.assertIn("exit_code=2", result.stderr)
+                self.assertIn("retained=", result.stderr)
+                self.assertIn("removed=0", result.stderr)
+                self.assertIn("safe_next_action=verify-arguments-read-only", result.stderr)
+                self.assertNotIn(str(self.root), result.stderr)
 
     def test_symlink_inside_owned_session_blocks_before_deletion(self):
         owned = self.session("Abcd1234")
@@ -366,7 +375,8 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
             def stat(*, follow_symlinks=False):
                 del follow_symlinks
                 raise PermissionError(
-                    errno.EACCES, "synthetic process ownership proof failure")
+                    errno.EACCES, "synthetic process ownership proof failure",
+                    "/private/runner-proc")
 
         class ProcessInventory:
             def __enter__(self):
@@ -387,9 +397,30 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
                                    side_effect=scoped_scandir):
                 with self.assertRaises(PermissionError) as caught:
                     cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700, state)
+                with mock.patch.object(
+                        sys, "argv", [str(HELPER), str(self.root),
+                                     str(self.owner_uid), "700"]), \
+                     mock.patch.object(
+                        sys, "stderr", new_callable=io.StringIO) as diagnostics, \
+                     mock.patch.object(
+                        sys, "stdout", new_callable=io.StringIO) as output:
+                    self.assertEqual(cleanup_module.main(), 2)
             self.assertEqual(caught.exception.errno, errno.EACCES)
             self.assertEqual(state.phase, "session-activity")
             self.assertFalse(state.partial)
+            self.assertEqual(output.getvalue(), "")
+            self.assertIn(
+                "phase=session-activity category=filesystem-error "
+                "original_errno=EACCES(13) "
+                "observed_uncertainty=same-owner-process-activity-unproved",
+                diagnostics.getvalue())
+            self.assertIn("retained=unexamined-or-unproved removed=0",
+                          diagnostics.getvalue())
+            self.assertIn("session_class=swapz-benchmark ownership_identity=proven",
+                          diagnostics.getvalue())
+            self.assertIn("safe_next_action=inspect-retained-evidence-read-only",
+                          diagnostics.getvalue())
+            self.assertNotIn("/private", diagnostics.getvalue())
             self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
         finally:
             if child.poll() is None:
@@ -416,22 +447,36 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.visible_process_ids.add(child.pid)
         original_stat = cleanup_module.os.stat
 
-        def deny_proc_directory_links(path, *args, **kwargs):
-            if (isinstance(path, str) and path.startswith("/proc/")
-                    and path.endswith(("/cwd", "/root"))):
-                raise PermissionError(errno.EACCES, "synthetic protected proc link")
-            return original_stat(path, *args, **kwargs)
-
         try:
             self.assertEqual(child.stdout.readline().strip(), "ready")
-            state = cleanup_module.CleanupState()
-            with mock.patch.object(cleanup_module.os, "stat",
-                                   side_effect=deny_proc_directory_links):
-                self.assertEqual(
-                    cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700, state),
-                    0)
-            self.assertEqual(state.removed, 0)
-            self.assertEqual(state.retained_active, 1)
+            for reference_name in ("cwd", "root"):
+                with self.subTest(reference_name=reference_name):
+                    def deny_proc_directory_link(path, *args, **kwargs):
+                        if path == f"/proc/{child.pid}/{reference_name}":
+                            raise PermissionError(
+                                errno.EACCES, "synthetic protected proc link",
+                                "/private/proc-link")
+                        return original_stat(path, *args, **kwargs)
+
+                    state = cleanup_module.CleanupState()
+                    with mock.patch.object(
+                            cleanup_module.os, "stat",
+                            side_effect=deny_proc_directory_link):
+                        with self.assertRaises(PermissionError) as caught:
+                            cleanup_module.cleanup(
+                                str(self.root), self.owner_uid, 0o700, state)
+                    self.assertEqual(caught.exception.errno, errno.EACCES)
+                    self.assertEqual(state.phase, "session-activity")
+                    self.assertFalse(state.partial)
+                    self.assertEqual(
+                        (owned / "fixture.bin").read_bytes(), b"owned payload")
+
+            # Once activity evidence is readable, the live descriptor itself
+            # still retains the session rather than permitting deletion.
+            result = self.run_cleanup()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("removed:0 retained:1", result.stdout)
+            self.assertIn("retained_active:1", result.stdout)
             self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
         finally:
             if child.poll() is None:
@@ -439,6 +484,83 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
                 child.stdin.flush()
             child.wait(timeout=5)
             self.visible_process_ids.discard(child.pid)
+
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:1 retained:0", result.stdout)
+        self.assertFalse(owned.exists())
+
+    def test_inaccessible_fd_evidence_blocks_live_holder_cleanup(self):
+        owned = self.session("Abcd1234")
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c",
+             "import os, sys\n"
+             "descriptor = os.open(sys.argv[1], os.O_RDONLY)\n"
+             "print('ready', flush=True)\n"
+             "sys.stdin.buffer.read(1)\n"
+             "os.close(descriptor)\n",
+             str(owned / "fixture.bin")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.visible_process_ids.add(child.pid)
+        original_scandir = cleanup_module.os.scandir
+
+        class InaccessibleDescriptor:
+            @staticmethod
+            def stat(*, follow_symlinks=True):
+                del follow_symlinks
+                raise PermissionError(
+                    errno.EACCES, "synthetic protected fd entry",
+                    "/private/proc-fd-entry")
+
+        class DescriptorInventory:
+            def __enter__(self):
+                return iter((InaccessibleDescriptor(),))
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "ready")
+            for denial_kind in ("directory", "entry"):
+                with self.subTest(denial_kind=denial_kind):
+                    def deny_fd_evidence(path):
+                        if path == f"/proc/{child.pid}/fd":
+                            if denial_kind == "directory":
+                                raise PermissionError(
+                                    errno.EACCES,
+                                    "synthetic protected fd inventory",
+                                    "/private/proc-fd")
+                            return DescriptorInventory()
+                        return original_scandir(path)
+
+                    state = cleanup_module.CleanupState()
+                    with mock.patch.object(
+                            cleanup_module.os, "scandir",
+                            side_effect=deny_fd_evidence):
+                        with self.assertRaises(PermissionError) as caught:
+                            cleanup_module.cleanup(
+                                str(self.root), self.owner_uid, 0o700, state)
+                    self.assertEqual(caught.exception.errno, errno.EACCES)
+                    self.assertEqual(state.phase, "session-activity")
+                    self.assertFalse(state.partial)
+                    self.assertEqual(
+                        (owned / "fixture.bin").read_bytes(), b"owned payload")
+
+            result = self.run_cleanup()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("removed:0 retained:1", result.stdout)
+            self.assertIn("retained_active:1", result.stdout)
+        finally:
+            if child.poll() is None:
+                child.stdin.write("x")
+                child.stdin.flush()
+            child.wait(timeout=5)
+            self.visible_process_ids.discard(child.pid)
+
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:1 retained:0", result.stdout)
+        self.assertFalse(owned.exists())
 
     def test_fd_closed_but_live_mmap_retains_completed_session(self):
         owned = self.session("Abcd1234")

@@ -4115,20 +4115,23 @@ the process has closed its file descriptor.
 Unreadable or malformed mapping inventory for a confirmed same-owner process
 blocks cleanup; original I/O errno must remain available. Failure to enumerate
 /proc itself or to prove the owner of an enumerated process is uncertainty and
-blocks cleanup. Only a process that disappears while ownership is being checked
-is skipped as exited. A process that exits during the scan or exposes
-an individually permission-restricted proc link/descriptor is skipped rather
-than making unrelated same-UID host state a cleanup prerequisite; such a process
-does not provide ownership evidence for this session. Inaccessible mappings
-cannot prove the absence of a live file holder and require read-only review
-before cleanup is retried. Native rootless tests independent of procfs visibility
+blocks cleanup. Only disappearance evidence is skippable: a vanished process,
+closed descriptor, or process that exits during the scan may produce
+FileNotFoundError and be treated as no longer observable. Permission denial on
+a confirmed same-owner process's cwd, root, descriptor inventory, individual
+descriptor, or mappings is activity uncertainty and blocks cleanup. Do not
+treat EACCES as process exit or as proof that the process is unrelated; until
+those references are readable enough to exclude the inspected session
+identities, deletion authority is unproved and the safe action is read-only
+review. Native rootless tests independent of procfs visibility
 must substitute a deterministic, explicitly named process inventory only within
 the test interpreter, never through the production cleaner's environment or
 command-line. Register each real live FD or mmap fixture holder so its actual
 procfs cwd/root/fd/maps evidence remains subject to the normal activity check.
-Retain separate permission-denial controls for an enumerated live holder's maps
-and for unknown process ownership, verifying the original EACCES, phase,
-disposition and read-only remedy. Synthetic cwd/root inode observations may
+Retain separate permission-denial controls for an enumerated live holder's
+cwd/root, descriptor inventory/entries, and maps, plus unknown process
+ownership, verifying the original EACCES, phase, disposition and read-only
+remedy. Synthetic cwd/root inode observations may
 cover unprivileged fixtures, but production must retain the real cwd/root scan.
 Never classify an arbitrary protected runner process as exited or treat a
 failed relevant mapping read as proof of inactivity. Diagnostic refusal must
