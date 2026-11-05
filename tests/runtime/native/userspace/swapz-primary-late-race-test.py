@@ -133,7 +133,8 @@ enum fixture_scenario {
     FIXTURE_REMOTE_EACCES, FIXTURE_REMOTE_EIO, FIXTURE_REMOTE_CLOSE_EIO,
     FIXTURE_MALFORMED,
     FIXTURE_EMPTY, FIXTURE_LOCAL_MALFORMED, FIXTURE_PARENT_SUBSTITUTED,
-    FIXTURE_ROOT_SUBSTITUTED, FIXTURE_ROOT_ON_SELECTED_PARENT, FIXTURE_HOLDER_LATE,
+    FIXTURE_ROOT_SUBSTITUTED, FIXTURE_ROOT_ON_SELECTED_PARENT,
+    FIXTURE_ROOT_SHARED_STABLE, FIXTURE_HOLDER_LATE,
     FIXTURE_SWAP_INVENTORY_MALFORMED, FIXTURE_SWAP_STAT_EACCES,
     FIXTURE_DM_INITIAL, FIXTURE_SWAPS_INITIAL, FIXTURE_ROOT_INITIAL,
     FIXTURE_HOLDER_INITIAL, FIXTURE_UNRELATED_SWAPFILE,
@@ -159,7 +160,8 @@ static const char *const scenario_names[] = {
     "remote EACCES late", "remote EIO late", "remote close EIO late",
     "malformed remote late",
     "empty remote late", "malformed self late", "parent substitution late",
-    "root parent substitution late", "root on target parent late", "holder appears late",
+    "root parent substitution late", "root on target parent late",
+    "root stably shares target parent", "holder appears late",
     "malformed swap inventory late", "swapfile stat EACCES late",
     "DM initially active", "selected swap initially active",
     "root initially on selected parent", "holder initially active",
@@ -666,6 +668,7 @@ static int fixture_source_chain(const char *sysfs_root, dev_t device,
         *parent = late && scenario == FIXTURE_ROOT_SUBSTITUTED
             ? makedev(259U, 2U)
             : (scenario == FIXTURE_ROOT_INITIAL ||
+               scenario == FIXTURE_ROOT_SHARED_STABLE ||
                (late && scenario == FIXTURE_ROOT_ON_SELECTED_PARENT))
                 ? makedev(8U, 0U) : makedev(259U, 0U);
         return 1;
@@ -972,6 +975,35 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define swapz_primary_swap_device_active(device) fixture_observed_swap_device_active(device)
 #define close(fd) 0
 
+/*
+ * This fixture isolates the late inventory race. Exact shared-root scope
+ * policy is covered by swapz-primary-policy; here the fixture models a stable
+ * positive scope if the synthetic root happens to share the target parent.
+ */
+static int swapz_primary_shared_root_scope_record_live(
+    const struct swapz_primary_target *target, dev_t root_device,
+    dev_t target_parent, dev_t root_parent, dev_t recovery_parent,
+    int target_fd, char scope_sha256[65])
+{
+    (void)target;
+    (void)root_device;
+    (void)target_parent;
+    (void)root_parent;
+    (void)recovery_parent;
+    (void)target_fd;
+    if (!scope_sha256) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (scenario != FIXTURE_ROOT_SHARED_STABLE) {
+        errno = EPERM;
+        return -1;
+    }
+    memset(scope_sha256, 'a', 64U);
+    scope_sha256[64] = '\0';
+    return 0;
+}
+
 /* The actual production coordinator function is inserted verbatim. */
 @@START_FUNCTION@@
 #undef close
@@ -989,7 +1021,7 @@ static int check_case(enum fixture_scenario candidate)
     int expected_mount_conflict;
     int expected_late_mount_conflict;
     char diagnostic[512] = {0};
-    char expected_diagnostic[128];
+    char expected_diagnostic[512];
     size_t diagnostic_length;
     FILE *diagnostic_stream;
     unsigned int writes;
@@ -1044,6 +1076,7 @@ static int check_case(enum fixture_scenario candidate)
         expected_mount_conflict &&
         candidate != FIXTURE_FOREIGN_SELECTED_INITIAL;
     expected_safe = candidate == FIXTURE_CLEAN ||
+        candidate == FIXTURE_ROOT_SHARED_STABLE ||
         candidate == FIXTURE_UNRELATED_SIBLING ||
         candidate == FIXTURE_UNRELATED_SWAPFILE ||
         candidate == FIXTURE_WRONG_MOUNT_DEVICE ||
@@ -1163,18 +1196,60 @@ static int check_case(enum fixture_scenario candidate)
         }
     } else {
         const char *phase = late ? "header-write" : "admission";
-        int expected_length = snprintf(expected_diagnostic,
+        size_t expected_diagnostic_length;
+        int expected_length;
+
+        switch (candidate) {
+        case FIXTURE_FOREIGN_SELECTED_INITIAL:
+            phase = "cross-namespace-mount-inventory";
+            break;
+        case FIXTURE_ROOT_INITIAL:
+            phase = "shared-root-parent-authorization-record";
+            break;
+        case FIXTURE_DM_INITIAL:
+            phase = "module-mapper-inventory";
+            break;
+        case FIXTURE_SWAPS_INITIAL:
+            phase = "target-swap-inventory";
+            break;
+        case FIXTURE_HOLDER_INITIAL:
+        case FIXTURE_WRONG_TARGET_OPEN:
+        case FIXTURE_STALE_PARTUUID:
+            phase = "target-exclusive-open";
+            break;
+        default:
+            break;
+        }
+        expected_length = snprintf(expected_diagnostic,
             sizeof(expected_diagnostic),
             "PRIMARY_START=FAILED phase=%s errno=%d error=%s\n",
             phase, expected_error, strerror(expected_error));
 
         assert(expected_length > 0 &&
                (size_t)expected_length < sizeof(expected_diagnostic));
+        expected_diagnostic_length = (size_t)expected_length;
+        if (candidate == FIXTURE_ROOT_INITIAL) {
+            int detail_length = snprintf(
+                expected_diagnostic + expected_diagnostic_length,
+                sizeof(expected_diagnostic) - expected_diagnostic_length,
+                "PRIMARY_START=ADMISSION_DETAIL phase=%s expected=%s "
+                "observed=%s errno=%d retained_state=READY "
+                "target_unchanged=true\n",
+                phase, "exact-host-root-target-parent-layout-record",
+                "missing-mismatched-or-unverifiable", expected_error);
+
+            assert(detail_length > 0 &&
+                   (size_t)detail_length <
+                       sizeof(expected_diagnostic) -
+                           expected_diagnostic_length);
+            expected_diagnostic_length += (size_t)detail_length;
+        }
         if (result == 0 || result_errno != expected_error ||
             diagnostic_length == 0U ||
-            strcmp(diagnostic, expected_diagnostic) != 0 ||
+            diagnostic_length != expected_diagnostic_length ||
+            memcmp(diagnostic, expected_diagnostic,
+                   expected_diagnostic_length) != 0 ||
             diagnostic[diagnostic_length - 1U] != '\n' ||
-            memchr(diagnostic, '\n', diagnostic_length - 1U) != NULL ||
             strstr(diagnostic, "run_id") ||
             strstr(diagnostic, "0123456789abcdef") ||
             strstr(diagnostic, "secret") || strstr(diagnostic, "token") ||

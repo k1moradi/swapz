@@ -11391,6 +11391,7 @@ static int swapz_primary_start_prepared(void)
 			goto out;
 		}
 	}
+	failure_phase = "module-mapper-inventory";
 	if (swapz_primary_read_module_mapper_inventory(
 		    &module_loaded, &mapper_present) < 0 ||
 	    module_loaded || mapper_present) {
@@ -11401,12 +11402,14 @@ static int swapz_primary_start_prepared(void)
 		int parent_swap_active =
 			swapz_primary_swap_device_active(target_parent);
 
+		failure_phase = "root-parent-swap-inventory";
 		if (parent_swap_active != 0) {
 			if (parent_swap_active > 0)
 				errno = EBUSY;
 			goto out;
 		}
 	}
+	failure_phase = "target-swap-inventory";
 	target_swap_active =
 		swapz_primary_swap_device_active(SWAPZ_PRIMARY_TARGET_DEVICE);
 	if (target_swap_active != 0) {
@@ -11420,6 +11423,7 @@ static int swapz_primary_start_prepared(void)
 	    swapz_primary_header_build(
 		    manifest.run_id, manifest.target.device_bytes, swapz_header) < 0)
 		goto out;
+	failure_phase = "target-exclusive-open";
 	target_fd = swapz_primary_target_open_exclusive(&manifest);
 	if (target_fd < 0 ||
 	    swapz_primary_exact_read(

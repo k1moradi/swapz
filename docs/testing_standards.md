@@ -263,6 +263,9 @@ overlapping or out-of-parent partitions; and target/recovery-parent equality.
 A positive exact record fixture may test the policy predicate only. It does
 not create a live authorization, waive source/artifact qualification, or
 permit physical mutation or production activation.
+Source-extracted lifecycle fixtures focused on a separate race boundary may
+stub only the shared-root predicate to a stable positive result; their result
+must not be counted as shared-root authorization evidence.
 
 Rootless selector qualification must reproduce replacement after the first
 lstat and after opening the descriptor, symlink and hard-link refusal, file
