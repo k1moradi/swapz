@@ -338,6 +338,7 @@ struct ordered_fixture {
 	bool data_submitted;
 	bool data_done;
 	bool upper_done;
+	bool retry_upper_pending;
 	int data_errno;
 	int original_lower_errno;
 	int terminal_errno;
@@ -353,13 +354,17 @@ static int ordered_check(const struct ordered_fixture *fixture,
 		!fixture->scenario->data_errno ? 1U : 0U;
 	const unsigned int observed_completed_blocks =
 		fixture->data_done && !fixture->data_errno ? 1U : 0U;
+	const unsigned int outstanding_lower_owners =
+		fixture->data_submissions - fixture->data_completions;
+	const unsigned int outstanding_upper_owners =
+		(fixture->upper_done ? 0U : 1U) +
+		(fixture->retry_upper_pending ? 1U : 0U);
 	const char *generation_category = fixture->durable_publications ?
 		"published-new" : "preserved-old";
-	const char *ownership_category =
-		fixture->data_submissions != fixture->data_completions ?
-		"lower-owned" : !fixture->upper_done ? "upper-owned" : "finalized";
+	const char *ownership_category = outstanding_lower_owners ?
+		"lower-owned" : outstanding_upper_owners ? "upper-owned" : "finalized";
 	const char *safe_disposition = fixture->terminal_errno ?
-		"reject-later-write" : fixture->upper_done ?
+		"fail-later-write" : fixture->upper_done ?
 		"complete-once" : "retain-owner";
 
 	if (valid)
@@ -378,9 +383,8 @@ static int ordered_check(const struct ordered_fixture *fixture,
 		fixture->scenario->expected_errno, fixture->upper_done ?
 		fixture->upper_errno : -EAGAIN, expected, actual,
 		fixture->successful_acks, fixture->durable_publications,
-		fixture->generation,
-		fixture->data_submissions - fixture->data_completions,
-		fixture->upper_done ? 0U : 1U);
+		fixture->generation, outstanding_lower_owners,
+		outstanding_upper_owners);
 	return 1;
 }
 
@@ -492,14 +496,28 @@ static void ordered_data_callback(struct ordered_fixture *fixture, int error)
 	fixture->data_completions++;
 }
 
+static int ordered_admit_retry_after_failure(struct ordered_fixture *fixture)
+{
+	/*
+	 * Production ->map can still queue a BIO while accepting remains true.
+	 * Keep that later upper owner separate from the older lower run.
+	 */
+	if (!fixture->terminal_errno || fixture->retry_upper_pending)
+		return -EINVAL;
+	fixture->retry_upper_pending = true;
+	return 0;
+}
+
 static int ordered_retry_after_failure(struct ordered_fixture *fixture)
 {
 	/*
-	 * This is a fresh upper BIO completed from the latched terminal error.
-	 * It is not another completion of the already-owned lower data BIO.
+	 * Complete a later upper BIO from the latched terminal error. If it was
+	 * admitted while an older lower run remained owned, ordered processing
+	 * reaches it only after that predecessor has finalized.
 	 */
 	if (!fixture->terminal_errno)
 		return -EINVAL;
+	fixture->retry_upper_pending = false;
 	fixture->retry_upper_completions++;
 	return fixture->terminal_errno;
 }
@@ -880,15 +898,15 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 				ordered_data_callback(&fixture, data_error);
 			}
 			/*
-			 * Fresh upper admission may race the ordered drain after the
-			 * callback elects terminal failure. It must reject the new
-			 * WRITE without consuming or replacing the pending lower owner.
+			 * ->map may queue a later upper WRITE after terminal failure is
+			 * latched while the older run still awaits ordered finalization.
+			 * Admission must not consume that owner or submit more lower I/O.
 			 */
-			error = ordered_retry_after_failure(&fixture);
-			ORDERED_CHECK(&fixture, "callback-latch-new-upper-before-drain",
-				error == expected_terminal &&
-				fixture.terminal_errno == expected_terminal &&
-				fixture.retry_upper_completions == 1 &&
+			error = ordered_admit_retry_after_failure(&fixture);
+			ORDERED_CHECK(&fixture, "callback-latch-queues-later-upper",
+				error == 0 && fixture.terminal_errno == expected_terminal &&
+				fixture.retry_upper_pending &&
+				!fixture.retry_upper_completions &&
 				fixture.data_submissions == 1 &&
 				fixture.data_completions == 1 &&
 				!fixture.upper_done && !fixture.upper_completions &&
@@ -898,7 +916,7 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 				!fixture.durable_publications &&
 				fixture.generation == 7 &&
 				fixture.authoritative_extent == 0x91U,
-				expected_terminal, error);
+				0, error);
 			error = ordered_advance(&fixture);
 			ORDERED_CHECK(&fixture, "terminal-final-owner",
 				error == expected_ack &&
@@ -908,6 +926,8 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 				fixture.data_submissions == 1 &&
 				fixture.data_completions == 1 &&
 				fixture.upper_completions == 1 &&
+				fixture.retry_upper_pending &&
+				!fixture.retry_upper_completions &&
 				!fixture.flush_meter.attempts &&
 				!fixture.lower.called &&
 				!fixture.successful_acks &&
@@ -920,15 +940,24 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 				error == expected_ack &&
 				fixture.upper_completions == 1 &&
 				fixture.data_completions == 1 &&
+				fixture.retry_upper_pending &&
+				!fixture.retry_upper_completions &&
 				!fixture.flush_meter.attempts,
 				expected_ack, error);
 			error = ordered_retry_after_failure(&fixture);
-			ORDERED_CHECK(&fixture, "fresh-upper-after-terminal",
+			ORDERED_CHECK(&fixture, "queued-upper-fails-after-owner-drain",
 				error == expected_terminal &&
-				fixture.retry_upper_completions == 2 &&
+				!fixture.retry_upper_pending &&
+				fixture.retry_upper_completions == 1 &&
 				fixture.upper_completions == 1 &&
+				fixture.data_submissions == 1 &&
+				fixture.data_completions == 1 &&
 				!fixture.flush_meter.attempts &&
-				!fixture.lower.called,
+				!fixture.lower.called &&
+				!fixture.successful_acks &&
+				!fixture.durable_publications &&
+				fixture.generation == 7 &&
+				fixture.authoritative_extent == 0x91U,
 				expected_terminal, error);
 		}
 	}

@@ -3878,15 +3878,18 @@ A submitted WRITE run is immutable until definitive lower completion and ordered
 publication. Completion callbacks must never observe reused packed bytes,
 transaction snapshots, batch hashes, upper-BIO pointers or ordering state.
 
-The rootless `flush-ordering.c` callback/drain matrix must reject a fresh upper
-WRITE with the first latched terminal errno after the lower callback has notified
-failure but before the outstanding lower run's ordered finalization. That admission
-must not create another lower submission, successful upper completion, or mapping
-generation; the original authoritative extent must remain intact. Failure-only
-diagnostics distinguish submission, callback and drain phases, callback-observed
-versus expected completed blocks, first error, generation, owner and disposition.
-This finite native schedule is not a loaded proof that the dm-io callback's
-context stays valid through its final queue-lock unlock during concurrent drain.
+The rootless `flush-ordering.c` callback/drain matrix must model the current
+serialized target order when a fresh upper WRITE arrives after the first terminal
+errno is latched but before an older lower run is finalized. While `accepting`
+remains true, `->map` may queue that BIO; queuing must not consume or replace the
+older lower owner, submit another lower WRITE, acknowledge success, or change the
+mapping generation or authoritative extent. The ordered worker finalizes the
+older run first, then the queued upper WRITE completes from the first latched
+terminal errno without publication. Failure-only diagnostics distinguish
+submission, callback and drain phases, callback-observed versus expected completed
+blocks, first error, generation, owner and disposition. This finite native schedule
+is not a loaded proof that the dm-io callback's context stays valid through its
+final queue-lock unlock during concurrent drain.
 
 The active collector and the one streaming run are separate ownership domains.
 Collection may perform zero detection, compression and payload CRC while the
