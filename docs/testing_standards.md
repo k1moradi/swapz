@@ -65,15 +65,23 @@ The post-COMPLETE owner-release durability boundary is an additional
 rootless diagnostic (not part of the 18 loaded interruption phases or the 13
 negative loaded-recovery cases). A private regular-file fixture compiles the
 actual production owner-release and recoverability C functions with the
-existing directory-fsync fault shim. If the directory fsync fails after
-unlinking the active-owner marker, the original EIO and owner-release failure
-must remain visible; the earlier durable COMPLETE record is not permission
-to report successful teardown. Since the current recovery admission refuses
-COMPLETE, fresh processes must report BLOCKED without touching a mapper or
-swap, whether the unconfirmed unlink persisted or the marker reappears.
-Repeat recovery must preserve those bytes and the blocked disposition. This
-exposes an owner-release retry/progress gap, not evidence that loaded swap or
-kernel ownership was safely cleaned up.
+existing directory-fsync fault shim. Executable-code guards additionally
+require both production stop and recovery coordinators to persist COMPLETE
+before owner release, attribute that call to the owner-release phase, branch
+to failure when it returns an error, and preserve the original errno. If the
+directory fsync fails after unlinking the active-owner marker, the original
+EIO and owner-release failure must remain visible; the earlier durable COMPLETE
+record is not permission to report successful teardown.
+
+The private fixture does not inspect Device Mapper or the kernel swap inventory,
+so its diagnostics must label mapper and swap state UNOBSERVED rather than
+claiming absent or inactive kernel state. Source ordering separately requires
+the current COMPLETE recovery rejection to occur before mapper/swap cleanup
+calls. Fresh fixture processes must remain BLOCKED with byte-exact COMPLETE
+state whether the unconfirmed unlink is modeled as persisted or the prior
+marker is modeled as present, and repeat attempts must preserve that same
+private state. This exposes an owner-release retry/progress gap; it is not
+loaded evidence and does not prove kernel mapper/swap ownership or teardown.
 
 ### Primary cross-namespace mount admission evidence (issue #94)
 

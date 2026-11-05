@@ -1858,6 +1858,57 @@ int main(int argc, char **argv)
             raise AssertionError("owner-release C fixture failed to compile:\n" +
                                  compiled.stderr)
 
+    def test_stop_and_recover_propagate_owner_release_failure(self):
+        source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        for symbol in ("swapz_primary_stop_active", "swapz_primary_recover"):
+            with self.subTest(symbol=symbol):
+                executable = c_function_body(source, symbol)
+                raw = c_function_body(source, symbol, code_only=False)
+                complete = executable.index("complete_persisted = 1;")
+                release = executable.index(
+                    "swapz_primary_release_partition_owner_at(", complete)
+                success = executable.index("result = 0;", release)
+                failure_exit = executable.index("out:", success)
+                saved_errno = executable.index(
+                    "saved_errno = errno ? errno : EIO;", failure_exit)
+
+                # COMPLETE is durable before owner release today. If release
+                # fails, the coordinator must not convert that failure into
+                # success or overwrite its original errno.
+                self.assertLess(complete, release)
+                self.assertLess(release, success)
+                phase = raw.rfind(
+                    'failure_phase = "owner-release";', complete, release)
+                self.assertGreaterEqual(
+                    phase, 0, f"{symbol} lost owner-release phase attribution")
+                checked_release = executable[release:success]
+                self.assertRegex(
+                    checked_release,
+                    r"swapz_primary_release_partition_owner_at\("
+                    r"[^;]*\)\s*<\s*0\s*\)\s*goto\s+out\s*;",
+                    f"{symbol} can ignore owner-release failure")
+                self.assertIn(
+                    "&& !complete_persisted", executable[failure_exit:],
+                    f"{symbol} no longer retains COMPLETE after release failure")
+                self.assertRegex(
+                    executable[saved_errno:],
+                    r"if\s*\(\s*result\s*<\s*0\s*\)\s*"
+                    r"errno\s*=\s*saved_errno\s*;",
+                    f"{symbol} does not restore the original failure errno")
+
+                # COMPLETE recovery admission must reject before any swap or
+                # mapper cleanup. This is source-order evidence only; the
+                # private fixture below does not observe live kernel state.
+                if symbol == "swapz_primary_recover":
+                    admission = executable.index(
+                        "!swapz_primary_state_recoverable(&state)")
+                    deactivate = executable.index(
+                        "swapz_primary_deactivate_mapper_swap(")
+                    remove = executable.index(
+                        "swapz_primary_dm_remove_mapper(")
+                    self.assertLess(admission, deactivate)
+                    self.assertLess(admission, remove)
+
     def test_failed_owner_release_fsync_stays_blocked_across_fresh_recovery(self):
         with tempfile.TemporaryDirectory(
                 prefix="swapz-primary-release-state-") as private_directory:
@@ -1896,9 +1947,10 @@ int main(int argc, char **argv)
             failure = invoke("release", inject_fsync_failure=True)
             diagnostic = (
                 "phase=owner-release original_errno=EIO(5) "
-                "durable=COMPLETE mapper=absent swap=inactive "
-                "expected=unconfirmed-owner-release/blocked "
-                "observed=" + failure.stdout.strip() +
+                "durable=COMPLETE expected_release=FAILED "
+                "expected_mapper=UNOBSERVED observed_mapper=UNOBSERVED "
+                "expected_swap=UNOBSERVED observed_swap=UNOBSERVED "
+                "observed_release=" + failure.stdout.strip() +
                 " recovery_disposition=BLOCKED"
             )
             self.assertEqual(failure.returncode, 2, diagnostic)
@@ -1922,10 +1974,11 @@ int main(int argc, char **argv)
                         recovery = invoke("recover")
                         recovery_diagnostic = (
                             "phase=recovery-admission original_errno=EPERM(1) "
-                            "durable=COMPLETE expected=BLOCKED "
-                            f"marker_persisted={marker_persisted} "
-                            "mapper=absent swap=inactive "
-                            "observed=" + recovery.stdout.strip()
+                            "durable=COMPLETE expected_recovery=BLOCKED "
+                            f"observed_owner_marker={'present' if marker_persisted else 'absent'} "
+                            "expected_mapper=UNOBSERVED observed_mapper=UNOBSERVED "
+                            "expected_swap=UNOBSERVED observed_swap=UNOBSERVED "
+                            "observed_recovery=" + recovery.stdout.strip()
                         )
                         self.assertEqual(recovery.returncode, 2,
                                          recovery_diagnostic)
