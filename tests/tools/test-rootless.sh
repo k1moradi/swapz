@@ -293,6 +293,9 @@ python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v
 rootless_phase='tests/runtime/native/primary-real-swap-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/primary-real-swap-test.py -v
+rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'
+rootless_phase_started_seconds=$SECONDS
+python3 -B tests/runtime/native/primary-real-swap-oracle-terminal-test.py -v
 rootless_phase='tests/runtime/benchmark/io-replay-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/benchmark/io-replay-test.py -v

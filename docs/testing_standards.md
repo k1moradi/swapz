@@ -256,6 +256,15 @@ BLOCKED because traffic attribution or mapper ownership is ambiguous.
 The byte oracle expands the run/worker/round seed into position-distinct 4 KiB
 pages; swap-in checks every byte, counts all corrupt bytes and caps only the
 diagnostic samples. The cgroup's OOM event keys must be present and parseable.
+An `ORACLE_VERIFIED` record is terminal only after complete byte readback
+and successful anonymous-mapping close. Short reads, interruption and failed
+unmapping must not produce a complete-looking record. Failure-only diagnostics
+identify the first failure phase, fully compared versus allocated pages/bytes,
+expected-zero versus observed byte mismatches, original errno when present,
+and whether cleanup finished. Diagnostic samples may contain page/byte offsets
+but not raw expected/observed values or seeds. Byte-exact comparison alone is
+not evidence of actual target swap-out/in without the independent cgroup,
+mapper, lower-device and kernel swap-traffic observations required above.
 OOM counters must remain unchanged, including at the final post-release sample;
 counter regressions cannot qualify as zero OOM events.
 OOM, cgroup swap and PSI telemetry begin before FILL; guard checks enforce the

@@ -69,7 +69,8 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
     if not MIN_MIB <= memory_mib <= MAX_MIB:
         print(f"FAIL: oracle memory must be {MIN_MIB}..{MAX_MIB} MiB", file=sys.stderr)
         return 2
-    if memory_mib * MIB % PAGE_BYTES:
+    allocation_bytes = memory_mib * MIB
+    if allocation_bytes % PAGE_BYTES:
         print("FAIL: oracle memory is not page aligned", file=sys.stderr)
         return 2
     try:
@@ -83,11 +84,11 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2
 
-    pages = memory_mib * MIB // PAGE_BYTES
+    pages = allocation_bytes // PAGE_BYTES
     _emit("ORACLE_WAITING=", {
         "pid": os.getpid(),
         "pages": pages,
-        "bytes": pages * PAGE_BYTES,
+        "bytes": allocation_bytes,
         "seed": seed_hex,
     })
     try:
@@ -95,7 +96,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
             raise RuntimeError("expected FILL command")
         allocation = mmap.mmap(
             -1,
-            pages * PAGE_BYTES,
+            allocation_bytes,
             flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
             prot=mmap.PROT_READ | mmap.PROT_WRITE,
         )
@@ -106,6 +107,12 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
     expected_digest = hashlib.blake2b(digest_size=32)
     fill_started = time.monotonic()
     result = 1
+    phase = "fill"
+    verified_pages = 0
+    byte_mismatches = 0
+    verification_record = None
+    original_error = None
+    cleanup_error = None
     try:
         for page_index in range(pages):
             expected = _page_pattern_from_seed(seed, page_index)
@@ -114,17 +121,18 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
             expected_digest.update(expected)
         _emit("ORACLE_FILLED=", {
             "pages": pages,
-            "bytes": pages * PAGE_BYTES,
+            "bytes": allocation_bytes,
             "digest": expected_digest.hexdigest(),
             "elapsed_seconds": round(time.monotonic() - fill_started, 6),
         })
 
+        phase = "wait_verify"
         if _read_command() != "VERIFY":
             raise RuntimeError("expected VERIFY command")
+        phase = "verify"
         verify_started = time.monotonic()
         observed_digest = hashlib.blake2b(digest_size=32)
         mismatches = []
-        byte_mismatches = 0
         for page_index in range(pages):
             expected = _page_pattern_from_seed(seed, page_index)
             offset = page_index * PAGE_BYTES
@@ -141,40 +149,70 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
                 ]
                 byte_mismatches += len(differences)
                 if len(mismatches) < 16:
-                    first_difference = differences[0]
+                    # Only offsets enter evidence; never disclose page contents.
                     mismatches.append({
                         "page": page_index,
-                        "byte": first_difference,
-                        "observed": observed[first_difference],
-                        "expected": expected[first_difference],
+                        "byte": differences[0],
                     })
             # Store the expected value after reading the entire page: this
             # forces a writable fault after swap-in without hiding corruption.
             allocation[offset] = expected[0]
+            verified_pages += 1
         actual_digest = observed_digest.hexdigest()
         expected_hex = expected_digest.hexdigest()
-        _emit("ORACLE_VERIFIED=", {
-            "verified_pages": pages,
-            "verified_bytes": pages * PAGE_BYTES,
+        verification_record = {
+            "verified_pages": verified_pages,
+            "verified_bytes": verified_pages * PAGE_BYTES,
             "mismatches": byte_mismatches,
             "mismatch_samples": mismatches,
             "digest": actual_digest,
             "expected_digest": expected_hex,
             "elapsed_seconds": round(time.monotonic() - verify_started, 6),
-        })
+        }
         result = (
             0 if byte_mismatches == 0 and actual_digest == expected_hex else 1)
-    except (OSError, RuntimeError) as exc:
-        print(f"FAIL: oracle workload failed: {exc}", file=sys.stderr)
+    except (OSError, RuntimeError, MemoryError, KeyboardInterrupt) as exc:
+        original_error = exc
         result = 1
     finally:
         try:
             allocation.close()
-        except (OSError, BufferError, ValueError) as cleanup_error:
-            print(
-                f"FAIL: oracle allocation cleanup failed: {cleanup_error}",
-                file=sys.stderr)
+        except (OSError, BufferError, ValueError, KeyboardInterrupt) as exc:
+            cleanup_error = exc
             result = 1
+
+    # Complete-looking evidence is terminal only after unmapping succeeded.
+    # Preserve the first verification error even if cleanup or reporting fails.
+    if cleanup_error is None and verification_record is not None:
+        try:
+            _emit("ORACLE_VERIFIED=", verification_record)
+        except (OSError, RuntimeError, KeyboardInterrupt) as exc:
+            original_error = exc
+            phase = "report"
+            result = 1
+    if original_error is not None:
+        print(f"FAIL: oracle workload failed: {original_error}", file=sys.stderr)
+    if cleanup_error is not None:
+        print(f"FAIL: oracle allocation cleanup failed: {cleanup_error}",
+              file=sys.stderr)
+    if result != 0:
+        failure_phase = phase
+        if (cleanup_error is not None and original_error is None and
+                byte_mismatches == 0):
+            failure_phase = "cleanup"
+        failure_error = original_error if original_error is not None else cleanup_error
+        original_errno = getattr(failure_error, "errno", None)
+        failure_type = (type(failure_error).__name__ if failure_error is not None else
+                        "byte_mismatch" if byte_mismatches else "digest_mismatch")
+        print(
+            f"FAIL: oracle phase={failure_phase} "
+            f"verified_pages={verified_pages}/{pages} "
+            f"verified_bytes={verified_pages * PAGE_BYTES}/{allocation_bytes} "
+            f"expected_mismatches=0 observed_mismatches={byte_mismatches} "
+            f"error={failure_type} "
+            f"errno={original_errno if original_errno is not None else 'none'} "
+            f"cleanup_complete={str(cleanup_error is None).lower()}",
+            file=sys.stderr)
     return result
 
 
