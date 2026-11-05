@@ -390,6 +390,12 @@ PAIR_RESUME_UNCERTAIN=0
 CGROUP_DIRECTORY_FD=""
 CGROUP_IDENTITY=""
 PASS_EVIDENCE=""
+# The EXIT trap marks cleanup active and captures its entry status in one
+# assignment command before cleanup() is called. Signals arriving in that
+# narrow entry window are latched here until cleanup installs its local traps.
+CLEANUP_ACTIVE=0
+CLEANUP_PENDING_SIGNAL_STATUS=0
+CLEANUP_ENTRY_STATUS=0
 # A foreign process in the private ID36 cgroup invalidates exclusive ownership.
 # Retain both evidence resources rather than applying group-wide cleanup.
 RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=0
@@ -981,7 +987,7 @@ report_cleanup_refusal() {
 }
 
 cleanup() {
-    local result=$? original_result observed initially_retained
+    local result="${1:-$?}" original_result observed initially_retained
     local current_identity child_cleanup_status session_fd_path
     local session_entry_snapshot session_entry nested_resume_disposition
     local cleanup_diagnostic_reported cleanup_refusal_severity cleanup_signal_status=0
@@ -998,6 +1004,12 @@ cleanup() {
     trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=130; original_result=130; result=130; fi' INT
     trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=143; original_result=143; result=143; fi' TERM
     trap - EXIT
+    if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION &&
+          ${CLEANUP_PENDING_SIGNAL_STATUS:-0} != 0 )); then
+        cleanup_signal_status=$CLEANUP_PENDING_SIGNAL_STATUS
+        original_result=$cleanup_signal_status
+        result=$cleanup_signal_status
+    fi
     set +e
 
     # Missing pinned cleanup state is ownership uncertainty. Production cannot
@@ -1236,9 +1248,10 @@ cleanup() {
     fi
     exit "$result"
 }
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'CLEANUP_ENTRY_STATUS=$? CLEANUP_ACTIVE=1; cleanup "$CLEANUP_ENTRY_STATUS"' EXIT
+trap 'if (( CLEANUP_ACTIVE )); then if (( CLEANUP_PENDING_SIGNAL_STATUS == 0 )); then CLEANUP_PENDING_SIGNAL_STATUS=129; fi; else exit 129; fi' HUP
+trap 'if (( CLEANUP_ACTIVE )); then if (( CLEANUP_PENDING_SIGNAL_STATUS == 0 )); then CLEANUP_PENDING_SIGNAL_STATUS=130; fi; else exit 130; fi' INT
+trap 'if (( CLEANUP_ACTIVE )); then if (( CLEANUP_PENDING_SIGNAL_STATUS == 0 )); then CLEANUP_PENDING_SIGNAL_STATUS=143; fi; else exit 143; fi' TERM
 
 if ! pidfd_signal_supported; then
     printf '%s\n' 'BLOCKED: ID36 pidfd signaling unavailable; phase:pidfd-preflight required:identity-bound direct-child termination support observed:unavailable original_exit:2 cleanup_obligation:normal-owned-session-cleanup' >&2
