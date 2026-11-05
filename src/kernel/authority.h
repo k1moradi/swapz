@@ -253,6 +253,9 @@ struct swapz_authority {
 	 * including record identities and generations. A forged caller
 	 * snapshot can never publish an unrelated page into a batch. */
 	swapz_u32 batch_hashes[SWAPZ_MAX_RECORDS];
+	/* Representation is part of the immutable paused identity. A caller-side
+	 * raw/compressed flag is never sufficient publication authority. */
+	swapz_u8 batch_raw[SWAPZ_MAX_RECORDS];
 	/* Diagnostic only: exact wall time inside final publication payload CRC32C
 	 * calls. Native builds leave this at zero; it never affects authority. */
 	unsigned long long publish_crc_wall_ns;
@@ -406,6 +409,10 @@ int swapz_stage_batch_unique(struct swapz_authority *authority,
 			   const swapz_u32 *logical_pages, swapz_u8 count,
 			   swapz_u8 blocks, struct swapz_tx *out);
 int swapz_batch_pause(struct swapz_authority *authority, const struct swapz_tx *tx);
+/* Engine-owned variant binds the physical representation to the same paused
+ * transaction identity before lower submission. */
+int swapz_batch_pause_run(struct swapz_authority *authority,
+			 const struct swapz_tx *tx, swapz_u8 raw);
 /*
  * Drop only the newest paused snapshot before any replay has started.
  * This is the fail-closed rollback primitive for a second prepared lower run:
@@ -418,6 +425,7 @@ int swapz_batch_abort_tail(struct swapz_authority *authority,
  * the ordered caller must fail the run, never retry it as newly available. */
 int swapz_batch_authenticate_run(struct swapz_authority *authority,
 				 const struct swapz_tx *transactions,
+				 const swapz_u8 *raw_entries,
 				 swapz_u8 extent_count);
 int swapz_batch_resume(struct swapz_authority *authority, const struct swapz_tx *tx);
 /* Cancel an abandoned physical region; old mappings remain authoritative. */

@@ -3487,8 +3487,12 @@ publishing the first replacement, leave prior generations unchanged, credit
 zero unauthenticated lower bytes, retain all uncertain reservations, and
 finish each accepted upper write once with an error. Independently reject a
 wrong oldest sequence and altered later run offset; the intact snapshot must
-still publish every record once. Keep a test-only pin for a duplicate engine
-finalizer, not a fabricated second real dm_io callback or simultaneous worker.
+still publish every record once. A mixed compressed/RAW run must additionally
+flip only a completed one-block compressed entry's caller-side representation
+bit and prove the authority-bound representation rejects it before any
+overwrite generation changes or lower-byte credit is recorded. Keep a
+test-only pin for a duplicate engine finalizer, not a fabricated second real
+dm_io callback or simultaneous worker.
 
 The remaining non-oldest-snapshot boundary must be a production-linked native
 regression: keep one test-only owner pin across an actual partial `-EIO` lower

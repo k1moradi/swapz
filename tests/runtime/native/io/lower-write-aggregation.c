@@ -2061,10 +2061,71 @@ failed:
 	return 0;
 }
 
+
+
+/*
+ * Representation is part of the immutable lower-run identity. A compressed
+ * one-block transaction and a RAW one-block transaction have the same basic
+ * transaction geometry, so transaction CRC authentication alone cannot
+ * distinguish them. Damage only the caller-side representation bit after the
+ * real lower write and require rejection before either overwrite publishes.
+ */
+static int test_full_lower_success_rejects_representation_substitution(void)
+{
+	struct swapz_io_run run = { .bytes = bulk, .txs = bulk_txs };
+	swapz_u8 initial_committed = 0, prepared = 0, committed = 99;
+	swapz_u16 completed = 0;
+	swapz_u32 credited_before, abandoned_before, committed_before;
+	swapz_u8 pending_before;
+	unsigned int publications_before;
+	unsigned long long physical_before;
+	int error;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(1, 2);
+	CHECK(swapz_engine_write_window_batched(
+		&e, pages, 2, &initial_committed) == 0);
+	CHECK(initial_committed == 2);
+	CHECK(maps[0].valid && !maps[0].raw && maps[0].generation == 1);
+	CHECK(maps[1].valid && maps[1].raw && maps[1].generation == 1);
+	CHECK(swapz_engine_prepare_batched_run(
+		&e, pages, 2, &run, &prepared, 0) == 0);
+	CHECK(prepared == 2 && run.extent_count == 2);
+	CHECK(run.txs[0].count == 1 && run.txs[0].extent_blocks == 1);
+	CHECK(!run.raw[0] && run.raw[1]);
+	pending_before = a.batch_pending;
+	credited_before = e.completed_blocks;
+	abandoned_before = a.abandoned_blocks;
+	committed_before = a.committed_blocks;
+	publications_before = published_calls;
+	physical_before = lower_written_bytes;
+	write_sealed(NULL, prepared);
+	CHECK(write_run(NULL, run.start_block, run.blocks,
+			run.bytes, &completed) == 0);
+	CHECK(completed == run.blocks);
+	CHECK(lower_written_bytes - physical_before ==
+	      (unsigned long long)run.blocks * SWAPZ_BLOCK_BYTES);
+	CHECK(!maps_visible_during_run && !ownership_violation);
+	/* Old code accepted this because count=1/blocks=1 is legal for RAW too. */
+	run.raw[0] = 1;
+	error = swapz_engine_complete_batched_run(
+		&e, &run, completed, 0, &committed);
+	CHECK(error == -ESTALE && committed == 0);
+	CHECK(e.completed_blocks == credited_before);
+	CHECK(a.batch_pending == pending_before);
+	CHECK(a.abandoned_blocks == abandoned_before);
+	CHECK(a.committed_blocks == committed_before);
+	CHECK(published_calls == publications_before);
+	CHECK(maps[0].valid && !maps[0].raw && maps[0].generation == 1);
+	CHECK(maps[1].valid && maps[1].raw && maps[1].generation == 1);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
 
+	CHECK(test_full_lower_success_rejects_representation_substitution() == 0); passed++;
 	CHECK(test_full_lower_success_authenticates_entire_run_before_publish() == 0); passed++;
 	CHECK(test_damaged_nonoldest_snapshot_preserves_lower_ownership() == 0); passed++;
 	CHECK(test_stale_lower_completion_keeps_successor_reserved() == 0); passed++;

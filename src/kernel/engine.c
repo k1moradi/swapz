@@ -1681,7 +1681,7 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 			}
 			e->pack_wall_ns += swapz_engine_elapsed_ns(
 				phase_start, swapz_engine_now_ns());
-			error = swapz_batch_pause(e->authority, tx);
+			error = swapz_batch_pause_run(e->authority, tx, raw);
 			if (error)
 				goto abort_current;
 			run->offsets[staged] = offset;
@@ -1794,7 +1794,8 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 		swapz_u16 checked_pages = 0, previous_end = 0;
 
 		if (run->extent_count > SWAPZ_MAX_RECORDS ||
-		    run->page_count > SWAPZ_MAX_RECORDS)
+		    run->page_count > SWAPZ_MAX_RECORDS ||
+		    run->start_block != run->txs[0].start_block)
 			return -ESTALE;
 		for (i = 0; i < run->extent_count; ++i) {
 			const struct swapz_tx *transaction = &run->txs[i];
@@ -1819,7 +1820,7 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 		    previous_end != run->blocks)
 			return -ESTALE;
 		error = swapz_batch_authenticate_run(
-			e->authority, run->txs, run->extent_count);
+			e->authority, run->txs, run->raw, run->extent_count);
 		if (error)
 			return error;
 	}

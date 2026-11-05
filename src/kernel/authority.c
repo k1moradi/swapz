@@ -1585,12 +1585,18 @@ int swapz_stage_batch_unique(struct swapz_authority *a,
 	return error;
 }
 
-int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
+static int swapz_batch_pause_representation(struct swapz_authority *a,
+					   const struct swapz_tx *tx,
+					   swapz_u8 raw)
 {
 	swapz_u32 segment;
+	swapz_u16 snapshot_index;
 
-	if (!swapz_is_active(a, tx) || !a->reuse_dead_segments ||
-	    a->batch_replaying || a->batch_pending >= SWAPZ_MAX_RECORDS)
+	if (!swapz_is_active(a, tx) || raw > 1U || !a->reuse_dead_segments ||
+	    a->batch_replaying)
+		return -EINVAL;
+	snapshot_index = (swapz_u16)a->batch_consumed + a->batch_pending;
+	if (snapshot_index >= SWAPZ_MAX_RECORDS)
 		return -EINVAL;
 	segment = tx->start_block / SWAPZ_SEGMENT_BLOCKS;
 	if (a->batch_pending) {
@@ -1601,10 +1607,12 @@ int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
 		a->batch_first_sequence = tx->sequence;
 		a->batch_segment = segment;
 		a->batch_consumed = 0;
+		snapshot_index = 0;
 	}
-	a->batch_hashes[a->batch_pending] =
+	a->batch_hashes[snapshot_index] =
 		swapz_batch_snapshot_crc32c(a, tx,
 					    &a->batch_pause_crc_wall_ns);
+	a->batch_raw[snapshot_index] = raw;
 	a->batch_pending++;
 	memset(&a->active_tx, 0, swapz_tx_active_bytes(a->active_count));
 	a->in_flight = 0;
@@ -1612,6 +1620,17 @@ int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
 	a->active_blocks = 0;
 	a->active_count = 0;
 	return 0;
+}
+
+int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
+{
+	return swapz_batch_pause_representation(a, tx, 0);
+}
+
+int swapz_batch_pause_run(struct swapz_authority *a,
+			 const struct swapz_tx *tx, swapz_u8 raw)
+{
+	return swapz_batch_pause_representation(a, tx, raw);
 }
 
 int swapz_batch_abort_tail(struct swapz_authority *a,
@@ -1638,6 +1657,7 @@ int swapz_batch_abort_tail(struct swapz_authority *a,
 					    &a->batch_resume_crc_wall_ns))
 		return -ESTALE;
 	a->batch_hashes[index] = 0;
+	a->batch_raw[index] = 0;
 	a->batch_pending--;
 	a->abandoned_blocks += tx->extent_blocks;
 	if (!a->batch_pending) {
@@ -1659,19 +1679,25 @@ int swapz_batch_abort_tail(struct swapz_authority *a,
  */
 int swapz_batch_authenticate_run(struct swapz_authority *a,
 				 const struct swapz_tx *transactions,
+				 const swapz_u8 *raw_entries,
 				 swapz_u8 extent_count)
 {
 	swapz_u8 index;
 
-	if (!a || !transactions || a->in_flight || a->batch_replaying ||
-	    !extent_count || extent_count > a->batch_pending ||
+	if (!a || !transactions || !raw_entries || a->in_flight ||
+	    a->batch_replaying || !extent_count ||
+	    extent_count > a->batch_pending ||
 	    (swapz_u16)a->batch_consumed + a->batch_pending >
 		    SWAPZ_MAX_RECORDS)
 		return -ESTALE;
 	for (index = 0; index < extent_count; ++index) {
 		const struct swapz_tx *transaction = &transactions[index];
+		swapz_u16 snapshot_index =
+			(swapz_u16)a->batch_consumed + index;
 
-		if (transaction->sequence != a->batch_first_sequence + index ||
+		if (raw_entries[index] > 1U ||
+		    a->batch_raw[snapshot_index] != raw_entries[index] ||
+		    transaction->sequence != a->batch_first_sequence + index ||
 		    transaction->start_block / SWAPZ_SEGMENT_BLOCKS !=
 			    a->batch_segment ||
 		    !swapz_legal_class(transaction->extent_blocks) ||
@@ -1681,7 +1707,7 @@ int swapz_batch_authenticate_run(struct swapz_authority *a,
 			    a->physical_blocks - transaction->start_block ||
 		    transaction->start_block + transaction->extent_blocks >
 			    a->next_block ||
-		    a->batch_hashes[a->batch_consumed + index] !=
+		    a->batch_hashes[snapshot_index] !=
 			    swapz_batch_snapshot_crc32c(
 				    a, transaction, &a->batch_resume_crc_wall_ns))
 			return -ESTALE;
@@ -1726,6 +1752,8 @@ static void swapz_forget_active(struct swapz_authority *a, int published)
 {
 	if (a->batch_replaying) {
 		a->batch_replaying = 0;
+		a->batch_hashes[a->batch_consumed] = 0;
+		a->batch_raw[a->batch_consumed] = 0;
 		a->batch_pending--;
 		a->batch_first_sequence++;
 		a->batch_consumed++;

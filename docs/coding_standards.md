@@ -2069,6 +2069,11 @@ not replaceable by an unauthenticated physical write. This preflight does not
 change the committed-prefix contract for a later independently verified
 payload-publication failure or the original errno/abort path for failed lower
 I/O. Physical bytes written to media are never themselves publication credit.
+The raw/compressed representation bit is part of that immutable identity:
+one-record/one-block geometry is valid for either representation, so a
+caller-side `run.raw[]` value must match authority state captured at pause
+time before replay can select `swapz_finish_raw()` versus `swapz_finish()`.
+Transaction CRC authentication alone does not prove representation identity.
 
 A matching oldest sequence is necessary but not full snapshot ownership:
 a damaged later transaction may fail authentication after the first has passed.
