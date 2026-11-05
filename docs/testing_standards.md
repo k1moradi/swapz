@@ -5434,13 +5434,17 @@ media removal must not automatically stop a mapper that may own live swap
 pages. Rootless package tests must use at least two selected PARTUUIDs and
 verify the generated names and dependencies change, and malformed selector
 output must fail without emitting a drop-in. The isolated generator transaction
-test must additionally reject stale raw by-PARTUUID `.swap` files and dangling
-`swap.target.wants` links for a previous selector across all three output
-directories. Inject final early-mask unlink failure both before and after the
-unlink, false-success unlink, and mask-restore rename failure before and after
-the rename. A refused generator run must keep the early `/dev/null` mask,
+test must not infer raw-swap safety by scanning unrelated generator output:
+systemd unit generators execute concurrently, so an unrelated by-PARTUUID
+`.swap` file or wants link may be present without gating the selected mapper.
+Exact selected-unit collisions still fail closed, while same-partition raw-swap
+alias exclusion remains an identity-based boot/deployment admission check.
+Inject final early-mask unlink failure both before and after the unlink,
+false-success unlink, mask-restore rename failure before and after the rename,
+and a foreign mapper-unit symlink substituted after mask removal. A refused
+generator run must replace that substitution with the early `/dev/null` mask,
 remove both pinned mapper/device drop-ins, preserve the first failing command
-status and distinguish that shell status from unavailable syscall errno, and
+status, report restore status separately from unavailable syscall errno, and
 report the verified rollback outcome without disclosing selector contents. These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another
 alias, so deployment must separately ensure the selected partition is not

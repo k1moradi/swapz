@@ -434,28 +434,56 @@ class GeneratorPublicationTest(unittest.TestCase):
         removal_command.unlink()
         rename_command.unlink()
 
-    def test_stale_raw_swap_alias_after_selector_change_remains_masked(self) -> None:
-        self.assertEqual(self.run_generator().returncode, 0)
-        self.set_selector(CHANGED)
-        old_raw_swap = identities(SELECTED)[1]
+    def test_foreign_mapper_symlink_after_mask_release_is_remasked(self) -> None:
+        outside = self.root / "foreign-mapper-unit"
+        outside.write_text("unchanged", encoding="ascii")
+        command = self.commands / "rm"
+        command.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*swapz-primary-mapper.service)\n'
+            '    for output_path do :; done\n'
+            '    /usr/bin/rm "$@" || exit $?\n'
+            '    /usr/bin/ln -s "$MOCK_EXTERNAL" "$output_path" || exit $?\n'
+            '    exit "$MOCK_RELEASE_STATUS" ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n',
+            encoding="ascii",
+        )
+        command.chmod(0o755)
+        for release_status, validation, expected_status in (
+            ("86", "release-mask", 86),
+            ("0", "mask-not-released", 1),
+        ):
+            with self.subTest(release_status=release_status):
+                result = self.run_generator(
+                    MOCK_EXTERNAL=str(outside),
+                    MOCK_RELEASE_STATUS=release_status,
+                )
+                self.assert_blocked(result, "publication")
+                self.assertEqual(result.returncode, expected_status)
+                self.assertIn(f"validation={validation}", result.stderr)
+                self.assertIn(f"original_status={expected_status}", result.stderr)
+                self.assertIn("restore_status=0", result.stderr)
+                self.assertIn("rollback=complete", result.stderr)
+                self.assertEqual(outside.read_text(encoding="ascii"), "unchanged")
+        command.unlink()
+
+    def test_unrelated_generated_partuuid_swap_does_not_gate_mapper(self) -> None:
+        unrelated_raw_swap = identities(CHANGED)[1]
         for output in (self.normal, self.early, self.late):
             for enabled_alias in (False, True):
                 with self.subTest(output=output.name, enabled_alias=enabled_alias):
-                    candidate = output / ("swap.target.wants" if enabled_alias else "") / old_raw_swap
+                    candidate = output / ("swap.target.wants" if enabled_alias else "") / unrelated_raw_swap
                     candidate.parent.mkdir(exist_ok=True)
                     if enabled_alias:
-                        candidate.symlink_to("/nonexistent/stale-raw-swap")
+                        candidate.symlink_to("/nonexistent/unrelated-raw-swap")
                     else:
                         candidate.write_text("[Swap]\n", encoding="ascii")
                     result = self.run_generator()
-                    self.assert_blocked(result, "publication")
-                    self.assertIn("validation=stale-raw-swap-alias", result.stderr)
-                    self.assertIn("observed=stale-raw-swap-alias", result.stderr)
-                    self.assertFalse(self.device_dropin(SELECTED).exists())
-                    self.assertFalse(self.device_dropin(CHANGED).exists())
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, "")
+                    self.assertTrue(self.mapper_dropin().exists())
+                    self.assertFalse(self.mask().exists())
                     candidate.unlink()
-        self.assertEqual(self.run_generator().returncode, 0)
-        self.assertTrue(self.device_dropin(CHANGED).exists())
 
     def test_hibernation_guards_survive_refused_selector(self) -> None:
         result = self.run_generator(MOCK_UNITS="garbage")

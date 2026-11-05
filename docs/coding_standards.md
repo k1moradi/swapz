@@ -703,16 +703,22 @@ symlinked ancestors, dot-component aliases or duplicate directory identities.
 Validate bounded manager output, refuse duplicate generated
 unit identities and symlink-substituted output paths, and remove only
 generator-owned stale drop-ins from a previously selected PARTUUID.
-Reject stale by-PARTUUID raw `.swap` files and `swap.target.wants` aliases
-in every supplied generator output directory, including names from a prior
-selector, rather than treating a collision-free current pair as proof that no
-raw swap job can start. The final early-mask unlink commits the generated
-drop-ins only when it both reports success and leaves the mask absent;
-failed or falsely successful unlink must restore the early barrier and roll
-back only pinned generated inodes. Diagnose the original command status,
-expected/observed mask and drop-in ownership, and verified rollback outcome
-without printing the selected PARTUUID; shell command exit status is not
-a recoverable syscall errno and must not be misreported as one. Publish the
+Unit generators share these output directories and execute concurrently, so
+do not treat a directory-wide scan of other generated `.swap` names as an
+authoritative raw-swap inventory. Reject an already-present exact selected unit
+as a collision, but an unrelated PARTUUID swap unit must not gate this
+generator, and absence of another generator's file never proves alias safety.
+The boot/deployment identity guard owns same-partition raw-swap alias exclusion.
+The final early-mask unlink commits the generated drop-ins only when it both
+reports success and leaves the mask absent. Failed or falsely successful unlink
+must restore the early barrier and roll back only pinned generated inodes. A
+symlink at the mapper-unit path counts as the barrier only when it targets
+`/dev/null`; atomically replace a foreign substitution at that owned
+early-priority safety name before reporting rollback. Diagnose the original
+command status, separate restore status, expected/observed mask and drop-in
+ownership, and verified rollback outcome without printing the selected
+PARTUUID; shell command exit status is not a recoverable syscall errno and must
+not be misreported as one. Publish the
 complete selected graph before releasing the mask; any validation, command,
 publication or rollback failure must leave the mapper blocked rather than
 fall back to a device path or reveal a partially active job. Diagnostics must
