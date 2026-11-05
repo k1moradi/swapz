@@ -300,7 +300,12 @@ unprivileged creator of the admission listener, not merely a same-UID
 replacement endpoint: the socket's inode, mode and ownership, the kernel
 SO_PEERCRED PID and UID, the client's pinned pre-connect ancestor chain with
 /proc start ticks, and a live pidfd must agree on connection and again before
-and after each approval. The client must enable SO_PASSCRED and verify
+and after each approval. The client must select the **nearest ancestor with the parent's UID**
+as the only creator candidate; merely finding the peer anywhere in the
+ancestry would also trust a higher same-UID shell or launcher which could
+replace the socket. A three-process rootless AF_UNIX regression must reject
+that higher-ancestor listener while preserving the direct parent's approval.
+The client must enable SO_PASSCRED and verify
 SCM_CREDENTIALS on every received reply byte; SO_PEERCRED alone remains
 unchanged if a connected descriptor is passed to a foreign writer. Missing,
 truncated or foreign sender credentials, a swapped pathname, an exited parent,

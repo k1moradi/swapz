@@ -309,7 +309,19 @@ class SourceAdmissionClient:
             if peer_uid != parent_uid:
                 raise _source_parent_refusal(
                     "connect", "peer_uid", "wrong_peer_uid")
-            if peer_pid not in {process_id for process_id, _, _ in ancestors}:
+            # sudo may insert root-owned monitors, but the listener creator
+            # must be the nearest ancestor still owned by the source parent UID.
+            # A higher same-UID ancestor is not delegated socket authority.
+            try:
+                authorized_parent_pid = next(
+                    (process_id for process_id, _, _ in ancestors
+                     if (Path("/proc") / str(process_id)).stat().st_uid ==
+                     parent_uid), None)
+            except OSError as exc:
+                raise _source_parent_refusal(
+                    "connect", "parent_ancestry", "unavailable_process_owner",
+                    exc.errno if exc.errno is not None else "none") from exc
+            if peer_pid != authorized_parent_pid:
                 raise _source_parent_refusal(
                     "connect", "parent_ancestry", "unrelated_peer_run")
             if not hasattr(os, "pidfd_open"):

@@ -595,6 +595,41 @@ finally:
             summary["first_failed_authenticity_invariant"], "parent_ancestry")
         self.assertEqual(summary["genuine_parent_connections"], 0)
 
+    def test_higher_same_uid_ancestor_cannot_impersonate_listener_parent(self):
+        # This test process owns the listener, but an intermediary launches
+        # the client. Our PID appears in its ancestry, yet we did not create it.
+        intermediary_script = r"""
+import subprocess
+import sys
+
+result = subprocess.run(
+    [sys.executable, "-I", "-B", "-c", sys.argv[1],
+     sys.argv[2], sys.argv[3], "normal"],
+    input="GO\n", text=True, capture_output=True, timeout=5)
+if result.returncode:
+    raise SystemExit(result.stderr or "nested client fixture failed")
+print(result.stdout.strip(), flush=True)
+"""
+        for repetition in range(3):
+            with self.subTest(repetition=repetition):
+                intermediary = subprocess.Popen(
+                    [sys.executable, "-I", "-B", "-c", intermediary_script,
+                     self.CLIENT, os.fspath(self.socket_path),
+                     os.fspath(CLIENT_HELPER)],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True)
+                self.addCleanup(self._reap, intermediary)
+                with self.server.accept()[0] as connection:
+                    connection.settimeout(5)
+                    # The non-creator grandparent must receive no admission
+                    # request, even though SO_PEERCRED lists it as an ancestor.
+                    self.assertEqual(connection.recv(1), b"")
+                stdout, stderr = intermediary.communicate(timeout=8)
+                self.assertEqual(intermediary.returncode, 0, stderr[:300])
+                self._assert_refusal(
+                    stdout.strip(), "connect",
+                    "parent_ancestry", "unrelated_peer_run")
+
     def test_real_parent_can_send_nonce_bound_synthetic_approval(self):
         for _ in range(3):
             with self.subTest(repetition=_):
