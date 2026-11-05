@@ -738,6 +738,56 @@ rm() {
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
+    def test_term_during_cgroup_rmdir_refusal_preserves_first_status(self):
+        # A second TERM during EXIT cleanup used to kill Bash immediately,
+        # replacing a prior failure and hiding retained cgroup/session state.
+        preamble = r'''
+rmdir() {
+    if [[ $1 == "$CGROUP" ]]; then
+        kill -TERM "$"
+        return 1
+    fi
+    command rmdir "$@"
+}
+'''
+        for original_status in (1, 143, 0):
+            with self.subTest(original_status=original_status):
+                expected_status = original_status or 143
+                result = self.execute(preamble=preamble, status=original_status)
+                self.assert_retained(
+                    result, "occupied-or-unremovable",
+                    expected_status=expected_status)
+                self.assertIn("phase:rmdir", result.stderr)
+                self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+
+    def test_term_during_completed_cleanup_never_reports_pass(self):
+        # Signal only the synthetic coordinator, never an unproved PID.
+        preamble = r'''
+rmdir() {
+    if [[ $1 == "$CGROUP" ]]; then
+        kill -TERM "$"
+        command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+    fi
+    command rmdir "$@"
+}
+'''
+        result = self.execute(preamble=preamble)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertFalse(self.session.exists())
+        self.assertIn("phase:cleanup-signal", result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertIn("ownership_proof:pinned-created-cgroup-and-session-identities",
+                      result.stderr)
+        self.assertIn("original_exit:143", result.stderr)
+        self.assertIn("nested_resume:not-required", result.stderr)
+        self.assertIn("cleanup_disposition:completed-owned", result.stderr)
+        self.assertIn("retained_cleanup:none", result.stderr)
+        self.assertIn("next_step:review-interruption-and-rerun-ID36-after-verifying-owned-state",
+                      result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
     def test_final_private_session_rmdir_failure_preserves_signal_exit(self):
         # An identity-validated, emptied session can still fail its final
         # rmdir. The already removed cgroup must not be reported as retained.
