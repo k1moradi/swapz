@@ -590,14 +590,38 @@ def _physical_audit_binding_is_valid(
             set(counts) != set(producer_workloads)):
         return False
     observed_counts = {workload: 0 for workload in producer_workloads}
+    observed_indices = {workload: set() for workload in producer_workloads}
+    pair_identifiers = set()
+    artifact_names = set()
+    artifact_digests = set()
     for pair in pairs:
-        if not isinstance(pair, dict):
+        if not _valid_campaign_artifact(pair):
             return False
         workload = pair.get("workload")
         if (
                 not isinstance(workload, str) or
                 workload not in observed_counts):
             return False
+        specification = producer_workloads[workload]
+        pair_index = pair.get("pair_index")
+        pair_id = pair.get("pair_id")
+        if (
+                type(pair_index) is not int or
+                not 1 <= pair_index <= specification["pairs"] or
+                pair_index in observed_indices[workload] or
+                not isinstance(pair_id, str) or not pair_id or
+                (workload, pair_id) in pair_identifiers or
+                pair.get("order") != specification["counterbalanced_order"][
+                    pair_index - 1] or
+                (pair.get("status"), pair.get("excluded")) not in (
+                    ("PASS", False), ("EXCLUDED", True)) or
+                pair["name"] in artifact_names or
+                pair["sha256"] in artifact_digests):
+            return False
+        observed_indices[workload].add(pair_index)
+        pair_identifiers.add((workload, pair_id))
+        artifact_names.add(pair["name"])
+        artifact_digests.add(pair["sha256"])
         observed_counts[workload] += 1
     for workload, specification in producer_workloads.items():
         count = counts.get(workload)
@@ -654,7 +678,7 @@ def _physical_audit_failure_witness_is_valid(
                 arm not in ("raw", "swapz") or
                 not isinstance(phase, str) or
                 re.fullmatch(
-                    r"(?:arm|measure|steady|gc|teardown|publish|"
+                    r"(?:measure|steady|gc|teardown|publish|"
                     r"round-[1-9][0-9]*(?:-verify)?)", phase) is None or
                 not any(diagnostic.get("producer_status") == "FAIL"
                         for diagnostic in matching_diagnostics)):
