@@ -1245,6 +1245,19 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             diagnose("BLOCKED", "qualification.decision_status", "PASS",
                      workload=workload,
                      reason="cohort decision is incomplete or unavailable")
+            # An incomplete cohort can still carry independently observed raw
+            # screening drift; keep its bounded BLOCKED diagnostic visible.
+            if spec["evidence"] == "statistical_paired":
+                spread = (summary.get("raw_repeat_spread") or {}).get(workload)
+                bound = QUALIFICATION["CONTRACT"]["screening"][
+                    "same_workload_raw_spread_max"]
+                if (type(spread) in (int, float) and math.isfinite(spread)
+                        and spread > bound):
+                    diagnose("BLOCKED", "raw_repeat_spread",
+                             {"operator": "<=", "value": bound,
+                              "unit": "fraction"},
+                             spread, workload=workload,
+                             reason="raw drift screens out the cohort")
             continue
         elif any(value is False for value in
                  (decision.get("checks") or {}).values()):
