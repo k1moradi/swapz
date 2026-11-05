@@ -264,6 +264,31 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
                 r"first_failed_phase=steady missing_samples_minimum=1"):
             self.validate_trace(trace)
 
+    def test_cadence_gap_at_phase_boundary_names_earliest_affected_phase(self) -> None:
+        trace, _ = synthetic_trace()
+        # Hide the last baseline sample behind a surplus 50 ms observation
+        # so all phase counts still meet their minimums. The remaining
+        # 200 ms gap crosses the baseline/initialization boundary.
+        del trace["samples"][10]
+        extra = copy.deepcopy(trace["samples"][1])
+        extra["monotonic_ns"] += 50_000_000
+        timestamp = START_UTC + datetime.timedelta(
+            seconds=1, milliseconds=150)
+        extra["timestamp_utc"] = timestamp.isoformat(
+            timespec="microseconds").replace("+00:00", "Z")
+        trace["samples"].insert(2, extra)
+        self.assertEqual(len(trace["samples"]), 39)
+        self.assertEqual(
+            sum(sample["phase"] == "baseline" for sample in trace["samples"]),
+            11)
+        with self.assertRaisesRegex(
+                ValueError,
+                r"metric=monotonic_interval_ns observed=200000000.*"
+                r"first_failed_phase=baseline missing_samples_minimum=1.*"
+                r"next_observed_phase=initialization "
+                r"peak_ram_bytes=unavailable"):
+            self.validate_trace(trace)
+
     def test_truncated_phase_and_host_window_fail_closed(self) -> None:
         trace, host = synthetic_trace()
         del trace["samples"][-1]

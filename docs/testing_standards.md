@@ -7312,7 +7312,10 @@ control and reject a deleted low-MemAvailable peak observation even if the
 remaining sample count still meets every phase minimum: the 200 ms gap violates
 the unchanged 50-150 ms adjacent-sample bound. Cadence and missing-phase
 diagnostics identify the first failed phase and a bounded minimum missing-sample
-count. They must not invent an exact missing-sample count from elapsed time:
+count. At a gap crossing phase labels, the earlier observed phase is the first
+affected phase and the following observed phase must also be named. That
+incomplete trace has peak RAM unavailable, never the lower surviving minimum.
+They must not invent an exact missing-sample count from elapsed time:
 given the permitted 150 ms maximum adjacent interval, a 300 ms observed gap
 proves at least one missing observation, not exactly two.
 A trace that labels itself as synthetic/rootless must not pass the loaded-host

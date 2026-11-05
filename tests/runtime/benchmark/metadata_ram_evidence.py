@@ -591,6 +591,7 @@ def validate_metadata_ram_trace(
         phase: [] for phase in PHASES
     }
     previous_monotonic = None
+    previous_phase = None
     previous_utc_ns = None
     first_utc_ns = None
     for sample_index, sample in enumerate(samples):
@@ -681,8 +682,10 @@ def validate_metadata_ram_trace(
                     f"metric=monotonic_interval_ns observed={elapsed_ns} "
                     f"minimum={minimum_interval_ns} "
                     f"maximum={maximum_interval_ns} "
-                    f"first_failed_phase={phase} "
-                    f"missing_samples_minimum={minimum_missing_samples}")
+                    f"first_failed_phase={previous_phase} "
+                    f"missing_samples_minimum={minimum_missing_samples} "
+                    f"next_observed_phase={phase} "
+                    "peak_ram_bytes=unavailable")
             wall_elapsed_ns = utc_ns - previous_utc_ns
             # Repeated or reversed UTC samples prove bad ordering, not a
             # particular number of missing observations.
@@ -704,6 +707,7 @@ def validate_metadata_ram_trace(
                     f"monotonic_interval_ns={elapsed_ns} "
                     f"first_failed_phase={phase} peak_ram_bytes=unavailable")
         previous_monotonic = monotonic_ns
+        previous_phase = phase
         previous_utc_ns = utc_ns
         phase_samples[phase].append(sample)
 
