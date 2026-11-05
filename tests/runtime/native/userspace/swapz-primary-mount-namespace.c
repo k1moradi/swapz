@@ -64,13 +64,23 @@ static const char *fixture_path(const char *path, char converted[PATH_MAX])
 
 static int fixture_other_mountinfo(const char *path)
 {
-	const char *suffix = "3031/mountinfo";
+	static const char *const suffixes[] = {
+		"3031/mountinfo",
+		"3031/task/3032/mountinfo",
+	};
 	size_t length = strlen(path);
-	size_t suffix_length = strlen(suffix);
+	size_t index;
 
-	return length >= suffix_length &&
-	       !strcmp(path + length - suffix_length, suffix) &&
-	       (length == suffix_length || path[length - suffix_length - 1U] == '/');
+	for (index = 0; index < sizeof(suffixes) / sizeof(suffixes[0]); ++index) {
+		size_t suffix_length = strlen(suffixes[index]);
+
+		if (length >= suffix_length &&
+		    !strcmp(path + length - suffix_length, suffixes[index]) &&
+		    (length == suffix_length ||
+		     path[length - suffix_length - 1U] == '/'))
+			return 1;
+	}
+	return 0;
 }
 
 static int fixture_open(const char *path, int flags, ...)
