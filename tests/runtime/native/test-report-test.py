@@ -3465,12 +3465,17 @@ class ReportContract(unittest.TestCase):
                             "diagnostic.log")
 
                 def fail(transcript, exit_code=1, reason="nonzero_exit",
-                         log=log_name, available=True, after_marker=""):
+                         log=log_name, available=True, after_marker="",
+                         initial_log_size=None):
                     log_file.unlink(missing_ok=True)
                     if available:
-                        log_file.write_text(
+                        initial = (
                             "--- swapz rootless attribution ---\n"
-                            f"exit_code={exit_code}\n")
+                            f"exit_code={exit_code}\n").encode()
+                        if initial_log_size is not None:
+                            self.assertGreaterEqual(initial_log_size, len(initial))
+                            initial += b"x" * (initial_log_size - len(initial))
+                        log_file.write_bytes(initial)
                         log_file.chmod(0o600)
                     marker = (
                         "FAIL: rootless phase=tmp-cleanup-test.py "
@@ -3552,6 +3557,24 @@ class ReportContract(unittest.TestCase):
                 _, stage, evidence = fail(exception)
                 self.assertIn("ValueError: ORIGINAL EXCEPTION", evidence)
                 self.assertNotIn("test_first", stage["diagnostic"])
+
+                # Unknown stderr remains private context only; it cannot be
+                # upgraded into a matched unittest traceback or public identity.
+                unknown = "unexpected child stderr without unittest framing\n"
+                _, stage, evidence = fail(unknown)
+                self.assertIn("private context only", evidence)
+                self.assertIn(unknown.strip(), evidence)
+                self.assertNotIn("first matched tmp-cleanup", evidence)
+                self.assertIn("test=unavailable", stage["diagnostic"])
+
+                # Exercise the cap edge where exactly one byte remains after
+                # the two matched-traceback labels. Python's data[-0:] is the
+                # whole buffer, so zero-budget slicing must be guarded.
+                matched_label_bytes = 90 + 65
+                initial_size = 262144 - matched_label_bytes - 1
+                _, _, _ = fail(
+                    exception, initial_log_size=initial_size)
+                self.assertEqual(log_file.stat().st_size, 262144)
 
                 # Silent nonzero, lost evidence, failed relay and timeout must
                 # preserve the process exit without inventing a nested test.

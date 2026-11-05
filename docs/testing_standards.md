@@ -1120,8 +1120,12 @@ Never promote an earlier marker if a different rootless phase failed later.
 The public report names the source-controlled `tmp-cleanup-test.py` phase,
 original exit, fixed reason, and complete repository-relative log location.
 `subtest=unavailable test=unavailable` remains mandatory unless the
-producer authenticates nested identity. No silent failure, relay error, timeout
-or later cleanup may invent one or replace the first cause. Read the private
+producer authenticates nested identity. If no unittest traceback matches,
+never write a label claiming that one did: retain only bounded private stage-tail
+context when nonempty, and append nothing for genuinely empty stderr. All size
+arithmetic, including a one-byte residual budget after labels, must stay within
+the 256-KiB whole-artifact bound. No silent failure, relay error, timeout or
+later cleanup may invent a cause or replace the first one. Read the private
 evidence locally with `sed -n '1,140p' build/tests/rootless-failure.XXXXXXXX/diagnostic.log`,
 substituting the eight-character directory from the public marker; never
 publish that raw text.

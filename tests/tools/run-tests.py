@@ -2317,20 +2317,43 @@ def retain_tmp_cleanup_first_failure(output, child_exit_code):
                 stat.S_IMODE(log_stat.st_mode) != 0o600):
             return
         remaining_bytes = 262144 - log_stat.st_size
-        first_label = (b"\n--- first matched tmp-cleanup unittest failure "
-                       b"(private; not a public test identity) ---\n")
-        tail_label = (b"\n--- official stage merged stdout/stderr tail "
-                      b"(context only) ---\n")
-        if remaining_bytes <= len(first_label) + len(tail_label):
+        transcript_bytes = transcript.encode("utf-8", errors="replace")
+        if first_block:
+            first_label = (
+                b"\n--- first matched tmp-cleanup unittest failure "
+                b"(private; not a public test identity) ---\n")
+            tail_label = (
+                b"\n--- official stage merged stdout/stderr tail "
+                b"(context only) ---\n")
+        else:
+            # A generic nonzero child may have no unittest traceback at all.
+            # Preserve nonempty private context without claiming that one was
+            # matched; an actually empty transcript needs no extra evidence.
+            if not transcript_bytes:
+                return
+            first_label = b""
+            tail_label = (
+                b"\n--- official stage merged stdout/stderr tail "
+                b"(private context only; no authenticated tmp-cleanup "
+                b"unittest traceback) ---\n")
+        fixed_bytes = len(first_label) + len(tail_label)
+        if remaining_bytes <= fixed_bytes:
             return
-        budget = remaining_bytes - len(first_label) - len(tail_label)
-        first_budget = min(65536, budget // 2) if first_block else 0
-        if len(first_block) > first_budget:
-            prefix_bytes = first_budget // 2
-            first_block = (first_block[:prefix_bytes] +
-                           first_block[-(first_budget - prefix_bytes):])
+        budget = remaining_bytes - fixed_bytes
+        if first_block:
+            # Keep the causal block preferentially. Guard zero-length suffix
+            # arithmetic explicitly: data[-0:] means the whole buffer.
+            first_budget = min(65536, max(1, budget // 2))
+            if len(first_block) > first_budget:
+                prefix_bytes = first_budget // 2
+                suffix_bytes = first_budget - prefix_bytes
+                first_block = (
+                    first_block[:prefix_bytes] +
+                    (first_block[-suffix_bytes:] if suffix_bytes else b""))
         tail_budget = budget - len(first_block)
-        tail = transcript.encode("utf-8", errors="replace")[-tail_budget:]
+        tail = (
+            transcript_bytes[-tail_budget:]
+            if tail_budget > 0 else b"")
         pending = memoryview(first_label + first_block + tail_label + tail)
         while pending:
             written = os.write(log, pending)
