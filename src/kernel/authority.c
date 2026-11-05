@@ -127,6 +127,41 @@ static int swapz_page_list_validate_segment(const struct swapz_authority *a,
  * is non-zero, the caller has already validated the containing segment header
  * and tail during the current serialized preflight pass.
  */
+static int swapz_page_list_validate_membership(
+	const struct swapz_authority *a, swapz_u32 logical, swapz_u32 segment)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	const swapz_u32 maximum_segment_pages =
+		SWAPZ_SEGMENT_BLOCKS * SWAPZ_MAX_RECORDS;
+	swapz_u32 current = logical;
+	swapz_u32 visited_pages = 1U;
+
+	if (segment >= a->segment_count ||
+	    a->segment_first_page[segment] >= a->logical_pages)
+		return -EUCLEAN;
+
+	/*
+	 * Local reciprocity alone cannot prove membership: a detached cycle can
+	 * satisfy both neighboring links. Walk toward the authoritative head and
+	 * bound corruption by the maximum physically possible maps in one segment.
+	 */
+	while (current != a->segment_first_page[segment]) {
+		swapz_u32 previous = a->page_prev_in_segment[current];
+
+		if (previous == none || previous >= a->logical_pages ||
+		    visited_pages >= maximum_segment_pages)
+			return -EUCLEAN;
+		if (!a->maps[previous].valid ||
+		    a->maps[previous].start_block >= a->physical_blocks ||
+		    a->maps[previous].start_block / SWAPZ_SEGMENT_BLOCKS != segment ||
+		    a->page_next_in_segment[previous] != current)
+			return -EUCLEAN;
+		current = previous;
+		visited_pages++;
+	}
+	return 0;
+}
+
 static int swapz_page_list_validate_entry_cached(
 	const struct swapz_authority *a, swapz_u32 logical, int segment_checked)
 {
@@ -166,7 +201,7 @@ static int swapz_page_list_validate_entry_cached(
 		   a->page_prev_in_segment[next] != logical) {
 		return -EUCLEAN;
 	}
-	return 0;
+	return swapz_page_list_validate_membership(a, logical, segment);
 }
 
 static int swapz_page_list_validate_entry(const struct swapz_authority *a,
