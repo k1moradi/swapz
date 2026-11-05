@@ -5316,8 +5316,10 @@ workload invocation, with `phase=pressure_admission`,
 `original=identity_mismatch`, `errno=None`, `admission=source/run`,
 exact expected pages/bytes, `UNVERIFIED` observations and retained
 `LIVE_SWAP_ACTIVE` stage; it creates no workload phase and cannot inherit
-counts or PASS from a prior run. A same-run child reporting three corrupt
-pages instead fails `phase=pressure_verify` with
+counts or PASS from a prior run. Rootless cases must clone the initial,
+unmodified state as well as results so a previous pressure run cannot donate
+its `pressure_cgroup` and undermine the pre-admission assertion. A same-run
+child reporting three corrupt pages instead fails `phase=pressure_verify` with
 `oracle=verified_page_count_mismatch`, exact lower observed pages/bytes
 and original nonzero child exit. A foreign-run child fails
 `oracle=run_identity_mismatch` even when its counts equal expectations

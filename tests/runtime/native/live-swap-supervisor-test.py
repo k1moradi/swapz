@@ -1302,6 +1302,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                        "helper_sha256": "a" * 64,
                        "artifact_digests":
                            dict(supervisor.EXPECTED_ARTIFACTS)}
+            baseline_state = dict(state)
             baseline_results = dict(results)
             ops = FakeOps(pressure_mode="mismatch")
             ops.mapper_active = True
@@ -1344,7 +1345,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             self.assertEqual(ops.pressure_calls, 1)
 
             # A fresh rejected run must not inherit the previous oracle report.
-            rejected_state = dict(state)
+            rejected_state = dict(baseline_state)
             rejected = dict(baseline_results, run_id="e" * 32)
             with self.assertRaisesRegex(
                     supervisor.LiveSwapError,
@@ -1374,8 +1375,8 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                                    return_value=HIGH_MEMORY):
                 with self.assertRaises(supervisor.LiveSwapError) as caught:
                     supervisor._run_pressure_phase(
-                        Path(directory), dict(state), wrong_run_results,
-                        wrong_run_ops)
+                        Path(directory), dict(baseline_state),
+                        wrong_run_results, wrong_run_ops)
             wrong_run_message = str(caught.exception)
             for expected_detail in (
                     "phase=pressure_verify",
