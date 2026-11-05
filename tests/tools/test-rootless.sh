@@ -563,6 +563,17 @@ finish_and_report_rootless_unittest "$rootless_package_exit_code" "$rootless_pac
 rootless_phase='tests/runtime/native/systemd/swapz-primary-systemd-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
+rootless_phase='tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py'
+rootless_phase_started_seconds=$SECONDS
+begin_rootless_private_stderr_capture
+rootless_generator_command_line=$LINENO
+if python3 -B tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py -v \
+    2>&"$rootless_capture_input_fd"; then
+  rootless_generator_exit_code=0
+else
+  rootless_generator_exit_code=$?
+fi
+finish_and_report_rootless_unittest "$rootless_generator_exit_code" "$rootless_generator_command_line"
 rootless_phase='tests/runtime/native/physical-swap-probe-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/physical-swap-probe-test.py -v

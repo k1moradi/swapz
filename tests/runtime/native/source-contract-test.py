@@ -33,6 +33,7 @@ MANDATORY_ROOTLESS_PYTHON_SUITES = (
     "tests/runtime/native/production-readiness-test.py",
     "tests/runtime/native/package-dkms-test.py",
     "tests/runtime/native/systemd/swapz-primary-systemd-test.py",
+    "tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py",
     "tests/runtime/native/physical-swap-probe-test.py",
     "tests/runtime/native/live-swap-supervisor-test.py",
 )

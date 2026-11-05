@@ -6132,6 +6132,17 @@ early mapper-unit name. A false-success or failing unlink must be classified
 using source-path absence, and the rename error status must remain visible
 separately from the original generator failure and the final mask state.
 
+The standalone `tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py` transaction fixture is
+mandatory in the rootless `make test` stage: `tests/tools/test-rootless.sh`
+invokes it exactly once, enforced by `tests/runtime/native/source-contract-test.py`.
+The existing Systemd/package workflow also runs it indirectly through its
+workflow-contract fixture; it must not add a duplicate direct invocation.
+The suite needs Python 3, Bash and GNU userspace commands, and operates only on
+private temporary directories with a stubbed manager. Generator subprocesses
+have a 30-second bound, and the official rootless stage keeps the original
+nonzero test exit, privately captured stderr, and suite-phase attribution.
+No service start, installation, swap activation, or device access is permitted.
+
 These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another
 alias, so deployment must separately ensure the selected partition is not
