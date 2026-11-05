@@ -4653,6 +4653,63 @@ against missing synthetic private paths; require Bash's open failure to expose
 no path text, require a successful grouped open to retain its descriptor, and
 require stderr to be restored for the following bounded diagnostic.
 
+Rootless ID36 process-identity negative controls must distinguish a missing
+readiness child (only after the captured timeout parent is still observable)
+from a missing timeout parent, a reparented child, or changed start times.
+An exited timeout with a live reparented pipe-held readiness child is
+**ambiguous ownership**, not a child-exited success: preserve the first
+failure/status, do not send PID-number signals, retain both created resources,
+and record `nested_resume:attempted` with the observed identity status.
+Release the fixture grandchild by closing its owned pipe, not by signaling
+an orphan. Successful synthetic cleanup prints only a
+`ROOTLESS_FIXTURE_ID36_CLEANUP` marker, never an actual
+`PASS_ID36_RESOURCE_PRESSURE` token.
+
+ID36's bounded memory.high/CPU-PSI pair is **RAM-only**: require
+`memory.swap.max=0` and a canonical zero `memory.swap.current` before
+pressure and after the pair. Missing swap controls, a changed limit, malformed
+charge or nonzero charge forbid PASS. `memory.events high` is reclaim
+pressure, not swap; host `/proc/vmstat` pswpin/pswpout is global activity,
+not attributable swap-charge evidence. A loaded anonymous-swap claim requires
+a separately owned workload cgroup with actual positive
+`memory.swap.current` delta, corroborating activity and host-memory safety
+samples, no OOM or unexpected termination, successful process exit and
+byte-exact oracle; none may be replaced by fixture output.
+
+**Codex agent A and Codex agent B: mandatory loaded anonymous-swap cgroup
+setup/teardown handoff (neither is authorized by rootless ID36 fixtures).**
+Before starting pressure, each agent must establish all of:
+(1) cgroup v2 mount/root provenance, delegated memory/CPU controls and an
+authorized writable parent; no host-wide controller or swap changes;
+(2) a uniquely created private child and private scratch with pinned
+directory descriptors, matching named-path device/inode and no symlinks;
+(3) present, readable `memory.max`, `memory.current`, `memory.swap.max`,
+`memory.swap.current`, `memory.events`, `memory.pressure`, `cpu.pressure`,
+and `cgroup.procs`, with a finite safe memory budget and an explicitly
+permitted nonzero swap budget (not ID36's swap.max=0);
+(4) canonical empty initial membership, baseline counters, two successive
+whole-host MemAvailable observations at or above 1 GiB, and sufficient
+validated effective parent headroom;
+(5) Popen/direct-child or equivalent durable owner handles with captured
+PID, PPID, start time and pidfd binding **before migration**, then exactly
+the admitted workers and no foreign members before FILL;
+(6) bounded pressure/PSI, memory-available, OOM and swap-charge monitoring,
+with a fail-closed admission watchdog and a byte-exact oracle.
+During teardown, each agent must (7) cooperatively stop and boundedly reap
+the same proved workers, using TERM/KILL only through revalidated pidfds for
+positively identified processes; never signal guessed/reparented/reused PIDs
+or use `cgroup.kill`; (8) prove every admitted child exited, verify two fresh
+canonical empty membership observations and the same pinned/named cgroup
+identity, then ordinary `rmdir` only; (9) inventory/unlink only pinned,
+canonical regular scratch entries and nonrecursively remove its verified
+directory. Any missing identity, retained child reference, foreign member,
+nonempty/unreadable membership, changed path inode, telemetry regression or
+cleanup failure means BLOCKED and retained evidence, with phase, expected
+proof, observed category, whether signaling/removal was attempted and original
+exit status. The agents must not claim loaded-host swap qualification from
+rootless synthetic observations, vmstat alone or an oracle without actual
+cgroup swap charge.
+
 The nested-child resume cleanup guard must interpret the numeric uncertainty
 state arithmetically: zero permits an attempt only with the existing tracked
 timeout, captured readiness PID, and captured nested process identity; one

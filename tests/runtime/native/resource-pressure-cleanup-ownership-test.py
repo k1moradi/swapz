@@ -2,9 +2,12 @@
 """Rootless ID36 cleanup ownership tests; all cgroup files are synthetic."""
 
 from pathlib import Path
+import os
 import re
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -122,7 +125,7 @@ rmdir() {
             'SESSION_DIRECTORY_FD=""\nCGROUP_DIRECTORY_FD=""\n'
             'pair_cgroup_pid="123"\nCGROUP_WAS_CREATED=1\n'
             f'RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION={int(retain)}\n'
-            'PASS_EVIDENCE="PASS_ID36_RESOURCE_PRESSURE=synthetic"\n'
+            'PASS_EVIDENCE="ROOTLESS_FIXTURE_ID36_CLEANUP=synthetic-pass"\n'
             + self.functions + '\n'
             + 'exec {SESSION_DIRECTORY_FD}<"$SESSION"\n'
             + 'exec {CGROUP_DIRECTORY_FD}<"$CGROUP"\n'
@@ -210,6 +213,166 @@ done
         self.assertNotIn("! $PAIR_RESUME_UNCERTAIN", cleanup)
         self.assertIn("&& (( PAIR_RESUME_UNCERTAIN == 0 )); then", cleanup)
 
+
+    @unittest.skipIf(os.geteuid() == 0, "rootless reparent probe only")
+    def test_reparented_readiness_child_is_not_misclassified_as_exited(self):
+        # Rootless real process tree: a direct child launches a pipe-held
+        # grandchild, records its PID, then exits. The grandchild stays live
+        # but no longer has the recorded timeout as its parent. EOF releases
+        # it cooperatively; neither the fixture nor cleanup signals an orphan.
+        with tempfile.TemporaryDirectory(
+                prefix="swapz-id36-reparent-", dir=self.root) as directory:
+            directory_path = Path(directory)
+            child_pid_path = directory_path / "child.pid"
+            release_parent = directory_path / "release-parent"
+            launcher = r"""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+child = subprocess.Popen(
+    [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
+    stdin=sys.stdin, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+Path(sys.argv[1]).write_text(str(child.pid), encoding="ascii")
+while not Path(sys.argv[2]).exists():
+    time.sleep(0.01)
+os._exit(0)
+"""
+            parent = subprocess.Popen(
+                [sys.executable, "-I", "-c", launcher,
+                 str(child_pid_path), str(release_parent)],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            try:
+                for _ in range(300):
+                    if child_pid_path.exists():
+                        break
+                    self.assertIsNone(parent.poll(), "launcher exited early")
+                    time.sleep(0.01)
+                self.assertTrue(child_pid_path.exists())
+                nested_pid = int(child_pid_path.read_text(encoding="ascii"))
+                parent_stat = Path(f"/proc/{parent.pid}/stat").read_text(
+                    encoding="ascii")
+                parent_start = parent_stat[parent_stat.rfind(") ") + 2:].split()[19]
+                nested_stat = Path(f"/proc/{nested_pid}/stat").read_text(
+                    encoding="ascii")
+                nested_start = nested_stat[nested_stat.rfind(") ") + 2:].split()[19]
+                self.assertEqual(
+                    int(nested_stat[nested_stat.rfind(") ") + 2:].split()[1]),
+                    parent.pid)
+
+                # Capture must succeed while the exact timeout still owns it.
+                action = shell_function("nested_pair_identity_action")
+                before = self.run_simple_shell(
+                    action + "\nnested_pair_identity_action capture "
+                    '"$1" "$2" "$3"\n',
+                    Path(str(nested_pid)), Path(str(parent.pid)),
+                    Path(parent_start))
+                self.assertEqual(before.returncode, 0, before.stderr)
+                self.assertEqual(before.stdout.strip(), nested_start)
+
+                # Deterministically lose only the recorded timeout's stat
+                # AFTER both pidfds open. The old common FileNotFoundError
+                # handler misreported this live reparent-capable child as
+                # status 3 (exited); status 4 must block ownership instead.
+                parent_stat_read = '    raw = Path(f"/proc/{pid}/stat").read_bytes()'
+                self.assertEqual(action.count(parent_stat_read), 1)
+                missing_parent_stat = action.replace(
+                    parent_stat_read,
+                    '    if pid == parent_pid:\n'
+                    '        raise FileNotFoundError("injected timeout parent loss")\n'
+                    + parent_stat_read)
+                parent_lost = self.run_simple_shell(
+                    missing_parent_stat +
+                    '\nnested_pair_identity_action capture "$1" "$2" "$3" "$4"\n',
+                    Path(str(nested_pid)), Path(str(parent.pid)),
+                    Path(parent_start), Path(nested_start))
+                self.assertEqual(parent_lost.returncode, 4, parent_lost.stderr)
+
+                release_parent.touch()
+                self.assertEqual(parent.wait(timeout=4), 0)
+                nested_stat = Path(f"/proc/{nested_pid}/stat").read_text(
+                    encoding="ascii")
+                self.assertNotEqual(
+                    int(nested_stat[nested_stat.rfind(") ") + 2:].split()[1]),
+                    parent.pid, "controlled child must actually be reparented")
+
+                # The former parser returned 3 (child gone) when it was the
+                # *parent* that disappeared; status 4 must quarantine instead.
+                after = self.run_simple_shell(
+                    action + "\nnested_pair_identity_action capture "
+                    '"$1" "$2" "$3" "$4"\n',
+                    Path(str(nested_pid)), Path(str(parent.pid)),
+                    Path(parent_start), Path(nested_start))
+                self.assertEqual(after.returncode, 4, after.stderr)
+
+                preamble = (
+                    f"PAIR_PID={parent.pid}\n"
+                    f"PAIR_PROCESS_IDENTITY={parent_start}\n"
+                    f"PAIR_CGROUP_PROCESS_PID={nested_pid}\n"
+                    f"PAIR_CGROUP_PROCESS_IDENTITY={nested_start}\n"
+                    'stop_direct_owned_child() { : > "$SESSION/../unexpected-parent-stop"; return 0; }\n'
+                )
+                result = self.execute(preamble=preamble, status=143)
+                self.assertEqual(result.returncode, 143, result.stderr)
+                self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+                self.assertIn("phase:pair-resume", result.stderr)
+                self.assertIn("observed:attempted-barrier-status-4", result.stderr)
+                self.assertIn("original_exit:143", result.stderr)
+                self.assertIn("nested_resume:attempted", result.stderr)
+                self.assertIn("retained_cleanup:child-cgroup-and-private-session",
+                              result.stderr)
+                self.assertTrue(self.cgroup.exists())
+                self.assertTrue(self.session.exists())
+                self.assertFalse((self.root / "unexpected-parent-stop").exists())
+                self.assertEqual(
+                    self.cgroup_kill.read_text(encoding="ascii"), "untouched\n")
+                self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+            finally:
+                # The only grandchild release is EOF on the original pipe;
+                # never signal a reparented numeric PID, even for test cleanup.
+                release_parent.touch()
+                if parent.stdin is not None:
+                    parent.stdin.close()
+                if parent.poll() is None:
+                    parent.terminate()  # exact owned Popen, not guessed PID
+                parent.wait(timeout=4)
+
+    def test_ram_only_swap_charge_guard_rejects_false_swap_evidence(self):
+        guard = shell_function("require_ram_only_swap_state")
+        self.assertIn("memory.swap.max memory.swap.current", self.source)
+        for maximum, charge, status, category in (
+                ("0", "0", 0, ""),
+                ("0", "4096", 1, "nonzero-charge"),
+                ("max", "0", 2, "not-zero"),
+                ("0", "00", 2, "invalid"),
+                ("0", "-1", 2, "invalid"),
+                ("0", "18446744073709551616", 2, "invalid"),
+                ("0", None, 2, "unreadable"),
+                (None, "0", 2, "unreadable")):
+            with self.subTest(maximum=maximum, charge=charge):
+                for name, value in (("memory.swap.max", maximum),
+                                    ("memory.swap.current", charge)):
+                    file_path = self.cgroup / name
+                    file_path.unlink(missing_ok=True)
+                    if value is not None:
+                        file_path.write_text(value + "\n", encoding="ascii")
+                result = self.run_simple_shell(
+                    'CGROUP=$1\n' + guard +
+                    '\nrequire_ram_only_swap_state preflight\n',
+                    self.cgroup)
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+                if status:
+                    self.assertIn(f"observed:{category}", result.stderr)
+                    self.assertIn("phase:preflight", result.stderr)
+                    self.assertIn(f"original_exit:{status}", result.stderr)
+                    self.assertIn("cleanup:deferred-to-owned-EXIT", result.stderr)
+                else:
+                    self.assertEqual(result.stderr, "")
+
     def test_verified_stopped_nested_child_receives_pidfd_sigcont_and_cleans(self):
         # Instrument only the wrapper's result; the actual pidfd identity and
         # signaling action, the complete cleanup and bounded owner stop are real.
@@ -234,7 +397,7 @@ signal_nested_owned_child() {
             (self.root / "nested-sigcont-status").read_text(encoding="ascii"), "0\n")
         self.assertEqual((self.root / "nested-resumed").read_text(
             encoding="ascii"), "resumed\n")
-        self.assertEqual(result.stdout, "PASS_ID36_RESOURCE_PRESSURE=synthetic\n")
+        self.assertEqual(result.stdout, "ROOTLESS_FIXTURE_ID36_CLEANUP=synthetic-pass\n")
         self.assertFalse(self.cgroup.exists())
         self.assertFalse(self.session.exists())
 
@@ -582,7 +745,7 @@ stop_direct_owned_child() { : > "$SESSION/../unexpected-outer-stop"; return 0; }
     def test_empty_cgroup_allows_cleanup_and_only_then_pass(self):
         result = self.execute()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "PASS_ID36_RESOURCE_PRESSURE=synthetic\n")
+        self.assertEqual(result.stdout, "ROOTLESS_FIXTURE_ID36_CLEANUP=synthetic-pass\n")
         self.assertFalse(self.cgroup.exists())
         self.assertFalse(self.session.exists())
         self.assertEqual(result.stderr, "")
@@ -622,7 +785,7 @@ awk() {
 '''
         result = self.execute(preamble=preamble)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "PASS_ID36_RESOURCE_PRESSURE=synthetic\n")
+        self.assertEqual(result.stdout, "ROOTLESS_FIXTURE_ID36_CLEANUP=synthetic-pass\n")
         self.assertEqual(result.stderr, "")
         self.assertFalse(self.cgroup.exists())
         self.assertFalse(self.session.exists())
@@ -772,7 +935,7 @@ ln -s "${SESSION%/*}/foreign-target" "$STOP"
     def test_existing_regular_stop_marker_is_accepted(self):
         result = self.execute(preamble=': > "$STOP"\n')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "PASS_ID36_RESOURCE_PRESSURE=synthetic\n")
+        self.assertEqual(result.stdout, "ROOTLESS_FIXTURE_ID36_CLEANUP=synthetic-pass\n")
         self.assertFalse(self.cgroup.exists())
         self.assertFalse(self.session.exists())
 

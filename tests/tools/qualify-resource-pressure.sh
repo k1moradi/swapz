@@ -655,8 +655,16 @@ try:
     try:
         deadline = time.monotonic() + 2.0
         while True:
+            # A lost timeout parent is *not* proof the readiness child exited.
+            # The child may have been reparented while retaining its pidfd.
+            # Only a missing child after an observed parent may return 3.
             try:
                 _, _, observed_parent_start = read_stat(parent_pid)
+            except FileNotFoundError:
+                raise SystemExit(4)
+            except (OSError, ValueError, UnicodeError):
+                raise SystemExit(2)
+            try:
                 state, observed_parent, observed_child_start = read_stat(child_pid)
             except FileNotFoundError:
                 raise SystemExit(3)
@@ -1304,7 +1312,7 @@ if ! cgroup_descriptor_identity="$(read_open_directory_identity "$CGROUP_DIRECTO
     CGROUP_CREATE_REFUSAL_OBSERVATION=descriptor-identity-stale
     exit 2
 fi
-for control in memory.max memory.high memory.current memory.peak memory.events cpu.pressure cgroup.procs; do
+for control in memory.max memory.high memory.current memory.peak memory.events cpu.pressure cgroup.procs memory.swap.max memory.swap.current; do
     [[ -e "$CGROUP/$control" ]] || {
         printf 'BLOCKED: ID36 missing cgroup v2 control %s; provide delegated memory/CPU controllers and a kernel supporting this telemetry\n' "$control" >&2
         exit 2
@@ -1315,9 +1323,33 @@ write_cgroup_control memory.max "$MEMORY_MAX_BYTES" || exit 2
 # Establish the resident helper baseline before applying the real high
 # watermark. The workload-scoped boundary is installed just before release.
 write_cgroup_control memory.high "$MEMORY_MAX_BYTES" || exit 2
-if [[ -e $CGROUP/memory.swap.max ]]; then
-    write_cgroup_control memory.swap.max 0 || exit 2
-fi
+# ID36 is an owned-RAM memory.high exercise, not an anonymous swap test.
+# Never silently run with an absent swap controller or treat global vmstat
+# activity as charge to this private cgroup. The distinct real-swap oracle
+# has its own positive swap-charge and byte-exact proof requirements.
+require_ram_only_swap_state() {
+    local phase="$1" swap_max swap_current
+    if ! swap_max="$(cat "$CGROUP/memory.swap.max" 2>/dev/null)" ||
+       ! swap_current="$(cat "$CGROUP/memory.swap.current" 2>/dev/null)"; then
+        printf 'BLOCKED: ID36 RAM-only swap telemetry unavailable; phase:%s required:memory.swap.max=0 and canonical memory.swap.current=0 observed:unreadable original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        return 2
+    fi
+    if [[ $swap_max != 0 ]]; then
+        printf 'BLOCKED: ID36 RAM-only swap isolation unproven; phase:%s required:memory.swap.max=0 observed:not-zero original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        return 2
+    fi
+    if [[ ! $swap_current =~ ^(0|[1-9][0-9]*)$ ||
+          ${#swap_current} -gt 18 ]]; then
+        printf 'BLOCKED: ID36 RAM-only swap charge malformed; phase:%s required:canonical memory.swap.current byte counter observed:invalid original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        return 2
+    fi
+    if [[ $swap_current != 0 ]]; then
+        printf 'FAIL: ID36 unexpected swap charge inside RAM-only cgroup; phase:%s required:memory.swap.current=0 observed:nonzero-charge original_exit:1 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        return 1
+    fi
+}
+write_cgroup_control memory.swap.max 0 || exit 2
+require_ram_only_swap_state preflight || exit $?
 
 if ! online_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"; then
     printf '%s\n' 'BLOCKED: ID36 online CPU count unavailable; restore working getconf _NPROCESSORS_ONLN telemetry' >&2
@@ -1860,6 +1892,7 @@ if (( pair_rc != 0 )); then
     exit 1
 fi
 
+require_ram_only_swap_state after-pair || exit $?
 (( high_delta > 0 )) || {
     printf '%s\n' 'FAIL: ID36 memory.high reclaim/throttle pressure was not observed' >&2
     exit 1
