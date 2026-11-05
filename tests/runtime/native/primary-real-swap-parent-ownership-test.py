@@ -374,7 +374,7 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             "import subprocess,sys,time\n"
             "descendant = subprocess.Popen([sys.executable, '-I', '-c', "
             "\"import signal,time; signal.signal(signal.SIGTERM, "
-            "signal.SIG_IGN); print('ready', flush=True); time.sleep(60)\", "
+            "signal.SIG_IGN); print('ready', flush=True); time.sleep(60)\"], "
             "stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
             "stderr=subprocess.DEVNULL, text=True)\n"
             "assert descendant.stdout.readline() == 'ready\\n'\n"
