@@ -4198,7 +4198,14 @@ strengthen retention but must not emit a second cleanup phase; first-error
 attribution remains stable. Existing final-directory replacement and
 rmdir-failure regressions still prove
 first refusal and remaining session ownership; no cgroup.kill or loaded host
-pressure cleanup is permitted by these rootless proofs.
+pressure cleanup is permitted by these rootless proofs. A repeated HUP/INT/TERM
+during EXIT cleanup must not abort the remaining ownership-checked teardown
+or replace an already failing original status (including 143) or prior cleanup
+refusal. If cleanup began successfully, the first such signal supplies its
+129/130/143 status, suppresses PASS even if both resources are removed, and
+produces one path-free cleanup-signal diagnostic with proven ownership,
+resumption and exact retention. Inject TERM at the synthetic cgroup rmdir
+boundary for both a retained refusal and a fully removed session.
 
 Rootless contracts must lint both the pressure helper and shell wrapper, and the
 loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
