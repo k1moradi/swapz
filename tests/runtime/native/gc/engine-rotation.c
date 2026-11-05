@@ -206,6 +206,39 @@ static int verify_raw_page(swapz_u32 logical)
 		-EUCLEAN : 0;
 }
 
+/*
+ * Mirror swapz_gc_move_raw(): authenticate the current source bytes before
+ * reserving one destination block, then publish only after lower completion.
+ * verify_after_write is disabled in this native fixture, matching setup().
+ */
+static int relocate_raw_page(swapz_u32 logical)
+{
+	struct swapz_map snapshot;
+	struct swapz_tx transaction;
+	swapz_u8 completed = 0U;
+	int error;
+
+	if (logical >= sizeof(maps) / sizeof(maps[0]))
+		return -ERANGE;
+	snapshot = maps[logical];
+	if (!snapshot.valid || !snapshot.raw || snapshot.extent_blocks != 1U ||
+	    snapshot.start_block >= PBLKS)
+		return -EUCLEAN;
+	error = lower_read(NULL, snapshot.start_block, 1U, raw_readback);
+	if (error)
+		return error;
+	error = swapz_verify_raw(&a, logical, raw_readback);
+	if (error)
+		return error;
+	error = swapz_stage(&a, &logical, 1U, 1U, &transaction);
+	if (error)
+		return error;
+	error = lower_write(NULL, transaction.start_block, 1U,
+			    raw_readback, &completed);
+	return swapz_finish_raw(
+		&a, &transaction, raw_readback, completed, error);
+}
+
 static int evacuate(swapz_u32 victim)
 {
 	struct swapz_compressed_page pages[8];
@@ -1079,7 +1112,8 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 	CHECK(swapz_enable_segment_page_lists(
 		      &a, first_page, last_page, previous_page, next_page,
 		      4U, 32U) == 0);
-	/* RAW entries are accepted only by the production-capable batched path. */
+	/* The initial RAW fixture page uses the supported batched setup path.
+	 * GC relocation below mirrors swapz_gc_move_raw() directly. */
 	e.bulk_enabled = 1;
 	e.bulk_scratch = bulk_scratch;
 	e.bulk_txs = bulk_txs;
@@ -1198,14 +1232,8 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 	 * reaches the three compressed survivors. Read their exact source payloads
 	 * before packing them into one two-block destination extent.
 	 */
-	CHECK(lower_read(NULL, maps[8U].start_block, 1U, raw_readback) == 0);
-	CHECK(swapz_verify_raw(&a, 8U, raw_readback) == 0);
-	raw_page.payload = raw_readback;
-	committed = 0U;
-	CHECK(swapz_engine_write_window_batched(
-		      &e, &raw_page, 1U, &committed) == 0);
-	CHECK(committed == 1U &&
-	      maps[8U].generation == original_raw.generation + 1U &&
+	CHECK(relocate_raw_page(8U) == 0);
+	CHECK(maps[8U].generation == original_raw.generation + 1U &&
 	      first_page[victim] == 2U);
 	lower_writes_after_raw = lower_writes;
 
@@ -1351,14 +1379,12 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
 	CHECK(a.gc_destination == blocked_destination);
 
-	/* swapz_gc_relocate_one() handles a RAW survivor synchronously. Mirror
-	 * that exact engine call first, leaving the three compressed survivors for
-	 * the packed flush that follows in production. */
-	committed = 0U;
-	CHECK(swapz_engine_write_window_batched(
-		      &e, &raw_page, 1U, &committed) == 0);
-	CHECK(committed == 1U &&
-	      maps[8].start_block == blocked_destination * SWAPZ_SEGMENT_BLOCKS);
+	/* swapz_gc_relocate_one() handles a RAW survivor synchronously through
+	 * swapz_gc_move_raw(). Mirror its source-read/stage/lower-write/finish path,
+	 * leaving the three compressed survivors for the packed production flush. */
+	CHECK(relocate_raw_page(8U) == 0);
+	CHECK(maps[8].start_block ==
+	      blocked_destination * SWAPZ_SEGMENT_BLOCKS);
 	CHECK(verify_raw_page(8U) == 0);
 
 	CHECK(swapz_engine_plan_bounded(
