@@ -164,6 +164,106 @@ def pass_record(**extra):
     }
 
 
+
+def real_swap_workload(primary):
+    # Rootless producer-shaped proof: two concurrent oracles, two complete
+    # reuse rounds, independent swap/mapper/vmstat/lower-device counters.
+    minimum_bytes = primary["minimum_swap_traffic_mib"] * 1048576
+    page_bytes = primary["page_bytes"]
+    verified_pages = primary["workload_mib"] * 1048576 // page_bytes
+    worker_pages = verified_pages // 2
+    worker_digests = ("1" * 64, "2" * 64)
+    aggregate_digest = hashlib.sha256(b"".join(
+        bytes.fromhex(value) for value in worker_digests)).hexdigest()
+    verified = {
+        "verified_pages": verified_pages,
+        "verified_bytes": verified_pages * page_bytes,
+        "mismatches": 0,
+        "digest": aggregate_digest,
+        "expected_digest": aggregate_digest,
+    }
+    physical_bytes = minimum_bytes // 2
+    sectors = physical_bytes // 512
+    rounds = []
+    for round_index in (1, 2):
+        worker_records = [{
+            "pid": 101 + worker_index,
+            "verified_pages": worker_pages,
+            "verified_bytes": worker_pages * page_bytes,
+            "mismatches": 0,
+            "digest": digest,
+            "expected_digest": digest,
+        } for worker_index, digest in enumerate(worker_digests)]
+        rounds.append({
+            "round": round_index,
+            "concurrent_workers": 2,
+            "worker_pids": [101, 102],
+            "worker_memory_mib": [primary["workload_mib"] // 2] * 2,
+            "oracle_filled": [{
+                "pid": record["pid"],
+                "digest": record["digest"],
+            } for record in worker_records],
+            "oracle_verified": worker_records,
+            "aggregate_verified": copy.deepcopy(verified),
+            "cgroup_swap_current_bytes_after_fill": minimum_bytes,
+            "cgroup_swap_peak_bytes": minimum_bytes,
+            "mapper_used_start_kib": 0,
+            "mapper_used_delta_kib": minimum_bytes // 1024,
+            "swapz_logical_write_delta": minimum_bytes,
+            "swapz_physical_write_delta": physical_bytes,
+            "swapz_logical_read_delta": minimum_bytes,
+            "swapz_physical_read_delta": physical_bytes,
+            "lower_write_sector_delta": sectors,
+            "lower_write_bytes_delta": sectors * 512,
+            "lower_read_sector_delta": sectors,
+            "lower_read_bytes_delta": sectors * 512,
+            "pswpout_delta": minimum_bytes // page_bytes,
+            "pswpin_delta": minimum_bytes // page_bytes,
+            "oom_delta": 0,
+            "oom_kill_delta": 0,
+            "release_swap_current_bytes": 0,
+            "mapper_used_released_kib": 0,
+        })
+    summed_fields = (
+        "mapper_used_delta_kib",
+        "swapz_logical_write_delta", "swapz_physical_write_delta",
+        "swapz_logical_read_delta", "swapz_physical_read_delta",
+        "lower_write_sector_delta", "lower_write_bytes_delta",
+        "lower_read_sector_delta", "lower_read_bytes_delta",
+        "pswpout_delta", "pswpin_delta", "oom_delta", "oom_kill_delta",
+    )
+    return {
+        "concurrent_workers": 2,
+        "reuse_rounds": 2,
+        "slot_reuse_proven": True,
+        "rounds": rounds,
+        "cgroup_swap_peak_bytes": minimum_bytes,
+        "cgroup_memory_pressure_some_usec": 0,
+        **{name: sum(row[name] for row in rounds) for name in summed_fields},
+    }
+
+
+def real_swap_cycle(primary, index):
+    run_id = f"{index + 1:032x}"
+    return {
+        "cycle": index + 1,
+        "run_id": run_id,
+        "mapper_uuid": "SWAPZ-PRIMARY-" + run_id,
+        "mapper_device": "253:0",
+        "linux_swap_uuid": f"00000000-0000-0000-0000-{index + 1:012x}",
+        "swap_priority": -1,
+        "workload": real_swap_workload(primary),
+        "stop_order": {
+            "initial_active": True,
+            "swapoff_before_remove_witness": True,
+            "final_absent": True,
+            "samples": 42,
+        },
+        "fresh_mapper_used_kib": 0,
+        "durable_final_stage": "COMPLETE",
+    }
+
+
 def real_swap_result(report_raw, policy_raw):
     policy = json.loads(policy_raw)
     primary = policy["primary_real_swap"]
@@ -193,12 +293,7 @@ def real_swap_result(report_raw, policy_raw):
         "reuse_rounds_per_cycle": 2,
         "evidence_path": "/var/lib/swapz/physical-recovery/test.json",
         "cycles": [
-            {
-                "run_id": f"{index + 1:032x}",
-                "linux_swap_uuid":
-                    f"00000000-0000-0000-0000-{index + 1:012x}",
-                "durable_final_stage": "COMPLETE",
-            }
+            real_swap_cycle(primary, index)
             for index in range(primary["cycles"])
         ],
     }
@@ -420,13 +515,29 @@ def physical_campaign_evidence(policy_raw):
             "host_before": campaign_artifact("host-before.json", "4"),
             "host_after": campaign_artifact("host-after.json", "5"),
             "qualification_summary": campaign_artifact("summary.json", "6"),
-            "pairs": [{
-                **campaign_artifact("pair-1.json", "7"),
-                "status": "PASS",
-                "excluded": False,
-            }],
+            "pairs": [
+                {
+                    **campaign_artifact(
+                        f"{workload}-{pair_index}.json",
+                        "0123456789abcdef"[artifact_index]),
+                    "workload": workload,
+                    "pair_id": f"{workload}-{pair_index}",
+                    "pair_index": pair_index,
+                    "order": specification["counterbalanced_order"][pair_index - 1],
+                    "status": "PASS",
+                    "excluded": False,
+                }
+                for artifact_index, (workload, specification, pair_index) in
+                enumerate(
+                    (workload, specification, pair_index)
+                    for workload, specification in
+                    json.loads(policy_raw)["physical_qualification"]["workloads"].items()
+                    for pair_index in range(1, specification["pairs"] + 1))
+            ],
         },
-        "record_count": 1,
+        "record_count": sum(
+            specification["pairs"] for specification in
+            json.loads(policy_raw)["physical_qualification"]["workloads"].values()),
     }
 
 
@@ -1909,8 +2020,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         physical_raw = encoded(physical)
         campaign = physical_campaign_evidence(policy_raw)
         campaign_raw = encoded(campaign)
+        count_bytes = f'"record_count":{campaign["record_count"]}'.encode()
         typed_raw = campaign_raw.replace(
-            b'"record_count":1', b'"record_count":1.0', 1)
+            count_bytes, count_bytes + b".0", 1)
         self.assertNotEqual(typed_raw, campaign_raw)
         evidence = current_evidence(
             report_raw, policy_raw, physical_raw, typed_raw)
@@ -2712,20 +2824,24 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
         self.assertEqual(result["release_verdict"], "BLOCKED")
 
-    @unittest.expectedFailure
     def test_missing_frozen_physical_arms_cannot_qualify_campaign(self):
+        # Historical pre-fix observation, now guarded by this regression:
         # Known evaluator gap: one internally consistent pair currently passes.
+        # A self-consistent pair must not replace the frozen cohort.
         policy = acceptance_policy()
         required_pair_count = sum(
             workload["pairs"] for workload in
             policy["physical_qualification"]["workloads"].values())
         campaign = physical_campaign_evidence(encoded(policy))
-        self.assertGreater(required_pair_count, 1)
-        self.assertEqual(len(campaign["artifacts"]["pairs"]), 1)
+        self.assertEqual(len(campaign["artifacts"]["pairs"]), required_pair_count)
+        campaign["artifacts"]["pairs"] = campaign["artifacts"]["pairs"][:1]
+        campaign["record_count"] = 1
         result = evaluate(policy=policy, campaign=campaign)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            f"required={required_pair_count} observed=1" in blocker
+            for blocker in result["code_blockers"]))
 
-    @unittest.expectedFailure
     def test_zero_real_swap_traffic_cannot_qualify_real_swap(self):
         # Model the producer's workload fields; zero traffic with zero byte
         # mismatches is unavailable proof, not a real-swap PASS.
@@ -2761,6 +2877,96 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         physical["cycles"] = copy.deepcopy(physical["result"]["cycles"])
         result = evaluate(report=report, policy=policy, physical=physical)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "cycle=1 workload." in blocker and "required=" in blocker
+            for blocker in result["code_blockers"]))
+
+
+    def test_complete_frozen_campaign_and_producer_swap_traffic_pass(self):
+        # Complete producer-shaped synthetic qualification is still admissible
+        # before the independent owner-reboot gate, not physical qualification.
+        policy = acceptance_policy()
+        campaign = physical_campaign_evidence(encoded(policy))
+        pairs = campaign["artifacts"]["pairs"]
+        required = policy["physical_qualification"]["workloads"]
+        self.assertEqual(len(pairs), sum(row["pairs"] for row in required.values()))
+        for workload, specification in required.items():
+            rows = [row for row in pairs if row["workload"] == workload]
+            self.assertEqual(
+                [row["pair_index"] for row in rows],
+                list(range(1, specification["pairs"] + 1)))
+            self.assertEqual(
+                [row["order"] for row in rows],
+                specification["counterbalanced_order"])
+        physical = real_swap_evidence(
+            encoded(owner_report()), encoded(policy))
+        for cycle in physical["cycles"]:
+            self.assertEqual(len(cycle["workload"]["rounds"]), 2)
+            self.assertGreaterEqual(
+                cycle["workload"]["rounds"][0]["swapz_logical_read_delta"],
+                policy["primary_real_swap"]["minimum_swap_traffic_mib"] * 1048576)
+        result = evaluate(policy=policy, physical=physical, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS", result["code_blockers"])
+        self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
+
+    def test_frozen_campaign_pair_identity_and_disposition_are_required(self):
+        policy = acceptance_policy()
+        mutations = (
+            ("duplicate-index", lambda rows: rows[1].__setitem__(
+                "pair_index", rows[0]["pair_index"])),
+            ("missing-workload", lambda rows: rows[0].__setitem__(
+                "workload", "not-a-frozen-workload")),
+            ("wrong-order", lambda rows: rows[0].__setitem__(
+                "order", "swapz-first")),
+            ("duplicate-name", lambda rows: rows[1].__setitem__(
+                "name", rows[0]["name"])),
+            ("excluded-pair", lambda rows: rows[0].update(
+                status="EXCLUDED", excluded=True)),
+        )
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                campaign = physical_campaign_evidence(encoded(policy))
+                mutate(campaign["artifacts"]["pairs"])
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    "sealed campaign" in blocker
+                    for blocker in result["code_blockers"]))
+
+    def test_real_swap_round_traffic_thresholds_and_aggregate_binding(self):
+        policy = acceptance_policy()
+        report = owner_report()
+        mutations = (
+            ("cgroup-swap", "cgroup_swap_current_bytes_after_fill", 0),
+            ("mapper-usage", "mapper_used_delta_kib", 0),
+            ("logical-write", "swapz_logical_write_delta", 0),
+            ("physical-write", "swapz_physical_write_delta", 0),
+            ("logical-read", "swapz_logical_read_delta", 0),
+            ("physical-read", "swapz_physical_read_delta", 0),
+            ("lower-write", "lower_write_sector_delta", 0),
+            ("lower-read", "lower_read_sector_delta", 0),
+            ("swapout", "pswpout_delta", 0),
+            ("swapin", "pswpin_delta", 0),
+            ("byte-mismatch", "aggregate_verified.mismatches", 1),
+            ("under-floor", "cgroup_swap_peak_bytes",
+             policy["primary_real_swap"]["minimum_swap_traffic_mib"] * 1048576 - 1),
+        )
+        for name, metric, value in mutations:
+            with self.subTest(name=name):
+                physical = real_swap_evidence(
+                    encoded(report), encoded(policy))
+                round_evidence = physical["result"]["cycles"][0]["workload"]["rounds"][0]
+                if metric.startswith("aggregate_verified."):
+                    round_evidence["aggregate_verified"][metric.split(".")[1]] = value
+                else:
+                    round_evidence[metric] = value
+                physical["cycles"] = copy.deepcopy(physical["result"]["cycles"])
+                result = evaluate(report=report, policy=policy, physical=physical)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    "cycle=1 workload." in blocker for blocker in result["code_blockers"]),
+                    result["code_blockers"])
+
 
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
@@ -2782,15 +2988,30 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             observed_module_sha256,
         )
 
+    def test_proven_current_source_owner_failure_is_not_missing_evidence(self):
+        report = owner_report()
+        report["overall"] = "FAIL"
+        report["stages"][1].update(
+            status="FAIL", exit_code=1, failed_phase="native-contract")
+        result = evaluate(report=report)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["release_verdict"], "FAIL")
+        report["source_sha"] = "b" * 40
+        report["tested_commit_sha"] = "b" * 40
+        stale = evaluate(report=report)
+        self.assertEqual(stale["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(stale["release_verdict"], "BLOCKED")
+
     def test_failure_diagnostics_do_not_disclose_private_input(self):
         private_marker = "/private/workspace token=do-not-echo"
         diagnostics, _, _ = self._failed_owner_diagnostics(private_marker)
         self.assertNotIn(private_marker, diagnostics)
 
-    @unittest.expectedFailure
     def test_failure_diagnostics_preserve_phase_and_source_artifact_identity(self):
+        # Historical pre-fix observation, now guarded by this regression:
         # Known diagnostic gap: the first authoritative failed phase and the
         # required/observed source and artifact identities are currently lost.
+        # Retain their exact bindings without exposing raw evidence.
         diagnostics, observed_source_sha, observed_module_sha256 = (
             self._failed_owner_diagnostics("synthetic-private-marker"))
         required_markers = (

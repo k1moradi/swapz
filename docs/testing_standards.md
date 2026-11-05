@@ -6629,7 +6629,9 @@ the sole qualification interface; `make fast_test` remains development-only.
 
 Release-evaluator synthetic negative controls must remain rootless and model
 the evidence fields emitted by the producer rather than inventing alternate
-counters. Development-only card evidence, including a source-bound fast-test
+counters. Complete positive controls must also exercise the producer-shaped
+frozen campaign and independently measured per-cycle swap workload so a
+fix cannot reject every release by default. Development-only card evidence, including a source-bound fast-test
 PASS, exact header restoration and an inactive final target, is never real-swap
 or physical-acceptance evidence and cannot backfill an incomplete five-stage
 `make test`. Development fixtures use the producer's `development_test_evidence`
@@ -6646,7 +6648,13 @@ evidence only and must be reported as an unresolved release blocker; it never
 upgrades acceptance.
 Privacy leak checks use a separate ordinary regression, never an expected-failure
 method, because `unittest.expectedFailure` would mask any assertion failure in
-that method.
+that method. Once repaired, the campaign-completeness, zero-traffic and
+diagnostic-completeness regressions must likewise be ordinary negative controls.
+Blockers must identify the first authoritative failed phase, evidence class,
+required and observed workload/count or exact SHA-256/source binding, and
+original disposition without copying private input paths or raw evidence.
+Current-source, explicitly failed executions remain FAIL; unavailable,
+incomplete and historical-source evidence remains BLOCKED.
 
 `docs/handoff/production-readiness.json` is observational release evidence,
 not a qualification result. Every current PASS must bind to the exact
@@ -6796,6 +6804,17 @@ real-swap helper is diagnostic rather than part of the cross-boot canonical
 target tuple, but it must be a valid major:minor and the persistent envelope
 must exactly match the nested PASS result; malformed or mismatched device
 identity is BLOCKED. Missing persistent physical evidence is BLOCKED.
+For each required real-swap cycle, the release evaluator must independently
+require the producer's two concurrent-oracle reuse rounds and the frozen
+minimum 128 MiB swap charge and logical swapz READ/WRITE evidence per round,
+not merely zero oracle mismatches or durable COMPLETE. Every round must bind
+the dedicated cgroup's swap charge to exact mapper use, nonzero
+`pswpout`/`pswpin`, physical swapz READ/WRITE activity, and host-visible
+backing-device sector/byte counters that cover the reported physical traffic.
+It must check verified page/byte geometry, digests, zero mismatches/OOM,
+release of the exact mapper slots, coherent cycle aggregates and witnessed
+normal swapoff-before-removal order. Missing or zero traffic is BLOCKED even
+when a source-bound retained artifact claims PASS.
 Current PASS physical records bind the normalized lowercase PARTUUID plus exact
 partition byte size and the frozen policy SHA-256. A synthesized
 `sustained_physical_performance: PASS` record is not sufficient: release
@@ -6808,7 +6827,15 @@ STABLE host identity with quiescent admitted-device boundaries, and the exact
 current policy, prospective-amendment, campaign-evaluator, evidence-sealer and
 metadata-RAM-validator digests. Its
 host/summary/pair artifact manifest must be structurally complete and internally
-count-consistent. Missing or stale sealed campaign evidence is BLOCKED.
+count-consistent. The release evaluator must also compare every sealed pair
+artifact independently against all frozen workload names, exact pair counts
+(5, 5, 1, 3; 14 total), unique per-workload pair IDs and indices,
+counterbalanced order, unique artifact names and PASS/non-excluded
+disposition. The campaign's self-reported `record_count`, aggregate PASS
+status and exact JSON digest are necessary but do not establish missing
+arms or an incomplete workload cohort. A shortened or inconsistent campaign
+is BLOCKED even when its internal envelope and digest agree.
+Missing or stale sealed campaign evidence is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
 derives maximum logical pages/bytes and measured target/metadata peak RAM from
 the accepted `sd-high-occupancy-churn` swapz arm, and a PASS campaign is invalid

@@ -535,6 +535,217 @@ def validate_acceptance_policy(
     return sha256_bytes(raw), memory_limit
 
 
+
+def validate_real_swap_workload(
+        workload: Any, primary_policy: dict[str, Any],
+        cycle_index: int) -> list[str]:
+    """Require the producer's independent Linux and lower-device observations."""
+    issues: list[str] = []
+
+    def reject(metric: str, required: Any, observed: Any) -> None:
+        # Keep only the first bounded diagnostic metrics, never raw evidence.
+        message = (
+            f"cycle={cycle_index} workload.{metric} "
+            f"required={required} observed={observed}")
+        if len(issues) < 24 and message not in issues:
+            issues.append(message)
+
+    minimum_mib = primary_policy.get("minimum_swap_traffic_mib")
+    workload_mib = primary_policy.get("workload_mib")
+    page_bytes = primary_policy.get("page_bytes")
+    if (type(minimum_mib) is not int or minimum_mib <= 0 or
+            type(workload_mib) is not int or workload_mib <= 0 or
+            type(page_bytes) is not int or page_bytes <= 0 or
+            workload_mib * 1048576 % page_bytes):
+        reject("frozen_policy", "positive traffic/page geometry", "invalid")
+        return issues
+    minimum_bytes = minimum_mib * 1048576
+    verified_pages = workload_mib * 1048576 // page_bytes
+    verified_bytes = verified_pages * page_bytes
+    if not isinstance(workload, dict):
+        reject("evidence", "producer workload object", "missing")
+        return issues
+
+    def counter(record: dict[str, Any], metric: str, minimum: int,
+                location: str) -> int | None:
+        observed = record.get(metric)
+        if type(observed) is not int:
+            reject(f"{location}.{metric}", f">={minimum}", "invalid")
+            return None
+        if observed < minimum:
+            reject(f"{location}.{metric}", f">={minimum}", observed)
+        return observed
+
+    def exact(record: dict[str, Any], metric: str, required: Any,
+              location: str) -> None:
+        observed = record.get(metric)
+        if type(observed) is not type(required) or observed != required:
+            reject(f"{location}.{metric}", required,
+                   observed if type(observed) in (bool, int) else "invalid")
+
+    exact(workload, "concurrent_workers", 2, "summary")
+    exact(workload, "reuse_rounds", 2, "summary")
+    exact(workload, "slot_reuse_proven", True, "summary")
+    counter(workload, "cgroup_memory_pressure_some_usec", 0, "summary")
+    rounds = workload.get("rounds")
+    if not isinstance(rounds, list) or len(rounds) != 2:
+        reject("rounds", 2, len(rounds) if isinstance(rounds, list)
+               else "invalid")
+        return issues
+
+    sum_fields = (
+        "mapper_used_delta_kib",
+        "swapz_logical_write_delta", "swapz_physical_write_delta",
+        "swapz_logical_read_delta", "swapz_physical_read_delta",
+        "lower_write_sector_delta", "lower_write_bytes_delta",
+        "lower_read_sector_delta", "lower_read_bytes_delta",
+        "pswpout_delta", "pswpin_delta", "oom_delta", "oom_kill_delta",
+    )
+    sums = {name: 0 for name in sum_fields}
+    peaks: list[int] = []
+    for index, round_evidence in enumerate(rounds, 1):
+        location = f"round={index}"
+        if not isinstance(round_evidence, dict):
+            reject(location, "producer round object", "invalid")
+            continue
+        exact(round_evidence, "round", index, location)
+        exact(round_evidence, "concurrent_workers", 2, location)
+        exact(round_evidence, "mapper_used_start_kib", 0, location)
+        exact(round_evidence, "mapper_used_released_kib", 0, location)
+        exact(round_evidence, "release_swap_current_bytes", 0, location)
+        for metric, minimum in (
+                ("cgroup_swap_current_bytes_after_fill", minimum_bytes),
+                ("cgroup_swap_peak_bytes", minimum_bytes),
+                ("mapper_used_delta_kib", (minimum_bytes + 1023) // 1024),
+                ("swapz_logical_write_delta", minimum_bytes),
+                ("swapz_physical_write_delta", 1),
+                ("swapz_logical_read_delta", minimum_bytes),
+                ("swapz_physical_read_delta", 1),
+                ("lower_write_sector_delta", 1),
+                ("lower_read_sector_delta", 1),
+                ("pswpout_delta", 1), ("pswpin_delta", 1),
+                ("lower_write_bytes_delta", 1),
+                ("lower_read_bytes_delta", 1)):
+            counter(round_evidence, metric, minimum, location)
+        exact(round_evidence, "oom_delta", 0, location)
+        exact(round_evidence, "oom_kill_delta", 0, location)
+        swap_current = round_evidence.get("cgroup_swap_current_bytes_after_fill")
+        swap_peak = round_evidence.get("cgroup_swap_peak_bytes")
+        mapper_used = round_evidence.get("mapper_used_delta_kib")
+        if (type(swap_current) is int and type(mapper_used) is int and
+                swap_current != mapper_used * 1024):
+            reject(f"{location}.mapper_used_delta_kib",
+                   "exact cgroup-to-mapper swap charge", "inconsistent")
+        if (type(swap_current) is int and type(swap_peak) is int and
+                swap_peak < swap_current):
+            reject(f"{location}.cgroup_swap_peak_bytes",
+                   "at least cgroup swap current", "inconsistent")
+        for direction in ("write", "read"):
+            sectors = round_evidence.get(f"lower_{direction}_sector_delta")
+            lower_bytes = round_evidence.get(f"lower_{direction}_bytes_delta")
+            physical_bytes = round_evidence.get(
+                f"swapz_physical_{direction}_delta")
+            if all(type(value) is int and value >= 0 for value in (
+                    sectors, lower_bytes, physical_bytes)):
+                if lower_bytes != sectors * 512 or lower_bytes < physical_bytes:
+                    reject(f"{location}.lower_{direction}_bytes_delta",
+                           "sectors*512 and >=physical", "inconsistent")
+        workers = round_evidence.get("oracle_verified")
+        filled = round_evidence.get("oracle_filled")
+        worker_pids = round_evidence.get("worker_pids")
+        worker_memory_mib = round_evidence.get("worker_memory_mib")
+        if (not isinstance(workers, list) or len(workers) != 2 or
+                not isinstance(filled, list) or len(filled) != 2 or
+                not isinstance(worker_pids, list) or len(worker_pids) != 2 or
+                any(type(pid) is not int or pid <= 0 for pid in worker_pids) or
+                len(set(worker_pids)) != 2 or
+                not isinstance(worker_memory_mib, list) or
+                len(worker_memory_mib) != 2 or
+                any(type(mib) is not int or mib < 64
+                    for mib in worker_memory_mib) or
+                sum(worker_memory_mib) != workload_mib):
+            reject(f"{location}.oracle_workers", "two owned verified workers",
+                   "invalid")
+        else:
+            worker_digests = []
+            expected_digests = []
+            worker_pages = 0
+            worker_bytes = 0
+            worker_mismatches = 0
+            for worker_index, worker in enumerate(workers):
+                fill = filled[worker_index]
+                if not isinstance(worker, dict) or not isinstance(fill, dict):
+                    reject(f"{location}.oracle_workers", "verified records", "invalid")
+                    continue
+                pages = worker.get("verified_pages")
+                byte_count = worker.get("verified_bytes")
+                mismatches = worker.get("mismatches")
+                digest = worker.get("digest")
+                expected_digest = worker.get("expected_digest")
+                expected_worker_pages = (
+                    worker_memory_mib[worker_index] * 1048576 // page_bytes)
+                if (worker.get("pid") != worker_pids[worker_index] or
+                        fill.get("pid") != worker_pids[worker_index] or
+                        type(pages) is not int or
+                        pages != expected_worker_pages or
+                        type(byte_count) is not int or
+                        byte_count != pages * page_bytes or
+                        type(mismatches) is not int or mismatches != 0 or
+                        not isinstance(digest, str) or
+                        not SHA256_RE.fullmatch(digest) or
+                        not isinstance(expected_digest, str) or
+                        not SHA256_RE.fullmatch(expected_digest) or
+                        digest != expected_digest or
+                        fill.get("digest") != expected_digest):
+                    reject(f"{location}.oracle_workers",
+                           "matched byte-exact worker verification", "invalid")
+                    continue
+                worker_pages += pages
+                worker_bytes += byte_count
+                worker_mismatches += mismatches
+                worker_digests.append(bytes.fromhex(digest))
+                expected_digests.append(bytes.fromhex(expected_digest))
+            aggregate = round_evidence.get("aggregate_verified")
+            if len(worker_digests) == 2 and isinstance(aggregate, dict):
+                for metric, expected in (
+                        ("verified_pages", worker_pages),
+                        ("verified_bytes", worker_bytes),
+                        ("mismatches", worker_mismatches),
+                        ("digest", hashlib.sha256(
+                            b"".join(worker_digests)).hexdigest()),
+                        ("expected_digest", hashlib.sha256(
+                            b"".join(expected_digests)).hexdigest())):
+                    if aggregate.get(metric) != expected:
+                        reject(f"{location}.aggregate_verified.{metric}",
+                               "matching worker sum/digest", "inconsistent")
+        verified = round_evidence.get("aggregate_verified")
+        if not isinstance(verified, dict):
+            reject(f"{location}.aggregate_verified",
+                   "byte-exact oracle totals", "missing")
+        else:
+            exact(verified, "verified_pages", verified_pages, location)
+            exact(verified, "verified_bytes", verified_bytes, location)
+            exact(verified, "mismatches", 0, location)
+            digest = verified.get("digest")
+            if (not isinstance(digest, str) or
+                    not SHA256_RE.fullmatch(digest) or
+                    digest != verified.get("expected_digest")):
+                reject(f"{location}.aggregate_verified.digest",
+                       "matching SHA-256 digests", "invalid")
+        for name in sum_fields:
+            value = round_evidence.get(name)
+            if type(value) is int:
+                sums[name] += value
+        peak = round_evidence.get("cgroup_swap_peak_bytes")
+        if type(peak) is int:
+            peaks.append(peak)
+    for name, expected in sums.items():
+        exact(workload, name, expected, "summary")
+    if len(peaks) == len(rounds):
+        exact(workload, "cgroup_swap_peak_bytes", max(peaks), "summary")
+    return issues
+
+
 def validate_real_swap_result(
         result: dict[str, Any],
         source_sha: str,
@@ -644,7 +855,7 @@ def validate_real_swap_result(
         swap_uuid_re = re.compile(
             r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
             r"[0-9a-f]{4}-[0-9a-f]{12}$")
-        for cycle in cycles:
+        for cycle_index, cycle in enumerate(cycles, 1):
             if not isinstance(cycle, dict):
                 reject("nested result contains a malformed cycle")
                 continue
@@ -665,6 +876,33 @@ def validate_real_swap_result(
                 swap_uuids.add(swap_uuid)
             if cycle.get("durable_final_stage") != "COMPLETE":
                 reject("nested result cycle did not end in durable COMPLETE")
+            if type(cycle.get("cycle")) is not int or cycle["cycle"] != cycle_index:
+                reject(f"nested result cycle identity required={cycle_index} observed=invalid")
+            if (isinstance(run_id, str) and RUN_ID_RE.fullmatch(run_id) and
+                    cycle.get("mapper_uuid") != f"SWAPZ-PRIMARY-{run_id}"):
+                reject(f"nested result cycle={cycle_index} mapper UUID binding mismatch")
+            mapper_device = cycle.get("mapper_device")
+            if (not isinstance(mapper_device, str) or
+                    not MAJOR_MINOR_RE.fullmatch(mapper_device) or
+                    mapper_device == target_device):
+                reject(f"nested result cycle={cycle_index} exact mapper device identity is invalid")
+            if type(cycle.get("swap_priority")) is not int or (
+                    cycle["swap_priority"] != -1):
+                reject(f"nested result cycle={cycle_index} swap priority is not -1")
+            if type(cycle.get("fresh_mapper_used_kib")) is not int or (
+                    cycle["fresh_mapper_used_kib"] != 0):
+                reject(f"nested result cycle={cycle_index} did not start fresh")
+            stop_order = cycle.get("stop_order")
+            if (not isinstance(stop_order, dict) or
+                    any(stop_order.get(key) is not True for key in (
+                        "initial_active", "swapoff_before_remove_witness",
+                        "final_absent")) or
+                    type(stop_order.get("samples")) is not int or
+                    stop_order["samples"] <= 0):
+                reject(f"nested result cycle={cycle_index} normal stop-order proof is missing")
+            for issue in validate_real_swap_workload(
+                    cycle.get("workload"), primary_policy, cycle_index):
+                reject("nested result " + issue)
     return issues
 
 
@@ -732,12 +970,27 @@ def validate_physical_campaign_evidence(
         raw: bytes,
         source_sha: str,
         policy_sha256: str | None,
-        target: tuple[str, int] | None) -> list[str]:
+        target: tuple[str, int] | None,
+        policy: dict[str, Any]) -> list[str]:
     issues: list[str] = []
 
     def reject(message: str) -> None:
         if message not in issues:
             issues.append(message)
+
+    physical_policy = policy.get("physical_qualification")
+    workloads = (
+        physical_policy.get("workloads")
+        if isinstance(physical_policy, dict) else None)
+    if (not isinstance(workloads, dict) or not workloads or
+            any(not isinstance(specification, dict) or
+                type(specification.get("pairs")) is not int or
+                specification["pairs"] <= 0 or
+                not isinstance(specification.get("counterbalanced_order"), list) or
+                len(specification["counterbalanced_order"]) != specification["pairs"]
+                for specification in workloads.values())):
+        reject("sealed campaign frozen workload contract is unavailable")
+        return issues
 
     if not isinstance(campaign, dict):
         reject("sealed campaign evidence object is invalid")
@@ -995,25 +1248,77 @@ def validate_physical_campaign_evidence(
         record_count = campaign.get("record_count")
         if not isinstance(pairs, list) or not pairs:
             reject("sealed campaign pair artifact list is empty")
-        elif (
-                not isinstance(record_count, int) or
-                isinstance(record_count, bool) or
-                record_count != len(pairs)):
+        elif type(record_count) is not int or record_count != len(pairs):
             reject("sealed campaign pair artifact count mismatch")
-        else:
-            for pair in pairs:
-                if not _valid_campaign_artifact(pair):
-                    reject("sealed campaign contains an invalid pair artifact")
-                    break
-                status = pair.get("status")
-                excluded = pair.get("excluded")
-                if (
-                        status not in ("PASS", "EXCLUDED") or
-                        not isinstance(excluded, bool) or
-                        excluded != (status == "EXCLUDED")):
-                    reject(
-                        "sealed campaign pair disposition is inconsistent")
-                    break
+
+        # A matching record_count only authenticates the supplied list. The
+        # independent frozen workload plan defines the complete cohort.
+        required_pairs = sum(
+            item["pairs"] for item in workloads.values()
+            if isinstance(item, dict) and type(item.get("pairs")) is int)
+        observed_pairs = len(pairs) if isinstance(pairs, list) else 0
+        if observed_pairs != required_pairs:
+            reject(
+                "sealed campaign frozen pair completeness mismatch: "
+                f"metric=total_pairs required={required_pairs} "
+                f"observed={observed_pairs} original_status="
+                f"{'PASS' if campaign.get('campaign_status') == 'PASS' else 'non_PASS'}")
+        observed_indices: dict[str, set[int]] = {
+            workload: set() for workload in workloads}
+        pair_identifiers: set[tuple[str, str]] = set()
+        artifact_names: set[str] = set()
+        # Inspect no more than the frozen cohort plus one excess artifact.
+        # An oversized list has already failed the independent count gate.
+        for pair in (pairs[:required_pairs + 1]
+                     if isinstance(pairs, list) else ()):
+            if not _valid_campaign_artifact(pair):
+                reject("sealed campaign contains an invalid pair artifact")
+                continue
+            if pair["name"] in artifact_names:
+                reject("sealed campaign contains duplicate pair artifact names")
+            artifact_names.add(pair["name"])
+            workload = pair.get("workload")
+            if not isinstance(workload, str) or workload not in workloads:
+                reject("sealed campaign contains a non-frozen workload")
+                continue
+            workload_spec = workloads[workload]
+            pair_index = pair.get("pair_index")
+            pair_id = pair.get("pair_id")
+            order = pair.get("order")
+            required_count = workload_spec["pairs"]
+            if (type(pair_index) is not int or
+                    not 1 <= pair_index <= required_count or
+                    pair_index in observed_indices[workload]):
+                reject(
+                    f"sealed campaign workload={workload} pair identity "
+                    f"required=unique_indices_1..{required_count} "
+                    "observed=missing_duplicate_or_out_of_range")
+                continue
+            observed_indices[workload].add(pair_index)
+            if (not isinstance(pair_id, str) or not pair_id or
+                    (workload, pair_id) in pair_identifiers):
+                reject(
+                    f"sealed campaign workload={workload} pair_id "
+                    "required=unique_nonempty observed=invalid_or_duplicate")
+            else:
+                pair_identifiers.add((workload, pair_id))
+            if order != workload_spec["counterbalanced_order"][pair_index - 1]:
+                reject(
+                    f"sealed campaign workload={workload} pair_index={pair_index} "
+                    "order differs from frozen counterbalance")
+            if pair.get("status") != "PASS" or pair.get("excluded") is not False:
+                reject(
+                    f"sealed campaign workload={workload} pair_index={pair_index} "
+                    "required=PASS_excluded_false observed=nonqualifying "
+                    f"original_status="
+                    f"{'PASS' if pair.get('status') == 'PASS' else 'non_PASS'}")
+        for workload, workload_spec in workloads.items():
+            required_count = workload_spec["pairs"]
+            observed_count = len(observed_indices[workload])
+            if observed_count != required_count:
+                reject(
+                    f"sealed campaign workload={workload} pair completeness "
+                    f"required={required_count} observed={observed_count}")
     return issues
 
 
@@ -1290,6 +1595,11 @@ def evaluate_release(
         block_code("exact-source owner make test is not PASS")
     if test_results.get("source_sha") != source_sha or             test_results.get("tested_commit_sha") != source_sha:
         block_code("owner make test is not bound to the release source")
+        observed_source = test_results.get("source_sha")
+        block_code(
+            "owner qualification: evidence_class=owner_make_test "
+            f"metric=source_sha required={source_sha} "
+            f"observed={observed_source if _valid_source(observed_source) else 'invalid'}")
     if test_results.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY":
         block_code("owner qualification scope is unexpected")
     stages = test_results.get("stages")
@@ -1311,6 +1621,25 @@ def evaluate_release(
             block_code(
                 "one or more mandatory owner qualification stages are not "
                 "PASS with exit code 0")
+            first_failed = next(row for row in stage_rows if (
+                row.get("status") != "PASS" or
+                type(row.get("exit_code")) is not int or
+                row.get("exit_code") != 0))
+            failed_phase = first_failed.get("failed_phase")
+            safe_phase = (
+                failed_phase if isinstance(failed_phase, str) and
+                re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", failed_phase)
+                else "unavailable")
+            original_status = first_failed.get("status")
+            safe_status = (
+                original_status if isinstance(original_status, str) and
+                original_status in ("PASS", "FAIL", "BLOCKED", "INCOMPLETE")
+                else "invalid")
+            block_code(
+                "owner qualification: evidence_class=owner_make_test "
+                f"first_failed_phase={safe_phase} "
+                f"original_status={safe_status} required=PASS "
+                f"observed={safe_status}")
     if not isinstance(report_hashes, dict) or             report_hashes.get("status") != "AVAILABLE":
         block_code("qualified artifact hashes are unavailable")
         report_artifacts = None
@@ -1398,6 +1727,22 @@ def evaluate_release(
     if qualified is not None:
         if qualified.get("qualified") is not True or                 not _same_hashes(qualified.get("hashes"), report_artifacts):
             block_code("qualified_artifact_hashes: owner artifact binding mismatch")
+            required_hashes = qualified.get("hashes")
+            for artifact_key in ARTIFACT_KEYS:
+                required_hash = (
+                    required_hashes.get(artifact_key)
+                    if isinstance(required_hashes, dict) else None)
+                observed_hash = (
+                    report_artifacts.get(artifact_key)
+                    if isinstance(report_artifacts, dict) else None)
+                if (required_hash != observed_hash and
+                        all(isinstance(value, str) and
+                            SHA256_RE.fullmatch(value)
+                            for value in (required_hash, observed_hash))):
+                    block_code(
+                        "owner qualification: evidence_class=qualified_artifacts "
+                        f"metric={artifact_key} required={required_hash} "
+                        f"observed={observed_hash}")
 
     ci = pass_record("required_ci")
     if ci is not None:
@@ -1501,10 +1846,26 @@ def evaluate_release(
                     real_swap_evidence_raw):
                 block_code(
                     "real_linux_swap: persistent evidence digest binding mismatch")
-            for issue in validate_real_swap_evidence(
-                    real_swap_evidence, real_swap_evidence_raw, source_sha,
-                    test_results_raw, policy, policy_sha256,
-                    report_artifacts, target):
+            swap_issues = validate_real_swap_evidence(
+                real_swap_evidence, real_swap_evidence_raw, source_sha,
+                test_results_raw, policy, policy_sha256,
+                report_artifacts, target)
+            if swap_issues:
+                original_status = (
+                    real_swap_evidence.get("status")
+                    if isinstance(real_swap_evidence, dict) else None)
+                safe_status = (
+                    original_status if original_status in (
+                        "PASS", "FAIL", "BLOCKED") else "invalid")
+                artifact_digest = (
+                    sha256_bytes(real_swap_evidence_raw)
+                    if isinstance(real_swap_evidence_raw, bytes) else "invalid")
+                block_code(
+                    "real_linux_swap: evidence_class=persistent_real_swap "
+                    "first_failed_phase=cycle_validation "
+                    f"original_status={safe_status} source_sha={source_sha} "
+                    f"artifact_sha256={artifact_digest}")
+            for issue in swap_issues:
                 block_code("real_linux_swap: " + issue)
 
     capacity = pass_record("maximum_capacity_and_ram")
@@ -1535,7 +1896,22 @@ def evaluate_release(
             physical_campaign_evidence_raw is not None):
         campaign_issues = validate_physical_campaign_evidence(
             physical_campaign_evidence, physical_campaign_evidence_raw,
-            source_sha, policy_sha256, target)
+            source_sha, policy_sha256, target, policy)
+        if campaign_issues:
+            original_status = (
+                physical_campaign_evidence.get("campaign_status")
+                if isinstance(physical_campaign_evidence, dict) else None)
+            safe_status = (
+                original_status if original_status in (
+                    "PASS", "FAIL", "BLOCKED") else "invalid")
+            artifact_digest = (
+                sha256_bytes(physical_campaign_evidence_raw)
+                if isinstance(physical_campaign_evidence_raw, bytes) else "invalid")
+            block_code(
+                "physical_campaign: evidence_class=sealed_physical_campaign "
+                "first_failed_phase=campaign_validation "
+                f"original_status={safe_status} source_sha={source_sha} "
+                f"artifact_sha256={artifact_digest}")
         if isinstance(physical_campaign_evidence, dict):
             campaign_sealed_at = physical_campaign_evidence.get(
                 "sealed_at_utc")
@@ -1758,7 +2134,19 @@ def evaluate_release(
                 reboot.get("overall") == "FAIL"):
             cold_boot_observed = "FAIL"
 
-    if cold_boot_observed == "FAIL":
+    # Only a failed execution bound to this exact source is a FAIL.
+    # Missing, malformed or previous-source evidence remains BLOCKED.
+    proven_owner_failure = (
+        test_results.get("overall") == "FAIL" and
+        test_results.get("source_sha") == source_sha and
+        test_results.get("tested_commit_sha") == source_sha and
+        isinstance(stages, list) and
+        [row.get("name") for row in stages if isinstance(row, dict)]
+        == list(REQUIRED_STAGES) and
+        any(isinstance(row, dict) and row.get("status") == "FAIL" and
+            type(row.get("exit_code")) is int and row["exit_code"] != 0
+            for row in stages))
+    if cold_boot_observed == "FAIL" or proven_owner_failure:
         release_verdict = "FAIL"
     elif not code_ready or not deployment_ready:
         release_verdict = "BLOCKED"
