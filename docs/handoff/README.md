@@ -11,7 +11,11 @@ history, not device authorization. Start with [AGENTS](../../AGENTS.md),
 ## Debugging navigation
 
 - **First Codex /dev/sda1:** [dedicated-card identity and standing scope](../AGENT_CONTEXT.md#current-production-mission); pathname alone is not identity.
-- **Second Codex /dev/sda4:** [retired host record](old-host-physical-and-live-swap-evidence.md) and [live-swap trial](../live-swap-trial-recovery.md) are **historical**, never current card permission.
+- **Second Lubuntu Codex /dev/sda4:** [separate host scope](../AGENT_CONTEXT.md#separate-lubuntu-host-scope-for-devsda4)
+  is conditional; recovery storage currently shares the target's parent and
+  **blocks mutation**. The [retired host record](old-host-physical-and-live-swap-evidence.md)
+  and [one-use trial](../live-swap-trial-recovery.md) are historical, not its
+  scope record or evidence of admission.
 - **Secure Boot:** [MOK enrollment and module signing](../compile.md#secure-boot-module-signing); a valid signature is not kernel-load evidence.
 - **Development-only card smoke:** [strict admission](../testing_standards.md#development-only-card-backed-data-path-smoke) and [triage](../README.md#diagnose-the-first-record); `make fast_test` is not qualifying `make test` or real swap.
 - **Real swap/physical:** [native-host qualification](../testing_standards.md#primary-real-swap-native-host-qualification) and [physical benchmark scope](../benchmark.md#physical-media-and-workload-validity); frozen policy above.
