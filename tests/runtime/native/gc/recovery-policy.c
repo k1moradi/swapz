@@ -1,43 +1,49 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Execute the same small GC lower-error policy included by the DM target. */
-#include <errno.h>
 #include <stdio.h>
 #include "gc-recovery-policy.h"
 
+struct recovery_policy_case {
+	int recovery_active;
+	int is_write;
+	int is_eio;
+	int expected_retry;
+};
+
 int main(void)
 {
-	static const int lower_errors[] = {
-		-EIO, -ENOSPC, -EINVAL, -EUCLEAN,
-		-EBADMSG, -EOVERFLOW, -EBUSY, 0
+	static const struct recovery_policy_case cases[] = {
+		{ 0, 0, 0, 0 },
+		{ 0, 0, 1, 0 },
+		{ 0, 1, 0, 0 },
+		{ 0, 1, 1, 0 },
+		{ 1, 0, 0, 0 },
+		{ 1, 0, 1, 0 },
+		{ 1, 1, 0, 0 },
+		{ 1, 1, 1, 1 },
 	};
-	unsigned int recovery_active, is_write, error_index;
-	unsigned int checked = 0;
+	unsigned int index;
 
-	for (recovery_active = 0; recovery_active <= 1; ++recovery_active) {
-		for (is_write = 0; is_write <= 1; ++is_write) {
-			for (error_index = 0;
-			     error_index < sizeof(lower_errors) / sizeof(lower_errors[0]);
-			     ++error_index) {
-				const int original_errno = lower_errors[error_index];
-				const int is_eio = original_errno == -EIO;
-				const int expected = recovery_active && is_write && is_eio;
-				const int observed =
-					swapz_gc_recovery_retryable_lower_write_error(
-						recovery_active, is_write, is_eio);
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		const struct recovery_policy_case *test_case = &cases[index];
+		const int observed_retry =
+			swapz_gc_recovery_retryable_lower_write_error(
+				test_case->recovery_active,
+				test_case->is_write,
+				test_case->is_eio);
 
-				if (observed != expected) {
-					fprintf(stderr,
-						"GC_RECOVERY_POLICY_FAIL phase=lower_io_classification "
-						"recovery=%u is_write=%u original_errno=%d "
-						"expected_retry=%d observed_retry=%d\n",
-						recovery_active, is_write, original_errno,
-						expected, observed);
-					return 1;
-				}
-				checked++;
-			}
+		if (observed_retry != test_case->expected_retry) {
+			fprintf(stderr,
+				"GC_RECOVERY_POLICY_FAIL phase=lower_io_classification "
+				"recovery=%d is_write=%d is_eio=%d "
+				"expected_retry=%d observed_retry=%d\n",
+				test_case->recovery_active, test_case->is_write,
+				test_case->is_eio, test_case->expected_retry,
+				observed_retry);
+			return 1;
 		}
 	}
-	printf("SWAPZ_GC_RECOVERY_POLICY_TESTS_PASS=%u\n", checked);
+	printf("SWAPZ_GC_RECOVERY_POLICY_TESTS_PASS=%zu\n",
+	       sizeof(cases) / sizeof(cases[0]));
 	return 0;
 }

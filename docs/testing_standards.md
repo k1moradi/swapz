@@ -1622,12 +1622,16 @@ metadata must never be hidden by start-block-only segment membership. The exact-
 error boundary must still reject an integrity/authority failure (-EBADMSG or
 -EUCLEAN) as terminal even with a live recovery token, while preserving
 retryability for the known synchronous lower-I/O -EIO and per-write -ENOSPC.
-The native `gc-recovery-policy.c` fixture must check the full recovered/not-
-recovered × READ/WRITE × eight-error matrix, including `-EIO`, `-ENOSPC`,
-`-EUCLEAN`, `-EBADMSG`, `-EOVERFLOW` and a successful completion. Only an
-authenticated GC WRITE with an original `-EIO` may take the lower-WRITE
-retryable path; per-write `-ENOSPC` is not that lower-I/O retry classification.
-On failure, report the original signed errno and observed retry decision.
+The native `gc-recovery-policy.c` fixture must exhaustively check the helper's
+eight distinct boolean inputs: recovery inactive/active × READ/WRITE ×
+non-`EIO`/`EIO`. The helper receives only the already-classified `is_eio`
+bit, so this fixture must not claim independent coverage of individual non-
+`EIO` errno values. The separate source-contract regression must prove that
+production derives that bit from `lower_error == -EIO`, preserves the original
+signed lower errno for terminal reporting, and routes other lower errors through
+the terminal failure path. Per-write `-ENOSPC` remains a separate GC capacity
+result, not this lower-WRITE retry classification. On helper failure, report the
+three policy inputs and expected/observed retry decision.
 
 The GC cost-accounting native regression must force u32 live-byte, u32 I/O-cost
 and u16 minimum-block overflow independently after a compressed generation is
