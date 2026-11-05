@@ -1972,8 +1972,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 saved_results["source_commit_sha"] = "f" * 40
             elif teardown_oracle_metadata == "helper_binding":
                 saved_results["helper_sha256"] = "f" * 64
+            elif teardown_oracle_metadata == "artifact_binding":
+                saved_results["artifact_sha256"] = {
+                    **saved_results["artifact_sha256"],
+                    "oracle_sha256": "f" * 64,
+                }
             elif teardown_oracle_metadata == "target_identity":
                 saved_results["major_minor"] = "8:99"
+            elif teardown_oracle_metadata == "stale_approval":
+                saved_results["approval_consumed"] = False
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -2076,20 +2083,16 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     state["_test_results"] = json.loads(
                         (Path(directory) / probe.RESULTS_NAME).read_text())
                 elif teardown_oracle_metadata is not None:
+                    # The reusable simulator must return enough state for the
+                    # outer subtest to diagnose every forged-evidence case.
+                    # Do not assert here: unittest subTest can suppress an
+                    # assertion before the caller's tuple assignment completes.
+                    state["_test_final_evidence_rejected"] = False
                     try:
                         execute()
                     except probe.ProbeError as rejected:
                         state["_test_first_failure"] = str(rejected)
-                    else:
-                        self.fail(
-                            "phase=final_oracle_evidence "
-                            "target_identity_proof=synthetic_checked_or_misbound "
-                            "source_helper_artifact_binding=manifest_required "
-                            "first_errno_or_exit=not_certifiable "
-                            "restored_header_proof=4096_bytes_matched "
-                            f"oracle_evidence_status={teardown_oracle_metadata} "
-                            "retained_recovery=COMPLETE "
-                            "safe_action=inspect_results_read_only")
+                        state["_test_final_evidence_rejected"] = True
                 elif fault or identity_failure_at is not None or \
                         oracle_failure_at is not None or \
                         missing_lower_after_at is not None or \
@@ -2212,37 +2215,71 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             development_only=True, recovery_failure=True)
         self.assertNotEqual(
             uncertain["_test_results"].get("oracle_suite"), "PASS",
-            "phase=recovery oracle_suite cannot PASS on uncertain restoration")
+            "phase=recovery target_identity_proof=matching "
+            "source_helper_artifact_binding=matching "
+            "first_errno_or_exit=worker_exit_0 "
+            "restored_header_proof=not_completed "
+            "oracle_evidence_status=phases_passed_recovery_uncertain "
+            "retained_recovery=RECOVERY_REQUIRED "
+            "safe_action=inspect_results_read_only")
         self.assertEqual(uncertain["stage"], "RECOVERY_REQUIRED")
         self.assertTrue(uncertain["_test_owner_marker"])
         self.assertTrue(uncertain["_test_consumed_claim"])
 
     def test_complete_restoration_cannot_certify_misbound_oracle_evidence(self):
         # The synthetic COMPLETE/header match is deliberately true for every
-        # case; only the oracle/provenance evidence is corrupted.
-        for damaged_field in (
-                "missing_phase", "incomplete_phase", "source_manifest",
-                "helper_binding", "target_identity"):
+        # case; only final oracle/provenance/approval evidence is corrupted.
+        cases = (
+            ("missing_phase", True, "matching", "matching", "not_applicable"),
+            ("incomplete_phase", True, "matching", "matching", "not_applicable"),
+            ("source_manifest", True, "matching",
+             "source_manifest_mismatch", "not_applicable"),
+            ("helper_binding", True, "matching",
+             "helper_sha256_mismatch", "not_applicable"),
+            ("artifact_binding", True, "matching",
+             "artifact_sha256_mismatch", "not_applicable"),
+            ("target_identity", True, "major_minor_mismatch",
+             "matching", "not_applicable"),
+            ("stale_approval", False, "matching", "matching", "stale"),
+        )
+        for (damaged_field, development_only, target_identity_proof,
+             source_helper_artifact_binding, approval_proof) in cases:
             with self.subTest(damaged_field=damaged_field), \
                     mock.patch("builtins.print") as printed:
                 _, state, target = self.simulate_physical_run(
-                    development_only=True,
+                    development_only=development_only,
                     teardown_oracle_metadata=damaged_field)
-            results = state["_test_results"]
-            self.assertEqual(state["stage"], "COMPLETE")
-            self.assertEqual(state["_test_observed_header"], target["header"])
-            self.assertTrue(results["original_header_matches_final"])
-            self.assertTrue(state["_test_consumed_claim"])
-            self.assertFalse(state["_test_owner_marker"])
-            self.assertNotEqual(
-                results.get("oracle_suite"), "PASS",
-                "phase=final_evidence oracle_status=uncertified "
-                f"proof_category={damaged_field} restored_header=4096_exact "
-                "safe_action=inspect_results_read_only")
-            self.assertFalse(any(
-                call.args and str(call.args[0]).startswith(
-                    "PHYSICAL_DEVELOPMENT_SMOKE=PASS")
-                for call in printed.call_args_list))
+                results = state["_test_results"]
+                diagnostic = (
+                    "phase=final_oracle_evidence "
+                    f"target_identity_proof={target_identity_proof} "
+                    "source_helper_artifact_binding="
+                    f"{source_helper_artifact_binding} "
+                    "first_errno_or_exit=worker_exit_0 "
+                    "restored_header_proof=4096_bytes_matched "
+                    f"oracle_evidence_status={damaged_field} "
+                    f"approval_proof={approval_proof} "
+                    f"retained_recovery={state['stage']} "
+                    "safe_action=inspect_results_read_only"
+                )
+                self.assertEqual(state["stage"], "COMPLETE", diagnostic)
+                self.assertEqual(
+                    state["_test_observed_header"], target["header"], diagnostic)
+                self.assertTrue(
+                    results["original_header_matches_final"], diagnostic)
+                self.assertTrue(state["_test_consumed_claim"], diagnostic)
+                self.assertFalse(state["_test_owner_marker"], diagnostic)
+                self.assertNotEqual(
+                    results.get("oracle_suite"), "PASS", diagnostic)
+                self.assertTrue(
+                    state["_test_final_evidence_rejected"], diagnostic)
+                success_prefix = (
+                    "PHYSICAL_DEVELOPMENT_SMOKE=PASS"
+                    if development_only else
+                    "PHYSICAL_SMOKE=BOUNDED_POSITIVE_CORRECTNESS_ONLY")
+                self.assertFalse(any(
+                    call.args and str(call.args[0]).startswith(success_prefix)
+                    for call in printed.call_args_list), diagnostic)
 
     def test_development_post_evidence_drift_is_pre_destructive(self):
         # A post-fast_test source change must retain its original refusal,
@@ -2469,7 +2506,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(results["final_recovery_state"], "RECOVERY_REQUIRED")
         self.assertNotEqual(
             results.get("oracle_suite"), "PASS",
-            "phase=recovery oracle_suite cannot PASS on uncertain restoration")
+            "phase=recovery target_identity_proof=matching "
+            "source_helper_artifact_binding=matching "
+            "first_errno_or_exit=worker_exit_0 "
+            "restored_header_proof=not_completed "
+            "oracle_evidence_status=phases_passed_recovery_uncertain "
+            "retained_recovery=RECOVERY_REQUIRED "
+            "safe_action=inspect_results_read_only")
         self.assertEqual(len(results["physical_oracle_phases"]), 11)
         self.assertTrue(all(phase["status"] == "PASS"
                             for phase in results["physical_oracle_phases"]))

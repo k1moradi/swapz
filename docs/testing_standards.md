@@ -5451,8 +5451,9 @@ bindings consistent with the durable run state, normal recovery, and independent
 final observations. A COMPLETE stage and matching 4096-byte header alone
 cannot prove I/O. Never retain an oracle-suite PASS on RECOVERY_REQUIRED.
 Rootless tests must corrupt a synthetic COMPLETE/header-matched result with
-missing or RUNNING phases, stale source/helper and wrong target metadata, then
-require a fail-closed outcome. On simultaneous oracle and teardown failure
+missing or RUNNING phases, stale consumed approval, mismatched source/helper/
+artifact bindings and wrong target metadata, then require a fail-closed
+outcome. On simultaneous oracle and teardown failure
 retain the first oracle errno/exit separately from recovery failure. Bounded
 failure-only diagnostics must state phase, target-identity proof category,
 source/helper artifact binding, first error, restored-header proof, oracle
