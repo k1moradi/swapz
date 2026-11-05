@@ -4220,11 +4220,20 @@ must therefore compare two bounded reads from the same pinned descriptor as
 well as its original metadata; changed-content samples retain the session
 even when the metadata looks stable. Identical-byte rewrites do not prove
 content mutation and may be indistinguishable when timestamps remain stable.
-The two observations are not atomic against a deliberate same-UID actor who
-rewrites and restores bytes between them. Rootless regression must cover
-synthetically stable timestamps with changed marker content (fail-before /
-pass-after), native timestamp behavior and identical-content rewriting;
-repeat on tmpfs, and report unavailable F2FS execution separately.
+Each pinned double-read is not atomic against a deliberate same-UID actor who
+rewrites and restores bytes between its observations. Inspection and live-use
+checks also occur after the initial ownership proof, so cleanup must repeat the
+full bounded owner/completion/evidence/PID proof after the activity inventory
+and immediately before the first unlink. A persistent changed owner or
+completion marker must retain the session even when its identity metadata and
+timestamps appear unchanged; an identical-byte rewrite remains
+content-equivalent. This final reproof narrows the authorization window but does
+not claim atomicity against a same-UID actor that changes and restores bytes
+after the final observation. Rootless regression must cover synthetically
+stable timestamps with changed marker content (fail-before / pass-after),
+native timestamp behavior, identical-content rewriting, and persistent
+post-proof owner/completion rewrites; repeat on tmpfs, and report unavailable
+F2FS execution separately.
 
 Inspection and removal must revalidate directory owner/mode plus regular-file
 owner/mode, single-link state, size and change timestamps before unlink. A file

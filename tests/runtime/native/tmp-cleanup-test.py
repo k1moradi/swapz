@@ -844,6 +844,78 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
                 if contents_change:
                     self.assertEqual(complete.read_text(), changed_record, diagnostic)
 
+    def test_marker_change_after_proof_is_rechecked_before_removal(self):
+        original_owned_complete = cleanup_module.owned_complete
+        original_stat = cleanup_module.os.stat
+        original_fstat = cleanup_module.os.fstat
+        # A persistent owner/completion rewrite after the first proof must be
+        # re-evaluated before unlink. Identical bytes remain content-equivalent.
+        for suffix, marker_name, contents_change, expected_removed in (
+                ("Dabc1234", cleanup_module.COMPLETE_FILE, True, 0),
+                ("Eabc1234", cleanup_module.OWNER_FILE, True, 0),
+                ("Fabc1234", cleanup_module.COMPLETE_FILE, False, 1)):
+            with self.subTest(marker_name=marker_name,
+                              contents_change=contents_change):
+                owned = self.session(suffix)
+                marker = owned / marker_name
+                marker_before = marker.stat()
+                rewritten_record = (self.record.replace(self.source_sha, "b" * 40)
+                                    if contents_change else self.record)
+                rewritten = False
+
+                def rewrite_after_first_proof(directory, owner_uid, expected_mount):
+                    nonlocal rewritten
+                    proven = original_owned_complete(
+                        directory, owner_uid, expected_mount)
+                    if proven and not rewritten:
+                        marker.write_text(rewritten_record)
+                        rewritten = True
+                    return proven
+
+                def stable_marker_stat(path, *args, **kwargs):
+                    observed = original_stat(path, *args, **kwargs)
+                    if (rewritten and path == marker_name
+                            and kwargs.get("dir_fd") is not None):
+                        return marker_before
+                    return observed
+
+                def stable_marker_fstat(descriptor):
+                    observed = original_fstat(descriptor)
+                    if (rewritten and (observed.st_dev, observed.st_ino) ==
+                            (marker_before.st_dev, marker_before.st_ino)):
+                        return marker_before
+                    return observed
+
+                with mock.patch.object(
+                        cleanup_module, "owned_complete",
+                        side_effect=rewrite_after_first_proof), \
+                     mock.patch.object(
+                         cleanup_module.os, "stat",
+                         side_effect=stable_marker_stat), \
+                     mock.patch.object(
+                         cleanup_module.os, "fstat",
+                         side_effect=stable_marker_fstat):
+                    removed = cleanup_module.cleanup(
+                        str(self.root), self.owner_uid, 0o700)
+                marker_role = (
+                    "owner" if marker_name == cleanup_module.OWNER_FILE
+                    else "complete")
+                diagnostic = (
+                    "phase=session-provenance-recheck "
+                    f"marker_role={marker_role} "
+                    "marker_identity=pinned-device-inode-owner-mode-size "
+                    f"marker_content_proof={'mismatch' if contents_change else 'equivalent'} "
+                    "timestamp_evidence=coarse-stable "
+                    f"expected_removed={expected_removed} observed_removed={removed} "
+                    "original_errno=none "
+                    f"retained_session={'required' if contents_change else 'not-required'} "
+                    "safe_next_action=inspect-retained-evidence-read-only")
+                self.assertTrue(rewritten, diagnostic)
+                self.assertEqual(removed, expected_removed, diagnostic)
+                self.assertEqual(owned.exists(), contents_change, diagnostic)
+                if contents_change:
+                    self.assertEqual(marker.read_text(), rewritten_record, diagnostic)
+
     def test_log_symlink_hardlink_and_non_private_log_retained(self):
         owned = self.session("Abcd1234")
         outside = self.root / "other-evidence"

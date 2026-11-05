@@ -509,6 +509,14 @@ def cleanup(root_path: str, owner_uid: int, root_mode: int,
                         state.retained_active += 1
                         state.phase = "root-inventory"
                         continue
+                    # Metadata-only inspection cannot detect every same-size
+                    # marker rewrite on a coarse-timestamp filesystem. Reprove
+                    # complete ownership immediately before the first unlink.
+                    state.phase = "session-provenance"
+                    if not owned_complete(candidate, owner_uid, expected_mount):
+                        state.retained += 1
+                        state.retained_unproved += 1
+                        continue
                     state.phase = "session-removal"
                     state.partial = True  # An unlink may succeed before a later error.
                     remove_tree(candidate, entries, expected_mount, preserve_markers=True)
