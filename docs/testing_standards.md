@@ -1249,7 +1249,19 @@ rootless marker: when that marker carries an allowlisted test name, that name
 wins over earlier suite output and later teardown; when it carries
 `test=unavailable`, earlier transcript `FAIL:`/`ERROR:` lines must not be
 guessed as the cause. A directly invoked, unwrapped unittest may still use its
-first detailed failure block. The final rootless failure prefix suppresses cross-suite unittest guessing and
+first detailed failure block. The official stage record keeps the
+source-controlled rootless phase in `failed_phase` (the basename for a Python
+suite), not as an absolute or repository-prefixed path inside `diagnostic`.
+For a complete final marker whose exit matches the actual child, its bounded
+public `diagnostic` must preserve the causal summary and authenticated
+`child_exit`, `reason`, `subtest`, `test` and relative private `log` pointer;
+tests must not demand an obsolete bare summary or discard those fields.
+Adversarial official-stage fixtures must verify first-failure precedence when
+a later unittest or cleanup failure appears, without exposing later failure
+identity, private traceback text or absolute paths. An unauthenticated
+late-race compile claim must suppress its test and subtest identity; malformed
+child exits or unsafe log pointers cannot authenticate a rootless marker.
+The final rootless failure prefix suppresses cross-suite unittest guessing and
 clears earlier marker identity; only its complete sanitized grammar may contribute classified test identity. The public marker may expose only allowlisted phase/test/subtest tokens and
 classify that first private failure as `native_compile`,
 `unittest_timeout`, `unittest_assertion`, `unittest_error`, or the

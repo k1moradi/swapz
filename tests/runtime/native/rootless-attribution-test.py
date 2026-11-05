@@ -794,9 +794,16 @@ exec "$SWAPZ_REAL_RM" "$@"
                 [sys.executable, "-c", fixture_code], report)
         self.assertEqual(status, 2)
         diagnostic = report["stages"][0]["diagnostic"]
+        self.assertEqual(report["stages"][0]["failed_phase"], Path(MAKE_PHASE).name)
+        self.assertEqual(report["stages"][0]["exit_code"], 2)
+        # The authenticated child fields must survive in the public record;
+        # compiler details and private source paths belong only in evidence.
         self.assertEqual(
             diagnostic,
-            "Native fixture compile failed: swapz-primary-late-race-test.py")
+            "Native fixture compile failed: swapz-primary-late-race-test.py; "
+            "child_exit=2 reason=native_compile subtest=compile "
+            "test=swapz-primary-late-race-test.py "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log")
         self.assertNotIn(PRIVATE_SENTINEL, diagnostic)
         self.assertNotIn("/private/", diagnostic)
 
@@ -812,10 +819,36 @@ exec "$SWAPZ_REAL_RM" "$@"
         malformed_diagnostic = malformed_report["stages"][0]["diagnostic"]
         self.assertEqual(
             malformed_diagnostic,
-            "Rootless late-race failure identity was not authenticated")
+            "Rootless late-race failure identity was not authenticated; "
+            "child_exit=2 reason=unittest_assertion subtest=unavailable "
+            "test=unavailable "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log")
+        self.assertEqual(malformed_report["stages"][0]["exit_code"], 2)
         self.assertNotIn(PRIVATE_SENTINEL, malformed_diagnostic)
         self.assertNotIn("/private/", malformed_diagnostic)
         self.assertNotIn(LATE_RACE_TEST, malformed_diagnostic)
+
+        # Wrong child exits and unsafe pointers must not authenticate a
+        # compile identity or copy untrusted text into the public diagnostic.
+        for unsafe_fixture_code in (
+                fixture_code.replace("test=swapz-primary-late-race-test.py exit=2 ",
+                                     "test=swapz-primary-late-race-test.py exit=3 "),
+                fixture_code.replace(
+                    "log=build/tests/rootless-failure.ABCD1234/diagnostic.log",
+                    "log=/private/unsafe/diagnostic.log")):
+            unsafe_report = {"stages": []}
+            with contextlib.redirect_stdout(io.StringIO()):
+                unsafe_status = reporter.run_stage(
+                    "Native and rootless contracts",
+                    [sys.executable, "-c", unsafe_fixture_code], unsafe_report)
+            self.assertEqual(unsafe_status, 2)
+            unsafe_stage = unsafe_report["stages"][0]
+            self.assertEqual(unsafe_stage["exit_code"], 2)
+            self.assertEqual(unsafe_stage["diagnostic"],
+                             "Rootless failure marker malformed or unverified")
+            self.assertNotIn(PRIVATE_SENTINEL, unsafe_stage["diagnostic"])
+            self.assertNotIn("/private/", unsafe_stage["diagnostic"])
+            self.assertNotIn(LATE_RACE_TEST, unsafe_stage["diagnostic"])
 
     def test_official_native_stage_keeps_first_unittest_failure(self):
         reporter_spec = importlib.util.spec_from_file_location(
@@ -853,10 +886,53 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assertEqual(report["stages"][0]["status"], "FAIL")
         self.assertEqual(report["stages"][0]["exit_code"], 37)
         diagnostic = report["stages"][0]["diagnostic"]
-        self.assertIn("test_a_primary", diagnostic)
-        self.assertNotIn("test_b_later", diagnostic)
-        self.assertIn(PRIMARY_PHASE, diagnostic)
-        self.assertIn("build/tests/rootless-failure.ABCD1234/diagnostic.log", diagnostic)
+        self.assertEqual(report["stages"][0]["failed_phase"], Path(PRIMARY_PHASE).name)
+        self.assertEqual(
+            diagnostic,
+            "Unit test failed: test_a_primary; "
+            "child_exit=37 reason=unittest_assertion "
+            "subtest=unavailable test=test_a_primary "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log")
+        for private_detail in (
+                "test_b_later", LATER_TEARDOWN_SENTINEL, PRIVATE_SENTINEL,
+                "OSError:", "/private/"):
+            self.assertNotIn(private_detail, diagnostic)
+
+        # Reverse failure kinds: a first ERROR must also take precedence over
+        # a later unittest FAIL and its private cleanup details.
+        first_error_fixture_code = (
+            fixture_code
+            .replace("test_a_primary) ... FAIL", "test_a_primary) ... ERROR")
+            .replace("FAIL: test_a_primary", "ERROR: test_a_primary")
+            .replace("AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD",
+                     "PermissionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD")
+            .replace("test_b_later) ... ERROR", "test_b_later) ... FAIL")
+            .replace("ERROR: test_b_later", "FAIL: test_b_later")
+            .replace("OSError: LATER_TEARDOWN_PRIVATE_PAYLOAD",
+                     "AssertionError: LATER_TEARDOWN_PRIVATE_PAYLOAD")
+            .replace("reason=unittest_assertion", "reason=unittest_error"))
+        first_error_report = {"stages": []}
+        with contextlib.redirect_stdout(io.StringIO()):
+            first_error_status = reporter.run_stage(
+                "Native and rootless contracts",
+                [sys.executable, "-c", first_error_fixture_code],
+                first_error_report)
+        self.assertEqual(first_error_status, 37)
+        first_error_stage = first_error_report["stages"][0]
+        self.assertEqual(first_error_stage["status"], "FAIL")
+        self.assertEqual(first_error_stage["exit_code"], 37)
+        self.assertEqual(first_error_stage["failed_phase"],
+                         Path(PRIMARY_PHASE).name)
+        self.assertEqual(
+            first_error_stage["diagnostic"],
+            "Unit test failed: test_a_primary; "
+            "child_exit=37 reason=unittest_error "
+            "subtest=unavailable test=test_a_primary "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log")
+        for private_detail in (
+                "test_b_later", LATER_TEARDOWN_SENTINEL, PRIVATE_SENTINEL,
+                "AssertionError:", "/private/"):
+            self.assertNotIn(private_detail, first_error_stage["diagnostic"])
 
     def test_ci_wrapper_accepts_authoritative_rootless_marker(self):
         diagnostic_spec = importlib.util.spec_from_file_location(
