@@ -533,6 +533,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             "order": lambda rows: rows[1].__setitem__("order", "raw-first"),
             "disposition": lambda rows: rows[1].update(
                 status="PASS", excluded=True),
+            "disposition-type": lambda rows: rows[1].update(
+                status="PASS", excluded=0),
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):
