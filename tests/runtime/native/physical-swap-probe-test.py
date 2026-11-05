@@ -118,6 +118,208 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     probe.ProbeError, "cannot snapshot Device Mapper inventory"):
                 probe._dm_inventory_snapshot()
 
+    def test_development_fast_test_evidence_is_fresh_exact_and_narrow(self):
+        head = "a" * 40
+        nonce = "b" * 32
+        base = {
+            "schema": "swapz-fast-test-development-evidence-v1",
+            "head": head,
+            "dirty": False,
+            "nonce": nonce,
+            "native_status": "PASS",
+            "loaded_preflight": {"status": "PASS", "check": "complete"},
+            "fast_test_status": "PASS",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "development-evidence.json"
+
+            def write(record, mode=0o600):
+                path.write_text(json.dumps(record))
+                path.chmod(mode)
+
+            write(base)
+            admitted = probe._read_fast_test_development_evidence(
+                path, os.getuid(), head, nonce)
+            self.assertEqual(admitted["outcome"], "FAST_TEST_PASS")
+
+            blocked = {
+                **base,
+                "loaded_preflight": {
+                    "status": "BLOCKED", "check": "unclaimed_null_blk",
+                    "errno": "unknown",
+                },
+                "fast_test_status": "BLOCKED",
+            }
+            write(blocked)
+            admitted = probe._read_fast_test_development_evidence(
+                path, os.getuid(), head, nonce)
+            self.assertEqual(
+                admitted["outcome"],
+                "LOADED_PREFLIGHT_BLOCKED_UNCLAIMED_NULL_BLK")
+
+            rejected = (
+                ({**blocked, "loaded_preflight": {
+                    "status": "BLOCKED", "check": "kernel_build"}},
+                 head, nonce, "other_failure"),
+                ({**base, "dirty": True}, head, nonce, "mismatch"),
+                (base, head, "c" * 32, "mismatch"),
+                ({**base, "native_status": "PENDING"}, head, nonce,
+                 "mismatch"),
+            )
+            for record, expected_head, expected_nonce, diagnostic in rejected:
+                with self.subTest(record=record, nonce=expected_nonce):
+                    write(record)
+                    with self.assertRaisesRegex(probe.ProbeError, diagnostic):
+                        probe._read_fast_test_development_evidence(
+                            path, os.getuid(), expected_head, expected_nonce)
+
+            write(base, 0o644)
+            with self.assertRaisesRegex(probe.ProbeError, "invalid_metadata"):
+                probe._read_fast_test_development_evidence(
+                    path, os.getuid(), head, nonce)
+
+            path.unlink()
+            path.symlink_to("missing-target")
+            with self.assertRaisesRegex(probe.ProbeError, "errno_"):
+                probe._read_fast_test_development_evidence(
+                    path, os.getuid(), head, nonce)
+
+    def test_development_recovery_restores_header_without_swapon(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            state.update({
+                "swap_was_active": False,
+                "swap_path": None,
+                "swap_size_kib": None,
+                "swap_priority": None,
+                "swap_used_kib": None,
+                "development_only": True,
+                "development_scope": probe.DEVELOPMENT_SCOPE,
+            })
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            commands = []
+
+            def run(command, **kwargs):
+                del kwargs
+                commands.append(tuple(command))
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="", stderr="")
+
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery",
+                        return_value={
+                            "device": state["device"], "major": state["major"],
+                            "minor": state["minor"],
+                            "size_bytes": state["size_bytes"],
+                            "partuuid": state["partuuid"],
+                        }), \
+                    mock.patch.object(probe, "_mapper_exists",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_active_swap_for",
+                                      return_value=None) as active_swap, \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=backup), \
+                    mock.patch.object(probe, "_holder_names", return_value=[]), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_run", side_effect=run), \
+                    mock.patch.object(probe, "_save_state"), \
+                    mock.patch.object(probe,
+                                      "_release_partition_ownership"):
+                recovered = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"])
+
+        self.assertEqual(recovered["stage"], "COMPLETE")
+        self.assertEqual(active_swap.call_count, 2)
+        self.assertFalse(any(command[0] == "swapon" for command in commands))
+        self.assertFalse(any(command[:2] == ("dmsetup", "remove")
+                             for command in commands))
+
+    def test_development_recovery_rejects_noncanonical_inactive_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, _ = self.make_recovery_state(state_dir)
+            state.update({
+                "swap_was_active": False,
+                "swap_path": None,
+                "swap_size_kib": None,
+                "swap_priority": None,
+                "swap_used_kib": None,
+                "development_only": True,
+                "development_scope": "wrong scope",
+            })
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery") as inspect, \
+                    mock.patch.object(probe, "_run") as command:
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "canonical_inactive_development_state"):
+                    probe.recover(
+                        state_dir, state["device_arg"], state["device_arg"])
+            inspect.assert_not_called()
+            command.assert_not_called()
+
+    def test_development_run_directory_uses_its_fresh_run_id(self):
+        run_id = "abcdef0123456789abcdef0123456789"
+        expected = self.recovery_base / f"swapz-physical-{run_id}"
+        with mock.patch.object(probe, "RECOVERY_BASE", self.recovery_base):
+            self.assertEqual(
+                probe._select_run_directory(None, run_id, True), expected)
+            with self.assertRaisesRegex(
+                    probe.ProbeError, "chooses its own fresh recovery directory"):
+                probe._select_run_directory(expected, run_id, True)
+            self.assertEqual(
+                probe._select_run_directory(expected, run_id, False), expected)
+
+    def test_development_final_observations_require_inactive_target(self):
+        run_id = "fedcba9876543210fedcba9876543210"
+        header = b"H" * probe.PAGE_BYTES
+        state = {
+            "partuuid": "deadbeef-01", "run_id": run_id,
+            "dm_name": "swapz-demo-physical-1234567890abcdef",
+            "dm_uuid": "SWAPZ-TEST-PHYSICAL-1234567890abcdef",
+            "stage": "COMPLETE", "development_only": True,
+            "swap_was_active": False,
+        }
+        target = {"device": "/dev/synthetic", "major": 8, "minor": 1}
+        inventory = {
+            "other_mapper_count": 0,
+            "other_mapper_sha256": hashlib.sha256(b"[]").hexdigest(),
+        }
+        (self.recovery_base / f"consumed-{run_id}.json").write_text("{}")
+        results = {
+            "original_header_sha256": hashlib.sha256(header).hexdigest(),
+            "start_timestamp": "2026-11-04T00:00:00Z",
+            "dm_inventory_before": inventory,
+        }
+        healthy_kernel = {
+            "available": True, "time_filter_applied": True,
+            "truncated": False, "messages": "",
+        }
+        with mock.patch.object(probe, "_read_block0", return_value=header), \
+                mock.patch.object(probe, "_active_swap_for", return_value=None), \
+                mock.patch.object(probe, "_block_stat_snapshot",
+                                  return_value={"available": False}), \
+                mock.patch.object(probe, "_kernel_swapz_messages",
+                                  return_value=healthy_kernel), \
+                mock.patch.object(probe, "_mapper_exists", return_value=False), \
+                mock.patch.object(probe, "_dm_inventory_snapshot",
+                                  return_value=inventory), \
+                mock.patch.object(probe.Path, "exists", return_value=False), \
+                mock.patch.object(probe, "_save_results"):
+            probe._final_observations(
+                results, self.recovery_base, state, target)
+
+        self.assertTrue(results["restored_swap_verified"])
+        self.assertTrue(results["target_remains_inactive"])
+        self.assertTrue(results["run_claim_consumed"])
+        self.assertIsNone(results["approval_consumed"])
+        self.assertFalse(results["active_partition_marker_present"])
+        self.assertTrue(results["unrelated_mapper_inventory_unchanged"])
+
     def test_dm_inventory_still_tracks_unrelated_mappers(self):
         inventory = "swapz-physical-owned SWAPZ-TEST-PHYSICAL-owned\nother-map other-uuid\n"
         with mock.patch.object(

@@ -34,6 +34,7 @@ import private_memory  # noqa: E402
 # Reuse the measured replay's counter parsing/reset checks; no polling worker.
 HOST_CPU = runpy.run_path(str(ROOT / "tests/runtime/benchmark/io-replay.py"))
 OUT_DIR = ROOT / "build/tests/fast-test"
+ADMISSION_EVIDENCE = OUT_DIR / "development-evidence.json"
 PAIR = "tests/tools/benchmark-owned-pair.sh"
 STRIPED_PAIR = "tests/tools/benchmark-striped-owned.sh"
 PREFLIGHT = "tests/tools/loaded-preflight.sh"
@@ -179,6 +180,53 @@ def scenario_arguments(name, plan, calibration=False,
 
 def run(command, **kwargs):
     return subprocess.run(command, cwd=ROOT, check=True, **kwargs)
+
+
+def write_development_evidence(evidence):
+    """Persist exact-source dev-loop stages; this never qualifies a source."""
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = OUT_DIR / f".development-evidence.{os.getpid()}.tmp"
+    payload = (json.dumps(evidence, sort_keys=True, indent=2) + "\n").encode()
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             getattr(os, "O_CLOEXEC", 0) |
+                             getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb", closefd=False) as output:
+                output.write(payload)
+                output.flush()
+                os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, ADMISSION_EVIDENCE)
+        directory_fd = os.open(OUT_DIR, os.O_RDONLY | os.O_DIRECTORY |
+                               getattr(os, "O_CLOEXEC", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def loaded_preflight_diagnostic(output):
+    pattern = re.compile(
+        r"^BLOCKED: LOADED_PREFLIGHT=([A-Z_]+) check=([a-z0-9_]+) "
+        r"errno=([A-Za-z0-9_-]+)(?: remedy=.*)?$")
+    matches = [pattern.fullmatch(line.strip())
+               for line in output.splitlines()]
+    matches = [match for match in matches if match]
+    if len(matches) != 1:
+        return {"status": "BLOCKED", "check": "unclassified",
+                "errno": "unavailable"}
+    match = matches[0]
+    return {"status": match.group(1), "check": match.group(2),
+            "errno": match.group(3)}
 
 
 def build():
@@ -993,15 +1041,38 @@ def main():
           f"mixed_ops={args.mixed_ops} "
           f"host_load={args.host_load_profile} "
           f"HEAD={head[:12]}{' +dirty' if dirty else ''}")
+    nonce = os.environ.get("SWAPZ_DEVELOPMENT_ADMISSION_NONCE")
+    if nonce is not None and not re.fullmatch(r"[0-9a-f]{32}", nonce):
+        print("BLOCKED: invalid development admission nonce", file=sys.stderr)
+        return 2
+    evidence = {
+        "schema": "swapz-fast-test-development-evidence-v1",
+        "head": head,
+        "dirty": bool(dirty),
+        "nonce": nonce,
+        "native_status": "PENDING",
+        "loaded_preflight": {"status": "NOT_RUN"},
+        "fast_test_status": "IN_PROGRESS",
+    }
+    write_development_evidence(evidence)
     started = time.monotonic()
     build()
+    evidence["native_status"] = "PASS"
+    write_development_evidence(evidence)
     print(f"  build + native/replay contract checks: PASS "
           f"({time.monotonic() - started:.1f}s)", flush=True)
     preflight = privileged(60, PREFLIGHT)
     if preflight.returncode:
-        print(preflight.stdout + preflight.stderr, file=sys.stderr)
+        diagnostic = preflight.stdout + preflight.stderr
+        print(diagnostic, file=sys.stderr)
+        evidence["loaded_preflight"] = loaded_preflight_diagnostic(diagnostic)
+        evidence["fast_test_status"] = "BLOCKED"
+        write_development_evidence(evidence)
         print("BLOCKED: loaded preflight failed", file=sys.stderr)
         return 2
+    evidence["loaded_preflight"] = {"status": "PASS", "check": "complete",
+                                    "errno": "0"}
+    write_development_evidence(evidence)
     try:
         plan = prepare_plan(
             args.content, ("nvme5", "mixed") in striped_specs or
@@ -1010,6 +1081,9 @@ def main():
                   if ("fast", f"write-q{qd}") in striped_specs),
             mixed_ops=args.mixed_ops, sample_path=args.anon_page_sample)
     except (OSError, ValueError, json.JSONDecodeError) as error:
+        evidence["fast_test_status"] = "BLOCKED"
+        evidence["blocker"] = "content_plan"
+        write_development_evidence(evidence)
         print(f"BLOCKED: content plan preparation failed: {error}",
               file=sys.stderr)
         return 2
@@ -1171,6 +1245,9 @@ def main():
         print_striped_table(striped_rows if striped_specs else [])
     print(f"\n  Detailed telemetry: {(OUT_DIR / result_name).relative_to(ROOT)} "
           f"(total {time.monotonic() - started:.0f}s)")
+    evidence["fast_test_status"] = "PASS" if status == 0 else "FAIL"
+    evidence["result_file"] = result_name
+    write_development_evidence(evidence)
     return status
 
 

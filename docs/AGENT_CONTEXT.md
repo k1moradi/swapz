@@ -136,6 +136,13 @@ safe path to a correct maintainable product:
   reason;
 - use `make fast_test` for development decisions and `make test` for exact
   source qualification;
+- when early card-backed data-path evidence is needed before full
+  qualification, use only the private physical helper's explicit
+  `--development-only` mode: bind a fresh current-main `make fast_test` record,
+  require the card already inactive, run one bounded mapper round-trip, and
+  restore the exact original header while leaving the card inactive. This is
+  experimental debugging evidence, never physical acceptance or a production
+  readiness result;
 - investigate a failure to cause before repeating it; never rerun until one
   sample passes and hide the failures;
 - avoid VMs, fallback infrastructure, unnecessary dependencies and broad

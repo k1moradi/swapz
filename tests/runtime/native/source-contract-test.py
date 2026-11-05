@@ -2972,6 +2972,52 @@ int main(void) {
                     owned_plan, (1,), (("nvme5", "invalid"),))
             self.assertFalse(owned_plan.exists())
 
+    def test_fast_test_development_evidence_is_atomic_and_private(self):
+        import json
+        import os
+        import runpy
+        import stat
+        import tempfile
+
+        fast = runpy.run_path(str(ROOT / "tests/tools/fast-test.py"))
+        with tempfile.TemporaryDirectory(prefix="swapz-fast-evidence-") as temp:
+            output = Path(temp) / "evidence"
+            writer = fast["write_development_evidence"]
+            writer.__globals__["OUT_DIR"] = output
+            writer.__globals__["ADMISSION_EVIDENCE"] = (
+                output / "development-evidence.json")
+            record = {
+                "schema": "swapz-fast-test-development-evidence-v1",
+                "head": "a" * 40,
+                "dirty": False,
+                "nonce": "b" * 32,
+                "native_status": "PASS",
+                "loaded_preflight": {
+                    "status": "BLOCKED", "check": "unclaimed_null_blk",
+                    "errno": "unknown",
+                },
+                "fast_test_status": "BLOCKED",
+            }
+            writer(record)
+            evidence_path = writer.__globals__["ADMISSION_EVIDENCE"]
+            info = evidence_path.stat(follow_symlinks=False)
+            self.assertTrue(stat.S_ISREG(info.st_mode))
+            self.assertEqual(stat.S_IMODE(info.st_mode), 0o600)
+            self.assertEqual(info.st_uid, os.getuid())
+            self.assertEqual(json.loads(evidence_path.read_text()), record)
+            self.assertEqual(
+                [path.name for path in output.iterdir()],
+                ["development-evidence.json"])
+
+            parsed = fast["loaded_preflight_diagnostic"](
+                "BLOCKED: LOADED_PREFLIGHT=BLOCKED "
+                "check=unclaimed_null_blk errno=EBUSY remedy=leave-untouched\n")
+            self.assertEqual(parsed["status"], "BLOCKED")
+            self.assertEqual(parsed["check"], "unclaimed_null_blk")
+            self.assertEqual(
+                fast["loaded_preflight_diagnostic"](
+                    "unrelated diagnostic\n")["check"], "unclassified")
+
     def test_completion_handoff_real_bodies_preserve_ownership_and_failure(self):
         """Exercise actual target C under controlled queue/close/reuse interleavings."""
         import subprocess

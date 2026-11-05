@@ -4326,7 +4326,10 @@ copied identifiers, alias replacement, parent/geometry drift, holder/activity
 conflicts and reconnection repinning without opening any host block device. Source contracts
 continue to verify the kernel opt-in superblock gate, reserved data offset, and
 exclusion of block 0 from all data/discard paths. Exact-current-main must still
-pass ordinary `make test` before any physical-media evidence is considered.
+pass ordinary `make test` before physical-media qualification or acceptance
+evidence is considered. The development-only debugging path below may produce
+experimental card-backed observations, but those observations are never
+physical-media qualification evidence.
 
 The production-readiness evaluator must also bind the CURRENT release-host
 platform to the owner qualification: x86_64, 4096-byte pages, and an exact
@@ -4349,9 +4352,49 @@ activation merely to preserve its former formatter argument list.
 A separately owner-authorized physical swap-partition correctness smoke is
 implemented only by the private tests/tools/physical-swap-probe.py helper. It
 is never called by make test and does not qualify performance, endurance or
-general physical-media behavior. Owner-provided make test reports are read
-and verified; do not rerun make test or make fast_test for this physical
-smoke.
+general physical-media behavior. Its full `run` mode remains behind exact
+owner `make test` evidence and the reviewed run record. Owner-provided make
+test reports are read and verified; do not rerun make test or make fast_test
+for that qualified physical smoke. The separate `--development-only` debugging
+mode below is the explicit exception and cannot satisfy its evidence gate.
+
+#### Development-only card-backed data-path smoke
+
+The helper's explicit `run --development-only` mode is a separate experimental
+path for early card-backed mapper debugging. It does not claim that the
+physical media, ordinary Linux swap lifecycle, performance, endurance or
+production behavior is qualified. Its result schema and
+`DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION` evidence class must remain
+ineligible to every production-readiness evaluator.
+
+Before this mode can write the card, it requires a fresh current-main
+`make fast_test SCENARIOS=fast-mixed REPEAT=1` record bound to the exact clean
+main SHA, a per-run nonce, and successful build/native/replay contracts. The
+loaded path may either pass completely or stop only at the exact
+`unclaimed_null_blk` ownership preflight. That specific block is environmental:
+leave every ambiguous null_blk instance untouched. Any native/build error,
+other loaded-preflight failure, dirty source, changed main, stale/malformed
+record or artifact mismatch blocks the card run. This narrow admission is only
+for the development smoke and does not replace the complete five-stage
+`make test` gate for physical qualification or production readiness.
+
+The selected authorized partition must already be inactive swap. This mode
+must not call `swapoff` or `swapon`, and must not activate the raw partition or
+the SWZ mapper as Linux swap. It saves the exact original 4096-byte block-zero
+header durably on the validated persistent recovery filesystem, records a
+fresh one-use run claim, and exercises only one helper-owned 16 MiB mapper
+with the existing 128-page byte-exact write/flush/overwrite/readback oracle.
+Normal exact-identity mapper removal and same-process-owned module cleanup
+must complete before the exact saved header is restored and reread. Final
+kernel swap inventory must prove the target remains inactive. Any uncertain
+state retains the durable recovery record and requires explicit recovery; do
+not force-remove anything or retry the same run.
+
+Rootless regressions must prove that only the exact fresh evidence outcomes
+are admitted, that a canonical inactive recovery restores the header without
+`swapon`, and that malformed inactive state fails before device inspection.
+This test path is not invoked by routine `make test` and cannot be described as
+a passing full physical or real-swap qualification.
 
 #### Physical admission and qualified-artifact policy
 

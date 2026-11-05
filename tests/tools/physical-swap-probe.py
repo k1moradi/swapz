@@ -33,6 +33,8 @@ PAGE_BYTES = 4096
 SWAP_SIGNATURE = b"SWAPSPACE2"
 LOGICAL_SECTORS = 32768
 EXPECTED_SCOPE = "physical swap backing correctness smoke only"
+DEVELOPMENT_SCOPE = (
+    "physical backing data-path smoke only; not production qualification")
 STATE_NAME = "state.json"
 BACKUP_NAME = "block0.bin"
 RESULTS_NAME = "results.json"
@@ -385,8 +387,9 @@ def _verify_target_identity(target):
             f"observed={parent!r}")
 
 
-def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
-    """Identify the selected partition; the live trial may allow drainable use."""
+def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False,
+                   allow_inactive_swap=False):
+    """Identify the selected partition; dev smoke may preserve inactive swap."""
     if not device_arg or device_arg != confirm_arg:
         raise ProbeError("--device and --confirm-device must match exactly")
     if not device_arg.startswith("/dev/disk/by-uuid/"):
@@ -427,18 +430,18 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
         raise ProbeError("selected swap partition is too small for swapz")
 
     active = _active_swap_for(major, minor)
-    if active is None:
+    if active is None and not allow_inactive_swap:
         raise ProbeError("selected partition must be exactly one active system swap")
-    if active["size_kib"] > size_bytes // 1024:
+    if active is not None and active["size_kib"] > size_bytes // 1024:
         raise ProbeError(
             "selected swap capacity exceeds the selected partition geometry")
-    if not LINUX_SWAP_PRIORITY_MIN <= active["priority"] <= \
+    if active is not None and not LINUX_SWAP_PRIORITY_MIN <= active["priority"] <= \
             LINUX_SWAP_PRIORITY_MAX:
         raise ProbeError(
             "selected swap priority cannot be restored exactly by this helper")
-    if not 0 <= active["used_kib"] <= active["size_kib"]:
+    if active is not None and not 0 <= active["used_kib"] <= active["size_kib"]:
         raise ProbeError("selected swap usage is outside its capacity")
-    if active["used_kib"] != 0 and not allow_used_swap:
+    if active is not None and active["used_kib"] != 0 and not allow_used_swap:
         raise ProbeError("selected swap partition is in use; require zero used KiB")
     header = _read_block0(device, {
         "major": major, "minor": minor, "size_bytes": size_bytes,
@@ -454,10 +457,11 @@ def inspect_target(device_arg, confirm_arg, *, allow_used_swap=False):
         "uuid": row["uuid"],
         "partuuid": partuuid,
         "header": header,
-        "swap_path": active["path"],
-        "swap_priority": active["priority"],
-        "swap_size_kib": active["size_kib"],
-        "swap_used_kib": active["used_kib"],
+        "swap_was_active": active is not None,
+        "swap_path": active["path"] if active is not None else None,
+        "swap_priority": active["priority"] if active is not None else None,
+        "swap_size_kib": active["size_kib"] if active is not None else None,
+        "swap_used_kib": active["used_kib"] if active is not None else None,
     }
 
 
@@ -659,6 +663,159 @@ def current_source_evidence():
         "prior_matching_reports": len(prior_matching_reports),
         "helper_sha256": helper_sha256,
         "head": head,
+    }
+
+
+def _read_fast_test_development_evidence(path, expected_uid, head, nonce):
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != expected_uid or
+                stat.S_IMODE(before.st_mode) != 0o600 or
+                not 1 <= before.st_size <= 65536):
+            raise ProbeError(
+                "development_evidence expected=user_owned_private_regular_file "
+                "observed=invalid_metadata")
+        chunks = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                raise ProbeError("development_evidence was truncated while reading")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                before.st_ctime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+                after.st_ctime_ns):
+            raise ProbeError("development_evidence changed while reading")
+        try:
+            record = _load_unique_json(b"".join(chunks))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ProbeError(
+                "development_evidence expected=unique_valid_json "
+                "observed=malformed") from exc
+    except OSError as exc:
+        raise ProbeError(
+            "development_evidence expected=readable_no_follow_file "
+            f"observed=errno_{exc.errno}") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if (not isinstance(record, dict) or
+            record.get("schema") != "swapz-fast-test-development-evidence-v1" or
+            record.get("head") != head or record.get("dirty") is not False or
+            record.get("nonce") != nonce or
+            record.get("native_status") != "PASS"):
+        raise ProbeError(
+            "development_evidence expected=current_clean_main_native_PASS "
+            "observed=mismatch")
+    preflight = record.get("loaded_preflight")
+    if (record.get("fast_test_status") == "PASS" and
+            isinstance(preflight, dict) and preflight.get("status") == "PASS" and
+            preflight.get("check") == "complete"):
+        outcome = "FAST_TEST_PASS"
+    elif (record.get("fast_test_status") == "BLOCKED" and
+          isinstance(preflight, dict) and preflight.get("status") == "BLOCKED" and
+          preflight.get("check") == "unclaimed_null_blk"):
+        # Do not remove or reuse the ambiguous null_blk instance. The physical
+        # smoke has its own stricter mapper/module and target-identity checks.
+        outcome = "LOADED_PREFLIGHT_BLOCKED_UNCLAIMED_NULL_BLK"
+    else:
+        raise ProbeError(
+            "development_evidence expected=fast_test_PASS_or_exact_"
+            "unclaimed_null_blk_block observed=other_failure")
+    return {"outcome": outcome, "preflight": preflight,
+            "native_status": record["native_status"],
+            "fast_test_status": record["fast_test_status"]}
+
+
+def current_development_evidence(nonce):
+    """Run source-bound fast_test and admit only the isolated dev smoke scope."""
+    if platform.machine() != "x86_64":
+        raise ProbeError("physical development smoke is currently limited to x86_64")
+    _require_physical_host()
+    if os.geteuid() != 0:
+        raise ProbeError("development physical smoke evidence requires root wrapper")
+    operator = os.environ.get("SUDO_USER")
+    if (not operator or operator == "root" or
+            not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,31}", operator)):
+        raise ProbeError("development smoke must be invoked through sudo by the checkout owner")
+    branch = _git("symbolic-ref", "--quiet", "--short", "HEAD")
+    if branch != "main":
+        raise ProbeError("physical development smoke is restricted to main")
+    if _git("status", "--porcelain"):
+        raise ProbeError("worktree changes block physical development smoke")
+    head = _git("rev-parse", "HEAD")
+    if head != _git("rev-parse", "origin/main") or _remote_main_sha() != head:
+        raise ProbeError("local and canonical origin/main must match before development smoke")
+    try:
+        repository_uid = os.stat(ROOT, follow_symlinks=False).st_uid
+    except OSError as exc:
+        raise ProbeError("cannot verify checkout owner for development evidence") from exc
+    try:
+        import pwd
+        operator_uid = pwd.getpwnam(operator).pw_uid
+    except (KeyError, ImportError) as exc:
+        raise ProbeError("cannot resolve sudo checkout owner") from exc
+    if operator_uid != repository_uid:
+        raise ProbeError("sudo operator does not own the source checkout")
+    nonce = nonce or secrets.token_hex(16)
+    if not re.fullmatch(r"[0-9a-f]{32}", nonce):
+        raise ProbeError("development admission nonce is malformed")
+    runuser = shutil.which("runuser")
+    env = shutil.which("env")
+    make = shutil.which("make")
+    if not runuser or not env or not make:
+        raise ProbeError("runuser, env and make are required for development evidence")
+    try:
+        result = subprocess.run(
+            [runuser, "--user", operator, "--", env,
+             f"SWAPZ_DEVELOPMENT_ADMISSION_NONCE={nonce}", make,
+             "fast_test", "SCENARIOS=fast-mixed", "REPEAT=1"],
+            cwd=ROOT, check=False, timeout=1200)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProbeError(f"source-bound development test failed to run: {exc}") from exc
+    evidence_path = ROOT / "build/tests/fast-test/development-evidence.json"
+    development = _read_fast_test_development_evidence(
+        evidence_path, operator_uid, head, nonce)
+    if result.returncode == 0:
+        if development["outcome"] != "FAST_TEST_PASS":
+            raise ProbeError(
+                "fast_test returned success without a PASS evidence record")
+    elif result.returncode == 2 and development["outcome"] == \
+            "LOADED_PREFLIGHT_BLOCKED_UNCLAIMED_NULL_BLK":
+        pass
+    else:
+        raise ProbeError(
+            "fast_test result expected=0_or_exact_preflight_exit_2 "
+            f"observed={result.returncode}")
+    try:
+        build_info = (ROOT / "build/source-build-info.h").read_text()
+    except OSError as exc:
+        raise ProbeError(
+            "development build identity expected=readable "
+            f"observed=errno_{exc.errno}") from exc
+    source_match = re.search(
+        r'^#define SWAPZ_BUILD_SOURCE_SHA "([0-9a-f]{40})"$',
+        build_info, re.MULTILINE)
+    clean_match = re.search(
+        r'^#define SWAPZ_BUILD_SOURCE_CLEAN ([01])$', build_info, re.MULTILINE)
+    if not source_match or source_match.group(1) != head or not clean_match or \
+            clean_match.group(1) != "1":
+        raise ProbeError("development build artifacts are not clean and bound to current main")
+    artifact_digests = _artifact_digests()
+    return {
+        "source_sha": head,
+        "head": head,
+        "development_only": True,
+        "scope": DEVELOPMENT_SCOPE,
+        "development_evidence": development,
+        "artifact_digests": artifact_digests,
+        "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
 
 
@@ -896,6 +1053,18 @@ def _recovery_run_directory(state_dir, run_id=None):
     return directory
 
 
+def _select_run_directory(state_dir, run_id, development_only):
+    """Use a fresh helper-chosen child only for the unreviewed dev smoke."""
+    if development_only:
+        if state_dir is not None:
+            raise ProbeError(
+                "development-only mode chooses its own fresh recovery directory")
+        state_dir = RECOVERY_BASE / f"swapz-physical-{run_id}"
+    elif state_dir is None:
+        raise ProbeError("qualified run requires an explicit recovery directory")
+    return _recovery_run_directory(state_dir, run_id)
+
+
 def _partition_lock(partuuid):
     """Permanent lock inode; never unlink it, including after a crash."""
     base = _recovery_base()
@@ -1006,7 +1175,7 @@ def _release_partition_ownership(state):
     try:
         used = _load_unique_json(used_path.read_bytes())
     except (OSError, ValueError) as exc:
-        raise ProbeError("one-use verbal approval consumption is missing") from exc
+        raise ProbeError("one-use run-authorization consumption is missing") from exc
     if used != marker:
         raise ProbeError("consumed review identity does not match partition owner")
     active_path.unlink()
@@ -1459,14 +1628,21 @@ def _final_observations(results, state_dir, state, target):
     row = results.get("final_swap_row")
     # The identity-only recovery target omits original swap parameters.
     # Compare with the durable saved state, including after standalone recovery.
-    results["restored_swap_verified"] = (
-        state.get("swap_was_active") is True
-        and isinstance(row, dict)
-        and row.get("kind") == "partition"
-        and type(state.get("swap_size_kib")) is int
-        and type(state.get("swap_priority")) is int
-        and row.get("size_kib") == state["swap_size_kib"]
-        and row.get("priority") == state["swap_priority"])
+    if state.get("swap_was_active") is True:
+        results["restored_swap_verified"] = (
+            isinstance(row, dict)
+            and row.get("kind") == "partition"
+            and type(state.get("swap_size_kib")) is int
+            and type(state.get("swap_priority")) is int
+            and row.get("size_kib") == state["swap_size_kib"]
+            and row.get("priority") == state["swap_priority"])
+    else:
+        # Development-only physical backing smoke preserves an originally
+        # inactive target. Absence from /proc/swaps is the required post-state.
+        results["restored_swap_verified"] = (
+            state.get("development_only") is True
+            and state.get("swap_was_active") is False
+            and row is None)
     try:
         results["final_mapper_present"] = _mapper_exists(state)
     except ProbeError as exc:
@@ -1476,7 +1652,12 @@ def _final_observations(results, state_dir, state, target):
     active = _recovery_base(target) / f"partition-{state['partuuid']}.active"
     results["active_partition_marker_present"] = active.exists()
     consumed = _recovery_base(target) / f"consumed-{state['run_id']}.json"
-    results["approval_consumed"] = consumed.is_file()
+    results["run_claim_consumed"] = consumed.is_file()
+    results["approval_consumed"] = (
+        consumed.is_file() if state.get("development_only") is not True else None)
+    results["target_remains_inactive"] = (
+        state.get("development_only") is True
+        and state.get("swap_was_active") is False and row is None)
     results["final_recovery_state"] = state.get("stage")
     results["mapper_removal_succeeded"] = (
         results["final_mapper_present"] is False)
@@ -1777,16 +1958,35 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
     if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != (
             state.get("header_sha256")):
         raise ProbeError("saved original header is missing or digest-mismatched")
-    # The original run admitted exactly one active swap partition. A damaged
-    # saved record must never turn restoration into an optional operation.
-    if state.get("swap_was_active") is not True:
-        observed = ("missing" if "swap_was_active" not in state else
-                    "false" if state["swap_was_active"] is False else "invalid")
+    # Normal mode restores an originally active, zero-use swap partition.
+    # The distinct development-only physical data-path smoke is admitted only
+    # when the card was already inactive and recovery must leave it inactive.
+    swap_was_active = state.get("swap_was_active")
+    development_only = state.get("development_only") is True
+    if swap_was_active is False:
+        if not development_only:
+            raise ProbeError(
+                "recovery_original_swap_active expected=true observed=false; "
+                "restoration_stage=not_attempted "
+                "ownership_marker_action=not_attempted; manual recovery required")
+        if (state.get("development_scope") != DEVELOPMENT_SCOPE or
+                any(state.get(field) is not None for field in (
+                    "swap_path", "swap_size_kib", "swap_priority",
+                    "swap_used_kib"))):
+            raise ProbeError(
+                "recovery_original_swap_active expected=canonical_inactive_"
+                "development_state observed=invalid; restoration_stage="
+                "not_attempted ownership_marker_action=not_attempted; "
+                "manual recovery required")
+    elif swap_was_active is not True:
+        observed = ("missing" if "swap_was_active" not in state else "invalid")
         raise ProbeError(
             "recovery_original_swap_active expected=true "
             f"observed={observed}; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
-    if type(state.get("swap_size_kib")) is not int or state["swap_size_kib"] <= 0:
+    if swap_was_active is True and (
+            type(state.get("swap_size_kib")) is not int or
+            state["swap_size_kib"] <= 0):
         observed = "missing" if "swap_size_kib" not in state else "invalid"
         raise ProbeError(
             "recovery_original_swap_size_kib expected=positive_integer "
@@ -1799,18 +1999,18 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             "recovery_saved_device_size_bytes expected=positive_integer "
             f"observed={observed}; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
-    if state["swap_size_kib"] > saved_size_bytes // 1024:
+    if swap_was_active is True and state["swap_size_kib"] > saved_size_bytes // 1024:
         raise ProbeError(
             "recovery_original_swap_size_kib expected=within_saved_device "
             "observed=exceeds_saved_device; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
-    if type(state.get("swap_priority")) is not int:
+    if swap_was_active is True and type(state.get("swap_priority")) is not int:
         observed = "missing" if "swap_priority" not in state else "invalid"
         raise ProbeError(
             "recovery_original_swap_priority expected=integer "
             f"observed={observed}; restoration_stage=not_attempted "
             "ownership_marker_action=not_attempted; manual recovery required")
-    if not LINUX_SWAP_PRIORITY_MIN <= state["swap_priority"] <= \
+    if swap_was_active is True and not LINUX_SWAP_PRIORITY_MIN <= state["swap_priority"] <= \
             LINUX_SWAP_PRIORITY_MAX:
         raise ProbeError(
             "recovery_original_swap_priority expected=-1..32767 "
@@ -1867,6 +2067,10 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
 
         current_header = _read_block0(target["device"], target)
         active = _active_swap_for(target["major"], target["minor"])
+        if swap_was_active is False and active is not None:
+            raise ProbeError(
+                "development recovery refused because the originally inactive "
+                "partition became active swap")
         if active is not None and current_header != backup:
             raise ProbeError("recovery refused to rewrite active swap")
         _validate_recovery_header(
@@ -1881,7 +2085,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             raise ProbeError("original 4 KiB header not restored exactly")
         state["final_block0_sha256"] = hashlib.sha256(backup).hexdigest()
 
-        if state.get("swap_was_active"):
+        if swap_was_active is True:
             if _active_swap_for(target["major"], target["minor"]) is None:
                 _verify_target_identity(target)
                 if state.get("swap_priority", -1) >= 0:
@@ -1894,6 +2098,9 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
                     active["priority"] != state["swap_priority"]):
                 raise ProbeError(
                     "original swap major, size or priority was not restored")
+        elif _active_swap_for(target["major"], target["minor"]) is not None:
+            raise ProbeError(
+                "development recovery expected the partition to remain inactive")
         state["stage"] = "COMPLETE"
         _save_state(state_dir, state)
         results_path = state_dir / RESULTS_NAME
@@ -1993,16 +2200,20 @@ def _prepare_state(target, state_dir, evidence, review):
         "size_bytes": target["size_bytes"],
         "partuuid": target["partuuid"],
         "header_sha256": hashlib.sha256(target["header"]).hexdigest(),
-        "swap_was_active": True,
-        "swap_path": target["swap_path"],
-        "swap_priority": target["swap_priority"],
-        "swap_size_kib": target["swap_size_kib"],
-        "swap_used_kib": target["swap_used_kib"],
+        "swap_was_active": target.get("swap_was_active", True),
+        "swap_path": target.get("swap_path"),
+        "swap_priority": target.get("swap_priority"),
+        "swap_size_kib": target.get("swap_size_kib"),
+        "swap_used_kib": target.get("swap_used_kib"),
+        "development_only": evidence.get("development_only") is True,
+        "development_scope": (DEVELOPMENT_SCOPE
+                              if evidence.get("development_only") is True
+                              else None),
         "source_sha": evidence["source_sha"],
         "helper_git_sha": evidence["head"],
         "helper_sha256": evidence["helper_sha256"],
-        "host_report_count": evidence["pass_reports"],
-        "reviewer": review["reviewer"],
+        "host_report_count": evidence.get("pass_reports"),
+        "reviewer": review.get("reviewer"),
         "run_id": review["run_id"],
         "module_ownership": "NOT_STARTED",
         "dm_name": dm_name,
@@ -2018,20 +2229,41 @@ def _remove_test_objects(state, state_dir):
                    lock_held=True, module_owned_by_process=True)
 
 
-def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
+def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
+              development_only=False):
     if os.geteuid() != 0:
         raise ProbeError("run action requires root")
     start_timestamp = _utc_timestamp()
-    evidence = current_source_evidence()
-    target = inspect_target(device_arg, confirm_arg)
+    if development_only:
+        evidence = current_development_evidence(None)
+        target = inspect_target(
+            device_arg, confirm_arg, allow_inactive_swap=True)
+        if target["swap_was_active"]:
+            raise ProbeError(
+                "development smoke requires the selected target to already be inactive")
+    else:
+        evidence = current_source_evidence()
+        target = inspect_target(device_arg, confirm_arg)
+        # Historical mocked normal-mode fixtures predate this explicit field;
+        # production inspect_target always supplies it from /proc/swaps.
+        target.setdefault("swap_was_active", True)
     target["device_arg"] = device_arg
     _recovery_base(target)
     live_artifact_digests = _artifact_digests()
     if live_artifact_digests != evidence["artifact_digests"]:
-        raise ProbeError(
-            "current build artifacts differ from the qualified make-test report")
-    review = validate_review(review_path, evidence, target)
-    state_dir_arg = _recovery_run_directory(state_dir_arg, review["run_id"])
+        raise ProbeError("current build artifacts differ from admitted evidence")
+    if development_only:
+        review = {
+            "reviewer": None,
+            "run_id": secrets.token_hex(16),
+            "approval_mode": "standing-owner-development",
+        }
+    else:
+        review = validate_review(review_path, evidence, target)
+    # The helper owns the dev run ID, so it chooses the matching directory
+    # beneath the already validated persistent recovery base itself.
+    state_dir_arg = _select_run_directory(
+        state_dir_arg, review["run_id"], development_only)
     _check_review_unconsumed(target, review["run_id"])
     for command in ("blockdev", "dmsetup", "insmod", "modprobe", "rmmod",
                     "swapoff", "swapon", "findmnt", "udevadm"):
@@ -2049,23 +2281,36 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
 
     lock_fd = _partition_lock(target["partuuid"])
     try:
-        # Burn the one-use verbal approval before state preparation. A crash,
+        # Burn the one-use run authorization before state preparation. A crash,
         # fsync failure or artifact-snapshot failure can never make it reusable.
         _burn_review(target, review["run_id"])
         state, state_dir = _prepare_state(
             target, state_dir_arg, evidence, review)
         results = {
-            "schema": "swapz-physical-results-v1",
+            "schema": ("swapz-physical-development-results-v1"
+                       if development_only else "swapz-physical-results-v1"),
+            "evidence_class": ("DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION"
+                               if development_only else
+                               "PHYSICAL_CORRECTNESS_SMOKE"),
+            "development_only": development_only,
+            "scope": (DEVELOPMENT_SCOPE if development_only else EXPECTED_SCOPE),
+            "linux_swap_activation_tested": False if development_only else None,
+            "physical_media_acceptance": False if development_only else None,
+            "production_qualification": False if development_only else None,
             "start_timestamp": start_timestamp,
             "end_timestamp": None,
             "current_git_head": evidence["head"],
-            "qualified_production_source_sha": evidence["source_sha"],
+            "source_commit_sha": evidence["source_sha"],
+            **({"qualified_production_source_sha": evidence["source_sha"]}
+               if not development_only else {}),
             "helper_git_sha": evidence["head"],
             "helper_sha256": evidence["helper_sha256"],
-            "qualified_artifact_sha256": dict(evidence["artifact_digests"]),
+            "artifact_sha256": dict(evidence["artifact_digests"]),
+            **({"qualified_artifact_sha256": dict(evidence["artifact_digests"])}
+               if not development_only else {}),
             "live_artifact_sha256_before_run": dict(live_artifact_digests),
             "run_id": review["run_id"],
-            "approval_mode": "verbal",
+            "approval_mode": review["approval_mode"],
             "reviewer": review["reviewer"],
             "device_uuid_path": device_arg,
             "major_minor": f"{target['major']}:{target['minor']}",
@@ -2073,19 +2318,20 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             "device_size_bytes": target["size_bytes"],
             "original_header_sha256": hashlib.sha256(
                 target["header"]).hexdigest(),
-            "original_swap_row": {
+            "original_swap_row": ({
                 "path": target["swap_path"],
                 "kind": "partition",
                 "size_kib": target["swap_size_kib"],
                 "used_kib": target["swap_used_kib"],
                 "priority": target["swap_priority"],
-            },
-            "qualification_evidence": {
+            } if target["swap_was_active"] else None),
+            "development_test_evidence": evidence.get("development_evidence"),
+            "qualification_evidence": ({
                 "latest_source_reports": evidence["latest_source_reports"],
                 "earlier_matching_artifact_reports": evidence[
                     "prior_matching_reports"],
                 "total_distinct_matching_reports": evidence["pass_reports"],
-            },
+            } if not development_only else None),
             "dm_name": state["dm_name"],
             "dm_uuid": state["dm_uuid"],
             "dm_inventory_before": dm_inventory_before,
@@ -2117,7 +2363,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                     "main or the bound helper changed before physical execution")
             _verify_target_identity(target)
             current_swap = _active_swap_for(target["major"], target["minor"])
-            if current_swap is None or current_swap["used_kib"] != 0 or (
+            if development_only:
+                if current_swap is not None:
+                    raise ProbeError(
+                        "selected partition became active swap after preflight")
+            elif current_swap is None or current_swap["used_kib"] != 0 or (
                     current_swap["size_kib"] != target["swap_size_kib"]) or (
                     current_swap["priority"] != target["swap_priority"]):
                 raise ProbeError("selected swap state changed after preflight")
@@ -2127,16 +2377,18 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             if live_before_swapoff != evidence["artifact_digests"]:
                 raise ProbeError(
                     "qualified artifacts changed before physical execution")
-            results["live_artifact_sha256_before_swapoff"] = dict(
+            results["live_artifact_sha256_before_mutation"] = dict(
                 live_before_swapoff)
             _save_results(state_dir, results)
             partition_claim_attempted = True
             _consume_review(target, review["run_id"], preburned=True)
-            # The consumed review, active partition claim and backup are durable.
+            # The consumed one-use run claim, active partition marker and
+            # original-header backup are durable before block-zero mutation.
             _verify_target_identity(target)
-            _run(["swapoff", "--", target["device"]], timeout=120)
-            if _active_swap_for(target["major"], target["minor"]) is not None:
-                raise ProbeError("swapoff returned but partition is still active")
+            if not development_only:
+                _run(["swapoff", "--", target["device"]], timeout=120)
+                if _active_swap_for(target["major"], target["minor"]) is not None:
+                    raise ProbeError("swapoff returned but partition is still active")
             state["stage"] = "SWAP_OFF"
             _save_state(state_dir, state)
 
@@ -2217,6 +2469,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                 ("ordinary-verify-series-128-round-7",
                  ("--verify-series", "128", "7")),
             ]
+            if development_only:
+                # The first card exercise is one bounded 128-page direct-I/O
+                # write/flush/overwrite/readback oracle. The full positive
+                # suite remains behind the exact-source qualification gate.
+                phases = phases[:1]
             for phase_name, options in phases:
                 _run_positive_oracle_phase(
                     oracle, mapper, state, target, state_dir, results,
@@ -2292,8 +2549,12 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
                     "restored_swap_verified",
                     "mapper_removal_succeeded",
                     "module_cleanup_succeeded",
-                    "approval_consumed",
                 )
+                if development_only:
+                    required_true += (
+                        "run_claim_consumed", "target_remains_inactive")
+                else:
+                    required_true += ("approval_consumed",)
                 required = (
                     *((key, True) for key in required_true),
                     ("active_partition_marker_present", False),
@@ -2339,8 +2600,13 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path):
             raise ProbeError(str(failure)) from failure
         # A successful oracle alone cannot publish success before normal
         # mapper/module removal, swap restoration, and evidence validation.
-        print("PHYSICAL_SMOKE=BOUNDED_POSITIVE_CORRECTNESS_ONLY")
-        print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")
+        if development_only:
+            print("PHYSICAL_DEVELOPMENT_SMOKE=PASS")
+            print("EVIDENCE_CLASS=DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
+            print(f"PHYSICAL_SMOKE_RESTORED=original-header; target-inactive state={state_dir}")
+        else:
+            print("PHYSICAL_SMOKE=BOUNDED_POSITIVE_CORRECTNESS_ONLY")
+            print(f"PHYSICAL_SMOKE_RESTORED=swap-enabled state={state_dir}")
         print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}")
     finally:
         os.close(lock_fd)
@@ -2760,6 +3026,9 @@ def main(argv=None):
     parser.add_argument("--source-sha")
     parser.add_argument("--state-dir")
     parser.add_argument("--review-record")
+    parser.add_argument(
+        "--development-only", action="store_true",
+        help="run one current-source physical backing smoke; never qualifies production")
     args = parser.parse_args(argv)
     if args.action in {"plan", "campaign-plan", "run", "recover"} and not args.device:
         parser.error("--device is required")
@@ -2767,8 +3036,16 @@ def main(argv=None):
         parser.error("--confirm-device is required")
     if args.action == "campaign-plan" and (not args.partuuid or not args.source_sha):
         parser.error("campaign-plan requires --partuuid and --source-sha")
-    if args.action == "run" and (not args.state_dir or not args.review_record):
-        parser.error("run requires --state-dir and --review-record")
+    if args.action == "run" and not args.state_dir and not args.development_only:
+        parser.error("run requires --state-dir")
+    if args.action == "run" and args.development_only and args.state_dir:
+        parser.error("--development-only chooses its own fresh recovery directory")
+    if args.action == "run" and not args.development_only and not args.review_record:
+        parser.error("qualified run requires --review-record")
+    if args.action == "run" and args.development_only and args.review_record:
+        parser.error("--development-only does not accept a review record")
+    if args.action != "run" and args.development_only:
+        parser.error("--development-only is available only for run")
     if args.action == "recover" and not args.state_dir:
         parser.error("recover requires --state-dir")
     if args.action == "plan":
@@ -2789,7 +3066,8 @@ def main(argv=None):
         raise ProbeError("received SIGTERM; attempting safe recovery")
 
     signal.signal(signal.SIGTERM, handle_sigterm)
-    run_probe(args.device, args.confirm_device, args.state_dir, args.review_record)
+    run_probe(args.device, args.confirm_device, args.state_dir,
+              args.review_record, development_only=args.development_only)
     return 0
 
 
