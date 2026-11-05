@@ -5415,7 +5415,20 @@ observation as sufficient for that later destructive boundary.
 A recovered header alone never establishes byte-oracle success. The
 development result requires an executed successful byte-oracle phase, durable
 `COMPLETE`, the exact original header, an inactive target, and a consumed
-one-use claim with no outstanding ownership marker. A zero-phase
+one-use claim with no outstanding ownership marker. `oracle_suite=PASS`
+must denote a final evidence decision, not just a worker's zero exit code:
+require all exact expected phases complete, source/helper/artifact and target
+bindings consistent with the durable run state, normal recovery, and independent
+final observations. A COMPLETE stage and matching 4096-byte header alone
+cannot prove I/O. Never retain an oracle-suite PASS on RECOVERY_REQUIRED.
+Rootless tests must corrupt a synthetic COMPLETE/header-matched result with
+missing or RUNNING phases, stale source/helper and wrong target metadata, then
+require a fail-closed outcome. On simultaneous oracle and teardown failure
+retain the first oracle errno/exit separately from recovery failure. Bounded
+failure-only diagnostics must state phase, target-identity proof category,
+source/helper artifact binding, first error, restored-header proof, oracle
+evidence, retained recovery, and a safe read-only next action, without leaking
+host identifiers, paths or secrets. A zero-phase
 `PRE_DESTRUCTIVE_FAILED` record can preserve the original header without
 passing the oracle. A failed oracle followed by `COMPLETE` proves restoration,
 not correctness; a passed oracle with uncertain cleanup remains

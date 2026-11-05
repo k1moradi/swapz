@@ -1717,7 +1717,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               source_drift=None,
                               helper_sha_mismatch=False,
                               artifact_drift_before_mutation=False,
-                              recovery_failure=False):
+                              recovery_failure=False,
+                              teardown_oracle_metadata=None):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         if development_only:
@@ -1961,6 +1962,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     inventory_after["other_mapper_sha256"]),
                 "end_timestamp": probe._utc_timestamp(),
             })
+            # Corrupt *durable evidence* only after synthetic cleanup proves
+            # exact 4 KiB restoration; header recovery cannot prove I/O.
+            if teardown_oracle_metadata == "missing_phase":
+                saved_results["physical_oracle_phases"] = []
+            elif teardown_oracle_metadata == "incomplete_phase":
+                saved_results["physical_oracle_phases"][0]["status"] = "RUNNING"
+            elif teardown_oracle_metadata == "source_manifest":
+                saved_results["source_commit_sha"] = "f" * 40
+            elif teardown_oracle_metadata == "helper_binding":
+                saved_results["helper_sha256"] = "f" * 64
+            elif teardown_oracle_metadata == "target_identity":
+                saved_results["major_minor"] = "8:99"
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -2062,6 +2075,21 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     # Read the durable failure record, not a synthetic PASS.
                     state["_test_results"] = json.loads(
                         (Path(directory) / probe.RESULTS_NAME).read_text())
+                elif teardown_oracle_metadata is not None:
+                    try:
+                        execute()
+                    except probe.ProbeError as rejected:
+                        state["_test_first_failure"] = str(rejected)
+                    else:
+                        self.fail(
+                            "phase=final_oracle_evidence "
+                            "target_identity_proof=synthetic_checked_or_misbound "
+                            "source_helper_artifact_binding=manifest_required "
+                            "first_errno_or_exit=not_certifiable "
+                            "restored_header_proof=4096_bytes_matched "
+                            f"oracle_evidence_status={teardown_oracle_metadata} "
+                            "retained_recovery=COMPLETE "
+                            "safe_action=inspect_results_read_only")
                 elif fault or identity_failure_at is not None or \
                         oracle_failure_at is not None or \
                         missing_lower_after_at is not None or \
@@ -2173,6 +2201,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(results["final_recovery_state"], "RECOVERY_REQUIRED")
         self.assertNotEqual(results.get("oracle_suite"), "PASS")
         self.assertIn("physical oracle phase", uncertain["_test_first_failure"])
+        self.assertEqual(results["physical_oracle_phases"][0]["return_code"], 1)
+        self.assertEqual(results["physical_oracle_phases"][0]["status"], "FAIL")
         self.assertIn("injected recovery uncertainty", results["recovery_error"])
         self.assertTrue(uncertain["_test_owner_marker"])
         self.assertTrue(uncertain["_test_consumed_claim"])
@@ -2180,10 +2210,39 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
         _, uncertain, _ = self.simulate_physical_run(
             development_only=True, recovery_failure=True)
-        self.assertEqual(uncertain["_test_results"]["oracle_suite"], "PASS")
+        self.assertNotEqual(
+            uncertain["_test_results"].get("oracle_suite"), "PASS",
+            "phase=recovery oracle_suite cannot PASS on uncertain restoration")
         self.assertEqual(uncertain["stage"], "RECOVERY_REQUIRED")
         self.assertTrue(uncertain["_test_owner_marker"])
         self.assertTrue(uncertain["_test_consumed_claim"])
+
+    def test_complete_restoration_cannot_certify_misbound_oracle_evidence(self):
+        # The synthetic COMPLETE/header match is deliberately true for every
+        # case; only the oracle/provenance evidence is corrupted.
+        for damaged_field in (
+                "missing_phase", "incomplete_phase", "source_manifest",
+                "helper_binding", "target_identity"):
+            with self.subTest(damaged_field=damaged_field), \
+                    mock.patch("builtins.print") as printed:
+                _, state, target = self.simulate_physical_run(
+                    development_only=True,
+                    teardown_oracle_metadata=damaged_field)
+            results = state["_test_results"]
+            self.assertEqual(state["stage"], "COMPLETE")
+            self.assertEqual(state["_test_observed_header"], target["header"])
+            self.assertTrue(results["original_header_matches_final"])
+            self.assertTrue(state["_test_consumed_claim"])
+            self.assertFalse(state["_test_owner_marker"])
+            self.assertNotEqual(
+                results.get("oracle_suite"), "PASS",
+                "phase=final_evidence oracle_status=uncertified "
+                f"proof_category={damaged_field} restored_header=4096_exact "
+                "safe_action=inspect_results_read_only")
+            self.assertFalse(any(
+                call.args and str(call.args[0]).startswith(
+                    "PHYSICAL_DEVELOPMENT_SMOKE=PASS")
+                for call in printed.call_args_list))
 
     def test_development_post_evidence_drift_is_pre_destructive(self):
         # A post-fast_test source change must retain its original refusal,
@@ -2408,7 +2467,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertNotIn(("restore0",), events)
         self.assertEqual(state["stage"], "RECOVERY_REQUIRED")
         self.assertEqual(results["final_recovery_state"], "RECOVERY_REQUIRED")
-        self.assertEqual(results["oracle_suite"], "PASS")
+        self.assertNotEqual(
+            results.get("oracle_suite"), "PASS",
+            "phase=recovery oracle_suite cannot PASS on uncertain restoration")
         self.assertEqual(len(results["physical_oracle_phases"]), 11)
         self.assertTrue(all(phase["status"] == "PASS"
                             for phase in results["physical_oracle_phases"]))
