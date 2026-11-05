@@ -3815,7 +3815,10 @@ subset of other jobs is green. A partial failed-job rerun is therefore
 incomplete qualification evidence: after a genuinely transient cancellation
 or infrastructure failure, rerun the full required workflow attempt for the
 same exact SHA; a reproducible test failure requires a fixing commit and must
-not be converted to PASS by repeated retries. A bounded failure-only
+not be converted to PASS by repeated retries. CI and test-only edits must
+preserve tracked file modes unless an explicit executable-entrypoint contract
+requires a mode change; Python fixtures invoked through `python3` do not gain
+qualification by becoming executable. A bounded failure-only
 refusal identifies the failed gate, required proof, observed classification
 and corrective action, without exposing credentials, host paths or unbounded
 external text. Keep the native-rootless aggregate required even if the
