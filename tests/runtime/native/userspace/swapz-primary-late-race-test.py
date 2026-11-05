@@ -1433,75 +1433,102 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
 
 
 def check_namespace_child_failure_boundary() -> int:
-    """A child which entered a new namespace but failed is not an environment SKIP."""
+    """Distinguish namespace setup unavailability from an executed child failure."""
     unshare = shutil.which("unshare")
     if unshare is None:
         print("SKIP: boundary=namespace-setup expected_identity=distinct "
-              "observed_identity=unavailable refusal=unshare-absent first_errno=ENOENT")
+              "observed_identity=unavailable refusal=unshare-absent "
+              "first_errno=ENOENT")
         return 0
+
+    namespace_command = [
+        unshare, "--user", "--map-root-user", "--mount", "--fork",
+    ]
     try:
-        parent_namespace = os.stat("/proc/self/ns/mnt")
+        parent_namespace_fd = os.open(
+            "/proc/self/ns/mnt", os.O_RDONLY | os.O_CLOEXEC)
     except OSError as error:
-        print(f"FAIL: boundary=namespace-parent-identity expected_identity=known "
-              f"observed_identity=unavailable refusal=stat-error first_errno={error.errno}",
+        print(f"FAIL: boundary=namespace-parent-reference expected_identity=pinned "
+              f"observed_identity=unavailable refusal=open-error "
+              f"first_errno={error.errno}",
               file=sys.stderr)
         return 1
 
-    # No mounts or swap operations: the child only compares namespace IDs.
-    # Its deliberate status 23 is a FAIL classification negative control.
-    child = (
-        "import os, sys\n"
-        "print('SWAPZ_NAMESPACE_CHILD_ENTERED', flush=True)\n"
-        "namespace = os.stat('/proc/self/ns/mnt')\n"
-        "if (namespace.st_dev, namespace.st_ino) == "
-        "(int(sys.argv[1]), int(sys.argv[2])):\n"
-        "    raise SystemExit(24)\n"
-        "raise SystemExit(23)\n"
-    )
     try:
-        completed = subprocess.run(
-            [unshare, "--user", "--map-root-user", "--mount", "--fork",
-             sys.executable, "-c", child,
-             str(parent_namespace.st_dev), str(parent_namespace.st_ino)],
-            capture_output=True, text=True, check=False, timeout=10,
-            env={**os.environ, "LC_ALL": "C"})
-    except OSError as error:
-        print(f"FAIL: boundary=namespace-child-spawn expected_identity=distinct "
-              f"observed_identity=unknown refusal=spawn-error first_errno={error.errno}",
-              file=sys.stderr)
-        return 1
-    except subprocess.TimeoutExpired:
-        print("FAIL: boundary=namespace-child-start expected_identity=distinct "
-              "observed_identity=unknown refusal=timeout first_errno=unknown",
-              file=sys.stderr)
-        return 1
-
-    if "SWAPZ_NAMESPACE_CHILD_ENTERED" not in completed.stdout.splitlines():
-        # Environmental SKIP is permitted only for a confirmed unshare setup
-        # error, before the child ever emitted its execution handshake.
-        setup_match = re.fullmatch(
-            r"unshare: unshare failed: "
-            r"(Operation not permitted|Permission denied|Invalid argument|Function not implemented)\n?",
-            completed.stderr)
-        if setup_match and completed.returncode != 0:
-            setup_errno = {
-                "Operation not permitted": "EPERM",
-                "Permission denied": "EACCES",
-                "Invalid argument": "EINVAL",
-                "Function not implemented": "ENOSYS",
-            }[setup_match.group(1)]
+        try:
+            # This probe contains no test assertion. A nonzero result means the
+            # environment could not establish the disposable namespace setup.
+            setup = subprocess.run(
+                [*namespace_command, sys.executable, "-c",
+                 "raise SystemExit(0)"],
+                capture_output=True, text=True, check=False, timeout=10,
+                env={**os.environ, "LC_ALL": "C"})
+        except OSError as error:
+            print(f"FAIL: boundary=namespace-setup-spawn "
+                  f"expected_identity=distinct observed_identity=unknown "
+                  f"refusal=spawn-error first_errno={error.errno}",
+                  file=sys.stderr)
+            return 1
+        except subprocess.TimeoutExpired:
+            print("FAIL: boundary=namespace-setup expected_identity=distinct "
+                  "observed_identity=unknown refusal=timeout "
+                  "first_errno=unavailable",
+                  file=sys.stderr)
+            return 1
+        if setup.returncode != 0:
             print("SKIP: boundary=namespace-setup expected_identity=distinct "
-                  f"observed_identity=unavailable refusal=unshare-denied first_errno={setup_errno}")
+                  "observed_identity=unavailable "
+                  "refusal=unshare-setup-unavailable "
+                  f"first_errno=unavailable observed_exit={setup.returncode}")
             return 0
+
+        # Keep a real namespace fd open across unshare. This is a pinned
+        # namespace reference, unlike a sampled PID/TID or stat tuple, and it
+        # avoids putting raw host namespace device/inode values in argv.
+        child = (
+            "import os, sys\n"
+            "print('SWAPZ_NAMESPACE_CHILD_ENTERED', flush=True)\n"
+            "pinned = os.fstat(int(sys.argv[1]))\n"
+            "current = os.stat('/proc/self/ns/mnt')\n"
+            "if (pinned.st_dev, pinned.st_ino) == "
+            "(current.st_dev, current.st_ino):\n"
+            "    raise SystemExit(24)\n"
+            "raise SystemExit(23)\n"
+        )
+        try:
+            completed = subprocess.run(
+                [*namespace_command, sys.executable, "-c", child,
+                 str(parent_namespace_fd)],
+                pass_fds=(parent_namespace_fd,), capture_output=True, text=True,
+                check=False, timeout=10, env={**os.environ, "LC_ALL": "C"})
+        except OSError as error:
+            print(f"FAIL: boundary=namespace-child-spawn "
+                  f"expected_identity=distinct observed_identity=unknown "
+                  f"refusal=spawn-error first_errno={error.errno}",
+                  file=sys.stderr)
+            return 1
+        except subprocess.TimeoutExpired:
+            print("FAIL: boundary=namespace-child-start "
+                  "expected_identity=distinct observed_identity=unknown "
+                  "refusal=timeout first_errno=unavailable",
+                  file=sys.stderr)
+            return 1
+    finally:
+        os.close(parent_namespace_fd)
+
+    # Setup already succeeded. From here onward, no error may be reclassified
+    # as an environmental SKIP.
+    if "SWAPZ_NAMESPACE_CHILD_ENTERED" not in completed.stdout.splitlines():
         print(f"FAIL: boundary=namespace-child-start expected_identity=distinct "
               f"observed_identity=unknown refusal=missing-start-marker "
-              f"first_errno=unknown observed_exit={completed.returncode}",
+              f"first_errno=unavailable observed_exit={completed.returncode}",
               file=sys.stderr)
         return 1
     if completed.returncode != 23:
-        print(f"FAIL: boundary=namespace-child-after-start expected_identity=distinct "
-              f"observed_identity=unknown refusal=unexpected-child-exit "
-              f"first_errno=none observed_exit={completed.returncode} expected_exit=23",
+        print(f"FAIL: boundary=namespace-child-after-start "
+              f"expected_identity=distinct observed_identity=unknown "
+              f"refusal=unexpected-child-exit first_errno=none "
+              f"observed_exit={completed.returncode} expected_exit=23",
               file=sys.stderr)
         return 1
     print("PASS: boundary=namespace-child-after-start expected_identity=distinct "
