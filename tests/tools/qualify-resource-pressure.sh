@@ -956,7 +956,7 @@ report_cleanup_refusal() {
 cleanup() {
     local result=$? original_result observed initially_retained
     local current_identity child_cleanup_status session_fd_path
-    local session_entry_snapshot session_entry
+    local session_entry_snapshot session_entry nested_resume_disposition
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     trap - EXIT HUP INT TERM
@@ -1007,15 +1007,22 @@ cleanup() {
     fi
 
     if (( initially_retained )); then
+        nested_resume_disposition=not-required
+        if (( PAIR_RESUME_UNCERTAIN )); then
+            nested_resume_disposition=skipped-uncertain
+        elif [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
+                -n $PAIR_CGROUP_PROCESS_IDENTITY ]]; then
+            nested_resume_disposition=attempted
+        fi
         if (( original_result == 0 || original_result == 2 )); then
-            printf 'BLOCKED: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" >&2
+            printf 'BLOCKED: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s nested_resume:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" "$nested_resume_disposition" >&2
         else
-            printf 'FAIL: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" >&2
+            printf 'FAIL: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s nested_resume:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" "$nested_resume_disposition" >&2
         fi
     fi
 
     if [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
-          -n $PAIR_CGROUP_PROCESS_IDENTITY && ! $PAIR_RESUME_UNCERTAIN ]]; then
+          -n $PAIR_CGROUP_PROCESS_IDENTITY ]] && (( PAIR_RESUME_UNCERTAIN == 0 )); then
         if wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
                 "$PAIR_PROCESS_IDENTITY" \
                 "$PAIR_CGROUP_PROCESS_IDENTITY"; then
@@ -1031,7 +1038,7 @@ cleanup() {
                 if (( child_cleanup_status != 3 && child_cleanup_status != 5 )); then
                     PAIR_RESUME_UNCERTAIN=1
                     report_cleanup_refusal pair-resume \
-                        "pidfd-status-$child_cleanup_status" "$original_result"
+                        "attempted-pidfd-status-$child_cleanup_status" "$original_result"
                 fi
             fi
         else
@@ -1042,9 +1049,13 @@ cleanup() {
             if (( child_cleanup_status != 3 && child_cleanup_status != 5 )); then
                 PAIR_RESUME_UNCERTAIN=1
                 report_cleanup_refusal pair-resume \
-                    "barrier-status-$child_cleanup_status" "$original_result"
+                    "attempted-barrier-status-$child_cleanup_status" "$original_result"
             fi
         fi
+    elif (( PAIR_RESUME_UNCERTAIN && ! initially_retained )); then
+        # No identity-bound nested signal is authorized after an uncertain
+        # resume; record the deliberate skip once and retain both resources.
+        report_cleanup_refusal pair-resume skipped-uncertain "$original_result"
     fi
 
     if [[ -n $PAIR_PID ]]; then

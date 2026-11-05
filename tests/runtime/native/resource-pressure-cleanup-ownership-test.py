@@ -50,7 +50,9 @@ class CleanupOwnershipFixtures(unittest.TestCase):
             "read_owned_directory_identity", "read_open_directory_identity",
             "direct_owned_child_running", "capture_direct_child_identity",
             "signal_direct_owned_child", "signal_owned_child_if_running",
-            "stop_direct_owned_child", "classify_cleanup_cgroup_membership",
+            "stop_direct_owned_child", "nested_pair_identity_action",
+            "capture_nested_child_identity", "wait_nested_child_stopped",
+            "signal_nested_owned_child", "classify_cleanup_cgroup_membership",
             "classify_cleanup_session_entries", "report_cleanup_refusal",
             "cleanup"))
         cls.source = QUALIFIER.read_text(encoding="utf-8")
@@ -135,6 +137,183 @@ rmdir() {
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn(" 123", result.stderr)
+
+
+    @staticmethod
+    def stopped_nested_pair_preamble() -> str:
+        # The cleanup coordinator owns an outer timeout; the readiness shell
+        # is that timeout's child, not a direct child of the coordinator.
+        return r'''
+timeout --signal=TERM --kill-after=1s 8s bash -c '
+    printf "pid=%s\n" "$$" > "$1"
+    kill -STOP "$$"
+    [[ -f $2 ]] && printf "resumed\n" > "$3"
+' _ "$PAIR_READY" "$STOP" "$SESSION/../nested-resumed" \
+    </dev/null >/dev/null 2>&1 &
+PAIR_PID=$!
+PAIR_PROCESS_IDENTITY="$(capture_direct_child_identity "$PAIR_PID")" || exit 41
+for _ in {1..100}; do
+    [[ -s $PAIR_READY ]] && break
+    direct_owned_child_running "$PAIR_PID" || exit 42
+    sleep 0.01
+done
+[[ -s $PAIR_READY ]] || exit 43
+PAIR_CGROUP_PROCESS_PID="$(awk -F= '$1 == "pid" && NF == 2 { print $2 }' "$PAIR_READY")"
+PAIR_CGROUP_PROCESS_IDENTITY="$(capture_nested_child_identity \
+    "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" "$PAIR_PROCESS_IDENTITY")" || exit 44
+wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
+    "$PAIR_PROCESS_IDENTITY" "$PAIR_CGROUP_PROCESS_IDENTITY" || exit 45
+'''
+
+    def test_nested_resume_old_string_guard_reproduction_and_numeric_contract(self):
+        # The former Bash [[ ! "$numeric" ]] truth test skipped *both* 0 and 1.
+        old_guard = r'''
+PAIR_PID=100 PAIR_CGROUP_PROCESS_PID=101 PAIR_CGROUP_PROCESS_IDENTITY=102
+for PAIR_RESUME_UNCERTAIN in 0 1; do
+    if [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
+          -n $PAIR_CGROUP_PROCESS_IDENTITY && ! $PAIR_RESUME_UNCERTAIN ]]; then
+        printf 'old:%s:attempted\n' "$PAIR_RESUME_UNCERTAIN"
+    else
+        printf 'old:%s:skipped\n' "$PAIR_RESUME_UNCERTAIN"
+    fi
+    if [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
+          -n $PAIR_CGROUP_PROCESS_IDENTITY ]] && (( PAIR_RESUME_UNCERTAIN == 0 )); then
+        printf 'fixed:%s:attempted\n' "$PAIR_RESUME_UNCERTAIN"
+    else
+        printf 'fixed:%s:skipped\n' "$PAIR_RESUME_UNCERTAIN"
+    fi
+done
+'''
+        result = self.run_simple_shell(old_guard)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "old:0:skipped", "fixed:0:attempted",
+            "old:1:skipped", "fixed:1:skipped",
+        ])
+        cleanup = shell_function("cleanup")
+        self.assertNotIn("! $PAIR_RESUME_UNCERTAIN", cleanup)
+        self.assertIn("&& (( PAIR_RESUME_UNCERTAIN == 0 )); then", cleanup)
+
+    def test_verified_stopped_nested_child_receives_pidfd_sigcont_and_cleans(self):
+        # Instrument only the wrapper's result; the actual pidfd identity and
+        # signaling action, the complete cleanup and bounded owner stop are real.
+        preamble = self.stopped_nested_pair_preamble() + r'''
+signal_nested_owned_child() {
+    nested_pair_identity_action signal "$@"
+    signal_status=$?
+    printf '%s\n' "$signal_status" > "$SESSION/../nested-sigcont-status"
+    if (( signal_status == 0 )); then
+        for _ in {1..50}; do
+            [[ -f $SESSION/../nested-resumed ]] && break
+            sleep 0.01
+        done
+    fi
+    return "$signal_status"
+}
+'''
+        result = self.execute(preamble=preamble)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(
+            (self.root / "nested-sigcont-status").read_text(encoding="ascii"), "0\n")
+        self.assertEqual((self.root / "nested-resumed").read_text(
+            encoding="ascii"), "resumed\n")
+        self.assertEqual(result.stdout, "PASS_ID36_RESOURCE_PRESSURE=synthetic\n")
+        self.assertFalse(self.cgroup.exists())
+        self.assertFalse(self.session.exists())
+
+    def test_uncertain_stopped_nested_child_is_quarantined_without_signal(self):
+        foreign = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: self.stop_foreign(foreign))
+        self.membership.write_text(f"{foreign.pid}\n", encoding="ascii")
+        preamble = self.stopped_nested_pair_preamble() + r'''
+PAIR_RESUME_UNCERTAIN=1
+signal_nested_owned_child() {
+    : > "$SESSION/../unexpected-nested-signal"
+    return 0
+}
+stop_direct_owned_child() {
+    : > "$SESSION/../unexpected-outer-stop"
+    return 0
+}
+'''
+        result = self.execute(preamble=preamble, status=143, retain=True)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertIn("nested_resume:skipped-uncertain", result.stderr)
+        self.assertIn("original_exit:143", result.stderr)
+        self.assertIn("retained_cleanup:child-cgroup-and-private-session",
+                      result.stderr)
+        self.assertTrue(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertFalse((self.root / "unexpected-nested-signal").exists())
+        self.assertFalse((self.root / "unexpected-outer-stop").exists())
+        self.assertIsNone(foreign.poll(), "foreign member must not be terminated")
+        self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"), "untouched\n")
+        nested_pid = int((self.session / "pair.ready").read_text(
+            encoding="ascii").removeprefix("pid=").strip())
+        nested_stat = Path(f"/proc/{nested_pid}/stat").read_text(
+            encoding="ascii").rsplit(") ", 1)[1].split()
+        self.assertEqual(nested_stat[0], "T", "uncertain child must remain stopped")
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_nested_resume_uncertainty_without_prior_retention_is_diagnostic(self):
+        preamble = r'''
+PAIR_PID=111
+PAIR_PROCESS_IDENTITY=222
+PAIR_CGROUP_PROCESS_PID=333
+PAIR_CGROUP_PROCESS_IDENTITY=444
+PAIR_RESUME_UNCERTAIN=1
+wait_nested_child_stopped() { : > "$SESSION/../unexpected-wait"; return 0; }
+signal_nested_owned_child() { : > "$SESSION/../unexpected-signal"; return 0; }
+stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
+'''
+        result = self.execute(preamble=preamble)
+        self.assert_retained(result, "skipped-uncertain")
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        for name in ("unexpected-wait", "unexpected-signal", "unexpected-stop"):
+            self.assertFalse((self.root / name).exists())
+
+    def test_nested_resume_failed_wait_or_signal_keeps_first_exit(self):
+        # Faults are injected into the exact production cleanup entry points;
+        # no PID or cgroup is touched by these failure-path stubs.
+        for failure, original_status, expected_observation in (
+                ("wait", 143, "attempted-barrier-status-2"),
+                ("signal", 1, "attempted-pidfd-status-2")):
+            with self.subTest(failure=failure):
+                preamble = r'''
+PAIR_PID=111
+PAIR_PROCESS_IDENTITY=222
+PAIR_CGROUP_PROCESS_PID=333
+PAIR_CGROUP_PROCESS_IDENTITY=444
+stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
+wait_nested_child_stopped() { : > "$SESSION/../wait-called"; return 0; }
+signal_nested_owned_child() { : > "$SESSION/../signal-called"; return 0; }
+'''
+                if failure == "wait":
+                    preamble += 'wait_nested_child_stopped() { : > "$SESSION/../wait-called"; return 2; }\n'
+                else:
+                    preamble += 'signal_nested_owned_child() { : > "$SESSION/../signal-called"; return 2; }\n'
+                result = self.execute(preamble=preamble, status=original_status)
+                self.assertEqual(result.returncode, original_status, result.stderr)
+                self.assertIn("phase:pair-resume", result.stderr)
+                self.assertIn(f"observed:{expected_observation}", result.stderr)
+                self.assertIn(f"original_exit:{original_status}", result.stderr)
+                self.assertIn("retained_cleanup:child-cgroup-and-private-session",
+                              result.stderr)
+                self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+                self.assertTrue((self.root / "wait-called").exists())
+                self.assertEqual((self.root / "signal-called").exists(),
+                                 failure == "signal")
+                self.assertFalse((self.root / "unexpected-stop").exists())
+                self.assertTrue(self.cgroup.exists())
+                self.assertTrue(self.session.exists())
+                self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"),
+                                 "untouched\n")
+                (self.root / "wait-called").unlink()
+                if (self.root / "signal-called").exists():
+                    (self.root / "signal-called").unlink()
 
     def test_function_extractor_keeps_heredoc_dictionary_body(self):
         function = shell_function("classify_cleanup_session_entries")

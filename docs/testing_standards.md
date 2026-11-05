@@ -3907,6 +3907,22 @@ original device/inode while post-removal path reappearance has a different
 device/inode, retain the remaining session-path obligation, and prohibit
 synthetic ID36 PASS evidence.
 
+The nested-child resume cleanup guard must interpret the numeric uncertainty
+state arithmetically: zero permits an attempt only with the existing tracked
+timeout, captured readiness PID, and captured nested process identity; one
+skips SIGCONT and quarantines the private cgroup and scratch. Rootless tests
+must first reproduce the original nonempty-string negation failure for both
+zero and one, then execute the extracted production cleanup with a real
+stopped timeout child and checked parent/child start-time identities. Confirm
+pidfd SIGCONT and bounded direct-child/session cleanup for zero; for one,
+confirm no nested signal or timeout termination, a live foreign process
+survives, and both uncertain resources remain. Inject identity-bound wait
+and SIGCONT failures to verify one bounded attempted-versus-skipped diagnostic
+and that the original EXIT/signal status wins over subsequent cleanup failure.
+Existing final-directory replacement and rmdir-failure regressions still prove
+first refusal and remaining session ownership; no cgroup.kill or loaded host
+pressure cleanup is permitted by these rootless proofs.
+
 Rootless contracts must lint both the pressure helper and shell wrapper, and the
 loaded report parser must require the exact `PASS_ID36_RESOURCE_PRESSURE`
 marker. Missing cgroup-v2 controllers, insufficient host safety headroom,
