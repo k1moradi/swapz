@@ -151,6 +151,56 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                     self.assertFalse(any(
                         item["status"] == "FAIL" for item in audit["diagnostics"]))
 
+    def test_unusable_cohort_cannot_claim_measured_decision_failure(self):
+        # A numerically failing check is not a terminal measurement when one
+        # of the frozen attempts was screened out of the accepted cohort.
+        records = [pair(index, 1100 + 500 * index)
+                   for index in range(1, 6)]
+        records[1]["status"] = "EXCLUDED"
+        records[1]["excluded"] = True
+        records[1]["analysis_usable"] = False
+        names = ("useful_write", "lower_write_bytes",
+                 "lower_write_requests", "read_p95", "read_p99",
+                 "write_p95", "write_p99", "cpu")
+        decision = QUALIFICATION.service_decision(
+            [{"deltas": {name: 0.0 for name in names}} for _ in range(5)],
+            "sd-service-balanced")
+        self.assertEqual(decision["status"], "FAIL")
+        audit, _ = inspect(records, decisions={
+            "sd-service-balanced": decision},
+            summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+    def test_unbound_producer_fail_does_not_claim_terminal_measurement(self):
+        record = pair(1, 1100)
+        record["status"] = "EXCLUDED"
+        record["excluded"] = True
+        record["analysis_usable"] = False
+        record["raw"]["verdict"] = "FAIL"
+        record["raw"]["source_sha"] = "b" * 40
+        audit, _ = inspect([record], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+    def test_counterbalanced_order_and_duplicate_indices_block_audit(self):
+        record = pair(1, 1100)
+        record["order"] = "swapz-first"
+        audit, metrics = inspect([record])
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("pair.order", metrics)
+
+        first = pair(1, 1100)
+        second = pair(1, 1600, run_id="second-attempt")
+        second["pair_id"] = "different-id"
+        audit, metrics = inspect([first, second])
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("pair.pair_index", metrics)
+
     def test_duplicate_pair_and_run_identifiers(self):
         records = [pair(1, 1100, "duplicate"),
                    pair(2, 1600, "duplicate")]
