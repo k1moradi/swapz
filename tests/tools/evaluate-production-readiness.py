@@ -1064,6 +1064,22 @@ def validate_physical_campaign_evidence(
             campaign.get("campaign_status") != "PASS" or
             campaign.get("qualification_status") != "PASS"):
         reject("sealed campaign qualification is not PASS")
+    # The sealer's physical audit must agree with its claimed PASS; a digest
+    # authenticates the supplied bytes but not an omitted or failed audit.
+    physical_audit = campaign.get("physical_evidence_audit")
+    if (not isinstance(physical_audit, dict) or
+            physical_audit.get("status") != "PASS" or
+            physical_audit.get("diagnostics") != [] or
+            type(physical_audit.get("omitted_diagnostic_count")) is not int or
+            physical_audit["omitted_diagnostic_count"] != 0 or
+            physical_audit.get("claim_boundary") !=
+            physical_policy.get("claim_boundary") or
+            physical_audit.get("measurement_authority") !=
+            "host-visible lower I/O, not NAND wear"):
+        reject(
+            "sealed campaign physical evidence audit is not a complete PASS: "
+            "metric=physical_evidence_audit required=PASS_zero_diagnostics "
+            "observed=missing_or_nonqualifying")
     if campaign.get("evaluation_protocol") != "v2":
         reject("sealed campaign did not use the required v2 protocol")
     if (

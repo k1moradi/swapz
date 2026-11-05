@@ -407,6 +407,14 @@ def physical_campaign_evidence(policy_raw):
         "pair_source_shas": [SOURCE],
         "source_consistent": True,
         "arm_boot_consistent": True,
+        "physical_evidence_audit": {
+            "status": "PASS",
+            "diagnostics": [],
+            "omitted_diagnostic_count": 0,
+            "claim_boundary": json.loads(policy_raw)[
+                "physical_qualification"]["claim_boundary"],
+            "measurement_authority": "host-visible lower I/O, not NAND wear",
+        },
         "campaign_status": "PASS",
         "qualification_status": "PASS",
         "evaluation_protocol": "v2",
@@ -2908,6 +2916,27 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         result = evaluate(policy=policy, physical=physical, campaign=campaign)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS", result["code_blockers"])
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
+
+    def test_claimed_pass_cannot_override_failing_physical_audit(self):
+        policy = acceptance_policy()
+        for mutation in ("missing", "failed", "diagnostics", "omitted"):
+            with self.subTest(mutation=mutation):
+                campaign = physical_campaign_evidence(encoded(policy))
+                audit = campaign["physical_evidence_audit"]
+                if mutation == "missing":
+                    campaign.pop("physical_evidence_audit")
+                elif mutation == "failed":
+                    audit["status"] = "FAIL"
+                elif mutation == "diagnostics":
+                    audit["diagnostics"] = [{
+                        "status": "FAIL", "metric": "pair.status"}]
+                else:
+                    audit["omitted_diagnostic_count"] = 1
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    "physical evidence audit is not a complete PASS" in blocker
+                    for blocker in result["code_blockers"]))
 
     def test_frozen_campaign_pair_identity_and_disposition_are_required(self):
         policy = acceptance_policy()

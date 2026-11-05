@@ -6840,7 +6840,10 @@ counterbalanced order, unique artifact names and PASS/non-excluded
 disposition. The campaign's self-reported `record_count`, aggregate PASS
 status and exact JSON digest are necessary but do not establish missing
 arms or an incomplete workload cohort. A shortened or inconsistent campaign
-is BLOCKED even when its internal envelope and digest agree.
+is BLOCKED even when its internal envelope and digest agree. The producer's
+`physical_evidence_audit` must independently report PASS with zero retained
+and omitted diagnostics and the frozen claim boundary; a PASS-looking
+campaign with an absent or failed audit remains BLOCKED.
 Missing or stale sealed campaign evidence is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
 derives maximum logical pages/bytes and measured target/metadata peak RAM from
