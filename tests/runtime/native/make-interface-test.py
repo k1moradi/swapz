@@ -1346,6 +1346,13 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn('case "$uuid" in', preflight)
         self.assertNotIn("BASH_REMATCH", preflight)
         self.assertIn("memory_backed", preflight)
+        self.assertIn('dmsetup deps -o devno "$owned_map"', preflight)
+        self.assertIn('[[ $sysfs_devno == "$lower_devno" ]]', preflight)
+        self.assertIn("assert_mapper_is_only_lower_holder mapper_remove", preflight)
+        self.assertIn('is_uint "$mapper_kernel_index"', preflight)
+        self.assertIn(
+            'exec {owned_power_fd}<> "/proc/$$/fd/$owned_config_fd/power"',
+            preflight)
         self.assertIn('dmsetup remove --retry "$uuid"', preflight)
         self.assertNotIn('dmsetup remove --retry "$owned_map"', preflight)
         self.assertNotIn("rmmod -f", preflight)

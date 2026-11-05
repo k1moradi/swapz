@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Private root preflight for make test loaded qualification.
 # It cleans verified completed swapz benchmark scratch before its memory
-# observation and may remove only an idle module or a proven stale mapping.
+# observation and may remove only a proven stale mapping. An idle module
+# without independent creation authority is retained.
 set -Eeuo pipefail
 
 # Safety refusals are not reproduced test failures. Never guess a kernel errno
@@ -387,9 +388,9 @@ read_opens() {
     printf '%s\n' "$val"
 }
 
-deps="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
-    refuse BLOCKED mapper_dependency unavailable "cannot read pre-existing dm_swapz dependency"
-lower_name="$(printf '%s\n' "$deps" | awk '
+dependency_name_proof="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
+    refuse BLOCKED mapper_dependency unavailable "cannot read pre-existing dm_swapz dependency name"
+lower_name="$(printf '%s\n' "$dependency_name_proof" | awk '
     /^[[:space:]]*1[[:space:]]+dependencies[[:space:]]*:/ {
         value = $0
         sub(/^[^(]*\(/, "", value)
@@ -400,7 +401,25 @@ lower_name="$(printf '%s\n' "$deps" | awk '
         }
     }
     END { exit found ? 0 : 1 }
-')" || refuse BLOCKED mapper_dependency unavailable "mapping does not expose one lower dependency"
+')" || refuse BLOCKED mapper_dependency unavailable "mapping does not expose one lower dependency name"
+dependency_devno_proof="$(dmsetup deps -o devno "$owned_map" 2>/dev/null)" ||
+    refuse BLOCKED mapper_dependency unavailable "cannot read pre-existing dm_swapz dependency device number"
+lower_devno="$(printf '%s\n' "$dependency_devno_proof" | awk '
+    /^[[:space:]]*1[[:space:]]+dependencies[[:space:]]*:/ {
+        value = $0
+        sub(/^[^(]*\(/, "", value)
+        sub(/\)[[:space:]]*$/, "", value)
+        gsub(/[[:space:]]/, "", value)
+        count = split(value, devno, ",")
+        if (count == 2 &&
+            devno[1] ~ /^(0|[1-9][0-9]*)$/ &&
+            devno[2] ~ /^(0|[1-9][0-9]*)$/) {
+            printf "%s:%s\n", devno[1], devno[2]
+            found = 1
+        }
+    }
+    END { exit found ? 0 : 1 }
+')" || refuse BLOCKED mapper_dependency unavailable "mapping does not expose one canonical lower dependency device number"
 
 cfgbase=/sys/kernel/config/nullb
 [[ -d $cfgbase ]] ||
@@ -411,9 +430,7 @@ case "$lower_name" in
     nullb-swapz-*)
         lower_token="${lower_name#nullb-swapz-}"
         is_hex16 "$lower_token" ||
-            refuse BLOCKED null_blk_owner unavailable "lower identity is not an owned null_blk"
-        [[ "$lower_token" == "$token" ]] ||
-            refuse BLOCKED null_blk_owner unavailable "lower ownership token differs from mapper token"
+            refuse BLOCKED null_blk_owner unavailable "lower dependency name is not an owned null_blk identity"
         [[ -d $cfgbase/$lower_name ]] &&
             owned_config="$cfgbase/$lower_name"
         ;;
@@ -424,12 +441,14 @@ case "$lower_name" in
         matches=()
         for config in "$cfgbase"/nullb-swapz-*; do
             [[ -d $config && -r $config/index ]] || continue
+            config_name="${config##*/}"
+            config_token="${config_name#nullb-swapz-}"
+            is_hex16 "$config_token" || continue
             [[ "$(cat "$config/index" 2>/dev/null)" == "$lower_index" ]] &&
                 matches+=("$config")
         done
-        [[ ${#matches[@]} == 1 &&
-           ${matches[0]:-} == "$cfgbase/nullb-swapz-$token" ]] ||
-            refuse BLOCKED null_blk_owner unavailable "index has no unique run-token-bound configfs owner"
+        [[ ${#matches[@]} == 1 ]] ||
+            refuse BLOCKED null_blk_owner unavailable "dependency index has no unique token-shaped configfs owner"
         owned_config="${matches[0]}"
         ;;
     *)
@@ -483,6 +502,7 @@ read_owned_config_proof() {
 
 read_owned_lower_proof() {
     local config_index disk sysfs_devno node_devno block_major system_major
+    local partition_marker
     config_index="${owned_config_proof#*|}"
     config_index="${config_index%%|*}"
     [[ -f $owned_config/power && ! -L $owned_config/power &&
@@ -502,6 +522,10 @@ read_owned_lower_proof() {
     sysfs_devno="$(cat "/sys/block/$disk/dev" 2>/dev/null)" || return 1
     [[ $sysfs_devno == *:* ]] || return 1
     is_uint "${sysfs_devno%%:*}" && is_uint "${sysfs_devno#*:}" || return 1
+    [[ $sysfs_devno == "$lower_devno" ]] || return 1
+    for partition_marker in /sys/block/$disk/*/partition; do
+        [[ ! -e $partition_marker ]] || return 1
+    done
     node_devno="$(stat -Lc '%Hr:%Lr' "$lower" 2>/dev/null)" || return 1
     [[ $node_devno == "$sysfs_devno" ]] || return 1
     block_major="${sysfs_devno%%:*}"
@@ -517,10 +541,19 @@ read_owned_lower_proof() {
 
 assert_owned_config_proof() {
     local phase="$1" expected_power="$2" current_proof
+    local current_config_fd_identity current_power_fd_identity
     current_proof="$(read_owned_config_proof)" ||
         ownership_refuse "$phase" null_blk config_inode_index_attributes missing_or_changed
     [[ $current_proof == "$owned_config_proof" ]] ||
         ownership_refuse "$phase" null_blk original_inode_index_attributes substituted
+    current_config_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_config_fd" 2>/dev/null)" ||
+        ownership_refuse "$phase" null_blk pinned_config_inode unreadable
+    current_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" ||
+        ownership_refuse "$phase" null_blk pinned_power_inode unreadable
+    [[ $current_config_fd_identity == "$owned_config_identity" ]] ||
+        ownership_refuse "$phase" null_blk pinned_config_inode substituted
+    [[ $current_power_fd_identity == "$owned_power_identity" ]] ||
+        ownership_refuse "$phase" null_blk pinned_power_inode substituted
     [[ -f $owned_config/power && ! -L $owned_config/power &&
        "$(cat "$owned_config/power" 2>/dev/null)" == "$expected_power" ]] ||
         ownership_refuse "$phase" null_blk expected_power_state missing_or_changed
@@ -533,33 +566,56 @@ assert_owned_config_proof() {
 }
 
 assert_owned_mapper_proof() {
-    local current_uuid current_dependencies current_devno current_opens
+    local current_uuid current_dependency_names current_dependency_devnos
+    local current_devno current_opens
     current_uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
         tr -d '[:space:]')" ||
         ownership_refuse mapper_remove mapper original_uuid unreadable
-    current_dependencies="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
-        ownership_refuse mapper_remove mapper original_dependencies unreadable
+    current_dependency_names="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
+        ownership_refuse mapper_remove mapper original_dependency_name unreadable
+    current_dependency_devnos="$(dmsetup deps -o devno "$owned_map" 2>/dev/null)" ||
+        ownership_refuse mapper_remove mapper original_dependency_devno unreadable
     current_devno="$(stat -Lc '%Hr:%Lr' "$mapper" 2>/dev/null)" ||
         ownership_refuse mapper_remove mapper original_devno unreadable
     current_opens="$(read_opens)" ||
         ownership_refuse mapper_remove mapper zero_opens unreadable
-    [[ $current_uuid == "$uuid" && $current_dependencies == "$deps" &&
+    [[ $current_uuid == "$uuid" &&
+       $current_dependency_names == "$dependency_name_proof" &&
+       $current_dependency_devnos == "$dependency_devno_proof" &&
        $current_devno == "$listed_mapper_devno" && $current_opens == 0 ]] ||
-        ownership_refuse mapper_remove mapper uuid_dependencies_devno_zero_opens substituted_or_busy
+        ownership_refuse mapper_remove mapper uuid_dependency_name_devno_zero_opens substituted_or_busy
 }
 
+if ! { exec {owned_config_fd}< "$owned_config"; } 2>/dev/null; then
+    ownership_refuse acquire null_blk pinned_config_inode open_failed
+fi
+owned_config_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_config_fd" 2>/dev/null)" ||
+    ownership_refuse acquire null_blk pinned_config_inode fd_stat_failed
 owned_config_proof="$(read_owned_config_proof)" ||
     ownership_refuse acquire null_blk config_inode_index_attributes missing_or_incomplete
+owned_config_identity="${owned_config_proof%%|*}"
 owned_power_identity="${owned_config_proof##*|}"
+[[ $owned_config_fd_identity == "$owned_config_identity" ]] ||
+    ownership_refuse acquire null_blk pinned_config_inode substituted
+# Resolve the power attribute through the already-pinned configfs directory.
+# A public-path replacement between the directory proof and this open cannot
+# redirect the descriptor to a same-named foreign configfs object.
+if ! { exec {owned_power_fd}<> "/proc/$$/fd/$owned_config_fd/power"; } 2>/dev/null; then
+    ownership_refuse acquire null_blk pinned_power_inode open_failed
+fi
+owned_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" ||
+    ownership_refuse acquire null_blk pinned_power_inode fd_stat_failed
+[[ $owned_power_fd_identity == "$owned_power_identity" ]] ||
+    ownership_refuse acquire null_blk pinned_power_inode substituted
 owned_lower_proof="$(read_owned_lower_proof)" ||
-    ownership_refuse acquire null_blk sysfs_major_devno_node_rdev missing_or_incomplete
+    ownership_refuse acquire null_blk dependency_sysfs_major_devno_node_rdev missing_or_incomplete
 
 assert_not_mounted "$lower" mounted_owned_lower
 assert_not_active_swap "$lower"
 
-# Holder termination is allowed only after the mapper and its lower dependency
-# are both positively proven to be private harness RAM. Target the canonical
-# dm block node so stale replay processes cannot hide behind the mapper symlink.
+# Resolve the canonical mapper node before accepting the lower. A matching
+# devno alone is insufficient because a removed null_blk index can be reused;
+# the current sysfs lower must name this exact mapper as its sole holder.
 mapper_node="$(readlink -f "$mapper" 2>/dev/null || true)"
 [[ -n $mapper_node && -b $mapper_node ]] ||
     refuse BLOCKED mapper_device_identity unavailable "canonical mapper block node is missing or unreadable; no holder signal"
@@ -579,6 +635,31 @@ fi
     refuse BLOCKED mapper_device_identity unavailable "canonical device identity changed; no holder signal"
 [[ $mapper_dev == "$listed_mapper_devno" ]] ||
     refuse BLOCKED mapper_device_identity unavailable "expected dmsetup inventory device identity to match canonical mapper node; observed mismatch; no holder signal; inspect device-mapper inventory and udev state without cleanup"
+mapper_kernel_name="${mapper_node##*/}"
+case "$mapper_kernel_name" in
+    dm-*) mapper_kernel_index="${mapper_kernel_name#dm-}" ;;
+    *) ownership_refuse acquire mapper canonical_dm_kernel_name malformed ;;
+esac
+is_uint "$mapper_kernel_index" ||
+    ownership_refuse acquire mapper canonical_dm_kernel_name malformed
+owned_disk="${owned_lower_proof%%|*}"
+assert_mapper_is_only_lower_holder() {
+    local phase="$1" holder_list holder_target mapper_target
+    [[ -d /sys/block/$owned_disk/holders ]] ||
+        ownership_refuse "$phase" null_blk mapper_holder missing
+    holder_list="$(ls -A "/sys/block/$owned_disk/holders" 2>/dev/null)" ||
+        ownership_refuse "$phase" null_blk mapper_holder unreadable
+    [[ $holder_list == "$mapper_kernel_name" &&
+       -L /sys/block/$owned_disk/holders/$mapper_kernel_name ]] ||
+        ownership_refuse "$phase" null_blk exact_single_mapper_holder missing_or_foreign
+    holder_target="$(readlink -f "/sys/block/$owned_disk/holders/$mapper_kernel_name" 2>/dev/null)" ||
+        ownership_refuse "$phase" null_blk mapper_holder_target unreadable
+    mapper_target="$(readlink -f "/sys/block/$mapper_kernel_name" 2>/dev/null)" ||
+        ownership_refuse "$phase" mapper mapper_sysfs_target unreadable
+    [[ -n $holder_target && $holder_target == "$mapper_target" ]] ||
+        ownership_refuse "$phase" null_blk exact_mapper_holder_target substituted
+}
+assert_mapper_is_only_lower_holder acquire
 
 wait_for_zero_opens() {
     local attempt
@@ -609,6 +690,7 @@ is_uint "$opens" && [[ $opens == 0 ]] ||
 # immediately before the nonforce mutation. The UUID operand avoids name reuse.
 assert_owned_config_proof mapper_remove 1
 assert_owned_mapper_proof
+assert_mapper_is_only_lower_holder mapper_remove
 assert_not_mounted "$mapper" mounted_owned_mapper
 assert_not_active_swap "$mapper"
 assert_not_mounted "$lower" mounted_owned_lower
@@ -634,25 +716,24 @@ holder_list="$(ls -A "/sys/block/${owned_lower_proof%%|*}/holders" 2>/dev/null)"
 [[ -z $holder_list ]] ||
     ownership_refuse power_off null_blk no_holders busy
 assert_owned_config_proof power_off 1
-# Open read/write without truncation, then check the *opened* inode against
-# the original configfs power inode. A pathname switch cannot redirect writes
-# after this point; no write occurs if the fd belongs to a replacement.
-if ! { exec {owned_power_fd}<> "$owned_config/power"; } 2>/dev/null; then
-    ownership_refuse power_off null_blk original_power_inode open_failed
-fi
-opened_power_identity="$(stat -Lc '%d:%i' "/proc/$BASHPID/fd/$owned_power_fd" 2>/dev/null)" ||
-    ownership_refuse power_off null_blk original_power_inode fd_stat_failed
-if [[ $opened_power_identity != "$owned_power_identity" ]]; then
-    exec {owned_power_fd}>&-
-    ownership_refuse power_off null_blk original_power_inode substituted
-fi
+# The power attribute was opened and pinned at acquisition. Re-stat that same
+# descriptor immediately before the write; no pathname lookup can retarget it.
+current_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev/null)" ||
+    ownership_refuse power_off null_blk pinned_power_inode fd_stat_failed
+[[ $current_power_fd_identity == "$owned_power_identity" ]] ||
+    ownership_refuse power_off null_blk pinned_power_inode substituted
 printf '0\n' >&"$owned_power_fd" ||
-    ownership_refuse power_off null_blk original_power_inode write_failed "$?" retain_remaining_resources
-exec {owned_power_fd}>&-
+    ownership_refuse power_off null_blk pinned_power_inode write_failed "$?" retain_remaining_resources
 # Power-off removes sysfs block telemetry. Keep checking the captured configfs
-# device/inode, index, creation attributes and power inode through removal.
+# identity and pinned descriptors through the final pathname-bound rmdir.
 assert_owned_config_proof config_remove 0
+current_config_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_config_fd" 2>/dev/null)" ||
+    ownership_refuse config_remove null_blk pinned_config_inode fd_stat_failed
+[[ $current_config_fd_identity == "$owned_config_identity" ]] ||
+    ownership_refuse config_remove null_blk pinned_config_inode substituted
 rmdir -- "$owned_config" 2>/dev/null ||
     ownership_refuse config_remove null_blk original_config_inode rmdir_failed "$?" retain_remaining_resources
+exec {owned_power_fd}>&-
+exec {owned_config_fd}>&-
 # The remaining module still lacks independent creation provenance.
 remove_idle_module

@@ -9,6 +9,7 @@ TMP="$(mktemp -d "$ROOT/build/tests/nullblk-name.XXXXXXXX")"
 NAME=nullb-swapz-0123456789abcdef
 TOKEN=aaaaaaaaaaaaaaaa
 OTHER_TOKEN=bbbbbbbbbbbbbbbb
+LOWER_TOKEN=cccccccccccccccc
 cleanup() {
     # This single mktemp-owned build fixture is not a /tmp cleanup candidate.
     [[ "$TMP" == "$ROOT/build/tests/nullblk-name."* ]] &&
@@ -78,8 +79,8 @@ source = source.replace(
 )
 source = source.replace('[[ -b $source ]]', '[[ -e $source ]]')
 source = source.replace('-b $lower', '-e $lower')
-# Inspect only this synthetic process's opened fd through procfs.
-source = source.replace(str(root / "proc") + '/$BASHPID/fd/', '/proc/$BASHPID/fd/')
+# Inspect only this synthetic process's pinned descriptors through procfs.
+source = source.replace(str(root / "proc") + '/$$/fd/', '/proc/$$/fd/')
 source = source.replace(
     '[[ -n $source_devno && -b $swap_path ]]',
     '[[ -n $source_devno && -e $swap_path ]]',
@@ -138,8 +139,13 @@ if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
     exit 0
 fi
 if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
-      "\$3" == "$FIXTURE/dev/nullb-swapz-$TOKEN" ]]; then
-    printf '240:7\n'
+      { "\$3" == "$FIXTURE/dev/nullb-swapz-$LOWER_TOKEN" ||
+        "\$3" == "$FIXTURE/dev/dm-0"; } ]]; then
+    if [[ "\$3" == "$FIXTURE/dev/dm-0" ]]; then
+        printf '253:0\n'
+    else
+        printf '240:7\n'
+    fi
     exit 0
 fi
 exec "$REAL_STAT" "\$@"
@@ -171,8 +177,9 @@ case "$SWAPZ_FIXTURE_CASE" in
     owned_cleanup|replaced_inode|cleanup_failure)
         [[ "$*" == *"dmsetup remove --retry SWAPZ-TEST-aaaaaaaaaaaaaaaa" ]] || exit 98
         fake_root="$SWAPZ_FIXTURE_ROOT"
-        config="$fake_root/sys/kernel/config/nullb/nullb-swapz-aaaaaaaaaaaaaaaa"
-        rm -- "$fake_root/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa" || exit 98
+        config="$fake_root/sys/kernel/config/nullb/nullb-swapz-cccccccccccccccc"
+        rm -- "$fake_root/sys/block/nullb-swapz-cccccccccccccccc/holders/dm-0" || exit 98
+        rm -- "$fake_root/dev/mapper/swapz-demo-aaaaaaaaaaaaaaaa" "$fake_root/dev/dm-0" || exit 98
         printf '0\n' > "$fake_root/sys/module/dm_swapz/refcnt"
         if [[ $SWAPZ_FIXTURE_CASE == replaced_inode ]]; then
             mv -- "$config" "$fake_root/retained-original-config" || exit 98
@@ -188,7 +195,7 @@ esac
 SH
 cat > "$STUBS/rmdir" <<SH
 #!/bin/bash
-[[ "\$1" == -- && "\$2" == "\$SWAPZ_FIXTURE_ROOT/sys/kernel/config/nullb/nullb-swapz-aaaaaaaaaaaaaaaa" ]] || exit 98
+[[ "\$1" == -- && "\$2" == "\$SWAPZ_FIXTURE_ROOT/sys/kernel/config/nullb/nullb-swapz-cccccccccccccccc" ]] || exit 98
 [[ "\$SWAPZ_FIXTURE_CASE" == owned_cleanup ]] || exit 98
 for attribute in index memory_backed size blocksize queue_mode power; do
     rm -- "\$2/\$attribute" || exit 98
@@ -248,13 +255,25 @@ case "$*" in
         elif [[ $SWAPZ_FIXTURE_CASE == foreign_dependency ]]; then
             counter_file="$SWAPZ_FIXTURE_ROOT/dependency-count"
             if [[ -e $counter_file ]]; then
+                printf '2\n' > "$counter_file"
                 printf '1 dependencies : (nullb-swapz-bbbbbbbbbbbbbbbb)\n'
             else
-                : > "$counter_file"
-                printf '1 dependencies : (nullb-swapz-aaaaaaaaaaaaaaaa)\n'
+                printf '1\n' > "$counter_file"
+                printf '1 dependencies : (nullb-swapz-cccccccccccccccc)\n'
             fi
         else
-            printf '1 dependencies : (nullb-swapz-aaaaaaaaaaaaaaaa)\n'
+            printf '1 dependencies : (nullb-swapz-cccccccccccccccc)\n'
+        fi
+        ;;
+    "deps -o devno swapz-demo-aaaaaaaaaaaaaaaa")
+        if [[ $SWAPZ_FIXTURE_CASE == dependency_devno_mismatch ]]; then
+            printf '1 dependencies : (240, 8)\n'
+        elif [[ $SWAPZ_FIXTURE_CASE == foreign_dependency &&
+                -f "$SWAPZ_FIXTURE_ROOT/dependency-count" &&
+                "$(cat "$SWAPZ_FIXTURE_ROOT/dependency-count")" == 2 ]]; then
+            printf '1 dependencies : (240, 8)\n'
+        else
+            printf '1 dependencies : (240, 7)\n'
         fi
         ;;
     "info -c --noheadings -o open swapz-demo-aaaaaaaaaaaaaaaa")
@@ -291,11 +310,13 @@ setup_busy_module() {
     printf '1\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
 }
 setup_mapper_node() {
-    : > "$FIXTURE/dev/mapper/swapz-demo-$TOKEN"
+    mkdir -p "$FIXTURE/sys/block/dm-0"
+    : > "$FIXTURE/dev/dm-0"
+    ln -s "../dm-0" "$FIXTURE/dev/mapper/swapz-demo-$TOKEN"
 }
 setup_owned_lower() {
-    local config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
-    local disk="$FIXTURE/sys/block/nullb-swapz-$TOKEN"
+    local config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN"
+    local disk="$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN"
     mkdir -p "$config" "$disk/holders" "$FIXTURE/sys/dev/block"
     printf '1\n' > "$config/memory_backed"
     printf '1\n' > "$config/power"
@@ -305,7 +326,8 @@ setup_owned_lower() {
     printf '2\n' > "$config/queue_mode"
     printf '240:7\n' > "$disk/dev"
     ln -s "$disk" "$FIXTURE/sys/dev/block/240:7"
-    : > "$FIXTURE/dev/nullb-swapz-$TOKEN"
+    : > "$FIXTURE/dev/nullb-swapz-$LOWER_TOKEN"
+    ln -s "$FIXTURE/sys/block/dm-0" "$disk/holders/dm-0"
 }
 run_case() {
     local case_name="$1" expected="$2" expected_result="$3" expected_errno="$4"
@@ -322,7 +344,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|foreign_dependency|cleanup_failure)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -361,13 +383,21 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|foreign_dependency|cleanup_failure)
+        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
             setup_owned_lower
             setup_mapper_node
             if [[ $case_name == missing_sysfs_proof ]]; then
-                rm -- "$FIXTURE/sys/block/nullb-swapz-$TOKEN/dev"
+                rm -- "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/dev"
             elif [[ $case_name == mismatched_devno ]]; then
-                printf '240:8\n' > "$FIXTURE/sys/block/nullb-swapz-$TOKEN/dev"
+                printf '240:8\n' > "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/dev"
+            elif [[ $case_name == partitioned_lower ]]; then
+                mkdir -p "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/nullb-swapz-${LOWER_TOKEN}1"
+                printf '1\n' > "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/nullb-swapz-${LOWER_TOKEN}1/partition"
+            elif [[ $case_name == foreign_holder ]]; then
+                rm -- "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-0"
+                mkdir -p "$FIXTURE/sys/block/dm-9"
+                ln -s "$FIXTURE/sys/block/dm-9" \
+                    "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-9"
             fi
             ;;
         unclaimed_nullb)
@@ -421,21 +451,23 @@ run_case() {
     [[ ! -e "$FIXTURE/unexpected-rmmod" ]] ||
         die "unowned module unload was attempted"
     if [[ "$case_name" == owned_cleanup ]]; then
-        [[ ! -e "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" &&
+        [[ ! -e "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
            ! -e "$FIXTURE/dev/mapper/swapz-demo-$TOKEN" ]] ||
             die "owned cleanup did not remove its proven mapper and configfs object"
     elif [[ "$case_name" == replaced_inode ]]; then
-        [[ "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/power")" == 1 &&
+        [[ "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 1 &&
            "$(cat "$FIXTURE/retained-original-config/power")" == 1 ]] ||
             die "replaced configfs inode was powered off"
     elif [[ "$case_name" == cleanup_failure ]]; then
-        [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" &&
-           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/power")" == 0 ]] ||
+        [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
+           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 0 ]] ||
             die "cleanup error failed to retain powered-off configfs state"
     fi
     if [[ "$case_name" == owned_cleanup || "$case_name" == replaced_inode ||
           "$case_name" == cleanup_failure || "$case_name" == missing_sysfs_proof ||
-          "$case_name" == mismatched_devno || "$case_name" == foreign_dependency ]]; then
+          "$case_name" == mismatched_devno || "$case_name" == dependency_devno_mismatch ||
+          "$case_name" == partitioned_lower || "$case_name" == foreign_holder ||
+          "$case_name" == foreign_dependency ]]; then
         [[ "$output" == *"phase="* && "$output" == *"resource_kind="* &&
            "$output" == *"expected_proof="* && "$output" == *"observed_proof="* &&
            "$output" == *"original_errno_or_exit="* &&
@@ -454,7 +486,7 @@ run_case() {
 # pathname, memory_backed and power values matched after the inode changed.
 reset_fake
 setup_owned_lower
-legacy_config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
+legacy_config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN"
 [[ -d $legacy_config && "$(cat "$legacy_config/memory_backed")" == 1 &&
    "$(cat "$legacy_config/power")" == 1 ]] ||
     die "legacy ownership model did not admit the initial synthetic object"
@@ -507,6 +539,9 @@ run_case recognized_constructor owned_mapper_removal BLOCKED unavailable
 run_case primary_namespace stale_run_token BLOCKED unavailable
 run_case missing_sysfs_proof owned_resource_proof BLOCKED unavailable
 run_case mismatched_devno owned_resource_proof BLOCKED unavailable
+run_case dependency_devno_mismatch owned_resource_proof BLOCKED unavailable
+run_case partitioned_lower owned_resource_proof BLOCKED unavailable
+run_case foreign_holder owned_resource_proof BLOCKED unavailable
 run_case foreign_dependency owned_resource_proof BLOCKED unavailable
 run_case replaced_inode owned_resource_proof BLOCKED unavailable
 run_case cleanup_failure owned_resource_proof BLOCKED 98
@@ -516,4 +551,4 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 41 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 44 isolated preflight fixtures'

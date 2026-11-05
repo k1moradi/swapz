@@ -489,23 +489,36 @@ module creation authority, so preflight must retain the module rather than
 separate from primary lifecycle ownership and must never adopt one another.
 
 A positively identified stale benchmark mapper is necessary but not sufficient
-to dispose of its lower. Capture the configfs directory device/inode, power
-attribute inode, index, memory-backed status, positive size, 4096-byte block
-size and queue mode before removal. Require unique null_blk sysfs name/index,
-the nullb block major from `/proc/devices`, exact sysfs major:minor and an
-equal real lower block node `st_rdev`; missing or ambiguous telemetry blocks
-cleanup. Before removal, revalidate the original mapper UUID, device number,
-open count, mounted/swap inventory and unchanged dependency output, plus the
-original configfs/lower proof. Remove by exact mapper UUID, never by an
-unverified reused name or with force. Before power-off, check the same configfs
-inode and all live lower proofs again and require an empty holder directory;
-write only via a descriptor whose inode matches the initially observed power
-attribute. After power-off invalidates the sysfs block evidence, retain the
-captured configfs device/inode, index, creation attributes and power inode
-through the last immediately preceding `rmdir` check. A pathname-based
-`rmdir` does not provide an atomic compare-and-unlink primitive, so its
-remaining concurrent-name-reuse boundary must not be described as a kernel
-atomic guarantee.
+to dispose of its lower. The ordinary benchmark pair intentionally generates
+its mapper token independently from each RAM-lower token, so token equality is
+not provenance and must not be required or inferred. Snapshot both the
+dependency name and its canonical major:minor from Device Mapper, then require
+that exact devno to equal the live null_blk sysfs devno and lower block-node
+`st_rdev`. The current sysfs lower must also expose the exact canonical
+`dm-N` mapper as its sole holder before mapper removal; this rejects an
+index/devno-reused replacement that merely inherited the old name or number.
+Partitioned lowers are not benchmark cleanup candidates, preserving the primary
+lifecycle helper's separate ownership domain.
+
+Open and retain descriptors for the selected configfs directory and its
+`power` attribute before destructive cleanup, and bind their device/inode
+identities to the captured configfs proof. Resolve the power attribute through
+the pinned directory descriptor rather than the public pathname. Also capture
+index, memory-backed status, positive size, 4096-byte block size and queue mode.
+Require the nullb block major from `/proc/devices`, exact sysfs major:minor,
+the dependency devno, and the equal real lower block node `st_rdev`; missing
+or ambiguous telemetry blocks cleanup. Before mapper removal, revalidate the
+original mapper UUID, mapper device number, zero opens, mounted/swap inventory,
+unchanged dependency-name and dependency-devno outputs, exact sole-holder link,
+plus the original pinned configfs/lower proof. Remove by exact mapper UUID,
+never by an unverified reused name or with force. Before power-off, require the
+same pinned configfs object, unchanged live lower proof and an empty holder
+directory, then write only through the power descriptor opened at acquisition.
+After power-off invalidates sysfs block telemetry, retain the captured configfs
+proof and both pinned descriptor identities through the last immediately
+preceding `rmdir` check. A pathname-based `rmdir` still lacks an atomic
+compare-and-unlink primitive, so its residual concurrent-name-reuse boundary
+must not be described as a kernel atomic guarantee.
 
 On missing, mismatched or substituted proof, fail closed and retain surviving
 state; a successful mapper removal alone is not a passing preflight. Diagnostics
@@ -513,10 +526,12 @@ at cleanup gates use fail-only `phase`, `resource_kind`,
 `expected_proof`, `observed_proof`, `original_errno_or_exit` and
 `retained_state_action` categories, never private resource names or PID
 inventories. The rootless `tests/runtime/native/nullblk-identity-test.sh`
-fixture must prove the original path-only false admission and exercise real
-owned proof, changed configfs inode, missing sysfs proof, mismatched rdev,
-changed/foreign mapper dependencies, namespace refusal, ambiguous module
-ownership and cleanup failure against only synthetic files and stubs. This
+fixture must prove the original path-only false admission and exercise a real
+benchmark-shaped owned proof with distinct mapper/lower tokens, changed configfs
+inode, missing sysfs proof, mismatched dependency/sysfs/rdev identities,
+partitioned-lower and foreign-holder refusal, changed/foreign mapper
+dependencies, namespace refusal, ambiguous module ownership and cleanup failure
+against only synthetic files and stubs. This
 unit evidence never substitutes for authorized loaded testing. Source-contract
 and Make-interface checks must pin UUID-targeted mapper removal and refusal of
 unowned modules and holder signals, never the obsolete destructive branches.
