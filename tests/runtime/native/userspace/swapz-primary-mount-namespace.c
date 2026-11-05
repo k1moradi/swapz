@@ -1070,6 +1070,45 @@ int main(void)
 		     "36 25 259:9 / / rw - ext4 /dev/other-root rw\n"
 		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
 	expect_mount_admission("selected parent in another namespace", 0, 0);
+
+	/*
+	 * Linux exposes non-leader thread /proc/<tid> paths without returning
+	 * them from top-level /proc enumeration. A thread can hold a distinct
+	 * mount namespace, so a process-leader-only scan must not authorize a
+	 * selected target or parent that is mounted only in that thread's view.
+	 */
+	assert(snprintf(path, sizeof(path), "%s/3031/task", fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/3031/task/3032", fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	assert(snprintf(path, sizeof(path), "%s/3031/task/3032/ns", fixture_proc_root) > 0);
+	assert(mkdir(path, 0700) == 0);
+	fixture_file("3031/task/3032/ns/mnt", "non-leader thread mount namespace\n");
+	fixture_file("3031/task/3032/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
+		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
+	expect_mount_admission("selected partition in non-leader thread namespace",
+			       0, 0);
+	fixture_reset();
+	fixture_file("3031/task/3032/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
+		     "37 36 8:0 / /parent rw - ext4 /dev/sda rw\n");
+	expect_mount_admission("selected parent in non-leader thread namespace",
+			       0, 0);
+	fixture_reset();
+	fixture_file("3031/task/3032/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
+	expect_mount_admission("unrelated sibling in non-leader thread namespace",
+			       1, 0);
+	fixture_unlink("3031/task/3032/mountinfo");
+	fixture_unlink("3031/task/3032/ns/mnt");
+	assert(snprintf(path, sizeof(path), "%s/3031/task/3032/ns", fixture_proc_root) > 0);
+	assert(rmdir(path) == 0);
+	assert(snprintf(path, sizeof(path), "%s/3031/task/3032", fixture_proc_root) > 0);
+	assert(rmdir(path) == 0);
+	assert(snprintf(path, sizeof(path), "%s/3031/task", fixture_proc_root) > 0);
+	assert(rmdir(path) == 0);
 	fixture_reset();
 	fixture_file("self/mountinfo",
 		     "36 25 259:0 / / rw - ext4 /dev/root rw\n"

@@ -132,6 +132,16 @@ during an opened-table failure remains unsafe and must still refuse.
 Only an unopened PID table with a separately proven absent mount namespace
 may be skipped for process-exit errors. Preserve the coordinator's own root
 mount identity independently from the foreign namespace's root.
+Top-level `/proc` enumeration is not complete thread coverage: Linux does not
+return non-leader `/proc/<tid>` directories from `getdents(2)`, while mount
+namespace membership can differ per thread. The direct-C fixture must therefore
+keep the process leader clean while placing a selected partition or selected
+physical parent only in a synthetic `/proc/<pid>/task/<tid>/mountinfo`, and
+require refusal; an unrelated sibling in that non-leader thread remains a
+positive control. A production scanner must enumerate those task views (or
+establish equivalent complete namespace coverage) with the same bounded,
+fail-closed rules. This is a stable inventory blind spot, not a post-snapshot
+TOCTOU observation and must not be labelled UNPROVEN.
 Also cover a chrooted peer whose mount-namespace device/inode matches the
 coordinator while its process-root-filtered mountinfo is empty. The coordinator
 may skip that redundant view only after its own mountinfo has a valid root row,
