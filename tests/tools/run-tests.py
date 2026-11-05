@@ -2527,7 +2527,9 @@ def failure_context(output, *, loaded=True, default_phase=None,
     unittest_failure = None
     rootless_compile_failure = None
     rootless_invalid_late_race_identity = False
-    if not loaded:
+    is_rootless_stage = (
+        not loaded and default_phase == OFFICIAL_STAGE_NAMES[1])
+    if is_rootless_stage:
         # Stage 2 is an aggregate transcript. A passing earlier suite may emit
         # synthetic FAIL/ERROR text, so a rootless failure marker owns the
         # failing-suite boundary. Use only an authenticated nested identity; if
@@ -2588,7 +2590,7 @@ def failure_context(output, *, loaded=True, default_phase=None,
     # Preserve this attribution for every failed source phase, not just the
     # tmp-cleanup suite; outer Make errors and cleanup diagnostics are secondary.
     rootless_attribution = None
-    if not loaded and rootless_last_marker is not None:
+    if is_rootless_stage and rootless_last_marker is not None:
         marker_phase, marker_subtest, marker_test, marker_exit, marker_reason = (
             rootless_last_marker.groups())
         phase = marker_phase
@@ -2604,7 +2606,7 @@ def failure_context(output, *, loaded=True, default_phase=None,
                        if rootless_invalid_late_race_identity else
                        "Rootless child failed")
             return phase, summary + "; " + rootless_attribution
-    elif not loaded and rootless_failure_marker_seen:
+    elif is_rootless_stage and rootless_failure_marker_seen:
         # An invalid final marker cannot borrow an earlier phase/test identity.
         return phase, "Rootless failure marker malformed or unverified"
 

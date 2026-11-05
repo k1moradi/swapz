@@ -3452,6 +3452,39 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("make-interface-test.py", reason)
         self.assertIn("malformed or unverified", reason)
 
+    def test_rootless_marker_cannot_reattribute_other_official_stage(self):
+        """Only the native/rootless aggregate may authenticate rootless markers."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        output = (
+            "src/kernel/foo.c:19:3: error: incompatible pointer type\n"
+            "FAIL: rootless phase=package-dkms-test.py "
+            "subtest=rollback-check test=test_cleanup exit=2 "
+            "reason=unittest_error phase_s=1 stage_s=2 line=315 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log\n"
+        )
+        report = {"stages": []}
+        with patch.object(
+                runner.subprocess, "run",
+                return_value=SimpleNamespace(stdout=output, returncode=2)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            observed_exit = runner.run_stage(
+                "Build module and helpers", ["unused"], report)
+
+        stage = report["stages"][0]
+        self.assertEqual(observed_exit, 2)
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(stage["exit_code"], 2)
+        self.assertEqual(stage["failed_phase"], "Build module and helpers")
+        self.assertEqual(
+            stage["diagnostic"],
+            "Native build error: incompatible pointer type")
+        public_json = json.dumps(stage)
+        self.assertNotIn("package-dkms-test.py", public_json)
+        self.assertNotIn("test_cleanup", public_json)
+        self.assertNotIn("rootless-failure.Abc123xy", public_json)
+
     def test_rootless_first_failure_preserves_exact_marker_and_redaction(self):
         """Only the final status-matched Bash marker can supply test identity."""
         from types import SimpleNamespace
