@@ -310,20 +310,26 @@ module-acceptance qualification.
 The standalone memory-only kernel smoke module and retired C++ model are intentionally absent. They were not shipped or part of the official qualification. Historical reproduction belongs in Git history, not a second current build path.
 
 
-The test runner keeps `test_results.json` unchanged until all qualification
-work has stopped. It then replaces that one file and publishes a report-only,
-nonforce, lease-checked commit directly to `main`. The parent is the exact
-tested revision; publication is refused if origin/main moved or unrelated
-tracked/index state is dirty. After a successful push the local main ref/index
-is advanced to the same report commit, so the operator does not accumulate a
-dirty report file or need a separate pull solely for generated evidence.
+## Report publication
+
+The test runner keeps `test_results.json` unchanged until qualification
+work stops. It then replaces that file and attempts a report-only `[skip ci]`,
+non-force commit directly to `main`. If a push fails after `origin/main`
+advances, a bounded retry may parent the new remote head only if it descends
+from the tested source and no newer-source qualification report would be
+overwritten. The report's `source_sha`/`tested_commit_sha` still identify the
+tested source, not the concurrent descendant; the latter is not qualified.
+
+After a successful remote push, the runner updates local `main` and index
+when safe. Otherwise it reports remote-only synchronization; reconcile and
+verify local and remote `main` before starting new work.
 
 
 Because the root `test_results.json` is generated evidence, its local
 working-tree/index state is excluded from the privileged loaded-source
 cleanliness gate. No other tracked path is exempt. The report is atomically
-replaced only after qualification stops and publication then reconciles the
-local main/index on success.
+replaced only after qualification stops; remote publication and safe local
+synchronization are separate checks.
 
 
 Loaded `make test` helpers execute privileged device work through `sudo`, but

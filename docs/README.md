@@ -65,7 +65,7 @@ report commits on `main`. Prior evidence remains in Git history. A report-only
 commit is not new production source: `tested_commit_sha` identifies the nearest
 non-report code ancestor. Publication accepts concurrent advances only when
 they descend from the exact tested source; it never reverts newer source bytes.
-See [the test/report contract](compile.md#build).
+See [report publication](compile.md#report-publication).
 
 Loaded host CPU/PSI samples include background activity; see the
 [benchmark context](benchmark.md#cpu-and-host-load-context) before comparison.

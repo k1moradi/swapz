@@ -77,7 +77,7 @@ production lifecycle, full-card capacity or measured RAM fit, sustained GC or
 churn, physical-media performance, NAND endurance, deployment readiness, or
 production readiness.
 
-## Current qualification blockers
+## Qualification blockers at observation (historical)
 
 Exact-source GitHub CI for the tested SHA was not fully green. The production-C
 workflow failed on x86_64 and arm64 in two primary mount-namespace cases: the
@@ -87,10 +87,13 @@ then failed its exact-SHA prerequisite. The physical-evidence adversarial,
 systemd/package, and private kernel-debug/static workflows passed. Official
 owner `make test` and real anonymous swap were not run as part of this smoke.
 
-Next, resolve the assigned mount-namespace CI defect and require green
-exact-source CI. Then run the official `make test` on the resulting exact
-source. Only after its required gates and real-swap admission pass should the
-primary-manager anonymous-page qualification proceed, with independent
+This is the 2026-11-05 state for the tested source, not a verdict on later
+`main` changes. Check [issue #94](https://github.com/k1moradi/swapz/issues/94)
+and [current evidence](../README.md#current-evidence) for subsequent qualification.
+The recorded follow-up was to resolve the mount-namespace CI defect, obtain
+green exact-source CI, then run official owner `make test`. Only after its
+required gates and real-swap admission pass could primary-manager
+anonymous-page qualification proceed, with independent
 `pswpout`/`pswpin`, cgroup swap charge, mapper and backing-device I/O, byte
 oracle, OOM and normal-teardown evidence. Preserve the current unclaimed
 `null_blk` refusal; it is not permission to remove or adopt those resources.
