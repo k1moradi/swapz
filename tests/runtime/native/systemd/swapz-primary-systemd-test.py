@@ -1907,29 +1907,48 @@ class BootVerifierTests(unittest.TestCase):
         self.arm_then_reboot()
         authorization = self.report / "runtime" / "primary-execution.env"
         journal_started = self.root / "observe-journal-started"
+        journal_pid_file = self.root / "observe-journal-pid"
         write_executable(
             self.bin / "journalctl",
             "#!/bin/sh\n"
             '[ ! -e "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/primary-execution.env" ] || exit 91\n'
             '[ -f "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/.primary-execution.observed.env" ] || exit 92\n'
+            'printf "%s\\n" "$$" > "$MOCK_OBSERVE_JOURNAL_PID"\n'
             'printf "started\\n" > "$MOCK_OBSERVE_JOURNAL_STARTED"\n'
             "exec sleep 15\n",
         )
         env = self.env.copy()
         env["MOCK_OBSERVE_JOURNAL_STARTED"] = str(journal_started)
+        env["MOCK_OBSERVE_JOURNAL_PID"] = str(journal_pid_file)
         verifier = subprocess.Popen(
             [str(self.sbin / "swapz-primary-boot-verify"), "observe"],
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env, start_new_session=True,
         )
+        timeout_pid: int | None = None
         try:
             deadline = time.monotonic() + 4
             while (not journal_started.exists() and verifier.poll() is None
                    and time.monotonic() < deadline):
                 time.sleep(0.02)
             self.assertTrue(journal_started.exists(), "fixture did not enter observe")
+            journal_pid = int(journal_pid_file.read_text(encoding="ascii"))
+            journal_status = Path(f"/proc/{journal_pid}/status").read_text(encoding="ascii")
+            timeout_pid = int(next(
+                line.split()[1] for line in journal_status.splitlines()
+                if line.startswith("PPid:")
+            ))
+            # Timeout owns the journal child in a distinct process group.
+            # Only the verifier holds the test's stdout/stderr pipe writers.
+            self.assertEqual(os.getpgid(verifier.pid), verifier.pid)
+            self.assertEqual(os.getpgid(timeout_pid), timeout_pid)
+            self.assertEqual(os.getpgid(journal_pid), timeout_pid)
+            self.assertTrue(os.readlink(f"/proc/{verifier.pid}/fd/1").startswith("pipe:["))
+            self.assertTrue(os.readlink(f"/proc/{verifier.pid}/fd/2").startswith("pipe:["))
+            self.assertIn("/.kernel-journal.", os.readlink(f"/proc/{journal_pid}/fd/1"))
+            self.assertEqual(os.readlink(f"/proc/{journal_pid}/fd/2"), "/dev/null")
             os.killpg(verifier.pid, signal.SIGTERM)
-            stdout, stderr = verifier.communicate(timeout=5)
+            stdout, stderr = verifier.communicate(timeout=4)
             self.assertEqual(verifier.returncode, 143, stderr)
             self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", stdout)
             self.assertIn(
@@ -1937,19 +1956,115 @@ class BootVerifierTests(unittest.TestCase):
                 "evidence_retained=unknown action=inspect_cold_boot_report_before_rearming",
                 stderr,
             )
+            self.assertIn(
+                "signal=TERM process_ownership=owned_timeout_group "
+                "child_status=143 token_disposition=revoked",
+                stderr,
+            )
+            self.assertFalse(Path(f"/proc/{timeout_pid}").exists())
+            self.assertFalse(Path(f"/proc/{journal_pid}").exists())
             self.assertFalse(authorization.exists())
             self.assertFalse(
                 (self.report / "runtime" / ".primary-execution.observed.env").exists()
             )
+            self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
         finally:
             if verifier.poll() is None:
                 os.killpg(verifier.pid, signal.SIGKILL)
                 verifier.communicate(timeout=5)
+            # The journal group is not in the verifier's session process group.
+            if timeout_pid is not None:
+                try:
+                    os.killpg(timeout_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
         # A second attempt cannot accept a token consumed by an interruption.
         write_executable(self.bin / "journalctl", "#!/bin/sh\nexit 0\n")
         repeated = self.run_verifier("observe")
         self.assertEqual(repeated.returncode, 1, repeated.stderr)
+        self.assertIn(
+            "runtime_preflight_authorization_missing_or_invalid",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
+
+    def test_interrupted_observation_cleanup_failure_preserves_signal(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        consumed = self.report / "runtime" / ".primary-execution.observed.env"
+        journal_started = self.root / "failed-cleanup-journal-started"
+        journal_pid_file = self.root / "failed-cleanup-journal-pid"
+        write_executable(
+            self.bin / "journalctl",
+            "#!/bin/sh\n"
+            'printf "%s\\n" "$" > "$MOCK_OBSERVE_JOURNAL_PID"\n'
+            'printf "started\\n" > "$MOCK_OBSERVE_JOURNAL_STARTED"\n'
+            "exec sleep 15\n",
+        )
+        write_executable(
+            self.bin / "rm",
+            "#!/bin/sh\n"
+            'case "$3" in */.primary-execution.observed.env) exit 73 ;; esac\n'
+            'exec /usr/bin/rm "$@"\n',
+        )
+        env = self.env.copy()
+        env["MOCK_OBSERVE_JOURNAL_STARTED"] = str(journal_started)
+        env["MOCK_OBSERVE_JOURNAL_PID"] = str(journal_pid_file)
+        verifier = subprocess.Popen(
+            [str(self.sbin / "swapz-primary-boot-verify"), "observe"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, start_new_session=True,
+        )
+        timeout_pid: int | None = None
+        try:
+            deadline = time.monotonic() + 4
+            while (not journal_started.exists() and verifier.poll() is None
+                   and time.monotonic() < deadline):
+                time.sleep(0.02)
+            self.assertTrue(journal_started.exists(), "fixture did not enter observe")
+            journal_pid = int(journal_pid_file.read_text(encoding="ascii"))
+            journal_status = Path(f"/proc/{journal_pid}/status").read_text(encoding="ascii")
+            timeout_pid = int(next(
+                line.split()[1] for line in journal_status.splitlines()
+                if line.startswith("PPid:")
+            ))
+            os.killpg(verifier.pid, signal.SIGTERM)
+            stdout, stderr = verifier.communicate(timeout=4)
+            self.assertEqual(verifier.returncode, 143, stderr)
+            self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", stdout)
+            self.assertIn(
+                "phase=observe_signal observed=interrupted exit_status=143", stderr
+            )
+            self.assertIn(
+                "token_disposition=unknown "
+                "token_cleanup_phase=token_revoke_consumed_unlink "
+                "token_cleanup_exit_status=73",
+                stderr,
+            )
+            self.assertIn(
+                "phase=token_revoke_consumed_unlink exit_status=73 reason=unlink_failed",
+                stderr,
+            )
+            self.assertNotIn(str(authorization), stderr)
+            self.assertFalse(authorization.exists())
+            self.assertTrue(consumed.is_file())
+        finally:
+            if verifier.poll() is None:
+                os.killpg(verifier.pid, signal.SIGKILL)
+                verifier.communicate(timeout=5)
+            if timeout_pid is not None:
+                try:
+                    os.killpg(timeout_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        # Even a failed claimed-token unlink never restores canonical authority.
+        write_executable(self.bin / "rm", '#!/bin/sh\nexec /usr/bin/rm "$@"\n')
+        write_executable(self.bin / "journalctl", "#!/bin/sh\nexit 0\n")
+        repeated = self.run_verifier("observe")
+        self.assertEqual(repeated.returncode, 1, repeated.stderr)
+        self.assertFalse(authorization.exists())
+        self.assertFalse(consumed.exists())
         self.assertIn(
             "runtime_preflight_authorization_missing_or_invalid",
             (self.report / "latest.env").read_text(encoding="utf-8"),

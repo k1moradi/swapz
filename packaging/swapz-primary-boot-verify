@@ -309,12 +309,66 @@ claim_runtime_authorization()
 	fi
 }
 
+# GNU timeout places its command in an independent process group unless
+# --foreground is used. This verifier owns the timeout PID, not arbitrary host
+# processes. Stop that group and wait for timeout to reap its direct child.
+stop_journal_observation()
+{
+	journal_child_status=none
+	[ -n "$journal_timeout_pid" ] || return 0
+	kill -TERM -- "-$journal_timeout_pid" 2>/dev/null || :
+	kill -TERM "$journal_timeout_pid" 2>/dev/null || :
+	if wait "$journal_timeout_pid" 2>/dev/null; then
+		journal_child_status=0
+	else
+		journal_child_status=$?
+	fi
+	journal_timeout_pid=
+}
+
 interrupted_observation()
 {
 	# POSIX sh does not guarantee an EXIT trap when terminated by a signal.
-	# Leave report persistence to the ordinary path; never claim a cold-boot PASS.
-	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=INCOMPLETE phase=observe_signal observed=interrupted exit_status=%s evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' "$1" >&2
-	exit "$1"
+	# An asynchronous wait allows this trap to run before the journal deadline.
+	observation_signal_exit_status=$1
+	observation_signal_name=$2
+	trap '' HUP INT TERM
+	observation_child_ownership=none
+	[ -z "$journal_timeout_pid" ] || observation_child_ownership=owned_timeout_group
+	stop_journal_observation
+	observation_token_disposition=unknown
+	observation_token_cleanup_phase=none
+	observation_token_cleanup_exit_status=0
+	if revoke_runtime_authorization; then
+		observation_runtime_authorization_cleaned=1
+		observation_token_disposition=revoked
+	else
+		observation_token_cleanup_phase=$authorization_revoke_phase
+		observation_token_cleanup_exit_status=$authorization_revoke_exit_status
+	fi
+	# Report the original signal before any EXIT fallback diagnostic. Never
+	# promote an interrupted attempt or a failed cleanup to PASS.
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=INCOMPLETE phase=observe_signal observed=interrupted exit_status=%s evidence_retained=unknown action=inspect_cold_boot_report_before_rearming signal=%s process_ownership=%s child_status=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s\n' \
+		"$observation_signal_exit_status" "$observation_signal_name" "$observation_child_ownership" "$journal_child_status" "$observation_token_disposition" "$observation_token_cleanup_phase" "$observation_token_cleanup_exit_status" >&2 || :
+	exit "$observation_signal_exit_status"
+}
+
+observation_exit()
+{
+	observation_exit_status=$1
+	# This fallback also owns an unexpected abort while the journal child runs.
+	[ -z "$journal_timeout_pid" ] || stop_journal_observation
+	if [ "$observation_runtime_authorization_cleaned" -eq 0 ]; then
+		if revoke_runtime_authorization; then
+			observation_runtime_authorization_cleaned=1
+		else
+			report_observation_revocation_failure || :
+			# Cleanup is secondary: it must not replace a signal or a
+			# pre-existing failure with its own status.
+			[ "$observation_exit_status" -ne 0 ] || observation_exit_status=1
+		fi
+	fi
+	exit "$observation_exit_status"
 }
 
 commit_runtime_authorization()
@@ -1526,11 +1580,23 @@ SWAPS
 		rm -f -- "$journal_raw"
 		fail "cannot create kernel-error temporary"
 	}
+	journal_command_status=1
 	if valid_boot_id "$boot_id" 2>/dev/null && command -v journalctl >/dev/null 2>&1 &&
-	   command -v timeout >/dev/null 2>&1 && \
-	   timeout --signal=TERM --kill-after=1s 5s journalctl --boot "$boot_id" --kernel \
-		--priority=err..alert --lines=256 --no-pager --output=short-monotonic \
-		>"$journal_raw" 2>/dev/null; then
+	   command -v timeout >/dev/null 2>&1; then
+		# A foreground external command delays POSIX shell TERM traps until
+		# its deadline. Own the background child and reap it on every path.
+		timeout --signal=TERM --kill-after=1s 5s journalctl --boot "$boot_id" --kernel \
+			--priority=err..alert --lines=256 --no-pager --output=short-monotonic \
+			>"$journal_raw" 2>/dev/null &
+		journal_timeout_pid=$!
+		if wait "$journal_timeout_pid"; then
+			journal_command_status=0
+		else
+			journal_command_status=$?
+		fi
+		journal_timeout_pid=
+	fi
+	if [ "$journal_command_status" -eq 0 ]; then
 		grep -Ei 'swapz|device-mapper|dm-[0-9]+|I/O error|blk_update_request|Buffer I/O' \
 			"$journal_raw" > "$journal_filtered" || :
 		kernel_error_count=$(wc -l < "$journal_filtered" | tr -d ' ')
@@ -1660,10 +1726,11 @@ observe)
 	observation_runtime_authorization_cleaned=0
 	observation_runtime_authorization_claimed=0
 	authorization_claim_command_failed=0
-	trap 'observation_exit_status=$?; if [ "$observation_runtime_authorization_cleaned" -eq 0 ]; then if ! revoke_runtime_authorization; then report_observation_revocation_failure; exit 1; fi; fi; exit "$observation_exit_status"' EXIT
-	trap 'interrupted_observation 129' HUP
-	trap 'interrupted_observation 130' INT
-	trap 'interrupted_observation 143' TERM
+	journal_timeout_pid=
+	trap 'observation_exit "$?"' EXIT
+	trap 'interrupted_observation 129 HUP' HUP
+	trap 'interrupted_observation 130 INT' INT
+	trap 'interrupted_observation 143 TERM' TERM
 	observe_boot
 	trap - EXIT HUP INT TERM
 	;;
