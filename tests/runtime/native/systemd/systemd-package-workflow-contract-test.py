@@ -4,6 +4,7 @@
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -126,6 +127,30 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
         self.assertIn("SYSTEMD_PACKAGE_ROOTLESS_FAILED", self.jobs)
         self.assertIn('"$GITHUB_SHA"', self.jobs)
         self.assertIn('"$GITHUB_RUN_ID"', self.jobs)
+
+    def test_passive_swap_cannot_be_activated_by_dependency(self) -> None:
+        # No systemd job is started: verify the packaged unit and evaluate the
+        # always-false condition independently in a rootless sandbox.
+        passive = (WORKFLOW.parents[2] / "packaging/swapz-primary.swap").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("RefuseManualStart=yes", passive)
+        self.assertIn("RefuseManualStop=yes", passive)
+        self.assertRegex(passive, r"(?m)^ConditionPathExists=!/dev/null$")
+        self.assertNotIn("[Install]", passive)
+        with tempfile.TemporaryDirectory(prefix="swapz-passive-unit-") as location:
+            staged = Path(location) / r"dev-mapper-swapz\x2dprimary.swap"
+            staged.write_text(passive, encoding="utf-8")
+            verified = subprocess.run(
+                ["systemd-analyze", "verify", str(staged)],
+                capture_output=True, text=True, check=False, timeout=30,
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+        checked = subprocess.run(
+            ["systemd-analyze", "condition", "ConditionPathExists=!/dev/null"],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+        self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
 
     def test_generator_transaction_fixture_runs_in_rootless_stage(self) -> None:
         # Keep this separate from the concurrent primary-systemd fixture owner.

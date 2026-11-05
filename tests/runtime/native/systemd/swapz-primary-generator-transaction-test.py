@@ -149,6 +149,8 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertNotIn("BindsTo=", service)
         self.assertIn("WantedBy=swap.target", service)
         self.assertIn("RefuseManualStart=yes", passive)
+        # RefuseManualStart alone allows dependency-queued start jobs.
+        self.assertIn("ConditionPathExists=!/dev/null", passive)
         self.assertNotIn("WantedBy=swap.target", passive)
         self.assertNotIn("/dev/sda1", self.generator.read_text())
 

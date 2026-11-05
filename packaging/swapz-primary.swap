@@ -5,6 +5,10 @@ Description=Primary Linux swap on swapz
 # be enabled in swap.target: that would queue a second swapon transaction.
 RefuseManualStart=yes
 RefuseManualStop=yes
+# RefuseManualStart blocks explicit jobs, not starts pulled in as dependencies.
+# A stale swap.target.wants link or fstab request must not perform swapon;
+# keep this unit observational while the mapper service owns all activation.
+ConditionPathExists=!/dev/null
 
 [Swap]
 What=/dev/mapper/swapz-primary

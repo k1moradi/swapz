@@ -6601,8 +6601,16 @@ activated through that alias. Current units remain disabled and
 path are qualified. The manager must use the same
 permanent selected-PARTUUID lock for all of its operations; tests must reject
 an unsafe lock directory, lock file or concurrent owner before any mutation.
-A persistent active-ownership marker is also required before the provisioning
-path can be enabled.
+The passive mapper .swap unit must keep an always-false
+`ConditionPathExists=!/dev/null` under `[Unit]`: `RefuseManualStart=yes`
+blocks explicit starts only, not dependency-pulled jobs from an accidental
+`swap.target.wants` link or fstab entry. The mapper service remains the sole
+swapon/swapoff owner, while the .swap unit observes `/proc/swaps` without a
+systemd start job. The exact-SHA systemd/package rootless contract must run
+`systemd-analyze verify` on the escaped swap unit name and
+`systemd-analyze condition` to prove that an indirect start is skipped;
+no service start or real swap action is permitted. A persistent active-ownership
+marker is also required before the provisioning path can be enabled.
 The native lock primitive must open the same permanent
 `partition-<selected-partuuid>.lock` inode under
 `/var/lib/swapz/physical-recovery`, reject symlinks and unsafe ownership or
