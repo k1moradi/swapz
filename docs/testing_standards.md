@@ -6335,6 +6335,14 @@ its absence is INCOMPLETE, not PASS, and its success is not proof of runtime
 sandbox support. The boot observer must revoke the single-use preflight
 authorization after PASS, FAIL or INCOMPLETE; armed observations with a
 missing, duplicated or mismatched token must FAIL rather than pass.
+An observer interrupted by HUP/INT/TERM must explicitly exit through its
+authorization cleanup (an EXIT-only trap is insufficient for POSIX sh), report
+the signal exit status and unknown retention of partial evidence, and never
+claim PASS. If unlink fails, safely invalidate a still-owned regular 0600
+single-link token without following substituted symlinks; preserve the original
+unlink error and refuse PASS even if invalidation is impossible. An active
+oneshot mapper requires SubState=exited and the passive active .swap requires
+SubState=active; unknown substates are INCOMPLETE and contradictions FAIL.
 Each malformed kernel-status observation must reissue its own token, then
 verify that non-PASS handling revoked it.
 

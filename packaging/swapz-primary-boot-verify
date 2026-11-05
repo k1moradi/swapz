@@ -214,6 +214,14 @@ revoke_runtime_authorization()
 		authorization_revoke_exit_status=$?
 		authorization_revoke_phase=token_revoke_unlink
 		authorization_revoke_reason=unlink_failed
+		# A failed unlink must not leave a still-valid 0600 token behind.
+		# Never follow a substituted symlink or modify an unowned file.
+		if [ -f "$runtime_enable_file" ] && [ ! -L "$runtime_enable_file" ] &&
+		   [ "$(stat -c '%u:%a:%h' -- "$runtime_enable_file" 2>/dev/null)" = "$expected_uid:600:1" ]; then
+			if chmod 000 -- "$runtime_enable_file" 2>/dev/null; then
+				sync -f "$runtime_enable_file" 2>/dev/null || :
+			fi
+		fi
 		return 1
 	fi
 	if sync -f "$runtime_base" 2>/dev/null; then
@@ -235,8 +243,16 @@ clear_runtime_authorization()
 
 report_observation_revocation_failure()
 {
-	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s\n' \
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s observed=authorization_revocation_failed evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
 		"$authorization_revoke_phase" "$authorization_revoke_exit_status" "$authorization_revoke_reason" >&2
+}
+
+interrupted_observation()
+{
+	# POSIX sh does not guarantee an EXIT trap when terminated by a signal.
+	# Leave report persistence to the ordinary path; never claim a cold-boot PASS.
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=INCOMPLETE phase=observe_signal observed=interrupted exit_status=%s evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' "$1" >&2
+	exit "$1"
 }
 
 commit_runtime_authorization()
@@ -1396,6 +1412,12 @@ SWAPS
 			unavailable) append_incomplete mapper_service_result_unavailable ;;
 			*) append_failure mapper_service_result_failed ;;
 			esac
+			# The oneshot mapper remains active/exited after successful start.
+			case "$mapper_sub_state" in
+			exited) ;;
+			unavailable) append_incomplete mapper_service_sub_state_unavailable ;;
+			*) append_failure mapper_service_sub_state_invalid ;;
+			esac
 			case "$swap_active_state" in
 			active) ;;
 			unavailable) append_incomplete primary_swap_unit_state_unavailable ;;
@@ -1405,6 +1427,11 @@ SWAPS
 			success) ;;
 			unavailable) append_incomplete primary_swap_unit_result_unavailable ;;
 			*) append_failure primary_swap_unit_result_failed ;;
+			esac
+			case "$swap_sub_state" in
+			active) ;;
+			unavailable) append_incomplete primary_swap_unit_sub_state_unavailable ;;
+			*) append_failure primary_swap_unit_sub_state_invalid ;;
 			esac
 		fi
 	else
@@ -1549,7 +1576,10 @@ observe)
 	# This observer never deactivates swap or removes an active mapper.
 	observation_runtime_authorization_revoked=0
 	trap 'observation_exit_status=$?; if [ "$observation_runtime_authorization_revoked" -eq 0 ]; then if ! revoke_runtime_authorization; then report_observation_revocation_failure; exit 1; fi; fi; exit "$observation_exit_status"' EXIT
+	trap 'interrupted_observation 129' HUP
+	trap 'interrupted_observation 130' INT
+	trap 'interrupted_observation 143' TERM
 	observe_boot
-	trap - EXIT
+	trap - EXIT HUP INT TERM
 	;;
 esac

@@ -1806,6 +1806,10 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("status=FAIL", report)
         self.assertIn("runtime_preflight_authorization_revocation_failed", report)
         self.assertTrue(authorization.is_file())
+        self.assertEqual(
+            authorization.stat().st_mode & 0o777, 0,
+            "failed unlink must invalidate a retained execution token",
+        )
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").is_file())
 
@@ -1861,6 +1865,53 @@ class BootVerifierTests(unittest.TestCase):
         self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", aborted.stdout)
         self.assertFalse(authorization.exists())
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").is_file())
+
+    def test_interrupted_observation_consumes_preflight_authorization(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        journal_started = self.root / "observe-journal-started"
+        write_executable(
+            self.bin / "journalctl",
+            "#!/bin/sh\n"
+            'printf "started\\n" > "$MOCK_OBSERVE_JOURNAL_STARTED"\n'
+            "exec sleep 15\n",
+        )
+        env = self.env.copy()
+        env["MOCK_OBSERVE_JOURNAL_STARTED"] = str(journal_started)
+        verifier = subprocess.Popen(
+            [str(self.sbin / "swapz-primary-boot-verify"), "observe"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 4
+            while (not journal_started.exists() and verifier.poll() is None
+                   and time.monotonic() < deadline):
+                time.sleep(0.02)
+            self.assertTrue(journal_started.exists(), "fixture did not enter observe")
+            os.killpg(verifier.pid, signal.SIGTERM)
+            stdout, stderr = verifier.communicate(timeout=5)
+            self.assertEqual(verifier.returncode, 143, stderr)
+            self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", stdout)
+            self.assertIn(
+                "phase=observe_signal observed=interrupted exit_status=143 "
+                "evidence_retained=unknown action=inspect_cold_boot_report_before_rearming",
+                stderr,
+            )
+            self.assertFalse(authorization.exists())
+        finally:
+            if verifier.poll() is None:
+                os.killpg(verifier.pid, signal.SIGKILL)
+                verifier.communicate(timeout=5)
+
+        # A second attempt cannot accept a token consumed by an interruption.
+        write_executable(self.bin / "journalctl", "#!/bin/sh\nexit 0\n")
+        repeated = self.run_verifier("observe")
+        self.assertEqual(repeated.returncode, 1, repeated.stderr)
+        self.assertIn(
+            "runtime_preflight_authorization_missing_or_invalid",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
 
     def test_revocation_failure_keeps_abort_cleanup_retry_armed(self) -> None:
         self.arm_then_reboot()
@@ -2091,6 +2142,23 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("runtime_preflight_authorization_missing_or_invalid",
                       (self.report / "latest.env").read_text())
         self.assertFalse(authorization.exists())
+
+    def test_replaced_authorization_symlink_is_never_accepted_or_followed(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        sentinel = self.root / "protected-authorization-sentinel"
+        sentinel.write_text("do-not-touch\n", encoding="ascii")
+        sentinel.chmod(0o600)
+        authorization.unlink()
+        authorization.symlink_to(sentinel)
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn(
+            "runtime_preflight_authorization_missing_or_invalid",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(sentinel.read_text(encoding="ascii"), "do-not-touch\n")
+        self.assertFalse(authorization.is_symlink())
 
     def test_successful_observation_revokes_one_use_preflight_token(self) -> None:
         self.arm_then_reboot()
@@ -2428,6 +2496,26 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("mapper_service_state_unavailable", report)
         self.assertIn("primary_swap_unit_state_unavailable", report)
 
+    def test_service_substate_contradictions_cannot_pass_observation(self) -> None:
+        self.arm_then_reboot()
+        for variable, value, status, reason in (
+            ("MOCK_MAPPER_SUB", "dead", "FAIL", "mapper_service_sub_state_invalid"),
+            ("MOCK_SWAP_SUB", "dead", "FAIL", "primary_swap_unit_sub_state_invalid"),
+            ("MOCK_MAPPER_SUB", "", "INCOMPLETE", "mapper_service_sub_state_unavailable"),
+            ("MOCK_SWAP_SUB", "", "INCOMPLETE", "primary_swap_unit_sub_state_unavailable"),
+        ):
+            with self.subTest(variable=variable, value=value):
+                self.assertEqual(self.run_verifier("preflight").returncode, 0)
+                env = self.env.copy()
+                env[variable] = value
+                observed = self.run_verifier("observe", env=env)
+                self.assertEqual(observed.returncode, 1 if status == "FAIL" else 2,
+                                 observed.stderr)
+                report = (self.report / "latest.env").read_text(encoding="utf-8")
+                self.assertIn(f"status={status}\n", report)
+                self.assertIn(reason, report)
+                self.assert_activation_revoked()
+
     def test_duplicate_and_missing_kernel_status_fields_are_incomplete(self) -> None:
         self.arm_then_reboot()
         valid = (
@@ -2563,6 +2651,16 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("primary recovery directory is unavailable", blocked.stderr)
         self.assert_activation_revoked()
         self.assertFalse((self.dev / "disk" / "by-partuuid" / OTHER_PARTUUID).is_symlink())
+
+    def test_missing_recovery_storage_never_authorizes_observed_pass(self) -> None:
+        self.arm_then_reboot()
+        self.recovery.rename(self.root / "disconnected-recovery")
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        report = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("status=FAIL\n", report)
+        self.assertIn("recovery_storage_unavailable", report)
+        self.assert_activation_revoked()
 
     def test_incomplete_package_journal_blocks_preflight_and_acceptance(self) -> None:
         self.arm_then_reboot()
