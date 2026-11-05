@@ -8575,8 +8575,8 @@ def main():
         print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
         print("  Report integrity: FAIL classification=NOT_PUBLISHED", flush=True)
         print(
-            "        stage=report-write expected=atomic-current-json "
-            f"observed={observed} origin_errno={origin_errno}",
+            "        stage=report-write expected=current-json "
+            f"observed={observed} errno={origin_errno}",
             flush=True)
         print(
             "  Report: NOT PUBLISHED (prior report, if any, is not this run)",

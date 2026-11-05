@@ -3245,11 +3245,11 @@ class ReportContract(unittest.TestCase):
 
         scenarios = (
             ("report-write", OSError(28, "private /home/secret"), 0, 1,
-             "observed=os-error origin_errno=28", "INCOMPLETE"),
+             "observed=os-error errno=28", "INCOMPLETE"),
             ("report-interrupt", KeyboardInterrupt(), 0, 130,
-             "observed=interrupted origin_errno=unavailable", "INCOMPLETE"),
+             "observed=interrupted errno=unavailable", "INCOMPLETE"),
             ("prior-test-failure", OSError(28, "private /home/secret"), 7, 7,
-             "observed=os-error origin_errno=28", "FAIL"),
+             "observed=os-error errno=28", "FAIL"),
         )
         for name, report_error, first_exit, expected_exit, detail, overall in scenarios:
             with self.subTest(name=name):
@@ -3290,10 +3290,13 @@ class ReportContract(unittest.TestCase):
                     "Report integrity: FAIL classification=NOT_PUBLISHED",
                     rendered)
                 self.assertIn(
-                    "stage=report-write expected=atomic-current-json", rendered)
+                    "stage=report-write expected=current-json", rendered)
                 self.assertIn(detail, rendered)
                 self.assertNotIn("/home/secret", rendered)
                 self.assertNotIn("Traceback", rendered)
+                self.assertTrue(
+                    all(len(line) <= 96 for line in rendered.splitlines()),
+                    rendered)
                 print_bench.assert_not_called()
                 publish.assert_not_called()
                 history.assert_not_called()
