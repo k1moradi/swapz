@@ -14,11 +14,13 @@ import io
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
 FIXTURE_SOURCE = Path(__file__).with_name("anon-page-fixture.py")
+ANONYMOUS_SWAP_SOURCE = Path(__file__).with_name("anonymous-swap.py")
 FIXTURE_SPEC = importlib.util.spec_from_file_location("anon_page_fixture", FIXTURE_SOURCE)
 if FIXTURE_SPEC is None or FIXTURE_SPEC.loader is None:
     raise RuntimeError("cannot load synthetic fixture generator")
@@ -42,6 +44,82 @@ PAGE_DIGESTS = {
     "delta64": "59d23d5ff9b87ddeb91f32bbd01ab1351989ad6a726b81dd4d2cbbe4e72faf13",
     "entropy": "090b737876a8394738f4f962a1fb80382ad9b6143d3ca3291260c60e310f9086",
 }
+
+
+MISSING = object()
+
+
+def manifest_value_summary(value) -> str:
+    """Return bounded metadata-only diagnostics without fixture bytes."""
+    if value is MISSING:
+        return "absent"
+    if value is None or type(value) in (bool, int, float):
+        return f"{type(value).__name__}={value!r}"
+    if isinstance(value, str):
+        preview = value if len(value) <= 48 else value[:45] + "..."
+        return f"str={preview!r}"
+    serialized = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return (f"{type(value).__name__}(json_bytes={len(serialized)},"
+            f"sha256={hashlib.sha256(serialized).hexdigest()})")
+
+
+def load_anonymous_swap_for_cleanup_test():
+    """Load the real worker while replacing unrelated benchmark dependencies."""
+    replay = {
+        "lower_stat": lambda _disk: None,
+        "iostat_delta": lambda _before, _after: None,
+        "host_cpu_snapshot": lambda: {},
+        "host_cpu_delta": lambda _before, _after: {
+            "status": "AVAILABLE",
+            "busy_fraction": 0.0,
+            "pressure_some_fraction": 0.0,
+            "steal_fraction": 0.0,
+        },
+    }
+    qualification = {
+        "CONTRACT": {"workloads": {"anonymous-swap": {}}},
+        "latency_bin_index": lambda _value: 0,
+        "latency_bin_upper": lambda _index: 1,
+        "normalize_partuuid": lambda value: value,
+        "capture_loaded_module_provenance": lambda *_args: {},
+    }
+
+    def fake_run_path(path):
+        name = Path(path).name
+        if name == "io-replay.py":
+            return replay
+        if name == "qualification.py":
+            return qualification
+        raise AssertionError(f"unexpected dependency load: {name}")
+
+    evidence_io = types.ModuleType("evidence_io")
+    evidence_io.write_new_json = lambda *_args, **_kwargs: None
+    spec = importlib.util.spec_from_file_location(
+        "anonymous_swap_cleanup_target", ANONYMOUS_SWAP_SOURCE)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load anonymous swap worker")
+    module = importlib.util.module_from_spec(spec)
+    with mock.patch.dict(sys.modules, {"evidence_io": evidence_io}), \
+            mock.patch("runpy.run_path", side_effect=fake_run_path):
+        spec.loader.exec_module(module)
+    return module
+
+
+class CloseFailingMapping:
+    def __init__(self, size: int) -> None:
+        self.data = bytearray(size)
+        self.close_calls = 0
+
+    def __getitem__(self, key):
+        value = self.data[key]
+        return bytes(value) if isinstance(key, slice) else value
+
+    def __setitem__(self, key, value) -> None:
+        self.data[key] = value
+
+    def close(self) -> None:
+        self.close_calls += 1
+        raise BufferError("synthetic mapping close failure")
 
 
 class BoundedInputRegression(unittest.TestCase):
@@ -119,9 +197,15 @@ class PersistedManifestRegression(unittest.TestCase):
 
     def reject_manifest(self, changed: dict, field: str) -> None:
         persisted = self.persist_manifest(changed)
+        expected = self.manifest.get(field, MISSING)
+        observed = changed.get(field, MISSING)
+        failure_context = (
+            f"field={field} expected={manifest_value_summary(expected)} "
+            f"observed={manifest_value_summary(observed)}")
         with self.assertRaisesRegex(
                 ValueError,
-                rf"phase=verify metadata_field={field} cause=workload-metadata-mismatch") as raised:
+                rf"phase=verify metadata_field={field} cause=workload-metadata-mismatch",
+                msg=failure_context) as raised:
             fixture.verify_fixture(self.fixture_path, persisted, self.compress)
         # Do not leak any page bytes into diagnostics.
         self.assertNotIn(repr(self.payload[:32]), str(raised.exception))
@@ -203,14 +287,48 @@ class PersistedManifestRegression(unittest.TestCase):
         changed = copy.deepcopy(self.manifest)
         changed["unexpected_field"] = "not permitted"
         self.reject_manifest(changed, "unexpected_field")
+
+    def test_rejects_non_object_and_each_missing_manifest_field(self) -> None:
+        for malformed in (None, True, [], "manifest"):
+            with self.subTest(manifest_type=type(malformed).__name__):
+                with self.assertRaisesRegex(
+                        ValueError,
+                        r"phase=verify cause=workload-metadata-mismatch"):
+                    fixture.verify_fixture(
+                        self.fixture_path, malformed, self.compress)
+        for field in self.manifest:
+            with self.subTest(missing_field=field):
+                changed = copy.deepcopy(self.manifest)
+                del changed[field]
+                self.reject_manifest(changed, field)
+
+    def test_rejects_float_integer_and_nested_counter_types(self) -> None:
         changed = copy.deepcopy(self.manifest)
-        del changed["fixture_sha256"]
-        self.reject_manifest(changed, "fixture_sha256")
+        changed["raw_pages"] = float(changed["raw_pages"])
+        self.reject_manifest(changed, "raw_pages")
+
+        profile = next(
+            name for name, buckets in self.manifest["profile_lz4_buckets"].items()
+            if buckets)
+        bucket = next(iter(self.manifest["profile_lz4_buckets"][profile]))
+        changed = copy.deepcopy(self.manifest)
+        changed["profile_lz4_buckets"][profile][bucket] = True
+        self.reject_manifest(changed, "profile_lz4_buckets")
+
+        changed = copy.deepcopy(self.manifest)
+        changed["requested_profile_weights"]["heap"] = 1.0
+        persisted = self.persist_manifest(changed)
+        with self.assertRaisesRegex(
+                ValueError, "invalid fixture profile weights",
+                msg="field=requested_profile_weights.heap expected=int observed=float"):
+            fixture.verify_fixture(self.fixture_path, persisted, self.compress)
 
     def test_rejects_invalid_persisted_seed_and_page_count_before_allocating(self) -> None:
         for field, invalid_values, diagnostic in (
-                ("seed", [True, -1, fixture.UINT64_MAX + 1], "unsigned 64-bit"),
-                ("pages", [True, -1, fixture.MAX_PAGES + 1, 10**100], "fixture pages")):
+                ("seed", [True, -1, 1.0, "1", fixture.UINT64_MAX + 1],
+                 "unsigned 64-bit"),
+                ("pages", [True, -1, 1.0, "18", fixture.MAX_PAGES + 1, 10**100],
+                 "fixture pages")):
             for invalid in invalid_values:
                 with self.subTest(field=field, value=str(invalid)[:24]):
                     changed = copy.deepcopy(self.manifest)
@@ -273,6 +391,58 @@ class PersistedManifestRegression(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "workload-metadata-write-mismatch"):
                 fixture.main()
         self.assertEqual(captured_output.getvalue(), "")
+
+
+class AnonymousSwapCleanupRegression(unittest.TestCase):
+    def test_mapping_close_failure_prevents_pass_publication(self) -> None:
+        worker = load_anonymous_swap_for_cleanup_test()
+        bounded_bytes = 64 * worker.PAGE
+        mapping = CloseFailingMapping(bounded_bytes)
+        cgroup = {
+            "memory_swap_current": 0,
+            "memory_stat": {"pgmajfault": 0},
+            "memory_events": {},
+            "memory_swap_events": {},
+        }
+        quiet = {
+            "observed": {
+                "status": "AVAILABLE",
+                "busy_fraction": 0.0,
+                "pressure_some_fraction": 0.0,
+                "steal_fraction": 0.0,
+            },
+            "reasons": [],
+        }
+        with tempfile.TemporaryDirectory(prefix="swapz-anon-close-") as directory:
+            args = types.SimpleNamespace(
+                workload_id="cleanup-regression",
+                candidate="raw",
+                source_sha="a" * 40,
+                bytes=bounded_bytes,
+                rounds=1,
+                require_swap_bytes=0,
+                expected_swap_device=None,
+                expected_dm_uuid=None,
+                result=str(Path(directory) / "result.json"),
+            )
+            with mock.patch.object(worker, "MIB", worker.PAGE), \
+                    mock.patch.object(worker.mmap, "mmap", return_value=mapping), \
+                    mock.patch.object(worker, "swap_inventory", return_value=[]), \
+                    mock.patch.object(worker, "cgroup_values", return_value=cgroup), \
+                    mock.patch.object(worker, "process_swap_bytes", return_value=0), \
+                    mock.patch.object(
+                        worker, "vmstat_snapshot",
+                        return_value={"pswpin": 0, "pswpout": 0}), \
+                    mock.patch.object(worker, "quiet_window", return_value=quiet), \
+                    mock.patch.object(worker, "write_new_json") as result_writer:
+                with self.assertRaisesRegex(
+                        BufferError, "synthetic mapping close failure"):
+                    worker.run(args)
+                result_writer.assert_not_called()
+        self.assertEqual(mapping.close_calls, 1)
+        self.assertEqual(args._partial_report["stage"], "publish")
+        self.assertEqual(args._partial_report["cleanup"], "mapping-close-failed")
+        self.assertEqual(args._partial_report["cleanup_error"], "BufferError")
 
 
 if __name__ == "__main__":
