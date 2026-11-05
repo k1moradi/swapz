@@ -1043,6 +1043,116 @@ static int same_authoritative_map(const struct swapz_map *actual,
 }
 
 /*
+ * Source READ -EIO after a prior compressed GC publication is recoverable:
+ * the published prefix remains authoritative, the failed read consumes no
+ * destination blocks, and retry visits only the still-mapped victim members.
+ * Three 2072-byte survivors then share one exact two-block extent.
+ */
+static int test_gc_read_eio_after_published_prefix_resume(void)
+{
+	const swapz_u32 victim = 0U;
+	const swapz_u32 destination = 2U;
+	const swapz_u32 destination_end =
+		(destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
+	struct swapz_map original_maps[4], published_prefix;
+	swapz_u32 shared_extent_start, cursor_before;
+	unsigned int logical;
+	int original_error;
+
+	CHECK(setup() == 0);
+	for (logical = 0; logical < SWAPZ_SEGMENT_BLOCKS - 3U; ++logical)
+		CHECK(write_one(0U) == 0);
+	for (logical = 1U; logical < 4U; ++logical)
+		CHECK(write_one(logical) == 0);
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(write_one(4U) == 0);
+	for (logical = 0; logical < 4U; ++logical)
+		original_maps[logical] = maps[logical];
+	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
+	CHECK(a.gc_destination == destination && roles[victim] &&
+	      !roles[destination] && !roles[3U]);
+	CHECK(write_one(1U) == 0);
+	published_prefix = maps[1U];
+	cursor_before = a.next_block;
+	CHECK(published_prefix.start_block ==
+	      destination * SWAPZ_SEGMENT_BLOCKS &&
+	      published_prefix.generation == original_maps[1U].generation + 1U);
+	CHECK(cursor_before == destination * SWAPZ_SEGMENT_BLOCKS + 1U);
+
+	fail_read = 1;
+	original_error = evacuate(victim);
+	if (original_error != -EIO || fail_read || !a.gc_allocation ||
+	    a.gc_forbidden_victim != victim || a.gc_destination != destination ||
+	    a.open_segment != destination || a.next_block != cursor_before ||
+	    !roles[victim] || roles[destination] ||
+	    !same_authoritative_map(&maps[1U], &published_prefix)) {
+		const unsigned int observed_available_blocks =
+			a.next_block <= destination_end ?
+				destination_end - a.next_block : 0U;
+
+		fprintf(stderr, "%s:%d FAIL GC phase=read_after_committed_prefix"
+			" source_segment=%u source_class=%u"
+			" destination_segment=%u destination_class=%u"
+			" expected_available_blocks=%u observed_available_blocks=%u"
+			" original_errno=%d expected_errno=%d"
+			" preserved_mapping=%d expected_generation=%u"
+			" observed_generation=%u victim_role=%u destination_role=%u"
+			" recovery=%u disposition=retry_same_destination"
+			" safe_action=retain_prefix_and_retry_unpublished\n",
+			__FILE__, __LINE__, victim,
+			(unsigned int)classes[original_maps[0U].start_block],
+			destination,
+			(unsigned int)classes[published_prefix.start_block],
+			(unsigned int)(SWAPZ_SEGMENT_BLOCKS - 1U),
+			observed_available_blocks, original_error, -EIO,
+			same_authoritative_map(&maps[1U], &published_prefix),
+			published_prefix.generation, maps[1U].generation,
+			(unsigned int)roles[victim],
+			(unsigned int)roles[destination],
+			(unsigned int)a.gc_allocation);
+		return 1;
+	}
+	for (logical = 0; logical < 4U; ++logical)
+		if (logical != 1U)
+			CHECK(same_authoritative_map(&maps[logical],
+						     &original_maps[logical]));
+	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
+	for (logical = 0; logical < 5U; ++logical)
+		CHECK(verify_page(logical) == 0);
+
+	CHECK(evacuate(victim) == 0);
+	CHECK(!a.gc_allocation && !roles[victim] && roles[destination] &&
+	      !roles[3U]);
+	CHECK(same_authoritative_map(&maps[1U], &published_prefix));
+	for (logical = 0; logical < 4U; ++logical)
+		if (logical != 1U)
+			CHECK(maps[logical].generation ==
+			      original_maps[logical].generation + 1U);
+	shared_extent_start = maps[0U].start_block;
+	CHECK(shared_extent_start == cursor_before &&
+	      maps[2U].start_block == shared_extent_start &&
+	      maps[3U].start_block == shared_extent_start &&
+	      maps[0U].extent_blocks == 2U &&
+	      maps[2U].extent_blocks == 2U &&
+	      maps[3U].extent_blocks == 2U &&
+	      live[shared_extent_start] == 3U &&
+	      classes[shared_extent_start] == 2U &&
+	      !live[shared_extent_start + 1U] &&
+	      !classes[shared_extent_start + 1U] &&
+	      a.next_block == shared_extent_start + 2U);
+	CHECK(write_one(5U) == 0);
+	CHECK(write_one(0U) == 0);
+	CHECK(live[shared_extent_start] == 2U &&
+	      maps[0U].start_block != shared_extent_start &&
+	      maps[2U].start_block == shared_extent_start &&
+	      maps[3U].start_block == shared_extent_start &&
+	      maps[0U].generation == original_maps[0U].generation + 2U);
+	for (logical = 0; logical < 6U; ++logical)
+		CHECK(verify_page(logical) == 0);
+	return 0;
+}
+
+/*
  * Production can reach a non-full destination -ENOSPC when a standalone RAW
  * survivor has already published and the remaining compressed survivors need a
  * two-block extent. Repeated torn -EIO runs quarantine two new destination
@@ -1071,7 +1181,7 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	swapz_u8 planned_classes[SWAPZ_MAX_RECORDS];
 	swapz_u8 planned_takes[SWAPZ_MAX_RECORDS];
 	swapz_u8 planned_extents = 0U, committed = 99U;
-	swapz_u32 block, stalled_cursor;
+	swapz_u32 block, stalled_cursor, shared_extent_start;
 	unsigned int available_reserve, index, lower_writes_before;
 	int error;
 
@@ -1147,6 +1257,10 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 		CHECK(a.next_block ==
 		      blocked_destination * SWAPZ_SEGMENT_BLOCKS + 1U +
 		      2U * (index + 1U));
+		/* A torn lower prefix must never publish a shared mapping. */
+		CHECK(same_authoritative_map(&maps[1U], &prior_compressed[0]) &&
+		      same_authoritative_map(&maps[2U], &prior_compressed[1]) &&
+		      same_authoritative_map(&maps[3U], &prior_compressed[2]));
 	}
 	stalled_cursor = (blocked_destination + 1U) *
 		SWAPZ_SEGMENT_BLOCKS - 1U;
@@ -1234,6 +1348,40 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	      maps[1].generation == prior_compressed[0].generation + 1U &&
 	      maps[2].generation == prior_compressed[1].generation + 1U &&
 	      maps[3].generation == prior_compressed[2].generation + 1U);
+	shared_extent_start = maps[1U].start_block;
+	/* One two-block extent has three live logical references, not three
+	 * independent two-block extents or one counted logical survivor. */
+	if (shared_extent_start >= PBLKS - 1U ||
+	    shared_extent_start != replacement_destination * SWAPZ_SEGMENT_BLOCKS ||
+	    maps[2U].start_block != shared_extent_start ||
+	    maps[3U].start_block != shared_extent_start ||
+	    maps[1U].extent_blocks != 2U ||
+	    maps[2U].extent_blocks != 2U ||
+	    maps[3U].extent_blocks != 2U ||
+	    live[shared_extent_start] != 3U ||
+	    classes[shared_extent_start] != 2U ||
+	    live[shared_extent_start + 1U] ||
+	    classes[shared_extent_start + 1U]) {
+		fprintf(stderr, "%s:%d FAIL GC phase=packed_retry_publication"
+			" source_segment=%u source_class=%u destination_segment=%u"
+			" destination_class=%d expected_available_blocks=%u"
+			" observed_available_blocks=%u original_errno=%d"
+			" expected_refs=3 observed_refs=%u preserved_prior_mappings=%d"
+			" disposition=refuse_role_exchange"
+			" safe_action=keep_current_authority\n",
+			__FILE__, __LINE__, victim,
+			(unsigned int)classes[prior_compressed[0].start_block],
+			replacement_destination,
+			shared_extent_start < PBLKS ?
+				(int)classes[shared_extent_start] : -1,
+			SWAPZ_SEGMENT_BLOCKS - 2U,
+			(unsigned int)((a.next_block <= PBLKS) ?
+				PBLKS - a.next_block : 0U), 0,
+			shared_extent_start < PBLKS ?
+				(unsigned int)live[shared_extent_start] : 0U,
+			!same_authoritative_map(&maps[1U], &prior_compressed[0]));
+		return 1;
+	}
 	CHECK(swapz_gc_commit_rotation(&a, victim) == 0);
 	CHECK(!a.gc_allocation && !roles[victim] &&
 	      roles[blocked_destination] && roles[replacement_destination]);
@@ -1243,6 +1391,16 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 
 	/* Role recovery is useful only if foreground publication really resumes. */
 	CHECK(write_one(4U) == 0 && verify_page(4U) == 0);
+	/* Overwriting one of the shared records releases exactly one reference;
+	 * the other two remain authoritative in the same two-block extent. */
+	CHECK(write_one(1U) == 0 && live[shared_extent_start] == 2U &&
+	      maps[1U].start_block != shared_extent_start &&
+	      maps[2U].start_block == shared_extent_start &&
+	      maps[3U].start_block == shared_extent_start &&
+	      maps[2U].generation == prior_compressed[1].generation + 1U &&
+	      maps[3U].generation == prior_compressed[2].generation + 1U &&
+	      verify_page(1U) == 0 && verify_page(2U) == 0 &&
+	      verify_page(3U) == 0);
 	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
 	     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
 		CHECK(!live[block]);
@@ -1310,6 +1468,7 @@ int main(void)
 	CHECK(test_late_replay_failure_reports_committed_prefix() == 0); passed++;
 	CHECK(test_gc_torn_run_resumes_same_destination() == 0); passed++;
 	CHECK(test_gc_publication_prefix_is_not_republished() == 0); passed++;
+	CHECK(test_gc_read_eio_after_published_prefix_resume() == 0); passed++;
 	CHECK(test_partial_gc_failures_resume_same_reserve() == 0); passed++;
 	CHECK(test_last_compressed_page_boundary_retry() == 0); passed++;
 	CHECK(test_mixed_raw_gc_uncertain_completion_recovery() == 0); passed++;
