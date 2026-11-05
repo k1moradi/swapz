@@ -71,7 +71,8 @@ Lifecycle source-order audits must follow the shared helper to its state-write
 dependency instead of requiring the persistence call to appear inline in each
 coordinator body. They must still verify that each operation-specific epilogue
 invokes the helper only after capturing the first errno and before publishing
-success.
+success. Isolated START, STOP and RECOVER source mutants must reject both
+omitted recovery persistence and premature ACTIVE/COMPLETE reporting.
 Because `SWAPZ_PRIMARY_ROOTLESS_TEST` compiles out those privileged lifecycle
 callers, keep the production-only static helper out of that build's translation
 unit while continuing to compile its actual body in the isolated errno fixture;

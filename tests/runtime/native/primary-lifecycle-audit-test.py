@@ -821,6 +821,85 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertIn("swapz_primary_original_swap_is_quiescent()", prepare)
         self.assertIn("swapz_primary_swap_device_active(", start)
 
+    def assert_lifecycle_failure_epilogues(self, source: str):
+        """Trace the single fail-closed errno helper from all three epilogues."""
+        helper_code = c_function_body(
+            source, "swapz_primary_require_recovery_preserving_errno")
+        helper_raw = c_function_body(
+            source, "swapz_primary_require_recovery_preserving_errno",
+            code_only=False)
+        self.assertRegex(
+            helper_code,
+            r"\bif\s*\(\s*swapz_primary_state_require_recovery_at\s*\(")
+        self.assertIn("const int primary_errno = original_errno ? original_errno : EIO;",
+                      helper_code)
+        self.assertIn("const int recovery_errno = errno ? errno : EIO;",
+                      helper_code)
+        self.assertIn("errno = primary_errno;", helper_code)
+        self.assertIn("return primary_errno;", helper_code)
+        self.assertIn('"original_errno=%d recovery_errno=%d "', helper_raw)
+        self.assertIn("operation, primary_errno, recovery_errno);", helper_code)
+
+        for symbol, operation, persisted, success_stage in (
+                ("swapz_primary_start_prepared", "START",
+                 "starting_persisted", "ACTIVE"),
+                ("swapz_primary_stop_active", "STOP",
+                 "stopping_persisted", "COMPLETE"),
+                ("swapz_primary_recover", "RECOVER",
+                 "recovering_persisted", "COMPLETE")):
+            body_code = c_function_body(source, symbol)
+            body_raw = c_function_body(source, symbol, code_only=False)
+            epilogue_start = body_code.rfind("\nout:\n")
+            self.assertGreaterEqual(
+                epilogue_start, 0, f"{operation}: missing failure epilogue")
+            epilogue_code = body_code[epilogue_start:]
+            epilogue_raw = body_raw[epilogue_start:]
+
+            persisted_condition = re.escape(persisted)
+            if operation != "START":
+                persisted_condition += r"\s*&&\s*!complete_persisted"
+            guard = re.search(
+                r"\bif\s*\(\s*result\s*<\s*0\s*&&\s*" +
+                persisted_condition +
+                r"\s*&&\s*recovery_fd\s*>=\s*0\s*&&\s*"
+                r"lock_fd\s*>=\s*0\s*\)\s*"
+                r"saved_errno\s*=\s*"
+                r"swapz_primary_require_recovery_preserving_errno\s*\(",
+                epilogue_code)
+            self.assertIsNotNone(
+                guard, f"{operation}: recovery helper is not fail-closed")
+            self.assertEqual(
+                body_code.count(
+                    "swapz_primary_require_recovery_preserving_errno("), 1,
+                f"{operation}: recovery helper must run at most once")
+            call = re.search(
+                rf"saved_errno\s*=\s*"
+                rf"swapz_primary_require_recovery_preserving_errno\s*\("
+                rf"\s*recovery_fd\s*,\s*lock_fd\s*,\s*state\.run_id\s*,"
+                rf'\s*0\s*,\s*"{operation}"\s*,\s*saved_errno\s*\);',
+                epilogue_raw)
+            self.assertIsNotNone(
+                call, f"{operation}: helper must receive the original errno")
+            capture = epilogue_code.find("saved_errno = errno ? errno : EIO;")
+            self.assertGreaterEqual(
+                capture, 0, f"{operation}: original errno not captured")
+            publication = re.search(
+                rf'if\s*\(\s*result\s*==\s*0\s*\)\s*printf\s*\(\s*'
+                rf'"PRIMARY_{operation}={success_stage}', epilogue_raw)
+            self.assertIsNotNone(
+                publication, f"{operation}: success publication not gated")
+            restore = re.search(
+                r"if\s*\(\s*result\s*<\s*0\s*\)\s*"
+                r"errno\s*=\s*saved_errno\s*;", epilogue_code)
+            self.assertIsNotNone(
+                restore, f"{operation}: original errno not returned")
+            self.assertLess(capture, guard.start())
+            self.assertLess(guard.start(), call.start())
+            self.assertLess(call.end(), epilogue_code.index("(void)close(target_fd);"))
+            self.assertLess(call.end(), publication.start())
+            self.assertLess(publication.end(), restore.start())
+            self.assertLess(restore.end(), epilogue_code.index("return result;"))
+
     def test_recovery_persists_fail_closed_interruption_order(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
         recover = c_function_body(
@@ -867,6 +946,49 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
         self.assertIn(
             "case SWAPZ_PRIMARY_STAGE_RESTORED:",
             c_function_body(source, "swapz_primary_state_recoverable"))
+
+        self.assert_lifecycle_failure_epilogues(source)
+
+        # Each isolated source mutant must fail the actual production-linked
+        # guard, not a behavioral mock or a comment/string-only assertion.
+        for symbol, operation, success_stage in (
+                ("swapz_primary_start_prepared", "START", "ACTIVE"),
+                ("swapz_primary_stop_active", "STOP", "COMPLETE"),
+                ("swapz_primary_recover", "RECOVER", "COMPLETE")):
+            body = c_function_body(source, symbol, code_only=False)
+            omitted = re.sub(
+                r"saved_errno\s*=\s*"
+                r"swapz_primary_require_recovery_preserving_errno\s*"
+                r"\([^;]*\);", "saved_errno = saved_errno;", body, count=1)
+            self.assertNotEqual(omitted, body)
+            with self.subTest(operation=operation, mutation="omit-recovery"):
+                with self.assertRaises(AssertionError):
+                    self.assert_lifecycle_failure_epilogues(
+                        source.replace(body, omitted, 1))
+
+            publication = re.search(
+                rf'if\s*\(result == 0\)\s*printf\s*\(\s*'
+                rf'"PRIMARY_{operation}={success_stage}.*?;\n',
+                body, re.S)
+            self.assertIsNotNone(publication)
+            premature = body.replace(publication.group(0), "", 1)
+            premature = premature.replace(
+                "saved_errno = errno ? errno : EIO;",
+                "saved_errno = errno ? errno : EIO;\n" +
+                publication.group(0), 1)
+            with self.subTest(operation=operation, mutation="early-success"):
+                with self.assertRaises(AssertionError):
+                    self.assert_lifecycle_failure_epilogues(
+                        source.replace(body, premature, 1))
+
+            false_success = body.replace(
+                "if (result == 0)\n\t\tprintf(",
+                "if (result < 0)\n\t\tprintf(", 1)
+            self.assertNotEqual(false_success, body)
+            with self.subTest(operation=operation, mutation="failure-as-success"):
+                with self.assertRaises(AssertionError):
+                    self.assert_lifecycle_failure_epilogues(
+                        source.replace(body, false_success, 1))
 
     def test_execution_gate_is_boot_scoped_pending_live_lifecycle_evidence(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
