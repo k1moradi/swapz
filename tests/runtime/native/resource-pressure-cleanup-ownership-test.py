@@ -386,6 +386,48 @@ stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
         self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"),
                          "untouched\n")
 
+    def test_production_directory_pin_commands_hide_private_paths(self):
+        # Execute the exact production redirection groups. Bash's own open
+        # failure must stay private, and a successful grouped exec must retain
+        # the opened descriptor without leaving stderr redirected.
+        for descriptor_variable, path_variable in (
+                ("SESSION_DIRECTORY_FD", "SESSION"),
+                ("CGROUP_DIRECTORY_FD", "CGROUP")):
+            with self.subTest(descriptor_variable=descriptor_variable):
+                open_command = (
+                    f'{{ exec {{{descriptor_variable}}}<"${path_variable}"; }} '
+                    '2>/dev/null'
+                )
+                self.assertIn(f"if ! {open_command}; then", self.source)
+                self.assertNotIn(
+                    f'if ! exec {{{descriptor_variable}}}<"${path_variable}"; then',
+                    self.source)
+
+                missing_path = self.root / f"missing-{path_variable.lower()}"
+                failure_script = (
+                    f"{path_variable}=$1\n"
+                    f"if {open_command}; then exit 91; fi\n"
+                    "printf '%s\\n' 'stderr-restored-after-failure' >&2\n"
+                )
+                result = self.run_simple_shell(failure_script, missing_path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stderr, "stderr-restored-after-failure\n")
+                self.assertNotIn(str(missing_path), result.stderr)
+
+                pinned_path = self.root / f"pinned-{path_variable.lower()}"
+                pinned_path.mkdir()
+                success_script = (
+                    f"{path_variable}=$1\n"
+                    f"if ! {open_command}; then exit 92; fi\n"
+                    f"[[ -d /proc/self/fd/${{{descriptor_variable}}} ]]\n"
+                    "printf '%s\\n' 'stderr-restored-after-success' >&2\n"
+                )
+                result = self.run_simple_shell(success_script, pinned_path)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stderr, "stderr-restored-after-success\n")
+
     def test_partial_cgroup_pin_refusal_keeps_first_phase_and_original_exit(self):
         # Each post-mkdir failure has a cgroup-create cause. EXIT cleanup must
         # publish that phase once, even if the caller is interrupted by TERM.

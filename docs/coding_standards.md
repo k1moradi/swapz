@@ -1642,6 +1642,10 @@ record its bounded setup observation, retain the created cgroup and private
 session, and publish exactly one `phase:cgroup-create` from EXIT cleanup with
 the actual original status (including signal exit 143). Do not relabel that
 first refusal as `phase:prior-admission` or try to remove an unpinned cgroup.
+Bash descriptor-open failures for both the private session and child cgroup must
+suppress shell-generated redirection diagnostics at the open site so randomized
+private paths cannot escape; that suppression must be scoped to the open
+attempt and must not leave stderr redirected after a successful pin.
 
 The cooperative stop marker and cleanup of known scratch entries must use the
 pinned session descriptor after confirming the named path still identifies the

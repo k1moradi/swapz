@@ -4098,6 +4098,10 @@ and mismatched pinned/name identity. Each case must retain both resources,
 report only the originating `phase:cgroup-create` (not a second
 `phase:prior-admission`), keep the actual original status including 143,
 label nested resume as not required, and never signal or claim ID36 PASS.
+Extract and execute the production session/cgroup descriptor-open commands
+against missing synthetic private paths; require Bash's open failure to expose
+no path text, require a successful grouped open to retain its descriptor, and
+require stderr to be restored for the following bounded diagnostic.
 
 The nested-child resume cleanup guard must interpret the numeric uncertainty
 state arithmetically: zero permits an attempt only with the existing tracked

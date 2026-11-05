@@ -359,7 +359,7 @@ fi
     exit 2
 }
 SESSION_DIRECTORY_FD=""
-if ! exec {SESSION_DIRECTORY_FD}<"$SESSION"; then
+if ! { exec {SESSION_DIRECTORY_FD}<"$SESSION"; } 2>/dev/null; then
     printf '%s\n' 'BLOCKED: ID36 private scratch session cannot be pinned; required:open owned directory descriptor observed:unreadable retained_cleanup:private-session' >&2
     exit 2
 fi
@@ -1215,7 +1215,7 @@ mkdir "$CGROUP" 2>/dev/null || {
     exit 2
 }
 CGROUP_WAS_CREATED=1
-if ! exec {CGROUP_DIRECTORY_FD}<"$CGROUP"; then
+if ! { exec {CGROUP_DIRECTORY_FD}<"$CGROUP"; } 2>/dev/null; then
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
     CGROUP_CREATE_REFUSAL_OBSERVATION=directory-fd-unavailable
     exit 2
