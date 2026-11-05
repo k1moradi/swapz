@@ -3,12 +3,14 @@
 
 import contextlib
 import errno
+import hashlib
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -541,6 +543,283 @@ class TerminalEvidenceContracts(unittest.TestCase):
                     lambda: None, bytearray())
         self.assertNotIn("Traceback", str(caught.exception))
         self.assertNotIn("/private/oracle.py", str(caught.exception))
+
+
+    def run_readiness_identity_fixture(self, identity_mutation):
+        process_ids = (41001, 41002)
+        worker_memory_mib = (64, 64)
+        processes = []
+        for process_id in process_ids:
+            process = mock.Mock()
+            process.pid = process_id
+            process.stdin = mock.Mock()
+            processes.append(process)
+
+        launched_processes = []
+        worker_seed_by_pid = {}
+        cleanup_events = []
+
+        def launch_process(arguments, **_kwargs):
+            process = processes[len(launched_processes)]
+            seed_argument_index = arguments.index("--seed") + 1
+            worker_seed_by_pid[process.pid] = arguments[seed_argument_index]
+            launched_processes.append(process)
+            return process
+
+        def oracle_event(process, prefix, _deadline, _guard, _pending):
+            self.assertEqual(prefix, "ORACLE_WAITING=")
+            worker_index = process_ids.index(process.pid)
+            expected_bytes = worker_memory_mib[worker_index] * qualify.MIB
+            record = {
+                "pid": process.pid,
+                "seed": worker_seed_by_pid[process.pid],
+                "pages": expected_bytes // qualify.PAGE_BYTES,
+                "bytes": expected_bytes,
+            }
+            if worker_index == 1 and identity_mutation == "duplicate_pid":
+                record["pid"] = process_ids[0]
+            elif worker_index == 1 and identity_mutation == "wrong_seed":
+                record["seed"] = "forged-seed"
+            return record
+
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            with mock.patch.multiple(
+                    qualify,
+                    _cgroup_create=mock.Mock(return_value=cgroup),
+                    _memory_events=mock.Mock(
+                        return_value={"oom": 0, "oom_kill": 0}),
+                    _psi_total=mock.Mock(return_value=0),
+                    _trusted_executable_path=mock.Mock(
+                        return_value=sys.executable),
+                    _write_control=mock.Mock(),
+                    read_swap_rows=mock.Mock(return_value=[]),
+                    _row_for_device=mock.Mock(
+                        return_value=mock.Mock(used_kib=0)),
+                    _oracle_event=mock.Mock(side_effect=oracle_event),
+                    _terminate_child=mock.Mock(
+                        side_effect=lambda process, _cgroup:
+                            cleanup_events.append(("terminate", process.pid))),
+                    _close_oracle_pipes=mock.Mock(
+                        side_effect=lambda process:
+                            cleanup_events.append(("close", process.pid))),
+                    _remove_cgroup=mock.Mock(
+                        side_effect=lambda _cgroup:
+                            cleanup_events.append(("remove_cgroup", None)))), \
+                    mock.patch.object(
+                        qualify.subprocess, "Popen", side_effect=launch_process):
+                try:
+                    qualify._run_workload(
+                        {"run_id": "terminal-contract-run"},
+                        {"mapper_device": (1, 2)},
+                        ORACLE,
+                        workload_mib=sum(worker_memory_mib),
+                        resident_mib=64,
+                        swap_limit_mib=sum(worker_memory_mib),
+                        timeout_seconds=1,
+                    )
+                except qualify.QualificationFailure as error:
+                    return error, cleanup_events, process_ids
+        self.fail("forged worker identity unexpectedly passed readiness")
+
+    def test_parent_requires_each_workers_readiness_and_verification_geometry(self):
+        worker_memory_mib = (64, 96)
+        readiness = []
+        verification = []
+        for memory_mib in worker_memory_mib:
+            expected_bytes = memory_mib * qualify.MIB
+            expected_pages = expected_bytes // qualify.PAGE_BYTES
+            readiness.append({"pages": expected_pages, "bytes": expected_bytes})
+            verification.append({
+                "verified_pages": expected_pages,
+                "verified_bytes": expected_bytes,
+            })
+
+        qualify.require_oracle_worker_geometry(
+            readiness, worker_memory_mib, "pages", "bytes", "readiness")
+        qualify.require_oracle_worker_geometry(
+            verification, worker_memory_mib,
+            "verified_pages", "verified_bytes", "verification")
+
+        compensated = [
+            {
+                "pages": readiness[0]["pages"] + 1,
+                "bytes": readiness[0]["bytes"] + qualify.PAGE_BYTES,
+            },
+            {
+                "pages": readiness[1]["pages"] - 1,
+                "bytes": readiness[1]["bytes"] - qualify.PAGE_BYTES,
+            },
+        ]
+        cases = (
+            (
+                "missing worker", readiness[:1], "pages", "bytes",
+                "readiness", "record count is incomplete",
+            ),
+            (
+                "aggregate compensation", compensated, "pages", "bytes",
+                "readiness", "worker 0 readiness",
+            ),
+            (
+                "worker one verification bytes",
+                [
+                    verification[0],
+                    {
+                        **verification[1],
+                        "verified_bytes":
+                            verification[1]["verified_bytes"] -
+                            qualify.PAGE_BYTES,
+                    },
+                ],
+                "verified_pages", "verified_bytes", "verification",
+                "worker 1 verification",
+            ),
+        )
+        for (description, records, page_field, byte_field,
+             phase, expected_error) in cases:
+            with self.subTest(description=description), self.assertRaisesRegex(
+                    qualify.QualificationFailure, expected_error):
+                qualify.require_oracle_worker_geometry(
+                    records, worker_memory_mib, page_field, byte_field, phase)
+
+    def test_parent_aggregates_full_expected_and_observed_worker_digests(self):
+        records = (
+            {
+                "verified_pages": 2,
+                "verified_bytes": 2 * qualify.PAGE_BYTES,
+                "mismatches": 0,
+                "digest": "01" * 32,
+                "expected_digest": "11" * 32,
+            },
+            {
+                "verified_pages": 3,
+                "verified_bytes": 3 * qualify.PAGE_BYTES,
+                "mismatches": 0,
+                "digest": "02" * 32,
+                "expected_digest": "22" * 32,
+            },
+        )
+        aggregate = qualify.aggregate_oracle_verification(list(records))
+
+        observed_digest = hashlib.sha256(
+            b"".join(bytes.fromhex(record["digest"]) for record in records)
+        ).hexdigest()
+        expected_digest = hashlib.sha256(
+            b"".join(
+                bytes.fromhex(record["expected_digest"]) for record in records)
+        ).hexdigest()
+        self.assertEqual(aggregate["verified_pages"], 5)
+        self.assertEqual(
+            aggregate["verified_bytes"], 5 * qualify.PAGE_BYTES)
+        self.assertEqual(aggregate["mismatches"], 0)
+        self.assertEqual(aggregate["digest"], observed_digest)
+        self.assertEqual(aggregate["expected_digest"], expected_digest)
+        self.assertNotEqual(aggregate["digest"], aggregate["expected_digest"])
+
+    def test_parent_requires_two_complete_reuse_rounds(self):
+        complete_round = {
+            "concurrent_workers": qualify.CONCURRENT_ORACLE_PROCESSES,
+            "mapper_used_start_kib": 0,
+            "mapper_used_delta_kib": 1,
+            "release_swap_current_bytes": 0,
+            "mapper_used_released_kib": 0,
+        }
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure,
+                "did not complete repeated slot-reuse rounds"):
+            qualify.evaluate_reuse_rounds([complete_round])
+
+        result = qualify.evaluate_reuse_rounds([
+            dict(complete_round) for _ in range(qualify.REUSE_ROUNDS)
+        ])
+        self.assertEqual(result["rounds"], qualify.REUSE_ROUNDS)
+        self.assertEqual(
+            result["concurrent_workers"], qualify.CONCURRENT_ORACLE_PROCESSES)
+        self.assertTrue(result["slot_reuse_proven"])
+
+        failed_worker_rounds = [
+            dict(complete_round) for _ in range(qualify.REUSE_ROUNDS)
+        ]
+        failed_worker_rounds[1]["concurrent_workers"] = (
+            qualify.CONCURRENT_ORACLE_PROCESSES - 1)
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure,
+                "lacked concurrent test-process activity"):
+            qualify.evaluate_reuse_rounds(failed_worker_rounds)
+
+    def test_parent_binds_worker_pid_and_seed_before_fill_and_cleans_up(self):
+        for identity_mutation in ("duplicate_pid", "wrong_seed"):
+            with self.subTest(identity_mutation=identity_mutation):
+                error, cleanup_events, process_ids = (
+                    self.run_readiness_identity_fixture(identity_mutation))
+                self.assertIn(
+                    "readiness PID/seed identities differ", str(error))
+                self.assertNotIn("forged-seed", str(error))
+                self.assertEqual(
+                    cleanup_events,
+                    [
+                        ("terminate", process_ids[0]),
+                        ("close", process_ids[0]),
+                        ("terminate", process_ids[1]),
+                        ("close", process_ids[1]),
+                        ("remove_cgroup", None),
+                    ],
+                )
+
+    def test_parent_rejects_one_failed_worker_after_valid_verified_records(self):
+        verified_record = {
+            "verified_pages": 1,
+            "verified_bytes": qualify.PAGE_BYTES,
+            "mismatched_pages": 0,
+            "mismatches": 0,
+            "mismatch_samples": [],
+            "digest": "ab" * 32,
+            "expected_digest": "ab" * 32,
+        }
+        outputs = []
+        processes = []
+        pending_buffers = []
+        try:
+            for exit_code in (0, 7):
+                read_descriptor, write_descriptor = os.pipe()
+                payload = (
+                    "ORACLE_VERIFIED=" +
+                    json.dumps(
+                        verified_record, sort_keys=True, separators=(",", ":")) +
+                    "\n"
+                ).encode("ascii")
+                os.write(write_descriptor, payload)
+                os.close(write_descriptor)
+                output = os.fdopen(read_descriptor, "rb", buffering=0)
+                outputs.append(output)
+                process = mock.Mock(stdout=output, stderr=io.StringIO())
+                process.poll.return_value = None
+                process.wait.return_value = exit_code
+                processes.append(process)
+                pending_buffers.append(bytearray())
+
+            parsed = [
+                qualify._oracle_event(
+                    process, "ORACLE_VERIFIED=",
+                    qualify.time.monotonic() + 1,
+                    lambda: None, pending)
+                for process, pending in zip(processes, pending_buffers)
+            ]
+            self.assertEqual(parsed, [verified_record, verified_record])
+            qualify.require_oracle_verification_details(parsed)
+
+            qualify._require_oracle_terminal_exit(
+                processes[0], qualify.time.monotonic() + 1,
+                lambda: None, pending_buffers[0])
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "phase=terminal.*child_exit=7.*evidence_complete=false"):
+                qualify._require_oracle_terminal_exit(
+                    processes[1], qualify.time.monotonic() + 1,
+                    lambda: None, pending_buffers[1])
+        finally:
+            for output in outputs:
+                output.close()
 
     def test_byte_exact_report_without_independent_swap_traffic_is_rejected(self):
         page_bytes = oracle.PAGE_BYTES
