@@ -1443,18 +1443,25 @@ after the fault is removed. Repeated recovery must verify byte-exact contents
 and generations, must not consume a second reserve merely because the first
 attempt failed, and must prove the evacuated source becomes reusable only after
 its mapping and physical liveness reach zero. A separate exact-production-C
-engine-rotation regression must inject a source-read `-EIO` after one compressed
-survivor has already published into the GC destination. The failed read must
-perform no successful lower read or write, consume no destination blocks, retain
-the published prefix without a second generation increment, and preserve all
-still-authoritative source maps. Retry must use the same authenticated
-victim/destination ownership, pack the three remaining 2072-byte compressed
-survivors into exactly one two-block extent, and prove its physical start
-refcount is three (with zero interior refcount). A later foreground overwrite
-of one member must reduce that shared reference count to two while preserving
-the other two maps and their byte-exact reads. This deterministic source-linked
-result remains synthetic: loaded lower fault/recovery and whole-map reuse
-qualification are separate and must not be inferred from it.
+engine-rotation regression must model the production survivor-list ordering
+`compressed -> RAW -> compressed...`: queue and publish the leading compressed
+survivor when the following RAW member forces a GC flush, then inject the RAW
+source-read `-EIO` before any destination reservation for that RAW member. The
+failed read must perform no successful lower read or write, consume no
+destination blocks, retain the published prefix without a second generation
+increment, and preserve the RAW mapping plus all still-authoritative compressed
+source maps. Retry must use the same authenticated victim/destination ownership,
+relocate the RAW member once, read the three remaining 2072-byte compressed
+survivors from their authoritative source extents, pack them into exactly one
+two-block extent, and prove its physical start refcount is three (with zero
+interior refcount). A later foreground overwrite of one member must reduce that
+shared reference count to two while preserving the other two maps and their
+byte-exact reads. The non-full two-block staging-exhaustion failure diagnostic
+must also report source/required-destination extent classes, expected and
+observed destination blocks available, the original errno, retained mapping and
+recovery ownership, retry disposition, and safe action. This deterministic
+source-linked result remains synthetic: loaded lower fault/recovery and
+whole-map reuse qualification are separate and must not be inferred from it.
 If accumulated uncertain reservations exhaust the owned destination,
 qualification forbids cursor rollback, live-reserve reuse or an unbounded
 internal retry. When the original

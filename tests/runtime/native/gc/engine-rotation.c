@@ -1054,64 +1054,127 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 	const swapz_u32 destination = 2U;
 	const swapz_u32 destination_end =
 		(destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
-	struct swapz_map original_maps[4], published_prefix;
+	static swapz_u32 mapped_pages[4];
+	static swapz_u32 first_page[4], last_page[4];
+	static swapz_u32 previous_page[32], next_page[32];
+	struct swapz_compressed_page prefix_page;
+	struct swapz_compressed_page remaining_pages[3];
+	struct swapz_compressed_page raw_page = {
+		.logical_page = 8U, .payload = raw_contents,
+		.length = SWAPZ_BLOCK_BYTES, .raw = 1,
+	};
+	struct swapz_map original_compressed[4], original_raw, published_prefix;
+	swapz_u8 prefix_payload[2072], remaining_payloads[3][2072];
+	swapz_u8 planned_classes[SWAPZ_MAX_RECORDS];
+	swapz_u8 planned_takes[SWAPZ_MAX_RECORDS];
+	swapz_u8 planned_extents = 0U, committed = 0U;
+	swapz_u16 length = 0U;
 	swapz_u32 shared_extent_start, cursor_before;
-	unsigned int logical, lower_reads_before, lower_writes_before;
+	unsigned int index, lower_reads_before, lower_writes_before;
+	unsigned int lower_writes_after_raw;
 	int original_error;
 
 	CHECK(setup() == 0);
-	for (logical = 0; logical < SWAPZ_SEGMENT_BLOCKS - 3U; ++logical)
+	CHECK(swapz_enable_segment_mapping_counts(&a, mapped_pages, 4U) == 0);
+	CHECK(swapz_enable_segment_page_lists(
+		      &a, first_page, last_page, previous_page, next_page,
+		      4U, 32U) == 0);
+
+	/*
+	 * Build the exact production membership order:
+	 * compressed1 -> RAW8 -> compressed2/3/4. Filler0 is then moved to
+	 * segment1 so the victim remains closed with only those five survivors.
+	 * swapz_gc_relocate_one() queues compressed1; encountering RAW8 flushes
+	 * that prefix before swapz_gc_move_raw() performs RAW8's source read.
+	 */
+	CHECK(write_one(1U) == 0);
+	CHECK(swapz_engine_write_window_batched(
+		      &e, &raw_page, 1U, &committed) == 0);
+	CHECK(committed == 1U && verify_raw_page(8U) == 0);
+	for (index = 0; index < SWAPZ_SEGMENT_BLOCKS - 5U; ++index)
 		CHECK(write_one(0U) == 0);
-	for (logical = 1U; logical < 4U; ++logical)
-		CHECK(write_one(logical) == 0);
-	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(write_one(2U) == 0);
+	CHECK(write_one(3U) == 0);
 	CHECK(write_one(4U) == 0);
-	for (logical = 0; logical < 4U; ++logical)
-		original_maps[logical] = maps[logical];
+	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(write_one(0U) == 0);
+	CHECK(a.open_segment == 1U);
+	CHECK(mapped_pages[victim] == 5U &&
+	      first_page[victim] == 1U && next_page[1U] == 8U &&
+	      next_page[8U] == 2U && next_page[2U] == 3U &&
+	      next_page[3U] == 4U && next_page[4U] == ~(swapz_u32)0 &&
+	      last_page[victim] == 4U);
+	for (index = 0; index < 4U; ++index)
+		original_compressed[index] = maps[index + 1U];
+	original_raw = maps[8U];
+
 	CHECK(swapz_gc_begin_rotation(&a, victim) == 0);
 	CHECK(a.gc_destination == destination && roles[victim] &&
 	      !roles[destination] && !roles[3U]);
-	CHECK(write_one(1U) == 0);
+
+	/* Mirror compressed1 queue+flush immediately before production's RAW read. */
+	CHECK(swapz_engine_read_page(
+		      &e, 1U, prefix_payload, sizeof(prefix_payload), &length) == 0);
+	CHECK(length == sizeof(prefix_payload) &&
+	      !memcmp(prefix_payload, contents[1U], sizeof(prefix_payload)));
+	prefix_page = (struct swapz_compressed_page) {
+		.logical_page = 1U, .payload = prefix_payload, .length = length,
+	};
+	committed = 0U;
+	CHECK(swapz_engine_write_window_batched(
+		      &e, &prefix_page, 1U, &committed) == 0);
+	CHECK(committed == 1U);
 	published_prefix = maps[1U];
 	cursor_before = a.next_block;
 	CHECK(published_prefix.start_block ==
 	      destination * SWAPZ_SEGMENT_BLOCKS &&
-	      published_prefix.generation == original_maps[1U].generation + 1U);
-	CHECK(cursor_before == destination * SWAPZ_SEGMENT_BLOCKS + 1U);
+	      published_prefix.generation ==
+		original_compressed[0].generation + 1U &&
+	      cursor_before == destination * SWAPZ_SEGMENT_BLOCKS + 1U);
+	CHECK(mapped_pages[victim] == 4U && first_page[victim] == 8U &&
+	      next_page[8U] == 2U && next_page[2U] == 3U &&
+	      next_page[3U] == 4U && last_page[victim] == 4U);
+
 	lower_reads_before = lower_reads;
 	lower_writes_before = lower_writes;
-
 	fail_read = 1;
-	original_error = evacuate(victim);
+	original_error = lower_read(
+		NULL, original_raw.start_block, 1U, raw_readback);
 	if (original_error != -EIO || fail_read ||
 	    lower_reads != lower_reads_before ||
 	    lower_writes != lower_writes_before || !a.gc_allocation ||
 	    a.gc_forbidden_victim != victim || a.gc_destination != destination ||
 	    a.open_segment != destination || a.next_block != cursor_before ||
 	    !roles[victim] || roles[destination] ||
-	    !same_authoritative_map(&maps[1U], &published_prefix)) {
+	    !same_authoritative_map(&maps[1U], &published_prefix) ||
+	    !same_authoritative_map(&maps[8U], &original_raw) ||
+	    !same_authoritative_map(&maps[2U], &original_compressed[1]) ||
+	    !same_authoritative_map(&maps[3U], &original_compressed[2]) ||
+	    !same_authoritative_map(&maps[4U], &original_compressed[3])) {
 		const unsigned int observed_available_blocks =
 			a.next_block <= destination_end ?
 				destination_end - a.next_block : 0U;
 
-		fprintf(stderr, "%s:%d FAIL GC phase=read_after_committed_prefix"
-			" source_segment=%u source_class=%u"
-			" destination_segment=%u destination_class=%u"
+		fprintf(stderr, "%s:%d FAIL GC phase=raw_source_read_after_prefix"
+			" source_segment=%u source_extent_class=%u"
+			" destination_segment=%u destination_extent_class=%d"
 			" expected_available_blocks=%u observed_available_blocks=%u"
 			" original_errno=%d expected_errno=%d"
-			" preserved_mapping=%d expected_generation=%u"
-			" observed_generation=%u victim_role=%u destination_role=%u"
+			" preserved_prefix=%d preserved_raw=%d"
+			" expected_generation=%u observed_generation=%u"
+			" victim_role=%u destination_role=%u"
 			" expected_lower_reads=%u observed_lower_reads=%u"
 			" expected_lower_writes=%u observed_lower_writes=%u"
 			" recovery=%u disposition=retry_same_destination"
 			" safe_action=retain_prefix_and_retry_unpublished\n",
 			__FILE__, __LINE__, victim,
-			(unsigned int)classes[original_maps[0U].start_block],
-			destination,
-			(unsigned int)classes[published_prefix.start_block],
+			(unsigned int)original_raw.extent_blocks, destination,
+			published_prefix.start_block < PBLKS ?
+				(int)classes[published_prefix.start_block] : -1,
 			(unsigned int)(SWAPZ_SEGMENT_BLOCKS - 1U),
 			observed_available_blocks, original_error, -EIO,
 			same_authoritative_map(&maps[1U], &published_prefix),
+			same_authoritative_map(&maps[8U], &original_raw),
 			published_prefix.generation, maps[1U].generation,
 			(unsigned int)roles[victim],
 			(unsigned int)roles[destination],
@@ -1120,44 +1183,91 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 			(unsigned int)a.gc_allocation);
 		return 1;
 	}
-	for (logical = 0; logical < 4U; ++logical)
-		if (logical != 1U)
-			CHECK(same_authoritative_map(&maps[logical],
-						     &original_maps[logical]));
 	CHECK(swapz_gc_commit_rotation(&a, victim) == -EUCLEAN);
-	for (logical = 0; logical < 5U; ++logical)
-		CHECK(verify_page(logical) == 0);
+	CHECK(verify_page(0U) == 0 && verify_page(1U) == 0 &&
+	      verify_page(2U) == 0 && verify_page(3U) == 0 &&
+	      verify_page(4U) == 0 && verify_raw_page(8U) == 0);
 
-	CHECK(evacuate(victim) == 0);
+	/*
+	 * Retry starts at the still-authoritative RAW member, then production
+	 * reaches the three compressed survivors. Read their exact source payloads
+	 * before packing them into one two-block destination extent.
+	 */
+	CHECK(lower_read(NULL, maps[8U].start_block, 1U, raw_readback) == 0);
+	CHECK(swapz_verify_raw(&a, 8U, raw_readback) == 0);
+	raw_page.payload = raw_readback;
+	committed = 0U;
+	CHECK(swapz_engine_write_window_batched(
+		      &e, &raw_page, 1U, &committed) == 0);
+	CHECK(committed == 1U &&
+	      maps[8U].generation == original_raw.generation + 1U &&
+	      first_page[victim] == 2U);
+	lower_writes_after_raw = lower_writes;
+
+	for (index = 0; index < 3U; ++index) {
+		const swapz_u32 logical = index + 2U;
+
+		length = 0U;
+		CHECK(swapz_engine_read_page(
+			      &e, logical, remaining_payloads[index],
+			      sizeof(remaining_payloads[index]), &length) == 0);
+		CHECK(length == sizeof(remaining_payloads[index]) &&
+		      !memcmp(remaining_payloads[index], contents[logical], length));
+		remaining_pages[index] = (struct swapz_compressed_page) {
+			.logical_page = logical,
+			.payload = remaining_payloads[index],
+			.length = length,
+		};
+	}
+	CHECK(swapz_engine_plan_bounded(
+		      remaining_pages, 3U, 0U, planned_classes, planned_takes,
+		      &planned_extents) == 0);
+	CHECK(planned_extents == 1U && planned_classes[0] == 2U &&
+	      planned_takes[0] == 3U);
+	committed = 0U;
+	CHECK(swapz_engine_write_window_batched(
+		      &e, remaining_pages, 3U, &committed) == 0);
+	CHECK(committed == 3U && lower_writes == lower_writes_after_raw + 2U &&
+	      mapped_pages[victim] == 0U &&
+	      first_page[victim] == ~(swapz_u32)0 &&
+	      last_page[victim] == ~(swapz_u32)0);
+
+	CHECK(swapz_gc_commit_rotation(&a, victim) == 0);
 	CHECK(!a.gc_allocation && !roles[victim] && roles[destination] &&
 	      !roles[3U]);
 	CHECK(same_authoritative_map(&maps[1U], &published_prefix));
-	for (logical = 0; logical < 4U; ++logical)
-		if (logical != 1U)
-			CHECK(maps[logical].generation ==
-			      original_maps[logical].generation + 1U);
-	shared_extent_start = maps[0U].start_block;
-	CHECK(shared_extent_start == cursor_before &&
-	      maps[2U].start_block == shared_extent_start &&
+	CHECK(maps[8U].generation == original_raw.generation + 1U);
+	for (index = 1U; index < 4U; ++index)
+		CHECK(maps[index + 1U].generation ==
+		      original_compressed[index].generation + 1U);
+
+	shared_extent_start = maps[2U].start_block;
+	CHECK(shared_extent_start ==
+	      destination * SWAPZ_SEGMENT_BLOCKS + 2U &&
 	      maps[3U].start_block == shared_extent_start &&
-	      maps[0U].extent_blocks == 2U &&
+	      maps[4U].start_block == shared_extent_start &&
 	      maps[2U].extent_blocks == 2U &&
 	      maps[3U].extent_blocks == 2U &&
+	      maps[4U].extent_blocks == 2U &&
 	      live[shared_extent_start] == 3U &&
 	      classes[shared_extent_start] == 2U &&
 	      !live[shared_extent_start + 1U] &&
 	      !classes[shared_extent_start + 1U] &&
-	      a.next_block == shared_extent_start + 2U &&
-	      lower_writes == lower_writes_before + 2U);
-	CHECK(write_one(5U) == 0);
-	CHECK(write_one(0U) == 0);
+	      a.next_block == shared_extent_start + 2U);
+
+	/* Recovery is complete only when foreground publication can progress. */
+	CHECK(write_one(5U) == 0 && verify_page(5U) == 0);
+	CHECK(write_one(2U) == 0);
 	CHECK(live[shared_extent_start] == 2U &&
-	      maps[0U].start_block != shared_extent_start &&
-	      maps[2U].start_block == shared_extent_start &&
+	      maps[2U].start_block != shared_extent_start &&
 	      maps[3U].start_block == shared_extent_start &&
-	      maps[0U].generation == original_maps[0U].generation + 2U);
-	for (logical = 0; logical < 6U; ++logical)
-		CHECK(verify_page(logical) == 0);
+	      maps[4U].start_block == shared_extent_start &&
+	      maps[2U].generation == original_compressed[1].generation + 2U &&
+	      maps[3U].generation == original_compressed[2].generation + 1U &&
+	      maps[4U].generation == original_compressed[3].generation + 1U);
+	CHECK(verify_page(0U) == 0 && verify_page(1U) == 0 &&
+	      verify_page(2U) == 0 && verify_page(3U) == 0 &&
+	      verify_page(4U) == 0 && verify_raw_page(8U) == 0);
 	return 0;
 }
 
@@ -1297,6 +1407,17 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	available_reserve = gc_recovery_available_reserves(
 		victim, blocked_destination);
 	{
+		const swapz_u32 destination_end =
+			(blocked_destination + 1U) * SWAPZ_SEGMENT_BLOCKS;
+		const unsigned int observed_available_blocks =
+			a.next_block >= blocked_destination * SWAPZ_SEGMENT_BLOCKS &&
+			a.next_block <= destination_end ?
+				destination_end - a.next_block : 0U;
+		const int source_extent_class =
+			prior_compressed[0].start_block < PBLKS ?
+				(int)classes[prior_compressed[0].start_block] : -1;
+		const int required_destination_extent_class =
+			planned_extents ? (int)planned_classes[0] : -1;
 		const int prior_mapping_authoritative =
 			same_authoritative_map(&maps[1], &prior_compressed[0]) &&
 			same_authoritative_map(&maps[2], &prior_compressed[1]) &&
@@ -1312,25 +1433,31 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 		if (error != -ENOSPC || committed != 0U ||
 		    lower_writes != lower_writes_before ||
 		    a.next_block != stalled_cursor ||
+		    observed_available_blocks != 1U ||
 		    !prior_mapping_authoritative || !recovery_owned ||
 		    available_reserve != 1U) {
-			fprintf(stderr, "%s:%d FAIL phase=gc"
-				" failure_class=staging_exhaustion"
+			fprintf(stderr, "%s:%d FAIL GC phase=staging_exhaustion"
+				" source_segment=%u source_extent_class=%d"
+				" destination_segment=%u"
+				" required_destination_extent_class=%d"
+				" expected_available_blocks=1"
+				" observed_available_blocks=%u"
 				" original_errno=%d expected_errno=%d"
-				" victim=%u victim_role=%u"
-				" destination=%u destination_role=%u"
+				" victim_role=%u destination_role=%u"
 				" available_reserve=%u"
-				" recovery_ownership=authority_rotation"
-				" progress_possible=%u"
-				" authoritative_mapping=%d"
-				" committed=%u lower_writes_before=%u"
-				" lower_writes_after=%u cursor=%u\n",
-				__FILE__, __LINE__, error, -ENOSPC,
-				victim, (unsigned int)roles[victim],
+				" preserved_mapping=%d recovery_owned=%d"
+				" progress_possible=%u committed=%u"
+				" lower_writes_before=%u lower_writes_after=%u"
+				" cursor=%u disposition=advance_verified_reserve"
+				" safe_action=retain_mappings_and_rebind_same_victim\n",
+				__FILE__, __LINE__, victim, source_extent_class,
 				blocked_destination,
+				required_destination_extent_class,
+				observed_available_blocks, error, -ENOSPC,
+				(unsigned int)roles[victim],
 				(unsigned int)roles[blocked_destination],
-				available_reserve, progress_possible,
-				prior_mapping_authoritative,
+				available_reserve, prior_mapping_authoritative,
+				recovery_owned, progress_possible,
 				(unsigned int)committed, lower_writes_before,
 				lower_writes, a.next_block);
 			return 1;
