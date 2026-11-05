@@ -85,23 +85,37 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         return 2
 
     pages = allocation_bytes // PAGE_BYTES
-    _emit("ORACLE_WAITING=", {
-        "pid": os.getpid(),
-        "pages": pages,
-        "bytes": allocation_bytes,
-        "seed": seed_hex,
-    })
+    phase = "waiting"
     try:
+        _emit("ORACLE_WAITING=", {
+            "pid": os.getpid(),
+            "pages": pages,
+            "bytes": allocation_bytes,
+            "seed": seed_hex,
+        })
+        phase = "wait_fill"
         if _read_command() != "FILL":
             raise RuntimeError("expected FILL command")
+        phase = "allocate"
         allocation = mmap.mmap(
             -1,
             allocation_bytes,
             flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS,
             prot=mmap.PROT_READ | mmap.PROT_WRITE,
         )
-    except (OSError, ValueError, RuntimeError) as exc:
-        print(f"FAIL: oracle allocation/start failed: {exc}", file=sys.stderr)
+    except (OSError, ValueError, RuntimeError, MemoryError, KeyboardInterrupt) as exc:
+        error_text = str(exc) or type(exc).__name__
+        original_errno = getattr(exc, "errno", None)
+        print(f"FAIL: oracle allocation/start failed: {error_text}", file=sys.stderr)
+        print(
+            f"FAIL: oracle phase={phase} "
+            f"verified_pages=0/{pages} verified_bytes=0/{allocation_bytes} "
+            "expected_page_mismatches=0 observed_page_mismatches=0 "
+            "expected_byte_mismatches=0 observed_byte_mismatches=0 "
+            f"error={type(exc).__name__} "
+            f"errno={original_errno if original_errno is not None else 'none'} "
+            "cleanup_complete=true",
+            file=sys.stderr)
         return 1
 
     expected_digest = hashlib.blake2b(digest_size=32)
@@ -109,6 +123,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
     result = 1
     phase = "fill"
     verified_pages = 0
+    page_mismatches = 0
     byte_mismatches = 0
     comparison_failed = False
     verification_record = None
@@ -145,6 +160,7 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
                     f"{len(observed)} of {PAGE_BYTES} bytes")
             observed_digest.update(observed)
             if observed != expected:
+                page_mismatches += 1
                 differences = [
                     index for index, (left, right) in enumerate(zip(observed, expected))
                     if left != right
@@ -165,13 +181,16 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         verification_record = {
             "verified_pages": verified_pages,
             "verified_bytes": verified_pages * PAGE_BYTES,
+            "mismatched_pages": page_mismatches,
             "mismatches": byte_mismatches,
             "mismatch_samples": mismatches,
             "digest": actual_digest,
             "expected_digest": expected_hex,
             "elapsed_seconds": round(time.monotonic() - verify_started, 6),
         }
-        comparison_failed = byte_mismatches != 0 or actual_digest != expected_hex
+        comparison_failed = (
+            page_mismatches != 0 or byte_mismatches != 0 or
+            actual_digest != expected_hex)
         result = 1 if comparison_failed else 0
     except (OSError, RuntimeError, MemoryError, KeyboardInterrupt) as exc:
         original_error = exc
@@ -213,7 +232,8 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
             f"FAIL: oracle phase={failure_phase} "
             f"verified_pages={verified_pages}/{pages} "
             f"verified_bytes={verified_pages * PAGE_BYTES}/{allocation_bytes} "
-            f"expected_mismatches=0 observed_mismatches={byte_mismatches} "
+            f"expected_page_mismatches=0 observed_page_mismatches={page_mismatches} "
+            f"expected_byte_mismatches=0 observed_byte_mismatches={byte_mismatches} "
             f"error={failure_type} "
             f"errno={original_errno if original_errno is not None else 'none'} "
             f"cleanup_complete={str(cleanup_error is None).lower()}",

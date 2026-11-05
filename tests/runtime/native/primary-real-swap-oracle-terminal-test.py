@@ -4,6 +4,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -18,10 +19,11 @@ SPEC.loader.exec_module(oracle)
 
 class TerminalEvidenceContracts(unittest.TestCase):
     def run_fixture(self, *, short_read=False, interrupted=False, corrupt=False,
-                    read_errno=None, report_errno=None, close_fails=False):
+                    corrupt_pages=(), page_count=2, read_errno=None,
+                    report_errno=None, close_fails=False):
         class AnonymousMemoryFixture:
             def __init__(self):
-                self.contents = bytearray(2 * oracle.PAGE_BYTES)
+                self.contents = bytearray(page_count * oracle.PAGE_BYTES)
                 self.closed = False
                 self.verify_started = False
 
@@ -55,6 +57,8 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 allocation.verify_started = True
                 if corrupt:
                     allocation.contents[9] ^= 1
+                for page_index in corrupt_pages:
+                    allocation.contents[page_index * oracle.PAGE_BYTES + 9] ^= 1
             return command
 
         original_emit = oracle._emit
@@ -64,7 +68,7 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 raise OSError(report_errno, "synthetic evidence report error")
             original_emit(prefix, payload)
 
-        with mock.patch.object(oracle, "MIB", 2 * oracle.PAGE_BYTES), \
+        with mock.patch.object(oracle, "MIB", page_count * oracle.PAGE_BYTES), \
                 mock.patch.object(oracle, "MIN_MIB", 1), \
                 mock.patch.object(oracle, "MAX_MIB", 1), \
                 mock.patch.object(oracle, "_disable_dumps"), \
@@ -96,7 +100,10 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertIn("phase=verify", stderr)
         self.assertIn("verified_pages=1/2", stderr)
         self.assertIn("verified_bytes=4096/8192", stderr)
-        self.assertIn("expected_mismatches=0 observed_mismatches=0", stderr)
+        self.assertIn(
+            "expected_page_mismatches=0 observed_page_mismatches=0", stderr)
+        self.assertIn(
+            "expected_byte_mismatches=0 observed_byte_mismatches=0", stderr)
         self.assertIn("errno=none", stderr)
         self.assertIn("cleanup_complete=false", stderr)
         self.assertNotIn("ab" * 16, stderr)
@@ -121,7 +128,10 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertFalse(allocation.closed)
         self.assertNotIn("ORACLE_VERIFIED=", stdout)
         self.assertIn("phase=verify", stderr)
-        self.assertIn("expected_mismatches=0 observed_mismatches=1", stderr)
+        self.assertIn(
+            "expected_page_mismatches=0 observed_page_mismatches=1", stderr)
+        self.assertIn(
+            "expected_byte_mismatches=0 observed_byte_mismatches=1", stderr)
         self.assertIn("error=byte_mismatch errno=none cleanup_complete=false", stderr)
         self.assertIn("[Errno 9] synthetic close error", stderr)
         self.assertNotIn("ab" * 16, stderr)
@@ -133,10 +143,53 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertTrue(allocation.closed)
         self.assertNotIn("ORACLE_VERIFIED=", stdout)
         self.assertIn("phase=verify", stderr)
-        self.assertIn("expected_mismatches=0 observed_mismatches=1", stderr)
+        self.assertIn(
+            "expected_page_mismatches=0 observed_page_mismatches=1", stderr)
+        self.assertIn(
+            "expected_byte_mismatches=0 observed_byte_mismatches=1", stderr)
         self.assertIn("error=byte_mismatch errno=none cleanup_complete=true", stderr)
         self.assertIn("[Errno 32] synthetic evidence report error", stderr)
         self.assertNotIn("ab" * 16, stderr)
+
+    def test_mismatch_page_count_is_not_truncated_with_diagnostic_samples(self):
+        status, stdout, stderr, allocation = self.run_fixture(
+            corrupt_pages=range(17), page_count=17)
+        self.assertEqual(status, 1)
+        self.assertTrue(allocation.closed)
+        verified_lines = [
+            line for line in stdout.splitlines()
+            if line.startswith("ORACLE_VERIFIED=")
+        ]
+        self.assertEqual(len(verified_lines), 1)
+        verified = json.loads(verified_lines[0].split("=", 1)[1])
+        self.assertEqual(verified["mismatched_pages"], 17)
+        self.assertEqual(verified["mismatches"], 17)
+        self.assertEqual(len(verified["mismatch_samples"]), 16)
+        self.assertIn(
+            "expected_page_mismatches=0 observed_page_mismatches=17", stderr)
+        self.assertIn(
+            "expected_byte_mismatches=0 observed_byte_mismatches=17", stderr)
+        self.assertNotIn("ab" * 16, stderr)
+
+    def test_interrupt_before_fill_returns_bounded_failure_without_allocating(self):
+        stderr = io.StringIO()
+        mmap_call = mock.Mock()
+        with mock.patch.object(oracle, "_disable_dumps"), \
+                mock.patch.object(oracle, "_emit"), \
+                mock.patch.object(oracle, "_read_command",
+                                  side_effect=KeyboardInterrupt()), \
+                mock.patch.object(oracle.mmap, "mmap", mmap_call), \
+                contextlib.redirect_stderr(stderr):
+            status = oracle.run_workload("ab" * 16, oracle.MIN_MIB)
+        self.assertEqual(status, 1)
+        mmap_call.assert_not_called()
+        self.assertIn("phase=wait_fill", stderr.getvalue())
+        self.assertIn("verified_pages=0/", stderr.getvalue())
+        self.assertIn("observed_page_mismatches=0", stderr.getvalue())
+        self.assertIn("observed_byte_mismatches=0", stderr.getvalue())
+        self.assertIn("error=KeyboardInterrupt", stderr.getvalue())
+        self.assertIn("cleanup_complete=true", stderr.getvalue())
+        self.assertNotIn("ab" * 16, stderr.getvalue())
 
     def test_interrupted_readback_cleans_up_without_reporting_verification(self):
         status, stdout, stderr, allocation = self.run_fixture(interrupted=True)
