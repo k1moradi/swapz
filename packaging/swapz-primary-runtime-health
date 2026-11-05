@@ -472,6 +472,19 @@ read_swap_inventory()
 {
 	[ -r "$proc_root/swaps" ] || return 1
 	LC_ALL=C awk '
+		function decimal_greater(left, right, normalized_left, normalized_right) {
+			normalized_left = left
+			normalized_right = right
+			sub(/^0+/, "", normalized_left)
+			sub(/^0+/, "", normalized_right)
+			if (normalized_left == "")
+				normalized_left = "0"
+			if (normalized_right == "")
+				normalized_right = "0"
+			if (length(normalized_left) != length(normalized_right))
+				return length(normalized_left) > length(normalized_right)
+			return ("x" normalized_left) > ("x" normalized_right)
+		}
 		NR == 1 {
 			if (NF != 5 || $1 != "Filename" || $2 != "Type" ||
 			    $3 != "Size" || $4 != "Used" || $5 != "Priority")
@@ -484,9 +497,22 @@ read_swap_inventory()
 			malformed = 1
 			next
 		}
+		seen_source[$1]++ {
+			malformed = 1
+			next
+		}
+		decimal_greater($4, $3) {
+			malformed = 1
+			next
+		}
 		{ print $1, $2, $3, $4, $5 }
 		END { if (!header_seen || malformed) exit 2 }
 	' "$proc_root/swaps"
+}
+
+swap_inventory_roster()
+{
+	printf '%s\n' "$1" | awk 'NF { print $1, $2, $3, $5 }'
 }
 
 active_swapz_swap()
@@ -537,8 +563,15 @@ active_swapz_swap()
 		status=$?
 	fi
 	[ "$status" -eq 10 ] && return 0
-	[ "$status" -eq 0 ] && return 1
-	return 2
+	[ "$status" -eq 0 ] || return 2
+	# Alias resolution happens after the proc snapshot. A changed inventory
+	# cannot prove inactivity because a mutable pathname may now name a
+	# different block device than the active row we just classified.
+	stable_swap_inventory=$(read_swap_inventory) || return 2
+	swap_inventory_rows=$(swap_inventory_roster "$swap_inventory")
+	stable_swap_inventory_rows=$(swap_inventory_roster "$stable_swap_inventory")
+	[ "$stable_swap_inventory_rows" = "$swap_inventory_rows" ] || return 2
+	return 1
 }
 
 hibernate_guard()
@@ -683,6 +716,8 @@ observe_runtime()
 	mapper_status_command_status=0
 	swap_inventory_command_status=0
 	swap_inventory_state=verified
+	swap_inventory_recheck_command_status=0
+	swap_inventory_consistency_state=not_checked
 
 	if manager_target_identity; then
 		if [ ! -e "$selected_path" ]; then
@@ -974,6 +1009,19 @@ EOF
 		*) append_reason observation_reasons swap_block_identity_unavailable ;;
 		esac
 		[ "$swap_occupancy_percent" -lt 90 ] || append_reason warning_reasons swap_capacity_low
+		swap_inventory_consistency_state=stable
+		if stable_swap_inventory=$(read_swap_inventory); then
+			swap_inventory_rows=$(swap_inventory_roster "$swap_inventory")
+			stable_swap_inventory_rows=$(swap_inventory_roster "$stable_swap_inventory")
+			if [ "$stable_swap_inventory_rows" != "$swap_inventory_rows" ]; then
+				swap_inventory_consistency_state=changed_during_observation
+				append_reason observation_reasons swap_inventory_changed_during_observation
+			fi
+		else
+			swap_inventory_recheck_command_status=$?
+			swap_inventory_consistency_state=recheck_unavailable_or_invalid
+			append_reason observation_reasons swap_inventory_recheck_unavailable_or_invalid
+		fi
 	else
 		swap_inventory_command_status=$?
 		swap_inventory_state=unavailable_or_invalid
@@ -1078,6 +1126,14 @@ log_runtime_state()
 		log_observer_diagnostic swap_inventory complete_five_column_inventory "$swap_inventory_state" read_swap_inventory "$swap_inventory_command_status" inspect_proc_swaps_read_only
 		;;
 	esac
+	case "$swap_inventory_consistency_state" in
+	changed_during_observation)
+		log_observer_diagnostic swap_inventory_stability stable_complete_inventory "$swap_inventory_consistency_state" read_swap_inventory "$swap_inventory_recheck_command_status" repeat_read_only_observation
+		;;
+	recheck_unavailable_or_invalid)
+		log_observer_diagnostic swap_inventory_stability stable_complete_inventory "$swap_inventory_consistency_state" read_swap_inventory "$swap_inventory_recheck_command_status" inspect_proc_swaps_read_only
+		;;
+	esac
 	if [ "$kernel_error_latest" != unavailable ] && [ "$kernel_error_latest" != "${previous_kernel_error_latest:-unavailable}" ]; then
 		printf 'SWAPZ_RUNTIME_KERNEL_ERROR=%s\n' "$kernel_error_latest" >&2
 	fi
@@ -1155,7 +1211,7 @@ monitor_loop()
 		else
 			capacity_bucket=normal
 		fi
-		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$mapper_info_command_status\|$mapper_table_command_status\|$mapper_status_command_status
+		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_table_command_status\|$mapper_status_command_status
 		if [ "$signature" != "$previous_signature" ]; then
 			log_runtime_state
 			previous_signature=$signature

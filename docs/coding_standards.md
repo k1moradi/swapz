@@ -2848,7 +2848,11 @@ is a definite FAIL. Compare each alias using its captured major:minor while
 permitting verified unrelated swapfiles and unrelated resolved block devices.
 Emit bounded, path-free observer phase, expected state, classified observed
 state, original probe exit status and a read-only next check only when the
-reported state changes; never promote missing evidence to HEALTHY.
+reported state changes; never promote missing evidence to HEALTHY. Reject
+duplicate swap sources and impossible Used-greater-than-Size accounting as
+malformed inventory. Because alias identity is resolved after the proc snapshot,
+a HEALTHY or inactive conclusion must re-read the normalized inventory and
+require the same rows; a changed or unreadable recheck is incomplete evidence.
 Keep repeated kernel-journal queries capped to a small recent-error window,
 use portable case-insensitive matching, and report cumulative error counts
 from DM status separately from the recent journal window.

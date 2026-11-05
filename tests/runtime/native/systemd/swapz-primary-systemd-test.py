@@ -3298,6 +3298,128 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("swap_remaining_kib=8000", observed.stderr)
         self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
 
+    def test_duplicate_or_impossible_unrelated_swap_rows_are_not_healthy(self) -> None:
+        mapper_row = (
+            f"{self.dev / 'mapper' / 'swapz-primary'} "
+            "partition 108320764 1024 -1\n"
+        )
+        for extra_rows in (
+            "/swapfile file 10000 12 -2\n/swapfile file 10000 12 -2\n",
+            "/swapfile file 10000 10001 -2\n",
+        ):
+            with self.subTest(extra_rows=extra_rows):
+                (self.proc / "swaps").write_text(
+                    "Filename Type Size Used Priority\n" + mapper_row + extra_rows,
+                    encoding="ascii",
+                )
+                observed = self.run_helper("once")
+                self.assertEqual(observed.returncode, 2, observed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+                self.assertIn(
+                    "swap_inventory_unavailable_or_invalid", observed.stderr
+                )
+                self.assertIn("phase=swap_inventory ", observed.stderr)
+                self.assertIn("observed=unavailable_or_invalid", observed.stderr)
+                self.assertIn("command_status=2 ", observed.stderr)
+
+    def test_changing_swap_inventory_cannot_report_healthy(self) -> None:
+        unrelated_sysfs = self.sys / "dev" / "block" / "8:7"
+        unrelated_sysfs.mkdir(parents=True)
+        (self.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n"
+            f"{self.dev / 'mapper' / 'swapz-primary'} "
+            "partition 108320764 1024 -1\n"
+            "/dev/disk/by-id/changing-swap partition 10000 12 -2\n",
+            encoding="ascii",
+        )
+        write_executable(
+            self.bin / "lsblk",
+            textwrap.dedent(
+                r"""\
+                #!/bin/sh
+                [ "$2" = MAJ:MIN ] || exit 1
+                case "$4" in
+                */disk/by-partuuid/*) echo 8:1 ;;
+                */mapper/swapz-primary) echo 253:0 ;;
+                /dev/disk/by-id/changing-swap)
+                    printf 'Filename Type Size Used Priority\n%s/mapper/swapz-primary partition 108320764 1024 -1\n' \
+                        "$SWAPZ_PRIMARY_TEST_DEV_ROOT" > "$SWAPZ_PRIMARY_TEST_PROC_ROOT/swaps"
+                    echo 8:7
+                    ;;
+                *) exit 1 ;;
+                esac
+                """
+            ),
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+        self.assertIn("swap_inventory_changed_during_observation", observed.stderr)
+        self.assertIn("phase=swap_inventory_stability ", observed.stderr)
+        self.assertIn("observed=changed_during_observation", observed.stderr)
+        self.assertIn("command_status=0 ", observed.stderr)
+        self.assertIn("next=repeat_read_only_observation", observed.stderr)
+
+    def test_swap_usage_change_during_observation_is_not_inventory_churn(self) -> None:
+        (self.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n"
+            f"{self.dev / 'mapper' / 'swapz-primary'} "
+            "partition 108320764 1024 -1\n"
+            "/swapfile file 10000 12 -2\n",
+            encoding="ascii",
+        )
+        write_executable(
+            self.bin / "lsblk",
+            textwrap.dedent(
+                r"""\
+                #!/bin/sh
+                [ "$2" = MAJ:MIN ] || exit 1
+                case "$4" in
+                */disk/by-partuuid/*) echo 8:1 ;;
+                */mapper/swapz-primary) echo 253:0 ;;
+                /swapfile)
+                    printf 'Filename Type Size Used Priority\n%s/mapper/swapz-primary partition 108320764 2048 -1\n/swapfile file 10000 13 -2\n' \
+                        "$SWAPZ_PRIMARY_TEST_DEV_ROOT" > "$SWAPZ_PRIMARY_TEST_PROC_ROOT/swaps"
+                    exit 1
+                    ;;
+                *) exit 1 ;;
+                esac
+                """
+            ),
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", observed.stderr)
+        self.assertNotIn("swap_inventory_changed_during_observation", observed.stderr)
+
+    def test_changing_swap_inventory_cannot_prove_hibernation_inactive(self) -> None:
+        (self.etc / "swapz" / "primary-target").unlink()
+        (self.dev / "mapper" / "swapz-primary").unlink()
+        write_executable(self.sbin / "swapzctl", "#!/bin/sh\nexit 2\n")
+        unrelated_sysfs = self.sys / "dev" / "block" / "8:7"
+        unrelated_sysfs.mkdir(parents=True)
+        (self.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n"
+            "/dev/disk/by-id/changing-swap partition 10000 12 -2\n",
+            encoding="ascii",
+        )
+        write_executable(
+            self.bin / "lsblk",
+            textwrap.dedent(
+                r"""\
+                #!/bin/sh
+                [ "$2" = MAJ:MIN ] || exit 1
+                [ "$4" = /dev/disk/by-id/changing-swap ] || exit 1
+                printf 'Filename Type Size Used Priority\n' \
+                    > "$SWAPZ_PRIMARY_TEST_PROC_ROOT/swaps"
+                echo 8:7
+                """
+            ),
+        )
+        blocked = self.run_helper("hibernate-guard")
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn("cannot prove swapz-primary inactive", blocked.stderr)
+
     def test_malformed_swap_inventory_degrades_runtime_observation(self) -> None:
         for content in (
             "",
