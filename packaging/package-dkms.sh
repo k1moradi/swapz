@@ -1917,7 +1917,49 @@ import re
 import sys
 from pathlib import Path
 
-report = json.loads(Path(sys.argv[1]).read_text())
+report = None
+
+
+def safe_observed(value):
+    """Return a bounded non-path representation for public diagnostics."""
+    if value is None:
+        return "missing"
+    if value is True:
+        return "true(bool)"
+    if value is False:
+        return "false(bool)"
+    if type(value) is int:
+        return str(value)
+    if (isinstance(value, str) and
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:+-]{0,79}", value)):
+        return value
+    return f"<{type(value).__name__}>"
+
+
+def reject(field, expected, observed, next_step):
+    source = (safe_observed(report.get("source_sha"))
+              if isinstance(report, dict) else "unavailable")
+    tested = (safe_observed(report.get("tested_commit_sha"))
+              if isinstance(report, dict) else "unavailable")
+    raise SystemExit(
+        "qualification report invalid: "
+        f"field={field} source_sha={source} tested_commit_sha={tested} "
+        f"expected={expected} observed={safe_observed(observed)} "
+        f"next={next_step}")
+
+
+try:
+    report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError):
+    raise SystemExit(
+        "qualification report invalid: field=document "
+        "source_sha=unavailable tested_commit_sha=unavailable "
+        "expected=UTF-8-JSON-object observed=unreadable "
+        "next=rerun-make-test-for-exact-clean-source")
+if not isinstance(report, dict):
+    reject("document", "JSON-object", report,
+           "rerun-make-test-for-exact-clean-source")
+
 expected_kernel_release = sys.argv[2]
 required_stages = (
     "Build module and helpers",
@@ -1927,30 +1969,71 @@ required_stages = (
     "Owned RAM smoke + mixed/QD pilot",
 )
 if report.get("schema") != "swapz-test-results-v1":
-    raise SystemExit("bad schema")
+    reject("schema", "swapz-test-results-v1", report.get("schema"),
+           "rerun-make-test-for-exact-clean-source")
 if report.get("kernel_release") != expected_kernel_release:
-    raise SystemExit("wrong kernel")
+    reject("kernel_release", expected_kernel_release, report.get("kernel_release"),
+           "rerun-make-test-on-running-kernel")
 source = report.get("source_sha")
 tested = report.get("tested_commit_sha")
-if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source) or tested != source:
-    raise SystemExit("bad source")
-if report.get("overall") != "PASS" or report.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY":
-    raise SystemExit("not qualified")
+if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source):
+    reject("source_sha", "40-lower-hex", source,
+           "rerun-make-test-for-exact-clean-source")
+if not isinstance(tested, str) or not re.fullmatch(r"[0-9a-f]{40}", tested):
+    reject("tested_commit_sha", "40-lower-hex", tested,
+           "rerun-make-test-for-exact-clean-source")
+if tested != source:
+    reject("tested_commit_sha", source, tested,
+           "rerun-make-test-for-exact-clean-source")
+if report.get("overall") != "PASS":
+    reject("overall", "PASS", report.get("overall"),
+           "inspect-first-non-PASS-stage-and-rerun-make-test")
+if report.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY":
+    reject("qualification", "RAM_BACKED_NULL_BLK_ONLY",
+           report.get("qualification"),
+           "rerun-make-test-for-exact-clean-source")
 stages = report.get("stages")
-if not isinstance(stages, list) or len(stages) != len(required_stages):
-    raise SystemExit("bad stages")
-for expected, stage in zip(required_stages, stages):
-    if not isinstance(stage, dict) or stage.get("name") != expected or stage.get("status") != "PASS" or stage.get("exit_code") != 0:
-        raise SystemExit("stage failed")
+if not isinstance(stages, list):
+    reject("stages", "5-canonical-stages", stages,
+           "rerun-make-test-for-exact-clean-source")
+if len(stages) != len(required_stages):
+    reject("stages", "5-canonical-stages", len(stages),
+           "rerun-make-test-for-exact-clean-source")
+for index, (expected, stage) in enumerate(zip(required_stages, stages)):
+    if not isinstance(stage, dict):
+        reject(f"stages[{index}]", "object", stage,
+               "rerun-make-test-for-exact-clean-source")
+    if stage.get("name") != expected:
+        reject(f"stages[{index}].name", expected, stage.get("name"),
+               "rerun-make-test-for-exact-clean-source")
+    if stage.get("status") != "PASS":
+        reject(f"stages[{index}].status", "PASS", stage.get("status"),
+               "inspect-first-non-PASS-stage-and-rerun-make-test")
+    exit_code = stage.get("exit_code")
+    if type(exit_code) is not int or exit_code != 0:
+        reject(f"stages[{index}].exit_code", "integer-0", exit_code,
+               "rerun-make-test-for-exact-clean-source")
+
 artifacts = report.get("qualified_artifacts")
-if not isinstance(artifacts, dict) or artifacts.get("status") != "AVAILABLE":
-    raise SystemExit("artifacts unavailable")
+if not isinstance(artifacts, dict):
+    reject("qualified_artifacts", "canonical-artifact-object", artifacts,
+           "rerun-make-test-and-rebuild-qualified-artifacts")
+if artifacts.get("status") != "AVAILABLE":
+    reject("qualified_artifacts.status", "AVAILABLE", artifacts.get("status"),
+           "rerun-make-test-and-rebuild-qualified-artifacts")
+artifact_keys = ("formatter_sha256", "module_sha256", "oracle_sha256")
 values = []
-for key in ("formatter_sha256", "module_sha256", "oracle_sha256"):
+for key in artifact_keys:
     value = artifacts.get(key)
     if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
-        raise SystemExit("bad digest")
+        reject(f"qualified_artifacts.{key}", "64-lower-hex-sha256", value,
+               "rerun-make-test-and-rebuild-qualified-artifacts")
     values.append(value)
+if set(artifacts) != {"status", *artifact_keys}:
+    reject("qualified_artifacts.keys",
+           "status+formatter_sha256+module_sha256+oracle_sha256",
+           "noncanonical-fields",
+           "rerun-make-test-and-rebuild-qualified-artifacts")
 print(source)
 print(*values, sep="\n")
 PY

@@ -4497,50 +4497,82 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
             self.SOURCE_SHA, "b" * 64, "c" * 64, "d" * 64])
 
         scenarios = (
-            ("tested_commit_sha", "bad source",
+            ("tested_commit_sha", self.SOURCE_SHA, "e" * 40,
+             "rerun-make-test-for-exact-clean-source",
              lambda report: report.update(tested_commit_sha="e" * 40)),
-            ("source_sha", "bad source",
-             lambda report: report.update(source_sha="e" * 40)),
-            ("kernel_release", "wrong kernel",
+            ("source_sha", "40-lower-hex", "wrong",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report.update(source_sha="wrong")),
+            ("kernel_release", self.KERNEL_RELEASE, "other-kernel",
+             "rerun-make-test-on-running-kernel",
              lambda report: report.update(kernel_release="other-kernel")),
-            ("stages[1].status", "stage failed",
+            ("stages[1].status", "PASS", "FAIL",
+             "inspect-first-non-PASS-stage-and-rerun-make-test",
              lambda report: report["stages"][1].update(
                  status="FAIL", exit_code=1)),
-            ("stages[4].status", "stage failed",
+            ("stages[4].status", "PASS", "BLOCKED",
+             "inspect-first-non-PASS-stage-and-rerun-make-test",
              lambda report: report["stages"][4].update(
                  status="BLOCKED", exit_code=2)),
-            ("stages[4].status", "stage failed",
+            ("stages[4].status", "PASS", "NOT_RUN",
+             "inspect-first-non-PASS-stage-and-rerun-make-test",
              lambda report: report["stages"][4].update(status="NOT_RUN")),
-            ("stages[4].status", "stage failed",
+            ("stages[4].status", "PASS", "UNAVAILABLE",
+             "inspect-first-non-PASS-stage-and-rerun-make-test",
              lambda report: report["stages"][4].update(status="UNAVAILABLE")),
-            ("stages", "bad stages",
+            ("stages", "5-canonical-stages", "2",
+             "rerun-make-test-for-exact-clean-source",
              lambda report: report["stages"].__delitem__(slice(2, None))),
-            ("qualified_artifacts.module_sha256", "bad digest",
-             lambda report: report["qualified_artifacts"].pop("module_sha256")),
-            ("qualified_artifacts.status", "artifacts unavailable",
+            ("stages[0].exit_code", "integer-0", "false(bool)",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report["stages"][0].update(exit_code=False)),
+            ("stages[0].exit_code", "integer-0", "<float>",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report["stages"][0].update(exit_code=0.0)),
+            ("qualified_artifacts.module_sha256",
+             "64-lower-hex-sha256", "missing",
+             "rerun-make-test-and-rebuild-qualified-artifacts",
+             lambda report: report["qualified_artifacts"].pop(
+                 "module_sha256")),
+            ("qualified_artifacts.keys",
+             "status+formatter_sha256+module_sha256+oracle_sha256",
+             "noncanonical-fields",
+             "rerun-make-test-and-rebuild-qualified-artifacts",
+             lambda report: report["qualified_artifacts"].update(
+                 unexpected="e" * 64)),
+            ("qualified_artifacts.status", "AVAILABLE", "UNAVAILABLE",
+             "rerun-make-test-and-rebuild-qualified-artifacts",
              lambda report: report["qualified_artifacts"].update(
                  status="UNAVAILABLE")),
-            ("overall", "not qualified",
+            ("overall", "PASS", "FAIL",
+             "inspect-first-non-PASS-stage-and-rerun-make-test",
              lambda report: report.update(overall="FAIL")),
-            ("overall", "not qualified",
+            ("overall", "PASS", "BLOCKED",
+             "inspect-first-non-PASS-stage-and-rerun-make-test",
              lambda report: report.update(overall="BLOCKED")),
         )
-        for field, error, mutate in scenarios:
-            with self.subTest(field=field, parser_error=error):
+        for field, expected, observed, next_step, mutate in scenarios:
+            with self.subTest(field=field, observed=observed):
                 report = copy.deepcopy(passing)
                 mutate(report)
                 outcome = self.package_report_gate(report)
+                diagnostic = outcome.stderr.strip()
                 message = (
                     f"field={field} tested_source={self.SOURCE_SHA} "
-                    f"expected=BLOCKED observed={report['overall']}; "
-                    "next=inspect the recorded failure and rerun make test "
-                    "for the exact clean source and kernel")
+                    f"expected=BLOCKED observed={report.get('overall')}; "
+                    "next=inspect the invalid report field and rerun make test")
                 self.assertNotEqual(outcome.returncode, 0, message)
-                self.assertIn(error, outcome.stderr, message)
-                self.assertNotIn("/home/", outcome.stderr)
+                self.assertIn(f"field={field}", diagnostic, message)
+                self.assertIn("source_sha=", diagnostic, message)
+                self.assertIn("tested_commit_sha=", diagnostic, message)
+                self.assertIn(f"expected={expected}", diagnostic, message)
+                self.assertIn(f"observed={observed}", diagnostic, message)
+                self.assertIn(f"next={next_step}", diagnostic, message)
+                for private_prefix in ("/home/", "/tmp/", "/var/", "/mnt/"):
+                    self.assertNotIn(private_prefix, diagnostic, message)
 
-        # Runner's artifact schema is intentionally stricter than mere
-        # presence of three digests, including rejecting extra fields.
+        # Runner and package admission both reject non-canonical artifact
+        # identity rather than treating the presence of three digests as enough.
         for field in ("formatter_sha256", "module_sha256", "oracle_sha256"):
             with self.subTest(missing_digest=field):
                 hashes = copy.deepcopy(passing["qualified_artifacts"])

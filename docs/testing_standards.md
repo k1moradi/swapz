@@ -6128,7 +6128,14 @@ Owner `test_results.json` ingestion is strict: the stage list must contain
 exactly the five canonical stages in order, each with `status: PASS` and an
 integer `exit_code: 0`; duplicate, reordered, missing, extra, or internally
 contradictory stage rows are BLOCKED. The qualified-artifact object accepts
-only its status plus formatter/module/oracle SHA-256 fields. Every current PASS
+only its status plus formatter/module/oracle SHA-256 fields.
+Package admission must enforce those JSON types and object keys exactly:
+`false`, `0.0`, and `"0"` are not an integer stage exit code, and extra
+artifact fields are non-canonical even when all three required digests exist.
+A public admission rejection must name the invalid field, sanitized
+`source_sha` and `tested_commit_sha`, expected and observed classifications,
+and the required next `make test` action without exposing an absolute host
+path. Every current PASS
 release record must carry a strict UTC `observed_at_utc` timestamp, and each
 required CI workflow PASS must carry one concrete positive run ID for the exact
 release source. Required CI evidence must also bind a completed workflow run
