@@ -494,8 +494,8 @@ try:
     client.bind_executed_helper_sha256("8" * 64)
     if sys.argv[3] == "changed_start":
         genuine_ancestors = helper._source_parent_ancestors
-        def changed_start_time(phase):
-            current = list(genuine_ancestors(phase))
+        def changed_start_time(phase, parent_uid):
+            current = list(genuine_ancestors(phase, parent_uid))
             process_id, parent_id, ticks = current[0]
             current[0] = process_id, parent_id, ticks + 1
             return tuple(current)
@@ -629,6 +629,41 @@ print(result.stdout.strip(), flush=True)
                 self._assert_refusal(
                     stdout.strip(), "connect",
                     "parent_ancestry", "unrelated_peer_run")
+
+    def test_parent_lineage_stops_at_authorized_parent(self):
+        parent_process_id = 32101
+        higher_process_id = 32102
+        start_ticks = 654321
+        parent_uid = os.geteuid()
+        stat_fields = (
+            ["S", str(higher_process_id)] + ["0"] * 17 + [str(start_ticks)])
+        process_stat = (
+            f"{parent_process_id} (source-parent) " + " ".join(stat_fields))
+        process_status = (
+            "Name:\tsource-parent\n"
+            f"Uid:\t{parent_uid}\t{parent_uid}\t{parent_uid}\t{parent_uid}\n")
+        stat_path = Path("/proc") / str(parent_process_id) / "stat"
+        status_path = Path("/proc") / str(parent_process_id) / "status"
+
+        def read_parent_identity(path, encoding=None, errors=None):
+            del encoding, errors
+            if path == stat_path:
+                return process_stat
+            if path == status_path:
+                return process_status
+            raise AssertionError(
+                f"walked above authenticated parent: {path.name}")
+
+        with mock.patch.object(
+                client_helper.os, "getppid", return_value=parent_process_id), \
+             mock.patch.object(
+                 client_helper.Path, "read_text", autospec=True,
+                 side_effect=read_parent_identity):
+            observed = client_helper._source_parent_ancestors(
+                "connect", parent_uid)
+        self.assertEqual(
+            observed,
+            ((parent_process_id, higher_process_id, start_ticks),))
 
     def test_real_parent_can_send_nonce_bound_synthetic_approval(self):
         for _ in range(3):

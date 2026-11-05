@@ -205,14 +205,16 @@ def _source_parent_refusal(phase: str, check: str, observed: str,
         "next=inspect_parent_identity_read_only")
 
 
-def _source_parent_ancestors(phase: str) -> tuple[tuple[int, int, int], ...]:
-    """Capture the living /proc ancestry, including start ticks against PID reuse."""
+def _source_parent_ancestors(
+        phase: str, parent_uid: int) -> tuple[tuple[int, int, int], ...]:
+    """Capture only the living lineage through the authorized parent candidate."""
     ancestry: list[tuple[int, int, int]] = []
     visited: set[int] = set()
     process_id = os.getppid()
     for _ in range(32):
         if process_id <= 1:
-            return tuple(ancestry)
+            raise _source_parent_refusal(
+                phase, "parent_ancestry", "missing_authorized_parent")
         if process_id in visited:
             raise _source_parent_refusal(
                 phase, "process_lineage", "cyclic_process_ancestry")
@@ -243,6 +245,9 @@ def _source_parent_ancestors(phase: str) -> tuple[tuple[int, int, int], ...]:
             raise _source_parent_refusal(
                 phase, "process_lineage", "exited_or_invalid_process")
         ancestry.append((process_id, parent_id, start_ticks))
+        if _source_nearest_uid_ancestor(
+                (ancestry[-1],), parent_uid, phase) == process_id:
+            return tuple(ancestry)
         process_id = parent_id
     raise _source_parent_refusal(
         phase, "process_lineage", "ambiguous_process_ancestry")
@@ -251,10 +256,10 @@ def _source_parent_ancestors(phase: str) -> tuple[tuple[int, int, int], ...]:
 def _source_nearest_uid_ancestor(
         ancestors: tuple[tuple[int, int, int], ...],
         parent_uid: int, phase: str) -> int | None:
-    """Use kernel effective UIDs, not proc-directory owners, to choose authority.
+    """Use the effective UID to select the nearest authorized parent ancestor.
 
-    /proc/PID directory ownership can differ from process credentials. Caller
-    revalidates the complete start-tick ancestry to guard PID replacement.
+    The caller stops at the first match and revalidates that child-to-parent
+    start-tick lineage, so unrelated ancestors above the parent are not authority.
     """
     for process_id, _parent_pid, _start_ticks in ancestors:
         try:
@@ -325,7 +330,7 @@ class SourceAdmissionClient:
         try:
             # Capture ancestry before connecting: a replaced pathname must
             # not choose its own authority merely by matching our UID.
-            ancestors = _source_parent_ancestors("connect")
+            ancestors = _source_parent_ancestors("connect", parent_uid)
             channel.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
             channel.connect(os.fspath(path))
             credentials = channel.getsockopt(
@@ -345,10 +350,9 @@ class SourceAdmissionClient:
                 raise _source_parent_refusal(
                     "connect", "peer_uid", "wrong_peer_uid")
             # sudo may insert root-owned monitors, but the listener creator
-            # must be the nearest ancestor still owned by the source parent UID.
-            # A higher same-UID ancestor is not delegated socket authority.
-            authorized_parent_pid = _source_nearest_uid_ancestor(
-                ancestors, parent_uid, "connect")
+            # must terminate the child-to-parent lineage at the nearest
+            # ancestor with the source parent's effective UID.
+            authorized_parent_pid = ancestors[-1][0]
             if peer_pid != authorized_parent_pid:
                 raise _source_parent_refusal(
                     "connect", "parent_ancestry", "unrelated_peer_run")
@@ -356,9 +360,7 @@ class SourceAdmissionClient:
                 raise _source_parent_refusal(
                     "connect", "parent_liveness", "pidfd_unavailable")
             parent_pidfd = os.pidfd_open(peer_pid)
-            if (ancestors != _source_parent_ancestors("connect") or
-                    _source_nearest_uid_ancestor(
-                        ancestors, parent_uid, "connect") != peer_pid):
+            if ancestors != _source_parent_ancestors("connect", parent_uid):
                 raise _source_parent_refusal(
                     "connect", "parent_ancestry", "changed_parent_process")
             _source_parent_pidfd_alive(parent_pidfd, "connect")
@@ -437,12 +439,11 @@ class SourceAdmissionClient:
 
     def _require_parent_authority(self, phase: str) -> None:
         # The PID is not an authority by itself. Pin its creation-time kernel
-        # reference and full process lineage, and recheck the named endpoint.
+        # reference and lineage through the authenticated parent, then recheck
+        # the named endpoint. Ancestors above that parent are not authority.
         _source_parent_pidfd_alive(self._parent_pidfd, phase)
-        if (_source_parent_ancestors(phase) != self._parent_ancestors or
-                _source_nearest_uid_ancestor(
-                    self._parent_ancestors, self._parent_uid, phase) !=
-                    self._parent_process_id):
+        if _source_parent_ancestors(
+                phase, self._parent_uid) != self._parent_ancestors:
             raise _source_parent_refusal(
                 phase, "parent_ancestry", "changed_parent_process")
         try:

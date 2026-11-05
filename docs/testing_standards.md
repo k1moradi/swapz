@@ -298,17 +298,19 @@ synthetic subprocess-ownership safety, never approval for physical admission.
 The reciprocal source-admission **client** must authenticate the known living
 unprivileged creator of the admission listener, not merely a same-UID
 replacement endpoint: the socket's inode, mode and ownership, the kernel
-SO_PEERCRED PID and UID, the client's pinned pre-connect ancestor chain with
-/proc start ticks, and a live pidfd must agree on connection and again before
-and after each approval. The client must select the **nearest ancestor with the parent's
-effective UID** (the second Uid field in /proc/PID/status), not its /proc
-directory owner, as the only creator candidate. Merely finding the peer
-anywhere in the ancestry would also trust a higher same-UID shell or launcher
-which could replace the socket. The rootless AF_UNIX regression must reject
-that higher-ancestor listener, including after it replaces a real nearest
-parent's socket, while preserving a direct parent's synthetic approval.
-Recheck the selected effective UID at every approval boundary; malformed or
-unavailable process credentials are BLOCKED.
+SO_PEERCRED PID and UID, the client's pinned pre-connect ancestry segment
+through that parent with /proc start ticks, and a live pidfd must agree on
+connection and again before and after each approval. The client must select the
+**nearest ancestor with the parent's effective UID** (the second Uid field in
+/proc/PID/status) as the only creator candidate and stop the pinned lineage at
+that process. Merely finding the peer anywhere in the ancestry would also trust
+a higher same-UID shell or launcher which could replace the socket. Conversely,
+ancestors above the authenticated parent are not authority; their exit or
+reparenting must not revoke an otherwise unchanged live parent. The rootless
+AF_UNIX regression must reject that higher-ancestor listener, including after
+it replaces a real nearest parent's socket, while preserving a direct parent's
+synthetic approval. Recheck the selected effective UID at every approval
+boundary; malformed or unavailable process credentials are BLOCKED.
 The client must enable SO_PASSCRED and verify
 SCM_CREDENTIALS on every received reply byte; SO_PEERCRED alone remains
 unchanged if a connected descriptor is passed to a foreign writer. Missing,
