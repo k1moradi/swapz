@@ -344,7 +344,7 @@ run_case() {
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -383,13 +383,15 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
+        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
             setup_owned_lower
             setup_mapper_node
             if [[ $case_name == missing_sysfs_proof ]]; then
                 rm -- "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/dev"
             elif [[ $case_name == mismatched_devno ]]; then
                 printf '240:8\n' > "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/dev"
+            elif [[ $case_name == mismatched_index ]]; then
+                printf '8\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/index"
             elif [[ $case_name == partitioned_lower ]]; then
                 mkdir -p "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/nullb-swapz-${LOWER_TOKEN}1"
                 printf '1\n' > "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/nullb-swapz-${LOWER_TOKEN}1/partition"
@@ -465,7 +467,8 @@ run_case() {
     fi
     if [[ "$case_name" == owned_cleanup || "$case_name" == replaced_inode ||
           "$case_name" == cleanup_failure || "$case_name" == missing_sysfs_proof ||
-          "$case_name" == mismatched_devno || "$case_name" == dependency_devno_mismatch ||
+          "$case_name" == mismatched_devno || "$case_name" == mismatched_index ||
+          "$case_name" == dependency_devno_mismatch ||
           "$case_name" == partitioned_lower || "$case_name" == foreign_holder ||
           "$case_name" == foreign_dependency ]]; then
         [[ "$output" == *"phase="* && "$output" == *"resource_kind="* &&
@@ -539,6 +542,7 @@ run_case recognized_constructor owned_mapper_removal BLOCKED unavailable
 run_case primary_namespace stale_run_token BLOCKED unavailable
 run_case missing_sysfs_proof owned_resource_proof BLOCKED unavailable
 run_case mismatched_devno owned_resource_proof BLOCKED unavailable
+run_case mismatched_index owned_resource_proof BLOCKED unavailable
 run_case dependency_devno_mismatch owned_resource_proof BLOCKED unavailable
 run_case partitioned_lower owned_resource_proof BLOCKED unavailable
 run_case foreign_holder owned_resource_proof BLOCKED unavailable
@@ -551,4 +555,4 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 44 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 45 isolated preflight fixtures'

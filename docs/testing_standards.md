@@ -505,9 +505,10 @@ Open and retain descriptors for the selected configfs directory and its
 identities to the captured configfs proof. Resolve the power attribute through
 the pinned directory descriptor rather than the public pathname. Also capture
 index, memory-backed status, positive size, 4096-byte block size and queue mode.
-Require the nullb block major from `/proc/devices`, exact sysfs major:minor,
-the dependency devno, and the equal real lower block node `st_rdev`; missing
-or ambiguous telemetry blocks cleanup. Before mapper removal, revalidate the
+Require the nullb block major from `/proc/devices`, require the configfs
+index to be the live null_blk minor, require exact sysfs major:minor to equal
+the dependency devno and real lower block node `st_rdev`; missing or
+ambiguous telemetry blocks cleanup. Before mapper removal, revalidate the
 original mapper UUID, mapper device number, zero opens, mounted/swap inventory,
 unchanged dependency-name and dependency-devno outputs, exact sole-holder link,
 plus the original pinned configfs/lower proof. Remove by exact mapper UUID,
@@ -528,8 +529,9 @@ at cleanup gates use fail-only `phase`, `resource_kind`,
 inventories. The rootless `tests/runtime/native/nullblk-identity-test.sh`
 fixture must prove the original path-only false admission and exercise a real
 benchmark-shaped owned proof with distinct mapper/lower tokens, changed configfs
-inode, missing sysfs proof, mismatched dependency/sysfs/rdev identities,
-partitioned-lower and foreign-holder refusal, changed/foreign mapper
+inode, missing sysfs proof, mismatched configfs index and
+dependency/sysfs/rdev identities, partitioned-lower and foreign-holder refusal,
+changed/foreign mapper
 dependencies, namespace refusal, ambiguous module ownership and cleanup failure
 against only synthetic files and stubs. This
 unit evidence never substitutes for authorized loaded testing. Source-contract

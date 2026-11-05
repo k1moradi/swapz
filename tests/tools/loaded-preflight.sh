@@ -199,7 +199,7 @@ clean_orphaned_nullb() {
         name="${cfg##*/}"
         orphan_token="${name#nullb-swapz-}"
         is_hex16 "$orphan_token" || continue
-        refuse BLOCKED unclaimed_null_blk unavailable "token-named null_blk exists without unique mapper ownership proof; leave it untouched"
+        refuse BLOCKED unclaimed_null_blk unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk"
     done
 }
 
@@ -533,6 +533,7 @@ read_owned_lower_proof() {
         section && $2 == "nullb" { if ($1 ~ /^(0|[1-9][0-9]*)$/) print $1 }
     ' /proc/devices 2>/dev/null)" || return 1
     [[ -n $system_major && $system_major == "$block_major" ]] || return 1
+    [[ $sysfs_devno == "$system_major:$config_index" ]] || return 1
     [[ -e /sys/dev/block/$sysfs_devno &&
        "$(readlink -f "/sys/dev/block/$sysfs_devno" 2>/dev/null)" ==
        "$(readlink -f "/sys/block/$disk" 2>/dev/null)" ]] || return 1
@@ -608,7 +609,7 @@ owned_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev
 [[ $owned_power_fd_identity == "$owned_power_identity" ]] ||
     ownership_refuse acquire null_blk pinned_power_inode substituted
 owned_lower_proof="$(read_owned_lower_proof)" ||
-    ownership_refuse acquire null_blk dependency_sysfs_major_devno_node_rdev missing_or_incomplete
+    ownership_refuse acquire null_blk dependency_sysfs_major_index_devno_node_rdev missing_or_incomplete
 
 assert_not_mounted "$lower" mounted_owned_lower
 assert_not_active_swap "$lower"
@@ -686,15 +687,16 @@ fi
 is_uint "$opens" && [[ $opens == 0 ]] ||
     refuse BLOCKED mapper_open_count unavailable "owned mapping remains open after bounded cleanup; reboot required before make test"
 
-# Revalidate both original objects and every recorded mapper dependency
-# immediately before the nonforce mutation. The UUID operand avoids name reuse.
-assert_owned_config_proof mapper_remove 1
-assert_owned_mapper_proof
-assert_mapper_is_only_lower_holder mapper_remove
+# Recheck host-use gates, then revalidate both original objects and every
+# recorded mapper dependency immediately adjacent to the nonforce mutation.
+# The UUID operand avoids a public mapper-name reuse after this proof.
 assert_not_mounted "$mapper" mounted_owned_mapper
 assert_not_active_swap "$mapper"
 assert_not_mounted "$lower" mounted_owned_lower
 assert_not_active_swap "$lower"
+assert_owned_config_proof mapper_remove 1
+assert_owned_mapper_proof
+assert_mapper_is_only_lower_holder mapper_remove
 if timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$uuid"; then
     :
 else
