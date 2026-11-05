@@ -34,17 +34,6 @@ struct forced_terminal_publication {
  */
 static _Thread_local struct forced_terminal_publication *forced_publication;
 
-/* CAS collision is only a reader-side schedule, not a payload publication. */
-struct ready_collision_hook {
-	const atomic_t *state;
-	pthread_barrier_t *collision;
-	int expected_ready_state;
-	int replacement_state;
-	unsigned int acquire_reads;
-	unsigned int failed_cas;
-};
-static _Thread_local struct ready_collision_hook *ready_collision;
-
 /* Defined after the included production header; keep the CAS shim neutral. */
 static void publish_interposed_terminal(atomic_t *state, int terminal_state);
 
@@ -76,8 +65,6 @@ static int atomic_read_acquire(const atomic_t *value)
 		if (observed == publication.ready_state)
 			publication.ready_acquires++;
 	}
-	if (ready_collision && value == ready_collision->state)
-		ready_collision->acquire_reads++;
 	return observed;
 }
 
@@ -100,18 +87,11 @@ static int atomic_cmpxchg(atomic_t *value, int old, int replacement)
 						    memory_order_relaxed))
 			sched_yield();
 	}
-	/* Both READY readers reach their real CAS before either can win. */
-	if (ready_collision && value == ready_collision->state &&
-	    old == ready_collision->expected_ready_state &&
-	    replacement == ready_collision->replacement_state)
-		(void)pthread_barrier_wait(ready_collision->collision);
 	/* Do not give Linux's failed-CAS path stronger ordering in this shim. */
 	atomic_compare_exchange_strong_explicit(&value->value, &old, replacement,
 			memory_order_seq_cst, memory_order_relaxed);
 	if (value == publication.state && old != expected)
 		publication.failed_cas++;
-	if (ready_collision && value == ready_collision->state && old != expected)
-		ready_collision->failed_cas++;
 	return old;
 }
 
@@ -1422,247 +1402,6 @@ static int test_generation_handoff_after_cancel_or_completion(void)
 	return 0;
 }
 
-/*
- * Two terminal observers acquire the same READY state before either CAS.
- * The barrier only forces CAS contention between readers; it never serves as
- * a payload-publication edge. Only the successful claimant retires the ready
- * charge and accounts for the first modeled upper completion.
- */
-enum { READY_COLLISION_SLOT = 63, READY_COLLISION_REPEATS = 64 };
-struct ready_collision_context {
-	atomic64_t free_mask;
-	atomic_t state;
-	_Atomic unsigned int references;
-	_Atomic unsigned int ready_current;
-	_Atomic unsigned int publications[2];
-	_Atomic unsigned int completions[2];
-	_Atomic int failed;
-	pthread_barrier_t collision;
-	int expected_ready_state;
-	int retired_states[2];
-	unsigned int acquire_reads[2];
-	unsigned int failed_cas[2];
-};
-
-struct ready_collision_argument {
-	struct ready_collision_context *context;
-	unsigned int contender;
-};
-
-static void ready_collision_fail(struct ready_collision_context *context,
-				 const char *phase, const char *cause,
-				 int expected, int observed)
-{
-	if (!atomic_exchange_explicit(&context->failed, 1,
-					      memory_order_relaxed))
-		fprintf(stderr, "ready-collision slot=%u phase=%s cause=%s "
-			"terminal=%d refs=%u expected=%d observed=%d "
-			"publications_expected=1/1 publications_observed=%u/%u "
-			"completions_expected=1/1 completions_observed=%u/%u ready=%u\n",
-			READY_COLLISION_SLOT, phase, cause,
-			swapz_preparation_read_state(&context->state),
-			atomic_load_explicit(&context->references,
-					     memory_order_relaxed),
-			expected, observed,
-			atomic_load_explicit(&context->publications[0],
-					     memory_order_relaxed),
-			atomic_load_explicit(&context->publications[1],
-					     memory_order_relaxed),
-			atomic_load_explicit(&context->completions[0],
-					     memory_order_relaxed),
-			atomic_load_explicit(&context->completions[1],
-					     memory_order_relaxed),
-			atomic_load_explicit(&context->ready_current,
-					     memory_order_relaxed));
-}
-
-static void *ready_collision_contender(void *opaque)
-{
-	const struct ready_collision_argument *argument = opaque;
-	struct ready_collision_context *context = argument->context;
-	struct ready_collision_hook hook = {
-		.state = &context->state,
-		.collision = &context->collision,
-		.expected_ready_state = context->expected_ready_state,
-		.replacement_state = SWAPZ_PREPARATION_CONSUMED,
-	};
-	const unsigned int contender = argument->contender;
-	int retired;
-
-	ready_collision = &hook;
-	retired = contender == 0 ? swapz_preparation_retire(&context->state) :
-		swapz_preparation_consume_ready(&context->state);
-	ready_collision = NULL;
-	context->retired_states[contender] = retired;
-	context->acquire_reads[contender] = hook.acquire_reads;
-	context->failed_cas[contender] = hook.failed_cas;
-	if (retired == context->expected_ready_state) {
-		unsigned int previous_ready = atomic_fetch_sub_explicit(
-			&context->ready_current, 1, memory_order_relaxed);
-
-		if (previous_ready != 1U)
-			ready_collision_fail(context, "ready-retirement",
-				"ready-charge-not-unique", 1, (int)previous_ready);
-		if (atomic_fetch_add_explicit(&context->completions[0], 1,
-					      memory_order_relaxed) != 0)
-			ready_collision_fail(context, "upper-completion",
-				"multiple-ready-owners", 0, 1);
-	} else if (retired != SWAPZ_PREPARATION_CONSUMED) {
-		ready_collision_fail(context, "losing-ready-claim",
-			"unexpected-terminal", SWAPZ_PREPARATION_CONSUMED, retired);
-	}
-	return NULL;
-}
-
-static int test_simultaneous_ready_retirement_and_slot_reuse(void)
-{
-	static const int ready_results[] = { 2048, 0 };
-	unsigned int case_index, iteration;
-
-	for (case_index = 0; case_index < 2U; ++case_index) {
-		for (iteration = 0; iteration < READY_COLLISION_REPEATS; ++iteration) {
-			struct ready_collision_context context = { 0 };
-			struct ready_collision_argument arguments[2];
-			pthread_t contenders[2];
-			unsigned int contender, winner, loser;
-			int slot, previous;
-
-			atomic_init(&context.free_mask.value,
-				    (s64)(1ULL << READY_COLLISION_SLOT));
-			atomic_init(&context.state.value, SWAPZ_PREPARATION_EMPTY);
-			atomic_init(&context.references, 2);
-			atomic_init(&context.ready_current, 0);
-			atomic_init(&context.publications[0], 0);
-			atomic_init(&context.publications[1], 0);
-			atomic_init(&context.completions[0], 0);
-			atomic_init(&context.completions[1], 0);
-			atomic_init(&context.failed, 0);
-			context.expected_ready_state =
-				swapz_preparation_codec_result_state(
-					ready_results[case_index]);
-			slot = swapz_preparation_claim_slot(&context.free_mask);
-			CHECK(slot == READY_COLLISION_SLOT);
-			atomic_store_explicit(&context.state.value,
-					      SWAPZ_PREPARATION_PREPARING,
-					      memory_order_relaxed);
-			/* Producer charges readiness before terminal publication. */
-			(void)atomic_fetch_add_explicit(&context.ready_current, 1,
-							 memory_order_relaxed);
-			previous = swapz_preparation_publish_codec_result(
-				&context.state, ready_results[case_index]);
-			CHECK(previous == SWAPZ_PREPARATION_PREPARING);
-			(void)atomic_fetch_add_explicit(&context.publications[0], 1,
-							 memory_order_relaxed);
-			/* Producer put leaves the ordered owner holding the final ref. */
-			CHECK(atomic_fetch_sub_explicit(&context.references, 1,
-					memory_order_acq_rel) == 2U);
-			CHECK(pthread_barrier_init(&context.collision, NULL, 2) == 0);
-			for (contender = 0; contender < 2; ++contender) {
-				arguments[contender].context = &context;
-				arguments[contender].contender = contender;
-				CHECK(pthread_create(&contenders[contender], NULL,
-						     ready_collision_contender,
-						     &arguments[contender]) == 0);
-			}
-			for (contender = 0; contender < 2; ++contender)
-				CHECK(pthread_join(contenders[contender], NULL) == 0);
-			CHECK(pthread_barrier_destroy(&context.collision) == 0);
-			winner = context.retired_states[0] ==
-				 context.expected_ready_state ? 0U : 1U;
-			loser = winner ^ 1U;
-			if (context.retired_states[winner] != context.expected_ready_state ||
-			    context.retired_states[loser] != SWAPZ_PREPARATION_CONSUMED ||
-			    context.acquire_reads[winner] != 1U ||
-			    context.acquire_reads[loser] != 2U ||
-			    context.failed_cas[winner] != 0U ||
-			    context.failed_cas[loser] != 1U ||
-			    atomic_load_explicit(&context.ready_current,
-						 memory_order_relaxed) != 0U ||
-			    atomic_load_explicit(&context.completions[0],
-						 memory_order_relaxed) != 1U ||
-			    swapz_preparation_read_state(&context.state) !=
-				    SWAPZ_PREPARATION_CONSUMED)
-				ready_collision_fail(&context, "ready-CAS-collision",
-					"double-consume-or-missing-reread", 1,
-					(int)atomic_load_explicit(
-						&context.completions[0],
-						memory_order_relaxed));
-			CHECK(swapz_preparation_claim_slot(&context.free_mask) == -1);
-			CHECK(atomic_load_explicit(&context.references,
-						  memory_order_relaxed) == 1U);
-			CHECK(atomic_fetch_sub_explicit(&context.references, 1,
-					memory_order_acq_rel) == 1U);
-			atomic_store_explicit(&context.state.value,
-					      SWAPZ_PREPARATION_EMPTY,
-					      memory_order_relaxed);
-			swapz_preparation_release_slot(&context.free_mask,
-						       READY_COLLISION_SLOT);
-			slot = swapz_preparation_claim_slot(&context.free_mask);
-			if (slot != READY_COLLISION_SLOT ||
-			    swapz_preparation_read_state(&context.state) !=
-				    SWAPZ_PREPARATION_EMPTY)
-				ready_collision_fail(&context, "immediate-reuse",
-					"state-not-cleared-after-final-put",
-					READY_COLLISION_SLOT, slot);
-			/* A negative codec result in the reused slot remains ERROR. */
-			atomic_store_explicit(&context.references, 2,
-					      memory_order_relaxed);
-			atomic_store_explicit(&context.state.value,
-					      SWAPZ_PREPARATION_PREPARING,
-					      memory_order_relaxed);
-			previous = swapz_preparation_publish_codec_result(
-				&context.state, -EIO);
-			if (previous == SWAPZ_PREPARATION_PREPARING)
-				(void)atomic_fetch_add_explicit(
-					&context.publications[1], 1,
-					memory_order_relaxed);
-			if (previous != SWAPZ_PREPARATION_PREPARING ||
-			    swapz_preparation_read_state(&context.state) !=
-				    SWAPZ_PREPARATION_ERROR ||
-			    swapz_preparation_retire(&context.state) !=
-				    SWAPZ_PREPARATION_ERROR ||
-			    swapz_preparation_consume_ready(&context.state) !=
-				    SWAPZ_PREPARATION_ERROR)
-				ready_collision_fail(&context, "reused-error-publication",
-					"error-converted-to-ready",
-					SWAPZ_PREPARATION_ERROR,
-					swapz_preparation_read_state(&context.state));
-			/* ERROR completes the new BIO only through its ordered owner. */
-			(void)atomic_fetch_add_explicit(&context.completions[1], 1,
-							 memory_order_relaxed);
-			CHECK(swapz_preparation_claim_slot(&context.free_mask) == -1);
-			CHECK(atomic_fetch_sub_explicit(&context.references, 1,
-					memory_order_acq_rel) == 2U);
-			CHECK(swapz_preparation_claim_slot(&context.free_mask) == -1);
-			CHECK(atomic_fetch_sub_explicit(&context.references, 1,
-					memory_order_acq_rel) == 1U);
-			atomic_store_explicit(&context.state.value,
-					      SWAPZ_PREPARATION_EMPTY,
-					      memory_order_relaxed);
-			swapz_preparation_release_slot(&context.free_mask,
-						       READY_COLLISION_SLOT);
-			CHECK((uint64_t)atomic64_read(&context.free_mask) ==
-			      (1ULL << READY_COLLISION_SLOT));
-			if (atomic_load_explicit(&context.publications[0],
-						 memory_order_relaxed) != 1U ||
-			    atomic_load_explicit(&context.publications[1],
-						 memory_order_relaxed) != 1U ||
-			    atomic_load_explicit(&context.completions[0],
-						 memory_order_relaxed) != 1U ||
-			    atomic_load_explicit(&context.completions[1],
-						 memory_order_relaxed) != 1U)
-				ready_collision_fail(&context, "final-counts",
-					"publication-or-completion-not-once", 1,
-					(int)atomic_load_explicit(
-						&context.completions[1],
-						memory_order_relaxed));
-			CHECK(!atomic_load_explicit(&context.failed,
-						   memory_order_relaxed));
-		}
-	}
-	return 0;
-}
-
 int main(void)
 {
 	CHECK(!test_representation_race());
@@ -1675,7 +1414,6 @@ int main(void)
 	CHECK(!test_two_producers_reclaim_only_after_final_consumer());
 	CHECK(!test_concurrent_reuse());
 	CHECK(!test_generation_handoff_after_cancel_or_completion());
-	CHECK(!test_simultaneous_ready_retirement_and_slot_reuse());
-	puts("SWAPZ_PREPARATION_SLOTS_PASS=11");
+	puts("SWAPZ_PREPARATION_SLOTS_PASS=10");
 	return 0;
 }

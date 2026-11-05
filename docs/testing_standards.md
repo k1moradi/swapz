@@ -4662,17 +4662,20 @@ never print page payload bytes. These finite C11 schedules remain supporting
 evidence, not loaded KCSAN, lockdep, or proof of kernel execution under
 suspend/drain.
 
-The native preparation-slot continuation additionally forces a simultaneous
-retire-versus-consume collision once both readers acquire READY_COMPRESSED or
-READY_RAW. Its reader-only barrier stops at the production CAS sites and
-cannot serve as producer-to-consumer payload publication. Exactly one claimant
-must own the ready-residency charge and modeled upper completion; the losing
-conditional exchange must acquire-reread CONSUMED. Slot 63 remains unavailable
-while the consumer reference survives, and immediate reuse after the final put
-must clear the previous terminal state before publishing an exact negative
-codec ERROR with a separate, once-only modeled completion and no ready charge.
-These checks are rootless C11 counter/state evidence, not proof of loaded BIO
-completion, kernel memory ordering, KCSAN, or lockdep qualification.
+The preparation-slot helper regression must not manufacture concurrent
+`swapz_preparation_retire()` and `swapz_preparation_consume_ready()` calls
+for one prepared page and describe that as a production ownership transition.
+They are alternative actions of the single serialized ordered owner: the normal
+ordered path consumes READY, while terminal completion retires PREPARING/READY;
+the asynchronous preparation worker only publishes its result and drops its own
+reference. Production-faithful rootless schedules instead race that one ordered
+owner against producer publication and producer final-put. The dedicated
+cancellation/lifetime continuation covers PREPARING -> CANCELLED when failure
+wins, READY -> CONSUMED when publication wins, ERROR remaining ERROR, both
+possible final-reference owners, slot-63 reuse only after the last reference,
+and stale-payload rejection after reclaim. A generic helper-contention test may
+be kept only when explicitly labeled non-production and must not count as BIO
+completion-ownership evidence.
 
 
 The submitter-path continuation adds 256 deterministic handoffs that model its
