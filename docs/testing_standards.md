@@ -272,6 +272,22 @@ parent replacement; it does not establish a matching primary mount-reader
 path or a destructive admission. Preserve **UNPROVEN** for unclosed snapshot
 intervals; do not label them FIXED solely from repeated namespace stats.
 
+A mount-namespace device/inode match also does not prove that a foreign
+`/proc/<pid>/mountinfo` view is complete. Linux captures the target task's
+filesystem root when opening mountinfo and omits mountpoints outside that root.
+An isolated rootless user/mount-namespace probe must therefore distinguish a
+full-root view from a chroot-filtered peer view: a private harmless mount may
+remain present in the namespace and visible through a mountinfo fd opened
+before chroot, while the coordinator's later `/proc/<pid>/mountinfo` read for
+that same live namespace omits the mount. A PID/TID replacement can likewise
+retain the same mount-namespace identity while changing the process root, so
+two equal namespace stats do not authenticate mountinfo completeness. Until
+production proves a foreign task is rooted at its namespace root or obtains an
+equivalent complete view, do not classify foreign selected-partition/parent
+exclusion as globally FIXED. This is separate from the same-namespace shortcut,
+which is permitted only after the coordinator proves its own root is exactly
+`/` and has already validated its full-root table.
+
 Do not promote a synthetic initial namespace-`stat()` `EINVAL` into a
 production defect unless a matching Linux procfs path is established. The
 mountinfo open path itself can use `EINVAL` while a task is disappearing, so
