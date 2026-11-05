@@ -5202,11 +5202,21 @@ be replaced by optional fast-test telemetry. Keep the final exact-SHA check
 immediately before physical execution. It is point-in-time drift detection,
 not a lock on main; do not move it earlier or treat the pre-fast-test source
 observation as sufficient for that later destructive boundary.
-A recovered header alone never establishes byte-oracle success. A completed
-oracle with uncertain cleanup is still `RECOVERY_REQUIRED`, not a physical
-PASS. Canonical remote main cannot be locked by a read; coordinate a brief
-publication quiet window and retry only after resynchronization with a fresh
-nonce and run ID.
+A recovered header alone never establishes byte-oracle success. The
+development result requires an executed successful byte-oracle phase, durable
+`COMPLETE`, the exact original header, an inactive target, and a consumed
+one-use claim with no outstanding ownership marker. A zero-phase
+`PRE_DESTRUCTIVE_FAILED` record can preserve the original header without
+passing the oracle. A failed oracle followed by `COMPLETE` proves restoration,
+not correctness; a passed oracle with uncertain cleanup remains
+`RECOVERY_REQUIRED` with first-failure and ownership evidence retained.
+Cross-check the original saved run-manifest source/helper identity, frozen
+artifact SHA-256 values, target fingerprint and fresh development nonce with
+the current evidence. Historical logs with missing or conflicting run-manifest
+source metadata are inconclusive: do not infer source SHA from a progress note.
+The final canonical remote-main comparison is a point-in-time check, not a
+GitHub lock; coordinate a brief publication quiet window and retry only after
+resynchronization with a fresh nonce and run ID.
 
 Rootless regressions must prove that only the exact fresh evidence outcomes
 are admitted, that a canonical inactive recovery restores the header without

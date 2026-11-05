@@ -1265,6 +1265,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 earlier_source, duration=4,
                 host=dict(local_host, id_sha256="2" * 64)),
             "blocked": report(earlier_source, duration=5, blocked=True),
+            # Conflicting or missing historical source fields are not authority.
+            "missing-source": {key: value for key, value in
+                               report(earlier_source).items()
+                               if key != "source_sha"},
+            "conflicting-source": {
+                **report(earlier_source), "tested_commit_sha": source},
         }
         commits = ["policy-one", "policy-two"]
         changed_paths = {
@@ -1272,7 +1278,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "policy-two": "docs/testing_standards.md",
         }
         publications = ["latest", "earlier", "duplicate",
-                        "different-artifacts", "foreign-host", "blocked"]
+                        "different-artifacts", "foreign-host", "blocked",
+                        "missing-source", "conflicting-source"]
+        for name in ("missing-source", "conflicting-source"):
+            self.assertFalse(probe._report_is_owner_pass(
+                histories[name], local_host), name)
 
         def git(*args, **kwargs):
             del kwargs
@@ -1633,6 +1643,47 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             self.assertIn(base, events)
             self.assertFalse((state_dir / probe.STATE_NAME).exists())
 
+    def test_development_manifest_binds_source_helper_and_original_header(self):
+        target, evidence = self.physical_preparation_fixture()
+        target["swap_was_active"] = False
+        evidence.update({"source_sha": evidence["head"],
+                         "development_only": True,
+                         "scope": probe.DEVELOPMENT_SCOPE})
+        review = {"run_id": "0123456789abcdef0123456789abcdef",
+                  "reviewer": None}
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "run"
+            with self.simulate_root_owned_directories(state_dir), \
+                    mock.patch.object(probe, "_allocate_dm_identity",
+                                      return_value=(
+                                          "swapz-demo-physical-1234567890abcdef",
+                                          "SWAPZ-TEST-PHYSICAL-1234567890abcdef")), \
+                    mock.patch.object(probe, "_verify_target_identity"), \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=target["header"]):
+                state, saved_dir = probe._prepare_state(
+                    target, state_dir, evidence, review)
+            manifest = probe._load_unique_json(
+                (state_dir / probe.STATE_NAME).read_bytes())
+            self.assertEqual(saved_dir, state_dir)
+            self.assertEqual(manifest, state)
+            for key, expected in (
+                    ("source_sha", evidence["source_sha"]),
+                    ("helper_git_sha", evidence["head"]),
+                    ("helper_sha256", evidence["helper_sha256"]),
+                    ("run_id", review["run_id"]),
+                    ("partuuid", target["partuuid"]),
+                    ("card_identity_sha256", target["card_identity_sha256"]),
+                    ("header_sha256",
+                     hashlib.sha256(target["header"]).hexdigest()),
+                    ("development_only", True),
+                    ("swap_was_active", False)):
+                self.assertEqual(manifest[key], expected, key)
+            self.assertEqual((manifest["major"], manifest["minor"]),
+                             (target["major"], target["minor"]))
+            self.assertEqual((state_dir / probe.BACKUP_NAME).read_bytes(),
+                             target["header"])
+
     def test_original_header_read_refuses_unverified_regular_descriptor(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "lookalike-partition"
@@ -1850,18 +1901,20 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "final_block0_sha256": saved_results[
                     "original_header_sha256"],
                 "original_header_matches_final": True,
-                "final_swap_row": {
+                "final_swap_row": (None if development_only else {
                     "kind": "partition",
                     "size_kib": target["swap_size_kib"],
                     "priority": target["swap_priority"],
-                },
+                }),
                 "restored_swap_verified": True,
                 "final_mapper_present": False,
                 "final_module_present": False,
                 "mapper_removal_succeeded": True,
                 "module_cleanup_succeeded": True,
                 "active_partition_marker_present": False,
-                "approval_consumed": True,
+                "approval_consumed": None if development_only else True,
+                "run_claim_consumed": True,
+                "target_remains_inactive": development_only,
                 "final_recovery_state": saved_state["stage"],
                 "dm_inventory_after": inventory_after,
                 "unrelated_mapper_inventory_unchanged": (
@@ -1981,15 +2034,90 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         artifact_drift_before_mutation or recovery_failure:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
-                            "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state|main or the bound helper changed|qualified artifacts changed"):
+                            "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state|main or the bound helper changed|qualified artifacts changed") as rejected:
                         execute()
+                    state["_test_first_failure"] = str(rejected.exception)
                 else:
                     execute()
                 if (source_drift is not None or helper_sha_mismatch or
                         artifact_drift_before_mutation or recovery_failure):
                     state["_test_results"] = json.loads(
                         (Path(directory) / probe.RESULTS_NAME).read_text())
+                state["_test_observed_header"] = observed_block_zero
+                state["_test_owner_marker"] = os.path.isfile(
+                    Path(directory) / f"partition-{target['partuuid']}.active")
+                state["_test_consumed_claim"] = os.path.isfile(
+                    Path(directory) / f"consumed-{review['run_id']}.json")
         return events, state, target
+
+    def test_development_oracle_outcome_requires_executed_comparison(self):
+        events, complete, target = self.simulate_physical_run(
+            development_only=True)
+        results = complete["_test_results"]
+        oracle_calls = [event[1] for event in events if
+                        event[0] == "command" and
+                        event[1][0] == "/reviewed/device-roundtrip"]
+        self.assertEqual(len(oracle_calls), 1)
+        self.assertEqual(oracle_calls[0][2:],
+                         ("--expect-dm-uuid", complete["dm_uuid"]))
+        self.assertEqual([phase["status"] for phase in
+                          results["physical_oracle_phases"]], ["PASS"])
+        self.assertEqual(results["oracle_suite"], "PASS")
+        self.assertEqual(complete["stage"], "COMPLETE")
+        self.assertEqual(results["final_recovery_state"], "COMPLETE")
+        self.assertEqual(results["source_commit_sha"], results["current_git_head"])
+        self.assertEqual(results["helper_git_sha"], results["current_git_head"])
+        self.assertEqual(results["helper_sha256"],
+                         hashlib.sha256(SCRIPT.read_bytes()).hexdigest())
+        self.assertEqual(results["artifact_sha256"],
+                         results["live_artifact_sha256_before_mutation"])
+        self.assertEqual(results["run_id"], complete["run_id"])
+        self.assertEqual(results["partuuid"], target["partuuid"])
+        self.assertEqual(results["major_minor"], "8:4")
+        self.assertEqual(complete["_test_observed_header"], target["header"])
+        self.assertTrue(results["original_header_matches_final"])
+        self.assertIsNone(results["final_swap_row"])
+        self.assertTrue(results["target_remains_inactive"])
+        self.assertTrue(complete["_test_consumed_claim"])
+        self.assertFalse(complete["_test_owner_marker"])
+        self.assertFalse(any(event[0] == "command" and
+                             event[1][0] in {"swapon", "swapoff"}
+                             for event in events))
+        self.assertEqual(results["evidence_class"],
+                         "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION")
+
+        events, failed, target = self.simulate_physical_run(
+            development_only=True, oracle_failure_at=1)
+        results = failed["_test_results"]
+        self.assertEqual([phase["status"] for phase in
+                          results["physical_oracle_phases"]], ["FAIL"])
+        self.assertNotEqual(results.get("oracle_suite"), "PASS")
+        self.assertEqual(failed["stage"], "COMPLETE")
+        self.assertEqual(failed["_test_observed_header"], target["header"])
+        self.assertTrue(results["original_header_matches_final"])
+        self.assertIn("physical oracle phase", failed["_test_first_failure"])
+        self.assertFalse(failed["_test_owner_marker"])
+        self.assertTrue(failed["_test_consumed_claim"])
+
+        events, uncertain, _ = self.simulate_physical_run(
+            development_only=True, oracle_failure_at=1,
+            recovery_failure=True)
+        results = uncertain["_test_results"]
+        self.assertEqual(uncertain["stage"], "RECOVERY_REQUIRED")
+        self.assertEqual(results["final_recovery_state"], "RECOVERY_REQUIRED")
+        self.assertNotEqual(results.get("oracle_suite"), "PASS")
+        self.assertIn("physical oracle phase", uncertain["_test_first_failure"])
+        self.assertIn("injected recovery uncertainty", results["recovery_error"])
+        self.assertTrue(uncertain["_test_owner_marker"])
+        self.assertTrue(uncertain["_test_consumed_claim"])
+        self.assertNotIn(("restore0",), events)
+
+        _, uncertain, _ = self.simulate_physical_run(
+            development_only=True, recovery_failure=True)
+        self.assertEqual(uncertain["_test_results"]["oracle_suite"], "PASS")
+        self.assertEqual(uncertain["stage"], "RECOVERY_REQUIRED")
+        self.assertTrue(uncertain["_test_owner_marker"])
+        self.assertTrue(uncertain["_test_consumed_claim"])
 
     def test_development_post_evidence_drift_is_pre_destructive(self):
         # A post-fast_test source change must retain its original refusal,
@@ -2024,6 +2152,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             results["original_header_sha256"],
             hashlib.sha256(target["header"]).hexdigest())
         self.assertTrue(results["original_header_matches_final"])
+        self.assertEqual(state["_test_observed_header"], target["header"])
         self.assertNotIn(("write0",), events)
         self.assertFalse(any(event[0] == "recover" for event in events))
         commands = [event[1] for event in events if event[0] == "command"]
