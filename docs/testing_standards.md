@@ -5305,6 +5305,22 @@ a passing fixture. Missing, malformed, nonfinite, duplicate or exhausted
 memory/PSI/cgroup evidence refuses admission. Intentionally generated PSI
 still cannot silently defeat the conservative stop thresholds.
 
+The rootless pressure-evidence regression must distinguish three failures.
+A mismatched parent source/run identity is rejected before cgroup creation or
+workload invocation, with `phase=pressure_admission`,
+`original=identity_mismatch`, `errno=None`, `admission=source/run`,
+exact expected pages/bytes, `UNVERIFIED` observations and retained
+`LIVE_SWAP_ACTIVE` stage; it creates no workload phase and cannot inherit
+counts or PASS from a prior run. A same-run child reporting three corrupt
+pages instead fails `phase=pressure_verify` with
+`oracle=verified_page_count_mismatch`, exact lower observed pages/bytes
+and original nonzero child exit. A foreign-run child fails
+`oracle=run_identity_mismatch` even when its counts equal expectations
+and it exits zero. Post-workload failures retain `status=FAIL`,
+`oracle_outcome=UNVERIFIED`, original exit and retained stage rather than
+qualifying PASS. Error detail remains bounded and excludes page contents,
+private paths and untrusted child text.
+
 Rootless debugging must also prove that a malformed reaped-child wait status
 cannot bypass parent pipe closure or an attempted owned-cgroup removal.
 A failed durable write of the *initial* activation failure report must not

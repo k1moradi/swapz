@@ -1302,6 +1302,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                        "helper_sha256": "a" * 64,
                        "artifact_digests":
                            dict(supervisor.EXPECTED_ARTIFACTS)}
+            baseline_results = dict(results)
             ops = FakeOps(pressure_mode="mismatch")
             ops.mapper_active = True
             with mock.patch.object(supervisor, "_memory_sample",
@@ -1311,9 +1312,25 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                         "expected_pages=.*observed_pages=") as caught:
                     supervisor._run_pressure_phase(
                         Path(directory), state, results, ops)
-            self.assertIn("retained=LIVE_SWAP_ACTIVE", str(caught.exception))
+            mismatch_message = str(caught.exception)
+            for expected_detail in (
+                    "phase=pressure_verify",
+                    "oracle=verified_page_count_mismatch",
+                    "exit=1",
+                    f"expected_pages={supervisor.PRESSURE_PAGES}",
+                    f"observed_pages={supervisor.PRESSURE_PAGES - 3}",
+                    f"expected_bytes={supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES}",
+                    f"observed_bytes={(supervisor.PRESSURE_PAGES - 3) * supervisor.PAGE_BYTES}",
+                    "mapping_close_errno=None",
+                    "retained=LIVE_SWAP_ACTIVE"):
+                self.assertIn(expected_detail, mismatch_message)
             phase = results["pressure_phase"]
             self.assertEqual(phase["status"], "FAIL")
+            self.assertEqual(phase["oracle_outcome"], "UNVERIFIED")
+            self.assertEqual(
+                phase["oracle_failure"], "verified_page_count_mismatch")
+            self.assertEqual(phase["child"]["mismatches"], 3)
+            self.assertEqual(phase["retained_state"], "LIVE_SWAP_ACTIVE")
             self.assertEqual(phase["expected_verified_pages"],
                              supervisor.PRESSURE_PAGES)
             self.assertEqual(phase["observed_verified_pages"],
@@ -1324,19 +1341,66 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                              (supervisor.PRESSURE_PAGES - 3) *
                              supervisor.PAGE_BYTES)
             self.assertEqual(phase["exit_code"], 1)
+            self.assertEqual(ops.pressure_calls, 1)
 
-            rejected = dict(results, run_id="e" * 32)
-            with self.assertRaisesRegex(supervisor.LiveSwapError,
-                                        "source/run identity") as caught:
+            # A fresh rejected run must not inherit the previous oracle report.
+            rejected_state = dict(state)
+            rejected = dict(baseline_results, run_id="e" * 32)
+            with self.assertRaisesRegex(
+                    supervisor.LiveSwapError,
+                    r"phase=pressure_admission original=identity_mismatch "
+                    r"errno=None admission=source/run ") as caught:
                 supervisor._run_pressure_phase(
-                    Path(directory), dict(state), rejected, ops)
+                    Path(directory), rejected_state, rejected, ops)
             rejected_message = str(caught.exception)
-            self.assertIn(
-                f"expected_pages={supervisor.PRESSURE_PAGES}",
-                rejected_message)
-            self.assertIn("observed_pages=UNVERIFIED", rejected_message)
-            self.assertIn("observed_bytes=UNVERIFIED", rejected_message)
-            self.assertIn("retained=LIVE_SWAP_ACTIVE", rejected_message)
+            for expected_detail in (
+                    f"expected_pages={supervisor.PRESSURE_PAGES}",
+                    "observed_pages=UNVERIFIED",
+                    f"expected_bytes={supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES}",
+                    "observed_bytes=UNVERIFIED",
+                    "retained=LIVE_SWAP_ACTIVE"):
+                self.assertIn(expected_detail, rejected_message)
+            self.assertNotIn("pressure_phase", rejected)
+            self.assertNotIn("pressure_cgroup", rejected_state)
+            self.assertEqual(rejected_state["stage"], "LIVE_SWAP_ACTIVE")
+            self.assertEqual(ops.pressure_calls, 1)
+            self.assertNotIn("e" * 32, rejected_message)
+
+            # A foreign child report must also fail, even with exact counts.
+            wrong_run_ops = FakeOps(pressure_mode="wrong_run")
+            wrong_run_ops.mapper_active = True
+            wrong_run_results = dict(baseline_results)
+            with mock.patch.object(supervisor, "_memory_sample",
+                                   return_value=HIGH_MEMORY):
+                with self.assertRaises(supervisor.LiveSwapError) as caught:
+                    supervisor._run_pressure_phase(
+                        Path(directory), dict(state), wrong_run_results,
+                        wrong_run_ops)
+            wrong_run_message = str(caught.exception)
+            for expected_detail in (
+                    "phase=pressure_verify",
+                    "oracle=run_identity_mismatch",
+                    "exit=0",
+                    f"expected_pages={supervisor.PRESSURE_PAGES}",
+                    f"observed_pages={supervisor.PRESSURE_PAGES}",
+                    f"expected_bytes={supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES}",
+                    f"observed_bytes={supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES}",
+                    "retained=LIVE_SWAP_ACTIVE"):
+                self.assertIn(expected_detail, wrong_run_message)
+            wrong_run_phase = wrong_run_results["pressure_phase"]
+            self.assertEqual(wrong_run_phase["status"], "FAIL")
+            self.assertEqual(wrong_run_phase["oracle_outcome"], "UNVERIFIED")
+            self.assertEqual(
+                wrong_run_phase["oracle_failure"], "run_identity_mismatch")
+            self.assertEqual(wrong_run_phase["retained_state"], "LIVE_SWAP_ACTIVE")
+            self.assertEqual(
+                wrong_run_phase["observed_verified_pages"],
+                supervisor.PRESSURE_PAGES)
+            self.assertEqual(
+                wrong_run_phase["observed_verified_bytes"],
+                supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES)
+            self.assertEqual(wrong_run_phase["exit_code"], 0)
+            self.assertEqual(wrong_run_ops.pressure_calls, 1)
 
             preverify_ops = FakeOps()
             preverify_ops.pressure_workload = mock.Mock(
