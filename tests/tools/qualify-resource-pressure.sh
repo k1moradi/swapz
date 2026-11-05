@@ -967,13 +967,19 @@ cleanup() {
     local result=$? original_result observed initially_retained
     local current_identity child_cleanup_status session_fd_path
     local session_entry_snapshot session_entry nested_resume_disposition
-    local cleanup_diagnostic_reported cleanup_refusal_severity
+    local cleanup_diagnostic_reported cleanup_refusal_severity cleanup_signal_status=0
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     # An earlier admission/ownership refusal already owns the cleanup report.
     # Suppress secondary cleanup diagnostics while still preserving retention.
     cleanup_diagnostic_reported=$initially_retained
-    trap - EXIT HUP INT TERM
+    # A second signal must not abort partly completed teardown. Preserve an
+    # earlier exit or retention refusal; otherwise latch the first signal
+    # status and finish only the existing identity-checked cleanup.
+    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=129; original_result=129; result=129; fi' HUP
+    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=130; original_result=130; result=130; fi' INT
+    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=143; original_result=143; result=143; fi' TERM
+    trap - EXIT
     set +e
 
     # Missing pinned cleanup state is ownership uncertainty. Production cannot
@@ -1020,14 +1026,14 @@ cleanup() {
         report_cleanup_refusal session-signal stale "$original_result"
     fi
 
+    nested_resume_disposition=not-required
+    if (( PAIR_RESUME_UNCERTAIN )); then
+        nested_resume_disposition=skipped-uncertain
+    elif [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
+            -n $PAIR_CGROUP_PROCESS_IDENTITY ]]; then
+        nested_resume_disposition=attempted
+    fi
     if (( initially_retained )); then
-        nested_resume_disposition=not-required
-        if (( PAIR_RESUME_UNCERTAIN )); then
-            nested_resume_disposition=skipped-uncertain
-        elif [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
-                -n $PAIR_CGROUP_PROCESS_IDENTITY ]]; then
-            nested_resume_disposition=attempted
-        fi
         if [[ -n ${CGROUP_CREATE_REFUSAL_OBSERVATION:-} ]]; then
             # This setup refusal owns the first phase; do not publish a second
             # prior-admission phase when its retained resources are finalized.
@@ -1193,6 +1199,11 @@ cleanup() {
 
     if (( RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION && result == 0 )); then
         result=2
+    fi
+    if (( cleanup_signal_status && ! cleanup_diagnostic_reported &&
+          ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
+        printf 'FAIL: ID36 signal during owned teardown; phase:cleanup-signal ownership_proof:pinned-created-cgroup-and-session-identities observed:signal-%s original_exit:%s nested_resume:%s cleanup_disposition:completed-owned retained_cleanup:none next_step:review-interruption-and-rerun-ID36-after-verifying-owned-state\n' \
+            "$cleanup_signal_status" "$original_result" "$nested_resume_disposition" >&2
     fi
     # Do not advertise PASS until both owned cgroup and scratch cleanup
     # succeeded. A cleanup refusal must not leave a misleading PASS record.
