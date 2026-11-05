@@ -168,13 +168,19 @@ as completion or permitting cleanup.
 | Runtime health or cold-boot evidence | Read the latest `SWAPZ_RUNTIME_HEALTH=` journal result and the persisted boot verifier observation. `DEGRADED`/INCOMPLETE can mean telemetry missing, not confirmed target failure; only a separate **owner-initiated** reboot can establish cold-boot PASS. Never reboot as Codex; [hibernation stays unsupported](handoff/systemd-runtime-health.md#hibernation-and-resume-boundary). |
 | Plot history `NOT UPDATED` | Check the renderer's local diagnostic log and [per-host history selection](benchmark.md#automatic-plots-for-each-computer); optional Matplotlib failure cannot change the source-pinned test verdict. |
 
-For card-smoke failures, start with the original process exit and phase marker;
-preflight `BLOCKED` must not be reported as an executed card oracle. When the
-helper emits `PHYSICAL_RESULTS=`, inspect the private per-run `results.json`
-next to its durable `state.json`: match `evidence_class`, `source_commit_sha`,
-`helper_git_sha`, `artifact_sha256`, selected PARTUUID/physical parent, earliest
-failed phase, original return code/errno when available and recovery disposition.
-A `RECOVERY_REQUIRED` marker means preserve that state and stop; review live
+For card-smoke failures, start with the original process exit and explicit
+producer marker; preflight `BLOCKED` alone is not an executed card oracle. When
+the helper emits `PHYSICAL_RESULTS=`, inspect its private per-run `results.json`
+and durable `state.json` together. Bind the result's `evidence_class`,
+`source_commit_sha`, `helper_git_sha`, `artifact_sha256` and `partuuid` to
+the state's source/helper identity and full partition/physical-parent identity.
+For an oracle attempt, use the first non-`PASS` `physical_oracle_phases[]`
+record and preserve its `phase`, `status`, `return_code` and bounded captured
+diagnostics. For setup or recovery failures, preserve the helper exit,
+`final_recovery_state`/`recovery_error` and the durable state stage (including
+`stage_before_recovery` when present). Numeric errno is authoritative only when
+the producer emitted it; never synthesize one from exception text. A
+`RECOVERY_REQUIRED` marker means preserve that state and stop; review live
 ownership and header/swap state read-only before exact-owned recovery, never
 force-remove or rerun to replace the failed attempt. Rootless failures may
 retain a separate local `build/tests/rootless-failure.*/diagnostic.log`; keep
