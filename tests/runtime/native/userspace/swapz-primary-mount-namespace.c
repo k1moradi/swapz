@@ -50,6 +50,9 @@ static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
 static int fixture_mount_close_error;
 static int fixture_mount_fd = -1;
+static int fixture_mount_fd_is_peer_leader;
+static int fixture_peer_mountinfo_read_eof;
+static unsigned int fixture_peer_mountinfo_completed_reads;
 static const char *fixture_regular_swap_path;
 static dev_t fixture_regular_swap_device;
 static char fixture_self_root[PATH_MAX] = "/";
@@ -111,8 +114,12 @@ static int fixture_open(const char *path, int flags, ...)
 		return -1;
 	}
 	fd = open(fixture_path(path, converted), flags, mode);
-	if (fd >= 0 && fixture_other_mountinfo(path))
+	if (fd >= 0 && fixture_other_mountinfo(path)) {
 		fixture_mount_fd = fd;
+		fixture_mount_fd_is_peer_leader =
+			strstr(path, "/3031/mountinfo") != NULL;
+		fixture_peer_mountinfo_read_eof = 0;
+	}
 	return fd;
 }
 
@@ -140,13 +147,19 @@ static int fixture_openat(int directory_fd, const char *path, int flags, ...)
 		return -1;
 	}
 	fd = openat(directory_fd, fixture_path(path, converted), flags, mode);
-	if (fd >= 0 && fixture_other_mountinfo(path))
+	if (fd >= 0 && fixture_other_mountinfo(path)) {
 		fixture_mount_fd = fd;
+		fixture_mount_fd_is_peer_leader =
+			strstr(path, "/3031/mountinfo") != NULL;
+		fixture_peer_mountinfo_read_eof = 0;
+	}
 	return fd;
 }
 
 static ssize_t fixture_read(int fd, void *buffer, size_t length)
 {
+	ssize_t result;
+
 	/*
 	 * An opened mountinfo fd must not be treated as a harmless exited PID:
 	 * losing its pathname while read(2) fails still leaves an unknown table.
@@ -164,7 +177,11 @@ static ssize_t fixture_read(int fd, void *buffer, size_t length)
 		errno = fixture_mount_read_error;
 		return -1;
 	}
-	return read(fd, buffer, length);
+	result = read(fd, buffer, length);
+	if (fd == fixture_mount_fd && fixture_mount_fd_is_peer_leader &&
+	    result == 0)
+		fixture_peer_mountinfo_read_eof = 1;
+	return result;
 }
 
 static struct dirent *fixture_readdir(DIR *directory)
@@ -183,21 +200,25 @@ static struct dirent *fixture_readdir(DIR *directory)
 		errno = fixture_task_readdir_error;
 		return NULL;
 	}
-	entry = readdir(directory);
-	if (entry && directory == fixture_task_directory &&
-	    !strcmp(entry->d_name, "3032"))
-		fixture_task_seen_thread = 1;
-	if (!entry && !errno && fixture_peer_mountinfo_after_peer_scan) {
-		/*
-		 * The peer's table was already read. A subsequent mount must not
-		 * retroactively change that completed inventory snapshot.
-		 */
+	/*
+	 * Production returns to the top-level /proc iterator only after finishing
+	 * the previously yielded PID, including its non-leader task scan. Require
+	 * a successful read-to-EOF and close of the peer leader table so this
+	 * mutation cannot accidentally fire at a task-directory EOF.
+	 */
+	if (directory == fixture_proc_directory &&
+	    fixture_inventory_seen_foreign_pid &&
+	    fixture_peer_mountinfo_after_peer_scan &&
+	    fixture_peer_mountinfo_completed_reads > 0U) {
 		fixture_file("3031/mountinfo",
 			     fixture_peer_mountinfo_after_peer_scan);
 		fixture_peer_mountinfo_after_peer_scan = NULL;
 		fixture_peer_mountinfo_after_peer_scan_injected = 1;
-		errno = 0;
 	}
+	entry = readdir(directory);
+	if (entry && directory == fixture_task_directory &&
+	    !strcmp(entry->d_name, "3032"))
+		fixture_task_seen_thread = 1;
 	if (entry && !strcmp(entry->d_name, "3031")) {
 		fixture_inventory_seen_foreign_pid = 1;
 		if (fixture_peer_mountinfo_before_peer_scan) {
@@ -234,10 +255,16 @@ static struct dirent *fixture_readdir(DIR *directory)
 static int fixture_close(int fd)
 {
 	int is_remote = fd == fixture_mount_fd;
+	int peer_leader_read_complete =
+		is_remote && fixture_mount_fd_is_peer_leader &&
+		fixture_peer_mountinfo_read_eof;
 	int result;
 
-	if (is_remote)
+	if (is_remote) {
 		fixture_mount_fd = -1;
+		fixture_mount_fd_is_peer_leader = 0;
+		fixture_peer_mountinfo_read_eof = 0;
+	}
 	result = close(fd);
 	if (result < 0)
 		return result;
@@ -245,6 +272,8 @@ static int fixture_close(int fd)
 		errno = fixture_mount_close_error;
 		return -1;
 	}
+	if (peer_leader_read_complete)
+		++fixture_peer_mountinfo_completed_reads;
 	return 0;
 }
 
@@ -516,6 +545,9 @@ static void fixture_reset(void)
 	fixture_mount_read_error = 0;
 	fixture_mount_close_error = 0;
 	fixture_mount_fd = -1;
+	fixture_mount_fd_is_peer_leader = 0;
+	fixture_peer_mountinfo_read_eof = 0;
+	fixture_peer_mountinfo_completed_reads = 0U;
 	fixture_regular_swap_path = NULL;
 	fixture_regular_swap_device = 0;
 	strcpy(fixture_self_root, "/");
@@ -562,8 +594,11 @@ static void expect_mount_identity_admission(
 		/* This fixture only calls the read-only production mount reader. */
 		fprintf(stderr,
 			"FAIL: phase=mount-admission case=%s expected=%s "
-			"actual_result=%d originating_errno=%d "
-			"mutation_calls=0 safe_action=retain_inactive_target\n",
+			"actual_result=%d observed_errno=%d "
+			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+			"limitation=reader-only-procfs-snapshot "
+			"safe_action=retain_inactive_target\n",
 			case_name, should_allow ? "admitted" : "refused",
 			result, errno);
 		++fixture_failures;
@@ -706,6 +741,7 @@ static void probe_shared_root_parent_same_namespace_snapshot_gap(void)
 	const dev_t target_parent = makedev(8U, 0U);
 	struct swapz_primary_mount_facts facts = {0};
 	int result;
+	int observed_errno;
 
 	fixture_same_parent_root();
 	fixture_share_mount_namespace();
@@ -717,17 +753,26 @@ static void probe_shared_root_parent_same_namespace_snapshot_gap(void)
 	fixture_same_namespace_mount_after_self_snapshot = 1;
 	errno = 0;
 	result = swapz_primary_read_mount_facts(&facts, target_parent);
+	observed_errno = errno;
 	if (!fixture_same_namespace_mount_injected) {
 		fprintf(stderr,
-			"FAIL: shared-parent same-namespace snapshot race: "
-			"gate=selected target/namespace identity injection did not run\n");
+			"FAIL: boundary=self-post-snapshot case=selected "
+			"reason=injection-not-run result=%d observed_errno=%d target=%d "
+			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+			"limitation=reader-only-procfs-snapshot\n",
+			result, observed_errno, facts.target_mounted);
 		++fixture_failures;
 		return;
 	}
 	if (fixture_mount_fd != -1) {
 		fprintf(stderr,
-			"FAIL: shared-parent same-namespace snapshot race: "
-			"gate=namespace enumeration remote mountinfo descriptor leaked\n");
+			"FAIL: boundary=self-post-snapshot case=selected "
+			"reason=mountinfo-fd-leak result=%d observed_errno=%d target=%d "
+			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+			"limitation=reader-only-procfs-snapshot\n",
+			result, observed_errno, facts.target_mounted);
 		++fixture_failures;
 		(void)close(fixture_mount_fd);
 		fixture_mount_fd = -1;
@@ -735,8 +780,13 @@ static void probe_shared_root_parent_same_namespace_snapshot_gap(void)
 	if (result == 0 &&
 	    (!facts.root_mount_seen || facts.root_device != root_device)) {
 		fprintf(stderr,
-			"FAIL: shared-parent same-namespace snapshot race: "
-			"gate=sibling/root root_seen=%d root=%u:%u expected=%u:%u\n",
+			"FAIL: boundary=self-post-snapshot case=selected "
+			"reason=root-identity result=%d observed_errno=%d target=%d "
+			"root_seen=%d root=%u:%u expected_root=%u:%u "
+			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+			"limitation=reader-only-procfs-snapshot\n",
+			result, observed_errno, facts.target_mounted,
 			facts.root_mount_seen, major(facts.root_device),
 			minor(facts.root_device), major(root_device),
 			minor(root_device));
@@ -749,9 +799,12 @@ static void probe_shared_root_parent_same_namespace_snapshot_gap(void)
 		 * claim. A future production fix may instead report target_mounted or
 		 * fail closed; either outcome safely retires this UNPROVEN observation.
 		 */
-		puts("UNPROVEN: shared-parent same-namespace selected target appeared "
-		     "after self mount snapshot and before peer skip; "
-		     "gate=selected target/namespace identity prevented=none");
+		printf("UNPROVEN: boundary=self-post-snapshot case=selected "
+		       "result=0 errno=%d target=0 prevented=none "
+		       "header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+		       "mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+		       "limitation=reader-only-procfs-snapshot-cannot-prove-kernel-exclusion\n",
+		       observed_errno);
 	}
 }
 
@@ -868,35 +921,104 @@ static void test_controlled_mount_snapshot_timings(void)
 					"revalidated parent device");
 
 	/*
-	 * A mount arriving after a foreign peer's completed read is another
-	 * bounded-snapshot control. Do not turn an observed clean snapshot into
-	 * a PASS that asserts the production coordinator may mutate.
+	 * A mount arriving only after production returns from a foreign peer's
+	 * completed leader and task scan is another bounded-snapshot control.
+	 * Do not turn an observed clean snapshot into a PASS that asserts the
+	 * production coordinator may mutate.
 	 */
 	fixture_same_parent_root();
 	fixture_peer_mountinfo_after_peer_scan = foreign_selected_mount;
 	errno = 0;
 	result = swapz_primary_read_mount_facts(&facts, target_parent);
-	fixture_expect_timed_change("mount after completed peer snapshot",
-				    fixture_peer_mountinfo_after_peer_scan_injected);
-	if (result == 0 &&
-	    (!facts.root_mount_seen || facts.root_device != root_device)) {
-		fprintf(stderr,
-			"FAIL: mount after completed peer snapshot: "
-			"gate=root identity root_seen=%d root=%u:%u\n",
-			facts.root_mount_seen, major(facts.root_device),
-			minor(facts.root_device));
-		++fixture_failures;
-	} else if (result == 0 && !facts.target_mounted) {
-		puts("UNPROVEN: selected mount appeared after completed foreign "
-		     "PID snapshot; gate=non-atomic mount inventory prevented=none");
-	}
-	if (fixture_mount_fd != -1) {
-		fprintf(stderr,
-			"FAIL: mount after completed peer snapshot: "
-			"gate=mountinfo fd ownership leaked\n");
-		++fixture_failures;
-		(void)close(fixture_mount_fd);
-		fixture_mount_fd = -1;
+	{
+		int observed_errno = errno;
+		unsigned int completed_reads = fixture_peer_mountinfo_completed_reads;
+
+		if (!fixture_peer_mountinfo_after_peer_scan_injected ||
+		    completed_reads == 0U) {
+			fprintf(stderr,
+				"FAIL: boundary=foreign-post-snapshot case=selected "
+				"reason=timing-witness result=%d observed_errno=%d target=%d "
+				"completed_peer_reads=%u injected=%d "
+				"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+				"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+				"limitation=reader-only-procfs-snapshot\n",
+				result, observed_errno, facts.target_mounted,
+				completed_reads,
+				fixture_peer_mountinfo_after_peer_scan_injected);
+			++fixture_failures;
+		}
+		if (fixture_mount_fd != -1) {
+			fprintf(stderr,
+				"FAIL: boundary=foreign-post-snapshot case=selected "
+				"reason=mountinfo-fd-leak result=%d observed_errno=%d target=%d "
+				"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+				"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+				"limitation=reader-only-procfs-snapshot\n",
+				result, observed_errno, facts.target_mounted);
+			++fixture_failures;
+			(void)close(fixture_mount_fd);
+			fixture_mount_fd = -1;
+		}
+		if (result == 0 &&
+		    (!facts.root_mount_seen || facts.root_device != root_device)) {
+			fprintf(stderr,
+				"FAIL: boundary=foreign-post-snapshot case=selected "
+				"reason=root-identity result=%d observed_errno=%d target=%d "
+				"root_seen=%d root=%u:%u expected_root=%u:%u "
+				"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+				"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+				"limitation=reader-only-procfs-snapshot\n",
+				result, observed_errno, facts.target_mounted,
+				facts.root_mount_seen, major(facts.root_device),
+				minor(facts.root_device), major(root_device),
+				minor(root_device));
+			++fixture_failures;
+		} else if (result == 0 && !facts.target_mounted) {
+			printf("UNPROVEN: boundary=foreign-post-snapshot case=selected "
+			       "result=0 errno=%d target=0 prevented=none "
+			       "header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+			       "mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+			       "limitation=reader-only-procfs-snapshot-cannot-prove-kernel-exclusion\n",
+			       observed_errno);
+		}
+		if (fixture_peer_mountinfo_after_peer_scan_injected &&
+		    completed_reads > 0U) {
+			struct swapz_primary_mount_facts fresh_facts = {0};
+			int fresh_result;
+			int fresh_errno;
+
+			errno = 0;
+			fresh_result =
+				swapz_primary_read_mount_facts(&fresh_facts, target_parent);
+			fresh_errno = errno;
+			if (fresh_result != 0 || !fresh_facts.target_mounted) {
+				fprintf(stderr,
+					"FAIL: boundary=foreign-post-snapshot case=selected "
+					"reason=injected-table-not-observable result=%d "
+					"observed_errno=%d target=%d "
+					"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+					"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED "
+					"limitation=reader-only-procfs-snapshot\n",
+					fresh_result, fresh_errno,
+					fresh_facts.target_mounted);
+				++fixture_failures;
+			}
+			if (fixture_mount_fd != -1) {
+				fprintf(stderr,
+					"FAIL: boundary=foreign-post-snapshot case=selected "
+					"reason=fresh-read-fd-leak result=%d observed_errno=%d "
+					"target=%d header_write=NOT_INTERCEPTED "
+					"mapper=NOT_INTERCEPTED mkswap=NOT_INTERCEPTED "
+					"swapon=NOT_INTERCEPTED "
+					"limitation=reader-only-procfs-snapshot\n",
+					fresh_result, fresh_errno,
+					fresh_facts.target_mounted);
+				++fixture_failures;
+				(void)close(fixture_mount_fd);
+				fixture_mount_fd = -1;
+			}
+		}
 	}
 }
 
@@ -1240,7 +1362,10 @@ int main(void)
 		fprintf(stderr,
 			"FAIL: phase=task-namespace case=reused TID "
 			"expected=EAGAIN refusal actual=injection-not-run "
-			"originating_errno=%d mutation_calls=0 "
+			"observed_errno=%d header_write=NOT_INTERCEPTED "
+			"mapper=NOT_INTERCEPTED mkswap=NOT_INTERCEPTED "
+			"swapon=NOT_INTERCEPTED "
+			"limitation=reader-only-procfs-snapshot "
 			"safe_action=retain_inactive_target\n", errno);
 		++fixture_failures;
 	}

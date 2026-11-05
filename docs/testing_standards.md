@@ -197,6 +197,21 @@ same non-atomic exclusion problem as a change immediately after the final
 snapshot returns, but it starts earlier and can span the remainder of PID
 enumeration.
 
+Independently retain the foreign-post-snapshot negative control with an exact
+timing witness. Begin with the peer leader and task views clean, require the
+fixture to observe the peer leader mountinfo through read-to-EOF and successful
+close, complete that peer's non-leader task scan, and inject the selected-device
+row only when production returns to the top-level `/proc` iterator. An EOF from
+`/proc/self/task` or `/proc/<pid>/task` is too early and does not establish
+this boundary. A fresh production-reader call must observe the injected row.
+If the original bounded read remains clean, report **UNPROVEN** with
+`prevented=none`; never convert that observation into a PASS or expected FAIL.
+Because this direct reader fixture intercepts no header write, mapper, mkswap
+or swapon operation, its diagnostics must report those mutation hooks as
+`NOT_INTERCEPTED`, not zero. Failure diagnostics must name the snapshot
+boundary, selected/parent/sibling case, observed errno, and remaining
+reader-only proof limitation.
+
 Check the production same-parent and independent recovery-parent relationship
 gates for changed, identical, and unresolved identities on either side. The
 reader supplied an out-of-date parent argument may return a clean snapshot:
