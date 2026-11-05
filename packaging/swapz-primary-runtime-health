@@ -705,6 +705,7 @@ observe_runtime()
 	dm_status=unavailable
 	mapper_major_minor=unavailable
 	mapper_table_sectors=unavailable
+	mapper_expected_swap_size_kib=unavailable
 	swap_size_kib=0
 	swap_used_kib=0
 	swap_remaining_kib=0
@@ -712,6 +713,7 @@ observe_runtime()
 	swap_total_entries=0
 	mapper_swap_type_state=verified
 	mapper_swap_priority_state=verified
+	mapper_swap_capacity_state=verified
 	swap_occupancy_percent=0
 	mapper_active=unavailable
 	mapper_sub=unavailable
@@ -833,6 +835,10 @@ observe_runtime()
 				append_reason failure_reasons mapper_table_invalid
 			else
 				mapper_table_sectors=$2
+				# /proc/swaps reports usable KiB after the one-page swap header.
+				# Keep this runtime observation identical to the boot verifier's
+				# already-established mapper-to-swap capacity contract.
+				mapper_expected_swap_size_kib=$((mapper_table_sectors / 2 - 4))
 				if [ "$selected_major_minor" != unavailable ] &&
 				   [ "$4" != "$selected_major_minor" ]; then
 					append_reason failure_reasons mapper_backing_identity_mismatch
@@ -1034,6 +1040,11 @@ observe_runtime()
 					swap_used_kib=$used
 					swap_remaining_kib=$((size - used))
 					swap_occupancy_percent=$(awk -v used="$used" -v size="$size" 'BEGIN { if (size > 0) printf "%d", (used * 100) / size; else print 0 }')
+					if [ "$mapper_expected_swap_size_kib" != unavailable ] &&
+					   [ "$size" -ne "$mapper_expected_swap_size_kib" ]; then
+						mapper_swap_capacity_state=invalid
+						append_reason failure_reasons mapper_swap_capacity_invalid
+					fi
 				else
 					append_reason observation_reasons swap_accounting_invalid
 				fi
@@ -1190,6 +1201,9 @@ log_runtime_state()
 	fi
 	if [ "$mapper_swap_priority_state" = invalid ]; then
 		log_observer_diagnostic swap_inventory_priority minus_one unexpected_priority read_swap_inventory 0 inspect_proc_swaps_read_only none observed
+	fi
+	if [ "$mapper_swap_capacity_state" = invalid ]; then
+		log_observer_diagnostic swap_inventory_capacity dm_geometry_minus_4kib_header unexpected_capacity read_swap_inventory 0 inspect_proc_swaps_and_dm_table_read_only none observed
 	fi
 	case "$swap_inventory_state" in
 	raw_backing_active|conflicting_dm_identity)

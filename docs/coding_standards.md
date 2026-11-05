@@ -3044,7 +3044,9 @@ also invalidates its stdout even when it looks complete; missing run-bound
 mapper identity remains a definite FAIL rather than optional degradation.
 An active selected raw backing partition or competing primary mapper identity
 is a definite FAIL. A matched primary mapper row must be a partition swap at
-priority -1; a different type or priority is a definite FAIL even when a later
+priority -1 and its usable Size must equal the validated DM logical bytes divided
+by 1024 minus the 4 KiB swap header already enforced by boot verification. A
+different type, priority or capacity is a definite FAIL even when a later
 inventory recheck reports an apparently healthy row. Compare each alias using
 its captured major:minor while
 permitting verified unrelated swapfiles and unrelated resolved block devices.

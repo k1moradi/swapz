@@ -3776,6 +3776,26 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(healthy.returncode, 0, healthy.stderr)
         self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", healthy.stderr)
 
+    def test_primary_swap_capacity_must_match_dm_geometry(self) -> None:
+        # A complete-looking mapper row with the wrong usable size used to
+        # report HEALTHY even though the DM table proved a different capacity.
+        (self.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n"
+            f"{self.dev / 'mapper' / 'swapz-primary'} partition 10000 2000 -1\n",
+            encoding="ascii",
+        )
+        observed = self.run_helper("once")
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+        self.assertIn("mapper_swap_capacity_invalid", observed.stderr)
+        self.assertIn(
+            "phase=swap_inventory_capacity expected=dm_geometry_minus_4kib_header "
+            "observed=unexpected_capacity command=read_swap_inventory "
+            "command_status=0 identity_mismatch=none service_state=observed "
+            "next=inspect_proc_swaps_and_dm_table_read_only",
+            observed.stderr,
+        )
+
     def test_wrong_primary_priority_survives_a_healthy_second_inventory_read(self) -> None:
         (self.proc / "swaps").write_text(
             "Filename Type Size Used Priority\n"
@@ -3826,14 +3846,14 @@ class RuntimeHealthTests(unittest.TestCase):
         # when the source pathname is long.
         (self.proc / "swaps").write_text(
             "Filename\tType\tSize\tUsed\tPriority\n"
-            f"{self.dev / 'mapper' / 'swapz-primary'}\tpartition\t10000\t2000\t-1\n",
+            f"{self.dev / 'mapper' / 'swapz-primary'}\tpartition\t108320764\t2000\t-1\n",
             encoding="ascii",
         )
         observed = self.run_helper("once")
         self.assertEqual(observed.returncode, 0, observed.stderr)
         self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", observed.stderr)
         self.assertIn("swap_used_kib=2000", observed.stderr)
-        self.assertIn("swap_remaining_kib=8000", observed.stderr)
+        self.assertIn("swap_remaining_kib=108318764", observed.stderr)
         self.assertEqual(self.run_helper("hibernate-guard").returncode, 1)
 
     def test_duplicate_or_impossible_unrelated_swap_rows_are_not_healthy(self) -> None:

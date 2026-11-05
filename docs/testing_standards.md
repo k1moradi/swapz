@@ -7085,8 +7085,9 @@ Mandatory Python qualification suites must remain syntactically valid; a path th
 The isolated systemd fixture must exercise the runtime-health helper and unit
 without reading or changing host swap state. Cover exact mapper/run/backing
 identity, foreign mapper rejection, active swap inventory and capacity,
-primary mapper partition type and priority -1 (including a healthy second read
-that must not erase a first-read failure), path-free journal diagnostics,
+primary mapper partition type, priority -1 and DM-derived usable capacity
+(including a healthy second read that must not erase a first-read failure),
+path-free journal diagnostics,
 configured backing-path disappearance as a hard failure, monitoring-command
 failure as degraded evidence, low-noise unchanged polling, kernel/systemd
 telemetry, and sustained GC pressure without progress. A nominally active
