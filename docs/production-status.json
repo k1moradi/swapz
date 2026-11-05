@@ -1,147 +1,232 @@
 {
-  "schema": "swapz-production-status-snapshot",
-  "snapshot_kind": "SOURCE_BOUND_READ_ONLY_STATUS",
-  "captured_at_utc": "2026-11-04T04:35:59Z",
-  "snapshot_semantics": {
-    "is_live_monitor": false,
-    "is_qualification_result": false,
-    "current_main_exact_source_qualified": false,
-    "volatile_observations_expire_at_capture": true,
-    "interpretation": "All host and CI observations are historical from captured_at_utc. The source SHA identifies the synchronized main head observed at capture; this file does not qualify later commits."
-  },
-  "repository": {
-    "branch": "main",
-    "local_main_sha_at_capture": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
-    "origin_main_sha_at_capture": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
-    "main_synchronized_at_capture": true,
-    "worktree_clean_at_capture": false,
-    "uncommitted_paths_at_capture": ["docs/production-status.json"],
-    "current_source_qualification": "NOT_QUALIFIED"
-  },
-  "latest_owner_make_test": {
-    "report_path": "../test_results.json",
-    "report_commit_sha": "3d060dd5f734716869c7d13a732a3b068a30f660",
-    "report_sha256": "5794527866b1c943688b6e085b5db56b467077a1533071fcadfa16ab7ce9fe60",
-    "tested_source_sha": "888092cbcf6661a919091b7a0e8820255a9fa19b",
-    "current_main_sha_at_capture": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
-    "overall": "BLOCKED",
-    "qualification_scope": "RAM_BACKED_NULL_BLK_ONLY",
-    "stages": [
-      {"name": "Build module and helpers", "status": "PASS", "elapsed_seconds": 28.726},
-      {"name": "Native and rootless contracts", "status": "PASS", "elapsed_seconds": 665.883},
-      {"name": "Kernel warnings W=1", "status": "PASS", "elapsed_seconds": 15.861},
-      {"name": "Kernel warnings W=2", "status": "PASS", "elapsed_seconds": 15.295},
-      {"name": "Owned RAM smoke + mixed/QD pilot", "status": "BLOCKED", "elapsed_seconds": 1403.289}
-    ],
-    "block_reason": "ID36 host lacked the required 1 GiB MemAvailable safety headroom",
-    "blocked_phase": "nvme_gen5 synthetic service envelope [off mixed]",
-    "qualified_artifacts": {
-      "scope": "Hashes below apply only to the report's tested_source_sha; they do not establish current or installed artifacts.",
-      "formatter_sha256": "cd12f0f42c7ad32cf7a58d49cdb29b30c353f7c6a13add2231b1bdd3ba715a66",
-      "module_sha256": "06bd1efc2369ccbc5d1dacfcb1384a8b1e69d59bda4c735b78348bc600a10849",
-      "oracle_sha256": "f7d293d3fb390024ca5b3d884e06799c3c627cd88ef14ba5cce764d626f415b0"
-    }
-  },
-  "current_head_ci_observation": {
-    "observed_at_utc": "2026-11-04T04:35:59Z",
-    "head_sha": "d614e6d419f9a0910f4ba51a506330b7a07d9a78",
-    "workflows": [
-      {
-        "name": "Native kernel-C project-goal regressions",
-        "run_id": 41773960510,
-        "status": "pending",
-        "conclusion": null,
-        "url": "https://github.com/k1moradi/swapz/actions/runs/41773960510"
-      },
-      {
-        "name": "Experimental swapz production C qualification",
-        "run_id": 41773960517,
-        "status": "completed",
-        "conclusion": "success",
-        "url": "https://github.com/k1moradi/swapz/actions/runs/41773960517"
-      },
-      {
-        "name": "Systemd and package production-readiness",
-        "run_id": 41773960446,
-        "status": "in_progress",
-        "conclusion": null,
-        "url": "https://github.com/k1moradi/swapz/actions/runs/41773960446"
-      }
-    ]
-  },
-  "authorized_target_observation": {
-    "observed_at_utc": "2026-11-04T04:35:59Z",
-    "selector": "PARTUUID=f13428f6-01",
-    "path_at_observation": "/dev/sda1",
-    "major_minor": "8:1",
-    "size_bytes": 124787884032,
-    "swap_signature_uuid": "8c6a02a2-20e9-4e31-869a-48ef7f6c990b",
-    "partuuid": "f13428f6-01",
-    "parent_model": "Multi-Card",
-    "transport": "usb",
-    "removable": true,
-    "mounted": false,
-    "source": "read-only selector, lsblk, findmnt, and kernel swap-inventory observations"
-  },
-  "host_observation": {
-    "observed_at_utc": "2026-11-04T04:35:59Z",
-    "architecture": "x86_64",
-    "kernel_release": "7.0.0-42-generic",
-    "mem_total_kib": 3863624,
-    "mem_available_kib": 894992,
-    "minimum_mem_available_kib_for_ID36": 1048576,
-    "active_swap_inventory": [
-      {"name": "/swapfile", "type": "file", "used_kib": 524076, "unrelated_to_authorized_target": true}
-    ],
-    "authorized_partition_active_as_swap": false,
-    "observation_scope": "Read-only /proc/swaps, /proc/meminfo, and block-device inventory; unrelated swap was not modified",
-    "preceding_host_action": "A safe sync and kernel page-cache drop were performed before capture; this is not qualification evidence."
-  },
-  "deployment_observation": {
-    "observed_at_utc": "2026-11-04T04:35:59Z",
-    "swapz_mapper_present": false,
-    "dm_swapz_loaded": false,
-    "dm_swapz_found_by_modinfo": false,
-    "swapzctl_in_path": false,
-    "primary_mapper_service": "not-found",
-    "boot_verifier_service": "not-found",
-    "boot_acceptance_directory_present": false,
-    "basis": "Read-only dmsetup, /sys/module, modinfo, command lookup, systemctl, and filesystem existence checks"
-  },
   "acceptance_manifest": {
     "path": "production-acceptance.json",
     "schema": "swapz-production-acceptance-v1",
-    "status": "FROZEN",
-    "sha256": "a14169dc9a29bc1c20a7806b39c40a22372e9fd134c50c786f30b665a473d473"
+    "sha256": "a14169dc9a29bc1c20a7806b39c40a22372e9fd134c50c786f30b665a473d473",
+    "status": "FROZEN"
+  },
+  "authorized_target_observation": {
+    "active_as_swap": false,
+    "identity_verified_by": "read-only lsblk and sysfs observation at capture; the prior development helper separately revalidated its opened descriptor on its tested source",
+    "major_minor": "8:1",
+    "mounted": false,
+    "observation_scope": "read-only inventory; not fresh destructive-operation admission",
+    "observed_at_utc": "2026-11-05T21:05:01Z",
+    "parent_model": "Multi-Card",
+    "path_at_observation": "/dev/sda1",
+    "removable": true,
+    "size_bytes": 124787884032,
+    "transport": "usb",
+    "unique_partition_and_content_identifiers": "retained only in private root-owned run record"
+  },
+  "captured_at_utc": "2026-11-05T21:05:01Z",
+  "current_head_ci_observation": {
+    "head_sha": "900e9305a12dda48b84cd2ba19eef07608fcce0e",
+    "native_rootless_first_failure": {
+      "classification": "fixture setup-denial message is not recognized by its skip matcher; overmount assertion did not run",
+      "local_focused_reproduction": "same assertion failure on first host",
+      "numeric_errno": "not emitted",
+      "observed": "unshare: write failed /proc/self/uid_map: Operation not permitted",
+      "owner": "assigned rootless fixture owner; no production defect established",
+      "phase": "user-namespace setup before child marker",
+      "test": "swapzctl-active-swap-provenance-test.py::test_bind_overmount_can_diverge_rendered_name_from_lookup"
+    },
+    "observed_at_utc": "2026-11-05T21:01:46Z",
+    "workflows": [
+      {
+        "conclusion": "failure",
+        "name": "Native kernel-C project-goal regressions",
+        "run_id": 42106201009,
+        "status": "completed",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/42106201009"
+      },
+      {
+        "conclusion": "success",
+        "name": "Experimental swapz production C qualification",
+        "run_id": 42106200862,
+        "status": "completed",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/42106200862"
+      },
+      {
+        "conclusion": "success",
+        "name": "Systemd/package rootless production-readiness",
+        "run_id": 42106200873,
+        "status": "completed",
+        "url": "https://github.com/k1moradi/swapz/actions/runs/42106200873"
+      }
+    ]
+  },
+  "deployment_observation": {
+    "basis": "read-only dmsetup, /sys/module, modinfo, systemctl and filesystem observations at capture",
+    "boot_acceptance_directory_present": false,
+    "boot_verifier_service": "not-found",
+    "dm_swapz_found_by_modinfo": false,
+    "dm_swapz_loaded": false,
+    "observed_at_utc": "2026-11-05T21:05:01Z",
+    "primary_mapper_service": "not-found",
+    "swapz_mapper_present": false,
+    "swapzctl_in_path": false
+  },
+  "fast_test_observation": {
+    "current_main_sha_at_capture": "900e9305a12dda48b84cd2ba19eef07608fcce0e",
+    "loaded_preflight": "BLOCKED",
+    "loaded_preflight_check": "unclaimed_null_blk",
+    "native_replay": "PASS",
+    "official_qualification": false,
+    "physical_helper_admission": "accepted only for the documented development-only smoke exception",
+    "preflight_expected_proof": "creation_authority",
+    "preflight_observed_proof": "token_name_only",
+    "same_commit": false,
+    "tested_source_sha": "fe7ae0e4f2800150ea1c13a843519945e4f5c789"
+  },
+  "host_observation": {
+    "active_swap_inventory": [],
+    "ambiguous_cgroup_action": "retained; current read-only cgroup.events reported populated=0 and memory.current=8192; ownership remains unproven",
+    "architecture": "x86_64",
+    "authorized_partition_active_as_swap": false,
+    "kernel_release": "7.0.0-42-generic",
+    "mem_available_kib": 2244420,
+    "mem_total_kib": 3863624,
+    "minimum_mem_available_kib_for_ID36": 1048576,
+    "observation_scope": "read-only /proc, block topology, mounts, holders, module and mapper checks after completed card smoke",
+    "observed_at_utc": "2026-11-05T21:05:01Z",
+    "tmp": {
+      "available_bytes": 1969209344,
+      "fast_test_reclaimed_logical_bytes": 0,
+      "filesystem": "tmpfs",
+      "percent_used": 1,
+      "size_bytes": 1978175488,
+      "unproven_retained_candidate_count": 1,
+      "used_bytes": 8966144
+    },
+    "unclaimed_null_blk_action": "retained untouched; names and token-shaped suffixes did not prove creation authority",
+    "unclaimed_null_blk_count": 2,
+    "unpopulated_unproven_swapz_cgroup_count": 1,
+    "unrelated_swapfile_modified_during_physical_smoke": false
+  },
+  "latest_owner_make_test": {
+    "current_main_sha_at_capture": "900e9305a12dda48b84cd2ba19eef07608fcce0e",
+    "current_source_status": "NOT_RUN",
+    "latest_tracked_report": {
+      "current_source": false,
+      "failed_stage": "Native and rootless contracts",
+      "overall": "FAIL",
+      "path": "../test_results.json",
+      "report_sha256": "ce95be0c0466033eb3e9bb532049bbc0cf244f2afc66c0c506369c216ff92e20",
+      "tested_source_sha": "0603d81f87119f4775c85c3d79af937f1d856795"
+    },
+    "overall": "NOT_RUN",
+    "qualification_scope": "no current-source official qualification",
+    "reason": "Full make test has not run on the current source; current Native rootless CI failure and unclaimed loaded-test null_blk resources remain unresolved."
+  },
+  "latest_physical_development_smoke": {
+    "artifact_sha256": {
+      "device_roundtrip": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
+      "dm_swapz_ko": "75f0048d5b86afc45d821776630b2e4cd8bd6354918035e3ce769b001c324007",
+      "formatter": "2f05ee70fd69d14e7c8714dd43dc2ac4dc3cca635541388d80fb93c12b4cb44d",
+      "physical_swap_probe_py": "026fc956b11b873d5c07d273b6dc1e393b40e0a7d27d13bd90744a50b66b69b7"
+    },
+    "evidence_class": "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION",
+    "linux_swap_activation_tested": false,
+    "oracle": {
+      "dm_lower_read_bytes": 1052672,
+      "dm_lower_read_requests": 257,
+      "dm_lower_write_bytes": 749568,
+      "dm_lower_write_requests": 183,
+      "failed_flushes": 0,
+      "full_page_comparisons": 256,
+      "logical_write_bytes": 786432,
+      "logical_write_pages": 192,
+      "phase": "byte-exact-opened-dm",
+      "phase_count": 1,
+      "status": "PASS",
+      "successful_flushes": 386,
+      "target_error_counters": 0,
+      "verified_bytes": 1048576,
+      "zero_mismatches": true
+    },
+    "private_raw_record": "root-owned mode 0600 on separate persistent recovery storage; path and identifiers omitted",
+    "production_qualification": false,
+    "public_handoff": "handoff/2026-11-05-first-host-fe7ae0e4-development-smoke.md",
+    "recovery": {
+      "durable_state": "COMPLETE",
+      "mapper_absent": true,
+      "module_absent": true,
+      "one_use_claim_absent": true,
+      "original_header_byte_exactly_restored": true,
+      "target_inactive": true
+    },
+    "result": "PASS_DEVELOPMENT_ONLY",
+    "target_binding": "positively identified owner-authorized removable SD partition; unique IDs kept private",
+    "tested_source_sha": "fe7ae0e4f2800150ea1c13a843519945e4f5c789"
   },
   "maximum_capacity_and_memory": {
-    "basis": "Source-derived arithmetic in AGENT_CONTEXT.md and testing_standards.md; not a loaded full-capacity allocation measurement",
+    "basis": "read-only primary plan arithmetic and source-derived allocation estimates; not a full-capacity loaded measurement",
+    "candidate_capacity_production_verified": false,
+    "candidate_linux_usable_swap_bytes": 110920462336,
     "candidate_logical_pages": 27080192,
     "candidate_mapper_bytes": 110920466432,
-    "candidate_linux_usable_swap_bytes": 110920462336,
-    "gc_reserve_blocks": 3385024,
     "foreground_cow_reserve_blocks": 256,
-    "capacity_index_arrays_estimate_bytes": 776070968,
-    "independently_page_rounded_arrays_estimate_bytes": 776114176,
-    "largest_single_array_estimate_bytes": 433283072,
     "frozen_metadata_and_target_peak_limit_bytes": 1342177280,
-    "arithmetic_remaining_for_fixed_target_and_runtime_overhead_bytes": 566063104,
     "full_capacity_constructor_peak_measured_bytes": null,
     "full_capacity_steady_state_peak_measured_bytes": null,
-    "measured_full_capacity_fit": "NOT_MEASURED",
-    "candidate_capacity_production_verified": false
+    "gc_reserve_blocks": 3385024,
+    "max_safe_logical_capacity_bytes": null,
+    "measured_full_capacity_fit": "NOT_MEASURED"
+  },
+  "next_action": "Assigned rootless fixture owner: recognize the observed uid_map namespace-setup denial as a setup-only skip while preserving the overmount assertion; loaded-test owner: establish a legitimately owned RAM-backed qualification resource without touching the two unclaimed null_blk objects. Then run official make test on one exact current main SHA before any real Linux swap attempt.",
+  "primary_plan_observation": {
+    "active_swap_rows": 0,
+    "candidate_gc_reserve_blocks": 3385024,
+    "candidate_linux_usable_swap_kib": 108320764,
+    "candidate_logical_pages": 27080192,
+    "candidate_mapper_bytes": 110920466432,
+    "candidate_status": "arithmetic only; full-capacity physical, incompressible and memory qualification not done",
+    "control_build_source_sha": "fe7ae0e4f2800150ea1c13a843519945e4f5c789",
+    "live_artifact_hashes_read": false,
+    "module_provenance_read": false,
+    "plan_is_read_only": true,
+    "plan_result": "BLOCKED",
+    "privileged_execution_enabled": false,
+    "qualification_report_valid": false,
+    "recovery_preflight_and_separate_persistent_filesystem": true,
+    "reported_reason": "device_identity_recovery_and_lifecycle_gates_not_qualified",
+    "swapz_mapper_present": false,
+    "swapz_module_loaded": false,
+    "target_geometry_bytes": 124787884032,
+    "target_identity_preflight": true,
+    "target_mounted": false
   },
   "readiness": {
-    "observational_status": "BLOCKED",
-    "code_production_ready": "IN_PROGRESS",
-    "deployment_production_ready": "IN_PROGRESS",
-    "production_ready_for_owner_reboot": "NO",
     "actual_linux_swap_on_authorized_target": "NOT_RUN",
+    "code_production_ready": "IN_PROGRESS",
+    "cold_boot_harness": "NOT_ARMED",
+    "deployment_production_ready": "IN_PROGRESS",
     "full_capacity_backing_and_measured_memory": "NOT_RUN",
-    "sustained_physical_gc_and_churn": "NOT_RUN",
-    "cold_boot_harness": "NOT_INSTALLED",
+    "observational_status": "BLOCKED",
     "owner_observed_cold_boot": "NO_CURRENT_EVIDENCE",
-    "reason": "The latest owner report is blocked and source-stale; native and systemd/package CI were incomplete at capture, no swapz artifacts or mapper were installed, and physical/full-capacity gates remain unqualified."
+    "production_ready_for_owner_reboot": "NO",
+    "reason": "Current Native rootless CI fails before its overmount assertion because user-namespace setup is denied; loaded preflight cannot prove ownership of two null_blk resources; no current-source official make test, real Linux swap, full-capacity memory, GC/churn, installation, or cold-boot evidence exists.",
+    "sustained_physical_gc_and_churn": "NOT_RUN"
   },
-  "next_action": "Once the synchronized main source is stable and the host has at least 1 GiB MemAvailable, run the sole official make test on that exact clean source. Then qualify full-capacity measured memory and bounded byte-exact real swap on the authorized card before deployment or reboot readiness."
+  "repository": {
+    "branch": "main",
+    "canonical_remote_main_sha_at_capture": "900e9305a12dda48b84cd2ba19eef07608fcce0e",
+    "current_source_qualification": "NOT_QUALIFIED",
+    "local_main_sha_at_capture": "900e9305a12dda48b84cd2ba19eef07608fcce0e",
+    "main_synchronized_at_capture": true,
+    "origin_main_sha_at_capture": "900e9305a12dda48b84cd2ba19eef07608fcce0e",
+    "snapshot_captures_sha_before_its_own_report_only_commit": true,
+    "snapshot_observations_current_as_of_utc": "2026-11-05T21:05:01Z",
+    "worktree_clean_before_snapshot_edit": true
+  },
+  "schema": "swapz-production-status-snapshot",
+  "snapshot_kind": "SOURCE_BOUND_READ_ONLY_STATUS",
+  "snapshot_semantics": {
+    "current_main_exact_source_qualified": false,
+    "interpretation": "Host and CI facts were observed at captured_at_utc on first host. The physical mapper oracle is bound to tested_source_sha, not to later documentation-only commits. The current exact source has no official make test PASS and no real Linux swap result.",
+    "is_live_monitor": false,
+    "is_qualification_result": false,
+    "volatile_observations_expire_at_capture": true
+  }
 }
