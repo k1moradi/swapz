@@ -5078,6 +5078,37 @@ qualify Linux `swapon`, physical performance, cold-boot recovery or power-loss
 behavior. The owner objective for this PC excludes VMs. Keep these limits
 explicit in every review and result.
 
+The historical `tests/tools/live-swap-supervisor.py` mutating CLI remains
+permanently disabled for the retired host; its rootless worker fixtures are
+not permission to run or recover real swap. A synthetic pressure PASS must
+bind the validated qualified source, HEAD and one lowercase run ID through
+the parent state and exactly one duplicate-free child JSON report. Require
+the frozen page count and corresponding 4KiB byte count, zero mismatches,
+confirmed anonymous-mapping close, zero cgroup OOM kills, positive independent
+mapper usage and swap peak, and proof that the direct child was reaped and
+its newly owned cgroup was removed. The 128MiB child memory cap, 80,000
+pages and existing time limits are upper bounds, never knobs to raise for
+a passing fixture. Missing, malformed, nonfinite, duplicate or exhausted
+memory/PSI/cgroup evidence refuses admission. Intentionally generated PSI
+still cannot silently defeat the conservative stop thresholds.
+
+Pressure cancellation may signal only the supervisor's unreaped direct child,
+not every PID found in the pressure cgroup. Child waits and postreap report
+reads remain bounded; an inherited report writer or unproven child death
+retains recovery obligations. A first byte mismatch, worker signal/exit or
+guard stop must survive a simultaneous pipe, memory-counter, cgroup-removal,
+mapping-close or later mapper-cleanup failure. Errors identify the original
+phase/errno or exit, memory/PSI category, expected/observed page and byte
+verification counts, and whether the child, cgroup or mapper recovery state is
+retained, without dumping page bytes or private paths. The trial cannot
+publish PASS on missing/reordered observation indices or regressing kernel
+and lower-device counters. Rootless adversarial tests must inject both
+termination uncertainty and failed teardown independently of a clean worker,
+including a timeout followed by cgroup-removal failure. No synthetic PASS
+proves actual anonymous-page reclaim, Linux swap-out/swap-in, maximum-capacity
+behavior or the current dedicated-card deployment; those remain independent
+loaded/current-host qualification gates.
+
 The primary manager's direct production-C tests must exercise multiple synthetic
 target identities and geometries, Device Mapper output variants, active-swap
 parsing, header recognition, and fail-closed ownership decisions without

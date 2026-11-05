@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rootless lifecycle tests for the owner-authorized live-swap supervisor."""
 import argparse
+import errno
 import time
 import hashlib
 import importlib.util
@@ -24,8 +25,15 @@ SPEC.loader.exec_module(supervisor)
 HEAD = "c" * 40
 RUN_ID = "d" * 32
 REAL_MKDIR = os.mkdir
-PRESSURE_OK = json.dumps({"verified_pages": supervisor.PRESSURE_PAGES,
-                          "mismatches": 0})
+PRESSURE_OK = json.dumps({
+    "run_id": RUN_ID,
+    "requested_pages": supervisor.PRESSURE_PAGES,
+    "verified_pages": supervisor.PRESSURE_PAGES,
+    "expected_bytes": supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES,
+    "verified_bytes": supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES,
+    "mismatches": 0,
+    "mapping_closed": True,
+})
 HIGH_MEMORY = {
     "mem_available_bytes": 8 * 1024**3,
     "mem_total_bytes": 16 * 1024**3,
@@ -213,18 +221,48 @@ class FakeOps:
         if state["run_id"] != RUN_ID:
             raise supervisor.LiveSwapError("pressure seed differs from run id")
         self.mapper_used_kib = 0 if self.pressure_mode == "no_mapper_use" else 64
-        guard()
+        if self.pressure_mode != "no_sample":
+            guard()
         outcome = {"cgroup": f"/synthetic/{cgroup_name}",
                    "timed_out": False, "stopped": False, "exit_code": 0,
+                   "child_reaped": True, "cgroup_removed": True,
                    "stdout": PRESSURE_OK, "stderr": "",
                    "memory_events": {"oom_kill": 0},
                    "swap_peak_bytes": 0 if self.pressure_mode == "no_swap_peak"
                    else 1048576,
                    "zswap_peak_bytes": 0}
         if self.pressure_mode == "mismatch":
-            outcome.update(exit_code=1, stdout=json.dumps({
-                "verified_pages": supervisor.PRESSURE_PAGES - 3,
-                "mismatches": 3}))
+            child = json.loads(PRESSURE_OK)
+            child.update(verified_pages=supervisor.PRESSURE_PAGES - 3,
+                         verified_bytes=(supervisor.PRESSURE_PAGES - 3) *
+                         supervisor.PAGE_BYTES, mismatches=3)
+            outcome.update(exit_code=1, stdout=json.dumps(child))
+        elif self.pressure_mode == "partial":
+            child = json.loads(PRESSURE_OK)
+            child["verified_pages"] -= 1
+            outcome["stdout"] = json.dumps(child)
+        elif self.pressure_mode == "wrong_run":
+            child = json.loads(PRESSURE_OK)
+            child["run_id"] = "e" * 32
+            outcome["stdout"] = json.dumps(child)
+        elif self.pressure_mode == "wrong_bytes":
+            child = json.loads(PRESSURE_OK)
+            child["verified_bytes"] -= 1
+            outcome["stdout"] = json.dumps(child)
+        elif self.pressure_mode == "duplicate_report":
+            outcome["stdout"] = PRESSURE_OK + "\n" + PRESSURE_OK
+        elif self.pressure_mode == "duplicate_key":
+            outcome["stdout"] = PRESSURE_OK[:-1] + ', "verified_pages": 1}'
+        elif self.pressure_mode == "mapping_close":
+            child = json.loads(PRESSURE_OK)
+            child.update(mapping_closed=False, mapping_close_errno=errno.EIO)
+            outcome.update(exit_code=1, stdout=json.dumps(child))
+        elif self.pressure_mode == "unreaped":
+            outcome["child_reaped"] = False
+        elif self.pressure_mode == "cgroup_retained":
+            outcome["cgroup_removed"] = False
+        elif self.pressure_mode == "no_sample":
+            pass
         elif self.pressure_mode == "oom":
             outcome.update(exit_code=-9, stdout="",
                            memory_events={"oom_kill": 1})
@@ -553,12 +591,14 @@ class LiveSwapSupervisorTests(unittest.TestCase):
 
     def test_actual_swap_io_requires_swap_out_swap_in_and_lower_writes(self):
         baseline = {
+            "sample_index": 0,
             "vmstat": {"pswpin": 0, "pswpout": 0},
             "dmsetup_status": {"counters": {"logical_write": 0,
                                             "logical_read": 0}},
             "block_stats": {"available": True, "values": [0] * 8},
         }
         sample = {
+            "sample_index": 1,
             "vmstat": {"pswpin": 3, "pswpout": 9},
             "dmsetup_status": {"counters": {"logical_write": 4096,
                                             "logical_read": 4096}},
@@ -566,12 +606,13 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "block_stats": {"available": True,
                             "values": [0, 0, 0, 0, 1, 0, 8, 0]},
         }
-        result = {"trial_baseline": baseline, "observations": [sample],
+        result = {"trial_baseline": baseline,
+                  "observations": [baseline, sample],
                   "pressure_phase": {"status": "PASS",
                                      "peak_mapper_used_kib": 196608}}
         self.assertTrue(supervisor._actual_swap_io(result))
         no_swap_in = json.loads(json.dumps(result))
-        no_swap_in["observations"][0]["vmstat"]["pswpin"] = 0
+        no_swap_in["observations"][1]["vmstat"]["pswpin"] = 0
         self.assertFalse(supervisor._actual_swap_io(no_swap_in))
         no_pressure = json.loads(json.dumps(result))
         no_pressure["pressure_phase"] = {"status": "FAIL",
@@ -581,8 +622,20 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         no_mapper_use["pressure_phase"]["peak_mapper_used_kib"] = 0
         self.assertFalse(supervisor._actual_swap_io(no_mapper_use))
         blind = json.loads(json.dumps(result))
-        blind["observations"][0]["block_stats"] = {"available": False}
+        blind["observations"][1]["block_stats"] = {"available": False}
         self.assertFalse(supervisor._actual_swap_io(blind))
+        absent = json.loads(json.dumps(result))
+        absent["observations"] = absent["observations"][1:]
+        self.assertFalse(supervisor._actual_swap_io(absent))
+        reversed_samples = json.loads(json.dumps(result))
+        reversed_samples["observations"].reverse()
+        self.assertFalse(supervisor._actual_swap_io(reversed_samples))
+        missing_middle = json.loads(json.dumps(result))
+        missing_middle["observations"][1]["sample_index"] = 2
+        self.assertFalse(supervisor._actual_swap_io(missing_middle))
+        regressed = json.loads(json.dumps(result))
+        regressed["observations"][1]["dmsetup_status"]["counters"]["logical_read"] = -1
+        self.assertFalse(supervisor._actual_swap_io(regressed))
 
     def test_pressure_pattern_is_deterministic_incompressible_and_verified(self):
         seed = RUN_ID.encode("ascii")
@@ -795,6 +848,11 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             report = json.loads(outcome["stdout"].strip().splitlines()[-1])
             self.assertEqual(report["verified_pages"], 16)
             self.assertEqual(report["mismatches"], 0)
+            self.assertEqual(report["run_id"], RUN_ID)
+            self.assertEqual(report["verified_bytes"], 16 * supervisor.PAGE_BYTES)
+            self.assertTrue(report["mapping_closed"])
+            self.assertTrue(outcome["child_reaped"])
+            self.assertTrue(outcome["cgroup_removed"])
             self.assertEqual(outcome["memory_events"], {"oom_kill": 0})
             self.assertEqual(outcome["swap_peak_bytes"], 1048576)
             self.assertIsNone(outcome["zswap_peak_bytes"])
@@ -832,19 +890,25 @@ class LiveSwapSupervisorTests(unittest.TestCase):
                     {"run_id": RUN_ID}, cgroup_name="swapz-live-0123456789abcdef",
                     guard=lambda: None, stop_requested=lambda: False, timeout=0.5)
         self.assertTrue(outcome["timed_out"])
+        self.assertTrue(outcome["child_reaped"])
+        self.assertTrue(outcome["cgroup_removed"])
         self.assertLess(outcome["exit_code"], 0)
 
     def test_pressure_phase_accepts_only_verified_bounded_child(self):
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)
-            base_state = {"run_id": RUN_ID, "dm_major": 252, "dm_minor": 0,
+            base_state = {"run_id": RUN_ID, "head": HEAD,
+                          "qualified_source": supervisor.QUALIFIED_SOURCE,
+                          "dm_major": 252, "dm_minor": 0,
                           "dm_name": "swapz-live-0123456789abcdef",
                           "stage": "LIVE_SWAP_ACTIVE"}
 
             def phase(mode):
                 ops = FakeOps(pressure_mode=mode)
                 ops.mapper_active = True
-                results = {"schema": "swapz-live-swap-results-v1"}
+                results = {"schema": "swapz-live-swap-results-v1",
+                           "run_id": RUN_ID, "head": HEAD,
+                           "qualified_source": supervisor.QUALIFIED_SOURCE}
                 with mock.patch.object(supervisor, "_memory_sample",
                                        return_value=HIGH_MEMORY):
                     value = supervisor._run_pressure_phase(
@@ -855,13 +919,326 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             self.assertEqual(passed["status"], "PASS")
             self.assertEqual(results["pressure_phase"]["status"], "PASS")
             self.assertGreater(results["pressure_phase"]["peak_mapper_used_kib"], 0)
-            for mode in ("mismatch", "oom", "timeout", "no_swap_peak", "no_mapper_use"):
+            for mode in ("mismatch", "partial", "wrong_run", "wrong_bytes",
+                         "duplicate_report", "duplicate_key", "mapping_close",
+                         "unreaped", "cgroup_retained", "no_sample", "oom",
+                         "timeout", "no_swap_peak", "no_mapper_use"):
                 with self.subTest(mode=mode):
                     with self.assertRaises(supervisor.LiveSwapError):
                         phase(mode)
             with self.assertRaises(supervisor.SafeStop) as caught:
                 phase("stop")
             self.assertEqual(caught.exception.reason, "operator_stop")
+
+    def test_pressure_oracle_run_and_mapping_close_fail_closed(self):
+        report = supervisor._pressure_run(RUN_ID, 4)
+        self.assertEqual(report["run_id"], RUN_ID)
+        self.assertEqual(report["requested_pages"], 4)
+        self.assertEqual(report["expected_bytes"], 4 * supervisor.PAGE_BYTES)
+        self.assertEqual(report["verified_bytes"], 4 * supervisor.PAGE_BYTES)
+        self.assertTrue(report["mapping_closed"])
+        for bad_run in ("D" * 32, RUN_ID[:-1], "x" * 32):
+            with self.subTest(bad_run=bad_run):
+                with self.assertRaisesRegex(supervisor.LiveSwapError, "identity"):
+                    supervisor._pressure_run(bad_run, 4)
+        with self.assertRaisesRegex(supervisor.LiveSwapError, "page bound"):
+            supervisor._pressure_run(RUN_ID, supervisor.PRESSURE_PAGES + 1)
+
+        class FailingCloseMapping:
+            def __init__(self, size):
+                self.data = bytearray(size)
+
+            def __getitem__(self, index):
+                return self.data[index]
+
+            def __setitem__(self, index, value):
+                self.data[index] = value
+
+            def close(self):
+                raise OSError(errno.EIO, "synthetic close failure")
+
+        def failing_mapping(_descriptor, size, *, access):
+            del access
+            return FailingCloseMapping(size)
+
+        with mock.patch.object(supervisor.mmap, "mmap",
+                               side_effect=failing_mapping):
+            closed = supervisor._pressure_run(RUN_ID, 4)
+            self.assertFalse(closed["mapping_closed"])
+            self.assertEqual(closed["mapping_close_errno"], errno.EIO)
+            self.assertEqual(closed["verified_pages"], 4)
+            with mock.patch.object(
+                    supervisor, "_pressure_verify",
+                    side_effect=supervisor.LiveSwapError(
+                        "first integrity failure")):
+                with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                            "first integrity failure") as caught:
+                    supervisor._pressure_run(RUN_ID, 4)
+                self.assertIn("mapping_close", " ".join(
+                    getattr(caught.exception, "__notes__", [])))
+
+    def test_pressure_report_rejects_duplicates_and_extra_records(self):
+        self.assertEqual(supervisor._parse_pressure_child_output(PRESSURE_OK),
+                         json.loads(PRESSURE_OK))
+        for text in (
+                PRESSURE_OK + "\n" + PRESSURE_OK,
+                PRESSURE_OK[:-1] + ', "verified_pages": 2}',
+                "noise\n" + PRESSURE_OK,
+                '{"run_id": ',
+                ""):
+            with self.subTest(text_kind=text[:20]):
+                self.assertIsNone(supervisor._parse_pressure_child_output(text))
+
+    def test_pressure_failure_evidence_contains_exact_counts_and_retained_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = {"run_id": RUN_ID, "head": HEAD,
+                     "qualified_source": supervisor.QUALIFIED_SOURCE,
+                     "dm_major": 252, "dm_minor": 0,
+                     "stage": "LIVE_SWAP_ACTIVE"}
+            results = {"run_id": RUN_ID, "head": HEAD,
+                       "qualified_source": supervisor.QUALIFIED_SOURCE}
+            ops = FakeOps(pressure_mode="mismatch")
+            ops.mapper_active = True
+            with mock.patch.object(supervisor, "_memory_sample",
+                                   return_value=HIGH_MEMORY):
+                with self.assertRaisesRegex(
+                        supervisor.LiveSwapError,
+                        "expected_pages=.*observed_pages=") as caught:
+                    supervisor._run_pressure_phase(
+                        Path(directory), state, results, ops)
+            self.assertIn("retained=LIVE_SWAP_ACTIVE", str(caught.exception))
+            phase = results["pressure_phase"]
+            self.assertEqual(phase["status"], "FAIL")
+            self.assertEqual(phase["expected_verified_pages"],
+                             supervisor.PRESSURE_PAGES)
+            self.assertEqual(phase["observed_verified_pages"],
+                             supervisor.PRESSURE_PAGES - 3)
+            self.assertEqual(phase["expected_verified_bytes"],
+                             supervisor.PRESSURE_PAGES * supervisor.PAGE_BYTES)
+            self.assertEqual(phase["observed_verified_bytes"],
+                             (supervisor.PRESSURE_PAGES - 3) *
+                             supervisor.PAGE_BYTES)
+            self.assertEqual(phase["exit_code"], 1)
+
+            rejected = dict(results, run_id="e" * 32)
+            with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                        "source/run identity"):
+                supervisor._run_pressure_phase(
+                    Path(directory), dict(state), rejected, ops)
+
+    def test_pressure_guard_stops_on_rising_psi_and_cgroup_exhaustion(self):
+        ops = FakeOps()
+        ops.mapper_active = True
+        ops.mapper_used_kib = 64
+        state = {"dm_major": 252, "dm_minor": 0}
+        for key, value, category in (
+                ("psi_some_avg10", supervisor.MAX_MEMORY_SOME_AVG10, "PSI_some"),
+                ("psi_full_avg10", supervisor.MAX_MEMORY_FULL_AVG10, "PSI_full"),
+                ("cgroup_headroom_bytes", 0, "cgroup")):
+            sample = dict(HIGH_MEMORY, **{key: value})
+            with self.subTest(category=category), mock.patch.object(
+                    supervisor, "_memory_sample", return_value=sample):
+                with self.assertRaisesRegex(supervisor.SafeStop,
+                                            category):
+                    supervisor._pressure_guard(
+                        ops, state, {"peak_mapper_used_kib": 0})
+
+    def test_malformed_psi_never_admits_memory_sample(self):
+        for raw in (
+                "some avg10=nan\nfull avg10=0",
+                "some avg10=-1\nfull avg10=0",
+                "some avg10=1\nsome avg10=2\nfull avg10=0",
+                "some avg10=1 avg10=2\nfull avg10=0",
+                "some avg10=1",
+                "full avg10=0"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(supervisor.LiveSwapError):
+                    supervisor.LinuxOps._psi_avg10(raw)
+        sample = dict(HIGH_MEMORY, psi_some_avg10=float("nan"))
+        with self.assertRaises(supervisor.SafeStop):
+            supervisor._check_memory_sample(sample)
+        sample = dict(HIGH_MEMORY)
+        del sample["cgroup_headroom_bytes"]
+        with self.assertRaises(supervisor.SafeStop):
+            supervisor._check_memory_sample(sample)
+
+    def test_pressure_worker_error_outlives_cleanup_error(self):
+        """No actual child or cgroup pressure: all process calls are fake."""
+        for termination_fails in (False, True):
+            with self.subTest(termination_fails=termination_fails):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    read_fd, write_fd = os.pipe()
+                    os.close(write_fd)
+
+                    def fake_mkdir(path, _mode=0o755):
+                        REAL_MKDIR(path)
+                        (Path(path) / "memory.events").write_text("oom_kill 0\n")
+                        (Path(path) / "memory.max").write_text("max\n")
+                        (Path(path) / "memory.zswap.max").write_text("max\n")
+
+                    def terminated(_cgroup, _pid):
+                        if termination_fails:
+                            raise supervisor.LiveSwapError(
+                                "synthetic child survived cancellation")
+                        return 9  # SIGKILL wait status.
+
+                    with ExitStack() as stack:
+                        stack.enter_context(mock.patch.object(
+                            supervisor, "PRESSURE_CGROUP_ROOT", root))
+                        stack.enter_context(mock.patch.object(
+                            supervisor.os, "mkdir", side_effect=fake_mkdir))
+                        stack.enter_context(mock.patch.object(
+                            supervisor, "_spawn_pressure_child",
+                            return_value=(1234, read_fd)))
+                        stack.enter_context(mock.patch.object(
+                            supervisor.os, "waitpid", return_value=(0, 0)))
+                        stack.enter_context(mock.patch.object(
+                            supervisor, "_terminate_pressure_child",
+                            side_effect=terminated))
+                        stack.enter_context(mock.patch.object(
+                            supervisor, "_remove_empty_cgroup",
+                            side_effect=OSError(errno.EIO, "synthetic rmdir")))
+                        stack.enter_context(mock.patch.object(
+                            supervisor, "SAMPLE_SECONDS", 0))
+                        with self.assertRaises(supervisor.SafeStop) as caught:
+                            supervisor.LinuxOps().pressure_workload(
+                                {"run_id": RUN_ID},
+                                cgroup_name="swapz-live-0123456789abcdef",
+                                guard=lambda: (_ for _ in ()).throw(
+                                    supervisor.SafeStop(
+                                        "memory_pressure", "first guard failure")),
+                                stop_requested=lambda: False, timeout=60)
+                    self.assertEqual(caught.exception.reason, "memory_pressure")
+                    message = str(caught.exception)
+                    self.assertIn("phase=pressure_guard", message)
+                    self.assertIn("cleanup=", message)
+                    self.assertIn("first guard failure", message)
+                    if termination_fails:
+                        self.assertIn("retained=child_and_cgroup", message)
+                        self.assertIn("child_reap:", message)
+                    else:
+                        self.assertIn("errno=5", message)
+                    self.assertNotIn(directory, message)
+                    with self.assertRaises(OSError):
+                        os.fstat(read_fd)
+
+    def test_timeout_cleanup_failure_preserves_original_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            read_fd, write_fd = os.pipe()
+            os.close(write_fd)
+
+            def fake_mkdir(path, _mode=0o755):
+                REAL_MKDIR(path)
+                (Path(path) / "memory.max").write_text("max\n")
+                (Path(path) / "memory.zswap.max").write_text("max\n")
+                (Path(path) / "memory.events").write_text("oom_kill 0\n")
+
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    supervisor, "PRESSURE_CGROUP_ROOT", root))
+                stack.enter_context(mock.patch.object(
+                    supervisor.os, "mkdir", side_effect=fake_mkdir))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_spawn_pressure_child",
+                    return_value=(1234, read_fd)))
+                stack.enter_context(mock.patch.object(
+                    supervisor.os, "waitpid", return_value=(0, 0)))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_terminate_pressure_child", return_value=9))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_remove_empty_cgroup",
+                    side_effect=OSError(errno.EIO, "synthetic rmdir")))
+                with self.assertRaisesRegex(
+                        supervisor.LiveSwapError, "original_exit=-9") as caught:
+                    supervisor.LinuxOps().pressure_workload(
+                        {"run_id": RUN_ID},
+                        cgroup_name="swapz-live-0123456789abcdef",
+                        guard=lambda: None, stop_requested=lambda: False,
+                        timeout=0)
+            self.assertIn("timed_out=True", str(caught.exception))
+            self.assertIn("retained=cgroup_or_telemetry", str(caught.exception))
+            self.assertNotIn(directory, str(caught.exception))
+
+    def test_child_report_with_unclosed_writer_is_not_success(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(supervisor.LiveSwapError,
+                                        "EOF unproven"):
+                supervisor._read_all_fd(read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_failed_child_and_cgroup_removal_retain_original_verify_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            read_fd, write_fd = os.pipe()
+            child = json.loads(PRESSURE_OK)
+            child.update(verified_pages=supervisor.PRESSURE_PAGES - 1,
+                         verified_bytes=(supervisor.PRESSURE_PAGES - 1) *
+                         supervisor.PAGE_BYTES, mismatches=1)
+            os.write(write_fd, json.dumps(child).encode() + b"\n")
+            os.close(write_fd)
+
+            def fake_mkdir(path, _mode=0o755):
+                REAL_MKDIR(path)
+                (Path(path) / "memory.max").write_text("max\n")
+                (Path(path) / "memory.zswap.max").write_text("max\n")
+                (Path(path) / "memory.events").write_text("oom_kill 0\n")
+
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    supervisor, "PRESSURE_CGROUP_ROOT", root))
+                stack.enter_context(mock.patch.object(
+                    supervisor.os, "mkdir", side_effect=fake_mkdir))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_spawn_pressure_child",
+                    return_value=(1234, read_fd)))
+                stack.enter_context(mock.patch.object(
+                    supervisor.os, "waitpid", return_value=(1234, 256)))
+                stack.enter_context(mock.patch.object(
+                    supervisor, "_remove_empty_cgroup",
+                    side_effect=OSError(errno.EIO, "synthetic rmdir")))
+                with self.assertRaisesRegex(
+                        supervisor.LiveSwapError,
+                        "phase=pressure_verify original_exit=1") as caught:
+                    supervisor.LinuxOps().pressure_workload(
+                        {"run_id": RUN_ID},
+                        cgroup_name="swapz-live-0123456789abcdef",
+                        guard=lambda: None, stop_requested=lambda: False,
+                        timeout=60)
+            diagnostic = str(caught.exception)
+            self.assertIn(f"expected_pages={supervisor.PRESSURE_PAGES}",
+                          diagnostic)
+            self.assertIn(
+                f"observed_pages={supervisor.PRESSURE_PAGES - 1}", diagnostic)
+            self.assertIn("cleanup=cgroup_remove:OSError:errno=5", diagnostic)
+            self.assertNotIn(directory, diagnostic)
+
+    def test_interrupted_recovery_never_uses_group_wide_kill(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cgroup = root / "swapz-live-0123456789abcdef"
+            cgroup.mkdir()
+            (cgroup / "cgroup.procs").write_text("999\n")
+            with mock.patch.object(supervisor, "PRESSURE_CGROUP_ROOT", root), \
+                    mock.patch.object(supervisor, "_kill_cgroup",
+                                      side_effect=AssertionError("unsafe kill")):
+                with self.assertRaisesRegex(
+                        supervisor.LiveSwapError, "retained=cgroup"):
+                    supervisor.LinuxOps().release_pressure_cgroup({
+                        "pressure_cgroup": cgroup.name})
+            self.assertTrue(cgroup.exists())
+
+    def test_duplicate_memory_events_are_not_trusted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            events = Path(directory) / "memory.events"
+            events.write_text("oom_kill 1\noom_kill 0\n")
+            with self.assertRaisesRegex(
+                    supervisor.LiveSwapError, "duplicate/malformed"):
+                supervisor._read_memory_events(Path(directory))
 
     def test_live_inspection_permits_used_swap_only_through_helper_flag(self):
         header = b"O" * supervisor.PAGE_BYTES
@@ -1170,6 +1547,23 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         self.assertFalse(any(Path(call[0]).name == "swapoff" and
                              "/dev/mapper/" in call[-1]
                              for call in ops.mutations))
+
+    def test_first_pressure_failure_survives_mapper_cleanup_failure(self):
+        ops = FakeOps(fail_phase="mapper_swapoff", pressure_mode="mismatch")
+        with self.assertRaisesRegex(
+                supervisor.LiveSwapError, "REQUIRES_REVIEW") as caught:
+            self.run_mock_trial(ops)
+        diagnostic = str(caught.exception)
+        self.assertIn("phase=activation", diagnostic)
+        self.assertIn("swap-pressure verification failed", diagnostic)
+        self.assertIn("exit=1", diagnostic)
+        self.assertIn("phase=cleanup", diagnostic)
+        self.assertIn("retained=private_recovery_state", diagnostic)
+        self.assertNotIn("/tmp/", diagnostic)
+        self.assertTrue(ops.mapper_exists)
+        self.assertTrue(ops.mapper_active)
+        self.assertFalse(ops.original_active)
+        self.assertEqual(ops.header, ops.formatted)
 
     def test_interrupted_activation_restores_without_advancing_to_mapper(self):
         ops = FakeOps(stop_after_format=True)
@@ -1718,6 +2112,7 @@ class LiveSwapSupervisorTests(unittest.TestCase):
             "swap_priority": 32767,
             "vmstat": {"pswpin": 4 * count, "pswpout": 8 * count},
             "memory": dict(HIGH_MEMORY),
+            "sample_index": len(results.get("observations", [])),
             "drain_headroom_bytes": supervisor._drain_headroom_bytes(
                 64, dict(HIGH_MEMORY)),
             "dmsetup_status": {"text": "synthetic", "counters": {

@@ -13,6 +13,8 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import math
+import mmap
 import os
 from pathlib import Path
 import platform
@@ -866,37 +868,56 @@ class LinuxOps:
 
     @staticmethod
     def _psi_avg10(contents):
+        """Require exactly one finite memory-PSI average per category."""
         rows = {}
         for line in contents.splitlines():
             fields = line.split()
             if not fields or fields[0] not in {"some", "full"}:
                 continue
-            parsed = dict(item.split("=", 1) for item in fields[1:]
-                          if "=" in item)
-            if "avg10" not in parsed:
-                raise LiveSwapError("memory PSI avg10 is missing")
-            rows[fields[0]] = float(parsed["avg10"])
-        if not {"some", "full"}.issubset(rows):
-            raise LiveSwapError("memory PSI is unavailable")
+            category = fields[0]
+            if category in rows:
+                raise LiveSwapError(f"memory PSI duplicate category={category}")
+            values = {}
+            for field in fields[1:]:
+                key, separator, value = field.partition("=")
+                if not separator or not key or key in values:
+                    raise LiveSwapError(f"memory PSI malformed category={category}")
+                values[key] = value
+            try:
+                average = float(values["avg10"])
+            except (KeyError, ValueError, OverflowError) as exc:
+                raise LiveSwapError(
+                    f"memory PSI missing/invalid avg10 category={category}") from exc
+            if not math.isfinite(average) or not 0 <= average <= 100:
+                raise LiveSwapError(f"memory PSI out-of-range category={category}")
+            rows[category] = average
+        if set(rows) != {"some", "full"}:
+            raise LiveSwapError("memory PSI missing some/full categories")
         return rows["some"], rows["full"]
 
     def _cgroup_headroom(self):
+        """Only an explicitly unlimited parent has no numeric headroom."""
         try:
             cgroup = next(line.split(":", 2)[2] for line in
                           self.text("/proc/self/cgroup").splitlines()
                           if line.startswith("0::"))
             base = Path("/sys/fs/cgroup") / cgroup.lstrip("/")
             maximum = (base / "memory.max").read_text().strip()
-            current = int((base / "memory.current").read_text().strip())
+            current = (base / "memory.current").read_text().strip()
+            if not re.fullmatch(r"[0-9]+", current):
+                raise ValueError("invalid parent current charge")
             if maximum == "max":
                 return None
-            return max(0, int(maximum) - current)
-        except (OSError, StopIteration, ValueError):
-            return None
+            if not re.fullmatch(r"[0-9]+", maximum):
+                raise ValueError("invalid parent maximum")
+            return max(0, int(maximum) - int(current))
+        except (OSError, StopIteration, ValueError) as exc:
+            raise LiveSwapError(
+                "cgroup parent headroom unavailable; admission=BLOCKED") from exc
 
 
     def pressure_workload(self, state, *, cgroup_name, guard, stop_requested, timeout):
-        """Run one forked, guarded child in its own cgroup, then remove the cgroup."""
+        """Own one fork child and report all cleanup failures without losing its cause."""
         run_id = state["run_id"]
         if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id):
             raise LiveSwapError("pressure seed must be the bound run id")
@@ -905,11 +926,19 @@ class LinuxOps:
         cgroup = PRESSURE_CGROUP_ROOT / cgroup_name
         if cgroup.exists():
             raise LiveSwapError("pressure cgroup name is already in use")
-        os.mkdir(cgroup, 0o755)
-        outcome = {"cgroup": str(cgroup), "timed_out": False, "stopped": False}
+        try:
+            os.mkdir(cgroup, 0o755)
+        except OSError as exc:
+            raise LiveSwapError(
+                f"phase=cgroup_create errno={exc.errno} retained=none") from exc
+        outcome = {"cgroup": str(cgroup), "timed_out": False, "stopped": False,
+                   "child_reaped": False, "cgroup_removed": False}
         pid = None
         read_fd = None
         status = None
+        first_error = None
+        cleanup_errors = []
+        phase = "cgroup_admission"
         try:
             _write_control(cgroup / "memory.max", str(PRESSURE_MEMORY_MAX_BYTES))
             _require_control(cgroup / "memory.max", str(PRESSURE_MEMORY_MAX_BYTES))
@@ -920,10 +949,12 @@ class LinuxOps:
                     "pressure cgroup cannot disable zswap; pressure would not reach the device")
             _write_control(cgroup / "memory.zswap.max", "0")
             _require_control(cgroup / "memory.zswap.max", "0")
+            phase = "child_spawn"
             pid, read_fd = _spawn_pressure_child(
                 cgroup, run_id, PRESSURE_PAGES, PRESSURE_TIMEOUT_SECONDS + 60)
             started = time.monotonic()
             last_guard = started
+            phase = "worker_watch"
             while True:
                 waited, code = os.waitpid(pid, os.WNOHANG)
                 if waited == pid:
@@ -936,20 +967,86 @@ class LinuxOps:
                     outcome["timed_out"] = True
                     break
                 if time.monotonic() - last_guard >= SAMPLE_SECONDS:
+                    phase = "pressure_guard"
                     guard()
+                    phase = "worker_watch"
                     last_guard = time.monotonic()
                 time.sleep(1)
-        finally:
-            if pid is not None and status is None:
+        except BaseException as exc:
+            first_error = exc
+
+        # Only our unreaped direct child's PID may be signalled. Never signal
+        # the entire cgroup: untrusted membership is not ownership proof.
+        if pid is not None and status is None:
+            try:
                 status = _terminate_pressure_child(cgroup, pid)
-            if pid is not None:
-                outcome["exit_code"] = os.waitstatus_to_exitcode(status)
-                outcome["stdout"] = _read_all_fd(read_fd)
-                os.close(read_fd)
-            outcome["memory_events"] = _read_memory_events(cgroup)
-            outcome["swap_peak_bytes"] = _read_int_control(cgroup / "memory.swap.peak")
-            outcome["zswap_peak_bytes"] = _read_int_control(cgroup / "memory.zswap.peak")
-            _remove_empty_cgroup(cgroup)
+            except BaseException as exc:
+                cleanup_errors.append(("child_reap", exc))
+        if pid is not None and status is not None:
+            outcome["child_reaped"] = True
+            outcome["exit_code"] = os.waitstatus_to_exitcode(status)
+        if read_fd is not None:
+            try:
+                if status is not None:
+                    outcome["stdout"] = _read_all_fd(read_fd)
+            except BaseException as exc:
+                cleanup_errors.append(("child_report", exc))
+            finally:
+                try:
+                    os.close(read_fd)
+                except OSError as exc:
+                    cleanup_errors.append(("child_pipe_close", exc))
+        for label, reader in (
+                ("memory_events", lambda: _read_memory_events(cgroup)),
+                ("swap_peak_bytes", lambda: _read_int_control(
+                    cgroup / "memory.swap.peak")),
+                ("zswap_peak_bytes", lambda: _read_int_control(
+                    cgroup / "memory.zswap.peak"))):
+            try:
+                outcome[label] = reader()
+            except BaseException as exc:
+                cleanup_errors.append((label, exc))
+        if pid is None or status is not None:
+            try:
+                _remove_empty_cgroup(cgroup)
+                outcome["cgroup_removed"] = True
+            except BaseException as exc:
+                cleanup_errors.append(("cgroup_remove", exc))
+
+        if cleanup_errors:
+            cleanup_detail = ",".join(
+                f"{label}:{type(exc).__name__}:errno={getattr(exc, 'errno', None)}"
+                for label, exc in cleanup_errors)
+            retained = ("child_and_cgroup" if pid is not None and status is None
+                        else "cgroup_or_telemetry")
+            detail = (f"; cleanup={cleanup_detail}; retained={retained}; "
+                      f"exit={outcome.get('exit_code')}; timed_out={outcome['timed_out']}")
+        else:
+            detail = ""
+        if first_error is not None:
+            original = (f"phase={phase} original={type(first_error).__name__}"
+                        f" errno={getattr(first_error, 'errno', None)}")
+            if isinstance(first_error, SafeStop):
+                first_error.args = (
+                    f"{original} category={first_error.reason} "
+                    f"detail={_bounded(first_error)}{detail}",)
+                raise first_error
+            raise LiveSwapError(f"{original}{detail}") from first_error
+        if cleanup_errors:
+            child = _parse_pressure_child_output(outcome.get("stdout", ""))
+            observed_pages = child.get("verified_pages") if child else None
+            observed_bytes = child.get("verified_bytes") if child else None
+            child_failed = (outcome.get("exit_code") != 0 or child is None or
+                            child.get("mismatches") != 0 or
+                            observed_pages != PRESSURE_PAGES or
+                            observed_bytes != PRESSURE_PAGES * PAGE_BYTES)
+            phase_name = "pressure_verify" if child_failed else "pressure_teardown"
+            raise LiveSwapError(
+                f"phase={phase_name} original_exit={outcome.get('exit_code')} "
+                f"admission=memory/PSI/cgroup "
+                f"expected_pages={PRESSURE_PAGES} observed_pages={observed_pages} "
+                f"expected_bytes={PRESSURE_PAGES * PAGE_BYTES} "
+                f"observed_bytes={observed_bytes}{detail}") from cleanup_errors[0][1]
         return outcome
 
     def ci_status(self, head):
@@ -979,7 +1076,7 @@ class LinuxOps:
                 "workflows": list(REQUIRED_CI_WORKFLOWS) if ok else []}
 
     def release_pressure_cgroup(self, state):
-        """Remove a pressure cgroup saved by an interrupted run; never force it."""
+        """Remove only an empty owned cgroup; never signal foreign members."""
         name = state.get("pressure_cgroup")
         if not name:
             return False
@@ -988,13 +1085,15 @@ class LinuxOps:
         cgroup = PRESSURE_CGROUP_ROOT / name
         if not cgroup.exists():
             return False
-        _kill_cgroup(cgroup)
         procs = cgroup / "cgroup.procs"
-        deadline = time.monotonic() + 60
-        while procs.exists() and procs.read_text().strip():
-            if time.monotonic() >= deadline:
-                raise LiveSwapError("pressure cgroup still has processes; manual review")
-            time.sleep(0.5)
+        try:
+            if procs.exists() and procs.read_text().strip():
+                raise LiveSwapError(
+                    "phase=pressure_recovery cgroup occupied; retained=cgroup")
+        except OSError:
+            # The kernel still refuses rmdir of a populated cgroup. A failed
+            # inventory read cannot authorize signalling or a PASS.
+            pass
         _remove_empty_cgroup(cgroup)
         return True
 
@@ -1577,19 +1676,50 @@ def _memory_sample(ops):
 
 
 def _check_memory_sample(sample, *, require_low_ram=False):
+    """Missing, malformed or exhausted memory/PSI evidence cannot admit work."""
+    if not isinstance(sample, dict):
+        raise SafeStop("memory_pressure", "memory pressure admission=invalid memory/PSI sample")
+    available = sample.get("mem_available_bytes")
     headroom = sample.get("cgroup_headroom_bytes")
-    if sample["mem_available_bytes"] < MIN_AVAILABLE_BYTES or \
-            (headroom is not None and
-             headroom < MIN_CGROUP_HEADROOM_BYTES) or \
-            sample["psi_some_avg10"] >= MAX_MEMORY_SOME_AVG10 or \
-            sample["psi_full_avg10"] >= MAX_MEMORY_FULL_AVG10:
+    if type(available) is not int or available < 0 or \
+            "cgroup_headroom_bytes" not in sample or \
+            (headroom is not None and (type(headroom) is not int or headroom < 0)):
+        raise SafeStop("memory_pressure", "memory pressure admission=invalid MemAvailable/cgroup")
+    for category in ("psi_some_avg10", "psi_full_avg10"):
+        value = sample.get(category)
+        if type(value) not in (int, float) or \
+                not math.isfinite(value) or not 0 <= value <= 100:
+            raise SafeStop("memory_pressure", f"memory pressure admission=invalid {category}")
+    if "mem_total_bytes" in sample and (
+            type(sample["mem_total_bytes"]) is not int or
+            sample["mem_total_bytes"] <= 0 or
+            available > sample["mem_total_bytes"]):
+        raise SafeStop("memory_pressure", "memory pressure admission=invalid MemTotal")
+    if available < MIN_AVAILABLE_BYTES:
         raise SafeStop(
             "memory_pressure",
-            "memory pressure reached the conservative stop threshold")
-    if require_low_ram and sample.get("ram_used_percent", 100.0) >= 50.0:
+            f"memory pressure admission=MemAvailable below floor={MIN_AVAILABLE_BYTES}")
+    if headroom is not None and headroom < MIN_CGROUP_HEADROOM_BYTES:
         raise SafeStop(
-            "ram_not_low",
-            "RAM use must be below 50 percent before original swapoff")
+            "memory_pressure",
+            f"memory pressure admission=cgroup below floor={MIN_CGROUP_HEADROOM_BYTES}")
+    if sample["psi_some_avg10"] >= MAX_MEMORY_SOME_AVG10:
+        raise SafeStop(
+            "memory_pressure",
+            f"memory pressure admission=PSI_some threshold={MAX_MEMORY_SOME_AVG10}")
+    if sample["psi_full_avg10"] >= MAX_MEMORY_FULL_AVG10:
+        raise SafeStop(
+            "memory_pressure",
+            f"memory pressure admission=PSI_full threshold={MAX_MEMORY_FULL_AVG10}")
+    if require_low_ram:
+        used = sample.get("ram_used_percent")
+        if type(used) not in (int, float) or not math.isfinite(used) or \
+                not 0 <= used <= 100:
+            raise SafeStop("ram_not_low", "memory pressure admission=invalid RAM-use percent")
+        if used >= 50.0:
+            raise SafeStop(
+                "ram_not_low",
+                "RAM use must be below 50 percent before original swapoff")
 
 
 def _drain_headroom_bytes(mapper_used_kib, memory):
@@ -1635,17 +1765,42 @@ def _check_start_headroom(original_used_kib, memory):
 
 
 def _pressure_run(run_id, pages):
-    """Fill, verify and count one deterministic working set in memory."""
+    """Verify the complete anonymous mapping; report close errors, not PASS."""
+    if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id) or \
+            type(pages) is not int or not 0 < pages <= PRESSURE_PAGES:
+        raise LiveSwapError("phase=pressure_setup invalid run identity/page bound")
     seed = run_id.encode("ascii")
     started = time.monotonic()
-    working_set = bytearray(pages * PAGE_BYTES)
-    for index in range(pages):
-        offset = index * PAGE_BYTES
-        working_set[offset:offset + PAGE_BYTES] = _pressure_page(seed, index)
-    mismatches = _pressure_verify(working_set, seed, pages)
+    working_set = mmap.mmap(-1, pages * PAGE_BYTES, access=mmap.ACCESS_WRITE)
+    original_error = None
+    mismatches = None
+    try:
+        for index in range(pages):
+            offset = index * PAGE_BYTES
+            working_set[offset:offset + PAGE_BYTES] = _pressure_page(seed, index)
+        mismatches = _pressure_verify(working_set, seed, pages)
+    except BaseException as exc:
+        original_error = exc
+    close_error = None
+    try:
+        working_set.close()
+    except BaseException as exc:
+        close_error = exc
+    if original_error is not None:
+        if close_error is not None:
+            original_error.add_note(
+                "phase=mapping_close secondary="
+                f"{type(close_error).__name__} errno={getattr(close_error, 'errno', None)}")
+        raise original_error
     return {
+        "run_id": run_id,
+        "requested_pages": pages,
         "verified_pages": pages - mismatches,
+        "expected_bytes": pages * PAGE_BYTES,
+        "verified_bytes": (pages - mismatches) * PAGE_BYTES,
         "mismatches": mismatches,
+        "mapping_closed": close_error is None,
+        "mapping_close_errno": getattr(close_error, "errno", None),
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }
 
@@ -1657,7 +1812,8 @@ def _set_parent_death_signal():
         raise OSError(ctypes.get_errno(), "cannot set parent-death signal")
 
 
-def _pressure_child(cgroup, run_id, pages, deadline_seconds, report_fd):
+def _pressure_child(cgroup, run_id, pages, deadline_seconds, report_fd,
+                    parent_pid):
     """Forked child: join the cgroup, exceed its limit, verify, report, exit.
 
     The child runs code the supervisor already loaded and verified, so nothing
@@ -1666,6 +1822,8 @@ def _pressure_child(cgroup, run_id, pages, deadline_seconds, report_fd):
     code = 2
     try:
         _set_parent_death_signal()
+        if os.getppid() != parent_pid:
+            raise LiveSwapError("pressure parent exited before death-signal binding")
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         signal.alarm(int(deadline_seconds))
@@ -1675,7 +1833,7 @@ def _pressure_child(cgroup, run_id, pages, deadline_seconds, report_fd):
         data = memoryview((json.dumps(result, sort_keys=True) + "\n").encode())
         while data:
             data = data[os.write(report_fd, data):]
-        code = 0 if result["mismatches"] == 0 else 1
+        code = 0 if result["mismatches"] == 0 and result["mapping_closed"] else 1
     except BaseException:
         code = 2
     finally:
@@ -1683,6 +1841,7 @@ def _pressure_child(cgroup, run_id, pages, deadline_seconds, report_fd):
 
 
 def _spawn_pressure_child(cgroup, run_id, pages, deadline_seconds):
+    parent_pid = os.getpid()
     read_fd, write_fd = os.pipe()
     try:
         pid = os.fork()
@@ -1692,32 +1851,35 @@ def _spawn_pressure_child(cgroup, run_id, pages, deadline_seconds):
         raise
     if pid == 0:
         os.close(read_fd)
-        _pressure_child(cgroup, run_id, pages, deadline_seconds, write_fd)
+        _pressure_child(cgroup, run_id, pages, deadline_seconds, write_fd,
+                        parent_pid)
     os.close(write_fd)
     return pid, read_fd
 
 
 def _read_all_fd(fd):
-    """Read the child's report to EOF, bounded; the child has already exited."""
+    """A reaped child is not proof that inherited pipe writers have closed."""
     chunks = []
     total = 0
+    os.set_blocking(fd, False)
     while True:
-        chunk = os.read(fd, 4096)
+        try:
+            chunk = os.read(fd, 4096)
+        except BlockingIOError as exc:
+            raise LiveSwapError(
+                "phase=child_report retained=open_writer; EOF unproven") from exc
         if not chunk:
             break
         total += len(chunk)
         if total > RESULT_LIMIT:
-            raise LiveSwapError("pressure child report exceeds its bound")
+            raise LiveSwapError("phase=child_report report exceeds bound")
         chunks.append(chunk)
     return b"".join(chunks).decode("utf-8", errors="replace")
 
 
 def _terminate_pressure_child(cgroup, pid):
-    """Kill the pressure child and its cgroup, then reap it and return its status."""
-    try:
-        _kill_cgroup(cgroup)
-    except OSError:
-        pass
+    """Signal only our unreaped fork child; never cgroup-wide foreign members."""
+    del cgroup
     try:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -1729,7 +1891,7 @@ def _terminate_pressure_child(cgroup, pid):
             return status
         if time.monotonic() >= deadline:
             raise LiveSwapError(
-                "pressure child did not exit after SIGKILL; manual review")
+                "phase=child_reap SIGKILL child still live; retained=child_and_cgroup")
         time.sleep(0.2)
 
 
@@ -1739,33 +1901,34 @@ def _require_control(path, expected):
 
 
 def _pressure_guard(ops, state, progress):
-    """While the child runs: keep RAM above the floor and record swapz use.
-
-    PSI is deliberately not checked here. The check causes reclaim on purpose,
-    so its stalls are expected.
-    """
+    """Stop on RAM, cgroup or PSI threshold before recording mapper usage."""
     memory = _memory_sample(ops)
     if memory["mem_available_bytes"] < MIN_AVAILABLE_BYTES:
         raise SafeStop(
             "memory_floor",
-            "MemAvailable fell below the 2 GiB floor during swap pressure")
+            "admission=MemAvailable below 2 GiB during swap pressure")
+    _check_memory_sample(memory)
+    progress["guard_samples"] = progress.get("guard_samples", 0) + 1
     row = ops.active_swap_for(state["dm_major"], state["dm_minor"])
-    used_kib = row["used_kib"] if row is not None else 0
-    progress["peak_mapper_used_kib"] = max(progress["peak_mapper_used_kib"], used_kib)
+    if row is None:
+        raise LiveSwapError("phase=pressure_guard mapped swap entry disappeared")
+    used_kib = row["used_kib"]
+    progress["peak_mapper_used_kib"] = max(
+        progress["peak_mapper_used_kib"], used_kib)
     if _drain_headroom_bytes(used_kib, memory) < TRIAL_HEADROOM_BYTES:
         raise SafeStop(
             "mapper_drain_headroom_low",
-            "mapper drain headroom fell below the trial stop threshold during swap pressure")
+            "admission=mapper drain headroom below trial stop threshold")
     return used_kib
 
 
 def _parse_pressure_child_output(text):
-    lines = [line for line in str(text).splitlines() if line.strip()]
-    if not lines:
+    """Accept one unique-key report, never the last of multiple records."""
+    if not isinstance(text, str) or not text.strip():
         return None
     try:
-        value = json.loads(lines[-1])
-    except ValueError:
+        value = PHYSICAL._load_unique_json(text.encode("utf-8"))
+    except (ValueError, UnicodeError):
         return None
     return value if isinstance(value, dict) else None
 
@@ -1799,8 +1962,10 @@ def _read_memory_events(cgroup):
         return events
     for line in text.splitlines():
         fields = line.split()
-        if len(fields) == 2 and fields[1].isdigit():
-            events[fields[0]] = int(fields[1])
+        if len(fields) != 2 or not re.fullmatch(r"[0-9]+", fields[1]) or \
+                fields[0] in events:
+            raise LiveSwapError("phase=memory_events duplicate/malformed counter")
+        events[fields[0]] = int(fields[1])
     return events
 
 
@@ -1813,18 +1978,25 @@ def _remove_empty_cgroup(cgroup):
 
 
 def _run_pressure_phase(state_dir, state, results, ops):
-    """Run one forked, guarded, byte-verified swap-pressure child, then validate it."""
+    """Require run-bound byte counts and completed child/cgroup teardown."""
+    if state.get("run_id") != results.get("run_id") or \
+            state.get("qualified_source") != QUALIFIED_SOURCE or \
+            results.get("qualified_source") != QUALIFIED_SOURCE or \
+            state.get("head") != results.get("head"):
+        raise LiveSwapError("phase=pressure_admission source/run identity mismatch")
     cgroup_name = f"swapz-live-{secrets.token_hex(8)}"
     state["pressure_cgroup"] = cgroup_name
     _save_state(state_dir, state)
-    progress = {"peak_mapper_used_kib": 0}
+    progress = {"peak_mapper_used_kib": 0, "guard_samples": 0}
     phase = {
-        "status": "FAIL",
-        "cgroup": cgroup_name,
+        "status": "FAIL", "cgroup": cgroup_name,
         "memory_max_bytes": PRESSURE_MEMORY_MAX_BYTES,
         "zswap_max_bytes": 0,
         "requested_pages": PRESSURE_PAGES,
+        "expected_verified_pages": PRESSURE_PAGES,
+        "expected_verified_bytes": PRESSURE_PAGES * PAGE_BYTES,
         "peak_mapper_used_kib": 0,
+        "retained_state": state.get("stage"),
     }
     results["pressure_phase"] = phase
     try:
@@ -1833,47 +2005,71 @@ def _run_pressure_phase(state_dir, state, results, ops):
             guard=lambda: _pressure_guard(ops, state, progress),
             stop_requested=ops.stop_requested,
             timeout=PRESSURE_TIMEOUT_SECONDS)
-    except SafeStop as exc:
-        phase.update(status="SAFE_STOP", error=_bounded(exc),
-                     peak_mapper_used_kib=progress["peak_mapper_used_kib"])
+    except (SafeStop, LiveSwapError) as exc:
+        phase.update(status="SAFE_STOP" if isinstance(exc, SafeStop) else "FAIL",
+                     error=_bounded(exc),
+                     peak_mapper_used_kib=progress["peak_mapper_used_kib"],
+                     guard_samples=progress["guard_samples"])
         _save_results(state_dir, results)
         raise
-    except LiveSwapError as exc:
-        phase.update(status="FAIL", error=_bounded(exc),
-                     peak_mapper_used_kib=progress["peak_mapper_used_kib"])
-        _save_results(state_dir, results)
-        raise
+    if not isinstance(outcome, dict):
+        raise LiveSwapError("phase=pressure_workload missing child outcome")
     child = _parse_pressure_child_output(outcome.get("stdout", ""))
-    memory_events = outcome.get("memory_events") or {}
+    memory_events = outcome.get("memory_events")
+    memory_events = memory_events if isinstance(memory_events, dict) else {}
     phase.update(
         exit_code=outcome.get("exit_code"),
         timed_out=outcome.get("timed_out") is True,
         stopped=outcome.get("stopped") is True,
+        child_reaped=outcome.get("child_reaped") is True,
+        cgroup_removed=outcome.get("cgroup_removed") is True,
         memory_events=memory_events,
         child=child,
+        observed_verified_pages=child.get("verified_pages") if child else None,
+        observed_verified_bytes=child.get("verified_bytes") if child else None,
         swap_peak_bytes=outcome.get("swap_peak_bytes"),
         zswap_peak_bytes=outcome.get("zswap_peak_bytes"),
         peak_mapper_used_kib=progress["peak_mapper_used_kib"],
-        stderr=_bounded(outcome.get("stderr", "")),
+        guard_samples=progress["guard_samples"],
     )
     _save_results(state_dir, results)
+    detail = (
+        f"phase=pressure_verify exit={phase['exit_code']} "
+        f"admission=memory/PSI/cgroup "
+        f"expected_pages={PRESSURE_PAGES} observed_pages={phase['observed_verified_pages']} "
+        f"expected_bytes={PRESSURE_PAGES * PAGE_BYTES} "
+        f"observed_bytes={phase['observed_verified_bytes']} "
+        f"retained={state.get('stage')}")
     if phase["stopped"]:
-        raise SafeStop("operator_stop",
-                       "operator requested a supervised stop during swap pressure")
+        raise SafeStop("operator_stop", f"operator requested stop; {detail}")
     if phase["timed_out"]:
-        raise LiveSwapError("swap-pressure child exceeded its bounded timeout")
+        raise LiveSwapError(f"pressure child timed out; {detail}")
+    if not phase["child_reaped"] or not phase["cgroup_removed"]:
+        raise LiveSwapError(f"pressure teardown unproven; {detail}")
+    if type(phase["exit_code"]) is not int or phase["exit_code"] != 0 or \
+            child is None or child.get("run_id") != state["run_id"] or \
+            type(child.get("requested_pages")) is not int or \
+            child["requested_pages"] != PRESSURE_PAGES or \
+            type(child.get("verified_pages")) is not int or \
+            child["verified_pages"] != PRESSURE_PAGES or \
+            type(child.get("expected_bytes")) is not int or \
+            child["expected_bytes"] != PRESSURE_PAGES * PAGE_BYTES or \
+            type(child.get("verified_bytes")) is not int or \
+            child["verified_bytes"] != PRESSURE_PAGES * PAGE_BYTES or \
+            type(child.get("mismatches")) is not int or \
+            child["mismatches"] != 0 or \
+            child.get("mapping_closed") is not True or \
+            type(memory_events.get("oom_kill")) is not int or \
+            memory_events["oom_kill"] != 0:
+        raise LiveSwapError(f"swap-pressure verification failed; {detail}")
     swap_peak = phase["swap_peak_bytes"]
     zswap_peak = phase["zswap_peak_bytes"]
-    if phase["exit_code"] != 0 or child is None or \
-            child.get("mismatches") != 0 or \
-            child.get("verified_pages") != PRESSURE_PAGES or \
-            memory_events.get("oom_kill", 1) != 0:
-        raise LiveSwapError("swap-pressure verification failed")
     if type(swap_peak) is not int or swap_peak <= 0 or \
-            (zswap_peak is not None and zswap_peak != 0):
-        raise LiveSwapError("swap-pressure did not reach the swap device")
-    if progress["peak_mapper_used_kib"] <= 0:
-        raise LiveSwapError("swapz mapper showed no swap use during the pressure check")
+            (zswap_peak is not None and
+             (type(zswap_peak) is not int or zswap_peak != 0)):
+        raise LiveSwapError(f"swap pressure did not reach owned swap; {detail}")
+    if progress["guard_samples"] == 0 or progress["peak_mapper_used_kib"] <= 0:
+        raise LiveSwapError(f"pressure samples missing or mapper unused; {detail}")
     phase["status"] = "PASS"
     _save_results(state_dir, results)
     return phase
@@ -1897,6 +2093,7 @@ def _save_observation(state_dir, state, results, ops, *, first=False):
         "swap_priority": row["priority"],
         "vmstat": vmstat,
         "memory": memory,
+        "sample_index": len(results.get("observations", [])),
         "drain_headroom_bytes": drain_headroom,
         "dmsetup_status": status,
         "block_stats": PHYSICAL._block_stat_snapshot({
@@ -1913,35 +2110,57 @@ def _save_observation(state_dir, state, results, ops, *, first=False):
 
 
 def _actual_swap_io(results):
-    """Require kernel swap-out and swap-in, mapper traffic and lower-device writes."""
+    """Only ordered samples with monotonic counters qualify as swap I/O."""
     baseline = results.get("trial_baseline")
     observations = results.get("observations", [])
     pressure = results.get("pressure_phase")
-    if not isinstance(baseline, dict) or not observations or \
+    if not isinstance(baseline, dict) or not isinstance(observations, list) or \
+            len(observations) < 2 or observations[0] != baseline or \
             not isinstance(pressure, dict) or pressure.get("status") != "PASS":
+        return False
+    if any(not isinstance(sample, dict) or
+           type(sample.get("sample_index")) is not int or
+           sample["sample_index"] != index
+           for index, sample in enumerate(observations)):
         return False
     peak_kib = pressure.get("peak_mapper_used_kib")
     if type(peak_kib) is not int or peak_kib <= 0:
         return False
-    final = observations[-1]
-    before_block = baseline.get("block_stats", {})
-    after_block = final.get("block_stats", {})
-    if not before_block.get("available") or not after_block.get("available"):
+    try:
+        for before, after in zip(observations, observations[1:]):
+            for group, keys in (
+                    ("vmstat", ("pswpin", "pswpout")),
+                    ("dmsetup_status", ("logical_write", "logical_read"))):
+                left = before[group]
+                right = after[group]
+                if group == "dmsetup_status":
+                    left, right = left["counters"], right["counters"]
+                for key in keys:
+                    if type(left[key]) is not int or type(right[key]) is not int or \
+                            left[key] < 0 or right[key] < left[key]:
+                        return False
+            for index in (4, 6):
+                left = before["block_stats"]["values"][index]
+                right = after["block_stats"]["values"][index]
+                if type(left) is not int or type(right) is not int or \
+                        left < 0 or right < left:
+                    return False
+        final = observations[-1]
+        before_block = baseline["block_stats"]
+        after_block = final["block_stats"]
+        if not before_block["available"] or not after_block["available"]:
+            return False
+        return bool(
+            final["vmstat"]["pswpout"] > baseline["vmstat"]["pswpout"] and
+            final["vmstat"]["pswpin"] > baseline["vmstat"]["pswpin"] and
+            final["dmsetup_status"]["counters"]["logical_write"] >
+            baseline["dmsetup_status"]["counters"]["logical_write"] and
+            final["dmsetup_status"]["counters"]["logical_read"] >
+            baseline["dmsetup_status"]["counters"]["logical_read"] and
+            (after_block["values"][4] > before_block["values"][4] or
+             after_block["values"][6] > before_block["values"][6]))
+    except (KeyError, IndexError, TypeError, ValueError):
         return False
-    before = before_block.get("values", [])
-    after = after_block.get("values", [])
-    if len(before) < 8 or len(after) < 8:
-        return False
-    initial_vm = baseline["vmstat"]
-    final_vm = final["vmstat"]
-    initial_dm = baseline["dmsetup_status"]["counters"]
-    final_dm = final["dmsetup_status"]["counters"]
-    return bool(
-        final_vm["pswpout"] > initial_vm["pswpout"] and
-        final_vm["pswpin"] > initial_vm["pswpin"] and
-        final_dm.get("logical_write", 0) > initial_dm.get("logical_write", 0) and
-        final_dm.get("logical_read", 0) > initial_dm.get("logical_read", 0) and
-        (after[4] > before[4] or after[6] > before[6]))
 
 
 def _release_marker(state):
@@ -2625,9 +2844,19 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
                     _save_results(state_dir, results)
                 except Exception:
                     pass
+            # A cleanup failure never replaces the first worker/integrity cause.
+            original_detail = (
+                f"phase=activation original={type(activation_error).__name__} "
+                f"errno={getattr(activation_error, 'errno', None)} "
+                f"detail={_bounded(activation_error)}; "
+                if activation_error is not None else "")
             raise LiveSwapError(
-                f"live trial stopped; evidence retained at {state_dir}; "
-                f"recovery=REQUIRES_REVIEW: {_bounded(recovery_exc)}") from recovery_exc
+                f"{original_detail}phase=cleanup recovery=REQUIRES_REVIEW "
+                f"retained=private_recovery_state "
+                f"cleanup={type(recovery_exc).__name__} "
+                f"errno={getattr(recovery_exc, 'errno', None)}") from (
+                    activation_error if activation_error is not None
+                    else recovery_exc)
         try:
             results["kernel_diagnostics"] = ops.kernel_diagnostics(
                 results["start_timestamp"], state)
@@ -2650,8 +2879,10 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
         if activation_error is not None and \
                 not isinstance(activation_error, SafeStop):
             raise LiveSwapError(
-                f"live trial failed; normal swap restored; evidence retained at "
-                f"{state_dir}: {_bounded(activation_error)}") from activation_error
+                "live trial failed; normal swap restored; "
+                f"phase=activation errno={getattr(activation_error, 'errno', None)} "
+                f"retained=private_recovery_state: {_bounded(activation_error)}"
+                ) from activation_error
         return results
     finally:
         os.close(lock_fd)
