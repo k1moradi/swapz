@@ -831,16 +831,16 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                 for field in ("lower_io", "throughput", "cpu",
                               "latency", "measurement_snapshots"):
                     candidate[field] = {}
-        # Model a rejected evaluator result followed by three late identity
-        # blocks after unavailable measurements have filled the public cap.
-        records[0]["status"] = "EXCLUDED"
-        records[0]["excluded"] = True
-        records[0]["analysis_usable"] = False
-        # EXCLUDED alone is incomplete evidence. Preserve one genuine producer
-        # failure so the diagnostic-cap test still exercises FAIL precedence.
-        records[0]["raw"]["verdict"] = "FAIL"
-        records[0]["raw"]["stage"] = "measure"
-        records[0]["raw"]["failure_reason"] = (
+        # Late duplicate/foreign identity blocks invalidate the first pair.
+        # Put the genuine producer failure on the second, independent pair;
+        # an invalidated producer identity can only establish BLOCKED.
+        failed_record = records[1]
+        failed_record["status"] = "EXCLUDED"
+        failed_record["excluded"] = True
+        failed_record["analysis_usable"] = False
+        failed_record["raw"]["verdict"] = "FAIL"
+        failed_record["raw"]["stage"] = "measure"
+        failed_record["raw"]["failure_reason"] = (
             "synthetic terminal measurement failure")
         records[-1]["swapz"]["workload_id"] = records[0]["swapz"]["workload_id"]
         records[-1]["swapz"]["source_sha"] = "b" * 40
@@ -859,15 +859,44 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             {"FAIL", "BLOCKED", "UNAVAILABLE"})
         self.assertTrue(any(
             item["status"] == "FAIL" and item["metric"] == "arm.verdict" and
-            item["pair_index"] == 1 and item.get("producer_status") == "FAIL"
+            item["pair_index"] == 2 and item.get("producer_status") == "FAIL"
             for item in audit["diagnostics"]))
         self.assertEqual(audit["first_failed_phase"], "measure")
+        self.assertEqual(audit["first_failed_evidence"], {
+            "workload": "sd-service-balanced", "pair_index": 2,
+            "arm": "raw", "metric": "arm.verdict", "evidence_class": "FAIL"})
         self.assertTrue(any(
             item["status"] == "BLOCKED" and
             item["metric"] in {
                 "arm.workload_id", "arm.source_sha", "arm.arm_boot_id"} and
             item["pair_index"] == 5 and item["arm"] == "swapz"
             for item in audit["diagnostics"]))
+
+        # Negative control: moving the otherwise identical producer failure
+        # onto pair 1 makes it unauthenticated by the late duplicate run ID.
+        invalidated_records = copy.deepcopy(records)
+        invalidated_records[1]["status"] = "PASS"
+        invalidated_records[1]["excluded"] = False
+        invalidated_records[1]["analysis_usable"] = True
+        invalidated_records[1]["raw"]["verdict"] = "PASS"
+        invalidated_records[1]["raw"].pop("stage", None)
+        invalidated_records[1]["raw"].pop("failure_reason", None)
+        invalidated_records[0]["status"] = "EXCLUDED"
+        invalidated_records[0]["excluded"] = True
+        invalidated_records[0]["analysis_usable"] = False
+        invalidated_records[0]["raw"]["verdict"] = "FAIL"
+        invalidated_records[0]["raw"]["stage"] = "measure"
+        invalidated_records[0]["raw"]["failure_reason"] = (
+            "synthetic terminal measurement failure")
+        blocked, _ = inspect(
+            invalidated_records, summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertIsNone(blocked["first_failed_phase"])
+        self.assertEqual(len(blocked["diagnostics"]),
+                         EVIDENCE.MAX_EVIDENCE_DIAGNOSTICS)
+        self.assertGreater(blocked["omitted_diagnostic_count"], 0)
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in blocked["diagnostics"]))
 
     def test_distinct_evidence_failure_classifications(self):
         baseline = pair(1, 1100)
@@ -1073,7 +1102,7 @@ class CapacityRamPropagation(unittest.TestCase):
             "source_sha": SOURCE, "source_tree_sha": "b" * 40,
             "captured_at_utc": "2026-11-01T00:00:00Z",
             "captured_monotonic_ns": 2_000_000_000,
-            "kernel": {"boot_id": BOOT},
+            "kernel": {"boot_id": BOOT, "uptime_seconds": 100.0},
             "memory": {"total_bytes": self.DEVICE_BYTES},
             "device": {
                 "partuuid": self.PARTUUID,
@@ -1151,15 +1180,11 @@ class CapacityRamPropagation(unittest.TestCase):
             values = [before, after, summary, *records, trace]
             for path, value in zip(paths, values):
                 path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
-            stability = {"status": "STABLE",
-                         "checks": {"same_boot": True}, "failed_checks": []}
             with (
                 mock.patch.object(EVIDENCE, "require_clean_source"),
                 mock.patch.object(EVIDENCE, "source_tree_sha",
                                   return_value="b" * 40),
                 mock.patch.object(EVIDENCE, "validate_host_snapshot"),
-                mock.patch.object(EVIDENCE, "host_stability",
-                                  return_value=stability),
                 mock.patch.dict(EVIDENCE.QUALIFICATION, {
                     "evaluate": lambda records, protocol: regenerated_summary}),
             ):
@@ -1199,6 +1224,42 @@ class CapacityRamPropagation(unittest.TestCase):
             with self.subTest(field=rejected_field):
                 with self.assertRaisesRegex(ValueError, rejected_field):
                     self.synthetic_seal(self.LIMIT, summary_mutation=mutation)
+
+    def test_release_rejects_fabricated_stable_host(self):
+        campaign = self.synthetic_seal(self.LIMIT)
+        observed_stability = campaign["host_stability"]
+        self.assertEqual(
+            observed_stability,
+            EVIDENCE.host_stability(*self.synthetic_hosts()))
+        self.assertEqual(observed_stability["status"], "STABLE")
+        self.assertEqual(
+            set(observed_stability["checks"]),
+            READINESS["PHYSICAL_HOST_STABILITY_CHECKS"])
+        self.assertTrue(all(
+            check is True for check in observed_stability["checks"].values()))
+
+        policy_digest = EVIDENCE.sha256_bytes(
+            EVIDENCE.ACCEPTANCE_MANIFEST.read_bytes())
+        first_check = next(iter(observed_stability["checks"]))
+        for mutation in ("incomplete", "coerced", "false", "failed_checks"):
+            with self.subTest(mutation=mutation):
+                forged = copy.deepcopy(campaign)
+                stability = forged["host_stability"]
+                if mutation == "incomplete":
+                    stability["checks"] = {"same_boot": True}
+                elif mutation == "coerced":
+                    stability["checks"][first_check] = 1
+                elif mutation == "false":
+                    stability["checks"][first_check] = False
+                else:
+                    stability["failed_checks"] = [first_check]
+                raw = (json.dumps(forged, sort_keys=True) + "\n").encode()
+                issues = READINESS["validate_physical_campaign_evidence"](
+                    forged, raw, SOURCE, policy_digest,
+                    (self.PARTUUID, self.DEVICE_BYTES))
+                self.assertIn(
+                    "sealed campaign host stability is not STABLE or complete",
+                    issues)
 
     def test_sealer_preserves_measured_fail_and_blocks_unverified(self):
         campaign = self.synthetic_seal(self.LIMIT + 1024)
@@ -1270,6 +1331,24 @@ class CapacityRamPropagation(unittest.TestCase):
                     verdict["METADATA_RAM_MEASUREMENT"][
                         "observed_peak_ram_bytes"], self.LIMIT + offset)
                 self.assertEqual(verdict["release_verdict"], "BLOCKED")
+                # Neither a below-limit nor over-limit receipt scalar may
+                # override the independently sealed RAM trace measurement.
+                mismatched_evidence = copy.deepcopy(evidence)
+                mismatched_evidence["release_evidence"][
+                    "maximum_capacity_and_ram"]["peak_ram_bytes"] = (
+                        self.LIMIT + (1024 if offset == 0 else 0))
+                mismatched_verdict = READINESS["evaluate_release"](
+                    SOURCE, {}, b"{}\n", mismatched_evidence,
+                    policy, policy_raw,
+                    physical_campaign_evidence=campaign,
+                    physical_campaign_evidence_raw=campaign_bytes)
+                self.assertEqual(
+                    mismatched_verdict["METADATA_RAM_MEASUREMENT"]["status"],
+                    "NOT_MEASURED")
+                self.assertEqual(mismatched_verdict["release_verdict"], "BLOCKED")
+                self.assertTrue(any(
+                    "sealed campaign measurement mismatch" in message
+                    for message in mismatched_verdict["code_blockers"]))
                 if offset:
                     self.assertTrue(any(
                         "claimed peak exceeds frozen limit" in message

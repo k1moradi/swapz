@@ -8197,7 +8197,16 @@ entries remain counted without publishing private samples. An authenticated FAIL
 later unrelated prerequisite or observation gap cannot relabel already failed
 evidence. Identity ambiguity, duplicate IDs or overlapping chronology discovered
 while authenticating that witness are part of the witness itself and therefore
-keep it BLOCKED.
+keep it BLOCKED. Rootless diagnostic-cap regressions must keep an authenticated
+producer failure on a distinct identity-clean pair when proving FAIL precedence;
+a late duplicate invalidating that same pair must remain BLOCKED regardless of
+which diagnostics fit under the cap. Synthetic capacity/RAM fixtures must
+compute the producer's complete host-stability check vector from their
+before/after snapshots, never mock a one-check STABLE declaration. The release
+validator must reject omitted, false or type-coerced host checks, and must
+rederive within/over-limit RAM from sealed trace evidence rather than a
+contradictory release-receipt scalar. None of these synthetic controls establish
+loaded-host acceptance.
 For an explicitly v2 campaign, the physical sealer audit independently checks
 every frozen-parent and prospective-amendment workload, including decisions
 omitted by the supplied summary. Missing decisions or short attempted/accepted
