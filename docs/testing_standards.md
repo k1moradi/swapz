@@ -6064,10 +6064,11 @@ failure and temporary-mask cleanup failure as well, preserving the exact
 original/restore command statuses rather than collapsing them to boolean
 failure. Repeat a narrowly injected initial-mask rename failure that
 substitutes a foreign symlink, falsely succeeds at unlink, and falsely
-succeeds at direct replacement. The result must preserve the initial rename
-status, separate restoration status, foreign-versus-owned classification,
-observed early-mask state, incomplete rollback and required operator action
-without publishing any selected-target drop-ins.
+succeeds at direct replacement. The result must give the initial rename and
+secondary restore rename distinct injected statuses, preserve the final
+restore-verification status separately, classify foreign versus owned state,
+report the observed early mask, incomplete rollback and required operator
+action, and publish no selected-target drop-ins.
 Inject final early-mask unlink failure both before and after the unlink,
 false-success unlink, mask-restore rename failure before and after the rename,
 and a foreign mapper-unit symlink substituted after mask removal. A refused

@@ -745,9 +745,10 @@ staging link is consumed. A failed or falsely successful rename must attempt
 to restore the mask and refuse generation, preserving the original command
 status and reporting rollback and any surviving temporary mask. When the
 initial mask cannot be independently restored, classify an owned mask versus
-foreign or unverifiable early-unit pathname, report original and secondary
-recovery statuses, and require explicit operator intervention rather than
-claiming a complete rollback. Before retiring
+foreign or unverifiable early-unit pathname, report the original transaction
+status, final restore status and exact staged-rename restore status when
+attempted, and require explicit operator intervention rather than claiming a
+complete rollback. Before retiring
 prior mapper/device drop-ins, compare their exact canonical generator content;
 a matching basename alone is insufficient proof of ownership, and unexpected
 regular-file contents must survive under the verified early mask.
