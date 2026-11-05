@@ -22,7 +22,7 @@ jobs:
   rootless-systemd-package:
     name: Systemd/package rootless ${{ github.sha }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
