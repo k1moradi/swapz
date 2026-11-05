@@ -13,6 +13,7 @@ import socket
 import subprocess
 import struct
 import sys
+import time
 import unittest
 from unittest import mock
 
@@ -348,14 +349,15 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             stderr=subprocess.DEVNULL)
         setattr(child, "_swapz_owned_process_group", child.pid)
         try:
-            deadline = __import__("time").monotonic() + 5
+            deadline = time.monotonic() + 5
             observed = None
-            while observed is None and __import__("time").monotonic() < deadline:
+            while observed is None and time.monotonic() < deadline:
                 observed = parent._child_exit_status(child)
                 if observed is None:
-                    __import__("time").sleep(0.01)
+                    time.sleep(0.01)
             self.assertEqual(observed, 7)
             self.assertIsNone(child.returncode)
+            self.assertTrue(Path(f"/proc/{child.pid}").exists())
             parent._stop_unadmitted_child(child)
             self.assertEqual(child.returncode, 7)
         finally:

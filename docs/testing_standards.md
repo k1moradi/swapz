@@ -199,7 +199,10 @@ private messages and exhausted termination grace can preserve the first refusal,
 use bounded group TERM/KILL plus direct-child wait, reap the Popen child, prove
 the controlled owned group empty, and never print private request bytes. A
 rootless descendant that ignores SIGTERM is a required negative control: direct-
-child-only cleanup must not be accepted as complete. A repeated initial nonce
+child-only cleanup must not be accepted as complete. Exit observation for a
+marked session leader must use a non-reaping wait boundary until group-wide
+termination has been issued, so PID/process-group reuse cannot precede cleanup.
+A repeated initial nonce
 must never grant or reuse approval; these controls still do not establish target,
 reader, detached privileged descendants, or sudo teardown on the physical host.
 
