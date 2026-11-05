@@ -440,24 +440,42 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
             source = fixture / "recovery-errno.c"
             binary = fixture / "recovery-errno"
             source.write_text(
-                r"""#include <errno.h>
+                r"""#define _POSIX_C_SOURCE 200809L
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 static int injected_recovery_errno;
+static const char *recovery_state_path;
+static unsigned int recovery_write_attempts;
 
 int swapz_primary_state_require_recovery_at(
     int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
 {
+    FILE *state_file;
+
     (void)recovery_fd;
     (void)lock_fd;
     (void)run_id;
     (void)expected_owner;
-    if (injected_recovery_errno == 0)
-        return 0;
-    errno = injected_recovery_errno;
-    return -1;
+    ++recovery_write_attempts;
+    if (injected_recovery_errno != 0) {
+        errno = injected_recovery_errno;
+        return -1;
+    }
+    state_file = fopen(recovery_state_path, "wb");
+    if (state_file == NULL)
+        return -1;
+    if (fputs("RECOVERY_REQUIRED\n", state_file) == EOF ||
+        fflush(state_file) != 0 || fsync(fileno(state_file)) != 0) {
+        const int write_errno = errno;
+        (void)fclose(state_file);
+        errno = write_errno;
+        return -1;
+    }
+    return fclose(state_file);
 }
 
 """ + helper + r"""
@@ -466,15 +484,17 @@ int main(int argc, char **argv)
     int original_errno;
     int preserved_errno;
 
-    if (argc != 4)
+    if (argc != 5)
         return 64;
     original_errno = atoi(argv[2]);
     injected_recovery_errno = atoi(argv[3]);
+    recovery_state_path = argv[4];
     errno = 0;
     preserved_errno = swapz_primary_require_recovery_preserving_errno(
         7, 8, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0,
         argv[1], original_errno);
-    printf("preserved=%d errno=%d\n", preserved_errno, errno);
+    printf("preserved=%d errno=%d attempts=%u\n", preserved_errno,
+           errno, recovery_write_attempts);
     return 0;
 }
 """,
@@ -489,59 +509,72 @@ int main(int argc, char **argv)
                 check=True,
             )
             cases = (
-                ("START", errno.EIO, errno.ENOSPC),
-                ("STOP", errno.EBUSY, errno.EIO),
-                ("RECOVER", errno.ESTALE, errno.EROFS),
+                ("START", "STARTING", errno.EIO, errno.ENOSPC),
+                ("STOP", "STOPPING", errno.EBUSY, errno.EIO),
+                ("RECOVER", "RECOVERING", errno.ESTALE, errno.EROFS),
             )
-            for operation, original_errno, recovery_errno in cases:
-                with self.subTest(operation=operation):
-                    result = subprocess.run(
-                        [
-                            str(binary), operation, str(original_errno),
-                            str(recovery_errno),
-                        ],
-                        cwd=ROOT,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=5,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(
-                        result.stdout,
-                        f"preserved={original_errno} errno={original_errno}\n",
-                    )
-                    self.assertIn(
-                        f"PRIMARY_{operation}=RECOVERY_STATE_FAILED "
-                        "phase=recovery-state-persist "
-                        "check=durable-recovery-state "
-                        "expected_proof=RECOVERY_REQUIRED-persisted "
-                        "observed_proof=write-failed "
-                        f"original_errno={original_errno} "
-                        f"recovery_errno={recovery_errno} "
-                        "retained_resource=transaction-evidence "
-                        "disposition=BLOCKED "
-                        "safe_next_action=read-only-inspect-recovery-state",
-                        result.stderr,
-                    )
-                    self.assertNotRegex(result.stderr, r"\b[0-9a-f]{32}\b")
-
-                    persisted = subprocess.run(
-                        [
-                            str(binary), operation, str(original_errno), "0",
-                        ],
-                        cwd=ROOT,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=5,
-                    )
-                    self.assertEqual(persisted.returncode, 0, persisted.stderr)
-                    self.assertEqual(
-                        persisted.stdout,
-                        f"preserved={original_errno} errno={original_errno}\n",
-                    )
-                    self.assertEqual(persisted.stderr, "")
+            for operation, initial_stage, original_errno, recovery_errno in cases:
+                state_path = fixture / f"{operation.lower()}-state"
+                for injected_errno in (recovery_errno, 0):
+                    with self.subTest(operation=operation,
+                                      recovery_errno=injected_errno):
+                        # An interrupted child retains its last durable claim.
+                        # A reported successful recovery write must actually
+                        # update that claim for the next process to observe.
+                        state_path.write_text(
+                            f"{initial_stage}\n", encoding="ascii")
+                        result = subprocess.run(
+                            [
+                                str(binary), operation, str(original_errno),
+                                str(injected_errno), str(state_path),
+                            ],
+                            cwd=ROOT,
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=5,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(
+                            result.stdout,
+                            f"preserved={original_errno} "
+                            f"errno={original_errno} attempts=1\n",
+                        )
+                        expected_stage = (
+                            initial_stage if injected_errno
+                            else "RECOVERY_REQUIRED")
+                        self.assertEqual(
+                            state_path.read_text(encoding="ascii"),
+                            expected_stage + "\n",
+                        )
+                        self.assertNotIn(
+                            str(state_path), result.stdout + result.stderr)
+                        self.assertNotIn(
+                            "PRIMARY_START=ACTIVE",
+                            result.stdout + result.stderr)
+                        self.assertNotIn(
+                            "PRIMARY_STOP=COMPLETE",
+                            result.stdout + result.stderr)
+                        self.assertNotIn(
+                            "PRIMARY_RECOVER=COMPLETE",
+                            result.stdout + result.stderr)
+                        self.assertNotRegex(result.stderr, r"\b[0-9a-f]{32}\b")
+                        if not injected_errno:
+                            self.assertEqual(result.stderr, "")
+                            continue
+                        self.assertIn(
+                            f"PRIMARY_{operation}=RECOVERY_STATE_FAILED "
+                            "phase=recovery-state-persist "
+                            "check=durable-recovery-state "
+                            "expected_proof=RECOVERY_REQUIRED-persisted "
+                            "observed_proof=write-failed "
+                            f"original_errno={original_errno} "
+                            f"recovery_errno={recovery_errno} "
+                            "retained_resource=transaction-evidence "
+                            "disposition=BLOCKED "
+                            "safe_next_action=read-only-inspect-recovery-state",
+                            result.stderr,
+                        )
 
     def test_start_stop_recover_share_errno_preserving_recovery_epilogue(self):
         function_ranges = (
