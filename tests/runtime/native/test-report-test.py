@@ -3384,22 +3384,22 @@ class ReportContract(unittest.TestCase):
     def test_rootless_failure_marker_binds_unittest_to_failing_phase(self):
         earlier_expected = (
             "FAIL: test_expected_negative "
-            "(__main__.EarlierFixture.test_expected_negative)\\n"
+            "(__main__.EarlierFixture.test_expected_negative)\n"
         )
         classified = (
             earlier_expected
             + "FAIL: test_oracle_first "
-            "(__main__.PrimaryRealSwapContracts.test_oracle_first)\\n"
+            "(__main__.PrimaryRealSwapContracts.test_oracle_first)\n"
             + "ERROR: test_teardown "
-            "(__main__.PrimaryRealSwapContracts.test_teardown)\\n"
+            "(__main__.PrimaryRealSwapContracts.test_teardown)\n"
             + "FAIL: rootless phase=primary-real-swap-test.py "
             "subtest=unavailable test=test_oracle_first exit=37 "
             "reason=unittest_assertion phase_s=1 stage_s=2 line=332 "
-            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\\n"
-            + "Failed during: tests/runtime/native/primary-real-swap-test.py\\n"
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+            + "Failed during: tests/runtime/native/primary-real-swap-test.py\n"
             + "Reason: exit=37 reason=unittest_assertion subtest=unavailable "
             "phase_wall_s=1 stage_wall_s=2 line=332 "
-            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\\n"
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
         )
         phase, reason = runner.failure_context(
             classified, loaded=False,
@@ -3414,10 +3414,10 @@ class ReportContract(unittest.TestCase):
             + "FAIL: rootless phase=C syntax: physical lifecycle seam "
             "subtest=unavailable test=unavailable exit=1 "
             "reason=nonzero_exit phase_s=1 stage_s=2 line=389 "
-            "log=unavailable\\n"
-            + "Failed during: C syntax: physical lifecycle seam\\n"
+            "log=unavailable\n"
+            + "Failed during: C syntax: physical lifecycle seam\n"
             + "Reason: exit=1 reason=nonzero_exit subtest=unavailable "
-            "phase_wall_s=1 stage_wall_s=2 line=389 log=unavailable\\n"
+            "phase_wall_s=1 stage_wall_s=2 line=389 log=unavailable\n"
         )
         phase, reason = runner.failure_context(
             marker_only, loaded=False,

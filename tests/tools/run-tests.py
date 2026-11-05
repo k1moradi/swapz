@@ -2361,7 +2361,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
             if match:
                 primary_lifecycle_command_failure = match.groups()
 
-unittest_failure = None
+    unittest_failure = None
     if not loaded:
         # Stage 2 is an aggregate transcript. A passing earlier suite may emit
         # synthetic FAIL/ERROR text, so a rootless failure marker owns the
@@ -2376,7 +2376,7 @@ unittest_failure = None
             r"test=(unavailable|test_[A-Za-z0-9_]{1,96}) "
             r"exit=[0-9]{1,3} reason=[a-z0-9_]{1,64} "
             r"phase_s=[0-9]+ stage_s=[0-9]+ line=[0-9]+ "
-            r"log=(?:unavailable|build/tests/rootless-failure\\."
+            r"log=(?:unavailable|build/tests/rootless-failure\."
             r"[A-Za-z0-9]{8}/diagnostic[.]log)")
         for line in output.splitlines():
             match = rootless_marker_re.fullmatch(line.strip())
@@ -2389,7 +2389,7 @@ unittest_failure = None
         else:
             for line in output.splitlines():
                 match = re.match(
-                    r"^(?:FAIL|ERROR): (test_[A-Za-z0-9_]+) \\(",
+                    r"^(?:FAIL|ERROR): (test_[A-Za-z0-9_]+) \(",
                     line.strip())
                 if match:
                     unittest_failure = match.group(1)
