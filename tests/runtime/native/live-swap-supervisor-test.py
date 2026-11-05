@@ -983,6 +983,9 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         for text in (
                 PRESSURE_OK + "\n" + PRESSURE_OK,
                 PRESSURE_OK[:-1] + ', "verified_pages": 2}',
+                PRESSURE_OK[:-1] + ', "private_path": "/sensitive/user/path"}',
+                PRESSURE_OK[:-1] + ', "page_contents": "secret"}',
+                PRESSURE_OK[:-1] + ', "elapsed_seconds": NaN}',
                 "noise\n" + PRESSURE_OK,
                 '{"run_id": ',
                 ""):

@@ -5141,7 +5141,10 @@ phase/errno or exit, memory/PSI category, expected/observed page and byte
 verification counts, and whether the child, cgroup or mapper recovery state is
 retained, without dumping page bytes or private paths. The trial cannot
 publish PASS on missing/reordered observation indices or regressing kernel
-and lower-device counters. Rootless adversarial tests must inject both
+and lower-device counters.
+Child reports with unknown JSON keys, additional records or nonfinite timing
+must be rejected without persisting their untrusted payloads, which may
+contain page contents or private filesystem paths. Rootless adversarial tests must inject both
 termination uncertainty and failed teardown independently of a clean worker,
 including a timeout followed by cgroup-removal failure. No synthetic PASS
 proves actual anonymous-page reclaim, Linux swap-out/swap-in, maximum-capacity

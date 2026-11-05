@@ -1923,14 +1923,28 @@ def _pressure_guard(ops, state, progress):
 
 
 def _parse_pressure_child_output(text):
-    """Accept one unique-key report, never the last of multiple records."""
+    """Accept one unique-key report with no unexpected private payload fields."""
     if not isinstance(text, str) or not text.strip():
         return None
     try:
         value = PHYSICAL._load_unique_json(text.encode("utf-8"))
     except (ValueError, UnicodeError):
         return None
-    return value if isinstance(value, dict) else None
+    fields = {
+        "run_id", "requested_pages", "verified_pages", "expected_bytes",
+        "verified_bytes", "mismatches", "mapping_closed", "mapping_close_errno",
+        "elapsed_seconds",
+    }
+    required = fields - {"mapping_close_errno", "elapsed_seconds"}
+    if not isinstance(value, dict) or not required.issubset(value) or \
+            not value.keys() <= fields:
+        return None
+    elapsed_seconds = value.get("elapsed_seconds")
+    if elapsed_seconds is not None and (
+            type(elapsed_seconds) not in (int, float) or
+            not math.isfinite(elapsed_seconds) or elapsed_seconds < 0):
+        return None
+    return value
 
 
 def _write_control(path, value):
