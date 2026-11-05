@@ -694,14 +694,30 @@ its **repository-relative** log location but must never print root checkout
 paths, arbitrary child stderr, credentials, payload bytes, device identities,
 UUIDs or `BASH_COMMAND`. The original subprocess output remains in the
 caller's privately captured official-stage output for finding the first
-`FAIL:`/`ERROR:` unittest; do not copy that output into publishable reports.
-Only the fail-only `FAIL:`, `Failed during:`, and `Reason:` markers expose
-bounded safe fields to the existing reporter. A failing status must survive
-diagnostic write errors and EXIT/ERR/signal traps without a duplicate marker.
-Successful stdout/stderr and exit status are unchanged and no failure log is
-created. Synthetic regular-file/stub-command tests must cover success, ordinary
-nonzero child failure, timeout-style 124, explicit shell exit, and failing shell
-assertions; they are not substitutes for the single official `make test`.
+`FAIL:`/`ERROR:` unittest; do not copy arbitrary child output into
+publishable reports. Only allowlisted source-controlled phase text and fixed
+reason classes may be promoted from a private capture into `FAIL:`, `Failed
+during:`, or `Reason:` markers. A failing status must survive diagnostic write
+errors and EXIT/ERR/signal traps without a duplicate marker.
+
+The long package unittest is the sole rootless suite that may keep a transient
+private stderr copy while it runs. One relay process may preserve stderr
+byte-for-byte into a mode-0600 file inside the mode-0700 failure directory; do
+not add a relay process to every passing suite. On PASS the file and directory
+are removed immediately. On failure retain at most a 256-KiB tail plus bounded
+attribution metadata, so the private log contains the unittest subtest header,
+traceback and original exception/errno when they are present. Classification
+must stop at the first detailed unittest failure block so a later subtest cannot
+replace the first failing checkpoint. The public marker may expose only an
+allowlisted `phase='[a-z0-9-]+'` value and classify that first private failure
+as `unittest_timeout`, `unittest_assertion`, `unittest_error`, or the
+generic nonzero reason. Exit 124 remains ambiguous unless that first private
+unittest traceback itself contains `subprocess.TimeoutExpired`. Successful
+stdout/stderr bytes and exit status remain unchanged and no failure log is
+retained. Synthetic regular-file/stub-command tests must cover success, ordinary
+nonzero child failure, timeout-style 124, explicit shell exit, failing shell
+assertions, first-subtest extraction and private-log permissions; they are not
+substitutes for the single official `make test`.
 
 Package install, upgrade and uninstall must preserve primary recovery authority.
 An exact already-installed identity may return as a no-op, but any package
