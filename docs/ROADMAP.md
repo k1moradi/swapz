@@ -630,6 +630,155 @@ results are preserved without changing their original conclusions in
 [handoff/2026-11-02-optimization-work-queue.md](handoff/2026-11-02-optimization-work-queue.md).
 Those dated instructions are not current code-change or test authorization.
 
+## Next-cycle Agent 17 — Cold swap-slot reclamation after application exit
+
+**Owner request / priority:** reserve this as a specific **next-cycle** debugging and
+correctness assignment for **Agent 17**, a rootless/remote-edit agent. The next
+cycle has **not** started. Do not interrupt Codex 1's first actual
+`/dev/sda1` mapper-page oracle, Codex 2's shared-root/lifecycle work, or
+current exact-source CI repairs. Agent 14 (GC/authority) and Agent 7
+(real-swap/oracle) should independently review Agent 17's results in that
+cycle without duplicating its edits. This is not a new current-cycle
+production-code mandate, a new acceptance threshold, or permission for
+remote agents to change host swap configuration.
+
+### User scenario and desired behavior
+
+A long-running browser (for example Firefox) accumulates cold **anonymous**
+memory, and Linux swaps some of those pages to swapz. When the browser closes
+for an update and starts again, its now-unreferenced swapped pages should
+cease consuming swapz's **logical mapping/liveness and reclaimable physical
+capacity** as soon as Linux **authoritatively releases the corresponding
+swap entries and tells the block device**. They should be invalidated in
+metadata, **without reading the old page from backing media, allocating a
+replacement RAM page, decoding LZ4, or recompressing it**. GC must skip
+newly dead records, and an entire physical segment becomes eligible for
+safe reuse/advisory lower TRIM only once **all** authoritative references are
+gone. The new browser instance needs no association with the prior one.
+
+This objective is **event-driven page invalidation**, not PID tracking, a
+periodic cold-page scanner, a browser-specific policy, proactive swap-in, or
+`swapoff`. Shared pages, forked descendants, shmem/tmpfs, retained swap
+cache, and live references can outlast one application's exit. The Linux MM
+owns swap-slot lifetimes; swapz is a Device Mapper block target and must
+never infer that a slot is free because a process exited or its PID changed.
+
+### Existing path and the actual notification gap
+
+The current target already advertises upper DISCARD capability
+(`src/kernel/dm-target.c`), and the ordered
+`swapz_discard()` -> `swapz_discard_page()` path already invalidates logical
+map generations, updates packed-extent live-reference accounting, unlinks
+segment-page-list membership and can detect fully dead segments without
+a lower READ or decompression. Roadmap IDs 29, 44, 66 and 70 cover related
+already-qualified mechanisms. **Revalidate these properties against the
+current source; do not reimplement them.**
+
+At roadmap drafting, `swapz_primary_native_swapon()` in
+`src/userspace/swapz-primary.c` invokes `SYS_swapon` with flags **0**.
+Thus the production lifecycle does **not request** Linux's optional
+freed-swap-page/cluster DISCARD policy, even though the DM target supports
+DISCARD. The block layer does not receive a general per-PID exit event or
+a guaranteed per-slot free callback. Without a delivered upper DISCARD or
+a later WRITE replacing the same logical offset, swapz cannot safely declare
+the old mapping dead just because the kernel internally freed a slot.
+
+Linux's documented `swapon --discard=pages` / swap flags can arrange
+**asynchronous DISCARD of fully released swap clusters**, subject to the
+running kernel and actual block-device queue capabilities. This is **not
+guaranteed per-page or immediate at task exit**: a cluster containing even
+one still-referenced swap entry can remain undiscarded, and workqueue timing
+may delay the notification. The kernel's `SWP_PAGE_DISCARD` path schedules
+discard when its cluster becomes free. Check both the exact owner kernel
+source and its loaded behavior before asserting any stronger latency
+contract. `discard=once` is an unrelated activation-time operation, **not**
+a substitute for freeing obsolete swapped pages.
+
+References: [swapon(8) discard policies](https://man7.org/linux/man-pages/man8/swapon.8.html),
+[swapon(2) flags](https://man7.org/linux/man-pages/man2/swapon.2.html),
+[Linux swap cluster discard implementation](https://linux.googlesource.com/linux/kernel/git/torvalds/linux.git/+/refs/heads/master/mm/swapfile.c),
+and the existing [technical swap context](context.md).
+
+### Next-cycle Agent 17 — exclusive remote scope and investigation order
+
+1. **Baseline before editing.** Fetch current clean `main`, read
+   `AGENTS.md`, the source and standards, and reproduce the existing
+   rootless DISCARD behavior with
+   `tests/runtime/native/mapping/{raw-discard,authority,randomized-authority}.c`
+   plus existing DM source/native fixtures. Confirm that an authenticated
+   upper DISCARD neither reads lower storage nor invokes decompression, and
+   identify any synchronous whole-segment TRIM latency on the path.
+2. **Establish the actual gap.** Inspect the native primary `swapon` flags
+   and rootless lifecycle tests; compare them with the supported kernel
+   `SWAP_FLAG_DISCARD` and `SWAP_FLAG_DISCARD_PAGES` contract. Isolate
+   the difference between a freed **swap slot**, a free **swap cluster**,
+   a delivered **upper BIO DISCARD**, removal of a swapz **logical map**,
+   and reclaim/reuse of a dead **physical segment**. Do not claim these
+   events occur at the same instant.
+3. **Minimal opt-in candidate, only if justified.** Evaluate requesting
+   page/cluster discards on the **already authorized swapz mapper** through
+   the current primary activation, with an existing-header/kernel-supported
+   flag combination and rootless negative/positive controls; do not request
+   activation-time whole-area DISCARD. This must be a tightly scoped
+   `swapon`-policy correction, not a new management protocol or a fallback
+   device. Preserve existing priority, source/target admission, failure
+   errno, atomic activation semantics and automatic-start locks. If kernel
+   capability or discard safety cannot be proved, leave the policy unchanged
+   and report **BLOCKED / not guaranteed**, rather than silently claiming
+   immediate reclamation. Coordinate with Codex before editing
+   `src/userspace/swapz-primary.c`; do not overwrite unpublished work.
+4. **Validate authority and races.** Exercise multi-page DISCARD
+   prevalidation (all-or-nothing on corruption), generation increment and
+   slot reuse, duplicate/out-of-range DISCARD, shared physical extents with
+   surviving live pages, overwrite/GC concurrent with DISCARD, ordering
+   against accepted READ/WRITE and PREFLUSH/FUA, stale cache references,
+   reserve allocation, and suspend/destruction. A failed or uncertain
+   DISCARD must never free a live record, double-decrement a reference,
+   resurrect an old generation, reuse a submitted lower-TRIM range, or
+   turn a prior error into success. No per-discard heap allocations,
+   lower-page read, decompression or full-map scan in the hot path.
+5. **Measure rather than promise.** With synthetic events/rootless
+   production-C tests, capture logical pages invalidated, surviving
+   shared-extent references, newly dead segments, upper DISCARD requests
+   and sectors, lower READ bytes, decompression calls, CPU work and first
+   failure. An explicit DISCARD should retire the specified logical
+   mappings with **zero lower READ/decompression** and bounded
+   per-page metadata work; actual physical flash erasure/TRIM and freed
+   RAM are separate claims. A zero-discard control must prove that merely
+   claiming an app exited causes **no speculative invalidation**.
+6. **Host-only handoff, not remote execution.** Ask the Codex owner of an
+   already admitted, isolated mapper to test a bounded anonymous-memory
+   workload: swap out known pages, terminate the owner normally **without
+   swapoff**, retain separately shared/live controls, observe actual
+   kernel-to-DM discards and cluster-empty timing, verify no stale mappings,
+   no byte corruption for surviving pages, and clean normal teardown.
+   Compare activated policy with and without page-discard capability
+   **only when safe and source-bound**. No remote agent may change real
+   swap flags, activate swap, load modules or touch physical storage.
+
+### Acceptance and coordination boundary
+
+This is successful only if current-source rootless/native tests prove safe
+zero-decompression **on received DISCARD**, and appropriate owned loaded
+evidence confirms what Linux actually emits after swap-slot release,
+including partial-cluster and shared-page controls. Record the observed
+event-to-invalidation delay instead of promising synchronous app-exit
+reclamation. Physical-media TRIM remains advisory and must never block
+logical authority correctness or dispose of a segment containing live pages.
+
+**Delivery:** Agent 17 writes a concise root-cause/contract assessment,
+source+kernel version, before/after regression, any small justified
+direct-`main` commit (with applicable canonical testing-standard update in
+the same commit), exact-SHA validation, and a Codex-only loaded test request.
+No new branch, PR, fork, worktree, force push, feature redesign or patch-only
+handoff. Preserve existing comments and apply the owner's maintainability,
+ownership, high-warning, failure-only diagnostic and no-speculative-churn
+standards. If the existing implementation already does everything possible
+with the notifications Linux supplies, **report that finding and do not add
+redundant code**. This planned item remains behind the current first-card
+debugging/qualification blockers and does not relax the frozen release gates.
+
+
 ## Deferred asynchronous segment TRIM design for review
 
 Step 3 of the owner's original plan is deferred behind resource-pressure and
