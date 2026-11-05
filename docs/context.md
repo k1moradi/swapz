@@ -15,7 +15,7 @@ rejected pilots and deferred research are catalogued in the
 [handoff index](handoff/README.md), not maintained as active instructions here.
 
 **Current contracts (linked rather than restated):** [VISION.md](VISION.md)
-defines product identity and the sole official qualification
+defines immutable product/module/SWZ names and the sole official qualification
 interface `make test`; `make fast_test` remains development-only and never
 qualifies a source. [AGENTS.md](../AGENTS.md) and
 [AGENT_CONTEXT.md](AGENT_CONTEXT.md) govern execution, device ownership and
