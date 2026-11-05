@@ -1902,13 +1902,30 @@ def validate_cold_boot_evidence(
     ]
     if table_fields != expected_table:
         reject("persistent cold-boot mapper table is inconsistent")
+    swap_total_entries = _bounded_decimal_text(cold_boot["swap_total_entries"])
+    swap_used_kib = _bounded_decimal_text(cold_boot["swap_used_kib"])
     if (
+            swap_total_entries is None or swap_total_entries < 1 or
+            swap_used_kib is None or swap_used_kib > swap_size_kib or
             cold_boot["swap_mapper_entries"] != "1" or
             cold_boot["swap_type"] != "partition" or
             cold_boot["swap_priority"] != "-1" or
             logical_bytes <= 4096 or
             swap_size_kib != logical_bytes // 1024 - 4):
-        reject("persistent cold-boot active swap evidence is inconsistent")
+        observed_source = cold_boot["loaded_module_build_source_sha"]
+        observed_module = cold_boot["module_artifact_sha256"]
+        reject(
+            "persistent cold-boot active swap evidence is inconsistent: "
+            "evidence_class=persistent_cold_boot first_failed_phase=active_swap "
+            "required_total_entries>=1 "
+            f"observed_total_entries={swap_total_entries if swap_total_entries is not None else 'invalid'} "
+            f"required_used_kib=0..{swap_size_kib if swap_size_kib >= 0 else 'invalid'} "
+            f"observed_used_kib={swap_used_kib if swap_used_kib is not None else 'invalid'} "
+            f"required_source_sha={source_sha} "
+            f"observed_source_sha={observed_source if _valid_source(observed_source) else 'invalid'} "
+            f"required_module_sha256={module_hash if isinstance(module_hash, str) and SHA256_RE.fullmatch(module_hash) else 'invalid'} "
+            f"observed_module_sha256={observed_module if SHA256_RE.fullmatch(observed_module) else 'invalid'} "
+            "verdict=BLOCKED reason=contradictory_or_malformed_swap_inventory")
     if (
             cold_boot["mapper_service_active_state"] != "active" or
             cold_boot["mapper_service_result"] != "success" or

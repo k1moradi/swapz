@@ -922,6 +922,42 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     reason in blocker
                     for blocker in result["cold_boot_blockers"]))
 
+    def test_cold_boot_swap_inventory_cannot_contradict_mapper_witness(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        for label, overrides, expected_observation in (
+                ("valid", {}, None),
+                ("zero total entries", {"swap_total_entries": "0"},
+                 "observed_total_entries=0"),
+                ("invalid total entries", {"swap_total_entries": "unknown"},
+                 "observed_total_entries=invalid"),
+                ("impossible swap usage", {"swap_used_kib": "108320765"},
+                 "observed_used_kib=108320765")):
+            with self.subTest(label=label):
+                raw = cold_boot_evidence_raw(**overrides)
+                evidence = current_evidence(report_raw, policy_raw)
+                evidence["release_evidence"]["owner_observed_reboot"].update(
+                    status="PASS", observed=True, overall="PASS",
+                    evidence_sha256=hashlib.sha256(raw).hexdigest())
+                result = evaluate(
+                    report, evidence, policy, cold_boot_raw=raw)
+                if label == "valid":
+                    self.assertEqual(result["COLD_BOOT_OBSERVED"], "PASS")
+                    self.assertEqual(result["release_verdict"], "PASS")
+                    continue
+                self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                diagnostics = "\n".join(result["cold_boot_blockers"])
+                self.assertIn("first_failed_phase=active_swap", diagnostics)
+                self.assertIn(expected_observation, diagnostics)
+                self.assertIn("required_source_sha=" + SOURCE, diagnostics)
+                self.assertIn(
+                    "required_module_sha256=" + ARTIFACTS["module_sha256"],
+                    diagnostics)
+                self.assertIn("verdict=BLOCKED", diagnostics)
+
     def test_cold_boot_evidence_parser_rejects_duplicate_keys(self):
         canonical_raw = cold_boot_evidence_raw()
         for key, suffix in (

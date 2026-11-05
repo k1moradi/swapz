@@ -6913,7 +6913,12 @@ bytes separately. The retained report must independently confirm a distinct
 armed/current boot ID, the exact release source and clean loaded module, the
 authorized PARTUUID and partition byte size, the run-bound mapper identity and
 capacity, one active mapper swap entry, healthy mapper/swap services, and zero
-swapz or relevant-kernel error counters. The evaluator must independently
+swapz or relevant-kernel error counters. The retained swap inventory must also
+report at least one total swap entry, with a bounded nonnegative integer used
+KiB count no larger than the mapper's reported swap size. Zero or malformed
+total entries and impossible usage contradict the active mapper witness and
+remain BLOCKED, even when the report's digest, source and target match. Other
+unrelated swap entries are permitted. The evaluator must independently
 recompute the maximum logical mapper sectors from the authorized partition bytes
 using the production one-block header, segment alignment, reserve rule, u32
 physical-index limit and independent 256-block foreground COW headroom; matching
