@@ -278,10 +278,120 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 self.assertEqual(stdout.getvalue(), "")
                 self.assertIn(
                     "BLOCKED: cannot disable process dumps:", stderr.getvalue())
+                self.assertIn(
+                    "BLOCKED: oracle phase=preflight "
+                    f"verified_pages=0/{oracle.MIN_MIB * oracle.MIB // oracle.PAGE_BYTES} "
+                    f"verified_bytes=0/{oracle.MIN_MIB * oracle.MIB}",
+                    stderr.getvalue())
+                self.assertIn(
+                    f"error={type(resource_error).__name__} "
+                    f"errno={resource_error.errno if isinstance(resource_error, OSError) else 'none'} "
+                    "cleanup_complete=true",
+                    stderr.getvalue())
                 self.assertNotIn("Traceback", stderr.getvalue())
                 self.assertNotIn("ab" * 16, stderr.getvalue())
                 emit.assert_not_called()
                 allocate.assert_not_called()
+
+    def test_parent_preserves_only_structured_pre_readiness_blocked_refusal(self):
+        blocked_summary = (
+            "BLOCKED: oracle phase=preflight verified_pages=0/16384 "
+            "verified_bytes=0/67108864 expected_page_mismatches=0 "
+            "observed_page_mismatches=0 expected_byte_mismatches=0 "
+            "observed_byte_mismatches=0 error=PermissionError errno=1 "
+            "cleanup_complete=true"
+        )
+        private_traceback = (
+            "Traceback (most recent call last):\n"
+            '  File "/private/oracle.py", line 1, in <module>\n'
+        )
+        cases = (
+            (2, "ORACLE_WAITING=", qualify.Blocked),
+            (1, "ORACLE_WAITING=", qualify.QualificationFailure),
+            (2, "ORACLE_VERIFIED=", qualify.QualificationFailure),
+        )
+        for return_code, prefix, error_type in cases:
+            with self.subTest(
+                    return_code=return_code, prefix=prefix,
+                    error_type=error_type.__name__):
+                read_descriptor, write_descriptor = os.pipe()
+                os.close(write_descriptor)
+                with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                    process = mock.Mock(
+                        stdout=output,
+                        stderr=io.StringIO(private_traceback + blocked_summary))
+                    process.poll.return_value = return_code
+                    with self.assertRaises(error_type) as caught:
+                        qualify._oracle_event(
+                            process, prefix, qualify.time.monotonic() + 1,
+                            lambda: None, bytearray())
+                diagnostic = str(caught.exception)
+                self.assertIn(f"child_exit={return_code}", diagnostic)
+                self.assertIn("evidence_complete=false", diagnostic)
+                self.assertIn("phase=preflight", diagnostic)
+                self.assertIn("errno=1", diagnostic)
+                self.assertNotIn("Traceback", diagnostic)
+                self.assertNotIn("/private/oracle.py", diagnostic)
+
+    def test_readiness_guard_allows_only_exited_worker_for_blocked_classification(self):
+        processes = [mock.Mock(pid=42001), mock.Mock(pid=42002)]
+        for process in processes:
+            process.stdin = mock.Mock()
+        launched_processes = []
+        ownership_exit_flags = []
+
+        def launch_process(_arguments, **_kwargs):
+            process = processes[len(launched_processes)]
+            launched_processes.append(process)
+            return process
+
+        def ownership_check(_cgroup, _processes, *, allow_worker_exit=False):
+            ownership_exit_flags.append(allow_worker_exit)
+
+        def oracle_event(_process, prefix, _deadline, guard, _pending):
+            self.assertEqual(prefix, "ORACLE_WAITING=")
+            guard()
+            raise qualify.Blocked("synthetic structured pre-readiness refusal")
+
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            with mock.patch.multiple(
+                    qualify,
+                    _cgroup_create=mock.Mock(return_value=cgroup),
+                    _memory_events=mock.Mock(
+                        return_value={"oom": 0, "oom_kill": 0}),
+                    _psi_total=mock.Mock(return_value=0),
+                    _trusted_executable_path=mock.Mock(
+                        return_value=sys.executable),
+                    _write_control=mock.Mock(),
+                    _read_uint=mock.Mock(return_value=0),
+                    _mem_available_mib=mock.Mock(
+                        return_value=qualify.MIN_AVAILABLE_MIB),
+                    require_no_cgroup_oom_events=mock.Mock(),
+                    require_oracle_worker_cgroup_ownership=mock.Mock(
+                        side_effect=ownership_check),
+                    read_swap_rows=mock.Mock(return_value=[]),
+                    _row_for_device=mock.Mock(
+                        return_value=mock.Mock(used_kib=0)),
+                    _oracle_event=mock.Mock(side_effect=oracle_event),
+                    _terminate_child=mock.Mock(),
+                    _close_oracle_pipes=mock.Mock(),
+                    _remove_cgroup=mock.Mock()), \
+                    mock.patch.object(
+                        qualify.subprocess, "Popen", side_effect=launch_process):
+                with self.assertRaisesRegex(
+                        qualify.Blocked, "synthetic structured pre-readiness refusal"):
+                    qualify._run_workload(
+                        {"run_id": "terminal-contract-run"},
+                        {"mapper_device": (1, 2)},
+                        ORACLE,
+                        workload_mib=128,
+                        resident_mib=64,
+                        swap_limit_mib=128,
+                        timeout_seconds=1,
+                    )
+        self.assertTrue(ownership_exit_flags)
+        self.assertTrue(ownership_exit_flags[0])
 
     def test_parent_stall_and_killed_child_have_no_terminal_evidence(self):
         read_descriptor, write_descriptor = os.pipe()

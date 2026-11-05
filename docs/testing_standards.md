@@ -527,7 +527,15 @@ parsed once, then reused by the fill and verification loops without changing
 the deterministic page-pattern bytes. A failed core-dump resource limit
 (OSError or ValueError) or dumpability lock is a pre-readiness BLOCKED
 refusal (exit 2): no WAITING record, anonymous allocation or traceback may
-escape. Rootless terminal tests inject both limit failures.
+escape. The oracle emits a bounded structured refusal with the expected page/
+byte geometry, original error class/errno and cleanup state. The parent may
+preserve BLOCKED only for that complete phase=preflight record, exit 2 and the
+initial ORACLE_WAITING boundary; unstructured exit 2, any later phase, stall,
+signal death or integrity failure remains FAIL. During the readiness wait the
+cgroup guard may tolerate only an already-exited owned worker disappearing so
+the terminal parser can classify that refusal; a live worker leaving the
+dedicated cgroup or foreign membership still fails. Rootless terminal tests
+inject both resource-limit failures and exercise this parent boundary.
 
 The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
 artifact identity, derive the same

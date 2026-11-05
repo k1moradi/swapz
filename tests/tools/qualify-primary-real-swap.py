@@ -2822,7 +2822,7 @@ def _terminate_child(process: subprocess.Popen, cgroup: Path) -> None:
 
 
 _ORACLE_FAILURE_SUMMARY_RE = re.compile(
-    r"FAIL: oracle phase=[a-z_]+ "
+    r"(?:FAIL|BLOCKED): oracle phase=[a-z_]+ "
     r"verified_pages=[0-9]+/[0-9]+ verified_bytes=[0-9]+/[0-9]+ "
     r"expected_page_mismatches=0 observed_page_mismatches=[0-9]+ "
     r"expected_byte_mismatches=0 observed_byte_mismatches=[0-9]+ "
@@ -2832,7 +2832,7 @@ _ORACLE_FAILURE_SUMMARY_RE = re.compile(
 
 
 def _bounded_oracle_failure_summary(process: subprocess.Popen) -> str:
-    """Expose only a complete structured oracle failure, never raw stderr."""
+    """Expose only a complete structured oracle failure/refusal, never raw stderr."""
     if process.stderr is None:
         return ""
     try:
@@ -2845,6 +2845,20 @@ def _bounded_oracle_failure_summary(process: subprocess.Popen) -> str:
         if _ORACLE_FAILURE_SUMMARY_RE.fullmatch(line):
             return line
     return ""
+
+
+def _raise_oracle_event_failure(
+        process: subprocess.Popen, prefix: str, return_code: int,
+        reason: str) -> None:
+    """Preserve only an authenticated pre-readiness BLOCKED child refusal."""
+    summary = _bounded_oracle_failure_summary(process)
+    detail = f": {summary}" if summary else ""
+    message = (
+        f"real-swap oracle phase=terminal child_exit={return_code} "
+        f"evidence_complete=false: {reason}{detail}")
+    if return_code == 2 and prefix == "ORACLE_WAITING=" and             summary.startswith("BLOCKED: oracle phase=preflight "):
+        raise Blocked(message)
+    raise QualificationFailure(message)
 
 
 def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
@@ -2882,19 +2896,18 @@ def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return_code = process.poll()
-            child_exit = return_code if return_code is not None else "running"
+            if return_code is not None:
+                _raise_oracle_event_failure(
+                    process, prefix, return_code, f"exited before {prefix}")
             raise QualificationFailure(
-                f"real-swap oracle phase=terminal child_exit={child_exit} "
+                "real-swap oracle phase=terminal child_exit=running "
                 f"evidence_complete=false: timed out waiting for {prefix}")
         readable, _, _ = select.select([fd], [], [], min(0.1, remaining))
         if not readable:
             return_code = process.poll()
             if return_code is not None:
-                summary = _bounded_oracle_failure_summary(process)
-                detail = f": {summary}" if summary else ""
-                raise QualificationFailure(
-                    f"real-swap oracle phase=terminal child_exit={return_code} "
-                    f"evidence_complete=false: exited before {prefix}{detail}")
+                _raise_oracle_event_failure(
+                    process, prefix, return_code, f"exited before {prefix}")
             continue
         try:
             chunk = os.read(fd, MAX_ORACLE_RECORD_BYTES + 1)
@@ -2908,14 +2921,13 @@ def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
                 f"errno={original_errno}") from exc
         if not chunk:
             return_code = process.poll()
-            child_exit = return_code if return_code is not None else "running"
-            summary = (
-                _bounded_oracle_failure_summary(process)
-                if return_code is not None else "")
-            detail = f": {summary}" if summary else ""
+            if return_code is not None:
+                _raise_oracle_event_failure(
+                    process, prefix, return_code,
+                    f"closed output before {prefix}")
             raise QualificationFailure(
-                f"real-swap oracle phase=terminal child_exit={child_exit} "
-                f"evidence_complete=false: closed output before {prefix}{detail}")
+                "real-swap oracle phase=terminal child_exit=running "
+                f"evidence_complete=false: closed output before {prefix}")
         pending.extend(chunk)
 
 
@@ -3264,7 +3276,11 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                             f"cannot move admitted oracle into dedicated cgroup: {exc}") from exc
 
                 guard_processes = round_processes
-                guard_allow_worker_exit = False
+                # Before readiness, an oracle may fail its own security
+                # preflight and exit. Permit only exited workers to disappear
+                # here so _oracle_event() can preserve a structured BLOCKED
+                # refusal; live-worker escape and foreign membership still fail.
+                guard_allow_worker_exit = True
                 deadline = time.monotonic() + timeout_seconds
                 oracle_buffers = {process.pid: bytearray() for process in round_processes}
                 waiting = [
@@ -3272,6 +3288,7 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                                   oracle_buffers[process.pid])
                     for process in round_processes
                 ]
+                guard_allow_worker_exit = False
                 if any(type(record.get("pid")) is not int for record in waiting):
                     raise QualificationFailure(
                         "concurrent oracle readiness PID identity is malformed")

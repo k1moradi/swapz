@@ -78,13 +78,24 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
     except ValueError as exc:
         print(f"FAIL: oracle seed is invalid: {exc}", file=sys.stderr)
         return 2
+    pages = allocation_bytes // PAGE_BYTES
     try:
         _disable_dumps()
     except RuntimeError as exc:
+        original_error = exc.__cause__ if exc.__cause__ is not None else exc
+        original_errno = getattr(original_error, "errno", None)
         print(f"BLOCKED: {exc}", file=sys.stderr)
+        print(
+            f"BLOCKED: oracle phase=preflight "
+            f"verified_pages=0/{pages} verified_bytes=0/{allocation_bytes} "
+            "expected_page_mismatches=0 observed_page_mismatches=0 "
+            "expected_byte_mismatches=0 observed_byte_mismatches=0 "
+            f"error={type(original_error).__name__} "
+            f"errno={original_errno if original_errno is not None else 'none'} "
+            "cleanup_complete=true",
+            file=sys.stderr)
         return 2
 
-    pages = allocation_bytes // PAGE_BYTES
     phase = "waiting"
     try:
         _emit("ORACLE_WAITING=", {
