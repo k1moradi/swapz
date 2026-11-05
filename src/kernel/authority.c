@@ -133,7 +133,7 @@ static int swapz_page_list_validate_membership(
 	const swapz_u32 none = ~(swapz_u32)0;
 	const swapz_u32 maximum_segment_pages =
 		SWAPZ_SEGMENT_BLOCKS * SWAPZ_MAX_RECORDS;
-	swapz_u32 current = logical;
+	swapz_u32 current_logical = logical;
 	swapz_u32 visited_pages = 1U;
 
 	if (segment >= a->segment_count ||
@@ -145,8 +145,9 @@ static int swapz_page_list_validate_membership(
 	 * satisfy both neighboring links. Walk toward the authoritative head and
 	 * bound corruption by the maximum physically possible maps in one segment.
 	 */
-	while (current != a->segment_first_page[segment]) {
-		swapz_u32 previous = a->page_prev_in_segment[current];
+	while (current_logical != a->segment_first_page[segment]) {
+		swapz_u32 previous =
+			a->page_prev_in_segment[current_logical];
 
 		if (previous == logical || previous == none ||
 		    previous >= a->logical_pages ||
@@ -155,9 +156,9 @@ static int swapz_page_list_validate_membership(
 		if (!a->maps[previous].valid ||
 		    a->maps[previous].start_block >= a->physical_blocks ||
 		    a->maps[previous].start_block / SWAPZ_SEGMENT_BLOCKS != segment ||
-		    a->page_next_in_segment[previous] != current)
+		    a->page_next_in_segment[previous] != current_logical)
 			return -EUCLEAN;
-		current = previous;
+		current_logical = previous;
 		visited_pages++;
 	}
 	return 0;
