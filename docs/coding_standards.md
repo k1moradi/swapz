@@ -725,6 +725,14 @@ symlinked ancestors, dot-component aliases or duplicate directory identities.
 Validate bounded manager output, refuse duplicate generated
 unit identities and symlink-substituted output paths, and remove only
 generator-owned stale drop-ins from a previously selected PARTUUID.
+An initial early-mask rename is not successful merely because `mv` returns
+zero: verify that the mapper-unit symlink resolves to `/dev/null` and the
+staging link is consumed. A failed or falsely successful rename must attempt
+to restore the mask and refuse generation, preserving the original command
+status and reporting rollback and any surviving temporary mask. Before retiring
+prior mapper/device drop-ins, compare their exact canonical generator content;
+a matching basename alone is insufficient proof of ownership, and unexpected
+regular-file contents must survive under the verified early mask.
 Unit generators share these output directories and execute concurrently, so
 do not treat a directory-wide scan of other generated `.swap` names as an
 authoritative raw-swap inventory. Reject an already-present exact selected unit

@@ -353,6 +353,63 @@ class GeneratorPublicationTest(unittest.TestCase):
                 destination.unlink()
         command.unlink()
 
+    def test_initial_mask_rename_false_success_and_error_keep_barrier(self) -> None:
+        rename_command = self.commands / "mv"
+        for failure, expected_status in (("false-success", 1), ("before", 71), ("after", 72)):
+            with self.subTest(failure=failure):
+                rename_command.write_text(
+                    '#!/bin/sh\ncase "$*" in\n'
+                    '*swapz-primary-mapper.service)\n'
+                    '    case "$MOCK_MASK_RENAME_FAILURE" in\n'
+                    '      false-success) exit 0 ;;\n'
+                    '      before) exit 71 ;;\n'
+                    '      after) /usr/bin/mv "$@" || exit $?; exit 72 ;;\n'
+                    '    esac ;;\n'
+                    'esac\nexec /usr/bin/mv "$@"\n',
+                    encoding="ascii",
+                )
+                rename_command.chmod(0o755)
+                result = self.run_generator(MOCK_MASK_RENAME_FAILURE=failure)
+                self.assert_blocked(result, "mask")
+                self.assertEqual(result.returncode, expected_status)
+                self.assertIn(f"original_status={expected_status}", result.stderr)
+                self.assertIn("original_errno=unavailable", result.stderr)
+                self.assertIn("expected_mask=/dev/null observed_mask=/dev/null", result.stderr)
+                self.assertIn("restore_status=0", result.stderr)
+                self.assertIn("surviving_artifacts=none rollback=complete", result.stderr)
+                self.assertFalse(self.device_dropin(SELECTED).exists())
+                self.assertFalse(list(self.early.glob(".swapz-primary-mask.*")))
+        rename_command.unlink()
+
+    def test_changed_selector_preserves_foreign_previous_mapper_dropin(self) -> None:
+        self.assertEqual(self.run_generator().returncode, 0)
+        previous_mapper = self.mapper_dropin()
+        previous_mapper.write_text("[Foreign]\nImportant=keep-mapper\n", encoding="ascii")
+        self.set_selector(CHANGED)
+        for _ in range(2):
+            result = self.run_generator(MOCK_STATUS="39", MOCK_UNITS="")
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(os.readlink(self.mask()), "/dev/null")
+            self.assertIn("phase=cleanup", result.stderr)
+            self.assertIn("validation=unowned-mapper-dropin", result.stderr)
+            self.assertEqual(previous_mapper.read_text(encoding="ascii"),
+                             "[Foreign]\nImportant=keep-mapper\n")
+            self.assertFalse(self.device_dropin(CHANGED).exists())
+            self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+
+    def test_changed_selector_preserves_foreign_previous_device_dropin(self) -> None:
+        self.assertEqual(self.run_generator().returncode, 0)
+        previous_device = self.device_dropin(SELECTED)
+        previous_device.write_text("[Foreign]\nImportant=keep-device\n", encoding="ascii")
+        self.set_selector(CHANGED)
+        for _ in range(2):
+            result = self.run_generator(MOCK_STATUS="39", MOCK_UNITS="")
+            self.assert_blocked(result, "cleanup")
+            self.assertIn("validation=unowned-stale-device-dropin", result.stderr)
+            self.assertEqual(previous_device.read_text(encoding="ascii"),
+                             "[Foreign]\nImportant=keep-device\n")
+            self.assertFalse(self.device_dropin(CHANGED).exists())
+
     def test_mask_release_error_rolls_back_published_files(self) -> None:
         command = self.commands / "rm"
         for failure in ("before", "after"):

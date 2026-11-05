@@ -5525,6 +5525,13 @@ systemd unit generators execute concurrently, so an unrelated by-PARTUUID
 `.swap` file or wants link may be present without gating the selected mapper.
 Exact selected-unit collisions still fail closed, while same-partition raw-swap
 alias exclusion remains an identity-based boot/deployment admission check.
+Inject initial early-mask rename errors both before and after replacement,
+and a false-success no-op: all must refuse the invocation with a verified
+`/dev/null` mask, no target drop-ins, no temporary mask, and the original
+command status. After selection changes, replace the prior mapper and device
+drop-ins separately with foreign regular-file contents and retry failed
+regeneration: the files must remain unchanged, with the early mask active and
+explicit ownership-failure diagnostics.
 Inject final early-mask unlink failure both before and after the unlink,
 false-success unlink, mask-restore rename failure before and after the rename,
 and a foreign mapper-unit symlink substituted after mask removal. A refused
