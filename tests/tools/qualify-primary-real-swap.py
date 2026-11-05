@@ -194,6 +194,74 @@ def _path_present(path: Path, label: str,
     return _lstat_optional(path, label, error_type) is not None
 
 
+
+def _source_parent_refusal(phase: str, check: str, observed: str,
+                           error_number: int | str = "none") -> Blocked:
+    """Bounded, failure-only proof classes; never disclose private PIDs or paths."""
+    return Blocked(
+        f"source_admission_parent_auth:phase={phase}:check={check}:"
+        "expected=live_ancestor_pid_starttime_uid_socket_inode_reply_sender:"
+        f"observed={observed}:errno={error_number}:authorization=BLOCKED:"
+        "next=inspect_parent_identity_read_only")
+
+
+def _source_parent_ancestors(phase: str) -> tuple[tuple[int, int, int], ...]:
+    """Capture the living /proc ancestry, including start ticks against PID reuse."""
+    ancestry: list[tuple[int, int, int]] = []
+    visited: set[int] = set()
+    process_id = os.getppid()
+    for _ in range(32):
+        if process_id <= 1:
+            return tuple(ancestry)
+        if process_id in visited:
+            raise _source_parent_refusal(
+                phase, "process_lineage", "cyclic_process_ancestry")
+        visited.add(process_id)
+        try:
+            process_stat = (Path("/proc") / str(process_id) / "stat").read_text(
+                encoding="ascii")
+        except OSError as exc:
+            raise _source_parent_refusal(
+                phase, "process_lineage", "unavailable_process_identity",
+                exc.errno if exc.errno is not None else "none") from exc
+        except UnicodeError as exc:
+            raise _source_parent_refusal(
+                phase, "process_lineage", "malformed_process_identity") from exc
+        closing_parenthesis = process_stat.rfind(") ")
+        fields = (process_stat[closing_parenthesis + 2:].split()
+                  if closing_parenthesis >= 0 else [])
+        try:
+            if len(fields) < 20:
+                raise ValueError("truncated process stat")
+            parent_id = int(fields[1])
+            start_ticks = int(fields[19])
+        except ValueError as exc:
+            raise _source_parent_refusal(
+                phase, "process_lineage", "malformed_process_identity") from exc
+        if (fields[0] in {"Z", "X", "x"} or parent_id < 0 or
+                start_ticks <= 0 or parent_id == process_id):
+            raise _source_parent_refusal(
+                phase, "process_lineage", "exited_or_invalid_process")
+        ancestry.append((process_id, parent_id, start_ticks))
+        process_id = parent_id
+    raise _source_parent_refusal(
+        phase, "process_lineage", "ambiguous_process_ancestry")
+
+
+def _source_parent_pidfd_alive(descriptor: int, phase: str) -> None:
+    """A pinned pidfd cannot silently become a different process after PID reuse."""
+    try:
+        poller = select.poll()
+        poller.register(descriptor, select.POLLIN | select.POLLHUP | select.POLLERR)
+        if poller.poll(0):
+            raise _source_parent_refusal(
+                phase, "parent_liveness", "exited_parent_process")
+    except OSError as exc:
+        raise _source_parent_refusal(
+            phase, "parent_liveness", "unavailable_parent_liveness",
+            exc.errno if exc.errno is not None else "none") from exc
+
+
 class SourceAdmissionClient:
     """Authenticated channel to the unprivileged source-verification parent."""
 
@@ -208,45 +276,83 @@ class SourceAdmissionClient:
         try:
             before = path.lstat()
         except OSError as exc:
-            raise Blocked("source admission socket is unavailable") from exc
+            raise _source_parent_refusal(
+                "connect", "socket_identity", "unavailable_socket",
+                exc.errno if exc.errno is not None else "none") from exc
         if (not stat.S_ISSOCK(before.st_mode) or before.st_uid != parent_uid or
                 stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
-            raise Blocked("source admission socket ownership is unsafe")
+            raise _source_parent_refusal(
+                "connect", "socket_identity", "unsafe_socket_metadata")
 
         channel = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         channel.settimeout(SOURCE_ADMISSION_TIMEOUT_SECONDS)
+        parent_pidfd: int | None = None
         try:
+            # Capture ancestry before connecting: a replaced pathname must
+            # not choose its own authority merely by matching our UID.
+            ancestors = _source_parent_ancestors("connect")
+            channel.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
             channel.connect(os.fspath(path))
             credentials = channel.getsockopt(
                 socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            _peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
+            peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
             after = path.lstat()
             before_identity = (
                 before.st_dev, before.st_ino, before.st_uid,
-                stat.S_IMODE(before.st_mode), before.st_nlink)
+                before.st_mode, before.st_nlink, before.st_ctime_ns)
             after_identity = (
                 after.st_dev, after.st_ino, after.st_uid,
-                stat.S_IMODE(after.st_mode), after.st_nlink)
-            if peer_uid != parent_uid or before_identity != after_identity:
-                raise Blocked("source admission parent identity changed")
+                after.st_mode, after.st_nlink, after.st_ctime_ns)
+            if before_identity != after_identity:
+                raise _source_parent_refusal(
+                    "connect", "socket_identity", "exchanged_socket_inode")
+            if peer_uid != parent_uid:
+                raise _source_parent_refusal(
+                    "connect", "peer_uid", "wrong_peer_uid")
+            if peer_pid not in {process_id for process_id, _, _ in ancestors}:
+                raise _source_parent_refusal(
+                    "connect", "parent_ancestry", "unrelated_peer_run")
+            if not hasattr(os, "pidfd_open"):
+                raise _source_parent_refusal(
+                    "connect", "parent_liveness", "pidfd_unavailable")
+            parent_pidfd = os.pidfd_open(peer_pid)
+            if ancestors != _source_parent_ancestors("connect"):
+                raise _source_parent_refusal(
+                    "connect", "parent_ancestry", "changed_parent_process")
+            _source_parent_pidfd_alive(parent_pidfd, "connect")
         except Blocked as exc:
+            if parent_pidfd is not None:
+                os.close(parent_pidfd)
             try:
                 channel.close()
             except OSError as cleanup_error:
                 _raise_cleanup_errors(
-                    exc, [f"source admission socket: {cleanup_error}"],
+                    exc, [f"source admission socket close:errno="
+                          f"{cleanup_error.errno if cleanup_error.errno is not None else 'none'}"],
                     error_type=Blocked)
             raise
         except (OSError, struct.error) as exc:
-            failure = Blocked("source admission parent connection failed")
+            failure = _source_parent_refusal(
+                "connect", "connection", "transport_or_credential_error",
+                exc.errno if isinstance(exc, OSError) and exc.errno is not None
+                else "none")
+            if parent_pidfd is not None:
+                os.close(parent_pidfd)
             try:
                 channel.close()
             except OSError as cleanup_error:
                 _raise_cleanup_errors(
-                    failure, [f"source admission socket: {cleanup_error}"],
+                    failure, [f"source admission socket close:errno="
+                              f"{cleanup_error.errno if cleanup_error.errno is not None else 'none'}"],
                     error_type=Blocked)
             raise failure from exc
         self._channel = channel
+        self._parent_pidfd = parent_pidfd
+        self._parent_process_id = peer_pid
+        self._parent_uid = parent_uid
+        self._parent_ancestors = ancestors
+        self._parent_socket_path = path
+        self._parent_socket_identity = after_identity
         self._validated_source = validated_source
         self._oracle_sha256: str | None = None
         self._physical_control_inputs_sha256: dict[str, str] | None = None
@@ -282,17 +388,71 @@ class SourceAdmissionClient:
             # can be retried by the outer cleanup path.
             channel.close()
             self._channel = None
+        parent_pidfd = getattr(self, "_parent_pidfd", None)
+        if parent_pidfd is not None:
+            os.close(parent_pidfd)
+            self._parent_pidfd = None
 
-    def _read_line(self) -> bytes:
+    def _require_parent_authority(self, phase: str) -> None:
+        # The PID is not an authority by itself. Pin its creation-time kernel
+        # reference and full process lineage, and recheck the named endpoint.
+        _source_parent_pidfd_alive(self._parent_pidfd, phase)
+        if _source_parent_ancestors(phase) != self._parent_ancestors:
+            raise _source_parent_refusal(
+                phase, "parent_ancestry", "changed_parent_process")
+        try:
+            named = self._parent_socket_path.lstat()
+        except OSError as exc:
+            raise _source_parent_refusal(
+                phase, "socket_identity", "unavailable_socket",
+                exc.errno if exc.errno is not None else "none") from exc
+        named_identity = (
+            named.st_dev, named.st_ino, named.st_uid,
+            named.st_mode, named.st_nlink, named.st_ctime_ns)
+        if named_identity != self._parent_socket_identity:
+            raise _source_parent_refusal(
+                phase, "socket_identity", "exchanged_socket_inode")
+
+    def _read_line(self, phase: str) -> bytes:
         data = bytearray()
+        kernel_socket = isinstance(self._channel, socket.socket)
+        credential_bytes = struct.calcsize("3i") if kernel_socket else 0
+        ancillary_capacity = (
+            socket.CMSG_SPACE(credential_bytes) if kernel_socket else 0)
         while len(data) <= SOURCE_ADMISSION_MAX_LINE_BYTES:
-            chunk = self._channel.recv(1)
+            if kernel_socket:
+                # SO_PEERCRED alone survives SCM_RIGHTS/duplicate-fd handoff.
+                # Check SCM_CREDENTIALS on *each received byte* so a foreign
+                # writer cannot append to a trusted process's stream reply.
+                chunk, ancillary, flags, _address = self._channel.recvmsg(
+                    1, ancillary_capacity)
+                if not chunk:
+                    raise _source_parent_refusal(
+                        phase, "reply_transport", "parent_disconnected")
+                if (flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC) or
+                        len(ancillary) != 1 or
+                        ancillary[0][:2] != (
+                            socket.SOL_SOCKET, socket.SCM_CREDENTIALS) or
+                        len(ancillary[0][2]) != credential_bytes):
+                    raise _source_parent_refusal(
+                        phase, "reply_sender", "missing_or_ambiguous_credentials")
+                sender_pid, sender_uid, _sender_gid = struct.unpack(
+                    "3i", ancillary[0][2])
+                if (sender_pid != self._parent_process_id or
+                        sender_uid != self._parent_uid):
+                    raise _source_parent_refusal(
+                        phase, "reply_sender", "foreign_message_sender")
+            else:
+                # Legacy unit-test doubles have no kernel credentials.
+                chunk = self._channel.recv(1)
             if not chunk:
-                raise Blocked("source admission parent disconnected")
+                raise _source_parent_refusal(
+                    phase, "reply_transport", "parent_disconnected")
             if chunk == b"\n":
                 return bytes(data)
             data.extend(chunk)
-        raise Blocked("source admission response is oversized")
+        raise _source_parent_refusal(
+            phase, "reply_bounds", "oversized_authorization_reply")
 
     def require(self, phase: str) -> str:
         if not re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase):
@@ -301,6 +461,8 @@ class SourceAdmissionClient:
             raise Blocked("physical control source inputs are not pinned")
         if self._executed_helper_sha256 is None:
             raise Blocked("executed helper identity is not pinned")
+        if isinstance(self._channel, socket.socket):
+            self._require_parent_authority(phase)
         nonce = os.urandom(16).hex()
         request = {
             "schema": SOURCE_ADMISSION_SCHEMA,
@@ -315,12 +477,14 @@ class SourceAdmissionClient:
                 json.dumps(
                     request, sort_keys=True, separators=(",", ":")).encode("ascii") +
                 b"\n")
-            response_bytes = self._read_line()
+            response_bytes = self._read_line(phase)
+            if isinstance(self._channel, socket.socket):
+                self._require_parent_authority(phase)
         except OSError as exc:
             error_number = exc.errno if exc.errno is not None else "none"
             raise Blocked(
                 f"source admission transport failed at {phase}:"
-                f"errno={error_number}") from exc
+                f"{_source_parent_refusal(phase, 'transport', 'transport_error', error_number)}") from exc
         try:
             response = json.loads(
                 response_bytes.decode("ascii"),
@@ -328,7 +492,10 @@ class SourceAdmissionClient:
                 parse_constant=_reject_nonfinite_json_constant,
                 parse_float=_finite_json_float)
         except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
-            raise Blocked("source admission response is malformed") from exc
+            raise Blocked(
+                "source admission response is malformed:" +
+                str(_source_parent_refusal(
+                    phase, "reply_parser", "malformed_authorization_reply"))) from exc
         required = {
             "schema", "status", "phase", "source_sha", "nonce",
             "oracle_sha256",
@@ -352,15 +519,24 @@ class SourceAdmissionClient:
                 response.get("nonce") != nonce or
                 not isinstance(oracle_sha256, str) or
                 re.fullmatch(r"[0-9a-f]{64}", oracle_sha256) is None):
-            raise Blocked("source admission response identity mismatch")
+            raise Blocked(
+                "source admission response identity mismatch:" +
+                str(_source_parent_refusal(
+                    phase, "reply_fields", "mismatched_authorization_reply")))
         if status != "PASS":
+            if isinstance(self._channel, socket.socket):
+                raise _source_parent_refusal(
+                    phase, "authorization_reply", "parent_refused")
             raise Blocked(
                 f"unprivileged source admission refused at {phase}: "
                 f"{response['reason']}")
         if self._oracle_sha256 is None:
             self._oracle_sha256 = oracle_sha256
         elif self._oracle_sha256 != oracle_sha256:
-            raise Blocked("source admission oracle identity changed")
+            raise Blocked(
+                "source admission oracle identity changed:" +
+                str(_source_parent_refusal(
+                    phase, "oracle_sha256", "changed_oracle_identity")))
         return oracle_sha256
 
 

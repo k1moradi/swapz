@@ -13,6 +13,7 @@ import socket
 import subprocess
 import struct
 import sys
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -23,6 +24,12 @@ SPEC = importlib.util.spec_from_file_location("swapz_source_parent_ownership", P
 parent = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = parent
 SPEC.loader.exec_module(parent)
+CLIENT_HELPER = ROOT / "tests/tools/qualify-primary-real-swap.py"
+CLIENT_SPEC = importlib.util.spec_from_file_location(
+    "swapz_source_child_ownership", CLIENT_HELPER)
+client_helper = importlib.util.module_from_spec(CLIENT_SPEC)
+sys.modules[CLIENT_SPEC.name] = client_helper
+CLIENT_SPEC.loader.exec_module(client_helper)
 
 
 class SourceAdmissionPeerOwnership(unittest.TestCase):
@@ -458,6 +465,275 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
                          "physical_admission_identity_missing")
         self.assertIn("authorization=BLOCKED", diagnostics)
         self.assertEqual(check.call_count, 1)
+
+
+@unittest.skipIf(os.geteuid() == 0, "live AF_UNIX parent proof requires non-root")
+class SourceAdmissionClientPeerProof(unittest.TestCase):
+    """Real, unprivileged kernel credentials; no simulated root or swap I/O."""
+
+    SOURCE = "a" * 40
+    ORACLE = "d" * 64
+    CLIENT = r"""
+import importlib.util
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location("swapz_client_proof", sys.argv[2])
+helper = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = helper
+spec.loader.exec_module(helper)
+client = None
+try:
+    client = helper.SourceAdmissionClient(
+        sys.argv[1], os.geteuid(), "a" * 40)
+    print("CONNECTED", flush=True)
+    if sys.stdin.readline() != "GO\n":
+        raise RuntimeError("missing synthetic gate")
+    client.bind_physical_control_inputs({
+        name: "c" * 64 for name in helper.PHYSICAL_CONTROL_INPUT_PATHS})
+    client.bind_executed_helper_sha256("8" * 64)
+    if sys.argv[3] == "changed_start":
+        genuine_ancestors = helper._source_parent_ancestors
+        def changed_start_time(phase):
+            current = list(genuine_ancestors(phase))
+            process_id, parent_id, ticks = current[0]
+            current[0] = process_id, parent_id, ticks + 1
+            return tuple(current)
+        helper._source_parent_ancestors = changed_start_time
+    try:
+        digest = client.require("initial")
+        print("SYNTHETIC_APPROVED" if digest == "d" * 64
+              else "WRONG_ORACLE", flush=True)
+    except helper.Blocked as exc:
+        print("BLOCKED=" + str(exc), flush=True)
+except helper.Blocked as exc:
+    print("BLOCKED=" + str(exc), flush=True)
+finally:
+    if client is not None:
+        client.close()
+"""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="swapz-parent-peer-")
+        self.addCleanup(temporary.cleanup)
+        self.socket_path = Path(temporary.name) / "source-admission.sock"
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(self.server.close)
+        self.server.bind(os.fspath(self.socket_path))
+        os.chmod(self.socket_path, 0o600)
+        self.server.listen(1)
+        self.server.settimeout(5)
+
+    @staticmethod
+    def _reap(child):
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+        for stream in (child.stdin, child.stdout, child.stderr):
+            if stream is not None:
+                stream.close()
+
+    def _start_client(self, mode="normal"):
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c", self.CLIENT,
+             os.fspath(self.socket_path), os.fspath(CLIENT_HELPER), mode],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, bufsize=1)
+        self.addCleanup(self._reap, child)
+        self.assertTrue(select.select([child.stdout], [], [], 5)[0])
+        self.assertEqual(child.stdout.readline().strip(), "CONNECTED")
+        return child
+
+    def _read_request(self, connection):
+        request = bytearray()
+        while b"\n" not in request:
+            fragment = connection.recv(4096)
+            self.assertTrue(fragment, "client exited before request")
+            request.extend(fragment)
+            self.assertLessEqual(len(request), 4096)
+        request_line, separator, remainder = request.partition(b"\n")
+        self.assertEqual(separator, b"\n")
+        self.assertFalse(remainder)
+        return json.loads(request_line.decode("ascii"))
+
+    def _response(self, request):
+        return {
+            "schema": request["schema"], "status": "PASS",
+            "phase": request["phase"], "nonce": request["nonce"],
+            "source_sha": request["source_sha"],
+            "oracle_sha256": self.ORACLE,
+        }
+
+    @staticmethod
+    def _finish(child):
+        assert select.select([child.stdout], [], [], 5)[0]
+        line = child.stdout.readline().strip()
+        assert child.wait(timeout=5) == 0, "unexpected client process failure"
+        return line
+
+    def _assert_refusal(self, result, phase, check, observed):
+        self.assertTrue(result.startswith("BLOCKED="), result)
+        for field in (
+                f"phase={phase}", f"check={check}",
+                "expected=live_ancestor_pid_starttime_uid_socket_inode_reply_sender",
+                f"observed={observed}", "errno=none", "authorization=BLOCKED",
+                "next=inspect_parent_identity_read_only"):
+            self.assertIn(field, result)
+
+    def test_published_source_bound_substitution_reproducer(self):
+        probe_path = ROOT / (
+            "tests/runtime/native/rootless-socket-substitution-probe.py")
+        result = subprocess.run(
+            [sys.executable, "-B", os.fspath(probe_path)],
+            stdin=subprocess.DEVNULL, capture_output=True,
+            text=True, timeout=30, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr[:300])
+        summary = json.loads(result.stdout)
+        self.assertEqual(summary["runs"], 12)
+        self.assertEqual(summary["substitution"], 12)
+        self.assertEqual(
+            summary["first_failed_authenticity_invariant"], "parent_ancestry")
+        self.assertEqual(summary["genuine_parent_connections"], 0)
+
+    def test_real_parent_can_send_nonce_bound_synthetic_approval(self):
+        for _ in range(3):
+            with self.subTest(repetition=_):
+                # One client per socket connection; a successful response is
+                # source-only test data, never physical run authorization.
+                child = self._start_client()
+                with self.server.accept()[0] as connection:
+                    connection.settimeout(5)
+                    child.stdin.write("GO\n")
+                    child.stdin.flush()
+                    request = self._read_request(connection)
+                    self.assertEqual(request["phase"], "initial")
+                    response = self._response(request)
+                    connection.sendall(
+                        (json.dumps(response) + "\n").encode("ascii"))
+                    self.assertEqual(self._finish(child), "SYNTHETIC_APPROVED")
+
+    def test_shared_fd_foreign_writer_cannot_authorize(self):
+        child = self._start_client()
+        with self.server.accept()[0] as connection:
+            connection.settimeout(5)
+            original_credentials = connection.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            child.stdin.write("GO\n")
+            child.stdin.flush()
+            request = self._read_request(connection)
+            response = (json.dumps(self._response(request)) + "\n").encode("ascii")
+            writer = subprocess.Popen(
+                [sys.executable, "-I", "-c",
+                 "import socket,sys; socket.socket(fileno=int(sys.argv[1]))"
+                 ".sendall(bytes.fromhex(sys.argv[2]))",
+                 str(connection.fileno()), response.hex()],
+                pass_fds=(connection.fileno(),),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                self.assertEqual(writer.wait(timeout=5), 0)
+            finally:
+                if writer.poll() is None:
+                    writer.kill()
+                writer.wait(timeout=5)
+            self.assertEqual(
+                connection.getsockopt(
+                    socket.SOL_SOCKET, socket.SO_PEERCRED,
+                    struct.calcsize("3i")), original_credentials)
+            self._assert_refusal(
+                self._finish(child), "initial",
+                "reply_sender", "foreign_message_sender")
+
+    def test_exchanged_socket_inode_blocks_before_request(self):
+        child = self._start_client()
+        with self.server.accept()[0] as connection:
+            connection.settimeout(5)
+            self.socket_path.unlink()
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as swapped:
+                swapped.bind(os.fspath(self.socket_path))
+                os.chmod(self.socket_path, 0o600)
+                swapped.listen(1)
+                child.stdin.write("GO\n")
+                child.stdin.flush()
+                self._assert_refusal(
+                    self._finish(child), "initial",
+                    "socket_identity", "exchanged_socket_inode")
+                self.assertEqual(connection.recv(1), b"")
+
+    def test_malformed_authorization_reply_blocks(self):
+        child = self._start_client()
+        with self.server.accept()[0] as connection:
+            connection.settimeout(5)
+            child.stdin.write("GO\n")
+            child.stdin.flush()
+            self._read_request(connection)
+            connection.sendall(b'{"status":"PASS","status":"PASS"}\n')
+            self._assert_refusal(
+                self._finish(child), "initial",
+                "reply_parser", "malformed_authorization_reply")
+
+    def test_wrong_nonce_cannot_authorize(self):
+        child = self._start_client()
+        with self.server.accept()[0] as connection:
+            connection.settimeout(5)
+            child.stdin.write("GO\n")
+            child.stdin.flush()
+            request = self._read_request(connection)
+            response = self._response(request)
+            response["nonce"] = "f" * 32
+            connection.sendall(
+                (json.dumps(response) + "\n").encode("ascii"))
+            self._assert_refusal(
+                self._finish(child), "initial",
+                "reply_fields", "mismatched_authorization_reply")
+
+    def test_parent_start_time_change_blocks(self):
+        child = self._start_client(mode="changed_start")
+        with self.server.accept()[0] as connection:
+            connection.settimeout(5)
+            child.stdin.write("GO\n")
+            child.stdin.flush()
+            self._assert_refusal(
+                self._finish(child), "initial",
+                "parent_ancestry", "changed_parent_process")
+            self.assertEqual(connection.recv(1), b"")
+
+    def test_reply_eof_blocks(self):
+        child = self._start_client()
+        with self.server.accept()[0] as connection:
+            connection.settimeout(5)
+            child.stdin.write("GO\n")
+            child.stdin.flush()
+            self._read_request(connection)
+            connection.shutdown(socket.SHUT_WR)
+            self._assert_refusal(
+                self._finish(child), "initial",
+                "reply_transport", "parent_disconnected")
+
+    def test_closed_pinned_parent_pidfd_blocks_reused_pid(self):
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        try:
+            pidfd = os.pidfd_open(child.pid)
+            try:
+                child.terminate()
+                child.wait(timeout=5)
+                with self.assertRaises(client_helper.Blocked) as refusal:
+                    client_helper._source_parent_pidfd_alive(pidfd, "initial")
+                self.assertIn("check=parent_liveness", str(refusal.exception))
+                self.assertIn("observed=exited_parent_process",
+                              str(refusal.exception))
+                self.assertIn("authorization=BLOCKED",
+                              str(refusal.exception))
+            finally:
+                os.close(pidfd)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+
 
 if __name__ == "__main__":
     unittest.main()

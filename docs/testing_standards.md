@@ -281,6 +281,33 @@ cleanup outcome in a mode-0600 private diagnostic, with only redacted bounded
 failure attribution in public summaries. A passing regression reports only
 synthetic subprocess-ownership safety, never approval for physical admission.
 
+The reciprocal source-admission **client** must authenticate the known living
+unprivileged creator of the admission listener, not merely a same-UID
+replacement endpoint: the socket's inode, mode and ownership, the kernel
+SO_PEERCRED PID and UID, the client's pinned pre-connect ancestor chain with
+/proc start ticks, and a live pidfd must agree on connection and again before
+and after each approval. The client must enable SO_PASSCRED and verify
+SCM_CREDENTIALS on every received reply byte; SO_PEERCRED alone remains
+unchanged if a connected descriptor is passed to a foreign writer. Missing,
+truncated or foreign sender credentials, a swapped pathname, an exited parent,
+changed ancestry/start time or unavailable evidence must BLOCK before source
+approval. The source-bound rootless socket-substitution probe must run twelve
+real AF_UNIX attempts against the actual client and observe
+`check=parent_ancestry` as the first failed authenticity invariant for an
+unrelated same-UID listener, with no request delivered to the genuine parent.
+Separate real AF_UNIX regressions must preserve a legitimate synthetic
+parent-child nonce-bound reply and reject forged replies sent through passed
+descriptors, changed socket inodes, malformed/duplicate JSON and wrong nonces.
+Every authentication refusal retains the failed phase/check, expected proof
+class, observed safe class, numeric original errno when present (otherwise
+`none`), BLOCKED authorization, and a read-only next action; no private
+socket path, PID, reply payload or source material is logged. Pidfd pins process
+lifetime against PID reuse, while /proc start-time/ancestry protects process
+identity; neither alone proves message authorship. The parent still lacks
+independent authentication of the privileged **request** writer, and no
+rootless synthetic approval supplies selected-card/reader or last-use physical
+evidence. Physical source-only admission remains unconditionally BLOCKED.
+
 The current wire schema carries source, helper and control-input identity but
 no independently authenticated exact message sender, physical qualification
 run, selected-card/reader target, or required boundary evidence. Consequently

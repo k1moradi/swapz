@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rootless proof that the real SourceAdmissionClient accepts a same-UID substitute."""
+"""Rootless proof that the actual client blocks same-UID source-listener substitution."""
 
 import importlib.util
 import json
@@ -44,7 +44,9 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         while b"\n" not in request_bytes:
             chunk = connection.recv(4096)
             if not chunk:
-                raise RuntimeError("client closed before request")
+                # A correctly authenticated client rejects before sending any
+                # admission request to this unrelated same-UID listener.
+                sys.exit(0)
             request_bytes.extend(chunk)
             if len(request_bytes) > 4096:
                 raise RuntimeError("request exceeded admission line limit")
@@ -96,21 +98,41 @@ def probe() -> bool:
 
                 # This is the production client implementation, not a duplicate
                 # of its UID/path/response predicates.
-                client = helper.SourceAdmissionClient(
-                    os.fspath(socket_path), os.geteuid(), SOURCE)
-                credentials = client._channel.getsockopt(
-                    socket.SOL_SOCKET, socket.SO_PEERCRED,
-                    struct.calcsize("3i"))
-                peer_pid, peer_uid, _peer_gid = struct.unpack(
-                    "3i", credentials)
-                assert peer_pid == impostor.pid
-                assert peer_uid == os.geteuid()
-
-                client.bind_physical_control_inputs(CONTROL_HASHES)
-                client.bind_executed_helper_sha256(HELPER_DIGEST)
-                assert client.require("initial") == ORACLE_DIGEST
-                client.close()
-                client = None
+                rejection = None
+                try:
+                    client = helper.SourceAdmissionClient(
+                        os.fspath(socket_path), os.geteuid(), SOURCE)
+                except helper.Blocked as error:
+                    rejection = str(error)
+                if client is not None:
+                    # Still exercise the published synthetic-PASS attack path
+                    # if connection-time authentication unexpectedly regresses.
+                    credentials = client._channel.getsockopt(
+                        socket.SOL_SOCKET, socket.SO_PEERCRED,
+                        struct.calcsize("3i"))
+                    peer_pid, peer_uid, _peer_gid = struct.unpack(
+                        "3i", credentials)
+                    assert peer_pid == impostor.pid
+                    assert peer_uid == os.geteuid()
+                    client.bind_physical_control_inputs(CONTROL_HASHES)
+                    client.bind_executed_helper_sha256(HELPER_DIGEST)
+                    try:
+                        client.require("initial")
+                    except helper.Blocked as error:
+                        rejection = str(error)
+                    else:
+                        raise AssertionError("unrelated listener forged PASS")
+                assert rejection is not None
+                for field in (
+                        "phase=connect", "check=parent_ancestry",
+                        "expected=live_ancestor_pid_starttime_uid_socket_inode_reply_sender",
+                        "observed=unrelated_peer_run", "errno=none",
+                        "authorization=BLOCKED",
+                        "next=inspect_parent_identity_read_only"):
+                    assert field in rejection, (field, rejection)
+                if client is not None:
+                    client.close()
+                    client = None
 
                 genuine.settimeout(0.02)
                 try:
@@ -147,8 +169,9 @@ if __name__ == "__main__":
     print(json.dumps({
         "runs": 12,
         "substitution": 12,
-        "actual_source_admission_client": "accepted_forged_pass",
+        "actual_source_admission_client": "blocked_unrelated_listener",
         "authenticated_peer_class": "unrelated_same_uid_process",
         "genuine_parent_connections": 0,
+        "first_failed_authenticity_invariant": "parent_ancestry",
         "privileged_execution": False,
     }, sort_keys=True))
