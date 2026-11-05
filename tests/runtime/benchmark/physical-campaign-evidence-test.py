@@ -192,6 +192,55 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertFalse(any(
             item["status"] == "FAIL" for item in audit["diagnostics"]))
 
+    def test_foreign_target_blocks_terminal_producer_claim(self):
+        record = pair(1, 1100)
+        record["status"] = "EXCLUDED"
+        record["excluded"] = True
+        record["analysis_usable"] = False
+        record["raw"]["verdict"] = "FAIL"
+        before, after = host_snapshots()
+        for snapshot in (before, after):
+            snapshot["device"] = {
+                "partuuid": "12345678-aaaa", "size_bytes": 8 * 1024**3,
+                "major_minor": "8:1", "parent_major_minor": "8:0",
+                "model": "synthetic", "transport": "usb",
+            }
+        claimed = EVIDENCE.qualification_target_identity(before)
+        claimed["physical_partuuid"] = "ffffffff-bbbb"
+        audit = EVIDENCE.audit_physical_pairs({
+            "status": "FAIL_OR_INCOMPLETE", "records": [record],
+            "decisions": {}, "campaign_target_consistent": True,
+            "campaign_target_identity": claimed,
+        }, before, after)
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertEqual(audit["admitted_source_sha"], SOURCE)
+        self.assertEqual(audit["admitted_target_partuuid"], "12345678-aaaa")
+        self.assertIn("qualification.campaign_target_identity", {
+            item["metric"] for item in audit["diagnostics"]})
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
+    def test_authenticated_producer_keeps_phase_and_redacts_private_error(self):
+        record = pair(1, 1100)
+        record["status"] = "EXCLUDED"
+        record["excluded"] = True
+        record["analysis_usable"] = False
+        record["raw"]["verdict"] = "FAIL"
+        record["raw"]["stage"] = "measure"
+        record["raw"]["failure_reason"] = "/private/host/error"
+        audit, _ = inspect([record], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "FAIL")
+        self.assertEqual(audit["first_failed_phase"], "measure")
+        self.assertEqual(audit["first_failed_evidence"]["workload"],
+                         "sd-service-balanced")
+        self.assertEqual(audit["first_failed_evidence"]["pair_index"], 1)
+        self.assertEqual(audit["first_failed_evidence"]["evidence_class"],
+                         "FAIL")
+        self.assertEqual(audit["admitted_source_sha"], SOURCE)
+        self.assertNotIn("/private/host", str(audit))
+        self.assertEqual(record["raw"]["failure_reason"], "/private/host/error")
+
     def test_counterbalanced_order_and_duplicate_indices_block_audit(self):
         record = pair(1, 1100)
         record["order"] = "swapz-first"
