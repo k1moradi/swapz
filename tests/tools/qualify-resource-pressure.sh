@@ -963,25 +963,25 @@ report_cleanup_refusal() {
     cleanup_diagnostic_reported=1
     case "$phase" in
         rmdir)
-            printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
-                "$severity" "$phase" "$observed" "$original_exit" >&2
+            printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session nested_resume:%s next_step:read-only-review-retained-state-before-retry\n' \
+                "$severity" "$phase" "$observed" "$original_exit" "$nested_resume_disposition" >&2
             ;;
         session-signal)
-            printf '%s: ID36 private scratch ownership refused; phase:%s required:same created private-session identity and only canonical ID36 entries observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
-                "$severity" "$phase" "$observed" "$original_exit" >&2
+            printf '%s: ID36 private scratch ownership refused; phase:%s required:same created private-session identity and only canonical ID36 entries observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session nested_resume:%s next_step:read-only-review-retained-state-before-retry\n' \
+                "$severity" "$phase" "$observed" "$original_exit" "$nested_resume_disposition" >&2
             ;;
         session-identity|session-inventory)
             # The created cgroup has already been removed at these phases.
-            printf '%s: ID36 private scratch ownership refused; phase:%s required:same created private-session identity and only canonical ID36 entries observed:%s original_exit:%s retained_cleanup:private-session\n' \
-                "$severity" "$phase" "$observed" "$original_exit" >&2
+            printf '%s: ID36 private scratch ownership refused; phase:%s required:same created private-session identity and only canonical ID36 entries observed:%s original_exit:%s retained_cleanup:private-session nested_resume:%s next_step:read-only-review-retained-state-before-retry\n' \
+                "$severity" "$phase" "$observed" "$original_exit" "$nested_resume_disposition" >&2
             ;;
         session-remove|session-post-rmdir)
-            printf '%s: ID36 private scratch cleanup did not complete; phase:%s required:same created removable private session with only known entries observed:%s original_exit:%s retained_cleanup:private-session\n' \
-                "$severity" "$phase" "$observed" "$original_exit" >&2
+            printf '%s: ID36 private scratch cleanup did not complete; phase:%s required:same created removable private session with only known entries observed:%s original_exit:%s retained_cleanup:private-session nested_resume:%s next_step:read-only-review-retained-state-before-retry\n' \
+                "$severity" "$phase" "$observed" "$original_exit" "$nested_resume_disposition" >&2
             ;;
         *)
-            printf '%s: ID36 cleanup ownership refused; phase:%s required:same created cgroup identity, exclusive empty canonical membership and positively owned direct children observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
-                "$severity" "$phase" "$observed" "$original_exit" >&2
+            printf '%s: ID36 cleanup ownership refused; phase:%s required:same created cgroup identity, exclusive empty canonical membership and positively owned direct children observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session nested_resume:%s next_step:read-only-review-retained-state-before-retry\n' \
+                "$severity" "$phase" "$observed" "$original_exit" "$nested_resume_disposition" >&2
             ;;
     esac
 }
@@ -1031,6 +1031,19 @@ cleanup() {
     fi
     session_fd_path="/proc/self/fd/$SESSION_DIRECTORY_FD"
 
+    # An early stop-marker refusal still needs an accurate nested-resume
+    # disposition. Partial nested evidence cannot authorize a pidfd signal.
+    nested_resume_disposition=not-required
+    if (( PAIR_RESUME_UNCERTAIN )); then
+        nested_resume_disposition=skipped-uncertain
+    elif [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
+            -n $PAIR_CGROUP_PROCESS_IDENTITY ]]; then
+        nested_resume_disposition=attempted
+    elif [[ -n ${PAIR_CGROUP_PROCESS_PID:-} ||
+            -n ${PAIR_CGROUP_PROCESS_IDENTITY:-} ]]; then
+        nested_resume_disposition=prohibited-unproved
+    fi
+
     # The cooperative stop path is itself private-session state. Revalidate the
     # created directory before touching it, and never clobber an existing name.
     if ! current_identity="$(read_owned_directory_identity "$SESSION")"; then
@@ -1056,13 +1069,6 @@ cleanup() {
         report_cleanup_refusal session-signal stale "$original_result"
     fi
 
-    nested_resume_disposition=not-required
-    if (( PAIR_RESUME_UNCERTAIN )); then
-        nested_resume_disposition=skipped-uncertain
-    elif [[ -n $PAIR_PID && -n $PAIR_CGROUP_PROCESS_PID &&
-            -n $PAIR_CGROUP_PROCESS_IDENTITY ]]; then
-        nested_resume_disposition=attempted
-    fi
     if (( initially_retained )); then
         if [[ -n ${CGROUP_CREATE_REFUSAL_OBSERVATION:-} ]]; then
             # This setup refusal owns the first phase; do not publish a second

@@ -287,6 +287,10 @@ stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
 '''
         result = self.execute(preamble=preamble)
         self.assert_retained(result, "skipped-uncertain")
+        self.assertIn("nested_resume:skipped-uncertain", result.stderr)
+        self.assertIn(
+            "next_step:read-only-review-retained-state-before-retry",
+            result.stderr)
         self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
         for name in ("unexpected-wait", "unexpected-signal", "unexpected-stop"):
             self.assertFalse((self.root / name).exists())
@@ -316,6 +320,10 @@ signal_nested_owned_child() { : > "$SESSION/../signal-called"; return 0; }
                 self.assertIn("phase:pair-resume", result.stderr)
                 self.assertIn(f"observed:{expected_observation}", result.stderr)
                 self.assertIn(f"original_exit:{original_status}", result.stderr)
+                self.assertIn("nested_resume:attempted", result.stderr)
+                self.assertIn(
+                    "next_step:read-only-review-retained-state-before-retry",
+                    result.stderr)
                 self.assertIn("retained_cleanup:child-cgroup-and-private-session",
                               result.stderr)
                 self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
@@ -391,6 +399,10 @@ stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
         self.assertIn("observed:stale", result.stderr)
         self.assertNotIn("phase:pair-resume", result.stderr)
         self.assertIn("original_exit:143", result.stderr)
+        self.assertIn("nested_resume:attempted", result.stderr)
+        self.assertIn(
+            "next_step:read-only-review-retained-state-before-retry",
+            result.stderr)
         self.assertTrue((self.root / "wait-called").exists())
         self.assertFalse((self.root / "unexpected-signal").exists())
         self.assertFalse((self.root / "unexpected-stop").exists())
@@ -398,6 +410,34 @@ stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
         self.assertTrue(self.session.exists())
         self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"),
                          "untouched\n")
+
+    def test_unproved_nested_identity_rmdir_refusal_is_actionable(self):
+        # A nested PID and token without its tracked timeout is not authority
+        # for SIGCONT, even if the final directory removal also refuses.
+        preamble = r'''
+PAIR_CGROUP_PROCESS_PID=333
+PAIR_CGROUP_PROCESS_IDENTITY=444
+signal_nested_owned_child() { : > "$SESSION/../unexpected-nested-signal"; return 0; }
+rmdir() {
+    if [[ $1 == "$CGROUP" ]]; then
+        return 16
+    fi
+    command rmdir "$@"
+}
+'''
+        result = self.execute(preamble=preamble, status=143)
+        self.assert_retained(
+            result, "occupied-or-unremovable", expected_status=143)
+        self.assertIn("phase:rmdir", result.stderr)
+        self.assertIn(
+            "required:exclusive empty canonical membership and removable cgroup",
+            result.stderr)
+        self.assertIn("nested_resume:prohibited-unproved", result.stderr)
+        self.assertIn(
+            "next_step:read-only-review-retained-state-before-retry",
+            result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertFalse((self.root / "unexpected-nested-signal").exists())
 
     def test_production_directory_pin_commands_hide_private_paths(self):
         # Execute the exact production redirection groups. Bash's own open
@@ -956,6 +996,10 @@ rmdir() {
         self.assertIn("observed:occupied-or-unremovable", result.stderr)
         self.assertIn("original_exit:143", result.stderr)
         self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertIn("nested_resume:not-required", result.stderr)
+        self.assertIn(
+            "next_step:read-only-review-retained-state-before-retry",
+            result.stderr)
         self.assertNotIn("retained_cleanup:child-cgroup-and-private-session",
                          result.stderr)
         self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)

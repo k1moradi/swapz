@@ -4375,7 +4375,15 @@ and that the original EXIT/signal status wins over subsequent cleanup failure.
 If an earlier admission or cleanup refusal already owns that bounded cleanup
 diagnostic, later wait, SIGCONT, child-stop, cgroup or session failures may
 strengthen retention but must not emit a second cleanup phase; first-error
-attribution remains stable. Existing final-directory replacement and
+attribution remains stable. Ordinary cleanup-refusal diagnostics must
+also state the nested-resume disposition (`not-required`, `attempted`,
+`prohibited-unproved` for incomplete nested identity, or
+`skipped-uncertain`), the failed ownership proof and bounded
+expected/observed state, preserved `original_exit`, precise
+`retained_cleanup` class, and the safe
+`next_step:read-only-review-retained-state-before-retry`. Classify the nested
+disposition before any stop-marker refusal can be reported; a partial proof
+never grants SIGCONT or wider cleanup authority. Existing final-directory replacement and
 rmdir-failure regressions still prove
 first refusal and remaining session ownership; no cgroup.kill or loaded host
 pressure cleanup is permitted by these rootless proofs. A repeated HUP/INT/TERM
