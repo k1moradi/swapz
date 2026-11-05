@@ -14,14 +14,15 @@ historical host-specific authorization text. Historical qualification,
 rejected pilots and deferred research are catalogued in the
 [handoff index](handoff/README.md), not maintained as active instructions here.
 
-**Operating authority:** [VISION.md](VISION.md) defines product identity and
-the official `make test` qualification interface; `make fast_test` remains
-development-only. [AGENTS.md](../AGENTS.md) and
+**Current contracts (linked rather than restated):** [VISION.md](VISION.md)
+defines product identity and the sole official qualification
+interface `make test`; `make fast_test` remains development-only and never
+qualifies a source. [AGENTS.md](../AGENTS.md) and
 [AGENT_CONTEXT.md](AGENT_CONTEXT.md) govern execution, device ownership and
-reboot restrictions. Loaded qualification uses positively identified,
-RAM-backed `null_blk`; dedicated physical-card authorization is separate and
-lives only in the current operating context. This technical reference grants
-no device-operation permission.
+reboot restrictions. Generic loaded qualification uses newly created,
+positively identified RAM-backed `null_blk`; dedicated physical-card
+authorization is governed by the current operating context. This technical
+reference grants no device-operation permission.
 
 The upstream functions cited here were inspected on Linux master at
 `c339f4010dea8b0d754f84ace70cd1b089878ef8` and on tag `v7.0`; where the two
