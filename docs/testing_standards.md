@@ -67,14 +67,19 @@ run ID or private resource names. The rootless
 compiles the production errno-preservation helper with an injected
 recovery-state write failure for START, STOP and RECOVER; source ordering must
 bind all three failure epilogues to that helper before any success publication.
-The rootless errno fixture must also seed a bounded private STARTING,
-STOPPING or RECOVERING state file before each child and inspect that file
-after the child exits. A failed recovery-state write preserves the last
-observable interrupted stage, which remains uncertain; a successful injected
-write must publish RECOVERY_REQUIRED rather than merely return zero. Verify
-the original numeric errno and reject failure-path ACTIVE/COMPLETE reporting
-in both cases. File fsync in the synthetic writer does not establish the
-production directory-fsync, mapper or kernel-swap state.
+The rootless errno fixture must seed a bounded private STARTING, STOPPING or
+RECOVERING state file before each child and inspect that file after the child
+exits. Exercise a synthetic failure before state mutation, a failure after
+RECOVERY_REQUIRED becomes observable, and a successful write. The pre-write
+failure leaves the interrupted bytes observable; the post-write failure may
+already expose RECOVERY_REQUIRED even though persistence still reports failure.
+This mirrors the production replace-record ordering where rename precedes close
+and recovery-directory fsync, so failed persistence leaves durable state
+uncertain and no particular observed stage is proof of durability. In all
+cases preserve the original numeric errno, report the secondary recovery errno
+for failed persistence, and reject failure-path ACTIVE/COMPLETE reporting.
+Synthetic file fsync does not establish production directory durability,
+mapper state or kernel swap state.
 Lifecycle source-order audits must follow the shared helper to its state-write
 dependency instead of requiring the persistence call to appear inline in each
 coordinator body. Audit the ordinary preprocessed executable function bodies,

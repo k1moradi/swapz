@@ -448,6 +448,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 #include <unistd.h>
 
 static int injected_recovery_errno;
+static int injected_recovery_after_write;
 static const char *recovery_state_path;
 static unsigned int recovery_write_attempts;
 
@@ -461,7 +462,7 @@ int swapz_primary_state_require_recovery_at(
     (void)run_id;
     (void)expected_owner;
     ++recovery_write_attempts;
-    if (injected_recovery_errno != 0) {
+    if (injected_recovery_errno != 0 && !injected_recovery_after_write) {
         errno = injected_recovery_errno;
         return -1;
     }
@@ -475,7 +476,13 @@ int swapz_primary_state_require_recovery_at(
         errno = write_errno;
         return -1;
     }
-    return fclose(state_file);
+    if (fclose(state_file) != 0)
+        return -1;
+    if (injected_recovery_errno != 0) {
+        errno = injected_recovery_errno;
+        return -1;
+    }
+    return 0;
 }
 
 """ + helper + r"""
@@ -484,11 +491,12 @@ int main(int argc, char **argv)
     int original_errno;
     int preserved_errno;
 
-    if (argc != 5)
+    if (argc != 6)
         return 64;
     original_errno = atoi(argv[2]);
     injected_recovery_errno = atoi(argv[3]);
-    recovery_state_path = argv[4];
+    injected_recovery_after_write = atoi(argv[4]);
+    recovery_state_path = argv[5];
     errno = 0;
     preserved_errno = swapz_primary_require_recovery_preserving_errno(
         7, 8, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0,
@@ -515,18 +523,26 @@ int main(int argc, char **argv)
             )
             for operation, initial_stage, original_errno, recovery_errno in cases:
                 state_path = fixture / f"{operation.lower()}-state"
-                for injected_errno in (recovery_errno, 0):
-                    with self.subTest(operation=operation,
-                                      recovery_errno=injected_errno):
-                        # An interrupted child retains its last durable claim.
-                        # A reported successful recovery write must actually
-                        # update that claim for the next process to observe.
+                scenarios = (
+                    ("pre-write-failure", recovery_errno, 0,
+                     initial_stage, True),
+                    ("post-write-failure", recovery_errno, 1,
+                     "RECOVERY_REQUIRED", True),
+                    ("success", 0, 0, "RECOVERY_REQUIRED", False),
+                )
+                for (scenario, injected_errno, failure_after_write,
+                     expected_stage, expect_diagnostic) in scenarios:
+                    with self.subTest(operation=operation, scenario=scenario):
+                        # A failed replace can occur either before the new
+                        # bytes are visible or after replacement but before
+                        # durable directory state is established.
                         state_path.write_text(
                             f"{initial_stage}\n", encoding="ascii")
                         result = subprocess.run(
                             [
                                 str(binary), operation, str(original_errno),
-                                str(injected_errno), str(state_path),
+                                str(injected_errno), str(failure_after_write),
+                                str(state_path),
                             ],
                             cwd=ROOT,
                             capture_output=True,
@@ -540,9 +556,6 @@ int main(int argc, char **argv)
                             f"preserved={original_errno} "
                             f"errno={original_errno} attempts=1\n",
                         )
-                        expected_stage = (
-                            initial_stage if injected_errno
-                            else "RECOVERY_REQUIRED")
                         self.assertEqual(
                             state_path.read_text(encoding="ascii"),
                             expected_stage + "\n",
@@ -560,7 +573,7 @@ int main(int argc, char **argv)
                             "PRIMARY_RECOVER=COMPLETE",
                             result.stdout + result.stderr)
                         self.assertNotRegex(result.stderr, r"\b[0-9a-f]{32}\b")
-                        if not injected_errno:
+                        if not expect_diagnostic:
                             self.assertEqual(result.stderr, "")
                             continue
                         self.assertIn(
