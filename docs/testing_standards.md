@@ -486,6 +486,14 @@ runner/official-pipeline registration; Agent 8 must not edit that wiring.
 
 ### Loaded-preflight ownership and retained cleanup
 
+The unprivileged rootless runner must `bash -n` the original preflight and
+its isolated fixture copy before attempting any loaded operation. Multiline
+`[[ ... ]]` binary comparisons must keep each operand on the same logical
+shell line as `==` (with an explicit continuation when wrapped): a Bash
+parse-time exit 2 is not a simulated authorization refusal. The rootless
+source-contract guard must assert retention of unowned idle modules, never
+automatic module removal or a fabricated auto-removal success marker.
+
 The root preflight is not a host-resource garbage collector. A
 `nullb-swapz-<16 hex>` name, even paired with an idle `dm_swapz` module,
 never grants creation ownership. An unclaimed null_blk remains

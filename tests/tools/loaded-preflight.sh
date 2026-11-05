@@ -535,7 +535,7 @@ read_owned_lower_proof() {
     [[ -n $system_major && $system_major == "$block_major" ]] || return 1
     [[ $sysfs_devno == "$system_major:$config_index" ]] || return 1
     [[ -e /sys/dev/block/$sysfs_devno &&
-       "$(readlink -f "/sys/dev/block/$sysfs_devno" 2>/dev/null)" ==
+       "$(readlink -f "/sys/dev/block/$sysfs_devno" 2>/dev/null)" == \
        "$(readlink -f "/sys/block/$disk" 2>/dev/null)" ]] || return 1
     printf '%s|%s|%s\n' "$disk" "$sysfs_devno" "$node_devno"
 }

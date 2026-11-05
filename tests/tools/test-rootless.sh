@@ -582,8 +582,8 @@ grep -Fq 'QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=' tests/tools/qualify-primary-li
 grep -Fq 'SWAPS_ID' tests/tools/benchmark-owned-pair.sh
 grep -Fq 'cat /sys/module/dm_swapz/refcnt' tests/tools/loaded-preflight.sh
 grep -Fq '[[ $refcount == 0 ]]' tests/tools/loaded-preflight.sh
-grep -Fq 'rmmod dm_swapz' tests/tools/loaded-preflight.sh
-grep -Fq 'AUTO_REMOVED_IDLE_DM_SWAPZ=1' tests/tools/loaded-preflight.sh
+grep -Fq 'expected_proof=creation_authority observed_proof=refcount_only' tests/tools/loaded-preflight.sh
+grep -Fq 'retained_state_action=retain_module' tests/tools/loaded-preflight.sh
 ! grep -Fq 'rmmod -f' tests/tools/loaded-preflight.sh
 grep -Fq 'QUARANTINED: host swap identity changed' tests/tools/deploy-nullblk.sh
 grep -Fq 'PASS_ZERO_WRITE_LOWER_IO=' tests/tools/deploy-nullblk.sh
