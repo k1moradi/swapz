@@ -5158,7 +5158,8 @@ The fork handoff must never lose that direct-child ownership: a parent pipe-clos
 failure after fork reaps the child before propagating, a child-side descriptor
 failure exits the child rather than returning into the supervisor stack, and a
 fork failure preserves its original errno while reporting descriptor-cleanup
-uncertainty. A surviving same-name cgroup from an interrupted run is retained
+uncertainty. OS-error diagnostics use the stable `OSError` category rather than
+errno-selected Python subclasses such as `BlockingIOError`. A surviving same-name cgroup from an interrupted run is retained
 because its inode identity was never durably bound; recovery must not remove it
 merely because it is currently empty. A failed write of the recovery-required evidence record is also a secondary
 failure: append its errno, retain the original worker/mapper failure, and do

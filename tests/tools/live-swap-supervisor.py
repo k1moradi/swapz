@@ -1881,8 +1881,11 @@ def _spawn_pressure_child(cgroup, run_id, pages, deadline_seconds):
         detail = (
             f" cleanup={','.join(cleanup_errors)} retained=parent_pipe_unknown"
             if cleanup_errors else "")
+        original_type = (
+            "OSError" if isinstance(fork_exc, OSError)
+            else type(fork_exc).__name__)
         raise LiveSwapError(
-            f"phase=child_fork original={type(fork_exc).__name__} "
+            f"phase=child_fork original={original_type} "
             f"errno={getattr(fork_exc, 'errno', None)}{detail}") from fork_exc
     if pid == 0:
         # No exception before _pressure_child may return into the parent's
