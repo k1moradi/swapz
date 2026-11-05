@@ -886,8 +886,18 @@ never print payload bytes.
 
 Only the compressed builder path has a validate-before-payload-hash contract.
 RAW uses a separate direct-copy path; do not claim that a compressed codec
-overlap check guards RAW memcpy. Zero-page elision and DISCARD are mapper or
-authority transitions rather than encoded append records. An explicitly
+overlap check guards RAW memcpy. Before that copy, the exact production batched
+engine must reject overlapping one-block RAW sources and destinations using
+address-distance bounds (not pointer ordering); exactly adjacent one-block
+sources remain valid. The rootless native regression must exercise left and
+right partial overlap plus exact alias, prove -EINVAL with zero additional
+lower submissions, physical completion credit or upper publication, preserve
+the prior generation and quarantine each attempted reservation, then retry
+with independent bytes and a matching authoritative RAW CRC. Its failure
+diagnostic must retain the originating errno, sequence/generation, expected
+versus observed mapping and completion counts, and reservation state without
+dumping payload bytes. Zero-page elision and DISCARD are mapper or authority
+transitions rather than encoded append records. An explicitly
 compiled ASan-only broken-prehash control may intentionally hash a poisoned
 overlapping input before engine validation, solely as an unsafe native
 negative control, never against storage or in the default native suite.

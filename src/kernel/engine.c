@@ -1506,6 +1506,22 @@ static int swapz_validate_batched_pages(struct swapz_engine *e,
 	return 0;
 }
 
+/*
+ * RAW bypasses codec append's overlap preflight. Compare address distances
+ * without ordering unrelated C pointers or forming wrapping end addresses.
+ * The source and destination are both exactly one logical block.
+ */
+static int swapz_raw_source_overlaps_image(const swapz_u8 *source,
+					  const swapz_u8 *image)
+{
+	const unsigned long source_address = (unsigned long)source;
+	const unsigned long image_address = (unsigned long)image;
+
+	if (source_address >= image_address)
+		return source_address - image_address < SWAPZ_BLOCK_BYTES;
+	return image_address - source_address < SWAPZ_BLOCK_BYTES;
+}
+
 int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 				   const struct swapz_compressed_page *pages,
 				   swapz_u8 count, struct swapz_io_run *run,
@@ -1622,6 +1638,15 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 
 			phase_start = swapz_engine_now_ns();
 			if (raw) {
+				/* Reject undefined overlapping memcpy before any bytes
+				 * or mappings from this reservation can be published. */
+				if (swapz_raw_source_overlaps_image(
+					    pages[entry].payload, image)) {
+					error = -EINVAL;
+					e->pack_wall_ns += swapz_engine_elapsed_ns(
+						phase_start, swapz_engine_now_ns());
+					goto abort_current;
+				}
 				memcpy(image, pages[entry].payload, SWAPZ_BLOCK_BYTES);
 			} else {
 				error = swapz_begin(&builder, image,

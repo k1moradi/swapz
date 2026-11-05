@@ -695,6 +695,185 @@ static int proof_reservations_clear(void)
 	       !auth.batch_replaying && !auth.batch_stage_allowed;
 }
 
+
+struct raw_overlap_expectation {
+	const char *phase;
+	long source_offset;
+	int originating_errno;
+	int expected_errno;
+	int observed_errno;
+	swapz_u8 expected_published;
+	swapz_u8 observed_published;
+	swapz_u32 expected_lower_writes;
+	swapz_u32 expected_upper_completions;
+	swapz_u32 expected_physical_completed;
+	swapz_u32 expected_next_block;
+	swapz_u32 expected_committed_blocks;
+	swapz_u32 expected_abandoned_blocks;
+	struct swapz_map retained_mapping;
+	struct swapz_map expected_mapping;
+};
+
+static int raw_overlap_failure(const struct raw_overlap_expectation *expected)
+{
+	const struct swapz_map *observed = &map[39];
+
+	fprintf(stderr,
+		"engine_phase=%s sequence=%u generation=%u source_offset=%ld "
+		"originating_errno=%d expected_errno=%d observed_errno=%d "
+		"retained_generation=%u "
+		"mapping_expected=(valid:%u,start:%u,generation:%u,raw:%u) "
+		"mapping_observed=(valid:%u,start:%u,generation:%u,raw:%u) "
+		"upper_completions_expected_observed=%u/%u "
+		"published_expected_observed=%u/%u "
+		"lower_writes_expected_observed=%u/%u "
+		"physical_completed_expected_observed=%u/%u "
+		"reservation_next_expected_observed=%u/%u "
+		"committed_expected_observed=%u/%u "
+		"quarantined_expected_observed=%u/%u "
+		"retained=%u in_flight=%u batch_pending=%u\n",
+		expected->phase, auth.next_sequence - 1U,
+		expected->retained_mapping.generation,
+		expected->source_offset, expected->originating_errno,
+		expected->expected_errno, expected->observed_errno,
+		expected->retained_mapping.generation,
+		(unsigned int)expected->expected_mapping.valid,
+		expected->expected_mapping.start_block,
+		expected->expected_mapping.generation,
+		(unsigned int)expected->expected_mapping.raw,
+		(unsigned int)observed->valid, observed->start_block,
+		observed->generation, (unsigned int)observed->raw,
+		expected->expected_upper_completions, proof_publications,
+		(unsigned int)expected->expected_published,
+		(unsigned int)expected->observed_published,
+		expected->expected_lower_writes, proof_lower_writes,
+		expected->expected_physical_completed, engine.completed_blocks,
+		expected->expected_next_block, auth.next_block,
+		expected->expected_committed_blocks, auth.committed_blocks,
+		expected->expected_abandoned_blocks, auth.abandoned_blocks,
+		(unsigned int)observed->valid, (unsigned int)auth.in_flight,
+		(unsigned int)auth.batch_pending);
+	return 1;
+}
+
+/*
+ * Execute the actual batched RAW copy with caller-owned, boundary-contacting
+ * sources. An overlapping source must fail before memcpy, lower submission
+ * or publication; the reserved extent remains quarantined. A later independent
+ * retry must retain the former map until its own successful completion.
+ */
+static int test_raw_run_source_overlap_preserves_authority(void)
+{
+	static const long overlapping_offsets[] = {
+		-1L, 0L, 1L, (long)SWAPZ_BLOCK_BYTES - 1L,
+	};
+	struct swapz_io_run run;
+	struct swapz_compressed_page page = {
+		.logical_page = 39,
+		.length = SWAPZ_BLOCK_BYTES,
+		.raw = 1,
+		.payload = proof_independent[0],
+	};
+	struct swapz_map retained;
+	struct raw_overlap_expectation expected = { 0 };
+	swapz_u8 published = 0;
+	swapz_u8 prepared;
+	swapz_u32 index;
+	int error;
+
+	CHECK(setup() == 0);
+	CHECK(proof_initialize_run(&run) == 0);
+	memset(proof_independent[0], 0x21, SWAPZ_BLOCK_BYTES);
+	memset(proof_independent[1], 0x87, SWAPZ_BLOCK_BYTES);
+	CHECK(proof_prepare_and_complete(&run, &page, 1, &published) == 0);
+	CHECK(published == 1 && map[39].valid && map[39].raw &&
+	      map[39].generation == 1 && proof_reservations_clear());
+	retained = map[39];
+
+	for (index = 0; index < sizeof(overlapping_offsets) /
+			     sizeof(overlapping_offsets[0]); ++index) {
+		expected = (struct raw_overlap_expectation){
+			.phase = "raw-copy-overlap-preflight",
+			.source_offset = overlapping_offsets[index],
+			.originating_errno = -EINVAL,
+			.expected_errno = -EINVAL,
+			.expected_published = 0,
+			.expected_lower_writes = proof_lower_writes,
+			.expected_upper_completions = proof_publications,
+			.expected_physical_completed = engine.completed_blocks,
+			.expected_next_block = auth.next_block + 1U,
+			.expected_committed_blocks = auth.committed_blocks,
+			.expected_abandoned_blocks = auth.abandoned_blocks + 1U,
+			.retained_mapping = retained,
+			.expected_mapping = retained,
+		};
+		page.payload = run.bytes + overlapping_offsets[index];
+		prepared = 99;
+		error = swapz_engine_prepare_batched_run(
+			&engine, &page, 1, &run, &prepared, 0);
+		expected.observed_errno = error;
+		expected.observed_published = prepared;
+		if (error != -EINVAL || prepared != 0 ||
+		    proof_lower_writes != expected.expected_lower_writes ||
+		    proof_publications != expected.expected_upper_completions ||
+		    engine.completed_blocks != expected.expected_physical_completed ||
+		    auth.next_block != expected.expected_next_block ||
+		    auth.committed_blocks != expected.expected_committed_blocks ||
+		    auth.abandoned_blocks != expected.expected_abandoned_blocks ||
+		    !proof_reservations_clear() ||
+		    memcmp(&retained, &map[39], sizeof(retained)) ||
+		    swapz_verify_raw(&auth, 39,
+				     disk + (size_t)retained.start_block *
+					    SWAPZ_BLOCK_BYTES))
+			return raw_overlap_failure(&expected);
+	}
+	/* Reuse the same run storage after four rejected, quarantined copies. */
+	page.payload = proof_independent[1];
+	expected = (struct raw_overlap_expectation){
+		.phase = "raw-copy-independent-retry",
+		.originating_errno = 0,
+		.expected_errno = 0,
+		.expected_published = 1,
+		.expected_lower_writes = proof_lower_writes + 1U,
+		.expected_upper_completions = proof_publications + 1U,
+		.expected_physical_completed = engine.completed_blocks + 1U,
+		.expected_next_block = auth.next_block + 1U,
+		.expected_committed_blocks = auth.committed_blocks + 1U,
+		.expected_abandoned_blocks = auth.abandoned_blocks,
+		.retained_mapping = retained,
+		.expected_mapping = (struct swapz_map){
+			.start_block = auth.next_block,
+			.generation = retained.generation + 1U,
+			.raw_crc32c = swapz_crc32c_bytes(proof_independent[1],
+							  SWAPZ_BLOCK_BYTES),
+			.payload_length = SWAPZ_BLOCK_BYTES,
+			.extent_blocks = 1,
+			.raw = 1,
+			.valid = 1,
+		},
+	};
+	published = 0;
+	error = proof_prepare_and_complete(&run, &page, 1, &published);
+	expected.observed_errno = error;
+	expected.observed_published = published;
+	if (error || published != 1 ||
+	    proof_lower_writes != expected.expected_lower_writes ||
+	    proof_publications != expected.expected_upper_completions ||
+	    engine.completed_blocks != expected.expected_physical_completed ||
+	    auth.next_block != expected.expected_next_block ||
+	    auth.committed_blocks != expected.expected_committed_blocks ||
+	    auth.abandoned_blocks != expected.expected_abandoned_blocks ||
+	    !proof_reservations_clear() || !map[39].valid || !map[39].raw ||
+	    map[39].generation != retained.generation + 1U ||
+	    map[39].start_block == retained.start_block ||
+	    memcmp(&map[39], &expected.expected_mapping, sizeof(map[39])) ||
+	    swapz_verify_raw(&auth, 39,
+			     disk + (size_t)map[39].start_block *
+				    SWAPZ_BLOCK_BYTES))
+		return raw_overlap_failure(&expected);
+	return 0;
+}
+
 static int test_engine_prepare_alias_validation_before_crc(void)
 {
 	static const struct {
@@ -1093,6 +1272,7 @@ int main(void)
 	CHECK(test_same_extent_read_cache_reuse_and_fail_closed() == 0); passed++;
 	CHECK(test_one_block_read_budget_remains_selective() == 0); passed++;
 	CHECK(test_two_block_payload_offset_skips_unneeded_second_block() == 0); passed++;
+	CHECK(test_raw_run_source_overlap_preserves_authority() == 0); passed++;
 	CHECK(test_engine_prepare_alias_validation_before_crc() == 0); passed++;
 	CHECK(test_engine_prepare_boundary_contact_and_packed_siblings() == 0); passed++;
 	CHECK(test_engine_prepare_preflight_never_submits() == 0); passed++;
