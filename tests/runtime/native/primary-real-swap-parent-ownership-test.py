@@ -382,19 +382,25 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True)
         setattr(child, "_swapz_owned_process_group", child.pid)
-        descendant_pid = int(child.stdout.readline().strip())
+        descendant_pid = None
         try:
+            self.assertTrue(select.select([child.stdout], [], [], 5)[0])
+            descendant_pid = int(child.stdout.readline().strip())
             parent._stop_unadmitted_child(child)
             self.assertIsNotNone(child.returncode)
             self.assertFalse(Path(f"/proc/{descendant_pid}").exists())
             with self.assertRaises(ProcessLookupError):
                 os.killpg(child.pid, 0)
         finally:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=5)
             child.stdout.close()
-            if Path(f"/proc/{descendant_pid}").exists():
+            if descendant_pid is not None and Path(f"/proc/{descendant_pid}").exists():
                 try:
                     os.kill(descendant_pid, signal.SIGKILL)
                 except ProcessLookupError:
