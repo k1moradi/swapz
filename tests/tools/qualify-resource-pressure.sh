@@ -931,6 +931,23 @@ report_cleanup_refusal() {
     local phase="$1" observed="$2" original_exit="$3" severity=BLOCKED
     (( original_exit == 0 || original_exit == 2 )) || severity=FAIL
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    # A cleanup-time signal that became the first failure owns the public
+    # phase. Record the first later refusal only as bounded disposition
+    # evidence; do not let it replace the signal's earlier attribution.
+    if (( ${cleanup_signal_status:-0} )); then
+        if [[ ${cleanup_signal_refusal:-none} == none ]]; then
+            cleanup_signal_refusal="$phase-$observed"
+            case "$phase" in
+                session-identity|session-inventory|session-remove|session-post-rmdir)
+                    cleanup_signal_retained=private-session
+                    ;;
+                *)
+                    cleanup_signal_retained=child-cgroup-and-private-session
+                    ;;
+            esac
+        fi
+        return 0
+    fi
     # Bash functions see cleanup() locals dynamically. Keep only the first
     # bounded cleanup refusal; later cleanup failures may strengthen retention
     # but must not replace or duplicate the earliest cleanup diagnostic.
@@ -968,6 +985,7 @@ cleanup() {
     local current_identity child_cleanup_status session_fd_path
     local session_entry_snapshot session_entry nested_resume_disposition
     local cleanup_diagnostic_reported cleanup_refusal_severity cleanup_signal_status=0
+    local cleanup_signal_refusal=none cleanup_signal_retained=none
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     # An earlier admission/ownership refusal already owns the cleanup report.
@@ -1200,10 +1218,16 @@ cleanup() {
     if (( RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION && result == 0 )); then
         result=2
     fi
-    if (( cleanup_signal_status && ! cleanup_diagnostic_reported &&
-          ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
-        printf 'FAIL: ID36 signal during owned teardown; phase:cleanup-signal ownership_proof:pinned-created-cgroup-and-session-identities observed:signal-%s original_exit:%s nested_resume:%s cleanup_disposition:completed-owned retained_cleanup:none next_step:review-interruption-and-rerun-ID36-after-verifying-owned-state\n' \
-            "$cleanup_signal_status" "$original_result" "$nested_resume_disposition" >&2
+    if (( cleanup_signal_status && ! cleanup_diagnostic_reported )); then
+        if [[ $cleanup_signal_retained == none ]]; then
+            printf 'FAIL: ID36 signal during owned teardown; phase:cleanup-signal ownership_proof:pinned-created-directory-identities-only observed:signal-%s original_exit:%s resumption_action:%s cleanup_disposition:completed-owned retained_cleanup:none cleanup_refusal:none next_step:review-interruption-and-rerun-ID36-after-verifying-owned-state\n' \
+                "$cleanup_signal_status" "$original_result" "$nested_resume_disposition" >&2
+        else
+            printf 'FAIL: ID36 signal during owned teardown; phase:cleanup-signal ownership_proof:pinned-created-directory-identities-only observed:signal-%s original_exit:%s resumption_action:%s cleanup_disposition:retained-%s retained_cleanup:%s cleanup_refusal:%s next_step:read-only-review-retained-state-before-retry\n' \
+                "$cleanup_signal_status" "$original_result" "$nested_resume_disposition" \
+                "$cleanup_signal_retained" "$cleanup_signal_retained" \
+                "$cleanup_signal_refusal" >&2
+        fi
     fi
     # Do not advertise PASS until both owned cgroup and scratch cleanup
     # succeeded. A cleanup refusal must not leave a misleading PASS record.
