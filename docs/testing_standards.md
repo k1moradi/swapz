@@ -1292,7 +1292,11 @@ must report that kernel errno; failed=1/error=0 is a torn observation that must
 retry, while a missing or malformed error token is BLOCKED. The rootless native
 observer regression must exercise both INFO read phases using production
 parser-backed synthetic snapshots, check safe mapping/device/generation/field
-context, and prevent staged numeric output.
+context, and prevent staged numeric output. Error-precedence evidence must also
+drive the production dm_query/read_dm_status_observation path through test-only
+ioctl interposition for bounded buffer-full exhaustion, malformed reply headers,
+and a synthetic syscall errno; fabricating status_problem.failure_errno in a
+reader callback is not sufficient end-to-end coverage.
 
 The status implementation must require two consecutive identical relevant
 snapshots before printing a ratio. The compressed-only result is available only

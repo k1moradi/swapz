@@ -1,10 +1,54 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define ioctl swapzctl_status_test_ioctl
 #define main swapzctl_program_main
 #include "../../../../src/userspace/swapzctl.c"
 #undef main
+#undef ioctl
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
+
+enum fake_dm_ioctl_behavior {
+	FAKE_DM_IOCTL_DISABLED,
+	FAKE_DM_IOCTL_BUFFER_FULL,
+	FAKE_DM_IOCTL_BAD_HEADER,
+	FAKE_DM_IOCTL_ERROR
+};
+
+static enum fake_dm_ioctl_behavior fake_dm_ioctl_behavior;
+static int fake_dm_ioctl_error;
+static unsigned int fake_dm_ioctl_calls;
+
+int swapzctl_status_test_ioctl(int fd, unsigned long request, ...)
+{
+	struct dm_ioctl *io;
+	va_list arguments;
+
+	(void)fd;
+	++fake_dm_ioctl_calls;
+	if (request != DM_TABLE_STATUS) {
+		errno = ENOTTY;
+		return -1;
+	}
+	if (fake_dm_ioctl_behavior == FAKE_DM_IOCTL_ERROR) {
+		errno = fake_dm_ioctl_error;
+		return -1;
+	}
+	va_start(arguments, request);
+	io = va_arg(arguments, struct dm_ioctl *);
+	va_end(arguments);
+	if (fake_dm_ioctl_behavior == FAKE_DM_IOCTL_BUFFER_FULL) {
+		io->flags |= DM_BUFFER_FULL_FLAG;
+		return 0;
+	}
+	if (fake_dm_ioctl_behavior == FAKE_DM_IOCTL_BAD_HEADER) {
+		io->data_size = 0;
+		return 0;
+	}
+	errno = ENOTTY;
+	return -1;
+}
 
 static int parse_swapz_ratio_status(const char *status,
 				    struct swapz_ratio_status *ratio)
@@ -1948,6 +1992,54 @@ static void test_status_info_errno_precedence(void)
 	}
 }
 
+
+static void test_production_dm_query_error_precedence(void)
+{
+	struct dm_status_observation observation = { 0 };
+	struct status_problem problem = { 0 };
+	unsigned int problem_target = UINT_MAX;
+
+	fake_dm_ioctl_behavior = FAKE_DM_IOCTL_BUFFER_FULL;
+	fake_dm_ioctl_calls = 0;
+	assert(read_dm_status_observation(-1, "fixture", 1, &observation,
+					  &problem, &problem_target) < 0);
+	assert(fake_dm_ioctl_calls == 5U);
+	assert(errno == EOVERFLOW);
+	assert(problem.failure_errno == EOVERFLOW);
+	assert(problem.field && !strcmp(problem.field, "DM_BUFFER_FULL_FLAG"));
+	assert(problem_target == UINT_MAX);
+	assert(!observation.reply && !observation.targets);
+
+	fake_dm_ioctl_behavior = FAKE_DM_IOCTL_BAD_HEADER;
+	fake_dm_ioctl_calls = 0;
+	memset(&problem, 0, sizeof(problem));
+	assert(read_dm_status_observation(-1, "fixture", 1, &observation,
+					  &problem, &problem_target) < 0);
+	assert(fake_dm_ioctl_calls == 1U);
+	assert(errno == EPROTO);
+	assert(problem.failure_errno == EPROTO);
+	assert(problem.field &&
+	       !strcmp(problem.field, "dm_ioctl.data_start/data_size"));
+	assert(problem_target == UINT_MAX);
+	assert(!observation.reply && !observation.targets);
+
+	fake_dm_ioctl_behavior = FAKE_DM_IOCTL_ERROR;
+	fake_dm_ioctl_error = EACCES;
+	fake_dm_ioctl_calls = 0;
+	memset(&problem, 0, sizeof(problem));
+	assert(read_dm_status_observation(-1, "fixture", 1, &observation,
+					  &problem, &problem_target) < 0);
+	assert(fake_dm_ioctl_calls == 1U);
+	assert(errno == EACCES);
+	assert(problem.failure_errno == EACCES);
+	assert(!problem.field);
+	assert(problem_target == UINT_MAX);
+	assert(!observation.reply && !observation.targets);
+
+	fake_dm_ioctl_behavior = FAKE_DM_IOCTL_DISABLED;
+	fake_dm_ioctl_error = 0;
+}
+
 static void test_status_is_read_only(void)
 {
 	unsigned char *reply = NULL;
@@ -1999,6 +2091,7 @@ int main(void)
 	test_adversarial_wire_boundaries();
 	test_adversarial_failed_info_after_staging();
 	test_status_info_errno_precedence();
+	test_production_dm_query_error_precedence();
 	test_status_is_read_only();
 	puts("PASS: swapzctl status compression-ratio accounting");
 	return 0;
