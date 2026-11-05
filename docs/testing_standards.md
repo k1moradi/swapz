@@ -33,7 +33,14 @@ and mapper inactive in `/proc/swaps`, invoke ordinary `swapon` through that
 descriptor's `/proc/self/fd/<n>` reference, and independently prove the exact
 mapper active before persisting `ACTIVE`. A definite `swapon` error fails the
 transaction even if later state is surprising; only an interrupted syscall may
-be reconciled by exact active inventory proof.
+be reconciled by exact active inventory proof. Native activation must request
+Linux released-swap-cluster DISCARD by combining `SWAP_FLAG_DISCARD` with the
+kernel ABI `SWAP_FLAG_DISCARD_PAGES` bit (`0x40000`). It must not request
+`SWAP_FLAG_DISCARD_ONCE`, must not alter swap priority, and must not retry
+with zero flags after a definite activation error. This policy requests
+asynchronous whole-cluster notifications; it does not promise an immediate
+per-page DISCARD when a process exits. The rootless lifecycle source guard
+must bind both ABI bits and the single native syscall expression.
 
 Normal stop and recovery must use ordinary `swapoff`. If the exact
 manifest-bound mapper is active, the coordinator pins and revalidates it,

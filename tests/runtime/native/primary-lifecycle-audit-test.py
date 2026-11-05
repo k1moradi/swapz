@@ -670,9 +670,12 @@ class PrimaryLifecycleBehaviorTest(unittest.TestCase):
 class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
     def test_native_swap_operations_are_transaction_ordered(self):
         source = PRIMARY_SOURCE.read_text(encoding="utf-8")
+        native_swapon = c_function_body(
+            source, "swapz_primary_native_swapon")
         activate = c_function_body(source, "swapz_primary_activate_mapper_swap")
         deactivate = c_function_body(
             source, "swapz_primary_deactivate_mapper_swap")
+        macros = active_preprocessor_macros()
         start = c_function_body(source, "swapz_primary_start_prepared")
         stop = c_function_body(source, "swapz_primary_stop_active")
         recover = c_function_body(source, "swapz_primary_recover")
@@ -682,8 +685,24 @@ class PrimaryLifecycleSourceGuardTest(unittest.TestCase):
             activate.index("swapz_primary_transaction_manifest_matches_at("),
             activate.index("swapz_primary_swap_transition_apply("))
         self.assertIn("swapz_primary_dm_mapper_verify_fd(", activate)
-        self.assertIn(
-            "return syscall(SYS_swapon, mapper_path, 0);", source)
+        self.assertEqual(macros.get("SWAP_FLAG_DISCARD"), "0x10000")
+        self.assertEqual(
+            macros.get("SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES"), "0x40000")
+        self.assertRegex(
+            native_swapon,
+            r"\bswap_flags\s*=\s*SWAP_FLAG_DISCARD\s*\|\s*"
+            r"SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES\s*;")
+        self.assertRegex(
+            native_swapon,
+            r"\bsyscall\s*\(\s*SYS_swapon\s*,\s*mapper_path\s*,"
+            r"\s*swap_flags\s*\)")
+        self.assertEqual(native_swapon.count("syscall"), 1)
+        self.assertNotIn("SWAP_FLAG_DISCARD_ONCE", native_swapon)
+        self.assertNotIn("SWAP_FLAG_PREFER", native_swapon)
+        self.assertNotRegex(
+            native_swapon,
+            r"\bsyscall\s*\(\s*SYS_swapon\s*,\s*mapper_path\s*,"
+            r"\s*0\s*\)")
         self.assertLess(
             start.index("swapz_primary_activate_mapper_swap("),
             start.index("active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE"))

@@ -21,6 +21,7 @@
 #include <sys/file.h>
 #include <sys/random.h>
 #include <sys/stat.h>
+#include <sys/swap.h>
 #include <sys/sysmacros.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -32,6 +33,10 @@
 
 #include "../kernel/authority.h"
 #include "../kernel/superblock.h"
+
+/* Linux swapon(2) ABI policy bit. libc commonly exposes only
+ * SWAP_FLAG_DISCARD, so keep the released-cluster selector local. */
+#define SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES 0x40000
 
 static struct swapz_primary_target swapz_primary_selected_target;
 
@@ -9324,8 +9329,11 @@ static int swapz_primary_native_swap_active(
 
 static long swapz_primary_native_swapon(void *context, const char *mapper_path)
 {
+	const int swap_flags =
+		SWAP_FLAG_DISCARD | SWAPZ_PRIMARY_SWAP_FLAG_DISCARD_PAGES;
+
 	(void)context;
-	return syscall(SYS_swapon, mapper_path, 0);
+	return syscall(SYS_swapon, mapper_path, swap_flags);
 }
 
 static long swapz_primary_native_swapoff(void *context, const char *mapper_path)
