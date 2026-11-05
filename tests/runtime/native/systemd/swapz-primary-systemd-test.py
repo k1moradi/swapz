@@ -3416,6 +3416,36 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("command_status=0", observed.stderr)
         self.assertIn("next=inspect_dmsetup_info_read_only", observed.stderr)
 
+    def test_literal_unavailable_dm_uuid_is_observed_identity_failure(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_UUID"] = "unavailable"
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+        self.assertIn("mapper_uuid_invalid", observed.stderr)
+        self.assertIn("mapper_uuid_not_bound_to_active_run", observed.stderr)
+        self.assertIn(
+            "phase=mapper_identity expected=run_bound_uuid observed=mismatched_uuid "
+            "command=dmsetup_info command_status=0",
+            observed.stderr,
+        )
+
+    def test_multiline_dm_info_is_incomplete_not_identity_failure(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_UUID"] = "SWAPZ-PRIMARY-bad\nsecond-line"
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+        self.assertIn("mapper_uuid_unavailable", observed.stderr)
+        self.assertNotIn("mapper_uuid_invalid", observed.stderr)
+        self.assertNotIn("mapper_uuid_not_bound_to_active_run", observed.stderr)
+        self.assertIn(
+            "phase=mapper_info expected=run_bound_uuid observed=invalid_output "
+            "command=dmsetup_info command_status=0",
+            observed.stderr,
+        )
+        self.assertIn("next=inspect_dmsetup_info_read_only", observed.stderr)
+
     def test_extra_raw_backing_swap_row_fails_runtime_health(self) -> None:
         # The expected mapper row cannot hide an active selected raw partition.
         with (self.proc / "swaps").open("a", encoding="ascii") as inventory:

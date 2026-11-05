@@ -744,6 +744,7 @@ observe_runtime()
 	kernel_error_count=unavailable
 	kernel_error_latest=unavailable
 	mapper_info_command_status=0
+	mapper_info_observation_state=not_observed
 	mapper_table_command_status=0
 	mapper_status_command_status=0
 	swap_inventory_command_status=0
@@ -783,13 +784,23 @@ observe_runtime()
 		# Valid-looking stdout followed by command failure (including timeout)
 		# is not a complete Device Mapper observation.
 		if dm_uuid_output=$(run_bounded dmsetup info --columns --noheadings --separator '|' -o uuid "$mapper_name" 2>/dev/null); then
+			mapper_info_observation_state=invalid_output
 			case "$dm_uuid_output" in
 			*'
 '*) dm_uuid=unavailable ;;
-			*) dm_uuid=$(printf '%s\n' "$dm_uuid_output" | awk '{ gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }') ;;
+			*)
+				dm_uuid=$(printf '%s\n' "$dm_uuid_output" | awk '{ gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print }')
+				if [ -n "$dm_uuid" ]; then
+					mapper_info_observation_state=value
+				else
+					dm_uuid=unavailable
+					mapper_info_observation_state=missing_output
+				fi
+				;;
 			esac
 		else
 			mapper_info_command_status=$?
+			mapper_info_observation_state=probe_failed
 			dm_uuid=unavailable
 		fi
 		if dm_table=$(run_bounded dmsetup table "$mapper_name" 2>/dev/null); then
@@ -807,17 +818,20 @@ observe_runtime()
 		[ -n "$dm_uuid" ] || dm_uuid=unavailable
 		[ -n "$dm_table" ] || dm_table=unavailable
 		[ -n "$dm_status" ] || dm_status=unavailable
-		# Missing dmsetup info is incomplete observation, not a proven
-		# mismatch with the transaction identifier.
-		[ "$dm_uuid" != unavailable ] || append_reason observation_reasons mapper_uuid_unavailable
-		# A returned name alone is not proof of the kernel DM UUID grammar.
-		if [ "$dm_uuid" != unavailable ] &&
-		   ! printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$'; then
-			append_reason failure_reasons mapper_uuid_invalid
-		fi
-		if [ "$active_run" != unavailable ] && [ "$dm_uuid" != unavailable ] &&
-		   [ "$dm_uuid" != "SWAPZ-PRIMARY-$active_run" ]; then
-			append_reason failure_reasons mapper_uuid_not_bound_to_active_run
+		# Missing or malformed dmsetup info is incomplete observation, not a
+		# proven mismatch. Keep observation state separate from the display
+		# sentinel because "unavailable" itself is valid command output.
+		if [ "$mapper_info_observation_state" = value ]; then
+			# A returned name alone is not proof of the kernel DM UUID grammar.
+			if ! printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$'; then
+				append_reason failure_reasons mapper_uuid_invalid
+			fi
+			if [ "$active_run" != unavailable ] &&
+			   [ "$dm_uuid" != "SWAPZ-PRIMARY-$active_run" ]; then
+				append_reason failure_reasons mapper_uuid_not_bound_to_active_run
+			fi
+		else
+			append_reason observation_reasons mapper_uuid_unavailable
 		fi
 		if [ "$dm_table" != unavailable ]; then
 			case "$dm_table" in *'
@@ -1201,8 +1215,15 @@ log_runtime_state()
 		"$kernel_error_count" >&2
 	if [ "$mapper_info_command_status" -ne 0 ]; then
 		log_observer_diagnostic mapper_info run_bound_uuid probe_failed dmsetup_info "$mapper_info_command_status" inspect_dmsetup_info_read_only
-	elif [ "$dm_uuid" = unavailable ] && [ "$mapper_major_minor" != unavailable ]; then
-		log_observer_diagnostic mapper_info run_bound_uuid missing_uuid dmsetup_info 0 inspect_dmsetup_info_read_only
+	else
+		case "$mapper_info_observation_state" in
+		missing_output)
+			log_observer_diagnostic mapper_info run_bound_uuid missing_uuid dmsetup_info 0 inspect_dmsetup_info_read_only
+			;;
+		invalid_output)
+			log_observer_diagnostic mapper_info run_bound_uuid invalid_output dmsetup_info 0 inspect_dmsetup_info_read_only
+			;;
+		esac
 	fi
 	case ",$failure_reasons," in
 	*,mapper_uuid_invalid,*|*,mapper_uuid_not_bound_to_active_run,*)
