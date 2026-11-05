@@ -109,8 +109,27 @@ def _check_git_source(validated_source: str, git: str | None = None) -> None:
             "validated source")
     if _run([git, "status", "--porcelain"], timeout=10).stdout:
         raise Blocked("production source tree is not clean")
-    # A concurrent checkout or tracking update may have occurred while status ran.
-    # Re-read local identity before the final canonical remote-main observation.
+    remote_main = _run(
+        [git, "ls-remote", "--exit-code",
+         CANONICAL_REMOTE_URL, "refs/heads/main"],
+        check=False, timeout=30, cwd=Path("/"))
+    if remote_main.returncode != 0:
+        raise Blocked(
+            "cannot verify the current remote main for physical qualification:"
+            f"exit_status={remote_main.returncode}:next=check_remote_and_retry")
+    expected_remote_main = f"{validated_source}\trefs/heads/main"
+    observed_remote_output = remote_main.stdout.strip()
+    if observed_remote_output != expected_remote_main:
+        remote_match = re.fullmatch(
+            r"([0-9a-f]{40})\trefs/heads/main", observed_remote_output)
+        observed_remote = remote_match.group(1) if remote_match else "invalid"
+        raise Blocked(
+            "current remote main differs from the validated source:"
+            f"expected={validated_source}:observed={observed_remote}:"
+            "next=sync_main_and_retry")
+
+    # The remote query can be the longest source probe. Re-read local identity
+    # afterwards so movement while that query is in flight cannot be admitted.
     final_head = _run([git, "rev-parse", "HEAD"], timeout=10).stdout.strip()
     final_branch = _run(
         [git, "rev-parse", "--abbrev-ref", "HEAD"],
@@ -126,28 +145,10 @@ def _check_git_source(validated_source: str, git: str | None = None) -> None:
             final_origin_main if re.fullmatch(r"[0-9a-f]{40}", final_origin_main)
             else "invalid")
         raise Blocked(
-            "source_local_identity_changed:"
+            "source_local_identity_changed:boundary=post_remote:"
             f"expected={validated_source}:head={observed_head}:"
             f"branch={'main' if final_branch == 'main' else 'other'}:"
             f"origin_main={observed_origin_main}:next=sync_main_and_retry")
-    remote_main = _run(
-        [git, "ls-remote", "--exit-code",
-         CANONICAL_REMOTE_URL, "refs/heads/main"],
-        check=False, timeout=30, cwd=Path("/"))
-    if remote_main.returncode != 0:
-        raise Blocked(
-            "cannot verify the current remote main for physical qualification:"
-            f"exit_status={remote_main.returncode}:next=check_remote_and_retry")
-    if remote_main.stdout.strip() != (
-            f"{validated_source}\trefs/heads/main"):
-        observed_remote = remote_main.stdout.strip().split("\t", 1)[0]
-        observed_remote = (
-            observed_remote if re.fullmatch(r"[0-9a-f]{40}", observed_remote)
-            else "invalid")
-        raise Blocked(
-            "current remote main differs from the validated source:"
-            f"expected={validated_source}:observed={observed_remote}:"
-            "next=sync_main_and_retry")
 
 
 def _git_file_bytes(validated_source: str, path: Path,
