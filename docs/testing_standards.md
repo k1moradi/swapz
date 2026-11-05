@@ -3225,8 +3225,12 @@ unpublished until its own lower completion. A failed first prefix must publish
 nothing and quarantine all reservations belonging to that prefix.
 
 The linked production-C lower-write aggregation fixture must also exercise
-bounded delayed, zero/partial EIO, successful-short, unsupported and duplicate
-finalization sequences. It must check the explicit synthetic owner/reference
+bounded delayed, zero/partial EIO, successful-short, unsupported, impossible
+over-completion paired with a real lower error, and duplicate finalization
+sequences. Both the split completion entry point and synchronous aggregation
+wrapper must preserve the original lower errno while counting an impossible
+completion report as zero credible lower bytes. It must check the explicit
+synthetic owner/reference
 lifetime, accepted upper writes, final and successful upper completion counts,
 single publication, credible completed lower bytes, unchanged original errno,
 paused-transaction drain and nonreuse of torn reservations. The duplicate

@@ -1735,7 +1735,10 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 		return io_error ? io_error : -ESTALE;
 	if (completed_blocks > run->blocks) {
 		completed_blocks = 0;
-		error = -EUCLEAN;
+		/* The count is untrustworthy, but a definitive lower errno
+		 * remains the primary failure cause. */
+		if (!error)
+			error = -EUCLEAN;
 	}
 	if (!error && completed_blocks != run->blocks)
 		error = -EIO;
@@ -1873,7 +1876,9 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 					run.bytes, &completed);
 		if (completed > run.blocks) {
 			completed = 0;
-			error = -EUCLEAN;
+			/* Preserve a real lower failure over the malformed count. */
+			if (!error)
+				error = -EUCLEAN;
 		}
 		if (!error && completed != run.blocks)
 			error = -EIO;

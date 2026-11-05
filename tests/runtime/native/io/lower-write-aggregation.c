@@ -35,6 +35,7 @@ static swapz_u8 raw_payloads[SWAPZ_MAX_RECORDS][SWAPZ_BLOCK_BYTES];
 static unsigned int extent_calls, run_calls, read_calls;
 static unsigned int fail_on_run;
 static unsigned int partial_fail_on_run;
+static unsigned int overcomplete_fail_on_run;
 static unsigned int unsupported_on_run;
 static unsigned int nospace_on_run;
 static unsigned int corrupt_on_run;
@@ -151,6 +152,11 @@ static int write_run(void *opaque, swapz_u32 block, swapz_u16 blocks,
 		}
 		return -EIO;
 	}
+	if (overcomplete_fail_on_run && run_calls == overcomplete_fail_on_run) {
+		/* Malformed completion metadata must not replace this lower EIO. */
+		*completed = blocks + 1U;
+		return -EIO;
+	}
 	if (fail_on_run && run_calls == fail_on_run)
 		return -EIO;
 	if (unsupported_on_run && run_calls == unsupported_on_run)
@@ -205,8 +211,8 @@ static int setup(void)
 	e.bulk_txs = bulk_txs;
 	e.bulk_enabled = 1;
 	extent_calls = run_calls = read_calls = 0;
-	fail_on_run = partial_fail_on_run = unsupported_on_run = 0;
-	nospace_on_run = short_on_run = corrupt_on_run = 0;
+	fail_on_run = partial_fail_on_run = overcomplete_fail_on_run = 0;
+	unsupported_on_run = nospace_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
 	ownership_violation = 0;
 	sealed_calls = sealed_pages = 0;
@@ -1439,6 +1445,7 @@ static int test_duplicate_lower_completion_accounted_once(void)
 		{ "partial-eio-then-duplicate", -EIO, -EIO, 2 },
 		{ "short-success-then-duplicate", 0, -EIO, 3 },
 		{ "unsupported-then-duplicate", -EOPNOTSUPP, -EOPNOTSUPP, 4 },
+		{ "overcomplete-eio-then-duplicate", -EIO, -EIO, 5 },
 	};
 	unsigned int scenario;
 
@@ -1489,17 +1496,23 @@ static int test_duplicate_lower_completion_accounted_once(void)
 			short_on_run = 1;
 		else if (scenarios[scenario].mode == 4)
 			unsupported_on_run = 1;
+		else if (scenarios[scenario].mode == 5)
+			overcomplete_fail_on_run = 1;
 		write_sealed(NULL, prepared);
 		lower_error = write_run(NULL, run.start_block, run.blocks,
 					run.bytes, &completed);
 		owner.original_lower_errno = lower_error;
 		/* Only the lower request's reference is released at notification. */
 		owner.references--;
-		completed_bytes = (unsigned long long)completed * SWAPZ_BLOCK_BYTES;
+		completed_bytes = completed <= run.blocks ?
+			(unsigned long long)completed * SWAPZ_BLOCK_BYTES : 0;
 		if (check_lower_completion_phase(scenarios[scenario].name,
 				"lower-notified",
 				lower_error == scenarios[scenario].lower_errno &&
-				completed <= run.blocks && run_calls == 1 &&
+				((scenarios[scenario].mode == 5 &&
+				  completed > run.blocks) ||
+				 (scenarios[scenario].mode != 5 &&
+				  completed <= run.blocks)) && run_calls == 1 &&
 				!maps_visible_during_run && !ownership_violation &&
 				!sealed_missing_before_lower,
 				&owner, 2, 0, 0, 0, run.extent_count, 0))
@@ -1567,6 +1580,24 @@ static int test_duplicate_lower_completion_accounted_once(void)
 				completed_bytes, 0, expected_visible))
 			return 1;
 	}
+	return 0;
+}
+
+
+static int test_overcomplete_failed_wrapper_preserves_lower_errno(void)
+{
+	swapz_u8 committed = 99;
+	unsigned int index;
+
+	CHECK(setup() == 0);
+	overcomplete_fail_on_run = 1;
+	CHECK(swapz_engine_write_window_batched(&e, pages, 16,
+					     &committed) == -EIO);
+	CHECK(committed == 0 && run_calls == 1 && e.completed_blocks == 0);
+	CHECK(!published_calls && !a.batch_pending && !a.in_flight);
+	CHECK(a.abandoned_blocks > 0);
+	for (index = 0; index < 16; ++index)
+		CHECK(!maps[index].valid);
 	return 0;
 }
 
@@ -1666,6 +1697,7 @@ int main(void)
 
 	CHECK(test_stale_lower_completion_keeps_successor_reserved() == 0); passed++;
 	CHECK(test_duplicate_lower_completion_accounted_once() == 0); passed++;
+	CHECK(test_overcomplete_failed_wrapper_preserves_lower_errno() == 0); passed++;
 
 	CHECK(test_planned_write_preserves_nonoverlap_read_residency() == 0); passed++;
 	CHECK(test_immutable_run_prepare_then_complete() == 0); passed++;
