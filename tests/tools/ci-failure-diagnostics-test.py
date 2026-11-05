@@ -216,7 +216,8 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "FAIL: rootless phase=bash syntax loaded-preflight.sh "
             "subtest=unavailable test=unavailable exit=2 reason=nonzero_exit "
             "phase_s=1 stage_s=516 line=531 log=unavailable")
-        malformed = self.diagnose(marker.replace("test=unavailable ", ""), 2)
+        malformed = self.diagnose(
+            marker.replace(" test=unavailable ", " "), 2)
         self.assertEqual(malformed["category"], "UNKNOWN_FAILURE")
         self.assertEqual(malformed["phase"], "native-rootless")
         self.assertNotIn("child_exit_code", malformed)
@@ -228,8 +229,10 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertEqual(nested["category"], "UNKNOWN_FAILURE")
         self.assertEqual(nested["child_exit_code"], 2)
         identified = self.diagnose(
-            marker.replace("test=unavailable", "test=test_unexpected"), 2)
+            marker.replace(" test=unavailable ",
+                           " test=test_unexpected "), 2)
         self.assertEqual(identified["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(identified["test"], "test_unexpected")
         self.assertEqual(identified["child_exit_code"], 2)
         missing = self.diagnose("", 2)
         self.assertEqual(missing["category"], "UNKNOWN_FAILURE")
