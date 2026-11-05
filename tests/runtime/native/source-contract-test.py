@@ -2098,7 +2098,7 @@ int main(void) {
         terminal_guard = flush.index(
             "if (smp_load_acquire(&ctx->failed))", commit_update)
         capacity_retry = flush.index("if (error == -ENOSPC)", commit_update)
-        compact_process = re.sub(r"\\s+", " ", body("swapz_process"))
+        compact_process = re.sub(r"\s+", " ", body("swapz_process"))
         self.assertGreaterEqual(scope_set, 0)
         self.assertLess(scope_set, engine_call)
         self.assertLess(engine_call, scope_clear)
