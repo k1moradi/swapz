@@ -581,8 +581,11 @@ and report only proof categories rather than private names or fixture paths.
 The unrelated device, when no dm_swapz mapping is loaded, must remain unchanged
 without a false ownership refusal. Neither path may invoke unowned module
 unload or inferred-PID signaling; an unexpected internal command failure is
-FAIL, not a benign ownership BLOCKED. This regular-file evidence cannot
-establish real host ownership or authorize loaded cleanup.
+FAIL, not a benign ownership BLOCKED. The final fixture PASS marker must report
+the number of `run_case` preflight fixtures actually executed; the separate
+legacy path-only false-admission demonstration is not a preflight fixture and
+must not be folded into that count. This regular-file evidence cannot establish
+real host ownership or authorize loaded cleanup.
 
 A positively identified stale benchmark mapper is necessary but not sufficient
 to dispose of its lower. The ordinary benchmark pair intentionally generates

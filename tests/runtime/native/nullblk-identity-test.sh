@@ -609,4 +609,4 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 48 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 47 isolated preflight fixtures'
