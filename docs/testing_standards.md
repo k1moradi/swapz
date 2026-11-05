@@ -4464,7 +4464,11 @@ The formatter invocation must bind the opened partition major:minor, exact
 byte size, PARTUUID, physical-parent major:minor, parent model and USB
 transport. Resolve transport from the physical parent because `lsblk` may
 report an empty transport for a partition node; recheck the saved parent-card
-fingerprint before formatting and during recovery.
+fingerprint before formatting and during recovery. A sysfs serial or WWID
+attribute that specifically reports `EINVAL`, `ENXIO` or `EOPNOTSUPP` is
+recorded as unavailable; other read errors, including `EIO` and permission
+failures, block the run. Parent model, topology, transport and geometry remain
+required.
 Normal exact-identity mapper removal and same-process-owned module cleanup
 must complete before the exact saved header is restored and reread. Final
 kernel swap inventory must prove the target remains inactive. Any uncertain

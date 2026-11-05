@@ -2,6 +2,7 @@
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+import errno
 import importlib.util
 import json
 import os
@@ -3046,6 +3047,35 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "matching_line_count": 0, "messages": "",
         }
         return target, source_sha, evidence, lower, inventory, diagnostics
+
+    def test_optional_serial_and_wwid_sysfs_absence_is_narrowly_tolerated(self):
+        unsupported = (errno.EINVAL, errno.ENXIO, errno.EOPNOTSUPP)
+        for name in ("serial", "wwid"):
+            for error in unsupported:
+                with self.subTest(name=name, errno=error), \
+                        mock.patch.object(
+                            probe.Path, "read_text",
+                            side_effect=OSError(error, "unsupported sysfs id")):
+                    self.assertIsNone(probe._optional_card_identity_text(
+                        f"/sys/synthetic/device/{name}"))
+
+        with mock.patch.object(
+                probe.Path, "read_text",
+                side_effect=OSError(errno.EIO, "sysfs read failure")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "card_identity_wwid expected=readable observed=errno_5"):
+                probe._optional_card_identity_text(
+                    "/sys/synthetic/device/wwid")
+
+        with mock.patch.object(
+                probe.Path, "read_text",
+                side_effect=OSError(errno.ENXIO, "device unavailable")):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "card_identity_model expected=readable observed=errno_6"):
+                probe._optional_card_identity_text(
+                    "/sys/synthetic/device/model")
 
     def test_campaign_card_identity_fingerprint_detects_stale_card(self):
         with tempfile.TemporaryDirectory() as directory:

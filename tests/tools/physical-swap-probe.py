@@ -11,6 +11,7 @@ helper and device.
 """
 import argparse
 from datetime import datetime, timezone
+import errno
 import fcntl
 import hashlib
 import json
@@ -2754,6 +2755,12 @@ def _optional_card_identity_text(path):
     except FileNotFoundError:
         return None
     except OSError as exc:
+        if (field_name in {"serial", "wwid"} and exc.errno in {
+                errno.EINVAL, errno.ENXIO, errno.EOPNOTSUPP}):
+            # Some physical readers expose an optional identity sysfs file
+            # whose read reports that the device has no such identifier.
+            # The parent model, topology and geometry remain mandatory.
+            return None
         # Never put sysfs paths or raw device identifiers in diagnostics.
         raise ProbeError(
             f"{field} expected=readable observed=errno_{exc.errno}"
