@@ -497,6 +497,8 @@ static int test_ordered_preflush_data_fua_matrix(void)
 		  true, true, 0, 0, -EIO, -EIO },
 		{ "WRITE|FUA FUA-failure", ORDERED_DATA_WRITE,
 		  false, true, 0, 0, -EOPNOTSUPP, -EOPNOTSUPP },
+		{ "WRITE|FUA FUA-ENOSPC", ORDERED_DATA_WRITE,
+		  false, true, 0, 0, -ENOSPC, -ENOSPC },
 		{ "WRITE|PREFLUSH without-FUA", ORDERED_DATA_WRITE,
 		  true, false, 0, 0, 0, 0 },
 		{ "empty WRITE|PREFLUSH", ORDERED_EMPTY_PREFLUSH_WRITE,

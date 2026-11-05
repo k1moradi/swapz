@@ -5116,6 +5116,14 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		committed += succeeded;
 		if (!error)
 			continue;
+		/*
+		 * Authority capacity exhaustion is local and may trigger GC. Lower
+		 * or FUA failures elect ctx->failed before returning here; never
+		 * reinterpret their errno as reusable capacity or publish a retry
+		 * after a terminal lower failure.
+		 */
+		if (smp_load_acquire(&ctx->failed))
+			break;
 		if (error == -ENOSPC)
 			ctx->window_gc_pressure++;
 		if (error == -ENOSPC && gc_attempts++ < 4) {
@@ -7314,7 +7322,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 		ctx->deadline_before_bio++;
 		error = swapz_flush_window(ctx);
-		if (error && !(op == REQ_OP_READ && error == -ENOSPC)) {
+		if (error && !(op == REQ_OP_READ && error == -ENOSPC &&
+			     !smp_load_acquire(&ctx->failed))) {
 			swapz_complete(bio, error);
 			return;
 		}
@@ -7417,7 +7426,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 		}
 		error = swapz_flush_window(ctx);
-		if (error && !(op == REQ_OP_READ && error == -ENOSPC)) {
+		if (error && !(op == REQ_OP_READ && error == -ENOSPC &&
+			     !smp_load_acquire(&ctx->failed))) {
 			swapz_complete(bio, error);
 			return;
 		}
