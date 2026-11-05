@@ -381,7 +381,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
             for action, expected in (
                     (lambda: (_ for _ in ()).throw(
-                        OSError(errno.EIO, "synthetic private path")), 
+                        OSError(errno.EIO, "synthetic private path")),
                      "phase=read.*errno=5"),
                     (lambda: selector.write_bytes(b""),
                      "phase=read.*observed=truncated-or-changed")):
