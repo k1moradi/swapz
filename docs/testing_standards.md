@@ -876,8 +876,8 @@ rootless marker: when that marker carries an allowlisted test name, that name
 wins over earlier suite output and later teardown; when it carries
 `test=unavailable`, earlier transcript `FAIL:`/`ERROR:` lines must not be
 guessed as the cause. A directly invoked, unwrapped unittest may still use its
-first detailed failure block. Marker parsing must match the sanitized rootless
-marker grammar; malformed child text is not marker authority. The public marker may expose only an
+first detailed failure block. Any rootless failure prefix suppresses cross-suite unittest guessing; only the
+complete sanitized marker grammar may contribute classified test identity. The public marker may expose only an
 allowlisted `phase='[a-z0-9-]+'` value and classify that first private failure
 as `unittest_timeout`, `unittest_assertion`, `unittest_error`, or the
 generic nonzero reason. Exit 124 remains ambiguous unless that first private

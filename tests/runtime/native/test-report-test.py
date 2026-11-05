@@ -3426,6 +3426,20 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("test_expected_negative", reason)
         self.assertIn("C syntax: physical lifecycle seam", reason)
 
+        malformed_marker = (
+            earlier_expected
+            + "FAIL: rootless phase=make-interface-test.py "
+            "subtest=unavailable test=not-allowlisted exit=1 "
+            "reason=nonzero_exit phase_s=1 stage_s=2 line=347 "
+            "log=unavailable\n"
+        )
+        phase, reason = runner.failure_context(
+            malformed_marker, loaded=False,
+            default_phase="Native and rootless contracts")
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertNotIn("test_expected_negative", reason)
+        self.assertIn("make-interface-test.py", reason)
+
     def test_randomized_native_failure_reports_safe_source_and_line(self):
         phase, reason = runner.failure_context(
             "FAIL: randomized-authority.c:188 expression=result == 0\n",

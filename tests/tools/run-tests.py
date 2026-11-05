@@ -2379,9 +2379,14 @@ def failure_context(output, *, loaded=True, default_phase=None):
             r"log=(?:unavailable|build/tests/rootless-failure\."
             r"[A-Za-z0-9]{8}/diagnostic[.]log)")
         for line in output.splitlines():
-            match = rootless_marker_re.fullmatch(line.strip())
+            candidate = line.strip()
+            if not candidate.startswith("FAIL: rootless "):
+                continue
+            # The prefix itself proves this is an aggregated rootless failure.
+            # Only the complete sanitized grammar may contribute test identity.
+            rootless_failure_marker_seen = True
+            match = rootless_marker_re.fullmatch(candidate)
             if match:
-                rootless_failure_marker_seen = True
                 rootless_reported_test = match.group(1)
         if rootless_failure_marker_seen:
             if rootless_reported_test != "unavailable":
