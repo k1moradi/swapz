@@ -679,7 +679,10 @@ separate from primary lifecycle ownership and must never adopt one another.
 
 The rootless loaded-preflight fixture must distinguish two concurrent
 token-shaped but unclaimed configfs objects from an unrelated foreign,
-index-named null_blk device. The pair must return BLOCKED for absent creation
+index-named null_blk device. A fully populated but unclaimed device remains
+BLOCKED; duplicate configfs index claims, incomplete attributes, dual sysfs
+names for a reused index, a second holder and a substituted sole-holder link
+must identify the first missing ownership proof without touching devices. The pair must return BLOCKED for absent creation
 authority, retain both original objects and their memory-backed attributes,
 and report only proof categories rather than private names or fixture paths.
 The unrelated device, when no dm_swapz mapping is loaded, must remain unchanged

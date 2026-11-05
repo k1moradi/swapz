@@ -272,6 +272,8 @@ case "$*" in
     "deps -o devname swapz-demo-aaaaaaaaaaaaaaaa")
         if [[ $SWAPZ_FIXTURE_CASE == wrong_owner ]]; then
             printf '1 dependencies : (nullb-swapz-bbbbbbbbbbbbbbbb)\n'
+        elif [[ $SWAPZ_FIXTURE_CASE == ambiguous_index_owner ]]; then
+            printf '1 dependencies : (nullb7)\n'
         elif [[ $SWAPZ_FIXTURE_CASE == foreign_dependency ]]; then
             counter_file="$SWAPZ_FIXTURE_ROOT/dependency-count"
             if [[ -e $counter_file ]]; then
@@ -365,12 +367,12 @@ run_case() {
             rm -- "$FIXTURE/proc/self/status"
             mkdir "$FIXTURE/proc/self/status"
             ;;
-        missing_module|missing_tool|missing_unused_rmmod|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|foreign_nullb|unclaimed_nullb|unclaimed_nullb_pair|internal_failure) ;;
+        missing_module|missing_tool|missing_unused_rmmod|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|foreign_nullb|unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|internal_failure) ;;
         idle_module_busy)
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
             ;;
-        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|changed_mapper_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
+        busy_mapper|mapper_inventory_error|noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|stale_token|changed_mapper_token|primary_namespace|wrong_owner|owned_swap|owned_swap_alias|unresolved_swap_alias|unreadable_identity|mounted_mapper|mount_inventory_empty|mount_inventory_error|swap_inventory_error|malformed_swap_inventory|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure|ambiguous_index_owner|partial_config_proof|reused_index_alias|extra_foreign_holder|changed_holder_target)
             setup_busy_module
             ;;
         *) die "unknown fixture case $case_name" ;;
@@ -409,7 +411,7 @@ run_case() {
             setup_owned_lower
             setup_mapper_node
             ;;
-        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|changed_mapper_token|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure)
+        noncanonical_mapper_major|malformed_mapper_fields|mapper_inventory_identity_mismatch|recognized_readfault|recognized_codec|recognized_completion|recognized_constructor|owned_cleanup|replaced_inode|changed_mapper_token|missing_sysfs_proof|mismatched_devno|mismatched_index|dependency_devno_mismatch|dependency_probe_failure|partitioned_lower|foreign_holder|foreign_dependency|cleanup_failure|ambiguous_index_owner|partial_config_proof|reused_index_alias|extra_foreign_holder|changed_holder_target)
             setup_owned_lower
             setup_mapper_node
             if [[ $case_name == missing_sysfs_proof ]]; then
@@ -418,6 +420,16 @@ run_case() {
                 printf '240:8\n' > "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/dev"
             elif [[ $case_name == mismatched_index ]]; then
                 printf '8\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/index"
+            elif [[ $case_name == partial_config_proof ]]; then
+                rm -- "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/size"
+            elif [[ $case_name == ambiguous_index_owner ]]; then
+                mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN"
+                printf '7\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/index"
+                printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/memory_backed"
+                printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/power"
+            elif [[ $case_name == reused_index_alias ]]; then
+                mkdir -p "$FIXTURE/sys/block/nullb7"
+                printf '240:7\n' > "$FIXTURE/sys/block/nullb7/dev"
             elif [[ $case_name == partitioned_lower ]]; then
                 mkdir -p "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/nullb-swapz-${LOWER_TOKEN}1"
                 printf '1\n' > "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/nullb-swapz-${LOWER_TOKEN}1/partition"
@@ -426,6 +438,17 @@ run_case() {
                 mkdir -p "$FIXTURE/sys/block/dm-9"
                 ln -s "$FIXTURE/sys/block/dm-9" \
                     "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-9"
+            elif [[ $case_name == extra_foreign_holder ||
+                    $case_name == changed_holder_target ]]; then
+                mkdir -p "$FIXTURE/sys/block/dm-9"
+                if [[ $case_name == changed_holder_target ]]; then
+                    rm -- "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-0"
+                    ln -s "$FIXTURE/sys/block/dm-9" \
+                        "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-0"
+                else
+                    ln -s "$FIXTURE/sys/block/dm-9" \
+                        "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-9"
+                fi
             fi
             ;;
         foreign_nullb)
@@ -438,12 +461,22 @@ run_case() {
         unclaimed_nullb)
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
             ;;
-        unclaimed_nullb_pair)
+        unclaimed_full_proof)
+            # Complete-looking attributes and sysfs identity are not provenance.
+            setup_owned_lower
+            ;;
+        unclaimed_nullb_pair|unclaimed_pair_foreign)
             # Two plausible names still provide zero independent creation proof.
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" \
                 "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN"
             printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/memory_backed"
             printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/memory_backed"
+            if [[ $case_name == unclaimed_pair_foreign ]]; then
+                mkdir -p "$FIXTURE/sys/kernel/config/nullb/foreign-device" \
+                    "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-${OTHER_TOKEN}-foreign" \
+                    "$FIXTURE/sys/block/nullb7"
+                printf '240:7\n' > "$FIXTURE/sys/block/nullb7/dev"
+            fi
             ;;
     esac
     case "$case_name" in
@@ -499,6 +532,37 @@ run_case() {
            "$output" != *"$FIXTURE/dev/"* ]] ||
             die "$case_name did not refuse the stale mapper identity safely: $output"
     fi
+    # Exact proof classes, not just exit codes; no host/fixture IDs in a refusal.
+    case "$case_name" in
+        unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign)
+            [[ "$output" == *"check=unclaimed_null_blk errno=unavailable remedy=phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk"* &&
+               "$output" != *"$FIXTURE/"* && "$output" != *"nullb-swapz-"* &&
+               "$output" != *"$TOKEN"* && "$output" != *"$OTHER_TOKEN"* &&
+               "$output" != *"rmmod"* && "$output" != *"unload"* &&
+               "$output" != *"delete"* && "$output" != *"power off"* ]] ||
+                die "$case_name omitted private-safe creation-authority refusal"
+            ;;
+        ambiguous_index_owner)
+            [[ "$output" == *"check=null_blk_owner errno=unavailable remedy=dependency index has no unique token-shaped configfs owner"* ]] ||
+                die "$case_name did not reject ambiguous index ownership"
+            ;;
+        partial_config_proof)
+            [[ "$output" == *"phase=acquire resource_kind=null_blk expected_proof=config_inode_index_attributes observed_proof=missing_or_incomplete original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources"* ]] ||
+                die "$case_name did not identify incomplete configfs proof"
+            ;;
+        reused_index_alias)
+            [[ "$output" == *"phase=acquire resource_kind=null_blk expected_proof=dependency_sysfs_major_index_devno_node_rdev observed_proof=missing_or_incomplete original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources"* ]] ||
+                die "$case_name accepted ambiguous reused index"
+            ;;
+        extra_foreign_holder)
+            [[ "$output" == *"phase=acquire resource_kind=null_blk expected_proof=exact_single_mapper_holder observed_proof=missing_or_foreign original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources"* ]] ||
+                die "$case_name did not identify concurrent foreign holder"
+            ;;
+        changed_holder_target)
+            [[ "$output" == *"phase=acquire resource_kind=null_blk expected_proof=exact_mapper_holder_target observed_proof=substituted original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources"* ]] ||
+                die "$case_name did not identify substituted holder link"
+            ;;
+    esac
     [[ -f "$FIXTURE/proc/swaps" ]] || die "host swap inventory was mutated"
     [[ ! -e "$FIXTURE/unexpected-rmmod" &&
        ! -e "$FIXTURE/unexpected-timeout" ]] ||
@@ -537,7 +601,8 @@ run_case() {
            -f "$FIXTURE/sys/block/nullb7/dev" &&
            "$(cat "$FIXTURE/sys/block/nullb7/dev")" == "240:7" ]] ||
             die "unrelated null_blk device was claimed or changed"
-    elif [[ "$case_name" == unclaimed_nullb_pair ]]; then
+    elif [[ "$case_name" == unclaimed_nullb_pair ||
+            "$case_name" == unclaimed_pair_foreign ]]; then
         [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" &&
            -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN" &&
            "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/memory_backed")" == 1 &&
@@ -547,6 +612,18 @@ run_case() {
            "$output" != *"$FIXTURE/"* &&
            "$output" != *"nullb-swapz-"* ]] ||
             die "ambiguous null_blk devices were admitted, changed or disclosed"
+        if [[ "$case_name" == unclaimed_pair_foreign ]]; then
+            [[ -d "$FIXTURE/sys/kernel/config/nullb/foreign-device" &&
+               -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-${OTHER_TOKEN}-foreign" &&
+               "$(cat "$FIXTURE/sys/block/nullb7/dev")" == "240:7" ]] ||
+                die "simultaneous foreign null_blk objects were changed"
+        fi
+    fi
+    if [[ "$case_name" == unclaimed_full_proof ]]; then
+        [[ "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 1 &&
+           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/memory_backed")" == 1 &&
+           "$(cat "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/dev")" == "240:7" ]] ||
+            die "complete-looking unclaimed null_blk object changed"
     fi
     if [[ "$case_name" == owned_cleanup ]]; then
         [[ ! -e "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
@@ -573,7 +650,11 @@ run_case() {
           "$case_name" == dependency_devno_mismatch ||
           "$case_name" == partitioned_lower || "$case_name" == foreign_holder ||
           "$case_name" == foreign_dependency ||
-          "$case_name" == changed_mapper_token ]]; then
+          "$case_name" == changed_mapper_token ||
+          "$case_name" == partial_config_proof ||
+          "$case_name" == reused_index_alias ||
+          "$case_name" == extra_foreign_holder ||
+          "$case_name" == changed_holder_target ]]; then
         [[ "$output" == *"phase="* && "$output" == *"resource_kind="* &&
            "$output" == *"expected_proof="* && "$output" == *"observed_proof="* &&
            "$output" == *"original_errno_or_exit="* &&
@@ -652,15 +733,22 @@ run_case dependency_devno_mismatch owned_resource_proof BLOCKED unavailable
 run_case dependency_probe_failure mapper_dependency BLOCKED unavailable
 run_case partitioned_lower owned_resource_proof BLOCKED unavailable
 run_case foreign_holder owned_resource_proof BLOCKED unavailable
+run_case extra_foreign_holder owned_resource_proof BLOCKED unavailable
+run_case changed_holder_target owned_resource_proof BLOCKED unavailable
+run_case partial_config_proof owned_resource_proof BLOCKED unavailable
+run_case reused_index_alias owned_resource_proof BLOCKED unavailable
+run_case ambiguous_index_owner null_blk_owner BLOCKED unavailable
 run_case foreign_dependency owned_resource_proof BLOCKED unavailable
 run_case replaced_inode owned_resource_proof BLOCKED unavailable
 run_case cleanup_failure owned_resource_proof BLOCKED 98
 run_case owned_cleanup idle_module_removal BLOCKED unavailable
 run_case unclaimed_nullb unclaimed_null_blk BLOCKED unavailable
 run_case unclaimed_nullb_pair unclaimed_null_blk BLOCKED unavailable
+run_case unclaimed_full_proof unclaimed_null_blk BLOCKED unavailable
+run_case unclaimed_pair_foreign unclaimed_null_blk BLOCKED unavailable
 run_case foreign_nullb LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 49 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 56 isolated preflight fixtures'
