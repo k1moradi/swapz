@@ -2363,6 +2363,18 @@ or BLOCKED run it atomically replaces that file with the sanitized stage,
 failure-phase/diagnostic, lifecycle and benchmark result for the exact
 `tested_commit_sha`.
 
+A missing later stage is `NOT_RUN` for diagnostic presentation, not an
+invented `stages[]` PASS record. `UNAVAILABLE` denotes evidence that could not
+be obtained or verified (such as an artifact digest); `FAIL` is an observed
+failed check and `BLOCKED` is a refused qualification gate. These are
+distinct from each other and from `PASS`. A fail-fast record retains only
+the stages actually executed; a full PASS requires all five in canonical
+order, exact clean tested-source identity, matching kernel/build provenance,
+the required loaded verdicts, and final formatter/module/oracle digests.
+A report-only advance of `main` may preserve the tested source, but cannot
+make a stale source, changed implementation, dirty input, missing stage or
+missing artifact current qualification.
+
 After writing the file, `make test` automatically publishes only that report
 to `main` using Git plumbing. `tested_commit_sha` names the nearest
 non-report code revision; generated report-only ancestors modify only

@@ -3872,6 +3872,22 @@ class ReportContract(unittest.TestCase):
                         git("--git-dir", str(origin), "rev-parse",
                             "refs/heads/main", cwd=sandbox).stdout.strip(),
                         before)
+
+                    # A staged source edit is still dirty, unlike a staged
+                    # generated report. A later clean source commit is stale
+                    # relative to the already tested revision.
+                    git("add", "source.c", cwd=checkout)
+                    self.assertIn("not clean", runner.publish(source_sha))
+                    self.assertEqual(
+                        git("--git-dir", str(origin), "rev-parse",
+                            "refs/heads/main", cwd=sandbox).stdout.strip(),
+                        before)
+                    git("commit", "-m", "Change source after test", cwd=checkout)
+                    self.assertIn("checkout changed", runner.publish(source_sha))
+                    self.assertEqual(
+                        git("--git-dir", str(origin), "rev-parse",
+                            "refs/heads/main", cwd=sandbox).stdout.strip(),
+                        before)
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 
@@ -4380,6 +4396,272 @@ class ReportContract(unittest.TestCase):
                     git.assert_not_called()
             finally:
                 runner.ROOT, runner.REPORT = previous_root, previous_report
+
+
+
+class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
+    """Rootless admission fixtures; no synthetic row represents loaded evidence."""
+
+    SOURCE_SHA = "a" * 40
+    KERNEL_RELEASE = "fixture-kernel"
+
+    def passing_report(self):
+        return {
+            "schema": "swapz-test-results-v1",
+            "source_sha": self.SOURCE_SHA,
+            "tested_commit_sha": self.SOURCE_SHA,
+            "kernel_release": self.KERNEL_RELEASE,
+            "qualification": "RAM_BACKED_NULL_BLK_ONLY",
+            "overall": "PASS",
+            "stages": [
+                {"name": name, "status": "PASS", "exit_code": 0}
+                for name in runner.OFFICIAL_STAGE_NAMES
+            ],
+            "qualified_artifacts": {
+                "status": "AVAILABLE",
+                "formatter_sha256": "b" * 64,
+                "module_sha256": "c" * 64,
+                "oracle_sha256": "d" * 64,
+            },
+        }
+
+    def package_report_gate(self, report, *, kernel_release=None):
+        """Execute only the actual package report-parser here-doc, not packaging."""
+        import subprocess
+        import sys
+
+        source = (ROOT / "packaging/package-dkms.sh").read_text()
+        marker = (
+            'qualification_output="$(python3 - "$qualification_report" '
+            '"$kernel_release" <<\'PY\'\n'
+        )
+        self.assertEqual(source.count(marker), 1)
+        parser = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        with tempfile.TemporaryDirectory(prefix="report-admission-") as name:
+            report_path = Path(name) / "synthetic-report.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, "-c", parser, str(report_path),
+                 kernel_release or self.KERNEL_RELEASE],
+                capture_output=True, text=True, check=False, timeout=10)
+
+    def test_official_stage_states_never_promote_unexecuted_work(self):
+        completed = self.passing_report()["stages"]
+        self.assertEqual(runner.qualification_overall(0, completed), "PASS")
+
+        for outcome, executed, exit_code, expected in (
+                ("stage_2_failed", completed[:1] + [
+                    {**completed[1], "status": "FAIL", "exit_code": 1}],
+                 1, "FAIL"),
+                ("stage_5_blocked", completed[:4] + [
+                    {**completed[4], "status": "BLOCKED", "exit_code": 2}],
+                 2, "BLOCKED"),
+                ("aborted", completed[:1], 1, "FAIL"),
+                ("incomplete", completed[:1], 0, "INCOMPLETE")):
+            with self.subTest(outcome=outcome):
+                observed = runner.qualification_overall(exit_code, executed)
+                self.assertEqual(
+                    observed, expected,
+                    f"field=stages source={self.SOURCE_SHA} "
+                    f"expected={expected} observed={observed}; "
+                    "next=inspect the first recorded stage and rerun make test")
+                # Missing stages have no recorded PASS; NOT_RUN is only a view.
+                states = [stage["status"] for stage in executed] + [
+                    "NOT_RUN"] * (len(completed) - len(executed))
+                self.assertNotIn("PASS", states[len(executed):])
+                self.assertEqual(len(states), len(runner.OFFICIAL_STAGE_NAMES))
+
+        for status in ("NOT_RUN", "UNAVAILABLE", "BLOCKED", "FAIL"):
+            with self.subTest(recorded_status=status):
+                stages = [dict(stage) for stage in completed]
+                stages[4]["status"] = status
+                expected = ("FAIL" if status == "FAIL" else
+                            "BLOCKED" if status == "BLOCKED" else
+                            "INCOMPLETE")
+                self.assertEqual(runner.qualification_overall(0, stages),
+                                 expected)
+        self.assertFalse(runner.owner_qualification_artifacts_available(
+            {"status": "UNAVAILABLE"}))
+        self.assertFalse(runner.required_benchmark_gates_pass({
+            "verdicts": {"overall": "NOT_RUN"},
+            "write_saturation": {"overall": "UNAVAILABLE"},
+        }))
+
+    def test_synthetic_report_admission_rejects_false_passes(self):
+        import copy
+
+        passing = self.passing_report()
+        accepted = self.package_report_gate(passing)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(accepted.stdout.splitlines(), [
+            self.SOURCE_SHA, "b" * 64, "c" * 64, "d" * 64])
+
+        scenarios = (
+            ("tested_commit_sha", "bad source",
+             lambda report: report.update(tested_commit_sha="e" * 40)),
+            ("source_sha", "bad source",
+             lambda report: report.update(source_sha="e" * 40)),
+            ("kernel_release", "wrong kernel",
+             lambda report: report.update(kernel_release="other-kernel")),
+            ("stages[1].status", "stage failed",
+             lambda report: report["stages"][1].update(
+                 status="FAIL", exit_code=1)),
+            ("stages[4].status", "stage failed",
+             lambda report: report["stages"][4].update(
+                 status="BLOCKED", exit_code=2)),
+            ("stages[4].status", "stage failed",
+             lambda report: report["stages"][4].update(status="NOT_RUN")),
+            ("stages[4].status", "stage failed",
+             lambda report: report["stages"][4].update(status="UNAVAILABLE")),
+            ("stages", "bad stages",
+             lambda report: report["stages"].__delitem__(slice(2, None))),
+            ("qualified_artifacts.module_sha256", "bad digest",
+             lambda report: report["qualified_artifacts"].pop("module_sha256")),
+            ("qualified_artifacts.status", "artifacts unavailable",
+             lambda report: report["qualified_artifacts"].update(
+                 status="UNAVAILABLE")),
+            ("overall", "not qualified",
+             lambda report: report.update(overall="FAIL")),
+            ("overall", "not qualified",
+             lambda report: report.update(overall="BLOCKED")),
+        )
+        for field, error, mutate in scenarios:
+            with self.subTest(field=field, parser_error=error):
+                report = copy.deepcopy(passing)
+                mutate(report)
+                outcome = self.package_report_gate(report)
+                message = (
+                    f"field={field} tested_source={self.SOURCE_SHA} "
+                    f"expected=BLOCKED observed={report['overall']}; "
+                    "next=inspect the recorded failure and rerun make test "
+                    "for the exact clean source and kernel")
+                self.assertNotEqual(outcome.returncode, 0, message)
+                self.assertIn(error, outcome.stderr, message)
+                self.assertNotIn("/home/", outcome.stderr)
+
+        # Runner's artifact schema is intentionally stricter than mere
+        # presence of three digests, including rejecting extra fields.
+        for field in ("formatter_sha256", "module_sha256", "oracle_sha256"):
+            with self.subTest(missing_digest=field):
+                hashes = copy.deepcopy(passing["qualified_artifacts"])
+                hashes.pop(field)
+                self.assertFalse(
+                    runner.owner_qualification_artifacts_available(hashes))
+        extra = copy.deepcopy(passing["qualified_artifacts"])
+        extra["unqualified"] = "e" * 64
+        self.assertFalse(runner.owner_qualification_artifacts_available(extra))
+
+    def test_publisher_rejects_stale_or_divergent_report_before_git(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory(prefix="report-provenance-") as name:
+            old_root, old_report = runner.ROOT, runner.REPORT
+            try:
+                runner.ROOT = Path(name)
+                runner.REPORT = runner.ROOT / runner.GIT_RESULT
+                with mock.patch.object(runner, "git_result") as git:
+                    for field in ("source_sha", "tested_commit_sha"):
+                        with self.subTest(field=field):
+                            report = self.passing_report()
+                            report[field] = "e" * 40
+                            runner.write_report(report)
+                            observed = runner.publish(self.SOURCE_SHA)
+                            self.assertIn(
+                                "report does not match tested Git commit",
+                                observed,
+                                f"field={field} tested_source={self.SOURCE_SHA} "
+                                f"expected=SKIPPED observed={observed}; "
+                                "next=rerun make test for the exact source")
+                    git.assert_not_called()
+            finally:
+                runner.ROOT, runner.REPORT = old_root, old_report
+
+    def test_kernel_header_source_clean_guard_rejects_mismatched_identity(self):
+        import os
+        import subprocess
+
+        source = (ROOT / "packaging/package-dkms.sh").read_text()
+        guard = (
+            '[[ "$build_source_sha" == "$qualified_source_sha" && '
+            '"$build_source_clean" == 1 ]]'
+        )
+        self.assertEqual(source.count(guard), 1)
+        for header_sha, clean_bit, expected in (
+                (self.SOURCE_SHA, "1", "PASS"),
+                ("e" * 40, "1", "BLOCKED"),
+                (self.SOURCE_SHA, "0", "BLOCKED"),
+                ("", "1", "BLOCKED")):
+            with self.subTest(header_sha=header_sha, clean_bit=clean_bit):
+                environment = {
+                    **os.environ,
+                    "build_source_sha": header_sha,
+                    "qualified_source_sha": self.SOURCE_SHA,
+                    "build_source_clean": clean_bit,
+                }
+                outcome = subprocess.run(
+                    ["bash", "-c", guard], env=environment,
+                    capture_output=True, text=True, check=False, timeout=5)
+                observed = "PASS" if outcome.returncode == 0 else "BLOCKED"
+                self.assertEqual(
+                    observed, expected,
+                    f"field=build/source-build-info.h tested_source="
+                    f"{self.SOURCE_SHA} expected={expected} observed={observed}; "
+                    "next=rebuild clean qualified artifacts for this exact "
+                    "source and running kernel")
+
+    def test_private_first_failure_survives_later_error_without_public_paths(self):
+        import stat
+        import subprocess
+
+        source = (ROOT / "tests/tools/test-rootless.sh").read_text()
+        start = source.index("begin_rootless_private_stderr_capture() {")
+        end = source.index("\nreport_rootless_failure() {", start)
+        capture_functions = source[start:end]
+        fixture_script = (
+            "set -Eeuo pipefail\n"
+            'ROOT="$1"\n'
+            "rootless_capture_directory=\nrootless_capture_path=\n"
+            "rootless_capture_input_fd=2\nrootless_capture_pid=\n"
+            "rootless_private_diagnostic_path=\n"
+            "rootless_private_diagnostic_log=\n"
+            "rootless_classified_reason=nonzero_exit\n"
+            "rootless_classified_subtest=unavailable\n"
+            + capture_functions + "\n"
+            "begin_rootless_private_stderr_capture\n"
+            "printf '%s\\n' "
+            "\"FAIL: test_first (__main__.PackageLifecycle.test_first) "
+            "(phase='first-check')\" "
+            "'AssertionError: first checkpoint' "
+            "'======================================================================' "
+            "\"ERROR: test_second (__main__.PackageLifecycle.test_second) "
+            "(phase='second-check')\" "
+            "'subprocess.TimeoutExpired: later checkpoint' "
+            ">&\"$rootless_capture_input_fd\"\n"
+            "finish_rootless_private_stderr_capture 1\n"
+            'classify_rootless_private_unittest_failure '
+            '"$rootless_private_diagnostic_path"\n'
+            'printf "reason=%s subtest=%s\\n" '
+            '"$rootless_classified_reason" "$rootless_classified_subtest"\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="report-first-failure-") as name:
+            root = Path(name)
+            process = subprocess.run(
+                ["bash", "-c", fixture_script, "bash", str(root)],
+                capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual(
+                process.stdout.strip(),
+                "reason=unittest_assertion subtest=first-check")
+            self.assertNotIn(str(root), process.stdout)
+            self.assertNotIn("second-check", process.stdout)
+            logs = list((root / "build/tests").glob(
+                "rootless-failure.*/diagnostic.log"))
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(stat.S_IMODE(logs[0].parent.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(logs[0].stat().st_mode), 0o600)
+            self.assertIn("first checkpoint", logs[0].read_text())
+            self.assertIn("later checkpoint", logs[0].read_text())
+
 
 
 class ProductionReadinessEvidenceTest(unittest.TestCase):
