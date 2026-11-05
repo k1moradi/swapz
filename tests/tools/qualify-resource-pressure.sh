@@ -1000,9 +1000,9 @@ cleanup() {
     # A second signal must not abort partly completed teardown. Preserve an
     # earlier exit or retention refusal; otherwise latch the first signal
     # status and finish only the existing identity-checked cleanup.
-    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=129; original_result=129; result=129; fi' HUP
-    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=130; original_result=130; result=130; fi' INT
-    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then cleanup_signal_status=143; original_result=143; result=143; fi' TERM
+    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then if (( ${CLEANUP_PENDING_SIGNAL_STATUS:-0} == 0 )); then CLEANUP_PENDING_SIGNAL_STATUS=129; fi; cleanup_signal_status=$CLEANUP_PENDING_SIGNAL_STATUS; original_result=$cleanup_signal_status; result=$cleanup_signal_status; fi' HUP
+    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then if (( ${CLEANUP_PENDING_SIGNAL_STATUS:-0} == 0 )); then CLEANUP_PENDING_SIGNAL_STATUS=130; fi; cleanup_signal_status=$CLEANUP_PENDING_SIGNAL_STATUS; original_result=$cleanup_signal_status; result=$cleanup_signal_status; fi' INT
+    trap 'if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then if (( ${CLEANUP_PENDING_SIGNAL_STATUS:-0} == 0 )); then CLEANUP_PENDING_SIGNAL_STATUS=143; fi; cleanup_signal_status=$CLEANUP_PENDING_SIGNAL_STATUS; original_result=$cleanup_signal_status; result=$cleanup_signal_status; fi' TERM
     trap - EXIT
     if (( result == 0 && ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION &&
           ${CLEANUP_PENDING_SIGNAL_STATUS:-0} != 0 )); then
