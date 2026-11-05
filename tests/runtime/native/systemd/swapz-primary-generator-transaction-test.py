@@ -856,6 +856,74 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertEqual(len(list(self.normal.glob(".swapz-primary-generator.*"))), 1)
         self.assertNotIn(SELECTED, result.stderr)
 
+    def test_inaccessible_mapper_directory_does_not_hide_failed_rollback(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("directory permission denial requires an unprivileged runner")
+        rename = self.commands / "mv"
+        rename.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*50-selected-target.conf) /usr/bin/mv "$@" || exit $?; exit 71 ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n', encoding="ascii",
+        )
+        rename.chmod(0o755)
+        removal = self.commands / "rm"
+        removal.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*50-selected-target.conf)\n'
+            '    /usr/bin/chmod 000 "$MOCK_DENIED_DIRECTORY" || exit $?\n'
+            '    exit 73 ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n', encoding="ascii",
+        )
+        removal.chmod(0o755)
+        published_directory = self.mapper_dropin().parent
+        try:
+            result = self.run_generator(MOCK_DENIED_DIRECTORY=str(published_directory))
+        finally:
+            published_directory.chmod(0o755)
+
+        # A failed removal leaves the owned mapper inode in place. While the
+        # directory is inaccessible, -e/-L falsely describe it as absent.
+        self.assertEqual(result.returncode, 71, result.stderr)
+        self.assertIn("phase=publication", result.stderr)
+        self.assertIn("validation=publish-mapper-dropin", result.stderr)
+        self.assertIn("phase=rollback", result.stderr)
+        self.assertIn("observed_mapper=directory-unverifiable", result.stderr)
+        self.assertIn("original_status=71 cleanup_status=73", result.stderr)
+        self.assertIn("rollback=incomplete", result.stderr)
+        self.assertNotIn("rollback=complete", result.stderr)
+        self.assertEqual(os.readlink(self.mask()), "/dev/null")
+        self.assertTrue(self.mapper_dropin().is_file())
+        self.assertFalse(self.device_dropin(SELECTED).exists())
+
+    def test_inaccessible_early_directory_refuses_false_successful_mask_release(self) -> None:
+        if os.geteuid() == 0:
+            self.skipTest("directory permission denial requires an unprivileged runner")
+        removal = self.commands / "rm"
+        removal.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*swapz-primary-mapper.service)\n'
+            '    /usr/bin/chmod 000 "$MOCK_DENIED_DIRECTORY" || exit $?\n'
+            '    exit 0 ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n', encoding="ascii",
+        )
+        removal.chmod(0o755)
+        try:
+            result = self.run_generator(MOCK_DENIED_DIRECTORY=str(self.early))
+        finally:
+            self.early.chmod(0o755)
+
+        # The mask remains in place, but an inaccessible parent used to make
+        # both negative pathname tests pass and falsely commit the graph.
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("phase=publication", result.stderr)
+        self.assertIn("validation=publication-ownership-not-proven", result.stderr)
+        self.assertIn("observed_mask=directory-inaccessible", result.stderr)
+        self.assertIn("action=mask-unproven-owner-intervention-required", result.stderr)
+        self.assertIn("rollback=incomplete", result.stderr)
+        self.assertEqual(os.readlink(self.mask()), "/dev/null")
+        self.assertFalse(self.mapper_dropin().exists())
+        self.assertFalse(self.device_dropin(SELECTED).exists())
+
     def test_exit_trap_observes_cleanup_postconditions_not_command_status(self) -> None:
         rename = self.commands / "mv"
         rename.write_text(textwrap.dedent(r"""
