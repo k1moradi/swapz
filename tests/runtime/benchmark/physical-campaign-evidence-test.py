@@ -338,6 +338,29 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertFalse(any(
             item["status"] == "FAIL" for item in audit["diagnostics"]))
 
+    def test_foreign_boot_overlap_does_not_erase_authenticated_failure(self):
+        failed = pair(1, 1100)
+        failed["status"] = "EXCLUDED"
+        failed["excluded"] = True
+        failed["analysis_usable"] = False
+        failed["raw"]["verdict"] = "FAIL"
+        failed["raw"]["stage"] = "measure"
+
+        stale = pair(2, 1100)
+        foreign_boot = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        stale["raw"]["arm_boot_id"] = foreign_boot
+        stale["swapz"]["arm_boot_id"] = foreign_boot
+        stale["analysis_usable"] = False
+        audit, metrics = inspect(
+            [failed, stale], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "FAIL", audit["diagnostics"])
+        self.assertEqual(audit["first_failed_phase"], "measure")
+        self.assertIn("arm.arm_boot_id", metrics)
+        self.assertTrue(any(
+            item["status"] == "FAIL" and item["metric"] == "arm.verdict" and
+            item["pair_index"] == 1
+            for item in audit["diagnostics"]))
+
     def test_overlap_invalidates_both_physical_failure_witnesses(self):
         first = pair(1, 1100)
         first["status"] = "EXCLUDED"
