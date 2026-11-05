@@ -16,6 +16,11 @@ STANDARDS = ("docs/coding_standards.md", "docs/testing_standards.md",
              "docs/compile.md", "docs/benchmark.md")
 SOURCE_PATHS = ("src", "tests", "packaging", ".github/workflows",
                 "Makefile", "dkms.conf")
+COMPILE_WORKFLOWS = frozenset({
+    ".github/workflows/kernel-debug.yml",
+    ".github/workflows/product-codec.yml",
+    ".github/workflows/systemd-package-readiness.yml",
+})
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
@@ -35,12 +40,32 @@ def git(*arguments: str) -> bytes:
     return result.stdout
 
 
+def git_status(*arguments: str) -> int:
+    """Return a bounded Git status without leaking process/runner details."""
+    try:
+        result = subprocess.run(("git", *arguments), stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=15,
+                                check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise PolicyError("Git metadata unavailable") from error
+    return result.returncode
+
+
 def applicable_standard_indexes(path: str) -> tuple[int, ...]:
+    # Build metadata is source-controlled implementation, but its governing
+    # operational contract also lives in compile.md. Keep these exceptions
+    # narrow so an unrelated compile edit cannot qualify arbitrary source/CI.
+    if path in ("src/kernel/Makefile", "src/kernel/VERSION"):
+        return (0, 1, 2)
     if path.startswith("src/"):
         return (0, 1)
     if path.startswith("tests/runtime/benchmark/"):
         return (1, 3)
-    if path.startswith(("tests/", ".github/workflows/")):
+    if path.startswith("tests/"):
+        return (1,)
+    if path in COMPILE_WORKFLOWS:
+        return (1, 2)
+    if path.startswith(".github/workflows/"):
         return (1,)
     if path.startswith("packaging/"):
         return (1, 2)
@@ -52,6 +77,8 @@ def applicable_standard_indexes(path: str) -> tuple[int, ...]:
 def emit_failure(commit_sha: str, path: str, required: str, reason: str) -> int:
     # Only repository metadata is printed, with a bounded escaped path.
     quoted_path = ascii(path[:64])
+    if len(quoted_path) > 96:
+        quoted_path = quoted_path[:93] + "..."
     print(f"SOURCE_CONTRACT_MISMATCH: commit={commit_sha} path={quoted_path} "
           f"required_policy={required} first_error={reason}", file=sys.stderr)
     print(f"SOURCE_CONTRACT_MISMATCH: commit={commit_sha} "
@@ -72,14 +99,12 @@ def audit_commit(commit_sha: str) -> int:
         raise PolicyError("truncated NUL-delimited changeset")
     standards_changed = []
     for standard in STANDARDS:
-        result = subprocess.run(
-            ("git", "diff", "--ignore-all-space", "--ignore-blank-lines",
-             "--quiet", parent, commit_sha, "--", standard),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=15, check=False)
-        if result.returncode not in (0, 1):
+        return_code = git_status(
+            "diff", "--ignore-all-space", "--ignore-blank-lines",
+            "--quiet", parent, commit_sha, "--", standard)
+        if return_code not in (0, 1):
             raise PolicyError("canonical standards diff unavailable")
-        standards_changed.append(result.returncode == 1)
+        standards_changed.append(return_code == 1)
     for raw_path in changed.split(b"\0")[:-1]:
         if not raw_path:
             raise PolicyError("empty changed-path metadata")
@@ -208,6 +233,38 @@ class SyntheticRepositoryPolicy(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("tests/runtime/native/check.py", result.stderr)
 
+    def test_compile_standard_is_applicable_to_kernel_build_metadata(self):
+        self.write("src/kernel/Makefile", "obj-m += dm-swapz.o\n")
+        self.write("docs/compile.md", "# Rules\nOriginal invariant.\nKbuild rule.\n")
+        self.commit("kernel build metadata and compile standard")
+        result = self.audit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_compile_standard_is_applicable_to_compile_workflow(self):
+        self.write(".github/workflows/product-codec.yml", "name: synthetic\n")
+        self.write("docs/compile.md", "# Rules\nOriginal invariant.\nCI compile rule.\n")
+        self.commit("compile workflow and compile standard")
+        result = self.audit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_compile_standard_cannot_qualify_project_goals_workflow(self):
+        self.write(".github/workflows/project-goals.yml", "name: synthetic\n")
+        self.write("docs/compile.md", "# Rules\nOriginal invariant.\nUnrelated compile rule.\n")
+        self.commit("project goals and unrelated compile standard")
+        result = self.audit()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("docs/testing_standards.md", result.stderr)
+
+    def test_diagnostic_escapes_and_bounds_unusual_repository_path(self):
+        unusual = "tests/runtime/native/\n" + ("é" * 80) + ".py"
+        self.write(unusual, "assert True\n")
+        self.commit("unusual test path")
+        result = self.audit()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("\\n", result.stderr)
+        self.assertEqual(len(result.stderr.splitlines()), 2)
+        self.assertTrue(all(len(line) <= 512 for line in result.stderr.splitlines()))
+
     def test_multidomain_change_requires_applicable_policy(self):
         self.write("src/kernel/check.c", "int check;\n")
         self.write("tests/runtime/benchmark/io-replay-test.py", "assert True\n")
@@ -248,6 +305,11 @@ class SyntheticRepositoryPolicy(unittest.TestCase):
 
     def test_aggregation_is_race_safe_and_rejects_skipped_jobs(self):
         workflow = WORKFLOW.read_text()
+        enforcement = ("python3 -B tests/runtime/native/repository-policy-test.py "
+                       "--enforce")
+        legacy = "- name: Require standards co-change for implementation work"
+        self.assertIn(enforcement, workflow)
+        self.assertLess(workflow.index(enforcement), workflow.index(legacy))
         self.assertIn("group: project-goals-" + "$" + "{{ github.ref }}-" +
                       "$" + "{{ github.run_id }}", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
