@@ -6207,6 +6207,7 @@ int swapz_primary_state_require_recovery_at(
 		recovery_fd, lock_fd, &recovery_required, expected_owner);
 }
 
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_require_recovery_preserving_errno(
 	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner,
 	const char *operation, int original_errno)
@@ -6232,6 +6233,7 @@ static int swapz_primary_require_recovery_preserving_errno(
 	errno = primary_errno;
 	return primary_errno;
 }
+#endif
 
 int swapz_primary_release_partition_owner_at(int recovery_fd, int lock_fd,
 						     const char *run_id,

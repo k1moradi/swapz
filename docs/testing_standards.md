@@ -67,6 +67,10 @@ run ID or private resource names. The rootless
 compiles the production errno-preservation helper with an injected
 recovery-state write failure for START, STOP and RECOVER; source ordering must
 bind all three failure epilogues to that helper before any success publication.
+Because `SWAPZ_PRIMARY_ROOTLESS_TEST` compiles out those privileged lifecycle
+callers, keep the production-only static helper out of that build's translation
+unit while continuing to compile its actual body in the isolated errno fixture;
+the rootless manager build remains warning-clean under `-Werror`.
 
 `tests/runtime/native/primary-lifecycle-audit-test.py` is a rootless
 adversarial model for those invariants and performs no privileged or physical
