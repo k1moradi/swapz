@@ -18,7 +18,10 @@ invariants. The [frozen acceptance manifest](../production-acceptance.json),
 current [test report](../../test_results.json) and current CI/source identity
 must be checked together; no handoff snapshot can replace them.
 The official test interface remains `make test`; `make fast_test` is
-development-only and never qualifies or publishes a source.
+development-only and never qualifies or publishes a source. For active failure
+attribution use [first-record triage](../README.md#diagnose-the-first-record);
+[development-only card smoke](../testing_standards.md#development-only-card-backed-data-path-smoke)
+is a bounded data-path check, not real-swap or physical acceptance.
 
 - [Systemd runtime health](systemd-runtime-health.md) is supplementary
   operational explanation, not a substitute for the package/boot contracts.

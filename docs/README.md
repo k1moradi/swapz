@@ -163,9 +163,22 @@ as completion or permitting cleanup.
 | Package upgrade/uninstall/recover | Read the retained journal's **durable** phase, operation and snapshot hashes; refuse ambiguous files, DKMS state or owners. [Transactional packaging](compile.md#packaging) requires explicit recovery, not deleting a journal/marker or activating a partial install. |
 | Primary plan/prepare/start | The read-only `swapzctl primary plan` exposes selector, geometry, original header, recovery storage, mount/swap inventories, module provenance and authorization checks. Protect the exact PARTUUID **and physical parent**, recovery filesystem and source-bound token. Prepare/start remain runtime-locked until qualified. Do not interpret an available `/dev/sda1` path as identity. |
 | Primary stop/recover | Use normal swapoff and only exact-owned teardown. A failed drain or unknown `READY`/`STARTING`/`ACTIVE`/`STOPPING`/`RECOVERING`/`RECOVERY_REQUIRED` record retains evidence; do not force-remove, clear the header, re-enable raw swap or unload a module with users. See [lifecycle safety](AGENT_CONTEXT.md#standing-owner-authorization). |
+| Development-only card preflight / byte oracle | An exact `unclaimed_null_blk` BLOCKED from `make fast_test` is an owned-RAM preflight outcome, **not** an SD-card test; only that specific environmental block may admit the private development smoke. `PHYSICAL_DEVELOPMENT_SMOKE=PASS` proves a source-bound 16 MiB mapper direct-I/O round-trip with the original header restored and Linux swap still inactive, **not** real swap, full physical acceptance or boot. See [the development-only contract](testing_standards.md#development-only-card-backed-data-path-smoke). |
 | Loaded RAM or physical admission | Distinguish ID36 `MemAvailable`/PSI/cgroup pressure from byte mismatches. A loaded `null_blk` proof is not anonymous-page swap, full-capacity RAM, physical GC/churn or cold READ evidence. Recheck mounts, active swap aliases, protected parent, exact-size SWZ header and `allow_physical_backing=1` **without mutation**. Follow the [frozen physical protocol](benchmark.md#physical-media-and-workload-validity). |
 | Runtime health or cold-boot evidence | Read the latest `SWAPZ_RUNTIME_HEALTH=` journal result and the persisted boot verifier observation. `DEGRADED`/INCOMPLETE can mean telemetry missing, not confirmed target failure; only a separate **owner-initiated** reboot can establish cold-boot PASS. Never reboot as Codex; [hibernation stays unsupported](handoff/systemd-runtime-health.md#hibernation-and-resume-boundary). |
 | Plot history `NOT UPDATED` | Check the renderer's local diagnostic log and [per-host history selection](benchmark.md#automatic-plots-for-each-computer); optional Matplotlib failure cannot change the source-pinned test verdict. |
+
+For card-smoke failures, start with the original process exit and phase marker;
+preflight `BLOCKED` must not be reported as an executed card oracle. When the
+helper emits `PHYSICAL_RESULTS=`, inspect the private per-run `results.json`
+next to its durable `state.json`: match `evidence_class`, `source_commit_sha`,
+`helper_git_sha`, `artifact_sha256`, selected PARTUUID/physical parent, earliest
+failed phase, original return code/errno when available and recovery disposition.
+A `RECOVERY_REQUIRED` marker means preserve that state and stop; review live
+ownership and header/swap state read-only before exact-owned recovery, never
+force-remove or rerun to replace the failed attempt. Rootless failures may
+retain a separate local `build/tests/rootless-failure.*/diagnostic.log`; keep
+that failure-only diagnostic private rather than publishing its contents.
 
 For safe startup/stop/recovery policy use [AGENT_CONTEXT](AGENT_CONTEXT.md),
 for package journal ownership use [compile](compile.md#packaging), and for
