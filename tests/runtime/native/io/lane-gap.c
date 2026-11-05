@@ -82,6 +82,27 @@ static int parts_unchanged(const struct swapz_lane_gap_parts *observed,
 	}
 	return 1;
 }
+
+static int rejected_partition_preserves_output(
+		swapz_u64 completion_ns, swapz_u64 owner_ns,
+		swapz_u64 publication_ns, swapz_u64 admission_ns,
+		swapz_u64 ownership_ns, swapz_u64 seal_ns, swapz_u64 submit_ns,
+		struct swapz_lane_gap_parts *parts,
+		const struct swapz_lane_gap_parts *expected, const char *phase)
+{
+	if (swapz_lane_gap_partition(completion_ns, owner_ns, publication_ns,
+				     admission_ns, ownership_ns, seal_ns,
+				     submit_ns, parts)) {
+		fprintf(stderr, "phase=%s completion_ns=%" PRIu64
+			" submit_ns=%" PRIu64
+			" expected=rejected observed=accepted exit_code=1\n",
+			phase, completion_ns, submit_ns);
+		return 0;
+	}
+	if (!parts)
+		return 1;
+	return parts_unchanged(parts, expected, phase, completion_ns, submit_ns);
+}
 static int test_invalid(void)
 {
 	const struct swapz_lane_gap_parts retained = {
@@ -96,18 +117,23 @@ static int test_invalid(void)
 	swapz_u64 marks[] = { 100, 101, 102, 103, 104, 105, 106 };
 	unsigned int index;
 
-	CHECK(!swapz_lane_gap_partition(100, 101, 102, 103, 104, 105, 99, &part));
-	CHECK(parts_unchanged(&part, &retained, "reversed-endpoints", 100, 99));
-	CHECK(!swapz_lane_gap_partition(100, 101, 102, 103, 104, 105, 106, NULL));
-	CHECK(parts_unchanged(&part, &retained, "null-output", 100, 106));
+	if (!rejected_partition_preserves_output(
+			100, 101, 102, 103, 104, 105, 99, &part, &retained,
+			"reversed-endpoints"))
+		return 1;
+	if (!rejected_partition_preserves_output(
+			100, 101, 102, 103, 104, 105, 106, NULL, NULL,
+			"null-output"))
+		return 1;
 	for (index = 0; index < 7; ++index) {
 		swapz_u64 saved = marks[index];
 
 		marks[index] = 0;
-		CHECK(!swapz_lane_gap_partition(marks[0], marks[1], marks[2],
-			marks[3], marks[4], marks[5], marks[6], &part));
-		CHECK(parts_unchanged(&part, &retained, "zero-mark",
-					marks[0], marks[6]));
+		if (!rejected_partition_preserves_output(
+				marks[0], marks[1], marks[2], marks[3], marks[4],
+				marks[5], marks[6], &part, &retained,
+				"zero-mark"))
+			return 1;
 		marks[index] = saved;
 	}
 	CHECK(swapz_lane_gap_partition(100, 101, 102, 103, 104, 105, 100, &part));
@@ -159,10 +185,10 @@ static int test_extreme_timestamps_and_successor_counts(void)
 	{
 		const struct swapz_lane_gap_parts retained = part;
 
-		CHECK(!swapz_lane_gap_partition(UINT64_MAX, 1, 1, 1, 1, 1,
-			UINT64_MAX - 1U, &part));
-		CHECK(parts_unchanged(&part, &retained, "reversed-u64",
-					UINT64_MAX, UINT64_MAX - 1U));
+		if (!rejected_partition_preserves_output(
+				UINT64_MAX, 1, 1, 1, 1, 1, UINT64_MAX - 1U,
+				&part, &retained, "reversed-u64"))
+			return 1;
 	}
 	CHECK(sum(&part) == 0);
 

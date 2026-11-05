@@ -2125,15 +2125,18 @@ be pooled as byte-for-byte-equivalent telemetry across this boundary.
 The observational ID178 module compiles the pure `src/kernel/lane-gap.h`
 helpers directly in `tests/runtime/native/io/lane-gap.c`; test every
 timestamp-order permutation on the bounded grid, invalid/zero marks and the
-successor/dwell bin transitions. A rejected partition (zero/missing mark,
-reversed completion/submit endpoints, or null output) must leave **all six**
-previous output fields unchanged, not merely the final seal field. Initialize
-distinct nonzero sentinels before invalid cases and preserve a valid partition
-across the 64-bit reversal boundary; a partially overwritten rejected
-attribution is a regression even if the boolean return value is correct.
-Fail-only native diagnostics identify the phase, relevant timestamp boundaries,
-the first differing field and its expected/observed value. This passive
-contract does not count accepted BIOs or qualify kernel drain progress. Rootless source contracts forbid scheduling,
+successor/dwell bin transitions. A rejected partition with a non-null output
+(zero/missing mark or reversed completion/submit endpoints) must leave **all
+six** previous output fields unchanged, not merely the final seal field. A null
+output is rejected independently; because no output object exists, no
+preservation assertion applies. Initialize distinct nonzero sentinels before
+invalid non-null cases and preserve a valid partition across the 64-bit reversal
+boundary; a partially overwritten rejected attribution is a regression even if
+the boolean return value is correct. Fail-only native diagnostics identify the
+phase, relevant timestamp boundaries and whether rejection itself failed; for a
+non-null rejected output they additionally identify the first differing field
+and its expected/observed value. This passive contract does not count accepted
+BIOs or qualify kernel drain progress. Rootless source contracts forbid scheduling,
 lock, wait, queue, or allocation calls inside the accounting helpers; require
 the new per-BIO timestamp fields without changing ID114's marks, sole
 ordered-domain chronology, generation-safe `profile_epoch` invalidation,
