@@ -1491,7 +1491,11 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         elif workload == "anonymous-swap":
             bounds = QUALIFICATION["CONTRACT"]["acceptance"]["anonymous"]
             decision_pairs = decision.get("pairs")
-            if not isinstance(decision_pairs, list):
+            # Preserve the historical isolated-audit contract: absent/null
+            # optional decision detail is equivalent to an empty collection.
+            if decision_pairs is None:
+                decision_pairs = []
+            elif not isinstance(decision_pairs, list):
                 diagnose(
                     "BLOCKED", "qualification.decision.pairs",
                     "anonymous decision pair results (list)", workload=workload,
@@ -1518,7 +1522,9 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                             "safe_action=recapture_and_reseal_campaign"))
                     continue
                 ratios = result.get("ratios")
-                if not isinstance(ratios, dict):
+                if ratios is None:
+                    ratios = {}
+                elif not isinstance(ratios, dict):
                     diagnose(
                         "BLOCKED", "qualification.decision.pairs[].ratios",
                         "anonymous decision ratio mapping (dict)",

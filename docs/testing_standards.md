@@ -8752,9 +8752,11 @@ wrong-type supplied raw-repeat-spread mappings are BLOCKED diagnostics, not
 unhandled TypeError/AttributeError exceptions; the historical missing/null
 optional raw-repeat-spread map remains equivalent to an empty mapping.
 Nested decision proof is equally untrusted: a non-object `checks` value, a
-non-list anonymous pair result set, a non-object anonymous result row, or a
-non-object anonymous ratio map must emit a bounded field/type diagnostic rather
-than throwing. An authenticated measurement-phase producer FAIL in a different
+supplied non-list anonymous pair result set, a non-object anonymous result row,
+or a supplied non-object anonymous ratio map must emit a bounded field/type
+diagnostic rather than throwing. Missing/null optional decision detail retains
+the historical isolated-audit empty-collection meaning; it never supplies
+physical proof. An authenticated measurement-phase producer FAIL in a different
 pair must remain FAIL. The sealer must reject
 missing, non-string or unhashable summary/pair identity components before
 using them as dictionary keys, with the failing field, expected and observed

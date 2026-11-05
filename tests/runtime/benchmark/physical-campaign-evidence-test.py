@@ -401,6 +401,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                     diagnostic["reason"] for diagnostic in audit["diagnostics"]
                     if f"failed_evidence_field={field}" in diagnostic["reason"])
                 self.assertIn(f"expected_type={expected_type}", reason)
+                self.assertIn("observed_type=str", reason)
                 self.assertIn("safe_action=recapture_and_reseal_campaign", reason)
                 self.assertNotIn(private_marker, str(audit))
 
