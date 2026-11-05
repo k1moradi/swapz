@@ -2,9 +2,9 @@
 """Unprivileged admission parent for private physical real-swap qualification.
 
 This parent owns every Git/remote-main source decision. It performs no block,
-Device Mapper, swap, module, or lifecycle mutation. The privileged child must
-request a fresh authenticated approval immediately before each physical cycle
-and again before a PASS can be emitted.
+Device Mapper, swap, module, or lifecycle mutation. The current wire schema can
+bootstrap source identity only; physical cycle/final approval remains BLOCKED
+until the request also binds the required run and target evidence.
 """
 
 from __future__ import annotations
@@ -423,7 +423,6 @@ def _serve_admission(server: socket.socket,
         [f"cycle-{index}" for index in range(1, cycles + 1)] +
         ["final"])
     passed_phases: list[str] = []
-    seen_nonces: set[str] = set()
     parent_rejected = False
     if re.fullmatch(r"[0-9a-f]{64}", oracle_sha256) is None:
         failure = Blocked("source admission oracle digest is malformed")
@@ -503,27 +502,39 @@ def _serve_admission(server: socket.socket,
                             "unexpected_source_admission_phase",
                             file=sys.stderr)
                         break
-                    if request["nonce"] in seen_nonces:
-                        parent_rejected = True
-                        _reply(stream, request, "BLOCKED", oracle_sha256,
-                               "replayed_source_admission_nonce")
-                        print(
-                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
-                            f"replayed_source_admission_nonce:phase={expected_phase}:"
-                            "expected=fresh_nonce:observed=reused:"
-                            "errno=none:authorization=BLOCKED:"
-                            "next=restart_qualification",
-                            file=sys.stderr)
-                        break
-                    seen_nonces.add(request["nonce"])
                     try:
                         if _owned_peer_process_lineage(
                                 child, peer_pid, expected_phase) != owned_peer_lineage:
                             raise _peer_identity_refusal(
                                 expected_phase, child, "changed_peer_run")
+                    except Blocked as exc:
+                        parent_rejected = True
+                        _reply(stream, request, "BLOCKED", oracle_sha256, str(exc))
+                        print(
+                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
+                            file=sys.stderr)
+                        break
+                    if expected_phase != "initial":
+                        parent_rejected = True
+                        child_exit = child.poll()
+                        _reply(
+                            stream, request, "BLOCKED", oracle_sha256,
+                            "physical_admission_identity_missing")
+                        print(
+                            "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+                            f"physical_admission_identity:phase={expected_phase}:"
+                            "expected=validated_source_owned_child_run_phase_target_evidence:"
+                            "observed=validated_source_owned_child_phase_source_evidence_only:"
+                            "errno=none:"
+                            f"child_exit={child_exit if child_exit is not None else 'running'}:"
+                            "authorization=BLOCKED:"
+                            "next=extend_admission_protocol_before_physical_retry",
+                            file=sys.stderr)
+                        break
+                    try:
                         _check_git_source(validated_source, git)
                         # Source queries may block: reprove process identity before
-                        # the approval response, not only when the socket connects.
+                        # the bootstrap response, not only when the socket connects.
                         if _owned_peer_process_lineage(
                                 child, peer_pid, expected_phase) != owned_peer_lineage:
                             raise _peer_identity_refusal(

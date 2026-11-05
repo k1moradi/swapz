@@ -101,7 +101,10 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         child.terminate.assert_called_once_with()
         self.assertIn("observed=unrelated_peer_run", diagnostic)
 
-    def test_nonce_reuse_across_ordered_phases_is_rejected(self):
+    def test_source_only_cycle_request_is_not_physical_approval(self):
+        # A repeated nonce value in a different phase is not approval replay:
+        # the child also binds the response to its requested phase. The real
+        # blocker is that this wire schema has no run/target evidence.
         result, responses, diagnostic, _child, check = self.run_exchange(
             os.getpid(), [
                 self.request("initial"),
@@ -111,19 +114,20 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         self.assertEqual([response["status"] for response in responses],
                          ["PASS", "BLOCKED"])
         self.assertEqual(responses[-1]["reason"],
-                         "replayed_source_admission_nonce")
+                         "physical_admission_identity_missing")
+        self.assertIn(
+            "observed=validated_source_owned_child_phase_source_evidence_only",
+            diagnostic)
         self.assertIn("authorization=BLOCKED", diagnostic)
         self.assertEqual(check.call_count, 1)
 
-    def test_fresh_nonces_allow_ordered_source_only_phases(self):
-        phases = ("initial", "cycle-1", "cycle-2", "final")
+    def test_initial_source_bootstrap_requires_fresh_git_proof(self):
         result, responses, _diagnostic, _child, check = self.run_exchange(
-            os.getpid(), [self.request(phase, f"{index:032x}")
-                          for index, phase in enumerate(phases, start=1)])
-        self.assertEqual(result, 2)  # Synthetic child reports BLOCKED, not PASS.
+            os.getpid(), [self.request("initial", "1" * 32)])
+        self.assertEqual(result, 2)  # Synthetic child itself reports BLOCKED.
         self.assertEqual([response["status"] for response in responses],
-                         ["PASS"] * len(phases))
-        self.assertEqual(check.call_count, len(phases))
+                         ["PASS"])
+        self.assertEqual(check.call_count, 1)
 
     def test_reordered_phase_is_rejected(self):
         result, responses, _diagnostic, _child, check = self.run_exchange(

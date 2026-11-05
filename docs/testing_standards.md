@@ -174,18 +174,26 @@ ref; later phases cannot reuse an earlier approval. The source-admission
 parent also binds kernel-reported socket peer PID and its Linux process start
 time/ancestry to the still-live launched sudo process tree. sudo may fork a
 monitor, so simple equality to Popen.pid is not sufficient. Exact peer process
-identity is rechecked at each phase and after potentially delayed source
-queries; changed, missing or unreadable identity, an exited launch owner or a
-nonce repeated across phases must BLOCK. An untrusted UID-0 peer is not
-authenticated merely by SO_PEERCRED UID 0. The socket request is bounded by
-a read timeout. This identity proof does not prevent arbitrary code changes
-by a hostile root operator, nor guarantee that a Git ref cannot move between
-the final source observation and a destructive operation. The existing source
-protocol does not carry independently established selected-card/reader
-identity, so a source PASS is never physical-target authorization: unresolved
-last-use selector, reader and opened-descriptor identity remain physical
-production-readiness blockers until the privileged helper and Codex-owned
-physical probe enforce them independently. Requests must arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
+identity is rechecked before each response and again after a potentially
+delayed source query. Changed, missing or unreadable identity or an exited
+launch owner must BLOCK. An untrusted UID-0 peer is not authenticated merely
+by SO_PEERCRED UID 0. The socket request is bounded by a read timeout. A nonce
+value repeated in a new request is not by itself approval replay: responses
+bind both phase and nonce, and the child verifies both. Reordered phases remain
+BLOCKED. This identity proof does not prevent arbitrary code changes by a
+hostile root operator, nor guarantee that a Git ref cannot move after the
+final source observation.
+
+The current wire schema carries source, helper and control-input identity but
+no independently established selected-card/reader target or physical
+qualification-run evidence. The non-destructive `initial` response is only a
+source bootstrap; it is not physical authorization. Every `cycle-*` or `final`
+request using this source-only schema must return BLOCKED with
+`physical_admission_identity_missing` before physical mutation or terminal
+PASS. A future protocol may admit those phases only after it binds the exact
+owned child/run, phase, selected target and reader, plus the evidence required
+at that boundary. Missing, stale or mismatched physical identity is never
+permission to continue. Requests must arrive in exact `initial`, `cycle-1..N`, `final` order. A concurrent push,
 parent disconnect, malformed/duplicated JSON, peer-identity change, missing
 approval or unavailable remote blocks before the next durable transaction/card
 mutation or prevents the final PASS. The unprivileged parent itself performs no
