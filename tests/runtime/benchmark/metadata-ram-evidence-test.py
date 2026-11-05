@@ -295,6 +295,20 @@ class SyntheticRamEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clocks disagree"):
             self.validate_trace(trace)
 
+    def test_backward_utc_sample_is_order_failure_with_unavailable_peak(self) -> None:
+        trace, _ = synthetic_trace()
+        # A reversed wall-clock sample is not a missing cadence observation.
+        trace["samples"][13]["timestamp_utc"] = (
+            trace["samples"][11]["timestamp_utc"])
+        with self.assertRaisesRegex(
+                ValueError,
+                r"metric=utc_sample_order.*"
+                r"observed_utc_interval_ns=-100000000.*"
+                r"monotonic_interval_ns=100000000.*"
+                r"first_failed_phase=steady peak_ram_bytes=unavailable") as caught:
+            self.validate_trace(trace)
+        self.assertNotIn("missing_samples_minimum=", str(caught.exception))
+
     def test_boot_mismatch_and_secret_string_redaction(self) -> None:
         trace, host = synthetic_trace()
         host["host_boot_id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"

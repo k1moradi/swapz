@@ -7065,7 +7065,10 @@ target-absent recovery. Each adjacent monotonic sample interval must be
 10% of 100 ms; a 100 ms label on systematically slower samples does not
 qualify. The first-to-last UTC elapsed time must also agree with the monotonic
 elapsed time within 500 ms, so per-sample wall-clock tolerance cannot accumulate
-into a fabricated host-snapshot chronology. The last second of mapper-absent
+into a fabricated host-snapshot chronology. A repeated or backward adjacent UTC
+timestamp is a clock-order failure, not proof of missing samples; diagnostics
+report the signed UTC interval, corresponding monotonic interval, first failed
+phase and unavailable peak without inventing an omission count. The last second of mapper-absent
 teardown samples must recover the
 pre-constructor baseline **median** for `MemAvailable` (no lower) and for
 `SUnreclaim`/`VmallocUsed` (no higher), with integer-exact half-KiB median
