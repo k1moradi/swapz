@@ -4920,7 +4920,9 @@ that Linux BLK_EXCL permits one, or prove failure of real block-device
 exclusion; that kernel interval remains **NOT PROVEN**. Diagnostics must expose
 phase, a synthetic observed-inventory class, original errno, requested flags,
 the actually returned access mode, unavailability of O_EXCL verification, and
-whether block zero was modified, without disclosing private paths.
+whether block zero was modified, without disclosing private paths. Failure-only
+inventory classification must come from the execution/report evidence, not just
+the fixture's intended injected class.
 The physical-card mapper-page oracle is separate and still required.
 Each case must prove the mutated identity surface was actually
 re-read after the accepted block-zero snapshot rather than deriving the

@@ -977,7 +977,9 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
 	const unsigned char original_block[SWAPZ_SUPERBLOCK_BYTES] = {0};
 	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
 	char errno_field[64];
+	const char *observed_inventory_class;
 	unsigned int previous_pwrite_calls;
+	int active_inventory_reported;
 	int observed_errno, status, field_length;
 	int block_zero_modified;
 
@@ -994,13 +996,23 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
 	test_diagnostic_errno_clobber = 0;
 	block_zero_modified = memcmp(admission_fixture.block_zero, original_block,
 				     sizeof(original_block)) != 0;
+	active_inventory_reported =
+		strstr(report, "active entry without a verifiable kernel "
+		       "backing identity") != NULL;
+	if (active_inventory_reported && observed_errno == EOPNOTSUPP &&
+	    admission_fixture.swap_inventory_checks == 4U)
+		observed_inventory_class =
+			"synthetic-active-observed-after-zero-row-snapshot";
+	else if (admission_fixture.swap_inventory_during_descriptor_query == NULL)
+		observed_inventory_class = "synthetic-injected-not-observed";
+	else
+		observed_inventory_class = "synthetic-injection-not-reached";
 
 	if (status != 3 || observed_errno != EOPNOTSUPP ||
 	    !strstr(report, "UNCERTAIN: target admission became uncertain "
 		    "after header write") ||
 	    !strstr(report, "stage=inventory") ||
-	    !strstr(report, "active entry without a verifiable kernel "
-		    "backing identity") ||
+	    !active_inventory_reported ||
 	    !strstr(report, errno_field) ||
 	    !strstr(report, "RECOVERY REQUIRED") ||
 	    strstr(report, ADMISSION_DEVICE) ||
@@ -1022,13 +1034,14 @@ static void test_real_cli_post_snapshot_swap_exclusion_remains_unproven(void)
 	    !swapz_sb_valid(admission_fixture.block_zero,
 			    admission_fixture.geometry_bytes)) {
 		fprintf(stderr, "FAIL: phase=post-final-inventory "
-			"observed_inventory_class=synthetic-active-after-zero-row-snapshot "
+			"observed_inventory_class=%s "
 			"original_errno=%d expected_errno=%d status=%d "
 			"requested_flags=%#x verified_access_mode=%#x "
 			"verified_exclusive=unavailable block_zero_modified=%d "
 			"inventory_checks_before_injection=%u inventory_checks=%u "
 			"descriptor_queries=%u writes=%u syncs=%u "
 			"kernel_exclusion=not-proven\n",
+			observed_inventory_class,
 			observed_errno, EOPNOTSUPP, status,
 			admission_fixture.observed_open_flags,
 			admission_fixture.observed_descriptor_flags & O_ACCMODE,
