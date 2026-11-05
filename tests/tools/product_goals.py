@@ -485,12 +485,15 @@ def diagnose_ci_failure(lines, exit_code, suite):
         unittest_category = None
     compile_phase = (
         phase == "Makefile native and metadata" or phase.startswith("C syntax:"))
-    # The producer runs bash -n for this fixed phase. A status-two failure
-    # identifies that source check, not a test assertion or a parser detail.
+    # The producer runs bash -n for this fixed phase family. A status-two
+    # failure identifies that source check, not a test assertion or parser
+    # detail. Syntax-loop phases never carry unittest or nested-subtest identity.
     rootless_shell_syntax_check_failed = (
         rootless_failure is not None and rootless_reason == "nonzero_exit"
         and child_exit_code == 2
-        and re.fullmatch(r"bash syntax [A-Za-z0-9_.-]{1,64}[.]sh", phase)
+        and rootless_failure["subtest"] == "unavailable"
+        and rootless_failure["test"] == "unavailable"
+        and re.fullmatch(r"bash syntax [A-Za-z0-9_.-]{1,64}", phase)
         is not None)
 
     if failing_test is not None:

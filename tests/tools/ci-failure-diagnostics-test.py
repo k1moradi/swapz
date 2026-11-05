@@ -200,6 +200,17 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertNotIn("permission denied", failure["first_error"])
         self.assertNotIn("unrelated", failure["first_error"])
 
+        extensionless = self.diagnose(
+            marker.replace("loaded-preflight.sh",
+                           "swapz-primary-boot-verify"), 2)
+        self.assertEqual(extensionless["category"], "SOURCE_CONTRACT")
+        self.assertEqual(
+            extensionless["phase"], "bash syntax swapz-primary-boot-verify")
+        self.assertEqual(
+            extensionless["test"], "bash syntax swapz-primary-boot-verify")
+        self.assertEqual(extensionless["child_exit_code"], 2)
+        self.assertIn("bash -n", extensionless["expected_contract"])
+
     def test_unknown_or_malformed_syntax_evidence_stays_generic(self):
         marker = (
             "FAIL: rootless phase=bash syntax loaded-preflight.sh "
@@ -212,6 +223,14 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         wrong_exit = self.diagnose(marker.replace("exit=2 ", "exit=3 "), 2)
         self.assertEqual(wrong_exit["category"], "UNKNOWN_FAILURE")
         self.assertEqual(wrong_exit["child_exit_code"], 3)
+        nested = self.diagnose(
+            marker.replace("subtest=unavailable", "subtest=preflight"), 2)
+        self.assertEqual(nested["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(nested["child_exit_code"], 2)
+        identified = self.diagnose(
+            marker.replace("test=unavailable", "test=test_unexpected"), 2)
+        self.assertEqual(identified["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(identified["child_exit_code"], 2)
         missing = self.diagnose("", 2)
         self.assertEqual(missing["category"], "UNKNOWN_FAILURE")
 
