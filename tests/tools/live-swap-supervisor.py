@@ -2053,6 +2053,9 @@ def _run_pressure_phase(state_dir, state, results, ops):
         f"expected_pages={PRESSURE_PAGES} observed_pages={phase['observed_verified_pages']} "
         f"expected_bytes={PRESSURE_PAGES * PAGE_BYTES} "
         f"observed_bytes={phase['observed_verified_bytes']} "
+        f"mapping_closed={child.get('mapping_closed') if child else None} "
+        f"mapping_close_errno={child.get('mapping_close_errno') if child else None} "
+        f"oom_kill={memory_events.get('oom_kill')} "
         f"retained={state.get('stage')}")
     if phase["stopped"]:
         raise SafeStop("operator_stop", f"operator requested stop; {detail}")
@@ -2844,8 +2847,14 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
                 module_owned_by_process=bool(
                     state.get("module_loaded_by_process")))
         except BaseException as recovery_exc:
-            _record_recovery_required(
-                state_dir, state, results, recovery_exc)
+            # Persist review-required state if possible, but a failed evidence
+            # write cannot replace the earlier worker or cleanup failure.
+            recovery_record_error = None
+            try:
+                _record_recovery_required(
+                    state_dir, state, results, recovery_exc)
+            except BaseException as record_exc:
+                recovery_record_error = record_exc
             try:
                 results["kernel_diagnostics"] = ops.kernel_diagnostics(
                     results["start_timestamp"], state)
@@ -2868,7 +2877,10 @@ def run_trial(approval_path, state_dir, *, confirm, ops=None,
                 f"{original_detail}phase=cleanup recovery=REQUIRES_REVIEW "
                 f"retained=private_recovery_state "
                 f"cleanup={type(recovery_exc).__name__} "
-                f"errno={getattr(recovery_exc, 'errno', None)}") from (
+                f"errno={getattr(recovery_exc, 'errno', None)} "
+                f"record={'FAILED' if recovery_record_error else 'RECORDED'} "
+                f"record_errno={getattr(recovery_record_error, 'errno', None)}"
+                ) from (
                     activation_error if activation_error is not None
                     else recovery_exc)
         try:

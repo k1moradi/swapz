@@ -1568,6 +1568,46 @@ class LiveSwapSupervisorTests(unittest.TestCase):
         self.assertFalse(ops.original_active)
         self.assertEqual(ops.header, ops.formatted)
 
+    def test_recovery_record_write_failure_preserves_first_integrity_error(self):
+        ops = FakeOps(fail_phase="mapper_swapoff", pressure_mode="mismatch")
+        with mock.patch.object(
+                supervisor, "_record_recovery_required",
+                side_effect=OSError(errno.ENOSPC, "synthetic record write")), \
+                self.assertRaises(supervisor.LiveSwapError) as caught:
+            self.run_mock_trial(ops)
+        message = str(caught.exception)
+        self.assertIn("swap-pressure verification failed", message)
+        self.assertIn("phase=activation", message)
+        self.assertIn("phase=cleanup", message)
+        self.assertIn("record=FAILED", message)
+        self.assertIn("record_errno=28", message)
+        self.assertNotIn("/tmp/", message)
+        self.assertTrue(ops.mapper_exists)
+        self.assertTrue(ops.mapper_active)
+
+    def test_mapping_close_errno_is_reported_without_page_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = {"run_id": RUN_ID, "head": HEAD,
+                     "qualified_source": supervisor.QUALIFIED_SOURCE,
+                     "dm_major": 252, "dm_minor": 0,
+                     "stage": "LIVE_SWAP_ACTIVE"}
+            results = {"run_id": RUN_ID, "head": HEAD,
+                       "qualified_source": supervisor.QUALIFIED_SOURCE}
+            ops = FakeOps(pressure_mode="mapping_close")
+            ops.mapper_active = True
+            with mock.patch.object(supervisor, "_memory_sample",
+                                   return_value=HIGH_MEMORY):
+                with self.assertRaises(
+                        supervisor.LiveSwapError) as caught:
+                    supervisor._run_pressure_phase(
+                        Path(directory), state, results, ops)
+            diagnostic = str(caught.exception)
+            self.assertIn("mapping_closed=False", diagnostic)
+            self.assertIn("mapping_close_errno=5", diagnostic)
+            self.assertIn("expected_bytes=", diagnostic)
+            self.assertIn("observed_bytes=", diagnostic)
+            self.assertNotIn(directory, diagnostic)
+
     def test_interrupted_activation_restores_without_advancing_to_mapper(self):
         ops = FakeOps(stop_after_format=True)
         result, _state_dir = self.run_mock_trial(ops)

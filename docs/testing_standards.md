@@ -5138,7 +5138,9 @@ still cannot silently defeat the conservative stop thresholds.
 Pressure cancellation may signal only the supervisor's unreaped direct child,
 not every PID found in the pressure cgroup. Child waits and postreap report
 reads remain bounded; an inherited report writer or unproven child death
-retains recovery obligations. A first byte mismatch, worker signal/exit or
+retains recovery obligations. A failed write of the recovery-required evidence record is also a secondary
+failure: append its errno, retain the original worker/mapper failure, and do
+not claim teardown or durable recovery success. A first byte mismatch, worker signal/exit or
 guard stop must survive a simultaneous pipe, memory-counter, cgroup-removal,
 mapping-close or later mapper-cleanup failure. Errors identify the original
 phase/errno or exit, memory/PSI category, expected/observed page and byte
