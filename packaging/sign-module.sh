@@ -7,6 +7,14 @@ blocked() {
     exit 2
 }
 
+blocked_phase() {
+    local phase="$1" command_status="$2"
+    shift 2
+    printf 'BLOCKED: Secure Boot module signing: %s; phase=%s; command_status=%s\n' \
+        "$*" "$phase" "$command_status" >&2
+    exit 2
+}
+
 mode=sign
 if [[ $# == 2 && $1 == --verify ]]; then
     mode=verify
@@ -84,11 +92,15 @@ state="$(secure_boot_state)"
 key="${SWAPZ_MOK_PRIVATE_KEY:-/var/lib/shim-signed/mok/MOK.priv}"
 cert="${SWAPZ_MOK_CERT:-/var/lib/shim-signed/mok/MOK.der}"
 
-command -v openssl >/dev/null 2>&1 || blocked "openssl is required"
-command -v python3 >/dev/null 2>&1 || blocked "python3 is required"
-command -v mktemp >/dev/null 2>&1 || blocked "mktemp is required"
+command -v openssl >/dev/null 2>&1 ||
+    blocked_phase detached_signature 127 "openssl is required"
+command -v python3 >/dev/null 2>&1 ||
+    blocked_phase detached_signature 127 "python3 is required"
+command -v mktemp >/dev/null 2>&1 ||
+    blocked_phase detached_signature 127 "mktemp is required"
 if [[ "$mode" == sign ]]; then
-    command -v kmodsign >/dev/null 2>&1 || blocked "kmodsign is required"
+    command -v kmodsign >/dev/null 2>&1 ||
+        blocked_phase signature_generation 127 "kmodsign is required"
 fi
 
 sudo_command=()
@@ -109,7 +121,8 @@ if [[ -r "$cert" ]]; then
         blocked "MOK certificate is not a regular file"
 else
     if [[ "$mode" == verify ]]; then
-        blocked "MOK certificate is unavailable for signature verification"
+        blocked_phase certificate_material 1 \
+            "MOK certificate is unavailable for signature verification"
     fi
     need_sudo
     "${sudo_command[@]}" test -f "$cert" &&
@@ -119,8 +132,10 @@ else
 fi
 
 command -v mokutil >/dev/null 2>&1 ||
-    blocked "mokutil is required to verify MOK enrollment"
+    blocked_phase certificate_enrollment 127 \
+        "mokutil is required to verify MOK enrollment"
 
+mokutil_enrollment_status=0
 mokutil_reports_enrolled() {
     local output status
 
@@ -142,6 +157,8 @@ mokutil_reports_enrolled() {
         fi
     fi
 
+    mokutil_enrollment_status="$status"
+
     # mokutil 0.7.2 returns 1 when the key is already enrolled and prints this
     # exact path-bound message. Its status 0 says "not enrolled"; silence or
     # any other status/output is not enrollment evidence.
@@ -152,8 +169,10 @@ mokutil_reports_enrolled() {
     return 1
 }
 
-mokutil_reports_enrolled ||
-    blocked "configured MOK certificate is not enrolled or enrollment could not be verified"
+if ! mokutil_reports_enrolled; then
+    blocked_phase certificate_enrollment "$mokutil_enrollment_status" \
+        "configured MOK certificate is not enrolled or enrollment could not be verified"
+fi
 
 restore_build_module_owner() {
     [[ "$mode" == sign ]] || return 0
@@ -198,15 +217,21 @@ if header_offset < 0:
 header = module[header_offset:header_offset + header_size]
 if len(header) != header_size:
     raise SystemExit(11)
+algorithm = header[0]
+hash_identifier = header[1]
 signature_type = header[2]
 signer_length = header[3]
 key_id_length = header[4]
+reserved = header[5:8]
 signature_length = int.from_bytes(header[8:12], "big")
-if signature_type != 2 or signer_length != 0 or key_id_length != 0:
+if (signature_type != 2 or algorithm != 0 or hash_identifier != 0 or
+        signer_length != 0 or key_id_length != 0 or any(reserved)):
+    raise SystemExit(11)
+# Match Linux mod_check_sig(): sig_len must be strictly smaller than the
+# bytes before struct module_signature, not merely fit without underflow.
+if signature_length <= 0 or signature_length >= header_offset:
     raise SystemExit(11)
 signature_offset = header_offset - signature_length
-if signature_length <= 0 or signature_offset < 0:
-    raise SystemExit(11)
 Path(sys.argv[2]).write_bytes(module[:signature_offset])
 Path(sys.argv[3]).write_bytes(module[signature_offset:header_offset])
 PY
@@ -224,12 +249,21 @@ write_public_certificate_pem() {
 }
 
 verify_module_signature() {
-    local temp_dir payload_path signature_path certificate_pem extract_rc=0
-    temp_dir="$(mktemp -d)" || return 20
-    chmod 0700 "$temp_dir" || {
+    local temp_dir payload_path signature_path certificate_pem
+    local extract_rc=0 command_rc=0
+    signature_command_status=0
+
+    temp_dir="$(mktemp -d)" || command_rc=$?
+    if (( command_rc != 0 )); then
+        signature_command_status="$command_rc"
+        return 20
+    fi
+    chmod 0700 "$temp_dir" || command_rc=$?
+    if (( command_rc != 0 )); then
+        signature_command_status="$command_rc"
         rm -rf -- "$temp_dir"
         return 20
-    }
+    fi
     payload_path="$temp_dir/module.payload"
     signature_path="$temp_dir/module.p7s"
     certificate_pem="$temp_dir/certificate.pem"
@@ -237,25 +271,35 @@ verify_module_signature() {
     extract_module_signature "$payload_path" "$signature_path" ||
         extract_rc=$?
     if (( extract_rc != 0 )); then
+        signature_command_status="$extract_rc"
         rm -rf -- "$temp_dir"
         return "$extract_rc"
     fi
-    write_public_certificate_pem "$certificate_pem" || {
+
+    command_rc=0
+    write_public_certificate_pem "$certificate_pem" || command_rc=$?
+    if (( command_rc != 0 )); then
+        signature_command_status="$command_rc"
         rm -rf -- "$temp_dir"
         return 20
-    }
+    fi
+
     # CMS may contain a foreign signer certificate. Ignore embedded certs:
     # only the configured enrolled MOK certificate may verify this payload.
+    command_rc=0
     openssl cms -verify -binary -nointern -inform DER -in "$signature_path" \
         -content "$payload_path" -certfile "$certificate_pem" -noverify \
-        -out /dev/null >/dev/null 2>&1 || {
+        -out /dev/null >/dev/null 2>&1 || command_rc=$?
+    if (( command_rc != 0 )); then
+        signature_command_status="$command_rc"
         rm -rf -- "$temp_dir"
         return 12
-    }
+    fi
+
     rm -rf -- "$temp_dir"
     return 0
 }
-
+signature_command_status=0
 signature_status=0
 if verify_module_signature; then
     signature_status=0
@@ -271,16 +315,20 @@ if [[ "$mode" == verify ]]; then
             exit 0
             ;;
         10)
-            blocked "qualified module is unsigned"
+            blocked_phase detached_signature "$signature_command_status" \
+                "qualified module is unsigned"
             ;;
         11)
-            blocked "qualified module has malformed signing metadata"
+            blocked_phase detached_signature "$signature_command_status" \
+                "qualified module has malformed signing metadata"
             ;;
         12)
-            blocked "qualified module signature is not cryptographically valid for the configured MOK certificate"
+            blocked_phase detached_signature "$signature_command_status" \
+                "qualified module signature is not cryptographically valid for the configured MOK certificate"
             ;;
         *)
-            blocked "qualified module signature verification failed"
+            blocked_phase detached_signature "$signature_command_status" \
+                "qualified module signature verification failed"
             ;;
     esac
 fi
@@ -292,24 +340,38 @@ if (( signature_status == 0 )); then
     exit 0
 fi
 (( signature_status == 10 )) ||
-    blocked "existing module signature is malformed, invalid, or from a different certificate; refusing to append another signature"
+    blocked_phase detached_signature "$signature_command_status" \
+        "existing module signature is malformed, invalid, or from a different certificate; refusing to append another signature"
 
 sign=(kmodsign sha512 "$key" "$cert" "$module")
+signature_generation_status=0
 if [[ -r "$key" ]]; then
     [[ -f "$key" && ! -L "$key" ]] ||
-        blocked "MOK private key is not a regular file"
-    "${sign[@]}" || blocked "kmodsign failed"
+        blocked_phase signature_generation 1 \
+            "MOK private key is not a regular file"
+    "${sign[@]}" >/dev/null 2>&1 || signature_generation_status=$?
+    if (( signature_generation_status != 0 )); then
+        blocked_phase signature_generation "$signature_generation_status" \
+            "kmodsign failed"
+    fi
 else
     need_sudo
     "${sudo_command[@]}" test -f "$key" &&
         "${sudo_command[@]}" test ! -L "$key" ||
-        blocked "MOK private key is missing, unsafe, or sudo authorization is unavailable"
-    "${sudo_command[@]}" "${sign[@]}" ||
-        blocked "sudo kmodsign failed or authorization is unavailable"
+        blocked_phase signature_generation 1 \
+            "MOK private key is missing, unsafe, or sudo authorization is unavailable"
+    "${sudo_command[@]}" "${sign[@]}" >/dev/null 2>&1 ||
+        signature_generation_status=$?
+    if (( signature_generation_status != 0 )); then
+        blocked_phase signature_generation "$signature_generation_status" \
+            "sudo kmodsign failed or authorization is unavailable"
+    fi
 fi
 
-verify_module_signature ||
-    blocked "new module signature failed cryptographic verification against the enrolled configured MOK"
+if ! verify_module_signature; then
+    blocked_phase detached_signature "$signature_command_status" \
+        "new module signature failed cryptographic verification against the enrolled configured MOK"
+fi
 restore_build_module_owner
 printf '%s\n' \
     "Secure Boot: signed dm-swapz.ko and cryptographically verified it against the enrolled configured MOK"

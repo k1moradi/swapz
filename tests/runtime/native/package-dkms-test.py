@@ -886,6 +886,36 @@ exec "{flock_binary}" "$@"
                     "phase=detached_signature", malformed_result.stderr)
         signed_module.write_bytes(canonical_signed_module)
 
+        # Linux rejects sig_len equal to all bytes before the trailer. Build a
+        # real CMS signature over an empty payload so a verifier using only an
+        # underflow check would otherwise accept this exact boundary.
+        empty_payload = self.home / "empty-module.payload"
+        empty_signature = self.home / "empty-module.p7s"
+        empty_payload.write_bytes(b"")
+        subprocess.run(
+            [openssl, "cms", "-sign", "-binary", "-in", str(empty_payload),
+             "-signer", str(certificate_pem), "-inkey", str(private_key),
+             "-outform", "DER", "-out", str(empty_signature), "-nocerts",
+             "-noattr", "-md", "sha512"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        empty_signature_bytes = empty_signature.read_bytes()
+        boundary_header = bytes((0, 0, 2, 0, 0, 0, 0, 0))
+        boundary_header += len(empty_signature_bytes).to_bytes(4, "big")
+        signed_module.write_bytes(
+            empty_signature_bytes + boundary_header + module_signature_marker)
+        boundary_result = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=verify_env, capture_output=True, text=True)
+        with self.subTest(
+                phase="detached_signature", case="signature_length_boundary"):
+            self.assertEqual(boundary_result.returncode, 2)
+            self.assertIn(
+                "malformed signing metadata", boundary_result.stderr)
+            self.assertIn("phase=detached_signature", boundary_result.stderr)
+            self.assertIn("command_status=11", boundary_result.stderr)
+        signed_module.write_bytes(canonical_signed_module)
+
         # kmodsign may replace the output inode while running through sudo.
         # The Makefile must still be able to chmod the built artifact, both
         # after a new signature and on a later already-signed build.
@@ -1107,6 +1137,7 @@ exec "{flock_binary}" "$@"
         malformed = verify_with_mokutil(cert=malformed_cert)
         self.assertEqual(malformed.returncode, 2)
         self.assertNotIn("cryptographic signature verified", malformed.stdout)
+        self.assertIn("phase=detached_signature", malformed.stderr)
 
         missing_bin = self.home / "missing-mokutil-bin"
         missing_bin.mkdir()
@@ -1130,6 +1161,8 @@ exec "{flock_binary}" "$@"
         self.assertEqual(missing.returncode, 2)
         self.assertIn("mokutil is required to verify MOK enrollment",
                       missing.stderr)
+        self.assertIn("phase=certificate_enrollment", missing.stderr)
+        self.assertIn("command_status=127", missing.stderr)
 
         if os.geteuid() != 0:
             inaccessible_cert = self.home / "inaccessible-certificate.der"

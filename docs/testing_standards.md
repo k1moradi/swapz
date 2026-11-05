@@ -6539,7 +6539,8 @@ module-signature trailer and cryptographically verify the detached PKCS#7/CMS
 signature over the exact module payload against the configured certificate.
 The trailer sanity check must match the kernel's `mod_check_sig()` contract:
 PKCS#7 id type, zero algorithm/hash/signer/key-id/reserved-pad parameter bytes,
-and a bounded positive signature length. A cryptographically valid CMS payload
+and a positive signature length strictly smaller than all bytes preceding the
+12-byte trailer; the kernel's equality boundary must reject. A cryptographically valid CMS payload
 with any kernel-rejected nonzero parameter byte is malformed and must not
 qualify. The real-CMS rootless regression must mutate every such trailer field
 independently and prove refusal; marker text alone is never signature proof.
@@ -6562,7 +6563,8 @@ build user's uid/gid after cryptographic verification (including a later
 already-signed invocation), verify that `--verify` remains ownership-read-
 only, and inject a failed signature-generation command while proving the
 unsigned module bytes remain unchanged and no private-key path/content reaches
-diagnostics. Failure diagnostics must identify the true phase (including
+diagnostics. Raw signing-command stdout/stderr must not be replayed on failure;
+report only bounded phase/status context. Failure diagnostics must identify the true phase (including
 `phase=certificate_enrollment`, `phase=detached_signature`,
 `phase=module_vermagic`, or `phase=signature_generation` as applicable) and
 retain the original producer/command status rather than broadly treating a

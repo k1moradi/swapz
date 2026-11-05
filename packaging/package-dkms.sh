@@ -2081,10 +2081,12 @@ if [[ -z "$test_root" ]]; then
   esac
 fi
 
-module_vermagic="$(modinfo -F vermagic "$module_artifact" 2>/dev/null || true)"
+module_vermagic_status=0
+module_vermagic="$(modinfo -F vermagic "$module_artifact" 2>/dev/null)" ||
+  module_vermagic_status=$?
 module_kernel_release="${module_vermagic%% *}"
 [[ "$module_kernel_release" == "$kernel_release" ]] ||
-  blocked "qualified module does not match the running kernel"
+  blocked "qualified module does not match the running kernel; phase=module_vermagic; command_status=$module_vermagic_status"
 if [[ -n "$test_root" ]]; then
   SWAPZ_SIGN_TEST_ROOT="$sandbox" bash packaging/sign-module.sh --verify "$module_artifact"
 else
