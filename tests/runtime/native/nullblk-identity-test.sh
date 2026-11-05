@@ -351,7 +351,7 @@ run_case() {
             rm -- "$FIXTURE/proc/self/status"
             mkdir "$FIXTURE/proc/self/status"
             ;;
-        missing_module|missing_tool|missing_unused_rmmod|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|unclaimed_nullb|internal_failure) ;;
+        missing_module|missing_tool|missing_unused_rmmod|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|foreign_nullb|unclaimed_nullb|unclaimed_nullb_pair|internal_failure) ;;
         idle_module_busy)
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
@@ -414,8 +414,21 @@ run_case() {
                     "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-9"
             fi
             ;;
+        foreign_nullb)
+            # An unrelated index-named device is not evidence of this run's ownership.
+            mkdir -p "$FIXTURE/sys/kernel/config/nullb/foreign-device" \
+                "$FIXTURE/sys/block/nullb7"
+            printf '240:7\n' > "$FIXTURE/sys/block/nullb7/dev"
+            ;;
         unclaimed_nullb)
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
+            ;;
+        unclaimed_nullb_pair)
+            # Two plausible names still provide zero independent creation proof.
+            mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" \
+                "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN"
+            printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/memory_backed"
+            printf '1\n' > "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/memory_backed"
             ;;
     esac
     case "$case_name" in
@@ -474,6 +487,19 @@ run_case() {
     [[ -f "$FIXTURE/proc/swaps" ]] || die "host swap inventory was mutated"
     [[ ! -e "$FIXTURE/unexpected-rmmod" ]] ||
         die "unowned module unload was attempted"
+    if [[ "$case_name" == foreign_nullb ]]; then
+        [[ -d "$FIXTURE/sys/kernel/config/nullb/foreign-device" &&
+           -f "$FIXTURE/sys/block/nullb7/dev" ]] ||
+            die "unrelated null_blk device was claimed or changed"
+    elif [[ "$case_name" == unclaimed_nullb_pair ]]; then
+        [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" &&
+           -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN" &&
+           "$output" == *"observed_proof=token_name_only"* &&
+           "$output" == *"retained_state_action=retain_unclaimed_null_blk"* &&
+           "$output" != *"$FIXTURE/"* &&
+           "$output" != *"nullb-swapz-"* ]] ||
+            die "ambiguous null_blk devices were admitted, changed or disclosed"
+    fi
     if [[ "$case_name" == owned_cleanup ]]; then
         [[ ! -e "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
            ! -e "$FIXTURE/dev/mapper/swapz-demo-$TOKEN" ]] ||
@@ -574,8 +600,10 @@ run_case replaced_inode owned_resource_proof BLOCKED unavailable
 run_case cleanup_failure owned_resource_proof BLOCKED 98
 run_case owned_cleanup idle_module_removal BLOCKED unavailable
 run_case unclaimed_nullb unclaimed_null_blk BLOCKED unavailable
+run_case unclaimed_nullb_pair unclaimed_null_blk BLOCKED unavailable
+run_case foreign_nullb LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 46 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 48 isolated preflight fixtures'
