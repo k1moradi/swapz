@@ -744,7 +744,7 @@ rm() {
         preamble = r'''
 rmdir() {
     if [[ $1 == "$CGROUP" ]]; then
-        kill -TERM "$"
+        kill -TERM "$BASHPID"
         return 1
     fi
     command rmdir "$@"
@@ -765,7 +765,7 @@ rmdir() {
         preamble = r'''
 rmdir() {
     if [[ $1 == "$CGROUP" ]]; then
-        kill -TERM "$"
+        kill -TERM "$BASHPID"
         command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
     fi
     command rmdir "$@"
