@@ -547,7 +547,9 @@ def _physical_audit_binding_is_valid(
         if not isinstance(pair, dict):
             return False
         workload = pair.get("workload")
-        if workload not in observed_counts:
+        if (
+                not isinstance(workload, str) or
+                workload not in observed_counts):
             return False
         observed_counts[workload] += 1
     for workload, specification in producer_workloads.items():
@@ -578,7 +580,9 @@ def _physical_audit_failure_witness_is_valid(
             first_failure.get("evidence_class") != "FAIL"):
         return False
     workload = first_failure.get("workload")
-    if workload not in producer_workloads:
+    if (
+            not isinstance(workload, str) or
+            workload not in producer_workloads):
         return False
     metric = first_failure.get("metric")
     pair_index = first_failure.get("pair_index")
@@ -652,12 +656,20 @@ def _physical_audit_failure_witness_is_valid(
             count["attempted_pairs"] == required and
             count["accepted_pairs"] == required and
             len(workload_pairs) == required and
+            all(type(index) is int for index in indices) and
             sorted(indices) == list(range(1, required + 1)) and
+            all(isinstance(pair_id, str) and bool(pair_id)
+                for pair_id in pair_ids) and
             len(set(pair_ids)) == required and
+            all(isinstance(name, str) and bool(name) for name in names) and
             len(set(names)) == required and
+            all(isinstance(digest, str) and SHA256_RE.fullmatch(digest)
+                for digest in digests) and
             len(set(digests)) == required and
             all(
                 _valid_campaign_artifact(pair) and
+                type(pair.get("pair_index")) is int and
+                1 <= pair["pair_index"] <= required and
                 isinstance(pair.get("pair_id"), str) and bool(pair["pair_id"]) and
                 pair.get("order") == specification["counterbalanced_order"][
                     pair["pair_index"] - 1] and

@@ -3569,6 +3569,31 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     for blocker in result["code_blockers"]),
                     result["code_blockers"])
 
+    def test_physical_audit_malformed_nested_types_are_blocked_nonthrowing(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        cases = []
+
+        pass_campaign = physical_campaign_evidence(policy_raw)
+        pass_campaign["artifacts"]["pairs"][0]["workload"] = []
+        cases.append(("pair-workload", pass_campaign))
+
+        arm_failure = physical_campaign_failure_evidence(policy_raw)
+        arm_failure["physical_evidence_audit"][
+            "first_failed_evidence"]["workload"] = []
+        cases.append(("failure-witness-workload", arm_failure))
+
+        decision_failure = physical_campaign_decision_failure_evidence(
+            policy_raw)
+        decision_failure["artifacts"]["pairs"][0]["pair_id"] = []
+        cases.append(("decision-pair-id", decision_failure))
+
+        for name, campaign in cases:
+            with self.subTest(name=name):
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
         policy = acceptance_policy()

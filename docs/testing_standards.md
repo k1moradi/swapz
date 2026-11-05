@@ -7335,9 +7335,11 @@ The audit qualification status and campaign qualification status must both be
 manifest is synthetic logic evidence only and remains BLOCKED. A missing or
 premature seal, contradictory qualification target, stale source, malformed
 audit identity/counts, BLOCKED/UNAVAILABLE evidence or incomplete failure
-witness likewise remains BLOCKED. Failure diagnostics identify the earliest
-seal/target/audit gate, expected versus observed source/target, the campaign
-digest and relevant pair count, and why FAIL versus BLOCKED was selected.
+witness likewise remains BLOCKED. Type-malformed nested audit witnesses,
+cohort counts and pair identifiers must fail closed as BLOCKED without raising.
+Failure diagnostics identify the earliest seal/target/audit gate, expected
+versus observed source/target, the campaign digest and relevant pair count, and
+why FAIL versus BLOCKED was selected.
 The existing five-argument private campaign-validator call remains supported
 for structural/measurement-only callers and loads tracked policy authority,
 but it does not establish release completeness. `evaluate_release` supplies
