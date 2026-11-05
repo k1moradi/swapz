@@ -6501,7 +6501,10 @@ the evidence fields emitted by the producer rather than inventing alternate
 counters. Development-only card evidence, including a source-bound fast-test
 PASS, exact header restoration and an inactive final target, is never real-swap
 or physical-acceptance evidence and cannot backfill an incomplete five-stage
-`make test`. Real-swap no-traffic controls use `cycles[].workload` cgroup
+`make test`. Development fixtures use the producer's `development_test_evidence`
+field; real-swap preflight controls use only their persistent disposition,
+phase and reason rather than borrowing development-probe restoration fields.
+Real-swap no-traffic controls use `cycles[].workload` cgroup
 swap, mapper use, swapz logical/physical READ/WRITE, lower-device byte, vmstat
 swap-in/out and oracle mismatch fields. Campaign-completeness controls derive
 required pair counts from the frozen workload map; a PASS-looking sealed

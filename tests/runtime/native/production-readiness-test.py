@@ -2599,9 +2599,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         private_marker = "secret-private-path-and-token"
         development = {
             "schema": "swapz-physical-development-results-v1",
-            "status": "PASS",
             "evidence_class": "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION",
             "development_only": True,
+            "current_git_head": SOURCE,
             "source_commit_sha": SOURCE,
             "linux_swap_activation_tested": False,
             "physical_media_acceptance": False,
@@ -2609,15 +2609,13 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "target_remains_inactive": True,
             "original_header_matches_final": True,
             "final_recovery_state": "COMPLETE",
-            "development_evidence": {
-                "schema": "swapz-fast-test-development-evidence-v1",
-                "head": SOURCE,
-                "dirty": False,
+            "development_test_evidence": {
+                "outcome": "FAST_TEST_PASS",
+                "preflight": {"status": "PASS", "check": "complete"},
                 "native_status": "PASS",
                 "fast_test_status": "PASS",
-                "loaded_preflight": {"status": "PASS", "check": "complete"},
             },
-            "private_note": private_marker,
+            "device_uuid_path": private_marker,
         }
         result = evaluate(report=report, physical=development)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
@@ -2632,15 +2630,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "real_linux_swap: persistent evidence schema is invalid" in item
             for item in result["code_blockers"]))
         self.assertNotIn(private_marker, json.dumps(result))
-    def test_physical_preflight_restoration_cannot_override_blocked_phase(self):
+    def test_blocked_real_swap_preflight_cannot_be_overridden_by_nested_pass(
+            self):
         report = owner_report()
         policy = acceptance_policy()
         physical = real_swap_evidence(encoded(report), encoded(policy))
         physical.update(
             status="BLOCKED", phase="PREFLIGHT",
-            reason="active unrelated swap", card_reached=True,
-            original_header_matches_final=True, target_remains_inactive=True,
-            mapper_io_bytes=0)
+            reason="active unrelated swap")
         result = evaluate(report=report, policy=policy, physical=physical)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(result["release_verdict"], "BLOCKED")
