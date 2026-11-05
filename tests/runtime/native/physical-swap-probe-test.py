@@ -1685,6 +1685,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         formatted[24:40] = bytes(range(1, 17))
         mapper = f"/dev/mapper/{state['dm_name']}"
         events = []
+        # Model actual block-zero bytes, rather than inferring a write from
+        # the number of reads. A second read before a write must be identical.
+        observed_block_zero = target["header"]
         identity_verifications = 0
         oracle_invocations = 0
         counter_reads = 0
@@ -1715,10 +1718,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     f"injected identity change at boundary {identity_verifications}")
 
         def run(command, **kwargs):
-            nonlocal oracle_invocations
+            nonlocal oracle_invocations, observed_block_zero
             del kwargs
             arguments = tuple(str(value) for value in command)
             events.append(("command", arguments))
+            if command[:2] == ["/reviewed/swapzctl", "format"]:
+                observed_block_zero = bytes(formatted)
             if command[0] == "/reviewed/device-roundtrip":
                 oracle_invocations += 1
                 if oracle_invocations == oracle_failure_at:
@@ -1783,6 +1788,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
         def is_file(path):
             return str(path).endswith("/parameters/allow_physical_backing")
+
+        def read_block0(_device, _target):
+            return observed_block_zero
+
+        def write_block0(_device, header, _target, **kwargs):
+            nonlocal observed_block_zero
+            del kwargs
+            events.append(("write0",))
+            observed_block_zero = bytes(header)
 
         def iter_directory(path):
             if str(path) == "/sys/dev/block/253:0/slaves":
@@ -1908,12 +1922,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         "priority": target["swap_priority"],
                     }, None])),
                 mock.patch.object(probe, "_write_block0",
-                                  side_effect=lambda *_, **__:
-                                  events.append(("write0",))),
+                                  side_effect=write_block0),
                 mock.patch.object(probe, "_read_block0",
-                                  side_effect=[target["header"],
-                                               bytes(probe.PAGE_BYTES),
-                                               bytes(formatted)]),
+                                  side_effect=read_block0),
                 mock.patch.object(probe, "_save_state",
                                   side_effect=lambda *_:
                                   events.append(("save", state["stage"]))),
