@@ -982,6 +982,66 @@ static int test_mixed_raw_gc_uncertain_completion_recovery(void)
 	return 0;
 }
 
+/* A recovery diagnostic may claim another reserve only when that segment is
+ * independently dead in current authority, not merely because its role bit is
+ * reserved. Keep this side-effect free so failure reporting cannot change GC. */
+static int gc_recovery_reserve_available(swapz_u32 segment,
+					 swapz_u32 victim,
+					 swapz_u32 destination)
+{
+	swapz_u32 block, logical;
+
+	if (segment >= sizeof(roles) / sizeof(roles[0]) ||
+	    segment == victim || segment == destination ||
+	    segment == a.gc_forbidden_open || roles[segment])
+		return 0;
+	for (logical = 0; logical < sizeof(maps) / sizeof(maps[0]); ++logical) {
+		const struct swapz_map *mapping = &maps[logical];
+
+		if (!mapping->valid)
+			continue;
+		if (mapping->start_block >= PBLKS ||
+		    (mapping->extent_blocks != 1U &&
+		     mapping->extent_blocks != 2U &&
+		     mapping->extent_blocks != 4U) ||
+		    mapping->start_block % SWAPZ_SEGMENT_BLOCKS +
+			    mapping->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+		    classes[mapping->start_block] != mapping->extent_blocks ||
+		    !live[mapping->start_block])
+			return 0;
+		if (mapping->start_block / SWAPZ_SEGMENT_BLOCKS == segment)
+			return 0;
+	}
+	for (block = segment * SWAPZ_SEGMENT_BLOCKS;
+	     block < (segment + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
+		if (live[block])
+			return 0;
+	return 1;
+}
+
+static unsigned int gc_recovery_available_reserves(swapz_u32 victim,
+						    swapz_u32 destination)
+{
+	unsigned int available = 0U;
+	swapz_u32 segment;
+
+	for (segment = 0; segment < sizeof(roles) / sizeof(roles[0]); ++segment)
+		available += gc_recovery_reserve_available(
+			segment, victim, destination) ? 1U : 0U;
+	return available;
+}
+
+static int same_authoritative_map(const struct swapz_map *actual,
+				  const struct swapz_map *expected)
+{
+	return actual->start_block == expected->start_block &&
+	       actual->generation == expected->generation &&
+	       actual->raw_crc32c == expected->raw_crc32c &&
+	       actual->payload_length == expected->payload_length &&
+	       actual->record_index == expected->record_index &&
+	       actual->state == expected->state;
+}
+
 /*
  * Production can reach a non-full destination -ENOSPC when a standalone RAW
  * survivor has already published and the remaining compressed survivors need a
@@ -1012,7 +1072,7 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	swapz_u8 planned_takes[SWAPZ_MAX_RECORDS];
 	swapz_u8 planned_extents = 0U, committed = 99U;
 	swapz_u32 block, stalled_cursor;
-	unsigned int index, lower_writes_before;
+	unsigned int available_reserve, index, lower_writes_before;
 	int error;
 
 	CHECK(setup() == 0);
@@ -1111,35 +1171,47 @@ static int test_gc_compressed_tail_staging_exhaustion(void)
 	committed = 99U;
 	error = swapz_engine_write_window_batched(
 		&e, compressed_pages, 3U, &committed);
-	if (error != -ENOSPC || committed != 0U ||
-	    lower_writes != lower_writes_before ||
-	    a.next_block != stalled_cursor) {
+	available_reserve = gc_recovery_available_reserves(
+		victim, blocked_destination);
+	{
 		const int prior_mapping_authoritative =
-			maps[1].start_block == prior_compressed[0].start_block &&
-			maps[1].generation == prior_compressed[0].generation &&
-			maps[2].start_block == prior_compressed[1].start_block &&
-			maps[2].generation == prior_compressed[1].generation &&
-			maps[3].start_block == prior_compressed[2].start_block &&
-			maps[3].generation == prior_compressed[2].generation;
+			same_authoritative_map(&maps[1], &prior_compressed[0]) &&
+			same_authoritative_map(&maps[2], &prior_compressed[1]) &&
+			same_authoritative_map(&maps[3], &prior_compressed[2]);
+		const int recovery_owned =
+			a.gc_allocation && a.gc_forbidden_victim == victim &&
+			a.gc_destination == blocked_destination &&
+			a.open_segment == blocked_destination;
+		const unsigned int progress_possible =
+			prior_mapping_authoritative && recovery_owned &&
+			available_reserve > 0U;
 
-		fprintf(stderr, "%s:%d FAIL phase=gc"
-			" failure_class=staging_exhaustion"
-			" original_errno=%d expected_errno=%d"
-			" victim=%u victim_role=%u"
-			" destination=%u destination_role=%u"
-			" recovery_ownership=authority_rotation"
-			" progress_possible=%u"
-			" prior_mapping_authoritative=%d"
-			" committed=%u lower_writes_before=%u"
-			" lower_writes_after=%u cursor=%u\n",
-			__FILE__, __LINE__, error, -ENOSPC,
-			victim, (unsigned int)roles[victim],
-			blocked_destination,
-			(unsigned int)roles[blocked_destination],
-			(unsigned int)!roles[replacement_destination],
-			prior_mapping_authoritative, (unsigned int)committed,
-			lower_writes_before, lower_writes, a.next_block);
-		return 1;
+		if (error != -ENOSPC || committed != 0U ||
+		    lower_writes != lower_writes_before ||
+		    a.next_block != stalled_cursor ||
+		    !prior_mapping_authoritative || !recovery_owned ||
+		    available_reserve != 1U) {
+			fprintf(stderr, "%s:%d FAIL phase=gc"
+				" failure_class=staging_exhaustion"
+				" original_errno=%d expected_errno=%d"
+				" victim=%u victim_role=%u"
+				" destination=%u destination_role=%u"
+				" available_reserve=%u"
+				" recovery_ownership=authority_rotation"
+				" progress_possible=%u"
+				" authoritative_mapping=%d"
+				" committed=%u lower_writes_before=%u"
+				" lower_writes_after=%u cursor=%u\n",
+				__FILE__, __LINE__, error, -ENOSPC,
+				victim, (unsigned int)roles[victim],
+				blocked_destination,
+				(unsigned int)roles[blocked_destination],
+				available_reserve, progress_possible,
+				prior_mapping_authoritative,
+				(unsigned int)committed, lower_writes_before,
+				lower_writes, a.next_block);
+			return 1;
+		}
 	}
 	CHECK(a.gc_allocation && a.gc_forbidden_victim == victim &&
 	      a.gc_destination == blocked_destination &&

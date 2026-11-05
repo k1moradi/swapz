@@ -1279,7 +1279,11 @@ attempts must fail without changing that retained token, circular probe,
 allocation cursor or any segment role. Failure diagnostics must derive
 victim/destination roles from the actual retained IDs and safely represent
 invalid/sentinel IDs rather than pairing a changed ID with a hard-coded role
-slot.
+slot. A GC staging-exhaustion diagnostic may report an available reserve or
+forward progress only after a side-effect-free authoritative deadness check of
+that reserve; a reserve role bit alone is insufficient. It must print the
+numeric available-reserve count, original errno, retained authoritative-mapping
+state and whether progress remains possible.
 Every successful reserve rotation must permit at least one subsequent foreground
 overwrite before the next `-ENOSPC`; at worst-case RAW occupancy the next
 exhaustion must occur within one 256-block segment of successful foreground
