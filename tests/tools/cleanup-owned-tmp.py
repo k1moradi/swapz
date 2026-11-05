@@ -267,6 +267,64 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                          for device, inode in identities}
     process_count = 0
     reference_count = 0
+
+    def scan_reference_view(reference_path: str,
+                            scan_mappings: bool) -> tuple[bool, int]:
+        nonlocal reference_count
+        for reference_name in ("cwd", "root"):
+            reference_count += 1
+            require(reference_count <= MAX_PROCESS_REFERENCES,
+                    "same-owner process references exceed cleanup bound", "bound")
+            try:
+                current = os.stat(os.path.join(reference_path, reference_name))
+            except FileNotFoundError:
+                continue
+            if (current.st_dev, current.st_ino) in identities:
+                return True, 0
+        try:
+            with os.scandir(os.path.join(reference_path, "fd")) as descriptors:
+                for descriptor in descriptors:
+                    reference_count += 1
+                    require(reference_count <= MAX_PROCESS_REFERENCES,
+                            "same-owner process references exceed cleanup bound", "bound")
+                    try:
+                        current = descriptor.stat(follow_symlinks=True)
+                    except FileNotFoundError:
+                        continue
+                    if (current.st_dev, current.st_ino) in identities:
+                        return True, 0
+        except FileNotFoundError:
+            pass
+
+        mapping_rows = 0
+        if scan_mappings:
+            try:
+                with open(os.path.join(reference_path, "maps"), "rb") as mappings:
+                    for mapping in mappings:
+                        mapping_rows += 1
+                        reference_count += 1
+                        require(reference_count <= MAX_PROCESS_REFERENCES,
+                                "same-owner process references exceed cleanup bound", "bound")
+                        fields = mapping.split(None, 5)
+                        require(len(fields) >= 5,
+                                "same-owner process mapping is malformed", "process-visibility")
+                        device_numbers = fields[3].split(b":", 1)
+                        require(len(device_numbers) == 2,
+                                "same-owner process mapping device is malformed",
+                                "process-visibility")
+                        try:
+                            mapping_identity = (int(device_numbers[0], 16),
+                                                int(device_numbers[1], 16), int(fields[4]))
+                        except ValueError as error:
+                            raise CleanupBlocked(
+                                "same-owner process mapping identity is malformed",
+                                "process-visibility") from error
+                        if mapping_identity in mapped_identities:
+                            return True, mapping_rows
+            except FileNotFoundError:
+                pass
+        return False, mapping_rows
+
     # The cleanup process intentionally owns root/session descriptors, so do
     # not scan its fd table. Its inherited cwd/root are not cleanup-owned and
     # can keep an otherwise completed session live after parent-name removal.
@@ -290,54 +348,39 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
             require(process_count <= MAX_PROCESSES,
                     "same-owner process inventory exceeds cleanup bound", "bound")
             process_path = os.path.join("/proc", process.name)
-            for reference_name in ("cwd", "root"):
-                reference_count += 1
-                require(reference_count <= MAX_PROCESS_REFERENCES,
-                        "same-owner process references exceed cleanup bound", "bound")
-                try:
-                    current = os.stat(os.path.join(process_path, reference_name))
-                except FileNotFoundError:
-                    continue
-                if (current.st_dev, current.st_ino) in identities:
-                    return True
+            referenced, mapping_rows = scan_reference_view(process_path, True)
+            if referenced:
+                return True
+
+            # Linux can leave the thread-group leader visible as a zombie while
+            # live workers retain per-task cwd/root/fd state. In that state the
+            # leader's procfs fd and maps views can be empty, so scan every
+            # non-leader task before treating the process as inactive.
+            mapping_inventory_visible = mapping_rows > 0
             try:
-                with os.scandir(os.path.join(process_path, "fd")) as descriptors:
-                    for descriptor in descriptors:
+                with os.scandir(os.path.join(process_path, "task")) as tasks:
+                    for task in tasks:
+                        if not task.name.isdecimal() or task.name == process.name:
+                            continue
                         reference_count += 1
                         require(reference_count <= MAX_PROCESS_REFERENCES,
                                 "same-owner process references exceed cleanup bound", "bound")
                         try:
-                            current = descriptor.stat(follow_symlinks=True)
+                            task_stat = task.stat(follow_symlinks=False)
                         except FileNotFoundError:
                             continue
-                        if (current.st_dev, current.st_ino) in identities:
+                        require(task_stat.st_uid == owner_uid,
+                                "same-owner process task ownership changed",
+                                "process-visibility")
+                        task_path = os.path.join(process_path, "task", task.name)
+                        referenced, task_mapping_rows = scan_reference_view(
+                            task_path, not mapping_inventory_visible)
+                        if referenced:
                             return True
+                        if task_mapping_rows > 0:
+                            mapping_inventory_visible = True
             except FileNotFoundError:
-                continue  # Process exited during descriptor inventory.
-            # A process can retain mapped file pages after its last fd closes.
-            # Match /proc mappings by device/inode, never by private paths.
-            try:
-                with open(os.path.join(process_path, "maps"), "rb") as mappings:
-                    for mapping in mappings:
-                        reference_count += 1
-                        require(reference_count <= MAX_PROCESS_REFERENCES,
-                                "same-owner process references exceed cleanup bound", "bound")
-                        fields = mapping.split(None, 5)
-                        require(len(fields) >= 5,
-                                "same-owner process mapping is malformed", "process-visibility")
-                        device_numbers = fields[3].split(b":", 1)
-                        require(len(device_numbers) == 2,
-                                "same-owner process mapping device is malformed", "process-visibility")
-                        try:
-                            mapping_identity = (int(device_numbers[0], 16),
-                                                int(device_numbers[1], 16), int(fields[4]))
-                        except ValueError as error:
-                            raise CleanupBlocked("same-owner process mapping identity is malformed",
-                                                 "process-visibility") from error
-                        if mapping_identity in mapped_identities:
-                            return True
-            except FileNotFoundError:
-                continue  # Process exited during inventory.
+                continue  # Process exited during task inventory.
     return False
 
 

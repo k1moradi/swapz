@@ -313,6 +313,101 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(owned.exists())
 
+    def test_empty_process_leader_views_require_live_task_inventory(self):
+        owned = self.session("Abcd1234")
+        child_code = (
+            "import os, sys, threading\n"
+            "def hold_file():\n"
+            "    descriptor = os.open(sys.argv[1], os.O_RDONLY)\n"
+            "    print('ready', flush=True)\n"
+            "    sys.stdin.buffer.read(1)\n"
+            "    os.close(descriptor)\n"
+            "worker = threading.Thread(target=hold_file)\n"
+            "worker.start()\n"
+            "worker.join()\n"
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c", child_code,
+             str(owned / "fixture.bin")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.visible_process_ids.add(child.pid)
+        original_stat = cleanup_module.os.stat
+        original_scandir = cleanup_module.os.scandir
+        original_open = open
+
+        def hide_leader_links(path, *args, **kwargs):
+            if path in (f"/proc/{child.pid}/cwd", f"/proc/{child.pid}/root"):
+                raise FileNotFoundError(
+                    errno.ENOENT, "synthetic exited process leader",
+                    "/private/proc-leader")
+            return original_stat(path, *args, **kwargs)
+
+        def hide_leader_maps(path, *args, **kwargs):
+            if path == f"/proc/{child.pid}/maps":
+                return io.BytesIO(b"")
+            return original_open(path, *args, **kwargs)
+
+        def deny_task_inventory(path):
+            if path == f"/proc/{child.pid}/fd":
+                return contextlib.nullcontext(())
+            if path == f"/proc/{child.pid}/task":
+                raise PermissionError(
+                    errno.EACCES, "synthetic protected task inventory",
+                    "/private/proc-task")
+            return original_scandir(path)
+
+        def expose_task_inventory(path):
+            if path == f"/proc/{child.pid}/fd":
+                return contextlib.nullcontext(())
+            return original_scandir(path)
+
+        try:
+            ready, _, _ = select.select([child.stdout], [], [], 5)
+            self.assertTrue(ready, "live-worker fixture did not become ready")
+            self.assertEqual(child.stdout.readline().strip(), "ready")
+
+            with mock.patch.object(
+                    cleanup_module.os, "stat", side_effect=hide_leader_links), \
+                 mock.patch.object(
+                    cleanup_module.os, "scandir", side_effect=deny_task_inventory), \
+                 mock.patch("builtins.open", side_effect=hide_leader_maps):
+                blocked = self.run_cleanup()
+            self.assertEqual(blocked.returncode, 2, blocked.stderr)
+            self.assertEqual(blocked.stdout, "")
+            self.assertIn("phase=session-activity category=filesystem-error",
+                          blocked.stderr)
+            self.assertIn("original_errno=EACCES(13)", blocked.stderr)
+            self.assertIn("observed_uncertainty=same-owner-process-activity-unproved",
+                          blocked.stderr)
+            self.assertIn("retained=unexamined-or-unproved removed=0",
+                          blocked.stderr)
+            self.assertIn("safe_next_action=inspect-retained-evidence-read-only",
+                          blocked.stderr)
+            self.assertNotIn("/private", blocked.stderr)
+            self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
+
+            with mock.patch.object(
+                    cleanup_module.os, "stat", side_effect=hide_leader_links), \
+                 mock.patch.object(
+                    cleanup_module.os, "scandir", side_effect=expose_task_inventory), \
+                 mock.patch("builtins.open", side_effect=hide_leader_maps):
+                result = self.run_cleanup()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("removed:0 retained:1", result.stdout)
+            self.assertIn("retained_active:1", result.stdout)
+            self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
+        finally:
+            if child.poll() is None:
+                child.stdin.write("x")
+                child.stdin.flush()
+            child.wait(timeout=5)
+            self.visible_process_ids.discard(child.pid)
+
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:1 retained:0", result.stdout)
+        self.assertFalse(owned.exists())
+
     def test_cleanup_process_cwd_inside_session_is_retained(self):
         owned = self.session("Abcd1234")
         previous_directory = Path.cwd()

@@ -4170,19 +4170,26 @@ without following symlinks to confirm its original device/inode/owner/mode and
 mount ID. A root or session rename, replacement, or remount during the bounded
 inspection must block with no deletion. After that pathname/mount revalidation
 and before the first unlink, perform a bounded same-owner /proc inventory and
-retain the session if any process still references an inspected session object
-through cwd, root, an open descriptor, or a live file-backed mapping. Check the
-cleanup process's inherited cwd and root separately before skipping its own PID;
-its intentionally pinned cleanup descriptors are not activity evidence, but an
-inherited cwd/root inside the session is. A bounded /proc/<pid>/maps scan
-matches mapping device/inode without using private path text, including when
-the process has closed its file descriptor.
+retain the session if any process or live worker task still references an
+inspected session object through cwd, root, an open descriptor, or a live
+file-backed mapping. Check the cleanup process's inherited cwd and root
+separately before skipping its own PID; its intentionally pinned cleanup
+descriptors are not activity evidence, but an inherited cwd/root inside the
+session is. Inspect non-leader /proc/<pid>/task/<tid> cwd/root/fd views as well
+as the thread-group leader because Linux may leave the leader visible as a
+zombie while live workers retain resources and the leader fd/maps views are
+empty. A bounded maps scan matches mapping device/inode without using private
+path text, including when the process has closed its file descriptor; once a
+nonempty thread-group mapping inventory is visible, duplicate task maps need
+not be rescanned because threads in that group share the address space.
 Unreadable or malformed mapping inventory for a confirmed same-owner process
-blocks cleanup; original I/O errno must remain available. Failure to enumerate
-/proc itself or to prove the owner of an enumerated process is uncertainty and
-blocks cleanup. Only disappearance evidence is skippable: a vanished process,
-closed descriptor, or process that exits during the scan may produce
-FileNotFoundError and be treated as no longer observable. Permission denial on
+or live task blocks cleanup; original I/O errno must remain available. Failure
+to enumerate /proc or a confirmed same-owner process's task inventory, or to
+prove the owner of an enumerated process/task, is uncertainty and blocks
+cleanup. Only disappearance evidence is skippable: a vanished process, vanished
+task, closed descriptor, or process/task that exits during the scan may produce
+FileNotFoundError and be treated as no longer observable. An empty leader view
+alone is not disappearance evidence while a non-leader task remains visible. Permission denial on
 a confirmed same-owner process's cwd, root, descriptor inventory, individual
 descriptor, or mappings is activity uncertainty and blocks cleanup. Do not
 treat EACCES as process exit or as proof that the process is unrelated; until
