@@ -5204,7 +5204,10 @@ regular inode and filesystem `st_dev`. That overmount fixture proves only the
 pathname re-resolution gap, not an actual swap race. It must make mount
 propagation private before fixture mounts, may skip only the overmount arm when
 unprivileged user/mount namespaces are unavailable, and must never activate or
-deactivate swap or open a block device. Rootless stream fixtures must reject
+deactivate swap or open a block device. A missing child marker may skip
+only on an `unshare` namespace-setup failure; unexpected interpreter or fixture
+startup failures must fail, not be reported as unavailable namespaces.
+Rootless stream fixtures must reject
 empty or headerless tables and malformed headers/rows before treating the
 snapshot as clear. Native fixtures also
 cover the literal kernel header, canonical numeric fields, embedded NULs,

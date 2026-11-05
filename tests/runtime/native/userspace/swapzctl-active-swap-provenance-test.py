@@ -207,9 +207,21 @@ class ActiveSwapProvenanceModel(unittest.TestCase):
             stderr=subprocess.PIPE,
             check=False,
             timeout=10,
+            env={**os.environ, "LC_ALL": "C"},
         )
         child_started = CHILD_MARKER in result.stderr
         if not child_started:
+            # Only namespace setup failures can skip; child failures must fail.
+            self.assertTrue(
+                result.returncode != 0
+                and result.stderr.startswith((
+                    "unshare: unshare failed:",
+                    "unshare: write failed:",
+                    "unshare: setgroups failed:",
+                )),
+                f"unexpected overmount child startup failure: "
+                f"status={result.returncode}; stderr={result.stderr}",
+            )
             self.skipTest(
                 result.stderr.strip() or "unprivileged user/mount namespaces unavailable"
             )
