@@ -94,6 +94,7 @@ install_verified_mask()
 		[ ! -e "$mask_temporary" ] && [ ! -L "$mask_temporary" ]; then :; else
 		[ "$mask_status" -ne 0 ] || mask_status=1
 		mask_restore_status=0
+		mask_restore_rename_status=0
 		if ! mapper_mask_is_active; then
 			# Retry the atomic mask replacement. If rename remains broken, a
 			# direct link at this reserved safety name is the last resort.
@@ -101,6 +102,9 @@ install_verified_mask()
 			if ln -s /dev/null "$mask_temporary"; then
 				if mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
 					mask_restore_status=$?
+					# Preserve the exact secondary rename failure even when a
+					# later verified replacement fails only its postcondition.
+					mask_restore_rename_status=$mask_restore_status
 				fi
 			else
 				mask_restore_status=$?
@@ -165,9 +169,10 @@ install_verified_mask()
 				fi ;;
 			esac
 		fi
-		printf 'swapz-primary-generator: phase=mask expected_mask=/dev/null observed_mask=%s observed_early_unit=%s owned_dropins=none original_status=%s restore_status=%s original_errno=unavailable surviving_artifacts=%s rollback=%s action=%s\n' \
+		printf 'swapz-primary-generator: phase=mask expected_mask=/dev/null observed_mask=%s observed_early_unit=%s owned_dropins=none original_status=%s restore_status=%s restore_rename_status=%s original_errno=unavailable surviving_artifacts=%s rollback=%s action=%s\n' \
 			"$observed_mask" "$observed_early_unit" "$mask_status" "$mask_restore_status" \
-			"$surviving_artifacts" "$rollback_outcome" "$mask_action" >&2
+			"$mask_restore_rename_status" "$surviving_artifacts" "$rollback_outcome" \
+			"$mask_action" >&2
 		fail "$mask_status" mask generator-output "$requested_mask_validation" mapper-active-job
 	fi
 }

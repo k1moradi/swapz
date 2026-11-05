@@ -598,8 +598,9 @@ class GeneratorPublicationTest(unittest.TestCase):
                 if [ ! -e "$MOCK_SUBSTITUTED" ]; then
                     /usr/bin/ln -s "$MOCK_FOREIGN" "$MOCK_MASK" || exit $?
                     : > "$MOCK_SUBSTITUTED"
+                    exit 92
                 fi
-                exit 92 ;;
+                exit 93 ;;
             esac
             exec /usr/bin/mv "$@"
             """).lstrip("\n"), encoding="ascii")
@@ -631,6 +632,7 @@ class GeneratorPublicationTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 92, result.stderr)
                 self.assertIn("phase=mask", result.stderr)
                 self.assertIn("original_status=92 restore_status=1", result.stderr)
+                self.assertIn("restore_rename_status=93", result.stderr)
                 self.assertIn("observed_mask=missing-or-substituted", result.stderr)
                 self.assertIn("observed_early_unit=foreign-symlink", result.stderr)
                 self.assertIn("owned_dropins=none", result.stderr)
