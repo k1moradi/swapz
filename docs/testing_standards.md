@@ -7239,7 +7239,15 @@ must independently report PASS with zero retained and omitted diagnostics and
 the frozen claim boundary; a PASS-looking campaign with an absent or failed
 audit remains BLOCKED. A source/target/policy/tool-bound campaign whose
 producer audit carries a retained FAIL diagnostic is producer-proven failed
-execution; BLOCKED/UNAVAILABLE or incomplete audit evidence remains BLOCKED.
+execution only when its exact-source, policy and artifact receipt is valid,
+its seal is a canonical UTC time not before an included host-after RAM capture,
+and the nested qualification pair target binding is a MATCH to the authorized
+partition and lower-device identity. A missing/premature seal or contradictory
+qualification target turns the claimed audit FAIL into BLOCKED, not an
+authenticated execution failure. BLOCKED/UNAVAILABLE or incomplete audit
+evidence also remains BLOCKED. The failure-authentication diagnostic identifies
+the earliest seal or target gate, expected versus observed source/target and
+artifact digest, and the reason for the FAIL/BLOCKED distinction.
 The existing five-argument private campaign-validator call remains supported
 for structural/measurement-only callers and loads tracked policy authority,
 but it does not establish release completeness. `evaluate_release` supplies

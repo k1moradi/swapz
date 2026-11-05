@@ -3359,6 +3359,77 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
                 self.assertEqual(result["release_verdict"], expected)
 
+    def test_physical_fail_requires_sealed_exact_qualification_target(self):
+        # A retained FAIL is authoritative only for the sealed admitted target,
+        # not for a stale host capture or a contradictory nested pair binding.
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+
+        def failed_campaign():
+            campaign = physical_campaign_evidence(policy_raw)
+            campaign["campaign_status"] = "BLOCKED_PHYSICAL_EVIDENCE"
+            audit = campaign["physical_evidence_audit"]
+            audit["status"] = "FAIL"
+            audit["diagnostics"] = [{
+                "status": "FAIL",
+                "metric": "arm.verdict",
+                "expected": "PASS",
+                "observed": None,
+                "workload": "sd-service-balanced",
+                "pair_index": 1,
+                "arm": "swapz",
+                "producer_status": "FAIL",
+                "reason": "physical arm producer reported terminal failure",
+            }]
+            return campaign
+
+        # Positive rootless control for a complete, coherent FAIL audit.
+        self.assertEqual(
+            evaluate(policy=policy, campaign=failed_campaign())[
+                "release_verdict"], "FAIL")
+
+        for mutation, expected_phase in (
+                ("missing-seal", "sealed_at_utc"),
+                ("seal-before-host-capture", "sealed_at_utc"),
+                ("wrong-observed-target", "qualification_target_binding"),
+                ("wrong-lower-device", "qualification_target_binding"),
+                ("missing-expected-target", "qualification_target_binding")):
+            with self.subTest(mutation=mutation):
+                campaign = failed_campaign()
+                binding = campaign["qualification_target_binding"]
+                if mutation == "missing-seal":
+                    campaign.pop("sealed_at_utc")
+                elif mutation == "seal-before-host-capture":
+                    campaign["sealed_at_utc"] = "2026-11-03T00:00:09Z"
+                elif mutation == "wrong-observed-target":
+                    binding["observed"]["physical_partuuid"] = "ffffffff-01"
+                elif mutation == "wrong-lower-device":
+                    binding["observed"]["lower_major_minor"] = "8:2"
+                else:
+                    binding.pop("expected")
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    f"first_failed_phase={expected_phase}" in blocker and
+                    f"required_source_sha={SOURCE}" in blocker and
+                    f"required_target=('{TARGET['partuuid']}', {TARGET['size_bytes']})" in blocker and
+                    f"observed_source_sha={SOURCE}" in blocker and
+                    "observed_qualification_target=" in blocker and
+                    "required_artifact_sha256=" in blocker and
+                    "observed_artifact_sha256=" in blocker and
+                    "verdict=BLOCKED" in blocker and
+                    "reason=missing_or_contradictory_campaign_proof" in blocker
+                    for blocker in result["code_blockers"]),
+                    result["code_blockers"])
+
+        # Performance failure authentication does not weaken complete PASS
+        # controls or grant release PASS without the observed owner cold boot.
+        complete = evaluate(policy=policy)
+        self.assertEqual(complete["CODE_PRODUCTION_READY"], "PASS")
+        self.assertEqual(complete["DEPLOYMENT_PRODUCTION_READY"], "PASS")
+        self.assertEqual(complete["release_verdict"], "BLOCKED")
+
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
         policy = acceptance_policy()

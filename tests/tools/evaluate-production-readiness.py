@@ -1704,6 +1704,39 @@ def _physical_campaign_failure_is_proven(
             target is None or
             _normalize_campaign_target(record.get("target")) != target):
         return False
+    # A producer's failed measurement cannot authenticate an unsealed or
+    # differently targeted campaign. Capacity/RAM may be independently absent
+    # on a failed run, but an included host trace must precede the seal.
+    sealed_time = _parse_utc_evidence_time(record.get("sealed_at_utc"))
+    if sealed_time is None:
+        return False
+    capacity_and_ram = record.get("capacity_and_ram")
+    if isinstance(capacity_and_ram, dict):
+        host_binding = capacity_and_ram.get("metadata_ram_host_binding")
+        host_after = (
+            host_binding.get("host_after_captured_at_utc")
+            if isinstance(host_binding, dict) else None)
+        host_after_time = _parse_utc_evidence_time(host_after)
+        if host_after_time is None or sealed_time < host_after_time:
+            return False
+    target_binding = record.get("qualification_target_binding")
+    expected = (
+        target_binding.get("expected")
+        if isinstance(target_binding, dict) else None)
+    if (
+            not isinstance(target_binding, dict) or
+            target_binding.get("status") != "MATCH" or
+            target_binding.get("consistent") is not True or
+            not isinstance(expected, dict) or
+            _normalize_target({
+                "partuuid": expected.get("physical_partuuid"),
+                "size_bytes": expected.get("physical_device_bytes"),
+            }) != target or
+            not isinstance(expected.get("lower_major_minor"), str) or
+            not MAJOR_MINOR_RE.fullmatch(expected["lower_major_minor"]) or
+            not _same_json_value(target_binding.get("observed"), expected)):
+        return False
+
     audit = record.get("physical_evidence_audit")
     diagnostics = audit.get("diagnostics") if isinstance(audit, dict) else None
     if (
@@ -2636,7 +2669,9 @@ def evaluate_release(
                 if isinstance(physical_campaign_evidence, dict) else None)
             safe_status = (
                 original_status if original_status in (
-                    "PASS", "FAIL", "BLOCKED") else "invalid")
+                    "PASS", "FAIL", "BLOCKED",
+                    "BLOCKED_PHYSICAL_EVIDENCE", "FAIL_OR_INCOMPLETE")
+                else "invalid")
             artifact_digest = (
                 sha256_bytes(physical_campaign_evidence_raw)
                 if isinstance(physical_campaign_evidence_raw, bytes) else "invalid")
@@ -2649,8 +2684,25 @@ def evaluate_release(
             audit = (
                 physical_campaign_evidence.get("physical_evidence_audit")
                 if isinstance(physical_campaign_evidence, dict) else None)
+            target_binding = (
+                physical_campaign_evidence.get("qualification_target_binding")
+                if isinstance(physical_campaign_evidence, dict) else None)
+            observed_binding = (
+                target_binding.get("observed")
+                if isinstance(target_binding, dict) else None)
+            observed_binding_target = (
+                _normalize_target({
+                    "partuuid": observed_binding.get("physical_partuuid"),
+                    "size_bytes": observed_binding.get("physical_device_bytes"),
+                }) if isinstance(observed_binding, dict) else None)
             failed_phase = (
-                "physical_evidence_audit"
+                "qualification_target_binding"
+                if any(issue.startswith(
+                    "sealed campaign qualification target")
+                    for issue in campaign_issues)
+                else "sealed_at_utc"
+                if any("sealed_at_utc" in issue for issue in campaign_issues)
+                else "physical_evidence_audit"
                 if isinstance(audit, dict) and audit.get("status") != "PASS"
                 else "campaign_validation")
             required_artifact = (
@@ -2668,7 +2720,12 @@ def evaluate_release(
                 f"required_source_sha={source_sha} "
                 f"observed_source_sha={safe_observed_source} "
                 f"required_artifact_sha256={required_artifact} "
-                f"observed_artifact_sha256={artifact_digest}")
+                f"observed_artifact_sha256={artifact_digest} "
+                f"required_target={target if target is not None else 'invalid'} "
+                f"observed_qualification_target="
+                f"{observed_binding_target if observed_binding_target is not None else 'invalid'} "
+                f"verdict={'FAIL' if physical_campaign_failure_proven else 'BLOCKED'} "
+                f"reason={'authenticated_producer_failure' if physical_campaign_failure_proven else 'missing_or_contradictory_campaign_proof'}")
         if isinstance(physical_campaign_evidence, dict):
             campaign_sealed_at = physical_campaign_evidence.get(
                 "sealed_at_utc")
