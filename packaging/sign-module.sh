@@ -120,13 +120,45 @@ fi
 
 command -v mokutil >/dev/null 2>&1 ||
     blocked "mokutil is required to verify MOK enrollment"
-if (( cert_requires_sudo == 1 )); then
-    "${sudo_command[@]}" mokutil --test-key "$cert" >/dev/null 2>&1 ||
-        blocked "configured MOK certificate is not enrolled"
-else
-    mokutil --test-key "$cert" >/dev/null 2>&1 ||
-        blocked "configured MOK certificate is not enrolled"
-fi
+
+mokutil_reports_enrolled() {
+    local output status
+
+    # Query the firmware MOK list directly. The kernel-keyring probe is a
+    # separate runtime fact and can fail for an unprivileged build process.
+    if (( cert_requires_sudo == 1 )); then
+        if output=$("${sudo_command[@]}" env LC_ALL=C mokutil \
+                --ignore-keyring --test-key "$cert" 2>&1); then
+            status=0
+        else
+            status=$?
+        fi
+    else
+        if output=$(env LC_ALL=C mokutil --ignore-keyring --test-key \
+                "$cert" 2>&1); then
+            status=0
+        else
+            status=$?
+        fi
+    fi
+
+    # Mokutil releases disagree on the exit status for the exact affirmative
+    # message. Accept the documented zero status only with empty output or
+    # that exact message; accept status 1 only with that exact certificate-
+    # bound message. Every other diagnostic or status remains a hard failure.
+    if (( status == 0 )) &&
+       { [[ -z "$output" ]] || [[ "$output" == "$cert is already enrolled" ]]; }; then
+        return 0
+    fi
+    if (( status == 1 )) &&
+       [[ "$output" == "$cert is already enrolled" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+mokutil_reports_enrolled ||
+    blocked "configured MOK certificate is not enrolled or enrollment could not be verified"
 
 extract_module_signature() {
     local payload_path="$1" signature_path="$2"

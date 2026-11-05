@@ -170,19 +170,24 @@ before the build succeeds. The default Ubuntu MOK locations are
 `/var/lib/shim-signed/mok/MOK.der`; `SWAPZ_MOK_PRIVATE_KEY` and
 `SWAPZ_MOK_CERT` may select an equivalent enrolled signing key and
 certificate. When Secure Boot is enabled, the configured certificate must also
-be reported enrolled by `mokutil --test-key`; a matching signature made by an
-unenrolled certificate is refused. Secure Boot-disabled and non-EFI hosts do
-not sign the module.
+be reported enrolled by `mokutil --ignore-keyring --test-key`; a matching
+signature made by an unenrolled certificate is refused. Secure Boot-disabled
+and non-EFI hosts do not sign the module.
 
 The signing hook parses the Linux module-signature trailer and verifies the
 appended detached PKCS#7/CMS signature over the exact module payload against
-the configured certificate. Enrollment is checked separately with
-`mokutil --test-key`; `modinfo` signer/key identifiers are metadata and are
-not accepted as cryptographic proof. An unchanged module is not signed again
-only when its existing signature is already cryptographically valid for the
-configured enrolled certificate. A pre-existing malformed, invalid, or
-differently signed module is refused instead of receiving another appended
-signature.
+the configured certificate. Enrollment is checked separately against the
+firmware MOK list with `mokutil --ignore-keyring --test-key`; Mokutil versions
+that return status 1 with the exact `<certificate path> is already enrolled`
+message are accepted as affirmative. Mixed output, another path, other
+nonzero statuses, and unrecognized responses remain blocked. This
+command-line result does not claim current kernel-keyring visibility or module
+acceptance; those are distinct runtime facts. `modinfo` signer/key identifiers
+are metadata and are not accepted as cryptographic proof. An unchanged module
+is not signed again only when its existing signature is already
+cryptographically valid for the configured enrolled certificate. A
+pre-existing malformed, invalid, or differently signed module is refused
+instead of receiving another appended signature.
 
 This verification establishes exact-payload signature validity plus configured
 certificate enrollment. It does not by itself claim that the running kernel

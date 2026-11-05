@@ -84,7 +84,9 @@ class PublicMakeContract(unittest.TestCase):
                          "SWAPZ_MOK_CERT", "SWAPZ_SIGN_NONINTERACTIVE",
                          "sudo_command+=(-n)", "--verify",
                          "SWAPZ_SIGN_TEST_ROOT",
-                         "kernel acceptance is not claimed"):
+                         "kernel acceptance is not claimed",
+                         "--ignore-keyring --test-key",
+                         "is already enrolled"):
             self.assertIn(required, content)
         self.assertIn('bash packaging/sign-module.sh "$@"', MAKE)
 
@@ -109,7 +111,20 @@ class PublicMakeContract(unittest.TestCase):
                     "#!/bin/sh\n"
                     "case \"$1\" in\n"
                     "  --sb-state) printf '%s\\n' 'SecureBoot enabled';;\n"
-                    "  --test-key) exit 0;;\n"
+                    "  --ignore-keyring)\n"
+                    "    [ \"$2\" = --test-key ] && [ \"$#\" = 3 ] || exit 2\n"
+                    "    case \"${SWAPZ_FAKE_MOKUTIL_MODE:-success-empty}\" in\n"
+                    "      success-empty) exit 0;;\n"
+                    "      success-exact) printf '%s\\n' \"$3 is already enrolled\"; exit 0;;\n"
+                    "      success-with-warning) printf '%s\\n' 'unrelated diagnostic'; exit 0;;\n"
+                    "      enrolled-message) printf '%s\\n' \"$3 is already enrolled\"; exit 1;;\n"
+                    "      enrolled-message-with-warning)\n"
+                    "        printf '%s\\n' 'unrelated diagnostic' \"$3 is already enrolled\"; exit 1;;\n"
+                    "      wrong-certificate) printf '%s\\n' '/other/MOK.der is already enrolled'; exit 1;;\n"
+                    "      not-enrolled) printf '%s\\n' \"$3 is not enrolled\"; exit 1;;\n"
+                    "      failed-with-positive-text) printf '%s\\n' \"$3 is already enrolled\"; exit 255;;\n"
+                    "      *) exit 2;;\n"
+                    "    esac;;\n"
                     "  *) exit 2;;\n"
                     "esac\n"
                 ),
@@ -169,11 +184,54 @@ class PublicMakeContract(unittest.TestCase):
                                  proc.stdout + "\n" + proc.stderr)
             self.assertEqual((fixture / "dm-swapz.ko.calls").read_text(),
                              "call\n")
-            verified = subprocess.run(
+
+            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "success-exact"
+            verified_exact = subprocess.run(
                 ["bash", str(helper), "--verify", str(module)], env=env,
                 capture_output=True, text=True, timeout=5)
-            self.assertEqual(verified.returncode, 0,
-                             verified.stdout + "\n" + verified.stderr)
+            self.assertEqual(verified_exact.returncode, 0,
+                             verified_exact.stdout + "\n" +
+                             verified_exact.stderr)
+
+            # Some Mokutil builds return status 1 while emitting the exact
+            # positive message for this DER certificate. Accept that one
+            # certificate-bound output form, but reject mixed diagnostics,
+            # another certificate's message, negative output and other
+            # failure statuses.
+            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "enrolled-message"
+            module.write_bytes(b"module")
+            enrolled = subprocess.run(
+                ["bash", str(helper), str(module)], env=env,
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(enrolled.returncode, 0,
+                             enrolled.stdout + "\n" + enrolled.stderr)
+            self.assertEqual((fixture / "dm-swapz.ko.calls").read_text(),
+                             "call\ncall\n")
+            verified_enrolled = subprocess.run(
+                ["bash", str(helper), "--verify", str(module)], env=env,
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(verified_enrolled.returncode, 0,
+                             verified_enrolled.stdout + "\n" +
+                             verified_enrolled.stderr)
+
+            for mode in ("success-with-warning", "enrolled-message-with-warning",
+                         "wrong-certificate", "not-enrolled",
+                         "failed-with-positive-text"):
+                with self.subTest(mokutil_mode=mode):
+                    env["SWAPZ_FAKE_MOKUTIL_MODE"] = mode
+                    module.write_bytes(b"module")
+                    rejected = subprocess.run(
+                        ["bash", str(helper), str(module)], env=env,
+                        capture_output=True, text=True, timeout=5)
+                    self.assertEqual(rejected.returncode, 2)
+                    self.assertIn("not enrolled or enrollment could not be verified",
+                                  rejected.stderr)
+                    self.assertEqual(module.read_bytes(), b"module")
+                    self.assertEqual(
+                        (fixture / "dm-swapz.ko.calls").read_text(),
+                        "call\ncall\n")
+
+            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "success-empty"
             module.write_bytes(b"module")
             unsigned = subprocess.run(
                 ["bash", str(helper), "--verify", str(module)], env=env,

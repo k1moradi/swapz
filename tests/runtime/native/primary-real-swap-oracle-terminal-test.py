@@ -257,7 +257,8 @@ class TerminalEvidenceContracts(unittest.TestCase):
             "expected_page_mismatches=0 observed_page_mismatches=0", stderr)
         self.assertIn(
             "expected_byte_mismatches=0 observed_byte_mismatches=0", stderr)
-        self.assertIn("error=OSError errno=32 cleanup_complete=true", stderr)
+        self.assertIn(
+            "error=BrokenPipeError errno=32 cleanup_complete=true", stderr)
         self.assertNotIn("ab" * 16, stderr)
 
     def test_parent_rejects_forged_mismatch_totals_and_bad_samples(self):

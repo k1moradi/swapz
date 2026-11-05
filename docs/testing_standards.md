@@ -329,6 +329,9 @@ exactly one ordered WAITING/FILLED/VERIFIED sequence after clean readback,
 with full page/byte counts, zero mismatches and fill-to-verify digest agreement.
 A failed terminal publication after clean readback must withhold VERIFIED,
 retain the original reporting errno and exit nonzero despite successful unmap.
+The report-write failure fixture must assert Python's concrete exception
+subclass for the injected errno (for example, `BrokenPipeError` for errno 32)
+instead of assuming every `OSError` construction retains the base class name.
 The parent must reject reordered records, any duplicate or truncated bytes
 remaining after the one accepted VERIFIED record, nonzero child exit, and
 inconsistent full page/byte mismatch totals or capped mismatch samples before
@@ -6212,13 +6215,17 @@ signature over the exact module payload against the configured certificate.
 Embedded CMS signer certificates must be excluded from signer resolution
 (OpenSSL `-nointern`): `-certfile` alone does not force verification against
 that exact configured and enrolled certificate.
-Certificate identity, `mokutil --test-key` enrollment, embedded signer/key
-metadata, cryptographic signature validity, and target-kernel acceptance are
-separate facts. `modinfo` signer or `sig_key` metadata is diagnostic only and
-must never substitute for cryptographic verification. Packaging may report
-cryptographic validity plus enrollment, but it must not claim that the target
-kernel accepted the module under its configured enforcement policy until the
-same exact installed bytes have been safely and authoritatively loaded by that
+Certificate identity, `mokutil --ignore-keyring --test-key` firmware-MOK
+enrollment, embedded signer/key metadata, cryptographic signature validity,
+kernel-keyring visibility, and target-kernel acceptance are separate facts.
+The signing-hook regression must accept status 1 only with the exact
+certificate-bound `<path> is already enrolled` response and reject mixed
+diagnostics, a different path, negative output, and other failure statuses.
+`modinfo` signer or `sig_key` metadata is diagnostic only and must never
+substitute for cryptographic verification. Packaging may report cryptographic
+validity plus enrollment, but it must not claim that the target kernel
+accepted the module under its configured enforcement policy until the same
+exact installed bytes have been safely and authoritatively loaded by that
 kernel.
 
 DKMS remains the compatibility/header integration mechanism, not the artifact
