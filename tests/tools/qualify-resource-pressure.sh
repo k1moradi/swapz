@@ -962,6 +962,10 @@ report_cleanup_refusal() {
     fi
     cleanup_diagnostic_reported=1
     case "$phase" in
+        pair-resume)
+            printf '%s: ID36 nested resume ownership refused; phase:%s required:tracked direct timeout with exact nested process identity, stopped-state proof and pidfd SIGCONT authority observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session nested_resume:%s next_step:read-only-review-retained-state-before-retry\n' \
+                "$severity" "$phase" "$observed" "$original_exit" "$nested_resume_disposition" >&2
+            ;;
         rmdir)
             printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session nested_resume:%s next_step:read-only-review-retained-state-before-retry\n' \
                 "$severity" "$phase" "$observed" "$original_exit" "$nested_resume_disposition" >&2
@@ -1040,7 +1044,13 @@ cleanup() {
             -n $PAIR_CGROUP_PROCESS_IDENTITY ]]; then
         nested_resume_disposition=attempted
     elif [[ -n ${PAIR_CGROUP_PROCESS_PID:-} ||
-            -n ${PAIR_CGROUP_PROCESS_IDENTITY:-} ]]; then
+            -n ${PAIR_CGROUP_PROCESS_IDENTITY:-} ||
+            ( -n $PAIR_PID &&
+              ( -e $session_fd_path/pair.ready ||
+                -L $session_fd_path/pair.ready ) ) ]]; then
+        # pair.ready is published immediately before the readiness shell stops.
+        # Seeing it without complete nested identity is therefore sufficient
+        # evidence that direct-owner teardown could strand a stopped child.
         nested_resume_disposition=prohibited-unproved
     fi
 
@@ -1115,6 +1125,15 @@ cleanup() {
                 report_cleanup_refusal pair-resume \
                     "attempted-barrier-status-$child_cleanup_status" "$original_result"
             fi
+        fi
+    elif [[ $nested_resume_disposition == prohibited-unproved &&
+            -n $PAIR_PID ]]; then
+        # A signal can land after pair.ready is published or its PID is copied,
+        # but before nested identity is proved. The readiness process may
+        # already be stopped, so do not terminate its tracked timeout.
+        PAIR_RESUME_UNCERTAIN=1
+        if (( ! initially_retained )); then
+            report_cleanup_refusal pair-resume prohibited-unproved "$original_result"
         fi
     elif (( PAIR_RESUME_UNCERTAIN && ! initially_retained )); then
         # No identity-bound nested signal is authorized after an uncertain

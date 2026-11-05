@@ -4483,7 +4483,12 @@ expected/observed state, preserved `original_exit`, precise
 `retained_cleanup` class, and the safe
 `next_step:read-only-review-retained-state-before-retry`. Classify the nested
 disposition before any stop-marker refusal can be reported; a partial proof
-never grants SIGCONT or wider cleanup authority. Existing final-directory replacement and
+never grants SIGCONT or wider cleanup authority. If a tracked timeout is still
+live after its readiness marker is published, or after the readiness PID is
+copied but before the nested identity is proved, cleanup must mark resume
+uncertainty before direct-child teardown, report
+`phase:pair-resume observed:prohibited-unproved` unless an earlier failure owns
+attribution, and retain the child cgroup plus private session. Existing final-directory replacement and
 rmdir-failure regressions still prove
 first refusal and remaining session ownership; no cgroup.kill or loaded host
 pressure cleanup is permitted by these rootless proofs. A repeated HUP/INT/TERM

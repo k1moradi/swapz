@@ -439,6 +439,44 @@ rmdir() {
         self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
         self.assertFalse((self.root / "unexpected-nested-signal").exists())
 
+    def test_partial_nested_identity_quarantines_live_outer_owner(self):
+        # Model interruption after readiness publication and after its PID is
+        # copied, but before nested identity capture. Neither state authorizes
+        # stopping the timeout that owns a possibly stopped readiness shell.
+        for state, partial_state in (
+                ("ready-published", 'printf "pid=333\\n" > "$PAIR_READY"\n'),
+                ("pid-captured", "PAIR_CGROUP_PROCESS_PID=333\n")):
+            with self.subTest(state=state):
+                ready_path = self.session / "pair.ready"
+                if ready_path.exists() or ready_path.is_symlink():
+                    ready_path.unlink()
+                preamble = r'''
+PAIR_PID=111
+PAIR_PROCESS_IDENTITY=222
+PAIR_CGROUP_PROCESS_PID=""
+PAIR_CGROUP_PROCESS_IDENTITY=""
+''' + partial_state + r'''
+wait_nested_child_stopped() { : > "$SESSION/../unexpected-wait"; return 0; }
+signal_nested_owned_child() { : > "$SESSION/../unexpected-nested-signal"; return 0; }
+stop_direct_owned_child() { : > "$SESSION/../unexpected-outer-stop"; return 0; }
+'''
+                result = self.execute(preamble=preamble, status=143)
+                self.assert_retained(
+                    result, "prohibited-unproved", expected_status=143)
+                self.assertIn("phase:pair-resume", result.stderr)
+                self.assertIn(
+                    "required:tracked direct timeout with exact nested process "
+                    "identity, stopped-state proof and pidfd SIGCONT authority",
+                    result.stderr)
+                self.assertIn("nested_resume:prohibited-unproved", result.stderr)
+                self.assertIn(
+                    "next_step:read-only-review-retained-state-before-retry",
+                    result.stderr)
+                self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+                for name in ("unexpected-wait", "unexpected-nested-signal",
+                             "unexpected-outer-stop"):
+                    self.assertFalse((self.root / name).exists())
+
     def test_production_directory_pin_commands_hide_private_paths(self):
         # Execute the exact production redirection groups. Bash's own open
         # failure must stay private, and a successful grouped exec must retain
