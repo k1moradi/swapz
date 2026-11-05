@@ -32,6 +32,8 @@ static int fixture_same_namespace_mount_injected;
 /* Timed synthetic procfs changes; these do not create actual mounts. */
 static const char *fixture_peer_mountinfo_before_peer_scan;
 static int fixture_peer_mountinfo_before_peer_scan_injected;
+static int fixture_mount_open_error_before_peer_scan;
+static int fixture_mount_open_error_before_peer_scan_injected;
 static const char *fixture_peer_mountinfo_after_peer_scan;
 static int fixture_peer_mountinfo_after_peer_scan_injected;
 static int fixture_peer_namespace_changes_between_stats;
@@ -178,6 +180,12 @@ static struct dirent *fixture_readdir(DIR *directory)
 				     fixture_peer_mountinfo_before_peer_scan);
 			fixture_peer_mountinfo_before_peer_scan = NULL;
 			fixture_peer_mountinfo_before_peer_scan_injected = 1;
+		}
+		if (fixture_mount_open_error_before_peer_scan) {
+			fixture_mount_open_error =
+				fixture_mount_open_error_before_peer_scan;
+			fixture_mount_open_error_before_peer_scan = 0;
+			fixture_mount_open_error_before_peer_scan_injected = 1;
 		}
 		/*
 		 * Reproduce a mount racing the already-read self snapshot while the
@@ -433,6 +441,8 @@ static void fixture_reset(void)
 	fixture_same_namespace_mount_injected = 0;
 	fixture_peer_mountinfo_before_peer_scan = NULL;
 	fixture_peer_mountinfo_before_peer_scan_injected = 0;
+	fixture_mount_open_error_before_peer_scan = 0;
+	fixture_mount_open_error_before_peer_scan_injected = 0;
 	fixture_peer_mountinfo_after_peer_scan = NULL;
 	fixture_peer_mountinfo_after_peer_scan_injected = 0;
 	fixture_peer_namespace_changes_between_stats = 0;
@@ -733,6 +743,15 @@ static void test_controlled_mount_snapshot_timings(void)
 					"selected device number/cross-namespace");
 	fixture_expect_timed_change("timed misleading-source bind before peer scan",
 				    fixture_peer_mountinfo_before_peer_scan_injected);
+
+	/* The peer can become unreadable after self was already observed clean. */
+	fixture_same_parent_root();
+	fixture_mount_open_error_before_peer_scan = EACCES;
+	expect_mount_identity_admission("timed peer mountinfo becomes inaccessible",
+					root_device, target_parent, 0, EACCES,
+					"namespace enumeration/access");
+	fixture_expect_timed_change("timed peer mountinfo becomes inaccessible",
+				    fixture_mount_open_error_before_peer_scan_injected);
 
 	/*
 	 * A peer changing mount namespaces between the two stat calls is NOT eligible
