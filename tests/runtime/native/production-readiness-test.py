@@ -2590,5 +2590,162 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(payload["release_verdict"], "BLOCKED")
 
 
+
+    def test_development_only_restoration_is_not_real_swap_proof(self):
+        # Cleanup success on an inactive card is not Linux swap activation.
+        private_marker = "secret-private-path-and-token"
+        development = {
+            "schema": "swapz-physical-development-results-v1",
+            "status": "PASS",
+            "evidence_class": "DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION",
+            "development_only": True,
+            "source_commit_sha": SOURCE,
+            "linux_swap_activation_tested": False,
+            "physical_media_acceptance": False,
+            "production_qualification": False,
+            "target_remains_inactive": True,
+            "original_header_matches_final": True,
+            "final_recovery_state": "COMPLETE",
+            "private_note": private_marker,
+        }
+        result = evaluate(physical=development)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "real_linux_swap: persistent evidence schema is invalid" in item
+            for item in result["code_blockers"]))
+        self.assertNotIn(private_marker, json.dumps(result))
+
+    def test_physical_preflight_and_restoration_cannot_override_blocked_phase(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        physical = real_swap_evidence(encoded(report), encoded(policy))
+        physical.update(
+            status="BLOCKED", phase="PREFLIGHT",
+            reason="active unrelated swap", card_reached=True,
+            original_header_matches_final=True, target_remains_inactive=True,
+            mapper_io_bytes=0)
+        result = evaluate(report=report, policy=policy, physical=physical)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "real_linux_swap: persistent evidence disposition is not PASS"
+            in item for item in result["code_blockers"]))
+        self.assertTrue(any(
+            "real_linux_swap: persistent evidence is not COMPLETE" in item
+            for item in result["code_blockers"]))
+
+    def test_fast_test_pass_without_five_stage_make_test_is_incomplete(self):
+        report = owner_report()
+        report["stages"] = report["stages"][:2]
+        # An otherwise all-PASS summary cannot supply three absent stages.
+        result = evaluate(report=report)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "owner qualification stage set/order is not exactly canonical"
+            in item for item in result["code_blockers"]))
+
+    def test_known_failed_stage_and_unavailable_stages_are_distinct(self):
+        failed = owner_report()
+        failed["overall"] = "FAIL"
+        failed["stages"][1].update(
+            status="FAIL", exit_code=1, failed_phase="native-contract",
+            diagnostic="synthetic failure")
+        failed_result = evaluate(report=failed)
+        self.assertEqual(failed_result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "exact-source owner make test is not PASS" in item
+            for item in failed_result["code_blockers"]))
+        self.assertTrue(any(
+            "mandatory owner qualification stages are not PASS" in item
+            for item in failed_result["code_blockers"]))
+
+        incomplete = owner_report()
+        incomplete["stages"] = incomplete["stages"][:1]
+        incomplete_result = evaluate(report=incomplete)
+        self.assertEqual(incomplete_result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "stage set/order is not exactly canonical" in item
+            for item in incomplete_result["code_blockers"]))
+        self.assertFalse(any(
+            "mandatory owner qualification stages are not PASS" in item
+            for item in incomplete_result["code_blockers"]))
+
+    def test_previous_source_and_artifact_cannot_qualify_new_source(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        evidence = current_evidence(report_raw, policy_raw)
+        newer_source_sha = "b" * 40
+        stale = EVALUATOR.evaluate_release(
+            newer_source_sha, report, report_raw, evidence, policy,
+            policy_raw)
+        self.assertEqual(stale["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "owner make test is not bound to the release source" in item
+            for item in stale["code_blockers"]))
+        self.assertTrue(any(
+            "release candidate is not frozen on synchronized main" in item
+            for item in stale["code_blockers"]))
+
+        changed_artifacts = owner_report()
+        changed_artifacts["qualified_artifacts"]["module_sha256"] = "7" * 64
+        stale_artifacts = evaluate(report=changed_artifacts)
+        self.assertEqual(stale_artifacts["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "qualified_artifact_hashes: owner artifact binding mismatch"
+            in item for item in stale_artifacts["code_blockers"]))
+
+    def test_contradictory_pass_and_blocked_reboot_is_not_observed_pass(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        evidence = current_evidence(encoded(report), encoded(policy))
+        evidence["release_evidence"]["owner_observed_reboot"].update(
+            status="PASS", observed=True, overall="BLOCKED")
+        result = evaluate(report=report, policy=policy, evidence=evidence)
+        self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+
+    @unittest.expectedFailure
+    def test_missing_frozen_physical_arms_cannot_qualify_campaign(self):
+        # Known evaluator gap: one internally consistent pair currently passes.
+        policy = acceptance_policy()
+        required_pair_count = sum(
+            workload["pairs"] for workload in
+            policy["physical_qualification"]["workloads"].values())
+        campaign = physical_campaign_evidence(encoded(policy))
+        self.assertGreater(required_pair_count, 1)
+        self.assertEqual(len(campaign["artifacts"]["pairs"]), 1)
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+
+    @unittest.expectedFailure
+    def test_zero_independent_swap_traffic_cannot_qualify_real_swap(self):
+        # Known evaluator gap: nested PASS cycles have no traffic verification.
+        report = owner_report()
+        policy = acceptance_policy()
+        physical = real_swap_evidence(encoded(report), encoded(policy))
+        for cycle in physical["result"]["cycles"]:
+            cycle["byte_mismatches"] = 0
+            cycle["independent_swap_traffic_bytes"] = 0
+            cycle["mapper_io_bytes"] = 0
+        physical["cycles"] = copy.deepcopy(physical["result"]["cycles"])
+        result = evaluate(report=report, policy=policy, physical=physical)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+
+    @unittest.expectedFailure
+    def test_known_failure_blocker_preserves_first_authoritative_phase(self):
+        # Known diagnostic gap: current generic blocker drops stage attribution.
+        report = owner_report()
+        report["overall"] = "FAIL"
+        report["stages"][1].update(
+            status="FAIL", exit_code=1, failed_phase="native-contract",
+            diagnostic="synthetic failure")
+        result = evaluate(report=report)
+        self.assertTrue(any(
+            "native-contract" in item and "FAIL" in item
+            for item in result["code_blockers"]))
+
 if __name__ == "__main__":
     unittest.main()
