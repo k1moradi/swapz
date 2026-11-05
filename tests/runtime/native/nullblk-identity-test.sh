@@ -357,9 +357,24 @@ setup_owned_lower() {
     : > "$FIXTURE/dev/nullb-swapz-$LOWER_TOKEN"
     ln -s "$FIXTURE/sys/block/dm-0" "$disk/holders/dm-0"
 }
+assert_private_safe_refusal() {
+    local case_name="$1" output="$2"
+    [[ "$output" != *"$FIXTURE/"* &&
+       "$output" != *"$TOKEN"* &&
+       "$output" != *"$OTHER_TOKEN"* &&
+       "$output" != *"$LOWER_TOKEN"* &&
+       "$output" != *"nullb-swapz-"* &&
+       "$output" != *"swapz-demo-"* &&
+       "$output" != *"rmmod"* &&
+       "$output" != *"unload"* &&
+       "$output" != *"remove"* &&
+       "$output" != *"delete"* &&
+       "$output" != *"power off"* ]] ||
+        die "$case_name disclosed a private identity or recommended unsafe cleanup"
+}
 run_case() {
     local case_name="$1" expected="$2" expected_result="$3" expected_errno="$4"
-    local result=0 output
+    local result=0 output unclaimed_config unclaimed_disk
     reset_fake
     case "$case_name" in
         missing_capability) printf 'CapEff:\t0000000000000000\n' > "$FIXTURE/proc/self/status" ;;
@@ -535,12 +550,8 @@ run_case() {
     # Exact proof classes, not just exit codes; no host/fixture IDs in a refusal.
     case "$case_name" in
         unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign)
-            [[ "$output" == *"check=unclaimed_null_blk errno=unavailable remedy=phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk"* &&
-               "$output" != *"$FIXTURE/"* && "$output" != *"nullb-swapz-"* &&
-               "$output" != *"$TOKEN"* && "$output" != *"$OTHER_TOKEN"* &&
-               "$output" != *"rmmod"* && "$output" != *"unload"* &&
-               "$output" != *"delete"* && "$output" != *"power off"* ]] ||
-                die "$case_name omitted private-safe creation-authority refusal"
+            [[ "$output" == *"check=unclaimed_null_blk errno=unavailable remedy=phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk"* ]] ||
+                die "$case_name omitted creation-authority refusal"
             ;;
         ambiguous_index_owner)
             [[ "$output" == *"check=null_blk_owner errno=unavailable remedy=dependency index has no unique token-shaped configfs owner"* ]] ||
@@ -561,6 +572,11 @@ run_case() {
         changed_holder_target)
             [[ "$output" == *"phase=acquire resource_kind=null_blk expected_proof=exact_mapper_holder_target observed_proof=substituted original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources"* ]] ||
                 die "$case_name did not identify substituted holder link"
+            ;;
+    esac
+    case "$case_name" in
+        unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|ambiguous_index_owner|partial_config_proof|reused_index_alias|extra_foreign_holder|changed_holder_target)
+            assert_private_safe_refusal "$case_name" "$output"
             ;;
     esac
     [[ -f "$FIXTURE/proc/swaps" ]] || die "host swap inventory was mutated"
@@ -620,10 +636,20 @@ run_case() {
         fi
     fi
     if [[ "$case_name" == unclaimed_full_proof ]]; then
-        [[ "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 1 &&
-           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/memory_backed")" == 1 &&
-           "$(cat "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/dev")" == "240:7" ]] ||
-            die "complete-looking unclaimed null_blk object changed"
+        unclaimed_config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN"
+        unclaimed_disk="$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN"
+        [[ "$(cat "$unclaimed_config/index")" == 7 &&
+           "$(cat "$unclaimed_config/memory_backed")" == 1 &&
+           "$(cat "$unclaimed_config/power")" == 1 &&
+           "$(cat "$unclaimed_config/size")" == 64 &&
+           "$(cat "$unclaimed_config/blocksize")" == 4096 &&
+           "$(cat "$unclaimed_config/queue_mode")" == 2 &&
+           "$(cat "$unclaimed_disk/dev")" == "240:7" &&
+           -L "$FIXTURE/sys/dev/block/240:7" &&
+           "$(readlink -f "$FIXTURE/sys/dev/block/240:7")" == "$unclaimed_disk" &&
+           -e "$FIXTURE/dev/nullb-swapz-$LOWER_TOKEN" &&
+           -L "$unclaimed_disk/holders/dm-0" ]] ||
+            die "complete-looking unclaimed null_blk inventory changed"
     fi
     if [[ "$case_name" == owned_cleanup ]]; then
         [[ ! -e "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
