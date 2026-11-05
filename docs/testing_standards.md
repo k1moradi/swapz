@@ -5142,7 +5142,7 @@ not permission to run or recover real swap. A synthetic pressure PASS must
 bind the validated qualified source, HEAD and one lowercase run ID through
 the parent state and exactly one duplicate-free child JSON report. Require
 the frozen page count and corresponding 4KiB byte count, zero mismatches,
-confirmed anonymous-mapping close, zero cgroup OOM kills, positive independent
+confirmed anonymous-mapping close, zero cgroup OOM and OOM-kill events, positive independent
 mapper usage and swap peak, and proof that the direct child was reaped and
 its newly owned cgroup was removed. The 128MiB child memory cap, 80,000
 pages and existing time limits are upper bounds, never knobs to raise for
@@ -5153,7 +5153,14 @@ still cannot silently defeat the conservative stop thresholds.
 Pressure cancellation may signal only the supervisor's unreaped direct child,
 not every PID found in the pressure cgroup. Child waits and postreap report
 reads remain bounded; an inherited report writer or unproven child death
-retains recovery obligations. A failed write of the recovery-required evidence record is also a secondary
+retains recovery obligations.
+The fork handoff must never lose that direct-child ownership: a parent pipe-close
+failure after fork reaps the child before propagating, a child-side descriptor
+failure exits the child rather than returning into the supervisor stack, and a
+fork failure preserves its original errno while reporting descriptor-cleanup
+uncertainty. A surviving same-name cgroup from an interrupted run is retained
+because its inode identity was never durably bound; recovery must not remove it
+merely because it is currently empty. A failed write of the recovery-required evidence record is also a secondary
 failure: append its errno, retain the original worker/mapper failure, and do
 not claim teardown or durable recovery success. A first byte mismatch, worker signal/exit or
 guard stop must survive a simultaneous pipe, memory-counter, cgroup-removal,
@@ -5165,7 +5172,13 @@ publish PASS on missing/reordered observation indices or regressing kernel
 and lower-device counters.
 Child reports with unknown JSON keys, additional records or nonfinite timing
 must be rejected without persisting their untrusted payloads, which may
-contain page contents or private filesystem paths. Rootless adversarial tests must inject both
+contain page contents or private filesystem paths. The accepted report schema uses typed
+nonnegative counts and an errno-only mapping-close field. Before any synthetic
+trial PASS, revalidate the bound run/source/HEAD/helper/artifact and historical
+target/capacity identity, the frozen 128MiB/80,000-page resource limits, exact
+page and byte oracle result, zero OOM/OOM-kill counters, positive mapper/swap
+use, proven child/cgroup teardown, and availability plus monotonic ordering of
+every lower-I/O observation. Rootless adversarial tests must inject both
 termination uncertainty and failed teardown independently of a clean worker,
 including a timeout followed by cgroup-removal failure. No synthetic PASS
 proves actual anonymous-page reclaim, Linux swap-out/swap-in, maximum-capacity
