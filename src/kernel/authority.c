@@ -148,7 +148,8 @@ static int swapz_page_list_validate_membership(
 	while (current != a->segment_first_page[segment]) {
 		swapz_u32 previous = a->page_prev_in_segment[current];
 
-		if (previous == none || previous >= a->logical_pages ||
+		if (previous == logical || previous == none ||
+		    previous >= a->logical_pages ||
 		    visited_pages >= maximum_segment_pages)
 			return -EUCLEAN;
 		if (!a->maps[previous].valid ||
@@ -201,7 +202,7 @@ static int swapz_page_list_validate_entry_cached(
 		   a->page_prev_in_segment[next] != logical) {
 		return -EUCLEAN;
 	}
-	return swapz_page_list_validate_membership(a, logical, segment);
+	return 0;
 }
 
 static int swapz_page_list_validate_entry(const struct swapz_authority *a,
@@ -2034,6 +2035,11 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 			error = -EUCLEAN;
 			break;
 		}
+		if (map->valid && swapz_segment_page_lists_enabled(a) &&
+		    swapz_page_list_validate_membership(a, logical, segment)) {
+			error = -EUCLEAN;
+			break;
+		}
 		if (!map->valid) {
 			processed++;
 			continue;
@@ -2194,6 +2200,9 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 			return -EUCLEAN;
 	}
 	if (swapz_page_list_validate_entry(a, logical_page))
+		return -EUCLEAN;
+	if (old->valid && swapz_segment_page_lists_enabled(a) &&
+	    swapz_page_list_validate_membership(a, logical_page, old_segment))
 		return -EUCLEAN;
 	if (old->valid) {
 		int score_error =
