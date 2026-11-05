@@ -398,16 +398,16 @@ jobs:
           import subprocess
           import sys
           import urllib.request
-          
-          
+
+
           def refuse(gate, required, observed, corrective):
               # Only source-controlled labels and bounded classifications reach CI logs.
               print(f"CI_NOT_QUALIFIED gate={gate} required={required} "
                     f"observed={observed} corrective_procedure={corrective}",
                     file=sys.stderr)
               raise SystemExit(1)
-          
-          
+
+
           source_sha = os.environ.get("GITHUB_SHA", "")
           run_id = os.environ.get("GITHUB_RUN_ID", "")
           run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
@@ -420,14 +420,14 @@ jobs:
                   not token):
               refuse("run-identity", "current-SHA/run/attempt/repository/Actions-token",
                      "missing-or-invalid", "use-a-normal-authenticated-main-push")
-          
+
           checkout = subprocess.run(["git", "rev-parse", "--verify", "HEAD"],
                                     capture_output=True, text=True, check=False,
                                     timeout=5)
           if checkout.returncode != 0 or checkout.stdout.strip() != source_sha:
               refuse("checkout-source", "HEAD-equals-GITHUB_SHA", "mismatched-or-unavailable",
                      "checkout-the-exact-published-source")
-          
+
           url = (f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com').rstrip('/')}"
                  f"/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100")
           request = urllib.request.Request(url, headers={
@@ -444,7 +444,7 @@ jobs:
           except (OSError, ValueError, UnicodeError, TypeError):
               refuse("job-census-api", "bounded-authenticated-current-run-job-manifest",
                      "unavailable-or-invalid", "restore-Actions-read-and-recheck-current-run")
-          
+
           prefixes = (
               "Native rootless", "Make interface", "Rootless source-contract",
               "Rootless primary-lifecycle-audit", "Rootless production-readiness",
@@ -459,10 +459,10 @@ jobs:
                   not all(isinstance(job, dict) for job in manifest["jobs"])):
               refuse("job-census-size", f"exactly-{expected_count}-current-attempt-jobs",
                      "missing-extra-or-incomplete", "complete-every-mandatory-job-on-current-SHA")
-          
+
           jobs = manifest["jobs"]
-          
-          
+
+
           def find_unique(prefix):
               name = f"{prefix} {source_sha}"
               matches = [job for job in jobs if job.get("name") == name]
@@ -478,8 +478,8 @@ jobs:
                          "same-source-run-and-attempt", "stale-or-mismatched",
                          "use-current-run-exact-SHA-job-evidence")
               return job
-          
-          
+
+
           for prefix in prefixes:
               job = find_unique(prefix)
               if job.get("status") != "completed" or job.get("conclusion") != "success":
@@ -493,7 +493,7 @@ jobs:
                   refuse("mandatory-job-" + prefix.replace(" ", "-"),
                          "completed-success", f"{status}-{conclusion}",
                          "fix-failing-or-incomplete-job-and-qualify-a-new-main-SHA")
-          
+
           conclusion = find_unique("Exact-SHA CI result")
           if conclusion.get("status") != "in_progress":
               refuse("conclusion-job", "current-gate-in-progress", "unexpected-status",

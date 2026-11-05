@@ -3849,6 +3849,10 @@ Rootless CI is not a substitute for the official source-bound `make test`
 report with all five successful stages and final formatter/module/oracle
 SHA-256 digests, owner-loaded null_blk qualification, or the separately
 authorized physical Linux swap and card acceptance evidence.
+The exact-SHA census here-doc must use genuinely empty separator lines, not
+indentation-only YAML code-block lines. Verify the committed patch with
+`git diff --check HEAD^ HEAD`; otherwise patch-hygiene CI must reject the SHA
+even if the Python syntax and synthetic evidence assertions appear correct.
 
 ID83 dispatcher refinement contracts must prove all scheduling boundaries:
 ordered RAW forcing requires an actually idle lower-WRITE path, stays within the
