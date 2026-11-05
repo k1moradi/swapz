@@ -104,6 +104,77 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
                          "src/kernel/foo.c:19:3: error: incompatible pointer type")
         self.assertEqual(failure["child_exit_code"], 2)
 
+    def test_rootless_signal_style_exit_remains_ambiguous(self):
+        marker = (
+            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+            "exit=143 reason=signal_or_child_exit phase_s=1 stage_s=2 "
+            "line=302 log=unavailable")
+        failure = self.diagnose(marker, 1)
+        self.assertEqual(failure["status"], "FAIL")
+        self.assertEqual(failure["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(failure["child_exit_code"], 143)
+        self.assertEqual(failure["phase"], "package-dkms-test.py")
+        self.assertIn("indistinguishable", failure["reason"])
+
+    def test_current_rootless_relay_and_colon_phase_markers_are_recognized(self):
+        relay = self.diagnose(
+            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+            "exit=1 reason=stderr_relay_failure phase_s=2 stage_s=5 "
+            "line=303 log=unavailable", 1)
+        self.assertEqual(relay["category"], "INFRASTRUCTURE")
+        self.assertEqual(relay["phase"], "package-dkms-test.py")
+        self.assertEqual(relay["child_exit_code"], 1)
+        self.assertEqual(relay["rootless_reason"], "stderr_relay_failure")
+
+        syntax = self.diagnose(
+            "FAIL: rootless phase=C syntax: physical lifecycle seam "
+            "subtest=unavailable exit=9 reason=nonzero_exit "
+            "phase_s=1 stage_s=6 line=351 log=unavailable", 1)
+        self.assertEqual(syntax["phase"], "C syntax: physical lifecycle seam")
+        self.assertEqual(syntax["child_exit_code"], 9)
+        self.assertIn("rootless phase=C syntax:", syntax["first_error"])
+
+    def test_rootless_marker_is_native_suite_scoped_path_safe_and_last_wins(self):
+        unsafe = self.diagnose(
+            "FAIL: rootless phase=../secret-path subtest=unavailable "
+            "exit=4 reason=nonzero_exit phase_s=1 stage_s=1 "
+            "line=1 log=unavailable", 4)
+        self.assertEqual(unsafe["phase"], "native-rootless")
+        self.assertNotIn("child_exit_code", unsafe)
+        self.assertNotIn("secret-path", unsafe["first_error"])
+
+        out_of_suite = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+             "exit=37 reason=nonzero_exit phase_s=1 stage_s=2 "
+             "line=303 log=unavailable"],
+            37, "make-interface")
+        self.assertEqual(out_of_suite["phase"], "make-interface")
+        self.assertNotIn("child_exit_code", out_of_suite)
+
+        last = self.diagnose(
+            "FAIL: rootless phase=fake-child subtest=unavailable "
+            "exit=99 reason=nonzero_exit phase_s=1 stage_s=1 "
+            "line=1 log=unavailable\n"
+            "FAIL: rootless phase=package-dkms-test.py subtest=preflight "
+            "exit=37 reason=unittest_error phase_s=2 stage_s=3 "
+            "line=303 log=unavailable", 1)
+        self.assertEqual(last["phase"], "package-dkms-test.py")
+        self.assertEqual(last["child_exit_code"], 37)
+        self.assertEqual(last["test"], "package-dkms-test.py[preflight]")
+
+    def test_unrelated_earlier_negative_output_cannot_replace_silent_phase(self):
+        log = (
+            "BLOCKED: expected negative fixture: Permission denied\n" +
+            "\n".join("ordinary successful output" for _ in range(20)) +
+            "\nFAIL: rootless phase=interface contract assertions "
+            "subtest=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=1 stage_s=7 line=432 log=unavailable")
+        failure = self.diagnose(log, 1)
+        self.assertEqual(
+            failure["phase"], "interface contract assertions")
+        self.assertNotIn("expected negative fixture", failure["first_error"])
+        self.assertIn("rootless phase=interface contract", failure["first_error"])
+
     def test_redaction_and_bounded_diagnostic_contract(self):
         safe_line = self.diagnostics._ci_safe_line(
             "AssertionError: token=privatevalue " + "x" * 6000 +
@@ -137,7 +208,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         log.unlink(missing_ok=True)
         failed = subprocess.run(
             [sys.executable, "-B", str(MODULE), "ci-run", "--suite", suite,
-             "--", "swapz-synthetic-command-that-does-not-exist"],
+             "--", "swapz-private-command-name-that-does-not-exist"],
             cwd=ROOT, env=environment, text=True, capture_output=True,
             timeout=12)
         self.assertEqual(failed.returncode, 127, failed.stderr)
@@ -147,6 +218,8 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertEqual(diagnostic["exit_code"], 127)
         self.assertEqual(diagnostic["category"], "INFRASTRUCTURE")
         self.assertIn("No such file or directory", diagnostic["first_error"])
+        self.assertNotIn("swapz-private-command-name", failed.stdout)
+        self.assertNotIn("swapz-private-command-name", log.read_text())
         self.assertEqual(diagnostic["artifact"],
                          "project-goals-synthetic-absent")
         self.assertEqual(diagnostic["log"],

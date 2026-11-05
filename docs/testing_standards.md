@@ -747,22 +747,43 @@ records the source-controlled `phase`, failing unittest or nested test name,
 `expected_contract` and sanitized `observed` diagnostic. A validated
 rootless failure marker may supply a separate `child_exit_code` and
 `rootless_reason`; it must **never** overwrite the outer process status.
-An OSError at child launch retains its original `launch_errno` and does
-not masquerade as a test assertion. Negative return codes identify a real
-direct-child signal; shell exit 128+signal is ambiguous, and exit 124 alone
-cannot establish a watchdog timeout.
+Only the `native-rootless` wrapper may promote that marker. Its phase is the
+source-controlled basename emitted by `test-rootless.sh`: allow ordinary
+letters, digits, spaces, dot, underscore, hyphen and the colon used by C-syntax
+phases, but never a path separator. Keep the last valid marker because the
+runner emits its authoritative summary after arbitrary child output. Current
+fixed reason classes include the unittest reasons, timeout-or-exit-124,
+signal-or-child-exit, received INT/TERM, and stderr relay/relay-cleanup failure.
+
+An OSError at child launch retains its original `launch_errno` and sanitized
+OS error text without publishing the executable or command string. Negative
+return codes identify a real direct-child signal. A rootless
+`signal_or_child_exit` marker is **not** cancellation evidence: shell
+128+signal-style status and an explicit child exit are indistinguishable.
+Likewise, exit 124 alone cannot establish a watchdog timeout. A runner marker
+that explicitly says it received INT/TERM may report interruption while still
+stating that the interruption's origin is not proven.
 
 Within unittest output the first detailed failing block owns the diagnostic:
 later teardown, cleanup, parser exceptions, and make-summary errors must not
 replace its test identity or donate a later exception when its original error
 is unrecognized. Genuine first native compiler diagnostics are preserved even
-when an outer rootless marker follows. If sanitized-log retention itself fails,
-the original test exit and cause are still reported, while `log=unavailable`
-and the numeric diagnostic errno describe that secondary evidence failure.
-All promoted fields use the existing bounded sanitization and allowlisted
-rootless-marker syntax; do not promote private local log contents, command
-strings, credentials, output payload bytes, or unvalidated paths. Passing
-commands emit no extra transcript, retain no log and incur no new subprocesses.
+when an outer rootless marker follows. For a marker-only rootless failure, an
+unrelated earlier expected `FAIL:`/`BLOCKED:` from a passing suite must not
+become the cause. A generic nonzero phase may retain a diagnostic only when it
+is tied to that source-controlled phase (or is the first native compiler error
+of its compile phase); otherwise the safe phase/reason/child-status marker is
+the observed diagnostic rather than guessing from earlier output. Relay and
+relay-cleanup failure reasons are harness/infrastructure failures and never
+replace an earlier failing child's status.
+
+If sanitized-log retention itself fails, the original test exit and cause are
+still reported, while `log=unavailable` and the numeric diagnostic errno
+describe that secondary evidence failure. All promoted fields use the existing
+bounded sanitization and allowlisted rootless-marker syntax; do not promote
+private local log contents, command strings, credentials, output payload bytes,
+or unvalidated paths. Passing commands emit no extra transcript, retain no log
+and incur no new subprocesses.
 
 The narrow synthetic `tests/tools/ci-failure-diagnostics-test.py` regression
 covers native assertions, nested unittest/cleanup precedence, compilation

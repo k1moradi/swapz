@@ -355,17 +355,20 @@ def _ci_failure_category(line, contract_suite):
 
 
 def diagnose_ci_failure(lines, exit_code, suite):
-    """Keep the first failed test and its first causal diagnostic together.
+    """Keep the originating failure and its first trustworthy diagnostic together.
 
-    exit_code belongs to the wrapped process. A rootless marker may additionally
-    report an earlier child status; neither replaces the other. Only allowlisted,
-    sanitized rootless metadata is promoted into the report.
+    exit_code belongs to the wrapped process. A validated native-rootless
+    marker may additionally report an earlier child status; neither replaces
+    the other. Malformed or out-of-suite marker-shaped child output is never
+    promoted into public attribution.
     """
     import re
     import signal
 
     first_error = None
     first_category = None
+    recent_error = None
+    recent_category = None
     fallback = None
     failing_test = None
     unittest_header = None
@@ -375,16 +378,18 @@ def diagnose_ci_failure(lines, exit_code, suite):
     unittest_contract_context = False
     make_target = None
     rootless_failure = None
-    rootless_marker_line = None
     contract_suite = any(name in suite for name in
                          ("contract", "policy", "interface", "layout"))
+    # test-rootless.sh emits only the basename of its source-controlled phase.
+    # Exclude path separators so arbitrary child output cannot promote a path.
     rootless_pattern = re.compile(
-        r"^FAIL: rootless phase=(?P<phase>[A-Za-z0-9_./ -]{1,128}) "
+        r"^FAIL: rootless phase=(?P<phase>[A-Za-z0-9_.: -]{1,128}) "
         r"subtest=(?P<subtest>[a-z0-9-]{1,64}|unavailable) "
         r"exit=(?P<exit>[0-9]{1,3}) "
         r"reason=(?P<reason>nonzero_exit|timeout_or_exit_124|"
         r"signal_or_child_exit|received_TERM|received_INT|"
-        r"unittest_assertion|unittest_error|unittest_timeout) "
+        r"unittest_assertion|unittest_error|unittest_timeout|"
+        r"stderr_relay_failure|stderr_relay_cleanup_failure) "
         r"phase_s=[0-9]+ stage_s=[0-9]+ "
         r"line=(?:[0-9]+|unavailable) "
         r"log=(?:unavailable|build/tests/rootless-failure\."
@@ -417,11 +422,19 @@ def diagnose_ci_failure(lines, exit_code, suite):
                 safe_line):
             unittest_contract_context = True
 
-        if rootless_failure is None:
-            rootless_match = rootless_pattern.fullmatch(safe_line)
-            if rootless_match:
-                rootless_failure = rootless_match.groupdict()
-                rootless_marker_line = safe_line
+        rootless_match = (
+            rootless_pattern.fullmatch(safe_line)
+            if suite == "native-rootless" else None)
+        if rootless_match:
+            # The runner emits its marker only after the failing child. Keep
+            # the last valid marker so child output cannot impersonate it
+            # before the runner emits the authoritative summary.
+            rootless_failure = rootless_match.groupdict()
+            continue
+        if safe_line.startswith("FAIL: rootless "):
+            # Never treat malformed or out-of-suite marker-shaped output as a
+            # causal FAIL line. It is arbitrary child output, not attribution.
+            continue
 
         if make_target is None:
             make_match = re.search(
@@ -437,34 +450,72 @@ def diagnose_ci_failure(lines, exit_code, suite):
                 safe_line):
             fallback = safe_line
 
-        category = (None if safe_line == rootless_marker_line else
-                    _ci_failure_category(
-                        safe_line, contract_suite or
-                        (first_unittest_active and unittest_contract_context)))
+        category = _ci_failure_category(
+            safe_line, contract_suite or
+            (first_unittest_active and unittest_contract_context))
         if first_unittest_active and unittest_error is None and category:
             unittest_error = safe_line
             unittest_category = category
-        if first_error is None and category:
-            first_error = safe_line
-            first_category = category
-
-    if failing_test is not None:
-        # Even an unrecognized first exception is attributable to its own
-        # header, never a recognized exception from the next unittest block.
-        causal_error = unittest_error or unittest_header
-        category = unittest_category or (
-            "SOURCE_CONTRACT" if contract_suite or unittest_contract_context
-            else "UNKNOWN_FAILURE")
-    else:
-        causal_error = first_error or (
-            fallback if fallback != rootless_marker_line else None)
-        category = first_category
+        if category:
+            if first_error is None:
+                first_error = safe_line
+                first_category = category
+            recent_error = safe_line
+            recent_category = category
 
     child_exit_code = (int(rootless_failure["exit"])
                        if rootless_failure is not None else None)
     effective_exit_code = (child_exit_code if child_exit_code is not None
                            else exit_code)
+    rootless_reason = (rootless_failure["reason"]
+                       if rootless_failure is not None else None)
     phase = rootless_failure["phase"] if rootless_failure else suite
+    compile_phase = (
+        phase == "Makefile native and metadata" or phase.startswith("C syntax:"))
+
+    if failing_test is not None:
+        causal_error = unittest_error or unittest_header
+        category = unittest_category or (
+            "SOURCE_CONTRACT" if contract_suite or unittest_contract_context
+            else "UNKNOWN_FAILURE")
+        if unittest_error is None and rootless_reason == "unittest_assertion":
+            category = "RUNTIME_ASSERTION"
+        elif unittest_error is None and rootless_reason == "unittest_timeout":
+            category = "INFRASTRUCTURE"
+    elif rootless_failure is not None:
+        # The outer runner gives us an exact phase. For a generic nonzero
+        # child, accept only a diagnostic adjacent to that final marker, except
+        # that a compile phase keeps its first compiler error even if verbose
+        # compiler output separates it from the marker. This prevents expected
+        # negative output from an earlier passing suite becoming the cause.
+        if (rootless_reason == "nonzero_exit" and
+                first_category == "NATIVE_COMPILE" and compile_phase):
+            causal_error = first_error
+            category = first_category
+        elif rootless_reason == "nonzero_exit" and recent_error is not None:
+            generic_phase_terms = {
+                "assertions", "bash", "contract", "executable", "interface",
+                "metadata", "native", "runner", "single", "source", "static",
+                "syntax", "test", "tests",
+            }
+            phase_terms = [
+                term.lower() for term in
+                re.findall(r"[A-Za-z0-9_.-]{5,}", phase)
+                if term.lower() not in generic_phase_terms
+            ]
+            if any(term in recent_error.lower() for term in phase_terms):
+                causal_error = recent_error
+                category = recent_category
+            else:
+                causal_error = None
+                category = None
+        else:
+            causal_error = None
+            category = None
+    else:
+        causal_error = first_error or fallback
+        category = first_category
+
     if failing_test is not None:
         test_name = failing_test
     elif rootless_failure:
@@ -481,12 +532,46 @@ def diagnose_ci_failure(lines, exit_code, suite):
         except ValueError:
             termination = "signal " + str(-exit_code)
 
-    if causal_error:
+    if rootless_failure is not None and causal_error is None:
+        marker_reason = ("rootless phase=" + phase + " reason=" +
+                         rootless_reason + " child_exit=" +
+                         str(child_exit_code))
+        if rootless_reason == "timeout_or_exit_124":
+            status, category = "FAIL", "INFRASTRUCTURE"
+            reason = (marker_reason +
+                      " (124 is timeout-or-child-exit; watchdog not proven)")
+        elif rootless_reason == "signal_or_child_exit":
+            status, category = "FAIL", "UNKNOWN_FAILURE"
+            reason = (marker_reason +
+                      " (signal-style shell status and explicit child exit "
+                      "are indistinguishable)")
+        elif rootless_reason in ("received_TERM", "received_INT"):
+            status, category = "CANCELLED", "CANCELLATION"
+            reason = (marker_reason +
+                      " (runner received an interrupt; origin not proven)")
+        elif rootless_reason == "unittest_assertion":
+            status, category = "FAIL", "RUNTIME_ASSERTION"
+            reason = marker_reason
+        elif rootless_reason == "unittest_timeout":
+            status, category = "FAIL", "INFRASTRUCTURE"
+            reason = marker_reason
+        elif rootless_reason in (
+                "stderr_relay_failure", "stderr_relay_cleanup_failure"):
+            status, category = "FAIL", "INFRASTRUCTURE"
+            reason = marker_reason
+        else:
+            status = "FAIL"
+            category = "SOURCE_CONTRACT" if contract_suite else "UNKNOWN_FAILURE"
+            reason = marker_reason
+        causal_error = reason
+    elif causal_error:
         status = "FAIL"
         reason = causal_error
         category = category or (
             "SOURCE_CONTRACT" if contract_suite else "UNKNOWN_FAILURE")
     elif effective_exit_code in (130, 143, -2, -15):
+        # Preserve existing top-level cancellation classification where no
+        # rootless marker can disambiguate shell 128+signal-style statuses.
         status, category = "CANCELLED", "CANCELLATION"
         reason = "execution interrupted; cancellation cause not proven"
         causal_error = reason
@@ -509,21 +594,6 @@ def diagnose_ci_failure(lines, exit_code, suite):
         category = "SOURCE_CONTRACT" if contract_suite else "UNKNOWN_FAILURE"
         reason = "command exited without a recognizable causal diagnostic"
         causal_error = reason
-
-    if rootless_failure and not failing_test and not first_error:
-        # The rootless failure marker is a fixed safe contract, not arbitrary
-        # child stderr. Attribute a marker-only failure to its actual phase.
-        reason = ("rootless phase=" + phase + " reason=" +
-                  rootless_failure["reason"] + " child_exit=" +
-                  str(child_exit_code))
-        causal_error = reason
-        if effective_exit_code == 124:
-            reason += " (124 is timeout-or-child-exit, not proof of a watchdog)"
-            causal_error = reason
-        if rootless_failure["reason"] == "unittest_assertion":
-            category = "RUNTIME_ASSERTION"
-        elif rootless_failure["reason"] == "unittest_timeout":
-            category = "INFRASTRUCTURE"
 
     expected_contract = {
         "NATIVE_COMPILE": "native source compiles and links",
@@ -551,7 +621,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
     }
     if child_exit_code is not None:
         result["child_exit_code"] = child_exit_code
-        result["rootless_reason"] = rootless_failure["reason"]
+        result["rootless_reason"] = rootless_reason
     if termination:
         result["termination"] = termination
     return result
@@ -633,9 +703,14 @@ def _ci_run(argv):
                     command, cwd=root, stdout=record,
                     stderr=subprocess.STDOUT, check=False).returncode
             except OSError as error:
-                record.write(("INFRASTRUCTURE: cannot start test: " +
-                              _ci_safe_line(str(error)) + "\n").encode())
+                # Preserve errno but never publish the executable/path from
+                # OSError's repr; command strings are not public diagnostics.
                 launch_errno = error.errno
+                launch_error = error.strerror or "operating system error"
+                record.write((
+                    "INFRASTRUCTURE: cannot start test: errno=" +
+                    str(launch_errno) + " " + _ci_safe_line(launch_error) +
+                    "\n").encode())
                 return_code = 127
         if return_code == 0:
             return 0
