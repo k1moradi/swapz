@@ -6506,6 +6506,8 @@ bindings and contradictory PASS/BLOCKED summaries remain non-qualifying. Any
 expected-failure reproducer for a known evaluator false-PASS is debugging
 evidence only and must be reported as an unresolved release blocker; it never
 upgrades acceptance.
+Privacy assertions in such diagnostic controls execute before the intentionally
+failing completeness assertion, so a known false-PASS cannot bypass leak checks.
 
 `docs/handoff/production-readiness.json` is observational release evidence,
 not a qualification result. Every current PASS must bind to the exact

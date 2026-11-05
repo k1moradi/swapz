@@ -2589,11 +2589,13 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(payload["DEPLOYMENT_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(payload["release_verdict"], "BLOCKED")
 
-
-
-
-    def test_development_only_restoration_is_not_real_swap_proof(self):
-        # Cleanup success on an inactive card is not Linux swap activation.
+    def test_development_only_restoration_and_fast_test_do_not_replace_make_test(
+            self):
+        # Cleanup success and a development fast-test PASS cannot replace the
+        # incomplete five-stage owner qualification.
+        report = owner_report()
+        report["overall"] = "BLOCKED"
+        report["stages"] = report["stages"][:2]
         private_marker = "secret-private-path-and-token"
         development = {
             "schema": "swapz-physical-development-results-v1",
@@ -2617,14 +2619,19 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             },
             "private_note": private_marker,
         }
-        result = evaluate(physical=development)
+        result = evaluate(report=report, physical=development)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(result["release_verdict"], "BLOCKED")
+        self.assertTrue(any(
+            "exact-source owner make test is not PASS" in item
+            for item in result["code_blockers"]))
+        self.assertTrue(any(
+            "owner qualification stage set/order is not exactly canonical"
+            in item for item in result["code_blockers"]))
         self.assertTrue(any(
             "real_linux_swap: persistent evidence schema is invalid" in item
             for item in result["code_blockers"]))
         self.assertNotIn(private_marker, json.dumps(result))
-
     def test_physical_preflight_restoration_cannot_override_blocked_phase(self):
         report = owner_report()
         policy = acceptance_policy()
@@ -2644,16 +2651,6 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "real_linux_swap: persistent evidence is not COMPLETE" in item
             for item in result["code_blockers"]))
 
-    def test_missing_five_stage_make_test_is_incomplete(self):
-        report = owner_report()
-        report["stages"] = report["stages"][:2]
-        # Development evidence cannot supply three absent qualification stages.
-        result = evaluate(report=report)
-        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
-        self.assertTrue(any(
-            "owner qualification stage set/order is not exactly canonical"
-            in item for item in result["code_blockers"]))
-
     def test_known_failed_stage_and_unavailable_stages_are_distinct(self):
         failed = owner_report()
         failed["overall"] = "FAIL"
@@ -2670,6 +2667,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             for item in failed_result["code_blockers"]))
 
         incomplete = owner_report()
+        incomplete["overall"] = "BLOCKED"
         incomplete["stages"] = incomplete["stages"][:1]
         incomplete_result = evaluate(report=incomplete)
         self.assertEqual(incomplete_result["CODE_PRODUCTION_READY"], "BLOCKED")
@@ -2796,12 +2794,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             ARTIFACTS["module_sha256"],
             observed_module_sha256,
         )
+        # Privacy is independently enforced even while this completeness
+        # assertion is an expected failure.
+        self.assertNotIn(private_marker, diagnostics)
         missing = [
             marker for marker in required_markers
             if marker not in diagnostics
         ]
         self.assertEqual(missing, [], diagnostics)
-        self.assertNotIn(private_marker, diagnostics)
 
 if __name__ == "__main__":
     unittest.main()
