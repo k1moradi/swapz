@@ -71,7 +71,8 @@ class CleanupOwnershipFixtures(unittest.TestCase):
         self.session.mkdir()
 
     def execute(self, body: str = "", *, status: int = 0,
-                retain: bool = False, preamble: str = "") -> subprocess.CompletedProcess[str]:
+                retain: bool = False, preamble: str = "",
+                via_exit_trap: bool = False) -> subprocess.CompletedProcess[str]:
         # Separate synthetic invocations share one fixture only within a test;
         # discard the previous invocation's owned stop marker first.
         stop_path = self.session / "pressure.stop"
@@ -94,6 +95,17 @@ rmdir() {
     fi
 }
 '''
+        if via_exit_trap:
+            trap_beginning = self.source.index(
+                "trap 'CLEANUP_ENTRY_STATUS=$? CLEANUP_ACTIVE=1; cleanup")
+            trap_end = self.source.index(
+                "\n\nif ! pidfd_signal_supported", trap_beginning)
+            cleanup_invocation = (
+                self.source[trap_beginning:trap_end] + f"\nexit {status}\n")
+        else:
+            cleanup_invocation = (
+                (f'(exit {status})\n' if status else 'true\n') + 'cleanup\n')
+
         script = (
             'set -Eeuo pipefail\n'
             'CGROUP=$1\nSESSION=$2\n'
@@ -105,6 +117,8 @@ rmdir() {
             'PAIR_PROCESS_IDENTITY=""\nPRESSURE_PROCESS_IDENTITY=""\n'
             'PAIR_CGROUP_PROCESS_PID=""\nPAIR_CGROUP_PROCESS_IDENTITY=""\n'
             'PAIR_RESUME_UNCERTAIN=0\n'
+            'CLEANUP_ACTIVE=0\nCLEANUP_PENDING_SIGNAL_STATUS=0\n'
+            'CLEANUP_ENTRY_STATUS=0\n'
             'SESSION_DIRECTORY_FD=""\nCGROUP_DIRECTORY_FD=""\n'
             'pair_cgroup_pid="123"\nCGROUP_WAS_CREATED=1\n'
             f'RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION={int(retain)}\n'
@@ -116,8 +130,7 @@ rmdir() {
             + 'CGROUP_IDENTITY="$(read_owned_directory_identity "$CGROUP")"\n'
             + rmdir_stub + preamble + '\n'
             + body + '\nset +e\n'
-            + (f'(exit {status})\n' if status else 'true\n')
-            + 'cleanup\n'
+            + cleanup_invocation
         )
         return subprocess.run(
             ["bash", "-c", script, "rootless-fixture", str(self.cgroup), str(self.session)],
@@ -735,6 +748,27 @@ rm() {
         self.assertIn("observed:occupied-or-unremovable", result.stderr)
         self.assertIn("original_exit:0", result.stderr)
         self.assertIn("retained_cleanup:private-session", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_term_before_cleanup_local_traps_is_latched(self):
+        # Exercise the production EXIT/signal trap block. DEBUG injects TERM
+        # before cleanup's first local trap is installed, then removes itself.
+        body = r'''
+set -T
+early_term_sent=0
+trap 'if [[ ${FUNCNAME[0]:-} == cleanup && $early_term_sent == 0 ]]; then early_term_sent=1; trap - DEBUG; kill -TERM "$BASHPID"; fi' DEBUG
+'''
+        result = self.execute(body=body, via_exit_trap=True)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertFalse(self.session.exists())
+        self.assertIn("phase:cleanup-signal", result.stderr)
+        self.assertIn("observed:signal-143", result.stderr)
+        self.assertIn("original_exit:143", result.stderr)
+        self.assertIn("cleanup_disposition:completed-owned", result.stderr)
+        self.assertIn("retained_cleanup:none", result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
