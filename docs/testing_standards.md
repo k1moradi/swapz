@@ -2321,8 +2321,8 @@ measured failure from an incomplete evaluator decision or from false checks
 attached to an unauthenticated cohort. A FAIL requires either a producer's
 terminal failure authenticated against the exact source, host boot, physical
 arm chronology and prospective pair identity, or a complete accepted cohort
-with a coherent measured failure decision. A failing preflight or an unknown
-measurement provenance remains BLOCKED even when an original arm says FAIL.
+with a coherent measured failure decision. A failing preflight, missing producer error or unknown measurement provenance
+remains BLOCKED even when an original arm says FAIL.
 A missing or unrecognized producer phase must remain BLOCKED; the audit must
 never synthesize a generic failure phase. Check every attempted index, duplicate
 pair/run identifier, exact counterbalanced raw/swapz temporal order, source and
@@ -7350,8 +7350,10 @@ only from the current audit's retained first-failure witness. The first failure
 must match a retained FAIL diagnostic and either (a) be an authenticated
 non-setup `arm.verdict` producer FAIL with the same workload/pair/arm and one
 matching EXCLUDED pair-manifest entry with a producer-recorded
-measurement phase; preflight, fill, warmup, teardown and publication failures
-remain BLOCKED unusable evidence. Or (b), the witness may be a
+measurement phase and retain a nonempty original producer error; the error
+stays in the immutable pair artifact and is never copied into public diagnostics.
+Preflight, fill, warmup, teardown and publication failures remain BLOCKED unusable
+evidence. Or (b), the witness may be a
 `qualification.decision_status` FAIL for a complete
 accepted measured cohort. Before either witness can drive release FAIL, the
 retained pair manifest must have type-strict PASS/EXCLUDED dispositions and
@@ -8072,7 +8074,10 @@ every frozen-parent and prospective-amendment workload, including decisions
 omitted by the supplied summary. Missing decisions or short attempted/accepted
 cohorts are BLOCKED prerequisites, never automatically producer-proven FAIL.
 An excluded or evaluator-unusable pair is incomplete evidence and remains
-BLOCKED unless an independent producer or measured check proves failure. An
+BLOCKED unless an independent producer or measured check proves failure. A
+reported measured cohort FAIL must be rederived exactly from the retained
+accepted records with type-strict JSON equality; a detached synthetic CI/check
+object is BLOCKED rather than measurement evidence. An
 authenticated terminal measurement-phase arm producer verdict of FAIL and a
 failed measured decision remain FAIL even when another cohort is missing. Raw-repeat spread beyond the frozen
 screening maximum remains BLOCKED/INCOMPLETE rather than becoming a
