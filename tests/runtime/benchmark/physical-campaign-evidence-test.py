@@ -96,7 +96,8 @@ def inspect(rows, before=None, after=None, decisions=None,
     result = EVIDENCE.audit_physical_pairs(
         {"status": summary_status, "records": rows,
          "decisions": decisions or {},
-         "raw_repeat_spread": raw_repeat_spread or {}},
+         "raw_repeat_spread": (
+             {} if raw_repeat_spread is None else raw_repeat_spread)},
         baseline if before is None else before,
         finished if after is None else after)
     return result, {d["metric"] for d in result["diagnostics"]}
@@ -300,7 +301,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         failed["raw"]["stage"] = "measure"
         failed["raw"]["failure_reason"] = "synthetic measurement failure"
         decisions = {"sd-service-balanced": {"status": "PASS", "checks": {}}}
-        for malformed_spread in ([0.2], "/private/host/secret"):
+        for malformed_spread in ([], [0.2], "/private/host/secret"):
             with self.subTest(observed_type=type(malformed_spread).__name__):
                 audit, metrics = inspect(
                     [failed], decisions=decisions,

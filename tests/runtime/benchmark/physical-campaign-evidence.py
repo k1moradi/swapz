@@ -1347,6 +1347,10 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             continue
         if spec["evidence"] == "statistical_paired":
             spread_by_workload = summary.get("raw_repeat_spread")
+            # Preserve the historical optional-spread contract: missing/null
+            # is not a wrong-type supplied mapping.
+            if spread_by_workload is None:
+                spread_by_workload = {}
             if not isinstance(spread_by_workload, dict):
                 diagnose(
                     "BLOCKED", "raw_repeat_spread", "workload spread mapping (dict)",

@@ -8596,8 +8596,9 @@ No pending prospective-v2 amendment is applied as a retroactive replacement.
 
 The physical producer audit must also type-check every nested pair workload
 before dictionary membership. Wrong-type JSON workload identifiers and
-wrong-type raw-repeat-spread mappings are BLOCKED diagnostics, not unhandled
-TypeError/AttributeError exceptions; an authenticated measurement-phase
+wrong-type supplied raw-repeat-spread mappings are BLOCKED diagnostics, not unhandled
+TypeError/AttributeError exceptions; the historical missing/null optional
+raw-repeat-spread map remains equivalent to an empty mapping. An authenticated measurement-phase
 producer FAIL in a different pair must remain FAIL. The sealer must reject
 missing, non-string or unhashable summary/pair identity components before
 using them as dictionary keys, with the failing field, expected and observed
