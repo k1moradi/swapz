@@ -366,12 +366,15 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             child.wait(timeout=5)
 
     @unittest.skipIf(os.geteuid() == 0, "rootless cleanup proof requires non-root")
+    @unittest.skipUnless(
+        hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
+        "safe descendant cleanup requires Linux pidfd support")
     def test_owned_process_group_cleanup_reaps_descendant(self):
         child_source = (
             "import subprocess,sys,time\n"
             "descendant = subprocess.Popen([sys.executable, '-I', '-c', "
             "\"import signal,time; signal.signal(signal.SIGTERM, "
-            "signal.SIG_IGN); print('ready', flush=True); time.sleep(60)\"], "
+            "signal.SIG_IGN); print('ready', flush=True); time.sleep(60)\", "
             "stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
             "stderr=subprocess.DEVNULL, text=True)\n"
             "assert descendant.stdout.readline() == 'ready\\n'\n"
@@ -384,29 +387,41 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True)
         setattr(child, "_swapz_owned_process_group", child.pid)
-        descendant_pid = None
+        descendant_pidfd = None
         try:
             self.assertTrue(select.select([child.stdout], [], [], 5)[0])
             descendant_pid = int(child.stdout.readline().strip())
+            self.assertIsNone(child.poll())
+            self.assertEqual(os.getpgid(descendant_pid), child.pid)
+            # Keep an ownership-bound kernel reference before production cleanup
+            # can reap the session leader. The finalizer must never signal a
+            # possibly recycled numeric PID or process-group ID.
+            descendant_pidfd = os.pidfd_open(descendant_pid)
             parent._stop_unadmitted_child(child)
             self.assertIsNotNone(child.returncode)
             self.assertFalse(Path(f"/proc/{descendant_pid}").exists())
             with self.assertRaises(ProcessLookupError):
                 os.killpg(child.pid, 0)
         finally:
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            # Group signaling is safe only while the actual session leader is
+            # still live and therefore reserves the process-group number.
+            if child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if descendant_pidfd is not None:
+                try:
+                    signal.pidfd_send_signal(
+                        descendant_pidfd, signal.SIGKILL, None, 0)
+                except ProcessLookupError:
+                    pass
+                finally:
+                    os.close(descendant_pidfd)
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=5)
             child.stdout.close()
-            if descendant_pid is not None and Path(f"/proc/{descendant_pid}").exists():
-                try:
-                    os.kill(descendant_pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
 
     def test_privileged_child_launch_creates_private_session(self):
         arguments = parent._build_parser().parse_args([
