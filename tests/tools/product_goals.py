@@ -377,6 +377,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
     first_unittest_active = False
     unittest_contract_context = False
     make_target = None
+    first_make_failure = None
     rootless_failure = None
     contract_suite = any(name in suite for name in
                          ("contract", "policy", "interface", "layout"))
@@ -427,16 +428,23 @@ def diagnose_ci_failure(lines, exit_code, suite):
         rootless_match = (
             rootless_pattern.fullmatch(safe_line)
             if suite == "native-rootless" else None)
-        if rootless_match:
-            # The runner emits its marker only after the failing child. Keep
-            # the last valid marker so child output cannot impersonate it
-            # before the runner emits the authoritative summary.
-            rootless_failure = rootless_match.groupdict()
-            continue
         if safe_line.startswith("FAIL: rootless "):
-            # Never treat malformed or out-of-suite marker-shaped output as a
-            # causal FAIL line. It is arbitrary child output, not attribution.
+            # The final marker owns the failing-suite boundary. An invalid
+            # final marker must also revoke any earlier valid attribution.
+            # Marker-shaped child output is never a causal FAIL line.
+            rootless_failure = (
+                rootless_match.groupdict() if rootless_match else None)
             continue
+
+        if (first_make_failure is None and suite == "native-rootless"
+                and safe_line.startswith("make")):
+            make_failure_match = re.fullmatch(
+                r"make(?:\[\d+\])?: \*\*\* "
+                r"\[Makefile:[0-9]+: ([a-z0-9-]{1,64})\] Error [0-9]+",
+                safe_line)
+            if make_failure_match:
+                first_make_failure = (
+                    safe_line, make_failure_match.group(1))
 
         if make_target is None:
             make_match = re.search(
@@ -532,9 +540,26 @@ def diagnose_ci_failure(lines, exit_code, suite):
             causal_error = None
             category = None
         elif (rootless_reason == "nonzero_exit" and
+              phase == "Makefile native and metadata" and
+              rootless_failure["subtest"] != "unavailable"):
+            # A later parallel Make or compiler error cannot override the
+            # first nested target authenticated by the rootless marker.
+            if (first_make_failure is not None and
+                    first_make_failure[1] == rootless_failure["subtest"]):
+                causal_error = first_make_failure[0]
+                category = _ci_failure_category(causal_error, contract_suite)
+            else:
+                causal_error = None
+                category = None
+        elif (rootless_reason == "nonzero_exit" and
                 first_category == "NATIVE_COMPILE" and compile_phase):
             causal_error = first_error
             category = first_category
+        elif (rootless_reason == "nonzero_exit" and
+              phase == "Makefile native and metadata"):
+            # No target was authenticated; raw child Make text is not a cause.
+            causal_error = None
+            category = None
         elif rootless_reason == "nonzero_exit" and recent_error is not None:
             generic_phase_terms = {
                 "assertions", "bash", "contract", "executable", "interface",
@@ -693,6 +718,10 @@ def diagnose_ci_failure(lines, exit_code, suite):
     if child_exit_code is not None:
         result["child_exit_code"] = child_exit_code
         result["rootless_reason"] = rootless_reason
+        # Keep Bash's validated, relative mode-0600 pointer independent of
+        # which sanitized line becomes first_error (including Make Error 134).
+        if rootless_failure["log"] != "unavailable":
+            result["rootless_private_log"] = rootless_failure["log"]
     if termination:
         result["termination"] = termination
     return result

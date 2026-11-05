@@ -81,22 +81,96 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "FAIL: test_expected (__main__.EarlierPassingCase)\n"
             "AssertionError: unrelated expected negative fixture\n"
             "mapping-authority: Assertion failed: PRIVATE_RESOURCE_IDENTIFIER\n"
-            "make[1]: *** [Makefile:154: test-mapping] Error 1\n"
+            "make[1]: *** [Makefile:154: test-mapping] Error 134\n"
             "make[1]: *** [Makefile:160: test-userspace] Error 1\n"
             + marker, 1)
         self.assertEqual(failure["status"], "FAIL")
-        self.assertEqual(failure["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(failure["category"], "RUNTIME_ASSERTION")
         self.assertEqual(failure["phase"], "Makefile native and metadata")
         self.assertEqual(failure["test"],
                          "Makefile native and metadata[test-mapping]")
         self.assertEqual(failure["exit_code"], 1)
         self.assertEqual(failure["child_exit_code"], 2)
         self.assertEqual(failure["rootless_reason"], "nonzero_exit")
-        self.assertIn("build/tests/rootless-failure.Abc123xy/diagnostic.log",
-                      failure["first_error"])
+        self.assertEqual(
+            failure["first_error"],
+            "make[1]: *** [Makefile:154: test-mapping] Error 134")
+        self.assertEqual(failure["observed"], failure["first_error"])
+        self.assertEqual(failure["expected_contract"],
+                         "test assertions and runtime contracts hold")
+        self.assertEqual(
+            failure["rootless_private_log"],
+            "build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        self.assertNotIn("diagnostic.log", failure["first_error"])
         self.assertNotIn("PRIVATE_RESOURCE_IDENTIFIER", json.dumps(failure))
         self.assertNotIn("EarlierPassingCase", json.dumps(failure))
         self.assertNotIn("test-userspace", json.dumps(failure))
+
+
+    def test_first_make_error_survives_later_abort_and_bad_final_marker(self):
+        marker = (
+            "FAIL: rootless phase=Makefile native and metadata "
+            "subtest=test-mapping test=unavailable exit=2 reason=nonzero_exit "
+            "phase_s=1 stage_s=2 line=476 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        first = "make[1]: *** [Makefile:154: test-mapping] Error 1"
+        later = "make[1]: *** [Makefile:160: test-userspace] Error 134"
+        failure = self.diagnose(first + "\n" + later + "\n" + marker, 1)
+        self.assertEqual(failure["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(failure["test"],
+                         "Makefile native and metadata[test-mapping]")
+        self.assertEqual(failure["first_error"], first)
+        self.assertEqual(failure["child_exit_code"], 2)
+        self.assertEqual(
+            failure["rootless_private_log"],
+            "build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        self.assertNotIn(later, json.dumps(failure))
+
+        # A later compiler error cannot displace the first failed target.
+        later_compile = (
+            "/private/source.c:12: error: PRIVATE_RESOURCE_IDENTIFIER")
+        compiled = self.diagnose(
+            first + "\n" + later_compile + "\n" + marker, 1)
+        self.assertEqual(compiled["first_error"], first)
+        self.assertEqual(compiled["category"], "UNKNOWN_FAILURE")
+        self.assertNotIn("PRIVATE_RESOURCE_IDENTIFIER", json.dumps(compiled))
+
+        # An unrelated target cannot donate its abort to the validated target.
+        unmatched = self.diagnose(later + "\n" + marker, 1)
+        self.assertEqual(unmatched["category"], "UNKNOWN_FAILURE")
+        self.assertIn("rootless phase=Makefile", unmatched["first_error"])
+        self.assertEqual(unmatched["child_exit_code"], 2)
+
+        # A final malformed marker invalidates earlier marker attribution.
+        stale = self.diagnose(
+            marker + "\nFAIL: rootless phase=../private "
+            "subtest=unavailable test=unavailable exit=99 "
+            "reason=nonzero_exit phase_s=1 stage_s=2 line=1 "
+            "log=/tmp/private.log", 1)
+        self.assertEqual(stale["phase"], "native-rootless")
+        self.assertNotIn("child_exit_code", stale)
+        self.assertNotIn("rootless_private_log", stale)
+        self.assertNotIn("private.log", json.dumps(stale))
+
+    def test_unittest_error_heading_is_not_compiler_error(self):
+        reporter_spec = importlib.util.spec_from_file_location(
+            "swapz_ci_native_failure_reporter",
+            ROOT / "tests/tools/run-tests.py")
+        reporter = importlib.util.module_from_spec(reporter_spec)
+        reporter_spec.loader.exec_module(reporter)
+        phase, diagnostic = reporter.failure_context(
+            "ERROR: tearDown (__main__.SyntheticCase)\n",
+            loaded=False, default_phase="Native and rootless contracts",
+            child_exit_code=1)
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertNotIn("Native build error", diagnostic)
+        self.assertNotIn("SyntheticCase", diagnostic)
+
+        _, compiler_diagnostic = reporter.failure_context(
+            "src/fixture.c:42:8: error: incompatible pointer type\n",
+            loaded=False, default_phase="Native and rootless contracts",
+            child_exit_code=2)
+        self.assertIn("Native build error", compiler_diagnostic)
 
     def test_timeout_signal_and_shell_exit_remain_distinct(self):
         timeout = self.diagnose("", 124)

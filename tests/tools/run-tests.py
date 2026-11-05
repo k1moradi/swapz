@@ -2614,6 +2614,11 @@ def failure_context(output, *, loaded=True, default_phase=None,
     if not loaded:
         for line in output.splitlines():
             candidate = line.strip()
+            # A unittest ERROR heading is not a compiler diagnostic.
+            if re.match(
+                    r"^ERROR: (?:test_[A-Za-z0-9_]+|setUp(?:Class|Module)?|"
+                    r"tearDown(?:Class|Module)?) \(", candidate):
+                continue
             helper = re.match(
                 r"^((?:predictor|routed production planner) .+?\b"
                 r"(?:failed|rejected)):\s*(.*)$", candidate, re.I)

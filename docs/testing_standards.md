@@ -1232,7 +1232,12 @@ only in the private diagnostic. Oversized captures must retain a bounded
 late-race traceback excerpt plus the first compiler `error:` line even when
 more than the normal transcript tail follows from other parallel jobs.
 A prior passing suite's expected `FAIL:` text cannot authenticate a later
-failing suite. A generic nested Make failure may disclose only the first
+failing suite. The outer `native-rootless` CI diagnostic must retain any
+validated relative private-log pointer as `rootless_private_log` even when a
+first nested Make error becomes `first_error`; `first_error` must not copy
+private source paths or traceback text. A missing or invalid final marker
+must not inherit an earlier marker's test identity or private-log pointer.
+A generic nested Make failure may disclose only the first
 source-controlled `tests/suites/Makefile` target from its own `make: ***` error
 as a `subtest` (for example, `test-mapping`). The reported Makefile line must
 resolve to a recipe line owned by that exact target in the source-controlled
