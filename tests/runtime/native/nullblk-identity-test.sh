@@ -351,7 +351,7 @@ run_case() {
             rm -- "$FIXTURE/proc/self/status"
             mkdir "$FIXTURE/proc/self/status"
             ;;
-        missing_module|missing_tool|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|unclaimed_nullb|internal_failure) ;;
+        missing_module|missing_tool|missing_unused_rmmod|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|unclaimed_nullb|internal_failure) ;;
         idle_module_busy)
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
@@ -418,9 +418,14 @@ run_case() {
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN"
             ;;
     esac
-    if [[ "$case_name" == missing_tool ]]; then
-        mv -- "$STUBS/rmmod" "$STUBS/rmmod.hidden"
-    fi
+    case "$case_name" in
+        missing_tool)
+            mv -- "$STUBS/dmsetup" "$STUBS/dmsetup.hidden"
+            ;;
+        missing_unused_rmmod)
+            mv -- "$STUBS/rmmod" "$STUBS/rmmod.hidden"
+            ;;
+    esac
     if SWAPZ_FIXTURE_CASE="$case_name" SWAPZ_FIXTURE_ROOT="$FIXTURE" \
         PATH="$STUBS" "$STUBS/bash" "$TOOLS/loaded-preflight.sh" \
         > "$FIXTURE/output.log" 2>&1; then
@@ -428,9 +433,14 @@ run_case() {
     else
         result=$?
     fi
-    if [[ "$case_name" == missing_tool ]]; then
-        mv -- "$STUBS/rmmod.hidden" "$STUBS/rmmod"
-    fi
+    case "$case_name" in
+        missing_tool)
+            mv -- "$STUBS/dmsetup.hidden" "$STUBS/dmsetup"
+            ;;
+        missing_unused_rmmod)
+            mv -- "$STUBS/rmmod.hidden" "$STUBS/rmmod"
+            ;;
+    esac
     output="$(cat "$FIXTURE/output.log")"
     if [[ "$expected_result" == BLOCKED ]]; then
         [[ $result == 1 &&
@@ -526,6 +536,7 @@ run_case missing_capability cap_sys_admin NOT_AUTHORIZED unavailable
 run_case capability_unreadable cap_sys_admin BLOCKED 21
 run_case missing_module null_blk_module BLOCKED unavailable
 run_case missing_tool required_tool BLOCKED unavailable
+run_case missing_unused_rmmod LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 run_case invalid_debug kernel_debug_config BLOCKED unavailable
 run_case retained_journal package_journal BLOCKED unavailable
 run_case journal_permission package_journal BLOCKED unavailable
@@ -567,4 +578,4 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 45 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 46 isolated preflight fixtures'

@@ -59,7 +59,7 @@ preflight_internal_error() {
 trap 'rc=$?; preflight_internal_error "$rc" "$LINENO"' ERR
 
 # Include every unconditionally used external utility in the audit.
-for cmd in rmmod dmsetup modprobe timeout awk tr findmnt cat readlink stat sleep id ls find rm rmdir python3 uname; do
+for cmd in dmsetup modprobe timeout awk tr findmnt cat readlink stat sleep id ls find rm rmdir python3 uname; do
     command -v "$cmd" >/dev/null ||
         refuse BLOCKED required_tool unavailable "install required executable $cmd before make test"
 done

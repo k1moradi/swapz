@@ -496,7 +496,11 @@ copy before attempting any loaded operation. Multiline
 shell line as `==` (with an explicit continuation when wrapped): a Bash
 parse-time exit 2 is not a simulated authorization refusal. The rootless
 source-contract guard must assert retention of unowned idle modules, never
-automatic module removal or a fabricated auto-removal success marker.
+automatic module removal or a fabricated auto-removal success marker. Because
+the preflight has no authority to unload an unowned module, `rmmod` is not a
+preflight prerequisite. The isolated rootless fixture must prove that an
+unavailable `rmmod` does not block an otherwise clean preflight while its stub
+still traps any unexpected unload attempt.
 
 The root preflight is not a host-resource garbage collector. A
 `nullb-swapz-<16 hex>` name, even paired with an idle `dm_swapz` module,
@@ -538,14 +542,15 @@ directory, then write only through the power descriptor opened at acquisition.
 The rootless power-helper fixture must prove that the matching regular power
 inode transitions from 1 to 0, while missing paths and FIFO substitutes refuse
 without writes.
+
 The preflight's rootless identity fixture must translate original paths in
-one pass, matching nested /proc/devices and /sys/dev/block prefixes before
-shorter /proc, /sys and /dev prefixes, so each maps to its own synthetic
-namespace. It must provide its own writable fake
-/dev/null for redirected diagnostics; a missing synthetic sink must not masquerade
-as an ownership refusal. All original host resources remain untouched.
- Shell failure-status capture belongs outside the Python
-here-document input: a Python parse or open error must never be reported as
+one pass, matching nested `/proc/devices` and `/sys/dev/block` paths before
+the shorter `/proc`, `/sys` and `/dev` patterns, so each maps to its own
+synthetic namespace. It must provide its own writable fake `/dev/null` for
+redirected diagnostics; a missing synthetic sink must not masquerade as an
+ownership refusal. All original host resources remain untouched. Shell
+failure-status capture belongs outside the Python here-document input: a
+Python parse or open error must never be reported as
 successful power-off. After power-off invalidates sysfs block telemetry, retain the captured configfs
 proof and both pinned descriptor identities through the last immediately
 preceding `rmdir` check. A pathname-based `rmdir` still lacks an atomic
