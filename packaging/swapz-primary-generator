@@ -68,79 +68,111 @@ mapper_mask_is_active()
 		return 1
 	fi
 }
-preexisting_unit=none
-if [ -L "$mapper_unit" ]; then
-	if mask_destination=$(readlink -- "$mapper_unit"); then
-		[ "$mask_destination" = /dev/null ] || preexisting_unit=unexpected-unit
-	else
-		fail "$?" mask generator-output read-existing-mask mapper-active-job
+install_verified_mask()
+{
+	requested_mask_validation=$1
+	if ln -s /dev/null "$mask_temporary"; then :; else
+		fail "$?" mask generator-output create-mask mapper-active-job
 	fi
-elif [ -e "$mapper_unit" ]; then
-	preexisting_unit=unexpected-unit
-fi
-if ln -s /dev/null "$mask_temporary"; then :; else
-	fail "$?" mask generator-output create-mask mapper-active-job
-fi
-# A rename can report success without moving (or fail after moving).
-# Verify the early barrier before staging anything activation-capable.
-mask_status=0
-if mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
-	mask_status=$?
-fi
-if [ "$mask_status" -eq 0 ] && mapper_mask_is_active &&
-	[ ! -e "$mask_temporary" ] && [ ! -L "$mask_temporary" ]; then :; else
-	[ "$mask_status" -ne 0 ] || mask_status=1
-	mask_restore_status=0
-	if ! mapper_mask_is_active; then
-		# Retry the atomic mask replacement. If rename remains broken, a
-		# direct link at this reserved safety name is the last resort.
-		rm -f -- "$mask_temporary" || :
-		if ln -s /dev/null "$mask_temporary"; then
-			if mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
-				mask_restore_status=$?
-			fi
-		else
-			mask_restore_status=$?
-		fi
+	# A rename can report success without moving (or fail after moving).
+	# Verify the early barrier before staging anything activation-capable.
+	mask_status=0
+	if mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
+		mask_status=$?
+	fi
+	if [ "$mask_status" -eq 0 ] && mapper_mask_is_active &&
+		[ ! -e "$mask_temporary" ] && [ ! -L "$mask_temporary" ]; then :; else
+		[ "$mask_status" -ne 0 ] || mask_status=1
+		mask_restore_status=0
 		if ! mapper_mask_is_active; then
+			# Retry the atomic mask replacement. If rename remains broken, a
+			# direct link at this reserved safety name is the last resort.
 			rm -f -- "$mask_temporary" || :
-			if rm -f -- "$mapper_unit"; then
-				if ln -s /dev/null "$mapper_unit"; then
-					mask_restore_status=0
-				else
+			if ln -s /dev/null "$mask_temporary"; then
+				if mv -fT -- "$mask_temporary" "$mapper_unit"; then :; else
 					mask_restore_status=$?
 				fi
 			else
 				mask_restore_status=$?
 			fi
+			if ! mapper_mask_is_active; then
+				rm -f -- "$mask_temporary" || :
+				if rm -f -- "$mapper_unit"; then
+					if ln -s /dev/null "$mapper_unit"; then
+						mask_restore_status=0
+					else
+						mask_restore_status=$?
+					fi
+				else
+					mask_restore_status=$?
+				fi
+			fi
 		fi
+		if rm -f -- "$mask_temporary"; then :; else
+			temporary_mask_remove_status=$?
+			[ "$mask_restore_status" -ne 0 ] ||
+				mask_restore_status=$temporary_mask_remove_status
+		fi
+		rollback_outcome=complete
+		surviving_artifacts=none
+		if [ -e "$mask_temporary" ] || [ -L "$mask_temporary" ]; then
+			rollback_outcome=incomplete
+			surviving_artifacts=temporary-mask
+		fi
+		if mapper_mask_is_active; then
+			observed_mask=/dev/null
+		else
+			observed_mask=missing-or-substituted
+			rollback_outcome=incomplete
+		fi
+		printf 'swapz-primary-generator: phase=mask expected_mask=/dev/null observed_mask=%s original_status=%s restore_status=%s original_errno=unavailable surviving_artifacts=%s rollback=%s\n' \
+			"$observed_mask" "$mask_status" "$mask_restore_status" "$surviving_artifacts" "$rollback_outcome" >&2
+		fail "$mask_status" mask generator-output "$requested_mask_validation" mapper-active-job
 	fi
-	if rm -f -- "$mask_temporary"; then :; else
-		[ "$mask_restore_status" -ne 0 ] || mask_restore_status=$?
-	fi
-	rollback_outcome=complete
-	surviving_artifacts=none
-	if [ -e "$mask_temporary" ] || [ -L "$mask_temporary" ]; then
-		rollback_outcome=incomplete
-		surviving_artifacts=temporary-mask
-	fi
+}
+
+fail_serialization()
+{
+	serialization_status=$1
+	serialization_validation=$2
 	if mapper_mask_is_active; then
 		observed_mask=/dev/null
+		rollback_outcome=early-mask-retained
 	else
 		observed_mask=missing-or-substituted
 		rollback_outcome=incomplete
 	fi
-	printf 'swapz-primary-generator: phase=mask expected_mask=/dev/null observed_mask=%s original_status=%s restore_status=%s original_errno=unavailable surviving_artifacts=%s rollback=%s\n' \
-		"$observed_mask" "$mask_status" "$mask_restore_status" "$surviving_artifacts" "$rollback_outcome" >&2
-	fail "$mask_status" mask generator-output publish-mask mapper-active-job
-fi
+	printf 'swapz-primary-generator: phase=serialization expected=exclusive-generator-transaction expected_mask=/dev/null observed_mask=%s original_status=%s original_errno=unavailable surviving_artifacts=none rollback=%s\n' \
+		"$observed_mask" "$serialization_status" "$rollback_outcome" >&2
+	fail "$serialization_status" serialization generator-output "$serialization_validation" mapper-active-job
+}
 
+# Serialize this generator across overlapping reloads. The directory FD has
+# no persistent lock artifact, and the early mask is installed while held.
+if {
+	if flock -x 9 2>/dev/null; then :; else
+		serialization_status=$?
+		install_verified_mask lock-failure-mask
+		fail_serialization "$serialization_status" acquire-transaction-lock
+	fi
+	preexisting_unit=none
+	if [ -L "$mapper_unit" ]; then
+		if mask_destination=$(readlink -- "$mapper_unit"); then
+			[ "$mask_destination" = /dev/null ] || preexisting_unit=unexpected-unit
+		else
+			fail "$?" mask generator-output read-existing-mask mapper-active-job
+		fi
+	elif [ -e "$mapper_unit" ]; then
+		preexisting_unit=unexpected-unit
+	fi
+	install_verified_mask publish-mask
 stage_dir=
 mapper_dropin=
 device_dropin=
 published_mapper=0
 published_device=0
 transaction_committed=0
+preserve_stage_dir=0
 cleanup()
 {
 	# Remove a partial graph while the mapper mask is still in force. Never
@@ -155,7 +187,9 @@ cleanup()
 			rm -f -- "$device_dropin" || :
 		fi
 	fi
-	[ -z "$stage_dir" ] || rm -rf -- "$stage_dir" || :
+	if [ -n "$stage_dir" ] && [ "$preserve_stage_dir" -eq 0 ]; then
+		rm -rf -- "$stage_dir" || :
+	fi
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -191,6 +225,42 @@ refuse_unowned_dropin()
 		"$observed_mask" "$rollback_outcome" >&2
 	fail 1 cleanup generator-output "$unowned_validation" mapper-active-job
 }
+refuse_replaced_dropin()
+{
+	replaced_source=$1
+	replaced_staged=$2
+	replaced_validation=$3
+	replaced_status=$4
+	[ "$replaced_status" -ne 0 ] || replaced_status=1
+	surviving_artifacts=private-stage-unowned-dropin
+	rollback_outcome=incomplete
+	# If a regular replacement was moved into private staging, restore an
+	# equivalent hardlink at its public path without overwriting any newer file.
+	# The staged link can then be removed without deleting the foreign inode.
+	if [ ! -L "$replaced_staged" ] && [ -f "$replaced_staged" ] &&
+		[ ! -e "$replaced_source" ] && [ ! -L "$replaced_source" ] &&
+		ln -- "$replaced_staged" "$replaced_source" &&
+		[ ! -L "$replaced_source" ] &&
+		[ "$replaced_staged" -ef "$replaced_source" ]; then
+		if rm -f -- "$replaced_staged"; then
+			surviving_artifacts=unowned-dropin-restored
+			rollback_outcome=early-mask-retained
+		else
+			preserve_stage_dir=1
+		fi
+	else
+		preserve_stage_dir=1
+	fi
+	if mapper_mask_is_active; then
+		observed_mask=/dev/null
+	else
+		observed_mask=missing-or-substituted
+		rollback_outcome=incomplete
+	fi
+	printf 'swapz-primary-generator: phase=cleanup expected=validated-owned-inode observed=replaced-inode expected_mask=/dev/null observed_mask=%s original_status=%s original_errno=unavailable surviving_artifacts=%s rollback=%s\n' \
+		"$observed_mask" "$replaced_status" "$surviving_artifacts" "$rollback_outcome" >&2
+	fail "$replaced_status" cleanup generator-output "$replaced_validation" mapper-active-job
+}
 mapper_dropin_dir=$normal_dir/swapz-primary-mapper.service.d
 if [ -L "$mapper_dropin_dir" ]; then
 	fail 1 cleanup generator-output symlinked-mapper-directory mapper-active-job
@@ -202,9 +272,16 @@ if [ -d "$mapper_dropin_dir" ]; then
 	fi
 	if [ -e "$old_mapper_dropin" ]; then
 		[ -f "$old_mapper_dropin" ] || fail 1 cleanup generator-output invalid-mapper-dropin mapper-active-job
-		# A matching basename alone does not establish ownership after a
-		# failed prior run or a concurrent regular-file substitution.
-		if previous_device_unit=$(sed -n '2s/^Requires=//p' -- "$old_mapper_dropin"); then :; else
+		# Pin the inode before validating it. Retirement then quarantines the
+		# pathname and verifies that the moved inode is the one we validated.
+		old_mapper_pin=$stage_dir/owned-previous-mapper
+		if ln -P -- "$old_mapper_dropin" "$old_mapper_pin"; then :; else
+			fail "$?" cleanup generator-output pin-old-mapper-dropin mapper-active-job
+		fi
+		if [ -L "$old_mapper_pin" ] || [ ! -f "$old_mapper_pin" ]; then
+			refuse_unowned_dropin unowned-mapper-dropin
+		fi
+		if previous_device_unit=$(sed -n '2{s/^Requires=//p;q;}' -- "$old_mapper_pin"); then :; else
 			fail "$?" cleanup generator-output read-old-mapper-dropin mapper-active-job
 		fi
 		case "$previous_device_unit" in
@@ -214,21 +291,30 @@ if [ -d "$mapper_dropin_dir" ]; then
 		previous_swap_unit=${previous_device_unit%.device}.swap
 		if printf '[Unit]\nRequires=%s\nAfter=%s\nConflicts=%s\nBefore=%s\nJobTimeoutSec=300s\nJobTimeoutAction=none\n' \
 			"$previous_device_unit" "$previous_device_unit" "$previous_swap_unit" "$previous_swap_unit" |
-			cmp -s - "$old_mapper_dropin"; then :; else
+			cmp -s - "$old_mapper_pin"; then :; else
 			compare_status=$?
 			[ "$compare_status" -eq 1 ] && refuse_unowned_dropin unowned-mapper-dropin
 			fail "$compare_status" cleanup generator-output compare-old-mapper-dropin mapper-active-job
 		fi
-		# Keep the old inode owned in private staging until the new file is
-		# published; an immediate unlink could recycle it on daemon-reload.
-		if mv -fT -- "$old_mapper_dropin" "$stage_dir/previous-mapper.conf"; then :; else
-			fail "$?" cleanup generator-output stage-old-mapper-dropin mapper-active-job
+		old_mapper_staged=$stage_dir/previous-mapper.conf
+		old_mapper_move_status=0
+		if mv -nT -- "$old_mapper_dropin" "$old_mapper_staged"; then :; else
+			old_mapper_move_status=$?
+		fi
+		if [ ! -L "$old_mapper_staged" ] && [ -f "$old_mapper_staged" ] &&
+			[ "$old_mapper_pin" -ef "$old_mapper_staged" ]; then
+			[ "$old_mapper_move_status" -eq 0 ] ||
+				fail "$old_mapper_move_status" cleanup generator-output stage-old-mapper-dropin mapper-active-job
+		else
+			refuse_replaced_dropin "$old_mapper_dropin" "$old_mapper_staged" \
+				stale-mapper-inode-replaced "$old_mapper_move_status"
 		fi
 	fi
 elif [ -e "$mapper_dropin_dir" ]; then
 	fail 1 cleanup generator-output invalid-mapper-directory mapper-active-job
 fi
 
+stale_device_index=0
 for old_device_dir in "$normal_dir"/dev-disk-by\\x2dpartuuid-*.device.d; do
 	[ -e "$old_device_dir" ] || [ -L "$old_device_dir" ] || continue
 	if [ -L "$old_device_dir" ] || [ ! -d "$old_device_dir" ]; then
@@ -240,14 +326,32 @@ for old_device_dir in "$normal_dir"/dev-disk-by\\x2dpartuuid-*.device.d; do
 	fi
 	if [ -e "$old_device_dropin" ]; then
 		[ -f "$old_device_dropin" ] || fail 1 cleanup generator-output invalid-device-dropin mapper-active-job
+		stale_device_index=$((stale_device_index + 1))
+		old_device_pin=$stage_dir/owned-previous-device-$stale_device_index
+		old_device_staged=$stage_dir/previous-device-$stale_device_index.conf
+		if ln -P -- "$old_device_dropin" "$old_device_pin"; then :; else
+			fail "$?" cleanup generator-output pin-stale-device-dropin mapper-active-job
+		fi
+		if [ -L "$old_device_pin" ] || [ ! -f "$old_device_pin" ]; then
+			refuse_unowned_dropin unowned-stale-device-dropin
+		fi
 		if printf '[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n' |
-			cmp -s - "$old_device_dropin"; then :; else
+			cmp -s - "$old_device_pin"; then :; else
 			compare_status=$?
 			[ "$compare_status" -eq 1 ] && refuse_unowned_dropin unowned-stale-device-dropin
 			fail "$compare_status" cleanup generator-output compare-stale-device-dropin mapper-active-job
 		fi
-		if rm -f -- "$old_device_dropin"; then :; else
-			fail "$?" cleanup generator-output remove-stale-device-dropin mapper-active-job
+		old_device_move_status=0
+		if mv -nT -- "$old_device_dropin" "$old_device_staged"; then :; else
+			old_device_move_status=$?
+		fi
+		if [ ! -L "$old_device_staged" ] && [ -f "$old_device_staged" ] &&
+			[ "$old_device_pin" -ef "$old_device_staged" ]; then
+			[ "$old_device_move_status" -eq 0 ] ||
+				fail "$old_device_move_status" cleanup generator-output stage-stale-device-dropin mapper-active-job
+		else
+			refuse_replaced_dropin "$old_device_dropin" "$old_device_staged" \
+				stale-device-inode-replaced "$old_device_move_status"
 		fi
 	fi
 	# Keep a directory containing someone else's drop-ins.
@@ -506,3 +610,10 @@ fi
 printf 'swapz-primary-generator: phase=rollback expected=early-mask-and-no-owned-dropins observed=%s original_status=%s restore_status=%s original_errno=unavailable rollback=%s\n' \
 	"$observed_mask" "$mask_status" "$mask_restore_status" "$rollback_outcome" >&2
 fail "$mask_status" publication generator-output "$mask_validation" mapper-active-job
+} 9< "$early_dir"; then
+	exit 0
+else
+	serialization_status=$?
+	install_verified_mask lock-open-failure-mask
+	fail_serialization "$serialization_status" open-transaction-lock
+fi

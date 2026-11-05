@@ -738,6 +738,17 @@ status and reporting rollback and any surviving temporary mask. Before retiring
 prior mapper/device drop-ins, compare their exact canonical generator content;
 a matching basename alone is insufficient proof of ownership, and unexpected
 regular-file contents must survive under the verified early mask.
+Canonical content must be validated through a pinned inode, not a pathname that
+can be replaced between comparison and retirement. Move a stale mapper/device
+drop-in into private quarantine with no-clobber semantics, verify the staged
+inode is the pinned inode before deleting it, and restore or retain any foreign
+replacement rather than deleting it. Overlapping invocations of this generator
+against the same output directories must serialize on the early output
+directory with an advisory lock held through final mask release; one invocation
+must never remove another invocation's graph and then allow that other
+invocation to release the shared safety mask. Lock/rollback failures must keep
+the verified `/dev/null` barrier and preserve exact command status in fail-only
+diagnostics.
 Unit generators share these output directories and execute concurrently, so
 do not treat a directory-wide scan of other generated `.swap` names as an
 authoritative raw-swap inventory. Reject an already-present exact selected unit

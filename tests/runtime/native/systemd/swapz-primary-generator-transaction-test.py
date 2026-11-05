@@ -12,6 +12,7 @@ import re
 import subprocess
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -409,6 +410,217 @@ class GeneratorPublicationTest(unittest.TestCase):
             self.assertEqual(previous_device.read_text(encoding="ascii"),
                              "[Foreign]\nImportant=keep-device\n")
             self.assertFalse(self.device_dropin(CHANGED).exists())
+
+    def test_stale_mapper_inode_replacement_during_retirement_is_preserved(self) -> None:
+        self.assertEqual(self.run_generator().returncode, 0)
+        previous_mapper = self.mapper_dropin()
+        command = self.commands / "mv"
+        command.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*previous-mapper.conf)\n'
+            '    after_separator=0\n'
+            '    for argument do\n'
+            '        if [ "$after_separator" = 1 ]; then source_path=$argument; break; fi\n'
+            '        [ "$argument" = -- ] && after_separator=1\n'
+            '    done\n'
+            '    replacement="$source_path.foreign.$"\n'
+            '    printf "%s\\n" "[Foreign]" "Important=preserve-replacement" > "$replacement" || exit $?\n'
+            '    /usr/bin/mv -fT -- "$replacement" "$source_path" || exit $?\n'
+            '    exec /usr/bin/mv "$@" ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n',
+            encoding="ascii",
+        )
+        command.chmod(0o755)
+        result = self.run_generator(MOCK_STATUS="39", MOCK_UNITS="")
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.readlink(self.mask()), "/dev/null")
+        self.assertIn("validation=stale-mapper-inode-replaced", result.stderr)
+        self.assertIn("surviving_artifacts=unowned-dropin-restored", result.stderr)
+        self.assertEqual(previous_mapper.read_text(encoding="ascii"),
+                         "[Foreign]\nImportant=preserve-replacement\n")
+        self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+
+    def test_stale_device_inode_replacement_during_retirement_is_preserved(self) -> None:
+        self.assertEqual(self.run_generator().returncode, 0)
+        previous_device = self.device_dropin(SELECTED)
+        compare = self.commands / "cmp"
+        compare.write_text(
+            '#!/bin/sh\nfor last_argument do :; done\n'
+            '/usr/bin/cmp "$@"\nstatus=$?\n'
+            'case "$last_argument" in\n'
+            '*50-swapz-timeout.conf)\n'
+            '    if [ "$status" -eq 0 ]; then\n'
+            '        replacement="$last_argument.foreign.$"\n'
+            '        printf "%s\\n" "[Foreign]" "Important=preserve-replacement" > "$replacement" || exit $?\n'
+            '        /usr/bin/mv -fT -- "$replacement" "$last_argument" || exit $?\n'
+            '    fi ;;\n'
+            'esac\nexit "$status"\n',
+            encoding="ascii",
+        )
+        compare.chmod(0o755)
+        rename = self.commands / "mv"
+        rename.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*previous-device-*.conf)\n'
+            '    after_separator=0\n'
+            '    for argument do\n'
+            '        if [ "$after_separator" = 1 ]; then source_path=$argument; break; fi\n'
+            '        [ "$argument" = -- ] && after_separator=1\n'
+            '    done\n'
+            '    replacement="$source_path.foreign.$"\n'
+            '    printf "%s\\n" "[Foreign]" "Important=preserve-replacement" > "$replacement" || exit $?\n'
+            '    /usr/bin/mv -fT -- "$replacement" "$source_path" || exit $?\n'
+            '    exec /usr/bin/mv "$@" ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n',
+            encoding="ascii",
+        )
+        rename.chmod(0o755)
+        result = self.run_generator(MOCK_STATUS="39", MOCK_UNITS="")
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.readlink(self.mask()), "/dev/null")
+        self.assertIn("validation=stale-device-inode-replaced", result.stderr)
+        self.assertIn("surviving_artifacts=unowned-dropin-restored", result.stderr)
+        self.assertEqual(previous_device.read_text(encoding="ascii"),
+                         "[Foreign]\nImportant=preserve-replacement\n")
+        self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+
+    def test_initial_mask_cleanup_reports_exact_restore_status(self) -> None:
+        rename_count = self.root / "rename-count"
+        removal_count = self.root / "removal-count"
+        rename = self.commands / "mv"
+        rename.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*swapz-primary-mapper.service)\n'
+            '    count=0; [ ! -e "$MOCK_RENAME_COUNT" ] || count=$(cat "$MOCK_RENAME_COUNT")\n'
+            '    count=$((count + 1)); printf "%s" "$count" > "$MOCK_RENAME_COUNT"\n'
+            '    [ "$count" -ne 1 ] || exit 0 ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n',
+            encoding="ascii",
+        )
+        rename.chmod(0o755)
+        removal = self.commands / "rm"
+        removal.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*.swapz-primary-mask.*)\n'
+            '    count=0; [ ! -e "$MOCK_REMOVAL_COUNT" ] || count=$(cat "$MOCK_REMOVAL_COUNT")\n'
+            '    count=$((count + 1)); printf "%s" "$count" > "$MOCK_REMOVAL_COUNT"\n'
+            '    [ "$count" -ne 2 ] || exit 77 ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n',
+            encoding="ascii",
+        )
+        removal.chmod(0o755)
+        result = self.run_generator(
+            MOCK_RENAME_COUNT=str(rename_count),
+            MOCK_REMOVAL_COUNT=str(removal_count),
+        )
+        self.assert_blocked(result, "mask")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("original_status=1", result.stderr)
+        self.assertIn("restore_status=77", result.stderr)
+        self.assertIn("rollback=complete", result.stderr)
+
+    def test_overlapping_failed_run_cannot_remove_graph_before_owner_releases_mask(self) -> None:
+        first_ready = self.root / "first-release-ready"
+        allow_first_release = self.root / "allow-first-release"
+        second_cleanup = self.root / "second-cleanup-observed"
+        second_lock = self.root / "second-lock-observed"
+        removal = self.commands / "rm"
+        removal.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*swapz-primary-mapper.service)\n'
+            '    if [ "$MOCK_RUN_ID" = first ]; then\n'
+            '        : > "$MOCK_FIRST_READY"\n'
+            '        while [ ! -e "$MOCK_ALLOW_FIRST" ]; do sleep 0.01; done\n'
+            '    fi ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n',
+            encoding="ascii",
+        )
+        removal.chmod(0o755)
+        rename = self.commands / "mv"
+        rename.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*previous-mapper.conf)\n'
+            '    [ "$MOCK_RUN_ID" != second ] || : > "$MOCK_SECOND_CLEANUP" ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n',
+            encoding="ascii",
+        )
+        rename.chmod(0o755)
+        lock = self.commands / "flock"
+        lock.write_text(
+            '#!/bin/sh\n'
+            '[ "$MOCK_RUN_ID" != second ] || : > "$MOCK_SECOND_LOCK"\n'
+            'exec /usr/bin/flock "$@"\n',
+            encoding="ascii",
+        )
+        lock.chmod(0o755)
+        arguments = [str(self.generator), str(self.normal), str(self.early), str(self.late)]
+        first_environment = self.environment | {
+            "MOCK_RUN_ID": "first",
+            "MOCK_FIRST_READY": str(first_ready),
+            "MOCK_ALLOW_FIRST": str(allow_first_release),
+            "MOCK_SECOND_CLEANUP": str(second_cleanup),
+            "MOCK_SECOND_LOCK": str(second_lock),
+        }
+        first = subprocess.Popen(
+            arguments, env=first_environment, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        second: subprocess.Popen[str] | None = None
+        try:
+            deadline = time.monotonic() + 5
+            while not first_ready.exists() and first.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(first_ready.exists(), "first generator did not reach final mask release")
+            second_environment = first_environment | {
+                "MOCK_RUN_ID": "second",
+                "MOCK_STATUS": "39",
+                "MOCK_UNITS": "",
+            }
+            second = subprocess.Popen(
+                arguments, env=second_environment, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            deadline = time.monotonic() + 5
+            while (not second_lock.exists() and not second_cleanup.exists()
+                   and second.poll() is None and time.monotonic() < deadline):
+                time.sleep(0.01)
+            self.assertTrue(second_lock.exists() or second_cleanup.exists(),
+                            "second generator did not reach lock or cleanup")
+            second_stderr = ""
+            if second_cleanup.exists() and not second_lock.exists():
+                _, second_stderr = second.communicate(timeout=5)
+            else:
+                self.assertIsNone(second.poll(), "second generator bypassed transaction serialization")
+            allow_first_release.touch()
+            _, first_stderr = first.communicate(timeout=5)
+            if second.poll() is None:
+                _, second_stderr = second.communicate(timeout=5)
+            self.assertEqual(first.returncode, 0, first_stderr)
+            self.assertEqual(second.returncode, 39, second_stderr)
+            self.assertEqual(os.readlink(self.mask()), "/dev/null")
+            self.assertFalse(self.mapper_dropin().exists())
+            self.assertFalse(self.device_dropin(SELECTED).exists())
+            self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+        finally:
+            allow_first_release.touch()
+            if first.poll() is None:
+                first.kill()
+                first.communicate()
+            if second is not None and second.poll() is None:
+                second.kill()
+                second.communicate()
+
+    def test_transaction_lock_failure_keeps_verified_mask(self) -> None:
+        lock = self.commands / "flock"
+        lock.write_text("#!/bin/sh\nexit 75\n", encoding="ascii")
+        lock.chmod(0o755)
+        result = self.run_generator()
+        self.assert_blocked(result, "serialization")
+        self.assertEqual(result.returncode, 75)
+        self.assertIn("validation=acquire-transaction-lock", result.stderr)
+        self.assertIn("original_status=75", result.stderr)
+        self.assertIn("expected_mask=/dev/null observed_mask=/dev/null", result.stderr)
+        self.assertIn("surviving_artifacts=none rollback=early-mask-retained", result.stderr)
 
     def test_mask_release_error_rolls_back_published_files(self) -> None:
         command = self.commands / "rm"

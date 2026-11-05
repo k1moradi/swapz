@@ -5579,6 +5579,17 @@ command status. After selection changes, replace the prior mapper and device
 drop-ins separately with foreign regular-file contents and retry failed
 regeneration: the files must remain unchanged, with the early mask active and
 explicit ownership-failure diagnostics.
+Also replace each previously validated stale drop-in inode between comparison
+and retirement: the foreign regular file must be restored or retained, the
+`/dev/null` mask must remain verified, and diagnostics must name the inode
+replacement and surviving artifact. Pause one invocation after it publishes
+its graph but before final mask release, start a second invocation that later
+fails, and prove the second cannot clean the first graph until the first has
+released transaction ownership; after the second fails, the early mask must
+remain and no partial graph may be active. Inject generator-transaction lock
+failure and temporary-mask cleanup failure as well, preserving the exact
+original/restore command statuses rather than collapsing them to boolean
+failure.
 Inject final early-mask unlink failure both before and after the unlink,
 false-success unlink, mask-restore rename failure before and after the rename,
 and a foreign mapper-unit symlink substituted after mask removal. A refused
