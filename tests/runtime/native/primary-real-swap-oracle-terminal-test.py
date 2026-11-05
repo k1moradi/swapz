@@ -231,6 +231,9 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertTrue(allocation.closed)
         self.assertIn("ORACLE_FILLED=", stdout)
         self.assertNotIn("ORACLE_VERIFIED=", stdout)
+        self.assertEqual(
+            [record.partition("=")[0] for record in stdout.splitlines()],
+            ["ORACLE_WAITING", "ORACLE_FILLED"])
         self.assertIn("phase=report", stderr)
         self.assertIn("verified_pages=2/2 verified_bytes=8192/8192", stderr)
         self.assertIn(

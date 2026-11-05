@@ -283,7 +283,12 @@ The byte oracle expands the run/worker/round seed into position-distinct 4 KiB
 pages; swap-in checks every byte, counts every corrupt page and byte, and caps
 only the diagnostic samples. The cgroup's OOM event keys must be present and parseable.
 An `ORACLE_VERIFIED` record is terminal only after complete byte readback
-and successful anonymous-mapping close. Short reads, interruption and failed
+and successful anonymous-mapping close. Rootless terminal fixtures must assert
+exactly one ordered WAITING/FILLED/VERIFIED sequence after clean readback,
+with full page/byte counts, zero mismatches and fill-to-verify digest agreement.
+A failed terminal publication after clean readback must withhold VERIFIED,
+retain the original reporting errno and exit nonzero despite successful unmap.
+Short reads, interruption and failed
 unmapping must not produce a complete-looking record. Failure-only diagnostics
 identify the first failure phase, fully compared versus allocated pages/bytes,
 expected-zero versus observed page/byte mismatch totals, original errno when
