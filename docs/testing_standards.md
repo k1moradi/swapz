@@ -5584,7 +5584,12 @@ explicit ownership-failure diagnostics.
 Also replace each previously validated stale drop-in inode between comparison
 and retirement: the foreign regular file must be restored or retained, the
 `/dev/null` mask must remain verified, and diagnostics must name the inode
-replacement and surviving artifact. Pause one invocation after it publishes
+replacement and surviving artifact. Also inject a stale-device rename
+which reports success after hardlinking the validated inode into staging
+without consuming the original name, and a successful rename followed by a
+foreign symlink at that original name. Both must fail under `/dev/null`,
+retain unowned source data, remove temporary owned staging, and never publish
+the new selector graph. Pause one invocation after it publishes
 its graph but before final mask release, start a second invocation that later
 fails, and prove the second cannot clean the first graph until the first has
 released transaction ownership; after the second fails, the early mask must

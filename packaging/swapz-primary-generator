@@ -261,6 +261,28 @@ refuse_replaced_dropin()
 		"$observed_mask" "$replaced_status" "$surviving_artifacts" "$rollback_outcome" >&2
 	fail "$replaced_status" cleanup generator-output "$replaced_validation" mapper-active-job
 }
+refuse_unconsumed_dropin()
+{
+	unconsumed_source=$1
+	unconsumed_validation=$2
+	if [ -L "$unconsumed_source" ]; then
+		observed_source=symlink
+	else
+		observed_source=retained-path
+	fi
+	if mapper_mask_is_active; then
+		observed_mask=/dev/null
+		rollback_outcome=early-mask-retained
+	else
+		observed_mask=missing-or-substituted
+		rollback_outcome=incomplete
+	fi
+	# The rename reported success, but retirement is incomplete until the
+	# original pathname is absent. Leave that path untouched on failure.
+	printf 'swapz-primary-generator: phase=cleanup expected=consumed-stale-source observed=%s expected_mask=/dev/null observed_mask=%s original_status=1 rename_status=0 original_errno=not-applicable surviving_artifacts=stale-source rollback=%s\n' \
+		"$observed_source" "$observed_mask" "$rollback_outcome" >&2
+	fail 1 cleanup generator-output "$unconsumed_validation" mapper-active-job
+}
 mapper_dropin_dir=$normal_dir/swapz-primary-mapper.service.d
 if [ -L "$mapper_dropin_dir" ]; then
 	fail 1 cleanup generator-output symlinked-mapper-directory mapper-active-job
@@ -305,6 +327,9 @@ if [ -d "$mapper_dropin_dir" ]; then
 			[ "$old_mapper_pin" -ef "$old_mapper_staged" ]; then
 			[ "$old_mapper_move_status" -eq 0 ] ||
 				fail "$old_mapper_move_status" cleanup generator-output stage-old-mapper-dropin mapper-active-job
+			if [ -e "$old_mapper_dropin" ] || [ -L "$old_mapper_dropin" ]; then
+				refuse_unconsumed_dropin "$old_mapper_dropin" stale-mapper-source-not-consumed
+			fi
 		else
 			refuse_replaced_dropin "$old_mapper_dropin" "$old_mapper_staged" \
 				stale-mapper-inode-replaced "$old_mapper_move_status"
@@ -349,6 +374,9 @@ for old_device_dir in "$normal_dir"/dev-disk-by\\x2dpartuuid-*.device.d; do
 			[ "$old_device_pin" -ef "$old_device_staged" ]; then
 			[ "$old_device_move_status" -eq 0 ] ||
 				fail "$old_device_move_status" cleanup generator-output stage-stale-device-dropin mapper-active-job
+			if [ -e "$old_device_dropin" ] || [ -L "$old_device_dropin" ]; then
+				refuse_unconsumed_dropin "$old_device_dropin" stale-device-source-not-consumed
+			fi
 		else
 			refuse_replaced_dropin "$old_device_dropin" "$old_device_staged" \
 				stale-device-inode-replaced "$old_device_move_status"

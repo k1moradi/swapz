@@ -742,7 +742,12 @@ Canonical content must be validated through a pinned inode, not a pathname that
 can be replaced between comparison and retirement. Move a stale mapper/device
 drop-in into private quarantine with no-clobber semantics, verify the staged
 inode is the pinned inode before deleting it, and restore or retain any foreign
-replacement rather than deleting it. Overlapping invocations of this generator
+replacement rather than deleting it. A successful no-clobber move must
+also consume the original public pathname: a staged inode match alone does not
+prove retirement when a rename wrapper leaves the old name or a foreign
+replacement in place. Refuse the transaction under the verified early mask
+and preserve the unconsumed source without deleting foreign contents.
+Overlapping invocations of this generator
 against the same output directories must serialize on the early output
 directory with an advisory lock held through final mask release; one invocation
 must never remove another invocation's graph and then allow that other

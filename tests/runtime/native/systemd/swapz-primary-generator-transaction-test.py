@@ -411,6 +411,73 @@ class GeneratorPublicationTest(unittest.TestCase):
                              "[Foreign]\nImportant=keep-device\n")
             self.assertFalse(self.device_dropin(CHANGED).exists())
 
+    def test_stale_device_rename_false_success_cannot_leave_source_behind(self) -> None:
+        self.assertEqual(self.run_generator().returncode, 0)
+        previous_device = self.device_dropin(SELECTED)
+        previous_content = previous_device.read_bytes()
+        self.set_selector(CHANGED)
+        rename_command = self.commands / "mv"
+        rename_command.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*previous-device-*.conf)\n'
+            '    argument_position=0\n'
+            '    for argument do\n'
+            '        case "$argument_position" in\n'
+            '          1) source_path=$argument; argument_position=2 ;;\n'
+            '          2) destination_path=$argument; break ;;\n'
+            '        esac\n'
+            '        [ "$argument" != -- ] || argument_position=1\n'
+            '    done\n'
+            '    /usr/bin/ln -- "$source_path" "$destination_path" || exit $?\n'
+            '    exit 0 ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n',
+            encoding="ascii",
+        )
+        rename_command.chmod(0o755)
+        result = self.run_generator()
+        self.assert_blocked(result, "cleanup")
+        self.assertIn("validation=stale-device-source-not-consumed", result.stderr)
+        self.assertIn("expected=consumed-stale-source observed=retained-path", result.stderr)
+        self.assertIn("rename_status=0 original_errno=not-applicable", result.stderr)
+        self.assertIn("surviving_artifacts=stale-source rollback=early-mask-retained",
+                      result.stderr)
+        self.assertEqual(previous_device.read_bytes(), previous_content)
+        self.assertFalse(self.device_dropin(CHANGED).exists())
+
+    def test_stale_device_rename_followed_by_symlink_substitution_blocks_release(self) -> None:
+        self.assertEqual(self.run_generator().returncode, 0)
+        previous_device = self.device_dropin(SELECTED)
+        self.set_selector(CHANGED)
+        outside = self.root / "foreign-stale-device"
+        outside.write_text("unchanged", encoding="ascii")
+        rename_command = self.commands / "mv"
+        rename_command.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*previous-device-*.conf)\n'
+            '    argument_position=0\n'
+            '    for argument do\n'
+            '        case "$argument_position" in\n'
+            '          1) source_path=$argument; argument_position=2 ;;\n'
+            '          2) break ;;\n'
+            '        esac\n'
+            '        [ "$argument" != -- ] || argument_position=1\n'
+            '    done\n'
+            '    /usr/bin/mv "$@" || exit $?\n'
+            '    /usr/bin/ln -s "$MOCK_FOREIGN_SOURCE" "$source_path" || exit $?\n'
+            '    exit 0 ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n',
+            encoding="ascii",
+        )
+        rename_command.chmod(0o755)
+        result = self.run_generator(MOCK_FOREIGN_SOURCE=str(outside))
+        self.assert_blocked(result, "cleanup")
+        self.assertIn("validation=stale-device-source-not-consumed", result.stderr)
+        self.assertIn("expected=consumed-stale-source observed=symlink", result.stderr)
+        self.assertTrue(previous_device.is_symlink())
+        self.assertEqual(previous_device.readlink(), outside)
+        self.assertEqual(outside.read_text(encoding="ascii"), "unchanged")
+        self.assertFalse(self.device_dropin(CHANGED).exists())
+
     def test_stale_mapper_inode_replacement_during_retirement_is_preserved(self) -> None:
         self.assertEqual(self.run_generator().returncode, 0)
         previous_mapper = self.mapper_dropin()
