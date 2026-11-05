@@ -1758,14 +1758,11 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 		test_logical_pages = 2U,
 		test_physical_blocks = 4U * SWAPZ_SEGMENT_BLOCKS,
 		test_segments = 4U,
-		test_payload_length = 512U,
 	};
 	const swapz_u32 none = ~(swapz_u32)0;
-	const swapz_u32 record_live_bytes =
-		test_payload_length + sizeof(struct swapz_record);
-	const swapz_u32 record_io_cost =
-		record_live_bytes + 2U * SWAPZ_BLOCK_BYTES;
+	const swapz_u32 pages[test_logical_pages] = { 0U, 1U };
 	struct swapz_authority test_authority;
+	struct swapz_tx tx;
 	struct swapz_map test_maps[test_logical_pages];
 	struct swapz_map maps_before[test_logical_pages];
 	swapz_u16 test_live[test_physical_blocks];
@@ -1790,10 +1787,14 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 	swapz_u32 gc_io_before[test_segments];
 	swapz_u16 test_gc_min_blocks[test_segments];
 	swapz_u16 gc_min_before[test_segments];
+	swapz_u32 first_live_bytes;
+	swapz_u32 second_live_bytes;
 	swapz_u32 reserve_before;
 	swapz_u32 open_segment_before;
 	swapz_u32 next_block_before;
 	swapz_u32 next_probe_before;
+	swapz_u32 committed_before;
+	swapz_u32 abandoned_before;
 	int error;
 	int state_retained;
 
@@ -1813,41 +1814,40 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 		      &test_authority, test_gc_live_bytes, test_gc_io_cost,
 		      test_gc_min_blocks, test_segments) == 0);
 
-	test_maps[0] = (struct swapz_map) {
-		.start_block = 0U,
-		.generation = 7U,
-		.payload_length = test_payload_length,
-		.record_index = 0U,
-		.extent_blocks = 2U,
-		.valid = 1U,
-	};
-	test_maps[1] = (struct swapz_map) {
-		.start_block = 0U,
-		.generation = 11U,
-		.payload_length = test_payload_length,
-		.record_index = 1U,
-		.extent_blocks = 2U,
-		.valid = 1U,
-	};
-	test_live[0] = 2U;
-	test_classes[0] = 2U;
-	test_mapped_pages[0] = 2U;
-	test_first_page[0] = 0U;
-	test_last_page[0] = 1U;
-	test_prev_page[0] = none;
-	test_next_page[0] = 1U;
-	test_prev_page[1] = 0U;
-	test_next_page[1] = none;
+	/*
+	 * Publish a real two-record compressed extent before fault injection.
+	 * This keeps payload offsets, record indexes, generation and GC costs
+	 * identical to production authority state rather than hand-building maps.
+	 */
+	CHECK(swapz_stage(&test_authority, pages, test_logical_pages, 2U, &tx) == 0);
+	CHECK(tx.start_block == 0U && tx.extent_blocks == 2U);
+	CHECK(encode(&tx) == 0);
+	CHECK(swapz_finish(&test_authority, &tx, extent,
+			   (swapz_u32)tx.extent_blocks * SWAPZ_BLOCK_BYTES,
+			   tx.extent_blocks, 0) == 0);
+	CHECK(test_maps[0].valid && !test_maps[0].raw &&
+	      test_maps[0].extent_blocks == 2U &&
+	      test_maps[0].start_block == 0U);
+	CHECK(test_maps[1].valid && !test_maps[1].raw &&
+	      test_maps[1].extent_blocks == 2U &&
+	      test_maps[1].start_block == 0U);
+	CHECK(test_live[0] == 2U && test_classes[0] == 2U &&
+	      test_mapped_pages[0] == 2U);
+	CHECK(test_first_page[0] == 0U && test_last_page[0] == 1U &&
+	      test_prev_page[0] == none && test_next_page[0] == 1U &&
+	      test_prev_page[1] == 0U && test_next_page[1] == none);
+	first_live_bytes = test_maps[0].payload_length +
+			   sizeof(struct swapz_record);
+	second_live_bytes = test_maps[1].payload_length +
+			    sizeof(struct swapz_record);
+	CHECK(test_gc_live_bytes[0] == first_live_bytes + second_live_bytes);
 
 	/*
-	 * The aggregate compressed live-byte score is valid for page zero but one
-	 * byte short for page one after the first temporary decrement. This forces
-	 * the cumulative second-page refusal rather than an immediate first-page
-	 * failure, while the physical shared-extent reference count remains valid.
+	 * The score is still sufficient for page zero, then becomes one byte
+	 * short for page one after the first modeled decrement. This specifically
+	 * exercises cumulative shared-extent rollback before any publication.
 	 */
-	test_gc_live_bytes[0] = 2U * record_live_bytes - 1U;
-	test_gc_io_cost[0] = 2U * record_io_cost;
-	test_gc_min_blocks[0] = 0U;
+	test_gc_live_bytes[0]--;
 
 	memcpy(maps_before, test_maps, sizeof(maps_before));
 	memcpy(live_before, test_live, sizeof(live_before));
@@ -1865,6 +1865,8 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 	open_segment_before = test_authority.open_segment;
 	next_block_before = test_authority.next_block;
 	next_probe_before = test_authority.next_segment_probe;
+	committed_before = test_authority.committed_blocks;
+	abandoned_before = test_authority.abandoned_blocks;
 
 	error = swapz_prevalidate_discard_range(
 		&test_authority, 0U, test_logical_pages);
@@ -1886,7 +1888,9 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 		test_authority.reserve_blocks == reserve_before &&
 		test_authority.open_segment == open_segment_before &&
 		test_authority.next_block == next_block_before &&
-		test_authority.next_segment_probe == next_probe_before;
+		test_authority.next_segment_probe == next_probe_before &&
+		test_authority.committed_blocks == committed_before &&
+		test_authority.abandoned_blocks == abandoned_before;
 	if (error != -EUCLEAN || !state_retained) {
 		fprintf(stderr,
 			"%s:%d: FAIL discard cumulative GC proof bad_page=1 "
@@ -1895,8 +1899,8 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 			"expected_bytes=%u observed_bytes=%u original_error=%d "
 			"retained_authority=%s lower_mutations=0 "
 			"safe_disposition=%s\n",
-			__FILE__, __LINE__, record_live_bytes,
-			record_live_bytes - 1U, error,
+			__FILE__, __LINE__, second_live_bytes,
+			second_live_bytes - 1U, error,
 			state_retained ? "yes" : "no",
 			state_retained ? "fail_closed_no_publication" :
 				"unexpected_authority_change");
