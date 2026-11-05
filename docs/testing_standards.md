@@ -7449,8 +7449,11 @@ never establish loaded-host measurement.
 Neither a synthetic control nor the 740 MiB
 index-only capacity estimate can become physical RAM acceptance. The focused
 synthetic metadata-RAM validator regression is part of the official rootless
-`make test` discovery path; adding a test file that no rootless entry point
-executes does not establish regression coverage. The serialized Codex
+`make test` discovery path. `tests/tools/test-rootless.sh` must execute
+`tests/runtime/benchmark/metadata-ram-evidence-test.py` exactly once, and the
+source-contract mandatory-suite list must enforce that registration; adding a
+test file that no rootless entry point executes does not establish regression
+coverage. The serialized Codex
 loaded-host collector remains a separate required qualification; an
 unbound scalar from `--metadata-and-target-peak-ram-bytes` alone is not a
 resource PASS.

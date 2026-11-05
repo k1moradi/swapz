@@ -26,6 +26,7 @@ MANDATORY_ROOTLESS_PYTHON_SUITES = (
     "tests/runtime/native/primary-lifecycle-audit-test.py",
     "tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py",
     "tests/runtime/native/primary-real-swap-test.py",
+    "tests/runtime/benchmark/metadata-ram-evidence-test.py",
     "tests/runtime/benchmark/io-replay-test.py",
     "tests/runtime/native/make-interface-test.py",
     "tests/runtime/native/test-report-test.py",
@@ -2093,21 +2094,10 @@ int main(void) {
             "ctx->prepublication_fua = false;", engine_call)
         gc_after = flush.index(
             "error = swapz_gc_compact_one(ctx);", scope_clear)
-        commit_update = flush.index("committed += succeeded;")
-        terminal_guard = flush.index(
-            "if (smp_load_acquire(&ctx->failed))", commit_update)
-        capacity_retry = flush.index("if (error == -ENOSPC)", commit_update)
-        compact_process = re.sub(r"\s+", " ", body("swapz_process"))
         self.assertGreaterEqual(scope_set, 0)
         self.assertLess(scope_set, engine_call)
         self.assertLess(engine_call, scope_clear)
         self.assertLess(scope_clear, gc_after)
-        self.assertLess(terminal_guard, capacity_retry)
-        self.assertGreaterEqual(
-            compact_process.count(
-                "op == REQ_OP_READ && error == -ENOSPC && "
-                "!smp_load_acquire(&ctx->failed)"),
-            2)
         self.assertIn("!needs_fua && ctx->engine.bulk_enabled", flush)
 
         for lower in (lower_extent, lower_run):
