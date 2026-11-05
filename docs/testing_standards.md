@@ -138,7 +138,12 @@ namespace membership can differ per thread. The direct-C fixture must therefore
 keep the process leader clean while placing a selected partition or selected
 physical parent only in a synthetic `/proc/<pid>/task/<tid>/mountinfo`, and
 require refusal; an unrelated sibling in that non-leader thread remains a
-positive control. A production scanner must enumerate those task views (or
+positive control. For the coordinator's own non-leader task, first admit a
+sibling-only table while the leader remains unchanged, then replace only the
+task's table with a selected mount and require refusal. Reject malformed
+non-leader task mountinfo, and fail closed when a reused TID changes its
+mount-namespace identity between the initial and confirming stats.
+A production scanner must enumerate those task views (or
 establish equivalent complete namespace coverage) with the same bounded,
 fail-closed rules. Count thread-group leaders and non-leader tasks against one
 4,194,304-entry ceiling, and apply the aggregate 64 MiB mountinfo-byte limit

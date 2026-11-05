@@ -29,6 +29,8 @@ static int fixture_inventory_readdir_error;
 static int fixture_inventory_seen_foreign_pid;
 static int fixture_task_readdir_error;
 static int fixture_task_seen_thread;
+static int fixture_task_namespace_reuse_on_stat;
+static int fixture_task_namespace_reuse_injected;
 static DIR *fixture_proc_directory;
 static DIR *fixture_task_directory;
 static int fixture_same_namespace_mount_after_self_snapshot;
@@ -288,6 +290,28 @@ static int fixture_stat(const char *path, struct stat *info)
 {
 	char converted[PATH_MAX];
 
+	/* Model a TID reused with a different mount namespace between two stats. */
+	if (strstr(path, "/3031/task/3032/ns/mnt") &&
+	    fixture_task_namespace_reuse_on_stat) {
+		char retired_namespace_path[PATH_MAX];
+		int path_length;
+		int result = stat(fixture_path(path, converted), info);
+
+		if (result < 0)
+			return result;
+		path_length = snprintf(retired_namespace_path,
+				       sizeof(retired_namespace_path),
+				       "%s/3031/task/3032/ns/mnt.retired",
+				       fixture_proc_root);
+		assert(path_length > 0 &&
+		       (size_t)path_length < sizeof(retired_namespace_path));
+		assert(rename(converted, retired_namespace_path) == 0);
+		fixture_file("3031/task/3032/ns/mnt",
+			     "reused TID mount namespace\n");
+		fixture_task_namespace_reuse_on_stat = 0;
+		fixture_task_namespace_reuse_injected = 1;
+		return result;
+	}
 	if ((strstr(path, "/3031/ns/mnt") ||
 	     strstr(path, "/3031/task/3032/ns/mnt")) &&
 	    fixture_namespace_stat_error) {
@@ -472,6 +496,8 @@ static void fixture_reset(void)
 	fixture_inventory_seen_foreign_pid = 0;
 	fixture_task_readdir_error = 0;
 	fixture_task_seen_thread = 0;
+	fixture_task_namespace_reuse_on_stat = 0;
+	fixture_task_namespace_reuse_injected = 0;
 	fixture_proc_directory = NULL;
 	fixture_task_directory = NULL;
 	fixture_same_namespace_mount_after_self_snapshot = 0;
@@ -533,6 +559,13 @@ static void expect_mount_identity_admission(
 			minor(expected_root_device), major(parent_device),
 			minor(parent_device),
 			should_allow ? "admitted" : "refused");
+		/* This fixture only calls the read-only production mount reader. */
+		fprintf(stderr,
+			"FAIL: phase=mount-admission case=%s expected=%s "
+			"actual_result=%d originating_errno=%d "
+			"mutation_calls=0 safe_action=retain_inactive_target\n",
+			case_name, should_allow ? "admitted" : "refused",
+			result, errno);
 		++fixture_failures;
 	}
 	if (fixture_mount_fd != -1) {
@@ -1102,6 +1135,12 @@ int main(void)
 	assert(mkdir(path, 0700) == 0);
 	fixture_file("self/task/65536/ns/mnt",
 		     "coordinator non-leader mount namespace\n");
+	/* The leader is unchanged: only this task's selected mount may refuse. */
+	fixture_file("self/task/65536/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /thread-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
+	expect_mount_admission("unrelated sibling in coordinator non-leader thread",
+			       1, 0);
 	fixture_file("self/task/65536/mountinfo",
 		     "36 25 259:10 / / rw - ext4 /thread-root rw\n"
 		     "37 36 8:1 / /selected rw - ext4 /dev/sda1 rw\n");
@@ -1188,6 +1227,25 @@ int main(void)
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
 	fixture_task_readdir_error = EIO;
 	expect_mount_admission("non-leader task enumeration error", 0, EIO);
+	fixture_reset();
+	fixture_file("3031/task/3032/mountinfo", "malformed\n");
+	expect_mount_admission("malformed non-leader task mountinfo", 0, EINVAL);
+	fixture_reset();
+	fixture_file("3031/task/3032/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /dev/thread-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
+	fixture_task_namespace_reuse_on_stat = 1;
+	expect_mount_admission("reused non-leader TID changes namespace", 0, EAGAIN);
+	if (!fixture_task_namespace_reuse_injected) {
+		fprintf(stderr,
+			"FAIL: phase=task-namespace case=reused TID "
+			"expected=EAGAIN refusal actual=injection-not-run "
+			"originating_errno=%d mutation_calls=0 "
+			"safe_action=retain_inactive_target\n", errno);
+		++fixture_failures;
+	}
+	if (fixture_task_namespace_reuse_injected)
+		fixture_unlink("3031/task/3032/ns/mnt.retired");
 	fixture_unlink("3031/task/3032/mountinfo");
 	fixture_unlink("3031/task/3032/ns/mnt");
 	assert(snprintf(path, sizeof(path), "%s/3031/task/3032/ns", fixture_proc_root) > 0);
