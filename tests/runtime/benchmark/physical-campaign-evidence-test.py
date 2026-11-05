@@ -195,6 +195,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         record["excluded"] = True
         record["analysis_usable"] = False
         record["raw"]["verdict"] = "FAIL"
+        record["raw"]["stage"] = "measure"
+        record["raw"]["failure_reason"] = "synthetic terminal measurement failure"
         record["raw"]["source_sha"] = "b" * 40
         audit, _ = inspect([record], summary_status="FAIL_OR_INCOMPLETE")
         self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
@@ -208,6 +210,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         record["excluded"] = True
         record["analysis_usable"] = False
         record["raw"]["verdict"] = "FAIL"
+        record["raw"]["stage"] = "measure"
+        record["raw"]["failure_reason"] = "synthetic terminal measurement failure"
         before, after = host_snapshots()
         for snapshot in (before, after):
             snapshot["device"] = {
@@ -263,6 +267,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                 record["excluded"] = True
                 record["analysis_usable"] = False
                 record["raw"]["verdict"] = "FAIL"
+                record["raw"]["failure_reason"] = (
+                    "synthetic producer phase failure")
                 if stage is not None:
                     record["raw"]["stage"] = stage
                 audit, _ = inspect(
@@ -274,6 +280,19 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                     item["status"] == "FAIL"
                     for item in audit["diagnostics"]))
 
+    def test_missing_producer_error_is_blocked(self):
+        record = pair(1, 1100)
+        record["status"] = "EXCLUDED"
+        record["excluded"] = True
+        record["analysis_usable"] = False
+        record["raw"]["verdict"] = "FAIL"
+        record["raw"]["stage"] = "measure"
+        audit, _ = inspect([record], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIsNone(audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in audit["diagnostics"]))
+
     def test_duplicate_identity_invalidates_both_failure_witnesses(self):
         def failed_pair(run_id):
             record = pair(1, 1100, run_id=run_id)
@@ -282,6 +301,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             record["analysis_usable"] = False
             record["raw"]["verdict"] = "FAIL"
             record["raw"]["stage"] = "measure"
+            record["raw"]["failure_reason"] = (
+                "synthetic terminal measurement failure")
             return record
 
         first = failed_pair("first-run")
@@ -310,6 +331,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         first["analysis_usable"] = False
         first["raw"]["verdict"] = "FAIL"
         first["raw"]["stage"] = "measure"
+        first["raw"]["failure_reason"] = "synthetic terminal measurement failure"
         duplicate = pair(1, 1800, run_id="second-run")
         duplicate["pair_id"] = "different-pair-id"
         audit, metrics = inspect(
@@ -330,6 +352,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         failed["analysis_usable"] = False
         failed["swapz"]["verdict"] = "FAIL"
         failed["swapz"]["stage"] = "measure"
+        failed["swapz"]["failure_reason"] = (
+            "synthetic terminal measurement failure")
         audit, metrics = inspect(
             [first, middle, failed], summary_status="FAIL_OR_INCOMPLETE")
         self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
@@ -345,6 +369,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         failed["analysis_usable"] = False
         failed["raw"]["verdict"] = "FAIL"
         failed["raw"]["stage"] = "measure"
+        failed["raw"]["failure_reason"] = "synthetic terminal measurement failure"
 
         stale = pair(2, 1100)
         foreign_boot = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -368,6 +393,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         first["analysis_usable"] = False
         first["raw"]["verdict"] = "FAIL"
         first["raw"]["stage"] = "measure"
+        first["raw"]["failure_reason"] = "synthetic terminal measurement failure"
         # Pair 2 overlaps both pair-1 arms. The later diagnostic must also
         # invalidate the earlier arm as an authenticated physical witness.
         second = pair(2, 1150)
@@ -385,6 +411,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         record["analysis_usable"] = False
         record["raw"]["verdict"] = "FAIL"
         record["raw"]["stage"] = "measure"
+        record["raw"]["failure_reason"] = "synthetic terminal measurement failure"
         decisions = {
             workload: {"status": "INCOMPLETE"}
             for workload in QUALIFICATION.WORKLOADS
@@ -410,6 +437,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                 record["analysis_usable"] = False
                 record["raw"]["verdict"] = "FAIL"
                 record["raw"]["stage"] = "measure"
+                record["raw"]["failure_reason"] = (
+                    "synthetic terminal measurement failure")
                 before, after = host_snapshots()
                 if binding == "source":
                     for snapshot in (before, after):
@@ -456,6 +485,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                 record = pair(1, 1100)
                 record["raw"]["verdict"] = "FAIL"
                 record["raw"]["stage"] = "measure"
+                record["raw"]["failure_reason"] = (
+                    "synthetic terminal measurement failure")
                 if mutation == "pass-disposition":
                     # A producer FAIL cannot coexist with an evaluator-usable
                     # PASS pair and still become authenticated failure evidence.
@@ -779,6 +810,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         # failure so the diagnostic-cap test still exercises FAIL precedence.
         records[0]["raw"]["verdict"] = "FAIL"
         records[0]["raw"]["stage"] = "measure"
+        records[0]["raw"]["failure_reason"] = (
+            "synthetic terminal measurement failure")
         records[-1]["swapz"]["workload_id"] = records[0]["swapz"]["workload_id"]
         records[-1]["swapz"]["source_sha"] = "b" * 40
         records[-1]["swapz"]["arm_boot_id"] = (
@@ -865,6 +898,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         producer_failed = copy.deepcopy(excluded)
         producer_failed["raw"]["verdict"] = "FAIL"
         producer_failed["raw"]["stage"] = "measure"
+        producer_failed["raw"]["failure_reason"] = (
+            "synthetic terminal measurement failure")
         failed, _ = inspect(
             [producer_failed], summary_status="FAIL_OR_INCOMPLETE")
         self.assertEqual(failed["status"], "FAIL")
