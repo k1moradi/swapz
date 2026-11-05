@@ -188,15 +188,15 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
     def test_systemctl_probe_status_survives_degraded_observation(self) -> None:
         systemctl_mock = self.fixture.bin / "systemctl"
         original_mock = systemctl_mock.read_text(encoding="utf-8")
-        active_state_line = 'ActiveState) echo "\${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;'
+        active_state_line = 'ActiveState) echo "${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;'
         self.assertIn(active_state_line, original_mock)
         systemctl_mock.write_text(
             original_mock.replace(
                 active_state_line,
                 'ActiveState)\n'
-                '    [ "\${MOCK_ACTIVE_STATE_EXIT:-0}" = 0 ] || '
+                '    [ "${MOCK_ACTIVE_STATE_EXIT:-0}" = 0 ] || '
                 'exit "$MOCK_ACTIVE_STATE_EXIT"\n'
-                '    echo "\${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;',
+                '    echo "${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;',
             ),
             encoding="utf-8",
         )
@@ -255,6 +255,27 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         )
         self.assertNotIn("dmsetup remove", result.stderr)
         self.assertNotIn("swapoff", result.stderr)
+
+    def test_journal_probe_status_survives_degraded_observation(self) -> None:
+        journalctl_mock = self.fixture.bin / "journalctl"
+        journalctl_mock.write_text(
+            '#!/bin/sh\nexit "${MOCK_JOURNAL_EXIT:-0}"\n',
+            encoding="utf-8",
+        )
+        journalctl_mock.chmod(0o755)
+        env = self.fixture.env.copy()
+        env["MOCK_JOURNAL_EXIT"] = "9"
+        result = self.fixture.run_helper("once", env)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
+        self.assertIn("kernel_log_unavailable", result.stderr)
+        self.assertIn(
+            "phase=kernel_log expected=bounded_recent_kernel_errors "
+            "observed=probe_failed command=journalctl command_status=9",
+            result.stderr,
+        )
+        self.assertIn("check=kernel_log_observation retained_state=unchanged", result.stderr)
+        self.assertIn("next=inspect_kernel_journal_read_only", result.stderr)
 
 
 if __name__ == "__main__":

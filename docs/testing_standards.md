@@ -1574,7 +1574,9 @@ that identifies the phase and check, expected proof, observed class, originating
 command status (or the validated target errno when the terminal status owns the
 failure), retained-state disposition, and a safe inspection action. A semantic
 mismatch after a successful probe reports command status zero; failed systemd,
-dmsetup, inventory or journal probes retain their actual command status.
+dmsetup, inventory or journal probes retain their actual command status. The journal
+observer must preserve the bounded `journalctl` exit separately from the redacted
+log sample so timeout and probe failure remain attributable without exposing text.
 Diagnostics must not print device paths, PARTUUIDs, recovery run IDs or private
 journal/recovery text. WARN and DEGRADED records are observation only: they are
 never permission to remove a mapper, disable unrelated swap, delete recovery

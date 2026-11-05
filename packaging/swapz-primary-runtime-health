@@ -684,11 +684,22 @@ kernel_error_snapshot()
 {
 	kernel_error_count=unavailable
 	kernel_error_latest=unavailable
-	command -v journalctl >/dev/null 2>&1 || return 1
+	kernel_log_command_status=0
+	if command -v journalctl >/dev/null 2>&1; then
+		:
+	else
+		kernel_log_command_status=$?
+		return 1
+	fi
 	# Bound journal work and process memory independently of system uptime.
 	# The DM target keeps cumulative failure counters; this is a recent-error
 	# diagnostic window, not a cumulative all-boot error count.
-	journal=$(run_bounded journalctl --boot=0 --kernel --priority=err..alert --lines=256 --no-pager --output=cat 2>/dev/null) || return 1
+	if journal=$(run_bounded journalctl --boot=0 --kernel --priority=err..alert --lines=256 --no-pager --output=cat 2>/dev/null); then
+		:
+	else
+		kernel_log_command_status=$?
+		return 1
+	fi
 	filtered=$(printf '%s\n' "$journal" | awk '
 		{ lowered = tolower($0) }
 		lowered ~ /swapz|dm-swapz|swapz-primary/ { print }
@@ -1377,7 +1388,7 @@ log_runtime_attribution()
 		log_observer_diagnostic passive_swap_unit_result success_result "$swap_unit_result_observed" systemctl_show "$swap_unit_result_command_status" inspect_systemctl_show_read_only none inferred passive_swap_result
 	fi
 	if reason_present "$observation_reasons" kernel_log_unavailable; then
-		log_observer_diagnostic kernel_log bounded_recent_kernel_errors probe_failed journalctl 1 inspect_kernel_journal_read_only none inferred kernel_log_observation
+		log_observer_diagnostic kernel_log bounded_recent_kernel_errors probe_failed journalctl "$kernel_log_command_status" inspect_kernel_journal_read_only none inferred kernel_log_observation
 	fi
 }
 
@@ -1564,7 +1575,7 @@ monitor_loop()
 		else
 			capacity_bucket=normal
 		fi
-		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$passive_enablement\|$passive_enablement_command_status\|$mapper_sub\|$mapper_sub_category\|$swap_unit_sub\|$swap_unit_sub_category\|$mapper_sub_command_status\|$swap_unit_sub_command_status\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_info_observation_state\|$mapper_table_command_status\|$mapper_status_command_status\|$mapper_active_category\|$mapper_active_command_status\|$mapper_result_category\|$mapper_result_command_status\|$swap_unit_active_category\|$swap_unit_active_command_status\|$swap_unit_result_category\|$swap_unit_result_command_status
+		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$passive_enablement\|$passive_enablement_command_status\|$mapper_sub\|$mapper_sub_category\|$swap_unit_sub\|$swap_unit_sub_category\|$mapper_sub_command_status\|$swap_unit_sub_command_status\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_info_observation_state\|$mapper_table_command_status\|$mapper_status_command_status\|$mapper_active_category\|$mapper_active_command_status\|$mapper_result_category\|$mapper_result_command_status\|$swap_unit_active_category\|$swap_unit_active_command_status\|$swap_unit_result_category\|$swap_unit_result_command_status\|$kernel_log_command_status
 		if [ "$signature" != "$previous_signature" ]; then
 			log_runtime_state
 			previous_signature=$signature
