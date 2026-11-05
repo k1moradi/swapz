@@ -16,6 +16,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
+MAKE_PHASE = "tests/Makefile native and metadata"
 PACKAGE_PHASE = "tests/runtime/native/package-dkms-test.py"
 PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
 OWNERSHIP_PHASE = "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
@@ -132,6 +133,46 @@ PY
 '''
 
 
+
+# This Make-stage stub leaves the prior passing suite's expected FAIL: in
+# the captured transcript; only the later matched failed target is causal.
+MAKE_FIXTURE = r'''
+[[ $# == 3 && $1 == -C && $2 == tests && $3 == test ]] || exit 89
+printf 'MAKE_STDOUT\n'
+case "$SWAPZ_RELAY_SCENARIO" in
+  pass)
+    printf 'MAKE_STDERR\n' >&2
+    exit 0 ;;
+  compile|oversized)
+    printf '%s\n' 'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' >&2
+    if [[ $SWAPZ_RELAY_SCENARIO == oversized ]]; then
+      head -c 307200 /dev/zero | tr '\0' 'x' >&2
+      printf '\n' >&2
+    fi
+    cat >&2 <<'TRACEBACK'
+Traceback (most recent call last):
+  File "/private/checkout/tests/runtime/native/userspace/swapz-primary-late-race-test.py", line 1428, in <module>
+    raise SystemExit(main())
+  File "/private/checkout/tests/runtime/native/userspace/swapz-primary-late-race-test.py", line 1414, in main
+    production = compile_and_run(source, workdir, mutant=False)
+  File "/private/checkout/tests/runtime/native/userspace/swapz-primary-late-race-test.py", line 1398, in compile_and_run
+    raise AssertionError(f"{c_path.name} compile failed: {compilation.stderr}")
+AssertionError: production.c compile failed:
+/private/source/production.c:4923:13: error: implicit declaration of function 'swapz_primary_shared_root_scope_record_live' PRIVATE_ONLY_TRACEBACK_PAYLOAD
+make[2]: *** [Makefile:160: test-userspace] Error 1
+make[1]: *** [Makefile:10: test-native] Error 2
+make: *** [Makefile:16: test] Error 2
+TRACEBACK
+    exit 2 ;;
+  unrelated)
+    printf '%s\n' \
+      'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' \
+      'make[2]: *** [Makefile:154: test-mapping] Error 1' >&2
+    exit 2 ;;
+  *) exit 90 ;;
+esac
+'''
+
 class RootlessAttribution(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -142,6 +183,12 @@ class RootlessAttribution(unittest.TestCase):
         package_end = source.index(
             "rootless_phase='tests/runtime/native/systemd/", package_begin)
         cls.functions = source[functions_begin:functions_end]
+        make_begin = source.index(f"rootless_phase='{MAKE_PHASE}'")
+        make_end = source.index(
+            "rootless_phase='tests/runtime/native/source-contract-test.py'",
+            make_begin)
+        cls.make_stage = source[make_begin:make_end]
+        assert cls.make_stage.count('"${make_args[@]}" -C tests test') == 1
         cls.package_stage = source[package_begin:package_end]
         primary_begin = source.index(f"rootless_phase='{PRIMARY_PHASE}'")
         primary_end = source.index(f"rootless_phase='{OWNERSHIP_PHASE}'",
@@ -187,12 +234,17 @@ class RootlessAttribution(unittest.TestCase):
             # Permission-independent failure injection also works as root.
             self.stub("mktemp", "exit 72\n")
 
+        if stage == MAKE_PHASE:
+            self.stub("make", MAKE_FIXTURE)
+
         fixture = (
             "#!/usr/bin/env bash\nset -Eeuo pipefail\n"
             f"ROOT={shlex.quote(str(self.root))}\n"
             'cd "$ROOT"\n'
             + self.functions + "\n" + FIXTURE + "\n"
-            + {PACKAGE_PHASE: self.package_stage,
+            + ("make_args=(make)\n" if stage == MAKE_PHASE else "")
+            + {MAKE_PHASE: self.make_stage,
+               PACKAGE_PHASE: self.package_stage,
                PRIMARY_PHASE: self.primary_stage,
                OWNERSHIP_PHASE: self.ownership_stage}[stage]
             + "printf 'AFTER_PACKAGE\\n'\n"
@@ -247,6 +299,77 @@ class RootlessAttribution(unittest.TestCase):
         self.assertIn(f"exit_code={status}", log.read_text())
         self.assertIn(f"test={test}\n", log.read_text())
         return log
+
+
+    def test_make_pass_preserves_streams_and_removes_capture(self):
+        result = self.invoke("pass", stage=MAKE_PHASE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "MAKE_STDOUT\nAFTER_PACKAGE\n")
+        self.assertEqual(result.stderr, "MAKE_STDERR\n")
+        self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
+
+    def test_make_compiler_failure_identifies_only_authenticated_fixture(self):
+        result = self.invoke("compile", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="unittest_assertion", subtest="compile",
+            test="test_swapz_primary_late_race", stage=MAKE_PHASE)
+        self.assertIn("implicit declaration of function", log.read_text())
+        self.assertIn("swapz_primary_shared_root_scope_record_live", log.read_text())
+        self.assertIn(PRIVATE_SENTINEL, log.read_text())
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertNotIn("test_expected", marker)
+        self.assertNotIn("AFTER_PACKAGE", result.stdout)
+
+    def test_make_does_not_inherit_earlier_expected_fail(self):
+        result = self.invoke("unrelated", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+        self.assertIn("FAIL: test_expected", log.read_text())
+        self.assertNotIn("AFTER_PACKAGE", result.stdout)
+
+    def test_make_oversized_stderr_retains_first_compiler_error(self):
+        result = self.invoke("oversized", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="unittest_assertion", subtest="compile",
+            test="test_swapz_primary_late_race", stage=MAKE_PHASE)
+        self.assertLessEqual(log.stat().st_size, 262144)
+        self.assertIn("swapz_primary_shared_root_scope_record_live",
+                      log.read_text())
+
+    def test_make_failed_relay_cannot_authenticate_child_output(self):
+        self.stub("tee", '"$SWAPZ_REAL_TEE" "$@"\nexit 68\n')
+        result = self.invoke("compile", stage=MAKE_PHASE)
+        self.assert_report(
+            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+        self.assertNotIn("AFTER_PACKAGE", result.stdout)
+
+    def test_make_unavailable_capture_preserves_child_exit(self):
+        result = self.invoke("compile", stage=MAKE_PHASE, storage="unwritable")
+        self.assert_report(
+            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE,
+            log_available=False)
+
+    def test_ci_wrapper_uses_make_fixture_identity_not_prior_fail(self):
+        diagnostic_spec = importlib.util.spec_from_file_location(
+            "swapz_rootless_ci_make_diagnostic",
+            ROOT / "tests/tools/product_goals.py")
+        self.assertIsNotNone(diagnostic_spec.loader)
+        diagnostics = importlib.util.module_from_spec(diagnostic_spec)
+        diagnostic_spec.loader.exec_module(diagnostics)
+        result = self.invoke("compile", stage=MAKE_PHASE)
+        diagnostic = diagnostics.diagnose_ci_failure(
+            result.stderr.splitlines(), result.returncode, "native-rootless")
+        self.assertEqual(diagnostic["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(diagnostic["child_exit_code"], 2)
+        self.assertEqual(diagnostic["rootless_reason"], "unittest_assertion")
+        self.assertEqual(diagnostic["phase"], "Makefile native and metadata")
+        self.assertEqual(diagnostic["test"], "test_swapz_primary_late_race")
+        self.assertNotIn("test_expected", diagnostic["first_error"])
+        self.assertNotIn(PRIVATE_SENTINEL, diagnostic["first_error"])
+        self.assertNotIn("/private/", diagnostic["first_error"])
+        self.assertIn("build/tests/rootless-failure.",
+                      diagnostic["first_error"])
 
     def test_pass_preserves_streams_and_removes_private_capture(self):
         result = self.invoke("pass")

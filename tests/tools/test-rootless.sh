@@ -185,6 +185,48 @@ classify_rootless_private_unittest_failure() {
     fi
   done < "$diagnostic_path"
 }
+
+# The initial Make stage can fail inside this source-extracted C fixture. Its
+# Python assertion is not a unittest progress record. Require the traceback
+# and failed test-userspace target; ignore preceding expected FAIL: lines.
+classify_rootless_private_make_failure() {
+  local diagnostic_path=$1
+  local line
+  local traceback_line_regex='^[[:space:]]*File "([^"]*/)?swapz-primary-late-race-test[.]py", line [0-9]+, in (compile_and_run|main|<module>)$'
+  local make_target_error_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:[0-9]+: test-userspace\] Error [0-9]+$'
+  local traceback_seen=0
+  local compile_assertion_seen=0
+  local compiler_error_seen=0
+  rootless_classified_reason=nonzero_exit
+  rootless_classified_subtest=unavailable
+  rootless_classified_test=unavailable
+  rootless_classified_kind=unavailable
+  [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
+  while IFS= read -r line || [[ -n $line ]]; do
+    if [[ $line == 'Traceback (most recent call last):' ]]; then
+      traceback_seen=0
+      compile_assertion_seen=0
+      compiler_error_seen=0
+    elif [[ $line =~ $traceback_line_regex ]]; then
+      traceback_seen=1
+    elif (( traceback_seen )) &&
+         [[ $line =~ ^AssertionError:[[:space:]]+(production|mutant)[.]c[[:space:]]+compile[[:space:]]+failed: ]]; then
+      compile_assertion_seen=1
+    elif (( compile_assertion_seen )) && [[ $line == *': error:'* ]]; then
+      compiler_error_seen=1
+    elif [[ $line =~ $make_target_error_regex ]]; then
+      if (( traceback_seen && compile_assertion_seen && compiler_error_seen )); then
+        # Only these source-controlled tokens cross the CI boundary.
+        rootless_classified_reason=unittest_assertion
+        rootless_classified_subtest=compile
+        rootless_classified_test=test_swapz_primary_late_race
+        rootless_classified_kind=FAIL
+      fi
+      return 0
+    fi
+  done < "$diagnostic_path"
+}
+
 report_rootless_failure() {
   local original_exit_code=$1
   local failed_at_line=$2
@@ -211,7 +253,7 @@ report_rootless_failure() {
   local private_diagnostic_path=${rootless_private_diagnostic_path:-}
   local private_diagnostic_log=${rootless_private_diagnostic_log:-unavailable}
   local private_directory
-  # Ordinary failures allocate only after the failure. The two captured
+  # Ordinary failures allocate only after the failure. The captured native Make stage and
   # unittests may already have private stderr, retained only on fail.
   if [[ -z $private_diagnostic_path ]]; then
     mkdir -p "$ROOT/build/tests" >/dev/null 2>&1
@@ -389,7 +431,29 @@ if [[ -n ${SWAPZ_TEST_JOBS:-} ]]; then
 fi
 rootless_phase='tests/Makefile native and metadata'
 rootless_phase_started_seconds=$SECONDS
-"${make_args[@]}" -C tests test
+# Preserve stdout and stderr relay while privately retaining a failed compile.
+begin_rootless_private_stderr_capture
+rootless_make_command_line=$LINENO
+if "${make_args[@]}" -C tests test 2>&"$rootless_capture_input_fd"; then
+  rootless_make_exit_code=0
+else
+  rootless_make_exit_code=$?
+fi
+finish_rootless_private_stderr_capture "$rootless_make_exit_code"
+if (( rootless_make_exit_code != 0 )); then
+  if [[ -z $rootless_capture_failure_reason ]]; then
+    classify_rootless_private_make_failure "$rootless_private_diagnostic_path"
+  fi
+  if [[ $rootless_classified_test != unavailable ]]; then
+    report_rootless_failure "$rootless_make_exit_code" "$rootless_make_command_line" \
+      "$rootless_classified_reason" "$rootless_classified_subtest" \
+      "$rootless_classified_test" "$rootless_classified_kind"
+  fi
+  report_rootless_failure "$rootless_make_exit_code" "$rootless_make_command_line"
+fi
+if [[ -n $rootless_capture_failure_reason ]]; then
+  report_rootless_failure 1 "$rootless_make_command_line" "$rootless_capture_failure_reason"
+fi
 rootless_phase='tests/runtime/native/source-contract-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/source-contract-test.py -v

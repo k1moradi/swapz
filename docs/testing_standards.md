@@ -1000,9 +1000,9 @@ reason classes may be promoted from a private capture into `FAIL:`, `Failed
 during:`, or `Reason:` markers. A failing status must survive diagnostic write
 errors and EXIT/ERR/signal traps without a duplicate marker.
 
-The long package unittest and primary real-swap native contract suite are the
-only rootless suites that may keep a transient private stderr copy while they
-run. One relay process may preserve stderr
+The initial native Make stage, the long package unittest, and the primary
+real-swap native contract suite are the only rootless suites that may keep a
+transient private stderr copy while they run. One relay process may preserve stderr
 byte-for-byte into a mode-0600 file inside the mode-0700 failure directory; do
 not add a relay process to every passing suite. On PASS the file and directory
 are removed immediately. On failure, retain at most 64 KiB from the selected
@@ -1014,7 +1014,17 @@ assertion or exception beyond the retained prefix. This fits the existing
 progress stderr displaces it from the tail. The excerpt matcher must recognize
 both the package and primary-real-swap unittest classes; matching only one class
 can discard the other suite's first assertion before the bounded private log is
-finalized. Python `unittest` preserves execution order in verbose `... FAIL`/`... ERROR`
+finalized. For the initial `make -C tests test` stage, leave stdout unchanged
+and relay only stderr. Only a matching `swapz-primary-late-race-test.py`
+traceback, generated-C compile assertion, compiler `error:` line, and
+failed `test-userspace` Make target may authenticate the nested failure.
+The public marker retains the Make phase, the original Make exit 2, and fixed
+`test=test_swapz_primary_late_race subtest=compile
+reason=unittest_assertion` (the Python assertion wrapping compilation),
+not the private compiler declaration or arbitrary paths. A prior passing
+suite's expected `FAIL:` text cannot authenticate a later failing suite.
+Incomplete relays or absent matching evidence retain
+`test=unavailable reason=nonzero_exit`.  Python `unittest` preserves execution order in verbose `... FAIL`/`... ERROR`
 progress records but groups detailed `ERROR:` blocks ahead of `FAIL:` blocks in
 its summary. Classification must therefore bind the first failed progress record
 to its matching detailed traceback; a later teardown error must not win merely
@@ -1045,7 +1055,7 @@ private filesystem paths. Failure-log allocation must not follow a symlinked
 build/tests directory.
 The private `tests/runtime/native/rootless-attribution-test.py` regression runs
 before package transactions in the existing rootless path, using the real
-package and primary-real-swap stage Bash functions with bounded synthetic stderr,
+initial Make, package and primary-real-swap stage Bash functions with bounded synthetic stderr,
 temporary storage,
 and a genuine Python `subprocess.TimeoutExpired`. It must also cover
 first-failure ordering, oversized capture, no-log storage, cleanup failures,
