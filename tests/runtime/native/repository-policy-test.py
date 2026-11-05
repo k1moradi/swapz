@@ -62,6 +62,24 @@ def standard_has_nonwhitespace_text_change(
     if return_code == 0:
         return False
 
+    tree_entry = git("ls-tree", "-z", commit_sha, "--", standard)
+    if not tree_entry:
+        return False
+    if not tree_entry.endswith(b"\0") or tree_entry.count(b"\0") != 1:
+        raise PolicyError("canonical standards tree metadata malformed")
+    try:
+        metadata, raw_path = tree_entry[:-1].split(b"\t", 1)
+        mode, object_type, object_sha = metadata.split(b" ", 2)
+        object_sha_text = object_sha.decode("ascii")
+    except (ValueError, UnicodeDecodeError) as error:
+        raise PolicyError(
+            "canonical standards tree metadata malformed") from error
+    path = raw_path.decode("utf-8", errors="surrogateescape")
+    if path != standard or SHA.fullmatch(object_sha_text) is None:
+        raise PolicyError("canonical standards tree metadata malformed")
+    if object_type != b"blob" or mode not in (b"100644", b"100755"):
+        return False
+
     statistics = git(
         "diff", "--ignore-all-space", "--ignore-blank-lines", "--no-renames",
         "--numstat", parent, commit_sha, "--", standard).decode(
@@ -261,6 +279,19 @@ class SyntheticRepositoryPolicy(unittest.TestCase):
         self.write("tests/runtime/native/check.py", "assert True\n")
         (self.repository / "docs/testing_standards.md").chmod(0o755)
         offending_sha = self.commit("mode-only standards metadata")
+        result = self.audit()
+        self.assertNotEqual(result.returncode, 0)
+        for expected in (offending_sha, "tests/runtime/native/check.py",
+                         "docs/testing_standards.md",
+                         "first_error=missing applicable"):
+            self.assertIn(expected, result.stderr)
+
+    def test_nonregular_standard_change_does_not_qualify(self):
+        self.write("tests/runtime/native/check.py", "assert True\n")
+        standard = self.repository / "docs/testing_standards.md"
+        standard.unlink()
+        standard.symlink_to("benchmark.md")
+        offending_sha = self.commit("nonregular standards replacement")
         result = self.audit()
         self.assertNotEqual(result.returncode, 0)
         for expected in (offending_sha, "tests/runtime/native/check.py",

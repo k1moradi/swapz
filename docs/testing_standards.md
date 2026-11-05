@@ -3007,8 +3007,10 @@ compile standards; other workflows require testing standards. Packaging accepts
 testing or compile standards, and root Make/DKMS interfaces require compile
 standards. Metadata-only changes such as a mode-bit flip do not count as a
 standards co-change: the automated applicability guard requires at least one
-changed non-whitespace text line in an applicable canonical standards file.
-Review must still confirm the change is semantically meaningful: textual Git
+changed non-whitespace text line in an applicable canonical standards regular
+file. A symlink, gitlink, deletion or other non-regular replacement cannot
+satisfy the co-change. Review must still confirm the change is semantically
+meaningful: textual Git
 differences cannot establish relevance by themselves. A later
 documentation/report-only follow-up cannot retroactively qualify an invalid
 implementation SHA. Failure diagnostics must identify the offending
