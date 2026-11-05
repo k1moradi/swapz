@@ -6701,9 +6701,13 @@ the sole qualification interface; `make fast_test` remains development-only.
 
 Release-evaluator synthetic negative controls must remain rootless and model
 the evidence fields emitted by the producer rather than inventing alternate
-counters. Complete positive controls must also exercise the producer-shaped
-frozen campaign and independently measured per-cycle swap workload so a
-fix cannot reject every release by default. Development-only card evidence, including a source-bound fast-test
+counters. Complete positive controls must also exercise the current
+producer-shaped v2 campaign and independently measured per-cycle swap workload
+so a fix cannot reject every release by default. The frozen parent policy
+requires 14 pairs across its four workloads; the current v2 producer also
+requires its two separately evaluated five-pair prospective-amendment cohorts.
+Those amendment pairs never substitute for any of the 14 frozen pairs, and a
+positive release fixture must carry the complete producer cohort. Development-only card evidence, including a source-bound fast-test
 PASS, exact header restoration and an inactive final target, is never real-swap
 or physical-acceptance evidence and cannot backfill an incomplete five-stage
 `make test`. Development fixtures use the producer's `development_test_evidence`
@@ -6801,11 +6805,17 @@ can drive PASS or FAIL only when it is current, exact-source/target bound,
 marked observed, carries a strict UTC `observed_at_utc` timestamp, and its
 `overall` disposition matches the summary status. A structurally incomplete
 reboot summary remains NO/BLOCKED rather than fabricating an observation.
-Owner `test_results.json` ingestion is strict: the stage list must contain
-exactly the five canonical stages in order, each with `status: PASS` and an
-integer `exit_code: 0`; duplicate, reordered, missing, extra, or internally
-contradictory stage rows are BLOCKED. The qualified-artifact object accepts
-only its status plus formatter/module/oracle SHA-256 fields.
+Owner `test_results.json` ingestion is strict: a qualifying PASS stage list
+must contain exactly the five canonical stages in order, each with
+`status: PASS` and an integer `exit_code: 0`; duplicate, reordered, missing,
+extra, or internally contradictory PASS rows are BLOCKED. A fail-fast report
+may contain only the canonical stage prefix through its first failed stage.
+When that exact-source report has `overall: FAIL` and the first non-PASS row
+has `status: FAIL` with a nonzero integer exit code, it is producer-proven
+failed execution and the final release verdict is FAIL. A BLOCKED/INCOMPLETE
+row, malformed/noncanonical prefix, absent failed row, or previous-source
+report remains BLOCKED. The qualified-artifact object accepts only its status
+plus formatter/module/oracle SHA-256 fields.
 Package admission must enforce those JSON types and object keys exactly:
 `false`, `0.0`, and `"0"` are not an integer stage exit code, and extra
 artifact fields are non-canonical even when all three required digests exist.
@@ -6833,11 +6843,14 @@ with listed issues are BLOCKED.
 The executable evaluator's process success is stricter than the pre-reboot
 readiness fields: it returns 0 only when the full `release_verdict` is PASS,
 which requires code PASS, deployment PASS and a current owner-observed cold-boot
-PASS backed by that retained report on the same authorized target. A current owner-observed reboot FAIL makes
-the release verdict FAIL and returns 1; missing or unobserved reboot evidence
-keeps the release verdict BLOCKED and returns 2. Therefore automation can use
-the command exit status as a final-release gate without confusing “safe to
-perform the owner reboot” with “release qualification complete.”
+PASS backed by that retained report on the same authorized target. It returns
+1 for a source/receipt-bound producer-proven failed execution: an exact-source
+owner fail-fast FAIL, terminal real-swap FAIL/COMPLETE, sealed physical audit
+FAIL, or current owner-observed reboot FAIL. Missing, malformed, stale,
+nonterminal/interrupted or producer-BLOCKED evidence keeps the release verdict
+BLOCKED and returns 2. Therefore automation can use the command exit status as
+a final-release gate without confusing “safe to perform the owner reboot” with
+“release qualification complete.”
 
 The private `tests/tools/evaluate-production-readiness.py` evaluator is the
 executable form of this release-evidence contract; it is not a new operator
@@ -6871,7 +6884,13 @@ exact release source, frozen policy digest, owner-report digest, qualified
 installed artifact hashes, current source-controlled helper/oracle digests,
 valid private execution-control digest, frozen workload/cycle values, distinct
 transaction run IDs and Linux swap UUIDs, and durable COMPLETE for every
-required cycle. The boot-scoped `target_device` major:minor recorded by the
+required cycle. They must also bind the producer's exact physical-control input
+inventory to the current source-controlled bytes, including the acceptance
+manifest and the pinned authorization-snapshot digest; checking that digest
+does not promote the historical readiness snapshot into current qualification.
+Every cycle must prove the loaded module's exact source/clean/physical-backing
+provenance and complete cycle-wide safety telemetry, including monotonic
+sampling and the frozen minimum-MemAvailable floor. The boot-scoped `target_device` major:minor recorded by the
 real-swap helper is diagnostic rather than part of the cross-boot canonical
 target tuple, but it must be a valid major:minor and the persistent envelope
 must exactly match the nested PASS result; malformed or mismatched device
@@ -6886,7 +6905,12 @@ backing-device sector/byte counters that cover the reported physical traffic.
 It must check verified page/byte geometry, digests, zero mismatches/OOM,
 release of the exact mapper slots, coherent cycle aggregates and witnessed
 normal swapoff-before-removal order. Missing or zero traffic is BLOCKED even
-when a source-bound retained artifact claims PASS.
+when a source-bound retained artifact claims PASS. An exact-source terminal
+persistent real-swap `FAIL` at phase `COMPLETE`, bound through the current
+receipt, owner report, target, frozen policy, helper/oracle and physical-control
+inputs, is a proven failed execution. The producer's initial/interrupted
+default FAIL disposition, terminal BLOCKED disposition, stale source or
+unbound artifact remains BLOCKED rather than being upgraded to FAIL.
 Current PASS physical records bind the normalized lowercase PARTUUID plus exact
 partition byte size and the frozen policy SHA-256. A synthesized
 `sustained_physical_performance: PASS` record is not sufficient: release
@@ -6899,20 +6923,29 @@ STABLE host identity with quiescent admitted-device boundaries, and the exact
 current policy, prospective-amendment, campaign-evaluator, evidence-sealer and
 metadata-RAM-validator digests. Its
 host/summary/pair artifact manifest must be structurally complete and internally
-count-consistent. The release evaluator must also compare every sealed pair
-artifact independently against all frozen workload names, exact pair counts
-(5, 5, 1, 3; 14 total), unique per-workload pair IDs and indices,
-counterbalanced order, unique artifact names and PASS/non-excluded
-disposition. The campaign's self-reported `record_count`, aggregate PASS
-status and exact JSON digest are necessary but do not establish missing
-arms or an incomplete workload cohort. A shortened or inconsistent campaign
-is BLOCKED even when its internal envelope and digest agree. The producer's
-`physical_evidence_audit` must independently report PASS with zero retained
-and omitted diagnostics and the frozen claim boundary; a PASS-looking
-campaign with an absent or failed audit remains BLOCKED. The existing
-five-argument private campaign-validator call must remain supported and
-resolve the tracked frozen policy itself when no policy object is supplied.
-Missing or stale sealed campaign evidence is BLOCKED.
+count-consistent. The release evaluator must independently require every
+frozen parent-policy workload with exact pair counts (5, 5, 1, 3; 14 total)
+and must also require the complete current v2 producer cohort. The current
+prospective amendment contributes two separate five-pair workloads, so the
+current v2 producer has 24 pair artifacts in total; amendment pairs are
+separately identified and can never replace a missing frozen pair. Pair
+artifacts require unique names and digests, unique per-workload pair IDs and
+indices, exact counterbalanced order and PASS/non-excluded disposition. The
+campaign's self-reported `record_count`, aggregate PASS status and exact JSON
+digest are necessary but do not establish missing arms or an incomplete
+workload cohort. A shortened or inconsistent campaign is BLOCKED even when its
+internal envelope and digest agree. The producer's `physical_evidence_audit`
+must independently report PASS with zero retained and omitted diagnostics and
+the frozen claim boundary; a PASS-looking campaign with an absent or failed
+audit remains BLOCKED. A source/target/policy/tool-bound campaign whose
+producer audit carries a retained FAIL diagnostic is producer-proven failed
+execution; BLOCKED/UNAVAILABLE or incomplete audit evidence remains BLOCKED.
+The existing five-argument private campaign-validator call remains supported
+for structural/measurement-only callers and loads tracked policy authority,
+but it does not establish release completeness. `evaluate_release` supplies
+the validated policy as the sixth argument and is the path that enforces the
+14 frozen pairs, complete current v2 producer cohort and physical-audit release
+gates. Missing or stale sealed campaign evidence is BLOCKED.
 Full-capacity evidence must come from that same sealed campaign: the sealer
 derives maximum logical pages/bytes and measured target/metadata peak RAM from
 the accepted `sd-high-occupancy-churn` swapz arm, and a PASS campaign is invalid

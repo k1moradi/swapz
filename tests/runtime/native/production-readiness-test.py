@@ -165,6 +165,32 @@ def pass_record(**extra):
 
 
 
+def real_swap_control_inputs(policy_raw):
+    authorization_snapshot_sha256 = hashlib.sha256(
+        (ROOT / EVALUATOR.REAL_SWAP_DYNAMIC_CONTROL_INPUT).read_bytes()
+    ).hexdigest()
+    inputs = {}
+    for relative_path in EVALUATOR.REAL_SWAP_CONTROL_INPUT_PATHS:
+        if relative_path == EVALUATOR.REAL_SWAP_DYNAMIC_CONTROL_INPUT:
+            inputs[relative_path] = authorization_snapshot_sha256
+        elif relative_path == "docs/production-acceptance.json":
+            inputs[relative_path] = hashlib.sha256(policy_raw).hexdigest()
+        else:
+            inputs[relative_path] = hashlib.sha256(
+                (ROOT / relative_path).read_bytes()).hexdigest()
+    return authorization_snapshot_sha256, inputs
+
+
+def physical_workload_specs(policy_raw):
+    policy = json.loads(policy_raw)
+    amendment = json.loads(
+        EVALUATOR.PHYSICAL_CAMPAIGN_AMENDMENT.read_text(encoding="utf-8"))
+    return {
+        **policy["physical_qualification"]["workloads"],
+        **amendment["workloads"],
+    }
+
+
 def real_swap_workload(primary):
     # Rootless producer-shaped proof: two concurrent oracles, two complete
     # reuse rounds, independent swap/mapper/vmstat/lower-device counters.
@@ -252,7 +278,22 @@ def real_swap_cycle(primary, index):
         "mapper_device": "253:0",
         "linux_swap_uuid": f"00000000-0000-0000-0000-{index + 1:012x}",
         "swap_priority": -1,
+        "loaded_module": {
+            "build_source_sha": SOURCE,
+            "build_source_clean": "1",
+            "allow_physical_backing": "1",
+        },
         "workload": real_swap_workload(primary),
+        "cycle_telemetry": {
+            "samples": 10,
+            "started_monotonic_ns": (index + 1) * 1_000_000_000,
+            "ended_monotonic_ns": (index + 1) * 1_000_000_000 + 500_000_000,
+            "minimum_mem_available_mib":
+                primary["minimum_mem_available_mib"] + 128,
+            "memory_psi_some_usec_delta": 0,
+            "pswpin_delta": 1,
+            "pswpout_delta": 1,
+        },
         "stop_order": {
             "initial_active": True,
             "swapoff_before_remove_witness": True,
@@ -267,11 +308,15 @@ def real_swap_cycle(primary, index):
 def real_swap_result(report_raw, policy_raw):
     policy = json.loads(policy_raw)
     primary = policy["primary_real_swap"]
+    authorization_snapshot_sha256, control_inputs = (
+        real_swap_control_inputs(policy_raw))
     return {
         "schema": "swapz-primary-real-swap-v1",
         "status": "PASS",
         "source_sha": SOURCE,
         "acceptance_manifest_sha256": hashlib.sha256(policy_raw).hexdigest(),
+        "authorization_snapshot_sha256": authorization_snapshot_sha256,
+        "physical_control_inputs_sha256": control_inputs,
         "helper_sha256": hashlib.sha256(
             EVALUATOR.REAL_SWAP_HELPER.read_bytes()).hexdigest(),
         "oracle_sha256": hashlib.sha256(
@@ -303,8 +348,10 @@ def real_swap_evidence(report_raw, policy_raw):
     result = real_swap_result(report_raw, policy_raw)
     envelope_keys = (
         "source_sha", "acceptance_manifest_sha256",
-        "qualification_report_sha256", "helper_sha256", "oracle_sha256",
+        "authorization_snapshot_sha256", "qualification_report_sha256",
+        "helper_sha256", "oracle_sha256",
         "qualified_installed_artifacts", "physical_execution_control_sha256",
+        "physical_control_inputs_sha256",
         "installed_control_privileged_execution_enabled",
         "partuuid", "target_size_bytes", "target_device",
         "cycles_requested", "workload_mib",
@@ -525,27 +572,26 @@ def physical_campaign_evidence(policy_raw):
             "qualification_summary": campaign_artifact("summary.json", "6"),
             "pairs": [
                 {
-                    **campaign_artifact(
-                        f"{workload}-{pair_index}.json",
-                        "0123456789abcdef"[artifact_index]),
+                    "name": f"{workload}-{pair_index}.json",
+                    "size_bytes": 1,
+                    "sha256": hashlib.sha256(
+                        f"{workload}:{pair_index}".encode("ascii")).hexdigest(),
                     "workload": workload,
                     "pair_id": f"{workload}-{pair_index}",
                     "pair_index": pair_index,
-                    "order": specification["counterbalanced_order"][pair_index - 1],
+                    "order":
+                        specification["counterbalanced_order"][pair_index - 1],
                     "status": "PASS",
                     "excluded": False,
                 }
-                for artifact_index, (workload, specification, pair_index) in
-                enumerate(
-                    (workload, specification, pair_index)
-                    for workload, specification in
-                    json.loads(policy_raw)["physical_qualification"]["workloads"].items()
-                    for pair_index in range(1, specification["pairs"] + 1))
+                for workload, specification in
+                physical_workload_specs(policy_raw).items()
+                for pair_index in range(1, specification["pairs"] + 1)
             ],
         },
         "record_count": sum(
             specification["pairs"] for specification in
-            json.loads(policy_raw)["physical_qualification"]["workloads"].values()),
+            physical_workload_specs(policy_raw).values()),
     }
 
 
@@ -2841,7 +2887,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             workload["pairs"] for workload in
             policy["physical_qualification"]["workloads"].values())
         campaign = physical_campaign_evidence(encoded(policy))
-        self.assertEqual(len(campaign["artifacts"]["pairs"]), required_pair_count)
+        producer_pair_count = sum(
+            workload["pairs"] for workload in
+            physical_workload_specs(encoded(policy)).values())
+        self.assertGreater(producer_pair_count, required_pair_count)
+        self.assertEqual(
+            len(campaign["artifacts"]["pairs"]), producer_pair_count)
         campaign["artifacts"]["pairs"] = campaign["artifacts"]["pairs"][:1]
         campaign["record_count"] = 1
         result = evaluate(policy=policy, campaign=campaign)
@@ -2894,11 +2945,17 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         # Complete producer-shaped synthetic qualification is still admissible
         # before the independent owner-reboot gate, not physical qualification.
         policy = acceptance_policy()
-        campaign = physical_campaign_evidence(encoded(policy))
+        policy_raw = encoded(policy)
+        campaign = physical_campaign_evidence(policy_raw)
         pairs = campaign["artifacts"]["pairs"]
-        required = policy["physical_qualification"]["workloads"]
-        self.assertEqual(len(pairs), sum(row["pairs"] for row in required.values()))
-        for workload, specification in required.items():
+        frozen = policy["physical_qualification"]["workloads"]
+        producer = physical_workload_specs(policy_raw)
+        frozen_pair_count = sum(row["pairs"] for row in frozen.values())
+        producer_pair_count = sum(row["pairs"] for row in producer.values())
+        self.assertEqual(frozen_pair_count, 14)
+        self.assertGreater(producer_pair_count, frozen_pair_count)
+        self.assertEqual(len(pairs), producer_pair_count)
+        for workload, specification in producer.items():
             rows = [row for row in pairs if row["workload"] == workload]
             self.assertEqual(
                 [row["pair_index"] for row in rows],
@@ -2907,18 +2964,75 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 [row["order"] for row in rows],
                 specification["counterbalanced_order"])
         physical = real_swap_evidence(
-            encoded(owner_report()), encoded(policy))
+            encoded(owner_report()), policy_raw)
         for cycle in physical["cycles"]:
             self.assertEqual(len(cycle["workload"]["rounds"]), 2)
+            self.assertEqual(
+                cycle["loaded_module"]["build_source_sha"], SOURCE)
             self.assertGreaterEqual(
                 cycle["workload"]["rounds"][0]["swapz_logical_read_delta"],
-                policy["primary_real_swap"]["minimum_swap_traffic_mib"] * 1048576)
+                policy["primary_real_swap"]["minimum_swap_traffic_mib"] *
+                1048576)
         result = evaluate(policy=policy, physical=physical, campaign=campaign)
-        self.assertEqual(result["CODE_PRODUCTION_READY"], "PASS", result["code_blockers"])
+        self.assertEqual(
+            result["CODE_PRODUCTION_READY"], "PASS",
+            result["code_blockers"])
         self.assertEqual(result["DEPLOYMENT_PRODUCTION_READY"], "PASS")
 
-    def test_direct_campaign_validator_uses_tracked_frozen_policy(self):
-        policy_raw = encoded(acceptance_policy())
+    def test_frozen_four_workloads_do_not_substitute_for_complete_v2_campaign(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        campaign = physical_campaign_evidence(policy_raw)
+        frozen_names = set(policy["physical_qualification"]["workloads"])
+        campaign["artifacts"]["pairs"] = [
+            pair for pair in campaign["artifacts"]["pairs"]
+            if pair["workload"] in frozen_names
+        ]
+        campaign["record_count"] = len(campaign["artifacts"]["pairs"])
+        frozen_pair_count = sum(
+            specification["pairs"] for specification in
+            policy["physical_qualification"]["workloads"].values())
+        producer_pair_count = sum(
+            specification["pairs"] for specification in
+            physical_workload_specs(policy_raw).values())
+        self.assertEqual(campaign["record_count"], frozen_pair_count)
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertFalse(any(
+            "frozen pair completeness mismatch" in blocker
+            for blocker in result["code_blockers"]))
+        self.assertTrue(any(
+            f"metric=total_v2_pairs required={producer_pair_count} "
+            f"observed={frozen_pair_count}" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_frozen_pairs_cannot_be_replaced_by_v2_amendment_pairs(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        campaign = physical_campaign_evidence(policy_raw)
+        frozen_names = set(policy["physical_qualification"]["workloads"])
+        pairs = campaign["artifacts"]["pairs"]
+        frozen_index = next(
+            index for index, pair in enumerate(pairs)
+            if pair["workload"] in frozen_names)
+        amendment_pair = next(
+            copy.deepcopy(pair) for pair in pairs
+            if pair["workload"] not in frozen_names)
+        amendment_pair["name"] = "replacement-amendment.json"
+        amendment_pair["sha256"] = "e" * 64
+        pairs[frozen_index] = amendment_pair
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertTrue(any(
+            "metric=frozen_pairs required=14 observed=13" in blocker
+            for blocker in result["code_blockers"]))
+
+    def test_direct_campaign_validator_remains_structural_only(self):
+        # Existing five-argument callers validate campaign structure/measurement
+        # but do not make a release decision. evaluate_release supplies the
+        # policy argument and independently enforces the complete v2 cohort.
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
         campaign = physical_campaign_evidence(policy_raw)
         digest = hashlib.sha256(policy_raw).hexdigest()
         validate = EVALUATOR.validate_physical_campaign_evidence
@@ -2927,11 +3041,14 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             (TARGET["partuuid"], TARGET["size_bytes"])), [])
         campaign["artifacts"]["pairs"] = campaign["artifacts"]["pairs"][:1]
         campaign["record_count"] = 1
-        issues = validate(
+        self.assertEqual(validate(
             campaign, encoded(campaign), SOURCE, digest,
-            (TARGET["partuuid"], TARGET["size_bytes"]))
+            (TARGET["partuuid"], TARGET["size_bytes"])), [])
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertTrue(any(
-            "required=14 observed=1" in issue for issue in issues))
+            "metric=frozen_pairs required=14 observed=1" in blocker
+            for blocker in result["code_blockers"]))
 
     def test_claimed_pass_cannot_override_failing_physical_audit(self):
         policy = acceptance_policy()
@@ -2965,6 +3082,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 "order", "swapz-first")),
             ("duplicate-name", lambda rows: rows[1].__setitem__(
                 "name", rows[0]["name"])),
+            ("duplicate-digest", lambda rows: rows[1].__setitem__(
+                "sha256", rows[0]["sha256"])),
             ("excluded-pair", lambda rows: rows[0].update(
                 status="EXCLUDED", excluded=True)),
         )
@@ -3013,6 +3132,104 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     result["code_blockers"])
 
 
+    def test_real_swap_producer_provenance_is_required(self):
+        policy = acceptance_policy()
+        report = owner_report()
+        cases = (
+            ("control-input",
+             lambda nested: nested["physical_control_inputs_sha256"].__setitem__(
+                 "src/userspace/swapz-primary.c", "0" * 64),
+             "physical control-input digest differs from current source"),
+            ("authorization-binding",
+             lambda nested: nested.__setitem__(
+                 "authorization_snapshot_sha256", "b" * 64),
+             "authorization snapshot/control-input digest binding mismatch"),
+            ("loaded-module",
+             lambda nested: nested["cycles"][0]["loaded_module"].__setitem__(
+                 "build_source_sha", "b" * 40),
+             "loaded module provenance is not exact"),
+            ("cycle-telemetry",
+             lambda nested: nested["cycles"][0]["cycle_telemetry"].__setitem__(
+                 "minimum_mem_available_mib",
+                 policy["primary_real_swap"]["minimum_mem_available_mib"] - 1),
+             "cycle telemetry is incomplete or below the frozen safety floor"),
+        )
+        for name, mutate, expected in cases:
+            with self.subTest(name=name):
+                physical = real_swap_evidence(
+                    encoded(report), encoded(policy))
+                nested = physical["result"]
+                mutate(nested)
+                for key in (
+                        "authorization_snapshot_sha256",
+                        "physical_control_inputs_sha256", "cycles"):
+                    physical[key] = copy.deepcopy(nested[key])
+                result = evaluate(
+                    report=report, policy=policy, physical=physical)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertTrue(any(
+                    expected in blocker
+                    for blocker in result["code_blockers"]),
+                    result["code_blockers"])
+
+    def test_terminal_real_swap_fail_is_fail_but_blocked_is_not(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        for status, expected in (("FAIL", "FAIL"), ("BLOCKED", "BLOCKED")):
+            with self.subTest(status=status):
+                physical = real_swap_evidence(
+                    encoded(report), encoded(policy))
+                physical.update(
+                    status=status, phase="COMPLETE",
+                    reason="synthetic terminal disposition")
+                physical.pop("result")
+                result = evaluate(
+                    report=report, policy=policy, physical=physical)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], expected)
+
+        interrupted = real_swap_evidence(
+            encoded(report), encoded(policy))
+        interrupted.update(
+            status="FAIL", phase="CYCLE_1_STARTING",
+            reason="qualification_interrupted_or_incomplete")
+        interrupted.pop("result")
+        result = evaluate(
+            report=report, policy=policy, physical=interrupted)
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+
+        stale = real_swap_evidence(encoded(report), encoded(policy))
+        stale.update(
+            status="FAIL", phase="COMPLETE",
+            reason="synthetic stale failure", source_sha="b" * 40)
+        stale.pop("result")
+        result = evaluate(report=report, policy=policy, physical=stale)
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+
+    def test_producer_proven_physical_fail_is_not_incomplete(self):
+        policy = acceptance_policy()
+        for audit_status, expected in (("FAIL", "FAIL"), ("BLOCKED", "BLOCKED")):
+            with self.subTest(audit_status=audit_status):
+                campaign = physical_campaign_evidence(encoded(policy))
+                campaign["campaign_status"] = "BLOCKED_PHYSICAL_EVIDENCE"
+                campaign["physical_evidence_audit"]["status"] = audit_status
+                campaign["physical_evidence_audit"]["diagnostics"] = [{
+                    "status": audit_status,
+                    "metric": "pair.status",
+                    "expected": "PASS and excluded=false",
+                    "observed": None,
+                    "workload": "sd-service-balanced",
+                    "pair_index": 1,
+                    "arm": None,
+                    "reason": (
+                        "failed or excluded trials cannot be dropped"
+                        if audit_status == "FAIL"
+                        else "physical evidence missing or inconsistent"),
+                }]
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], expected)
+
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
         policy = acceptance_policy()
@@ -3038,6 +3255,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         report["overall"] = "FAIL"
         report["stages"][1].update(
             status="FAIL", exit_code=1, failed_phase="native-contract")
+        # The real runner is fail-fast: a proven current-source failure may
+        # legitimately retain only the canonical prefix through the failed stage.
+        report["stages"] = report["stages"][:2]
         result = evaluate(report=report)
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(result["release_verdict"], "FAIL")
@@ -3046,6 +3266,22 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         stale = evaluate(report=report)
         self.assertEqual(stale["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(stale["release_verdict"], "BLOCKED")
+
+    def test_invalid_source_cannot_promote_failure_classification(self):
+        invalid_source = "not-a-git-sha"
+        report = owner_report()
+        report["overall"] = "FAIL"
+        report["source_sha"] = invalid_source
+        report["tested_commit_sha"] = invalid_source
+        report["stages"][1].update(
+            status="FAIL", exit_code=1, failed_phase="native-contract")
+        report["stages"] = report["stages"][:2]
+        policy = acceptance_policy()
+        result = EVALUATOR.evaluate_release(
+            invalid_source, report, encoded(report), {}, policy,
+            encoded(policy))
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["release_verdict"], "BLOCKED")
 
     def test_failure_diagnostics_do_not_disclose_private_input(self):
         private_marker = "/private/workspace token=do-not-echo"
