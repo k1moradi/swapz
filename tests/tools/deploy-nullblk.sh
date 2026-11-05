@@ -49,7 +49,7 @@ OWN_MODULE=0
 QUARANTINE=0
 SUSPENDED=0
 SESSION_BOOT_ID=""
-BOOT_ID_PRODUCER_PHASE="owned_execution"
+BOOT_ID_PRODUCER_PHASE="session_capture"
 BOOT_ID_PRODUCER_OBSERVED="withheld"
 fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
@@ -145,7 +145,11 @@ done
 	fail "another dm_swapz module already loaded; do not touch it"
 [[ -r /proc/swaps ]] || fail "cannot audit host swap"
 SESSION="$(mktemp -d "${TMPDIR:-/tmp}/swapz-deploy.XXXXXXXX")"
-exec > >(tee -a "$SESSION/session.log") 2>&1
+# Keep the caller output descriptor so terminal evidence can be published only
+# after the asynchronous session-log fanout has drained.
+exec {SESSION_OUTPUT_FD}>&1
+exec > >(tee -a "$SESSION/session.log" >&"$SESSION_OUTPUT_FD") 2>&1
+SESSION_TEE_PID=$!
 SOURCE_HEAD="$VALIDATED_SOURCE"
 note "SOURCE_HEAD=$SOURCE_HEAD"
 note "RUNNING_KERNEL=$(uname -r)"
@@ -158,7 +162,7 @@ SWAPS_ID_BEFORE="$(printf '%s
 note "HOST_SWAPS_BEFORE:"
 printf '%s\n' "$SWAPS_BEFORE"
 cleanup() {
-	local rc=$? current_id
+	local rc=$? current_id tee_rc=0 quarantine_failure=0 terminal_success=""
 	trap - EXIT HUP INT TERM
 	set +e
 	# Inventory changes could make the owned mapper/lower host swap.
@@ -235,49 +239,76 @@ cleanup() {
 	if (( QUARANTINE )); then
 		note "BLOCKED_KERNEL_DEBUG_PRODUCER phase=teardown expected=$expected_boot_marker observed=quarantined evidence_retained=yes"
 		note "BLOCKED: resource retained, never forced; session log retained"
-		exit 1
+		rc=1
+		quarantine_failure=1
 	fi
 	# Only after safe teardown can the producer attest the execution boot.
-	if (( rc == 0 )); then
+	if (( ! quarantine_failure && rc == 0 )); then
+		BOOT_ID_PRODUCER_PHASE="publication_capture"
+		BOOT_ID_PRODUCER_OBSERVED="withheld"
 		if ! swapz_read_session_boot_id /proc/sys/kernel/random/boot_id; then
-			BOOT_ID_PRODUCER_PHASE="publication_capture"
 			BOOT_ID_PRODUCER_OBSERVED="$BOOT_ID_OBSERVED_CATEGORY"
 			rc=1
 		elif [[ "$BOOT_ID_READ" != "$SESSION_BOOT_ID" ]]; then
 			BOOT_ID_PRODUCER_PHASE="publication_match"
 			BOOT_ID_PRODUCER_OBSERVED="different_valid_boot"
 			rc=1
-		else
-			note "BOOT_ID=$SESSION_BOOT_ID"
 		fi
 	fi
-	if (( rc != 0 )); then
+	if (( rc != 0 && ! quarantine_failure )); then
 		note "BLOCKED_KERNEL_DEBUG_PRODUCER phase=$BOOT_ID_PRODUCER_PHASE expected=$expected_boot_marker observed=$BOOT_ID_PRODUCER_OBSERVED evidence_retained=yes"
 	fi
 	if (( rc == 0 )); then
 		if (( MAX_BOUNDARY_PROBE )); then
-			note "PASS: loaded maximum-capacity constructor and boundary roundtrip, clean teardown"
+			terminal_success="PASS: loaded maximum-capacity constructor and boundary roundtrip, clean teardown"
 		elif (( GC_RECOVERY_FAULT_PROBE )); then
-			note "PASS: loaded GC roll-forward fault recovery, clean teardown"
+			terminal_success="PASS: loaded GC roll-forward fault recovery, clean teardown"
 		else
-			note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
+			terminal_success="PASS: loaded isolated swapz byte-exact I/O, clean teardown"
 		fi
-	else
+	elif (( ! quarantine_failure )); then
 		note "FAIL: test exit $rc; safe teardown attempted"
 	fi
-	note "EVIDENCE=$SESSION/session.log"
+
+	# The wrapper reads execution.log immediately after this helper returns.
+	# Close the tee input and join the owned fanout before committing terminal
+	# BOOT_ID/PASS evidence. This prevents a successful helper exit from racing
+	# the validator's read of a still-incomplete execution log.
+	exec 1>&- 2>&-
+	wait "$SESSION_TEE_PID" || tee_rc=$?
+	if (( tee_rc != 0 )); then
+		rc=1
+		printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=evidence_flush expected=$expected_boot_marker observed=retention_flush_failed evidence_retained=unknown" >&"$SESSION_OUTPUT_FD"
+	elif (( rc == 0 )); then
+		# Commit the terminal pair to retained evidence before exposing it to the
+		# caller. If retention fails, publish no execution BOOT_ID or PASS claim.
+		if ! printf 'BOOT_ID=%s\n%s\n' "$SESSION_BOOT_ID" "$terminal_success" >> "$SESSION/session.log"; then
+			rc=1
+			printf '%s\n' "BLOCKED_KERNEL_DEBUG_PRODUCER phase=evidence_commit expected=$expected_boot_marker observed=retention_write_failed evidence_retained=partial" >&"$SESSION_OUTPUT_FD"
+		elif ! printf 'BOOT_ID=%s\n%s\n' "$SESSION_BOOT_ID" "$terminal_success" >&"$SESSION_OUTPUT_FD"; then
+			rc=1
+		else
+			# Preserve the existing success-only evidence locator without
+			# disclosing a private session path on failed publication.
+			printf 'EVIDENCE=%s/session.log\n' "$SESSION" >&"$SESSION_OUTPUT_FD"
+		fi
+	fi
+	exec {SESSION_OUTPUT_FD}>&-
 	exit "$rc"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # Capture before provisioning, but do not publish until a clean owned teardown.
+BOOT_ID_PRODUCER_PHASE="session_capture"
+BOOT_ID_PRODUCER_OBSERVED="withheld"
 if ! swapz_read_session_boot_id /proc/sys/kernel/random/boot_id; then
-    BOOT_ID_PRODUCER_PHASE="session_capture"
     BOOT_ID_PRODUCER_OBSERVED="$BOOT_ID_OBSERVED_CATEGORY"
     fail "kernel boot identity unavailable for owned session"
 fi
 SESSION_BOOT_ID="$BOOT_ID_READ"
+BOOT_ID_PRODUCER_PHASE="owned_execution"
+BOOT_ID_PRODUCER_OBSERVED="withheld"
 if ! mountpoint -q /sys/kernel/config; then
 	modprobe configfs
 	mount -t configfs configfs /sys/kernel/config ||

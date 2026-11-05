@@ -6506,9 +6506,23 @@ malformed, duplicated/extended or changed identity never publishes the marker;
 interruption, failed loaded work or uncertain teardown withholds it as well.
 Every withheld publication reports a fixed producer phase, expected marker,
 safe observed category and retained-evidence status without echoing private
-paths or arbitrary input. Rootless fixtures execute the real producer reader
-and cleanup with synthetic boot files and inert host commands, and may inject
-this marker only into synthetic replay evidence; they must still report
+paths or arbitrary input. The helper's session-log fanout is part of that
+publication boundary: it preserves the caller output descriptor, closes its
+tee input after nonterminal diagnostics, and synchronously joins the owned tee
+before committing terminal evidence. Only after that drain succeeds may the
+producer append the terminal `BOOT_ID`/clean-PASS pair to retained evidence
+and expose the same pair to the caller, so the wrapper cannot read a
+still-incomplete execution log and a failed retention write cannot leak a
+premature success marker. A tee failure reports sanitized
+`phase=evidence_flush` with retained state unknown; a terminal retention
+write failure reports `phase=evidence_commit` with partial retained evidence.
+Failed publication never prints the private session path, while successful runs
+retain the existing `EVIDENCE=...` locator after the terminal pair commits.
+Interruption before the initial boot-ID read completes remains
+`phase=session_capture`, not an owned-I/O phase. Rootless fixtures execute the
+real producer reader and cleanup with synthetic boot files, deliberately
+delayed/failing evidence fanout and inert host commands, and may inject this
+marker only into synthetic replay evidence; they must still report
 `ROOTLESS_VALIDATOR_ONLY=PASS`, never a loaded PASS.
 The read-only feature probe can still report individual capabilities.
 Kernel diagnostics, helper failure reasons and contradictory source/module/
