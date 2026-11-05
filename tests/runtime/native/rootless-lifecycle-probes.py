@@ -118,7 +118,7 @@ def main():
               'interrupted_wait_without_finalizer':'child_remained_live',
               'failed_stderr_collection':'observed',
               'same_named_foreign_path':'not_owner',
-              'owned_process_group_cleanup':'session_leader_only',
+              'owned_session_group_signal':'leader_live_during_signal',
               'privileged_execution':False}
     print(json.dumps(result,sort_keys=True))
 
