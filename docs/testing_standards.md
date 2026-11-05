@@ -5805,7 +5805,10 @@ no-follow link command falsely reports success. Preserve foreign targets and
 unconsumed owned inodes, retain the verified mask, and report original command
 status, secondary cleanup and mask-repair statuses, observed staging survivors,
 and rollback completeness without logging selector bytes. Include a failure
-before any selected-target drop-in has been published.
+before any selected-target drop-in has been published. Explicit post-release
+rollback must carry the original unlink or ownership failure status into its
+cleanup observer instead of treating a successful mask-restoration command as
+the original status; foreign inode survivors still require full diagnostics.
 
 These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another

@@ -942,7 +942,7 @@ class GeneratorPublicationTest(unittest.TestCase):
                 self.assertIn("validation=publication-ownership-not-proven", result.stderr)
                 self.assertIn("phase=rollback", result.stderr)
                 self.assertIn(f"observed_mapper={observed}", result.stderr)
-                self.assertIn("original_status=1", result.stderr)
+                self.assertIn("original_status=1 cleanup_status=0", result.stderr)
                 self.assertIn("rollback=incomplete", result.stderr)
                 self.assertEqual(os.readlink(self.mask()), "/dev/null")
                 self.assertFalse(self.device_dropin(SELECTED).exists())

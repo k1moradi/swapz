@@ -192,7 +192,10 @@ transaction_committed=0
 preserve_stage_dir=0
 cleanup()
 {
-	cleanup_original_status=$?
+	# Explicit rollback after a mask-release failure may be called after a
+	# successful restoration command. Carry the first failing status into
+	# that call; the EXIT trap still supplies its own actual exit status.
+	cleanup_original_status=${1-$?}
 	cleanup_command_status=0
 	# Remove a partial graph while the mapper mask is still in force. Never
 	# follow a substituted symlink to an external destination.
@@ -786,7 +789,7 @@ if ! mapper_mask_is_active; then
 fi
 # The unlink result is the original failure. Check rollback without
 # exposing the selected identity or overwriting that status.
-cleanup
+cleanup "$mask_status"
 trap - EXIT
 rollback_outcome=complete
 if [ -e "$mapper_dropin" ] || [ -L "$mapper_dropin" ] ||
