@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
 PACKAGE_PHASE = "tests/runtime/native/package-dkms-test.py"
 PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
+OWNERSHIP_PHASE = "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
 PRIVATE_SENTINEL = "PRIVATE_ONLY_TRACEBACK_PAYLOAD"
 LATER_TEARDOWN_SENTINEL = "LATER_TEARDOWN_PRIVATE_PAYLOAD"
 
@@ -27,7 +28,7 @@ FIXTURE = r'''
 python3() {
   [[ $# == 3 && $1 == -B && $3 == -v ]] || return 89
   case "$2" in
-    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py) ;;
+    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py) ;;
     *) return 89 ;;
   esac
   printf 'SYNTHETIC_STDOUT\n'
@@ -73,6 +74,14 @@ PY
         "ERROR: test_teardown (__main__.PrimaryRealSwapContracts.test_teardown)" \
         'OSError: later teardown failure must not replace the first assertion' >&2
       return 37 ;;
+    ownership_errno)
+      printf '%s\n' \
+        "test_group (__main__.SourceAdmissionPeerOwnership.test_group) ... ERROR" \
+        "ERROR: test_group (__main__.SourceAdmissionPeerOwnership.test_group)" \
+        'Traceback (most recent call last):' \
+        'OSError: [Errno 9] PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        'boundary=owned_process_group expected=empty observed=descendant_alive child_exit=7 errno=9 owned_cleanup=failed' >&2
+      return 52 ;;
     primary_errno)
       printf '%s\n' \
         "ERROR: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
@@ -135,10 +144,16 @@ class RootlessAttribution(unittest.TestCase):
         cls.functions = source[functions_begin:functions_end]
         cls.package_stage = source[package_begin:package_end]
         primary_begin = source.index(f"rootless_phase='{PRIMARY_PHASE}'")
-        primary_end = source.index(
-            "rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'",
-            primary_begin)
+        primary_end = source.index(f"rootless_phase='{OWNERSHIP_PHASE}'",
+                                   primary_begin)
         cls.primary_stage = source[primary_begin:primary_end]
+        ownership_end = source.index(
+            "rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'",
+            primary_end)
+        cls.ownership_stage = source[primary_end:ownership_end]
+        assert source.count(f"python3 -B {OWNERSHIP_PHASE} -v") == 1
+        assert cls.ownership_stage.count(
+            f"python3 -B {OWNERSHIP_PHASE} -v") == 1
         assert cls.primary_stage.count(
             "python3 -B tests/runtime/native/primary-real-swap-test.py -v") == 1
         # Keep the rootless invocation tied to the real registered test.
@@ -177,7 +192,9 @@ class RootlessAttribution(unittest.TestCase):
             f"ROOT={shlex.quote(str(self.root))}\n"
             'cd "$ROOT"\n'
             + self.functions + "\n" + FIXTURE + "\n"
-            + (self.primary_stage if stage == PRIMARY_PHASE else self.package_stage)
+            + {PACKAGE_PHASE: self.package_stage,
+               PRIMARY_PHASE: self.primary_stage,
+               OWNERSHIP_PHASE: self.ownership_stage}[stage]
             + "printf 'AFTER_PACKAGE\\n'\n"
         )
         environment = dict(os.environ)
@@ -353,6 +370,20 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assertIn("PermissionError: [Errno 13] " + PRIVATE_SENTINEL,
                       log.read_text())
         self.assertIn("AssertionError: later cleanup failed", log.read_text())
+
+    def test_ownership_errno_preserves_boundary_and_private_traceback(self):
+        result = self.invoke("ownership_errno", stage=OWNERSHIP_PHASE)
+        log = self.assert_report(
+            result, status=52, reason="unittest_error",
+            test="test_group", stage=OWNERSHIP_PHASE)
+        evidence = log.read_text()
+        self.assertIn("OSError: [Errno 9] " + PRIVATE_SENTINEL, evidence)
+        self.assertIn(
+            "boundary=owned_process_group expected=empty "
+            "observed=descendant_alive child_exit=7 errno=9 "
+            "owned_cleanup=failed", evidence)
+        self.assertIn("unittest_kind=ERROR\\n", evidence)
+        self.assertNotIn("AFTER_PACKAGE", result.stdout)
 
     def test_primary_oversized_stderr_keeps_first_traceback(self):
         result = self.invoke("primary_oversized", stage=PRIMARY_PHASE)

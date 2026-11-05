@@ -206,6 +206,14 @@ A repeated initial nonce
 must never grant or reuse approval; these controls still do not establish target,
 reader, detached privileged descendants, or sudo teardown on the physical host.
 
+The normal rootless runner must register
+`tests/runtime/native/primary-real-swap-parent-ownership-test.py` exactly once,
+immediately after the primary real-swap contracts and before the terminal oracle
+contracts. Its live-process negative controls run without sudo or device writes;
+first-failure attribution and bounded private stderr must be retained through
+the shared rootless reporter. A passing regression reports only synthetic
+subprocess-ownership safety, never approval for physical admission.
+
 The current wire schema carries source, helper and control-input identity but
 no independently authenticated exact message sender, physical qualification
 run, selected-card/reader target, or required boundary evidence. Consequently

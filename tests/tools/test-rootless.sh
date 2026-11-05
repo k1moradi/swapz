@@ -108,8 +108,8 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\.test_[A-Za-z0-9_]{1,96}\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\.test_[A-Za-z0-9_]{1,96}\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\.test_[A-Za-z0-9_]{1,96}\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\.test_[A-Za-z0-9_]{1,96}\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
   local first_progress_kind=
   local first_progress_test=
@@ -247,13 +247,13 @@ report_rootless_failure() {
            function matches_target(text, pattern) {
              if (target_test != "unavailable" &&
                  target_kind != "unavailable") {
-               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\." target_test "\\)"
+               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\." target_test "\\)"
                if (text !~ pattern) return 0
                if (target_subtest != "unavailable" &&
                    text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
                return 1
              }
-             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts)\.test_[A-Za-z0-9_]+\)/
+             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\.test_[A-Za-z0-9_]+\)/
            }
            function retain_suffix(text, excess) {
              suffix = suffix text
@@ -326,7 +326,8 @@ report_rootless_failure() {
   exit "$original_exit_code"
 }
 
-# Reuse the bounded relay for the two detailed, high-volume unittests.
+# Reuse the bounded relay for detailed unittests, including live
+# subprocess-ownership and sensitive admission failure diagnostics.
 # A failed child owns the exit status even if stderr relay or cleanup fails.
 finish_and_report_rootless_unittest() {
   local original_exit_code=$1
@@ -421,6 +422,17 @@ else
   rootless_primary_exit_code=$?
 fi
 finish_and_report_rootless_unittest "$rootless_primary_exit_code" "$rootless_primary_command_line"
+rootless_phase='tests/runtime/native/primary-real-swap-parent-ownership-test.py'
+rootless_phase_started_seconds=$SECONDS
+begin_rootless_private_stderr_capture
+rootless_ownership_command_line=$LINENO
+if python3 -B tests/runtime/native/primary-real-swap-parent-ownership-test.py -v \
+    2>&"$rootless_capture_input_fd"; then
+  rootless_ownership_exit_code=0
+else
+  rootless_ownership_exit_code=$?
+fi
+finish_and_report_rootless_unittest "$rootless_ownership_exit_code" "$rootless_ownership_command_line"
 rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/primary-real-swap-oracle-terminal-test.py -v
