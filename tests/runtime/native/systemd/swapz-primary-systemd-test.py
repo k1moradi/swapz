@@ -3065,7 +3065,7 @@ class RuntimeHealthTests(unittest.TestCase):
                 #!/bin/sh
                 if [ "$1" = is-enabled ]; then
                     printf '%s\n' "${MOCK_PASSIVE_ENABLEMENT:-static}"
-                    exit 0
+                    exit "${MOCK_PASSIVE_ENABLEMENT_EXIT:-0}"
                 fi
                 property=
                 for argument in "$@"; do
@@ -3192,6 +3192,63 @@ class RuntimeHealthTests(unittest.TestCase):
                     observed.stderr,
                 )
 
+    def test_malformed_substate_is_observed_incomplete_telemetry(self) -> None:
+        for variable, value, reason, phase in (
+            (
+                "MOCK_MAPPER_SUBSTATE",
+                "exited\nstale",
+                "mapper_service_substate_telemetry_invalid",
+                "mapper_service_substate",
+            ),
+            (
+                "MOCK_PASSIVE_SUBSTATE",
+                "active\nstale",
+                "passive_swap_unit_substate_telemetry_invalid",
+                "passive_swap_unit_substate",
+            ),
+        ):
+            with self.subTest(variable=variable):
+                env = self.env.copy()
+                env[variable] = value
+                observed = self.run_helper("once", env)
+                self.assertEqual(observed.returncode, 2, observed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+                self.assertIn(reason, observed.stderr)
+                self.assertIn(f"phase={phase} expected=", observed.stderr)
+                self.assertIn(
+                    "observed=invalid_output command=systemctl_show command_status=0 "
+                    "identity_mismatch=none service_state=observed",
+                    observed.stderr,
+                )
+
+    def test_passive_enablement_state_must_match_systemctl_exit(self) -> None:
+        # systemctl is-enabled intentionally returns 1 for "disabled", while
+        # "static" returns 0. A mismatched pair is incomplete telemetry.
+        disabled_env = self.env.copy()
+        disabled_env["MOCK_PASSIVE_ENABLEMENT"] = "disabled"
+        disabled_env["MOCK_PASSIVE_ENABLEMENT_EXIT"] = "1"
+        disabled = self.run_helper("once", disabled_env)
+        self.assertEqual(disabled.returncode, 0, disabled.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", disabled.stderr)
+
+        for state, exit_code in (("static", "41"), ("disabled", "124")):
+            with self.subTest(state=state, exit_code=exit_code):
+                env = self.env.copy()
+                env["MOCK_PASSIVE_ENABLEMENT"] = state
+                env["MOCK_PASSIVE_ENABLEMENT_EXIT"] = exit_code
+                observed = self.run_helper("once", env)
+                self.assertEqual(observed.returncode, 2, observed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+                self.assertIn("passive_swap_enablement_unavailable", observed.stderr)
+                self.assertNotIn("SWAPZ_RUNTIME_HEALTH=HEALTHY", observed.stderr)
+                self.assertIn(
+                    "phase=passive_swap_enablement expected=static_or_disabled "
+                    "observed=inconsistent_or_invalid command=systemctl_is_enabled "
+                    f"command_status={exit_code} identity_mismatch=none "
+                    "service_state=observed",
+                    observed.stderr,
+                )
+
     def test_unavailable_substate_keeps_original_systemctl_exit(self) -> None:
         env = self.env.copy()
         env["MOCK_MAPPER_SUBSTATE_EXIT"] = "37"
@@ -3200,7 +3257,7 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
         self.assertIn("mapper_service_substate_unavailable", observed.stderr)
         self.assertIn(
-            "phase=mapper_service_substate expected=exited observed=unavailable",
+            "phase=mapper_service_substate expected=exited observed=probe_failed",
             observed.stderr,
         )
         self.assertIn(

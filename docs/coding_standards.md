@@ -2879,7 +2879,12 @@ or hiding the native failure. The active oneshot mapper service with
 `.swap` reports `SubState=active`; an observed contradictory substate is FAIL,
 not HEALTHY. Missing or invalid substate telemetry is DEGRADED unless another
 check proves failure. Preserve the originating bounded `systemctl` exit for
-unavailable substates and label service evidence as observed or inferred.
+unavailable substates and label service evidence as observed or inferred. A
+successful probe with blank or multiline substate output is observed malformed
+telemetry with command status zero, not a fabricated command failure or inferred
+state. Bind passive `systemctl is-enabled` text to its documented exit semantics:
+`static`/0 and `disabled`/1 are the only admitted safe pairs; a mismatched pair
+is incomplete evidence, not proof of safe enablement.
 
 Production observation is bounded to low-frequency polling (normally 60
 seconds) and logs the first snapshot plus state changes and confirmed failures,
