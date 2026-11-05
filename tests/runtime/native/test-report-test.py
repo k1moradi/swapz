@@ -3675,6 +3675,53 @@ class ReportContract(unittest.TestCase):
         self.assertIn("nested [path]: [path] failed", reason)
         self.assertNotIn("/home/private", reason)
 
+    def test_loaded_failure_diagnostic_stays_with_current_phase(self):
+        log = (
+            "START_LOADED_OWNED_NULLBLK_SMOKE\n"
+            "FAIL: expected negative from completed phase\n"
+            "PASS_LOADED_OWNED_NULLBLK_SMOKE\n"
+            "START_LOADED_SHARED_BENCHMARK_PLAN=trace\n"
+            "opaque child failure\n"
+        )
+        phase, reason = runner.failure_context(log)
+        self.assertEqual(phase, "shared fixture preparation trace")
+        self.assertEqual(
+            reason, "Shared benchmark plan trace step returned nonzero")
+        self.assertNotIn("expected negative", reason)
+
+    def test_loaded_cleanup_epilogue_never_replaces_specific_failure(self):
+        for child_exit in (1, 124, 137, 143):
+            with self.subTest(child_exit=child_exit):
+                phase, reason = runner.failure_context(
+                    "START_LOADED_SUSPEND_DRAIN\n"
+                    "FAIL: retained lifecycle errno=5\n"
+                    f"FAIL: test exit {child_exit}; safe teardown attempted\n")
+                self.assertEqual(phase, "owned RAM retained suspend/drain")
+                self.assertEqual(reason, "FAIL: retained lifecycle errno=5")
+
+    def test_loaded_kernel_debug_failure_owns_its_phase(self):
+        fake_process = FakeStreamingProcess(
+            synthetic_log() +
+            "FAIL: loaded kernel debug diagnostics implicated swapz\n",
+            returncode=1)
+        original_popen = runner.subprocess.Popen
+        report = {"schema": "swapz-test-results-v1", "stages": [],
+                  "benchmarks": {"sessions": [], "verdicts": {}}}
+        try:
+            runner.subprocess.Popen = lambda *args, **kwargs: fake_process
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    runner.run_stage("Owned RAM smoke + mixed/QD pilot",
+                                     ["unused"], report, parse_bench=True), 1)
+        finally:
+            runner.subprocess.Popen = original_popen
+        stage = report["stages"][-1]
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(stage["failed_phase"], "loaded kernel debug evidence")
+        self.assertEqual(
+            stage["diagnostic"],
+            "FAIL: loaded kernel debug diagnostics implicated swapz")
+
     def test_primary_lifecycle_blocked_marker_classifies_loaded_stage_blocked(self):
         log = (
             "START_LOADED_OWNED_NULLBLK_SMOKE\n"

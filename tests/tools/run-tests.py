@@ -2254,8 +2254,11 @@ def failure_context(output, *, loaded=True, default_phase=None):
     pair_number = 0
     regime = None
     shared_plan_step = None
+    output_lines = output.splitlines()
+    diagnostic_start = 0
     if loaded:
-        for line in output.splitlines():
+        for line_index, line in enumerate(output_lines):
+            previous_phase = phase
             if line.startswith("START_LOADED_MAXIMUM_CAPACITY"):
                 phase = "owned RAM maximum-capacity constructor"
             elif line.startswith("START_LOADED_GC_ROLL_FORWARD_RECOVERY"):
@@ -2334,6 +2337,13 @@ def failure_context(output, *, loaded=True, default_phase=None):
                          f" [{match.group(1)} {match.group(2)}]")
             elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
                 phase = f"after completed owned RAM comparison {pair_number}/8"
+            elif line == "FAIL: loaded kernel debug diagnostics implicated swapz":
+                phase = "loaded kernel debug evidence"
+            if phase != previous_phase:
+                diagnostic_start = line_index
+
+    diagnostic_lines = (
+        output_lines[diagnostic_start:] if loaded else output_lines)
 
     primary_lifecycle_command_failure = None
     primary_prepare_failure = None
@@ -2342,7 +2352,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
         # never copy paths, IDs or arbitrary child output. The prepare helper
         # validates and re-emits its phase record, but intentionally keeps the
         # coordinator wrapper private, so the report must not depend on it.
-        for line in output.splitlines():
+        for line in diagnostic_lines:
             prepare_match = re.fullmatch(
                 r"PRIMARY_PREPARE=FAILED phase=([a-z0-9-]{1,64}) "
                 r"errno=([0-9]{1,3}) error=([A-Za-z0-9 .()_-]{1,64})"
@@ -2460,11 +2470,13 @@ def failure_context(output, *, loaded=True, default_phase=None):
             reason += f"; nested {nested_phase}: {nested_reason}"
     elif native_diagnostic is not None:
         reason = native_diagnostic
-    elif loaded and "BLOCKED_LOADED_QUALIFICATION" in output:
+    elif loaded and any(
+            "BLOCKED_LOADED_QUALIFICATION" in line
+            for line in diagnostic_lines):
         reason = "Noninteractive root/sudo authorization is unavailable"
-    elif loaded and "QUARANTINED:" in output:
+    elif loaded and any("QUARANTINED:" in line for line in diagnostic_lines):
         reason = None
-        for line in reversed(output.splitlines()):
+        for line in reversed(diagnostic_lines):
             candidate = line.strip()
             if not candidate.startswith("QUARANTINED: "):
                 continue
@@ -2479,7 +2491,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
             reason = ("Safety quarantine: owned device or swap identity "
                       "could not be safely released")
     elif loaded and any("mktemp:" in line and "Permission denied" in line
-                        for line in output.splitlines()):
+                        for line in diagnostic_lines):
         reason = ("Cannot allocate the shared fixture: directory is not writable "
                   "(check build/tests permissions)")
     else:
@@ -2488,7 +2500,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
         # Replay helpers may emit a detailed BLOCKED/FAIL line before a generic
         # shell epilogue, so preserve the detailed marker regardless of order.
         reason = None
-        for line in reversed(output.splitlines()):
+        for line in reversed(diagnostic_lines):
             candidate = line.strip()
             if candidate.startswith("BLOCKED/FAIL: "):
                 msg = candidate.partition(": ")[2]
@@ -2498,9 +2510,11 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)
                 reason = f"FAIL: {msg[:155]}"
                 break
-        for line in reversed(output.splitlines()) if reason is None else ():
+        for line in reversed(diagnostic_lines) if reason is None else ():
             candidate = line.strip()
-            if candidate == "FAIL: test exit 1; safe teardown attempted":
+            if re.fullmatch(
+                    r"FAIL: test exit [0-9]{1,3}; safe teardown attempted",
+                    candidate):
                 continue
             lifecycle_prefix = next((
                 prefix for prefix in (

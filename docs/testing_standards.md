@@ -881,9 +881,14 @@ text in a successful rootless aggregate is not independently a failed stage.
 Loaded progress may show a fixed failure category but must not echo raw child
 stderr. Direct nested unittest diagnostics must redact absolute host paths;
 a final authoritative rootless marker must not inherit earlier suite or later
-nested error detail. Keep incomplete/unexecuted stages non-PASS, retain the first
-causal exit through report-write and cleanup errors, and bind publication to
-`tested_commit_sha` rather than treating a report-only commit as a retest.
+nested error detail. Loaded diagnostics are scoped to the most recent recognized
+phase boundary so expected FAIL text from a completed phase cannot be imported.
+Every numeric `FAIL: test exit <status>; safe teardown attempted` epilogue is
+secondary to the preceding specific failure, and the terminal loaded-kernel-debug
+FAIL marker owns the loaded-kernel-debug evidence phase. Keep
+incomplete/unexecuted stages non-PASS, retain the first causal exit through
+report-write and cleanup errors, and bind publication to `tested_commit_sha`
+rather than treating a report-only commit as a retest.
 
 
 ### Native/rootless fail-only subprocess attribution
