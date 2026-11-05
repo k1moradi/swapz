@@ -7039,6 +7039,20 @@ not an authentication signature: this verifier cannot prove that a malicious
 actor did not splice same-boot records with identical artifact digests.
 Only the actual owned-helper execution and separately retained owner evidence
 can establish loaded qualification.
+
+Kernel-debug negative controls must isolate one verifier gate at a time rather
+than accidentally tripping a stricter earlier requirement. A duplicate marker
+fixture inserts the duplicate adjacent to its canonical record while preserving
+the producer's terminal newline. A terminal-tail fixture appends a neutral
+nonfailure sentinel so teardown failure parsing cannot win first. Verify-CLI
+fixtures write the canonical execution bytes exactly and must not add an extra
+blank terminal record. Targeted regressions assert the intended evidence field
+and phase and reject the accidental earlier-gate diagnostic; the unchanged
+synthetic control must continue to PASS. When real subprocess evidence carries
+an exit status or errno, preserve that original numeric value in the sanitized
+diagnostic; a validation-only fixture with no producer exit or errno must not
+invent one. Never relax fail-closed verifier precedence to accommodate a
+multiply-invalid fixture.
 Interruption before the initial boot-ID read completes remains
 `phase=session_capture`, not an owned-I/O phase. Rootless fixtures execute the
 real producer reader and cleanup with synthetic boot files, deliberately

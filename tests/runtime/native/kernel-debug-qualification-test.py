@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Rootless negative controls for the private kernel-debug qualification lane.
-
-Fixture standard: each negative case changes only its intended evidence field.
-Keep unrelated run markers, publication order and terminal newline complete;
-place duplicate records adjacent to their canonical record, and use a benign
-post-publication sentinel when testing terminal tails. The verify-CLI fixture
-must pass the canonical log bytes unchanged. A synthetic PASS never proves
-loaded-kernel execution, and unknown failure markers must remain fail-closed.
-"""
+"""Rootless negative controls for the private kernel-debug qualification lane."""
 from __future__ import annotations
 
 import contextlib
@@ -297,6 +289,14 @@ class KernelDebugQualificationTests(unittest.TestCase):
                 self.assertIn(explanation, reason)
                 self.assertNotIn(private_detail, reason)
                 self.assertLess(len(reason), 512)
+
+        status, reason = self.verify(
+            execution=GOOD_LOG + f"POST_PUBLICATION_NOTE={private_detail}\n")
+        self.assertEqual(status, "BLOCKED", reason)
+        self.assertIn("field=terminal tail", reason)
+        self.assertIn("phase=publication", reason)
+        self.assertNotIn("phase=teardown", reason)
+
         status, reason = self.verify(execution=GOOD_LOG.replace(
             boot_marker, f"TEARDOWN_FAILED=1\n{boot_marker}"))
         self.assertEqual(status, "BLOCKED")
@@ -773,6 +773,8 @@ exit 0
             missing_module.returncode, 2,
             missing_module.stdout + missing_module.stderr)
         self.assertIn("module artifact missing", missing_module.stdout)
+        self.assertNotIn("field=terminal tail", missing_module.stdout)
+        self.assertNotIn("field=terminal newline", missing_module.stdout)
 
     def test_kernel_fault_categories_fail(self) -> None:
         diagnostics = (
@@ -848,6 +850,14 @@ exit 0
                 status, reason = self.verify(execution=execution)
                 self.assertEqual(status, "BLOCKED")
                 self.assertIn(explanation, reason)
+
+        duplicated_compound = GOOD_LOG.replace(
+            compound_record, compound_record + "\n" + compound_record, 1)
+        status, reason = self.verify(execution=duplicated_compound)
+        self.assertEqual(status, "BLOCKED", reason)
+        self.assertIn(
+            "duplicated loaded run marker: PASS_LOADED_COMPOUND_BIO", reason)
+        self.assertNotIn("field=terminal newline", reason)
 
     def test_kernel_and_module_hash_markers_bind_execution(self) -> None:
         without_kernel = "\n".join(
