@@ -840,13 +840,37 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
     retained_status_counts = {
         status: 0 for status in diagnostic_priority
     }
+    # Only authenticated failure candidates may become measured FAIL. Invalid
+    # identities invalidate that attempt; unusable cohorts cannot claim a
+    # measured aggregate failure from their stored decision/checks.
+    untrusted_pair_keys, untrusted_cohorts = set(), set()
+    pending_producer_failures = []
+    first_problem, first_terminal_failure = None, None
 
     def diagnose(status, metric_name, expected, observed=None,
                  workload=None, pair_index=None, arm=None,
                  reason="physical evidence missing or inconsistent",
                  producer_status=None, failure_phase=None):
-        nonlocal omitted, first_failed_phase
+        nonlocal omitted, first_failed_phase, first_problem, first_terminal_failure
         encountered_statuses.add(status)
+        if workload is not None:
+            if status in ("BLOCKED", "UNAVAILABLE"):
+                untrusted_cohorts.add(workload)
+                if metric_name in (
+                        "pair.pair_id", "pair.pair_index", "pair.order",
+                        "pair.source_sha", "pair.workload_id",
+                        "pair.prospective_chronology_ns",
+                        "arm.candidate", "arm.workload_id", "arm.source_sha",
+                        "arm.arm_boot_id", "arm.monotonic_window_ns",
+                        "pair.target_identity"):
+                    untrusted_pair_keys.add((workload, pair_index))
+            location = {"workload": workload, "pair_index": pair_index,
+                        "arm": arm, "metric": metric_name,
+                        "evidence_class": status}
+            if first_problem is None:
+                first_problem = location
+            if status == "FAIL" and first_terminal_failure is None:
+                first_terminal_failure = location
         if status == "FAIL" and first_failed_phase is None:
             # Only producer-proven or independently derived failures own this
             # field. Missing prerequisites remain BLOCKED/UNAVAILABLE.
@@ -918,7 +942,8 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         diagnose("BLOCKED", "qualification.status", "PASS",
                  reason="qualification is incomplete or rejected")
 
-    pair_identifiers, run_identifiers, windows = set(), set(), []
+    pair_identifiers, pair_indices = set(), set()
+    run_identifiers, windows = set(), []
     for record in records:
         if not isinstance(record, dict):
             diagnose("BLOCKED", "pair.schema", "physical pair object")
@@ -929,6 +954,27 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             diagnose("BLOCKED", "pair.workload", "frozen cohort")
             continue
         index = pair_index if type(pair_index) is int else None
+        spec = workloads[workload]
+        if (index is None or not 1 <= index <= spec["pairs"] or
+                (workload, index) in pair_indices):
+            diagnose("BLOCKED", "pair.pair_index",
+                     {"operator": "range", "min": 1, "max": spec["pairs"],
+                      "unique": True},
+                     index, workload=workload, pair_index=index,
+                     reason="missing, repeated or out-of-plan pair index")
+        else:
+            pair_indices.add((workload, index))
+        if (index is not None and 1 <= index <= spec["pairs"] and
+                record.get("order") != spec["counterbalanced_order"][index - 1]):
+            diagnose("BLOCKED", "pair.order",
+                     spec["counterbalanced_order"][index - 1],
+                     workload=workload, pair_index=index,
+                     reason="counterbalanced pair order differs from frozen plan")
+        if (record.get("source_sha") != before.get("source_sha") or
+                record.get("source_sha") != after.get("source_sha")):
+            diagnose("BLOCKED", "pair.source_sha", "admitted exact source",
+                     workload=workload, pair_index=index,
+                     reason="pair source differs from host source")
         identifier = (workload, record.get("pair_id"))
         if (not isinstance(identifier[1], str) or not identifier[1] or
                 identifier in pair_identifiers):
@@ -951,6 +997,20 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         raw_arm = record.get("raw")
         swapz_arm = record.get("swapz")
         if isinstance(raw_arm, dict) and isinstance(swapz_arm, dict):
+            # The label cannot override the actual temporal arm sequence.
+            if record.get("order") in ("raw-first", "swapz-first"):
+                first_label, second_label = (
+                    ("raw", "swapz") if record["order"] == "raw-first"
+                    else ("swapz", "raw"))
+                first_arm, second_arm = record[first_label], record[second_label]
+                first_end = first_arm.get("arm_finished_monotonic_ns")
+                second_start = second_arm.get("arm_started_monotonic_ns")
+                if (type(first_end) is int and type(second_start) is int and
+                        first_end >= second_start):
+                    diagnose("BLOCKED", "pair.order",
+                             "nonoverlapping actual counterbalanced arms",
+                             workload=workload, pair_index=index,
+                             reason="recorded raw/swapz order contradicts chronology")
             raw_run_id = raw_arm.get("workload_id")
             swapz_run_id = swapz_arm.get("workload_id")
             if (isinstance(raw_run_id, str) and raw_run_id and
@@ -967,13 +1027,14 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                 diagnose("UNAVAILABLE", "arm.evidence", "measured physical arm",
                          workload=workload, pair_index=index, arm=label)
                 continue
+            if arm.get("candidate") != label:
+                diagnose("BLOCKED", "arm.candidate", label,
+                         workload=workload, pair_index=index, arm=label,
+                         reason="arm candidate does not match pair position")
             producer_verdict = arm.get("verdict")
             if producer_verdict == "FAIL":
-                diagnose(
-                    "FAIL", "arm.verdict", "PASS",
-                    workload=workload, pair_index=index, arm=label,
-                    reason="physical arm producer reported terminal failure",
-                    producer_status=producer_verdict, failure_phase="arm")
+                pending_producer_failures.append(
+                    (workload, index, label, arm))
             elif producer_verdict != "PASS":
                 diagnose(
                     "BLOCKED", "arm.verdict", "PASS",
@@ -1069,6 +1130,37 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                          reason="later pair reuses earlier physical time")
             last_end = end
 
+    # Authenticate terminal producer failures only after seeing every attempt:
+    # a later duplicate, foreign source or overlapping window can invalidate an
+    # earlier apparently valid failure. Preserve the original arm error/stage
+    # inside its immutable artifact; do not publish arbitrary error strings.
+    for workload, index, label, arm in pending_producer_failures:
+        if not valid_host_window or (workload, index) in untrusted_pair_keys:
+            diagnose("BLOCKED", "arm.verdict", "authenticated terminal failure",
+                     workload=workload, pair_index=index, arm=label,
+                     reason="producer FAIL lacks valid physical arm identity")
+            continue
+        stage = arm.get("stage")
+        if (isinstance(stage, str) and
+                re.fullmatch(
+                    r"(?:preflight|fill|warmup|measure|steady|gc|teardown|"
+                    r"publish|round-[1-9][0-9]*(?:-verify)?)", stage)):
+            failure_phase = stage
+        else:
+            failure_phase = "arm"
+        # Setup failures are real producer errors, but not authenticated
+        # terminal measurements of a completed physical workload.
+        if failure_phase in ("preflight", "fill", "warmup"):
+            diagnose("BLOCKED", "arm.verdict", "terminal measured workload",
+                     workload=workload, pair_index=index, arm=label,
+                     reason="producer failed before the measurement phase")
+            continue
+        diagnose(
+            "FAIL", "arm.verdict", "PASS",
+            workload=workload, pair_index=index, arm=label,
+            reason="authenticated physical producer terminal failure",
+            producer_status="FAIL", failure_phase=failure_phase)
+
     decisions = summary.get("decisions")
     if not isinstance(decisions, dict):
         diagnose("BLOCKED", "qualification.decisions", "workload decision object")
@@ -1084,6 +1176,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         required_workloads = decisions
         if protocol is not None:
             diagnose("BLOCKED", "qualification.evaluation_protocol", "v1 or v2")
+    cohort_pair_counts = {}
     for workload in required_workloads:
         spec = workloads[workload]
         decision = decisions.get(workload)
@@ -1093,10 +1186,16 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                      reason="frozen or v2 cohort decision is missing")
         attempts = [r for r in records if isinstance(r, dict) and
                     r.get("workload") == workload]
+        accepted_count = sum(
+            r.get("analysis_usable") is True for r in attempts)
+        cohort_pair_counts[workload] = {
+            "required_pairs": spec["pairs"],
+            "attempted_pairs": len(attempts),
+            "accepted_pairs": accepted_count,
+        }
         for name, count in (
                 ("attempted_pairs", len(attempts)),
-                ("accepted_pairs",
-                 sum(r.get("analysis_usable") is True for r in attempts))):
+                ("accepted_pairs", accepted_count)):
             if count != spec["pairs"]:
                 diagnose("BLOCKED", "qualification." + name,
                          {"operator": "==", "value": spec["pairs"], "unit": "pairs"},
@@ -1104,14 +1203,60 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                          reason="frozen or v2 cohort is incomplete")
         if not isinstance(decision, dict):
             continue
-        if decision.get("status") == "FAIL":
+        cohort_verified = (
+            len(attempts) == spec["pairs"] and
+            accepted_count == spec["pairs"] and
+            workload not in untrusted_cohorts and valid_host_window and
+            all((workload, pair_index) in pair_indices for pair_index
+                in range(1, spec["pairs"] + 1)) and
+            before.get("source_sha") == after.get("source_sha"))
+        decision_status = decision.get("status")
+        if decision_status == "FAIL":
+            if not cohort_verified:
+                diagnose("BLOCKED", "qualification.decision_authentication",
+                         "complete verified measured cohort",
+                         workload=workload,
+                         reason="unusable cohort cannot claim measured FAIL")
+                continue
+            checks = decision.get("checks")
+            if (spec["evidence"] == "statistical_paired" or
+                    workload == "sd-high-occupancy-churn"):
+                coherent = (
+                    isinstance(checks, dict) and
+                    any(value is False for value in checks.values()) and
+                    all(type(value) is bool for value in checks.values()))
+            else:
+                pair_decisions = decision.get("pairs")
+                coherent = (
+                    isinstance(pair_decisions, list) and
+                    len(pair_decisions) == spec["pairs"] and
+                    any(row.get("status") == "FAIL" for row in pair_decisions
+                        if isinstance(row, dict)))
+            if not coherent:
+                diagnose("BLOCKED", "qualification.decision_authentication",
+                         "consistent measured FAIL checks",
+                         workload=workload,
+                         reason="reported failure contradicts decision evidence")
+                continue
             diagnose("FAIL", "qualification.decision_status", "PASS",
                      workload=workload,
-                     reason="frozen evaluated measurements failed")
-        elif decision.get("status") != "PASS":
+                     reason="verified frozen measurements failed")
+        elif decision_status != "PASS":
             diagnose("BLOCKED", "qualification.decision_status", "PASS",
                      workload=workload,
                      reason="cohort decision is incomplete or unavailable")
+            continue
+        elif any(value is False for value in
+                 (decision.get("checks") or {}).values()):
+            diagnose("BLOCKED", "qualification.decision_authentication",
+                     "PASS consistent with measured checks",
+                     workload=workload,
+                     reason="PASS disposition contradicts failed checks")
+            continue
+        if not cohort_verified:
+            # The aggregate decision cannot authorize PASS or measured metrics
+            # when source, order, cohort counts or screening are incomplete.
+            continue
         if spec["evidence"] == "statistical_paired":
             limits = QUALIFICATION["service_limits"](workload)
             for name, endpoint, op, bound in (
@@ -1185,6 +1330,15 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             qualification_status if qualification_status in
             ("PASS", "FAIL_OR_INCOMPLETE") else "INVALID"),
         "first_failed_phase": first_failed_phase,
+        "first_failed_evidence": first_terminal_failure or first_problem,
+        "cohort_pair_counts": cohort_pair_counts,
+        # Only validated non-path identifiers appear in public diagnostics.
+        "admitted_source_sha": (
+            before.get("source_sha")
+            if isinstance(before.get("source_sha"), str) and
+            re.fullmatch(r"[0-9a-f]{40}", before["source_sha"]) else None),
+        "admitted_target_partuuid": QUALIFICATION["normalize_partuuid"](
+            (before.get("device") or {}).get("partuuid")),
         "claim_boundary": QUALIFICATION["CONTRACT"]["claim_boundary"],
         "measurement_authority": "host-visible lower I/O, not NAND wear",
     }
