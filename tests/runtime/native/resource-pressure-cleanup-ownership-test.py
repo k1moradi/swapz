@@ -772,6 +772,27 @@ trap 'if [[ ${FUNCNAME[0]:-} == cleanup && $early_term_sent == 0 ]]; then early_
         self.assertNotIn(str(self.root), result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
+    def test_first_signal_survives_cleanup_trap_handoff(self):
+        # HUP lands before local cleanup traps; TERM lands after they are
+        # installed but before pending-state adoption. The earlier HUP wins.
+        body = r'''
+set -T
+signal_stage=0
+trap 'if [[ ${FUNCNAME[0]:-} == cleanup ]]; then if (( signal_stage == 0 )); then signal_stage=1; kill -HUP "$BASHPID"; elif (( signal_stage == 1 )) && [[ $BASH_COMMAND == "trap - EXIT" ]]; then signal_stage=2; trap - DEBUG; kill -TERM "$BASHPID"; fi; fi' DEBUG
+'''
+        result = self.execute(body=body, via_exit_trap=True)
+        self.assertEqual(result.returncode, 129, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertFalse(self.session.exists())
+        self.assertIn("phase:cleanup-signal", result.stderr)
+        self.assertIn("observed:signal-129", result.stderr)
+        self.assertIn("original_exit:129", result.stderr)
+        self.assertIn("cleanup_disposition:completed-owned", result.stderr)
+        self.assertIn("retained_cleanup:none", result.stderr)
+        self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
     @staticmethod
     def term_during_cgroup_rmdir_preamble() -> str:
         return r'''
