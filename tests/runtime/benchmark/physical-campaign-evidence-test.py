@@ -241,8 +241,26 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertEqual(len(audit["diagnostics"]),
                          EVIDENCE.MAX_EVIDENCE_DIAGNOSTICS)
         self.assertGreater(audit["omitted_diagnostic_count"], 0)
-        self.assertTrue(all(item["status"] == "UNAVAILABLE"
-                            for item in audit["diagnostics"]))
+        blockers = [item for item in audit["diagnostics"]
+                    if item["status"] == "BLOCKED"]
+        self.assertEqual(len(blockers), 1)
+        self.assertEqual(blockers[0]["metric"], "arm.arm_boot_id")
+        self.assertEqual(blockers[0]["pair_index"], 5)
+        self.assertEqual(blockers[0]["arm"], "swapz")
+        self.assertIsNone(blockers[0]["observed"])
+        self.assertIn("mixed or absent", blockers[0]["reason"])
+
+        # A later excluded attempt remains FAIL rather than UNAVAILABLE.
+        records[-1]["swapz"]["arm_boot_id"] = BOOT
+        records[-1]["status"] = "EXCLUDED"
+        records[-1]["excluded"] = True
+        records[-1]["analysis_usable"] = False
+        rejected, _ = inspect(records)
+        self.assertEqual(rejected["status"], "FAIL")
+        self.assertTrue(any(
+            item["status"] == "FAIL" and item["metric"] == "pair.status" and
+            item["pair_index"] == 5
+            for item in rejected["diagnostics"]))
 
     def test_distinct_evidence_failure_classifications(self):
         baseline = pair(1, 1100)

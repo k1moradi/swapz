@@ -834,15 +834,24 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
     diagnostics = []
     omitted = 0
     encountered_statuses = set()
+    diagnostic_priority = {"UNAVAILABLE": 0, "FAIL": 1, "BLOCKED": 2}
 
     def diagnose(status, metric_name, expected, observed=None,
                  workload=None, pair_index=None, arm=None,
                  reason="physical evidence missing or inconsistent"):
         nonlocal omitted
         encountered_statuses.add(status)
+        replacement_index = None
         if len(diagnostics) == MAX_EVIDENCE_DIAGNOSTICS:
             omitted += 1
-            return
+            # Retain a field-level reason for a newly encountered
+            # higher-severity finding when earlier details fill the cap.
+            replacement_index = next(
+                (index for index, entry in enumerate(diagnostics)
+                 if diagnostic_priority[entry["status"]] <
+                 diagnostic_priority[status]), None)
+            if replacement_index is None:
+                return
         # Avoid unbounded integers, non-finite floats and private strings.
         if type(observed) is int:
             value = observed if 0 <= abs(observed) <= (1 << 64) - 1 else None
@@ -850,11 +859,15 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             value = observed if math.isfinite(observed) else None
         else:
             value = None
-        diagnostics.append({
+        detail = {
             "status": status, "metric": metric_name, "expected": expected,
             "observed": value, "workload": workload, "pair_index": pair_index,
             "arm": arm, "reason": reason,
-        })
+        }
+        if replacement_index is None:
+            diagnostics.append(detail)
+        else:
+            diagnostics[replacement_index] = detail
 
     records = summary.get("records")
     if not isinstance(records, list):

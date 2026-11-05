@@ -6769,6 +6769,6 @@ Lower-device bytes/requests are host-visible I/O, **not NAND wear**.
 Sealer provenance comparisons are type-exact at every JSON depth: a boolean
 cannot substitute for an integer arm counter or frozen numeric limit, even
 when Python would compare their values equal. The public diagnostic limit
-must not hide a higher-severity BLOCKED or FAIL classification; omitted
-entries remain counted without publishing private sample contents.
+must retain the field-level reason for higher-severity BLOCKED or FAIL
+findings; displaced entries remain counted without publishing private samples.
 No pending prospective-v2 amendment is applied as a retroactive replacement.
