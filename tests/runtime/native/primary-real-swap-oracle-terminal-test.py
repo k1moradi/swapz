@@ -5,7 +5,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import sys
 import unittest
 from unittest import mock
 
@@ -15,6 +17,13 @@ ORACLE = ROOT / "tests/tools/primary-real-swap-oracle.py"
 SPEC = importlib.util.spec_from_file_location("primary_real_swap_oracle_terminal", ORACLE)
 oracle = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(oracle)
+
+QUALIFIER = ROOT / "tests/tools/qualify-primary-real-swap.py"
+QUALIFIER_SPEC = importlib.util.spec_from_file_location(
+    "qualify_primary_real_swap_terminal", QUALIFIER)
+qualify = importlib.util.module_from_spec(QUALIFIER_SPEC)
+sys.modules[QUALIFIER_SPEC.name] = qualify
+QUALIFIER_SPEC.loader.exec_module(qualify)
 
 
 class TerminalEvidenceContracts(unittest.TestCase):
@@ -202,12 +211,14 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertIn("KeyboardInterrupt", stderr)
         self.assertNotIn("ab" * 16, stderr)
 
-
-    def test_clean_readback_has_exactly_one_ordered_terminal_record(self):
+    def test_clean_readback_matches_parent_terminal_contract(self):
         status, stdout, stderr, allocation = self.run_fixture()
         self.assertEqual(status, 0)
         self.assertTrue(allocation.closed)
         self.assertEqual(stderr, "")
+
+        expected_pages = 2
+        expected_bytes = expected_pages * oracle.PAGE_BYTES
         records = stdout.splitlines()
         self.assertEqual(
             [record.partition("=")[0] for record in records],
@@ -215,15 +226,21 @@ class TerminalEvidenceContracts(unittest.TestCase):
         waiting, filled, verified = [
             json.loads(record.partition("=")[2]) for record in records
         ]
-        self.assertEqual((waiting["pages"], waiting["bytes"]), (2, 8192))
-        self.assertEqual((filled["pages"], filled["bytes"]), (2, 8192))
         self.assertEqual(
-            (verified["verified_pages"], verified["verified_bytes"]), (2, 8192))
+            (waiting["pages"], waiting["bytes"]),
+            (expected_pages, expected_bytes))
+        self.assertEqual(
+            (filled["pages"], filled["bytes"]),
+            (expected_pages, expected_bytes))
+        self.assertEqual(
+            (verified["verified_pages"], verified["verified_bytes"]),
+            (expected_pages, expected_bytes))
         self.assertEqual(verified["mismatched_pages"], 0)
         self.assertEqual(verified["mismatches"], 0)
         self.assertEqual(verified["mismatch_samples"], [])
         self.assertEqual(verified["digest"], verified["expected_digest"])
         self.assertEqual(filled["digest"], verified["expected_digest"])
+        qualify.require_oracle_verification_details([verified])
 
     def test_clean_readback_report_failure_keeps_original_errno(self):
         status, stdout, stderr, allocation = self.run_fixture(report_errno=32)
@@ -243,6 +260,168 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertIn("error=OSError errno=32 cleanup_complete=true", stderr)
         self.assertNotIn("ab" * 16, stderr)
 
+    def test_parent_rejects_forged_mismatch_totals_and_bad_samples(self):
+        verified_pages = 17
+        verified_bytes = verified_pages * oracle.PAGE_BYTES
+        valid_record = {
+            "verified_pages": verified_pages,
+            "verified_bytes": verified_bytes,
+            "mismatched_pages": 0,
+            "mismatches": 0,
+            "mismatch_samples": [],
+        }
+        qualify.require_oracle_verification_details([valid_record])
+
+        capped_record = {
+            **valid_record,
+            "mismatched_pages": verified_pages,
+            "mismatches": verified_pages,
+            "mismatch_samples": [
+                {"page": page_index, "byte": 9}
+                for page_index in range(qualify.MAX_ORACLE_MISMATCH_SAMPLES)
+            ],
+        }
+        qualify.require_oracle_verification_details([capped_record])
+
+        mutants = (
+            {**valid_record, "mismatched_pages": 1},
+            {**valid_record, "mismatches": 1},
+            {
+                **valid_record,
+                "mismatched_pages": 1,
+                "mismatches": 1,
+                "mismatch_samples": [],
+            },
+            {
+                **valid_record,
+                "mismatched_pages": 1,
+                "mismatches": 1,
+                "mismatch_samples": [{"page": verified_pages, "byte": 0}],
+            },
+            {
+                **valid_record,
+                "mismatched_pages": 1,
+                "mismatches": 1,
+                "mismatch_samples": [{"page": 0, "byte": oracle.PAGE_BYTES}],
+            },
+        )
+        for forged_record in mutants:
+            with self.subTest(forged_record=forged_record), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.require_oracle_verification_details([forged_record])
+
+    def test_parent_rejects_duplicate_or_trailing_terminal_bytes(self):
+        pending_tails = (
+            bytearray(b'ORACLE_VERIFIED={"verified_pages":2}\n'),
+            bytearray(b'ORACLE_VERIFIED={"verified_pages":2'),
+        )
+        for pending_tail in pending_tails:
+            with self.subTest(pending_tail=bytes(pending_tail)):
+                read_descriptor, write_descriptor = os.pipe()
+                os.close(write_descriptor)
+                with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                    process = mock.Mock(stdout=output, stderr=io.StringIO())
+                    process.wait.return_value = 0
+                    with self.assertRaisesRegex(
+                            qualify.QualificationFailure,
+                            "phase=terminal.*child_exit=0.*evidence_complete=false"):
+                        qualify._require_oracle_terminal_exit(
+                            process, qualify.time.monotonic() + 1,
+                            lambda: None, pending_tail)
+
+        read_descriptor, write_descriptor = os.pipe()
+        try:
+            os.write(write_descriptor, b"unexpected-terminal-tail")
+            os.close(write_descriptor)
+            write_descriptor = -1
+            with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                process = mock.Mock(stdout=output, stderr=io.StringIO())
+                process.wait.return_value = 0
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure,
+                        "phase=terminal.*child_exit=0.*evidence_complete=false"):
+                    qualify._require_oracle_terminal_exit(
+                        process, qualify.time.monotonic() + 1,
+                        lambda: None, bytearray())
+        finally:
+            if write_descriptor >= 0:
+                os.close(write_descriptor)
+
+    def test_parent_rejects_reordered_or_truncated_terminal_record(self):
+        cases = (
+            (
+                b'ORACLE_FILLED={"pages":2}\n',
+                "unexpected or oversized record",
+            ),
+            (
+                b'ORACLE_VERIFIED={"verified_pages":2',
+                "closed output before ORACLE_VERIFIED",
+            ),
+        )
+        for payload, expected_error in cases:
+            with self.subTest(payload=payload):
+                read_descriptor, write_descriptor = os.pipe()
+                try:
+                    os.write(write_descriptor, payload)
+                    os.close(write_descriptor)
+                    write_descriptor = -1
+                    with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                        process = mock.Mock(stdout=output)
+                        process.poll.return_value = None
+                        with self.assertRaisesRegex(
+                                qualify.QualificationFailure, expected_error):
+                            qualify._oracle_event(
+                                process, "ORACLE_VERIFIED=",
+                                qualify.time.monotonic() + 1,
+                                lambda: None, bytearray())
+                finally:
+                    if write_descriptor >= 0:
+                        os.close(write_descriptor)
+
+    def test_parent_requires_zero_exit_and_observed_terminal_eof(self):
+        read_descriptor, write_descriptor = os.pipe()
+        os.close(write_descriptor)
+        with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+            process = mock.Mock(stdout=output, stderr=None)
+            process.wait.return_value = 0
+            qualify._require_oracle_terminal_exit(
+                process, qualify.time.monotonic() + 1,
+                lambda: None, bytearray())
+
+        read_descriptor, write_descriptor = os.pipe()
+        try:
+            with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                process = mock.Mock(stdout=output, stderr=None)
+                process.wait.return_value = 0
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure,
+                        "cannot confirm terminal EOF"):
+                    qualify._require_oracle_terminal_exit(
+                        process, qualify.time.monotonic() + 1,
+                        lambda: None, bytearray())
+        finally:
+            os.close(write_descriptor)
+
+    def test_parent_preserves_bounded_nonzero_child_diagnostic(self):
+        read_descriptor, write_descriptor = os.pipe()
+        os.close(write_descriptor)
+        oracle_failure = (
+            "FAIL: oracle phase=verify verified_pages=1/2 "
+            "verified_bytes=4096/8192 expected_page_mismatches=0 "
+            "observed_page_mismatches=0 expected_byte_mismatches=0 "
+            "observed_byte_mismatches=0 error=OSError errno=5 "
+            "cleanup_complete=true"
+        )
+        with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+            process = mock.Mock(stdout=output, stderr=io.StringIO(oracle_failure))
+            process.wait.return_value = 7
+            with self.assertRaisesRegex(
+                    qualify.QualificationFailure,
+                    "phase=terminal.*child_exit=7.*evidence_complete=false.*"
+                    "phase=verify.*errno=5.*cleanup_complete=true"):
+                qualify._require_oracle_terminal_exit(
+                    process, qualify.time.monotonic() + 1,
+                    lambda: None, bytearray())
 
 if __name__ == "__main__":
     unittest.main()

@@ -318,7 +318,11 @@ exactly one ordered WAITING/FILLED/VERIFIED sequence after clean readback,
 with full page/byte counts, zero mismatches and fill-to-verify digest agreement.
 A failed terminal publication after clean readback must withhold VERIFIED,
 retain the original reporting errno and exit nonzero despite successful unmap.
-Short reads, interruption and failed
+The parent must reject reordered records, any duplicate or truncated bytes
+remaining after the one accepted VERIFIED record, nonzero child exit, and
+inconsistent full page/byte mismatch totals or capped mismatch samples before
+aggregation. Successful child exit is terminal evidence only after EOF proves
+that no unconsumed oracle output remains. Short reads, interruption and failed
 unmapping must not produce a complete-looking record. Failure-only diagnostics
 identify the first failure phase, fully compared versus allocated pages/bytes,
 expected-zero versus observed page/byte mismatch totals, original errno when

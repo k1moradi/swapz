@@ -96,6 +96,7 @@ SOURCE_ADMISSION_MAX_LINE_BYTES = 4096
 MAX_PHYSICAL_SOURCE_BYTES = 16 * 1024 * 1024
 SOURCE_ADMISSION_TIMEOUT_SECONDS = 45
 MAX_ORACLE_RECORD_BYTES = 4096
+MAX_ORACLE_MISMATCH_SAMPLES = 16
 # A sustained memory stall is a safety stop, not an integrity oracle.
 PSI_STOP_FRACTION = 0.85
 PSI_STOP_GRACE_SECONDS = 5
@@ -2649,6 +2650,59 @@ def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
         pending.extend(chunk)
 
 
+def _require_oracle_terminal_exit(
+        process: subprocess.Popen, deadline: float,
+        guard: Callable[[], None], pending: bytearray) -> None:
+    """Require zero exit and EOF after the one accepted terminal record."""
+    if process.stdout is None:
+        raise QualificationFailure("oracle stdout pipe is unavailable")
+    try:
+        return_code = process.wait(
+            timeout=max(1, int(deadline - time.monotonic())))
+    except subprocess.TimeoutExpired as exc:
+        raise QualificationFailure(
+            "real-swap oracle phase=terminal child_exit=timeout "
+            "evidence_complete=false: did not exit after byte verification") from exc
+    if return_code != 0:
+        stderr = ""
+        if process.stderr is not None:
+            stderr = process.stderr.read(MAX_ORACLE_RECORD_BYTES + 1)
+            if len(stderr) > MAX_ORACLE_RECORD_BYTES:
+                stderr = stderr[:MAX_ORACLE_RECORD_BYTES] + "...[truncated]"
+            stderr = stderr.strip()
+        detail = f": {stderr}" if stderr else ""
+        raise QualificationFailure(
+            f"real-swap oracle phase=terminal child_exit={return_code} "
+            f"evidence_complete=false{detail}")
+
+    guard()
+    if pending:
+        raise QualificationFailure(
+            "real-swap oracle phase=terminal child_exit=0 "
+            "evidence_complete=false: trailing output after ORACLE_VERIFIED")
+    stdout_fd = process.stdout.fileno()
+    try:
+        readable, _, _ = select.select([stdout_fd], [], [], 0)
+    except (OSError, ValueError) as exc:
+        raise QualificationFailure(
+            "real-swap oracle phase=terminal child_exit=0 "
+            "evidence_complete=false: cannot confirm terminal EOF") from exc
+    if not readable:
+        raise QualificationFailure(
+            "real-swap oracle phase=terminal child_exit=0 "
+            "evidence_complete=false: cannot confirm terminal EOF")
+    try:
+        trailing = os.read(stdout_fd, MAX_ORACLE_RECORD_BYTES + 1)
+    except OSError as exc:
+        raise QualificationFailure(
+            "real-swap oracle phase=terminal child_exit=0 "
+            "evidence_complete=false: cannot confirm terminal EOF") from exc
+    if trailing:
+        raise QualificationFailure(
+            "real-swap oracle phase=terminal child_exit=0 "
+            "evidence_complete=false: trailing output after ORACLE_VERIFIED")
+
+
 def evaluate_workload_evidence(*, cgroup_swap_bytes: int, cgroup_swap_peak: int,
                                min_swap_bytes: int, expected_verified_pages: int,
                                oom_delta: int, oom_kill_delta: int,
@@ -2727,6 +2781,55 @@ def require_oracle_worker_geometry(
                 record[byte_field] != expected_bytes:
             raise QualificationFailure(
                 f"concurrent oracle worker {worker_index} {phase} page/byte count is incomplete")
+
+
+def require_oracle_verification_details(records: list[dict]) -> None:
+    """Validate full mismatch totals independently of capped diagnostics."""
+    for worker_index, record in enumerate(records):
+        required_integer_fields = (
+            "verified_pages", "verified_bytes", "mismatched_pages", "mismatches")
+        if not isinstance(record, dict) or any(
+                type(record.get(key)) is not int
+                for key in required_integer_fields):
+            raise QualificationFailure(
+                f"concurrent oracle worker {worker_index} "
+                "verification mismatch totals are malformed")
+
+        verified_pages = record["verified_pages"]
+        verified_bytes = record["verified_bytes"]
+        mismatched_pages = record["mismatched_pages"]
+        mismatched_bytes = record["mismatches"]
+        mismatch_samples = record.get("mismatch_samples")
+        expected_sample_count = min(
+            mismatched_pages, MAX_ORACLE_MISMATCH_SAMPLES)
+        mismatch_evidence_valid = (
+            verified_pages > 0 and
+            verified_bytes == verified_pages * PAGE_BYTES and
+            0 <= mismatched_pages <= verified_pages and
+            mismatched_pages <= mismatched_bytes <= mismatched_pages * PAGE_BYTES and
+            isinstance(mismatch_samples, list) and
+            len(mismatch_samples) == expected_sample_count
+        )
+        if not mismatch_evidence_valid:
+            raise QualificationFailure(
+                f"concurrent oracle worker {worker_index} "
+                "verification mismatch evidence is inconsistent")
+
+        previous_page = -1
+        for sample in mismatch_samples:
+            sample_valid = (
+                isinstance(sample, dict) and
+                set(sample) == {"page", "byte"} and
+                type(sample["page"]) is int and
+                type(sample["byte"]) is int and
+                previous_page < sample["page"] < verified_pages and
+                0 <= sample["byte"] < PAGE_BYTES
+            )
+            if not sample_valid:
+                raise QualificationFailure(
+                    f"concurrent oracle worker {worker_index} "
+                    "verification mismatch sample is malformed")
+            previous_page = sample["page"]
 
 
 def aggregate_oracle_verification(records: list[dict]) -> dict:
@@ -2996,20 +3099,14 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 require_oracle_worker_geometry(
                     verified_records, worker_memory_mib,
                     "verified_pages", "verified_bytes", "verification")
+                require_oracle_verification_details(verified_records)
                 if any(filled.get("digest") != verified.get("expected_digest")
                        for filled, verified in zip(filled_records, verified_records)):
                     raise QualificationFailure(
                         "oracle fill digest differs from expected verification digest")
                 for process in round_processes:
-                    try:
-                        process.wait(timeout=max(1, int(deadline - time.monotonic())))
-                    except subprocess.TimeoutExpired as exc:
-                        raise QualificationFailure(
-                            "concurrent oracle did not exit after byte verification") from exc
-                    if process.returncode != 0:
-                        stderr = process.stderr.read().strip() if process.stderr else ""
-                        raise QualificationFailure(
-                            f"oracle verification failed rc={process.returncode}: {stderr}")
+                    _require_oracle_terminal_exit(
+                        process, deadline, guard, oracle_buffers[process.pid])
 
                 guard_processes = None
                 guard_allow_worker_exit = False
