@@ -4640,7 +4640,18 @@ Resolving a reported pathname in the formatter's mount namespace cannot
 authenticate the kernel's already-active backing inode across namespaces;
 a matching local `st_dev`, `st_ino` or `st_rdev` is not admission authority.
 A complete well-formed zero-row snapshot alone clears this inventory gate;
-it is not a kernel exclusion lock. Rootless stream fixtures must reject
+it is not a kernel exclusion lock. The rootless pathname-provenance regression
+must distinguish ordinary rename/unlink from current-mount-view replacement:
+`/proc/self/fd/N` readlink and `seq_file_path()` both render a retained
+`struct path` through `d_path()`. Renaming the retained file must change the
+rendered name and unlinking it must add ` (deleted)`; inside an isolated
+user+mount namespace, a private bind overmount must be able to preserve that
+rendered pathname while `lstat()` of the same string reaches a different
+regular inode and filesystem `st_dev`. That overmount fixture proves only the
+pathname re-resolution gap, not an actual swap race. It must make mount
+propagation private before fixture mounts, may skip only the overmount arm when
+unprivileged user/mount namespaces are unavailable, and must never activate or
+deactivate swap or open a block device. Rootless stream fixtures must reject
 empty or headerless tables and malformed headers/rows before treating the
 snapshot as clear. Native fixtures also
 cover the literal kernel header, canonical numeric fields, embedded NULs,

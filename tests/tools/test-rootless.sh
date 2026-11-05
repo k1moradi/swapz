@@ -392,6 +392,9 @@ rootless_phase_started_seconds=$SECONDS
 rootless_phase='tests/runtime/native/source-contract-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/source-contract-test.py -v
+rootless_phase='tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py'
+rootless_phase_started_seconds=$SECONDS
+python3 -B tests/runtime/native/userspace/swapzctl-active-swap-provenance-test.py -v
 rootless_phase='tests/runtime/native/tmp-cleanup-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/tmp-cleanup-test.py -v

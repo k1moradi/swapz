@@ -377,21 +377,30 @@ whole-device parent, and that parent must be the exact expected device, report
 removable media, match the expected printable model, and resolve through a USB
 transport path. The selected partition must be the parent's sole partition.
 Both the partition and its parent must have empty holders and slaves, and
-neither may appear mounted or as active swap. Active swap block nodes conflict
-by their `st_rdev`, and regular swapfiles conflict by their filesystem
-`st_dev` when it matches the partition or parent. Other swap-entry file types
-and unreadable entries refuse formatting. The readable `/proc/swaps` inventory
-must contain the kernel's exact tabbed five-column header; empty, headerless,
-malformed or type-inconsistent rows refuse formatting rather than being
-interpreted as no active swap. Kernel-escaped swap paths must decode
-`\\040`, `\\011`, `\\012` and `\\134` before filesystem identity
-checks, while other raw non-NUL filename bytes remain valid. Every record must
-terminate in a newline; embedded NULs, records of 8192 bytes or longer,
-inventories over 16 MiB or 65536 data rows, and duplicate swap backing
-identities (block `st_rdev`, regular `st_dev` and `st_ino`) are not
-clearance. This catches directly backed swapfiles visible through
-`/proc/swaps` even if their mount is outside the formatter's mount namespace;
-it does not prove ancestry through arbitrary stacked filesystems.
+neither may appear mounted or as active swap. Production formatter clearance
+requires a complete well-formed zero-row `/proc/swaps`; every active row,
+including an apparently unrelated regular swapfile or block device, refuses
+with `EOPNOTSUPP` until a separately reviewed kernel-held backing identity,
+lower-device ancestry and exclusion contract is proven through the destructive
+write. `/proc/swaps` is an activity inventory, not a transferable userspace
+identity handle: `seq_file_path()` renders the retained kernel `struct file`
+path, while a later `lstat()` resolves the emitted string through the
+formatter's current mount view. A private bind overmount can preserve the
+retained `d_path()` string while redirecting that lookup to a different
+regular file and filesystem `st_dev`; therefore current `st_dev`/`st_ino`
+or block-node `st_rdev` is not production admission authority. Ordinary
+rename/unlink is a control rather than the demonstrated gap: `d_path()`
+follows the rename and marks an unlinked retained file ` (deleted)`.
+
+The readable `/proc/swaps` inventory must contain the kernel's exact tabbed
+five-column header; empty, headerless, malformed or type-inconsistent rows
+refuse formatting rather than being interpreted as no active swap.
+Kernel-escaped swap paths must decode `\\040`, `\\011`, `\\012` and
+`\\134` during inventory validation, while other raw non-NUL filename bytes
+remain valid. Every record must terminate in a newline; embedded NULs, records
+of 8192 bytes or longer, inventories over 16 MiB or 65536 data rows refuse.
+Multiple active rows remain non-clearance; pathname identity deduplication must
+not turn any active inventory into permission to format.
 Mount inventory must inspect the formatter's own mount table and every
 distinct visible mount namespace, not just its own mount namespace. An empty
 opened PID mountinfo table is ambiguous and fails closed except for a peer
