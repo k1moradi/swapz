@@ -110,6 +110,8 @@ classify_rootless_private_unittest_failure() {
   local line
   local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.test_[A-Za-z0-9_]{1,96}\\)"
   local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.test_[A-Za-z0-9_]{1,96}\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
+  # Other generator subtest keys identify a failed method, never public data.
+  local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.test_[A-Za-z0-9_]{1,96}\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
   local first_progress_kind=
   local first_progress_test=
@@ -135,16 +137,22 @@ classify_rootless_private_unittest_failure() {
       if [[ -n ${BASH_REMATCH[4]} ]]; then
         first_progress_subtest=${BASH_REMATCH[4]}
       fi
-      rootless_classified_test=$first_progress_test
-      rootless_classified_kind=$first_progress_kind
-      rootless_classified_subtest=$first_progress_subtest
-      if [[ $first_progress_kind == FAIL ]]; then
-        rootless_classified_reason=unittest_assertion
-      else
-        rootless_classified_reason=unittest_error
-      fi
-      break
+    elif [[ $line =~ $generator_progress_regex ]]; then
+      # Report only the allowlisted method; arbitrary subtest details stay private.
+      first_progress_test=${BASH_REMATCH[1]}
+      first_progress_kind=${BASH_REMATCH[3]}
+    else
+      continue
     fi
+    rootless_classified_test=$first_progress_test
+    rootless_classified_kind=$first_progress_kind
+    rootless_classified_subtest=$first_progress_subtest
+    if [[ $first_progress_kind == FAIL ]]; then
+      rootless_classified_reason=unittest_assertion
+    else
+      rootless_classified_reason=unittest_error
+    fi
+    break
   done < "$diagnostic_path"
 
   while IFS= read -r line || [[ -n $line ]]; do

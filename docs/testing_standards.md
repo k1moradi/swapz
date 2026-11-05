@@ -6154,6 +6154,9 @@ workflow-contract fixture; it must not add a duplicate direct invocation.
 The rootless stderr classifier also recognizes `GeneratorPublicationTest` so a
 failed adversarial assertion names its responsible test method without exposing
 private generator stderr in the public failure marker.
+Generator subtest context with arbitrary keys remains private; its allowlisted
+method is still identified, while only a validated `phase=` tag can appear as
+a public subtest value.
 The suite needs Python 3, Bash and GNU userspace commands, and operates only on
 private temporary directories with a stubbed manager. Generator subprocesses
 have a 30-second bound, and the official rootless stage keeps the original
