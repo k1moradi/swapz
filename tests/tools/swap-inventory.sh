@@ -3,6 +3,75 @@
 # This is not proof of the kernel-held inode/device behind a swap pathname.
 # "Used" is volatile, not a change in swap-device configuration.
 swapz_swap_inventory_identity() {
+    local input="$1" snapshot="" snapshot_bytes="" identity=""
+    local operation_status=0 cleanup_status=0
+
+    # /dev/stdin can be a one-shot pipe. Snapshot it once, within the same
+    # bound as the parser, before tail and awk independently read the input.
+    if [[ "$input" == /dev/stdin ]]; then
+        if snapshot="$(mktemp "${TMPDIR:-/tmp}/swapz-swap-inventory.XXXXXXXX" 2>/dev/null)"; then
+            :
+        else
+            operation_status=$?
+            printf 'swap-inventory: phase=stream-snapshot-create record=all expected=private-snapshot observed=create-error first_exit=%d\n' "$operation_status" >&2
+            return "$operation_status"
+        fi
+
+        if head -c 16777217 -- "$input" > "$snapshot" 2>/dev/null; then
+            :
+        else
+            operation_status=$?
+            printf 'swap-inventory: phase=stream-snapshot-read record=all expected=readable-stream observed=read-error first_exit=%d\n' "$operation_status" >&2
+        fi
+
+        if (( operation_status == 0 )); then
+            if snapshot_bytes="$(wc -c < "$snapshot" 2>/dev/null)"; then
+                snapshot_bytes="${snapshot_bytes//[[:space:]]/}"
+                if [[ ! "$snapshot_bytes" =~ ^[0-9]+$ ]]; then
+                    operation_status=1
+                    printf '%s\n' 'swap-inventory: phase=stream-snapshot-size record=all expected=decimal-byte-count observed=invalid-byte-count first_exit=1' >&2
+                elif (( snapshot_bytes > 16777216 )); then
+                    operation_status=1
+                    printf '%s\n' 'swap-inventory: phase=stream-snapshot-size record=all expected=at-most-16MiB observed=oversized-inventory first_exit=1' >&2
+                fi
+            else
+                operation_status=$?
+                printf 'swap-inventory: phase=stream-snapshot-size record=all expected=readable-byte-count observed=size-error first_exit=%d\n' "$operation_status" >&2
+            fi
+        fi
+
+        if (( operation_status == 0 )); then
+            if identity="$(swapz_swap_inventory_identity_file "$snapshot")"; then
+                :
+            else
+                operation_status=$?
+            fi
+        fi
+
+        if rm -f -- "$snapshot" 2>/dev/null; then
+            :
+        else
+            cleanup_status=$?
+        fi
+
+        if (( operation_status != 0 )); then
+            if (( cleanup_status != 0 )); then
+                printf 'swap-inventory: phase=stream-snapshot-cleanup record=all expected=temporary-file-removed observed=cleanup-error secondary_exit=%d\n' "$cleanup_status" >&2
+            fi
+            return "$operation_status"
+        fi
+        if (( cleanup_status != 0 )); then
+            printf 'swap-inventory: phase=stream-snapshot-cleanup record=all expected=temporary-file-removed observed=cleanup-error first_exit=%d\n' "$cleanup_status" >&2
+            return "$cleanup_status"
+        fi
+        [[ -n "$identity" ]] && printf '%s\n' "$identity"
+        return 0
+    fi
+
+    swapz_swap_inventory_identity_file "$input"
+}
+
+swapz_swap_inventory_identity_file() {
     local input="$1" lines last_byte sorted_lines exit_status
     if [[ ! -r "$input" ]]; then
         printf '%s\n' 'swap-inventory: phase=open record=input expected=readable-inventory observed=unreadable first_exit=1' >&2

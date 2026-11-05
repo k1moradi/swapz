@@ -5,7 +5,29 @@ ROOT="$(cd -- "$(dirname -- "$0")/../../.." && pwd -P)"
 source "$ROOT/tests/tools/swap-inventory.sh"
 mkdir -p "$ROOT/build/tests"
 TMP="$(mktemp -d "$ROOT/build/tests/swap-inventory.XXXXXXXX")"
-trap 'rm -f "$TMP/before" "$TMP/after" "$TMP/result" "$TMP/diagnostic"; rmdir "$TMP"' EXIT
+STREAM_TMP_PARENT=${TMPDIR:-$ROOT/build/tests}
+STREAM_TMP="$(mktemp -d "$STREAM_TMP_PARENT/swap-inventory-stream.XXXXXXXX")"
+cleanup_test_scratch() {
+    local test_status=$?
+    trap - EXIT
+    if (( test_status != 0 )); then
+        printf '%s\n' 'RETAINED: private swap-inventory fixture after test failure' >&2
+        exit "$test_status"
+    fi
+    if ! rm -f -- "$TMP/before" "$TMP/after" "$TMP/result" "$TMP/diagnostic"; then
+        printf '%s\n' 'FAIL: could not remove exact swap-inventory fixture files' >&2
+        exit 1
+    fi
+    if ! rmdir -- "$STREAM_TMP"; then
+        printf '%s\n' 'FAIL: one-shot snapshot file was retained or changed' >&2
+        exit 1
+    fi
+    if ! rmdir -- "$TMP"; then
+        printf '%s\n' 'FAIL: swap-inventory fixture directory was nonempty or changed' >&2
+        exit 1
+    fi
+}
+trap cleanup_test_scratch EXIT
 cat > "$TMP/before" <<'EOF'
 Filename				Type		Size		Used		Priority
 /swapfile                               file            524284          1624            -1
@@ -29,6 +51,86 @@ expect_invalid_inventory() {
         exit 1
     fi
 }
+
+assert_stream_snapshot_clean() {
+    [[ -z "$(find "$STREAM_TMP" -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+        echo 'FAIL: one-shot inventory snapshot was retained' >&2
+        exit 1
+    }
+}
+
+cat "$TMP/before" | TMPDIR="$STREAM_TMP" swapz_swap_inventory_identity /dev/stdin >"$TMP/result" 2>"$TMP/diagnostic"
+[[ "$(cat "$TMP/result")" == "$before" && ! -s "$TMP/diagnostic" ]] || {
+    echo 'FAIL: valid one-shot stdin inventory changed or was rejected' >&2
+    exit 1
+}
+assert_stream_snapshot_clean
+
+expect_invalid_stream_inventory() {
+    local case_name="$1" expected="$2" observed="$3"
+    local exit_status=0 diagnostic
+    cat "$TMP/after" | TMPDIR="$STREAM_TMP" swapz_swap_inventory_identity /dev/stdin >"$TMP/result" 2>"$TMP/diagnostic" || exit_status=$?
+    diagnostic="$(cat "$TMP/diagnostic")"
+    if (( exit_status != 1 )) || [[ -s "$TMP/result" ]] ||
+        [[ "$diagnostic" != *"$expected $observed first_exit=1"* ]]; then
+        printf 'FAIL: %s stream exit=%d diagnostic=%s\n' "$case_name" "$exit_status" "$diagnostic" >&2
+        exit 1
+    fi
+    assert_stream_snapshot_clean
+}
+
+expect_snapshot_cleanup_failure() {
+    local case_name="$1" expected_exit="$2" expected_primary="$3" expected_cleanup="$4"
+    local exit_status=0 diagnostic snapshot_path entry_count snapshot_mode
+    (
+        rm() { return 73; }
+        cat "$TMP/after" | TMPDIR="$STREAM_TMP" swapz_swap_inventory_identity /dev/stdin >"$TMP/result" 2>"$TMP/diagnostic"
+    ) || exit_status=$?
+    diagnostic="$(cat "$TMP/diagnostic")"
+    if (( exit_status != expected_exit )) || [[ -s "$TMP/result" ]] ||
+        { [[ -n "$expected_primary" ]] && [[ "$diagnostic" != *"$expected_primary"* ]]; } ||
+        [[ "$diagnostic" != *"$expected_cleanup"* ]]; then
+        printf 'FAIL: %s cleanup failure exit=%d diagnostic=%s\n' "$case_name" "$exit_status" "$diagnostic" >&2
+        exit 1
+    fi
+
+    entry_count="$(find "$STREAM_TMP" -mindepth 1 -maxdepth 1 -printf '.' | wc -c)"
+    snapshot_path="$(find "$STREAM_TMP" -mindepth 1 -maxdepth 1 -type f -name 'swapz-swap-inventory.*' -print -quit)"
+    snapshot_mode=
+    if [[ -n "$snapshot_path" && ! -L "$snapshot_path" ]]; then
+        snapshot_mode="$(stat -c '%a' -- "$snapshot_path")"
+    fi
+    if [[ "$entry_count" != 1 || -z "$snapshot_path" || -L "$snapshot_path" || "$snapshot_mode" != 600 ]]; then
+        printf 'FAIL: %s did not retain only its private snapshot for diagnosis\n' "$case_name" >&2
+        exit 1
+    fi
+    command rm -f -- "$snapshot_path"
+    assert_stream_snapshot_clean
+}
+
+printf 'Wrong Type Size Used Priority\n/swapfile file 4096 0 -1\n' > "$TMP/after"
+expect_invalid_stream_inventory 'malformed header' 'expected=exact-tabbed-five-column-header' 'observed=invalid-header'
+printf 'Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swapfile file 4096 5\n' > "$TMP/after"
+expect_invalid_stream_inventory 'malformed row' 'expected=five-fields' 'observed=invalid-field-count'
+: > "$TMP/after"
+expect_invalid_stream_inventory 'empty stream' 'expected=newline-terminated-record' 'observed=unterminated-or-empty'
+
+exit_status=0
+head -c 16777217 /dev/zero | TMPDIR="$STREAM_TMP" swapz_swap_inventory_identity /dev/stdin >"$TMP/result" 2>"$TMP/diagnostic" || exit_status=$?
+[[ "$exit_status" == 1 && ! -s "$TMP/result" ]] || {
+    echo "FAIL: oversized one-shot inventory exit=$exit_status" >&2
+    exit 1
+}
+[[ "$(cat "$TMP/diagnostic")" == *'phase=stream-snapshot-size record=all expected=at-most-16MiB observed=oversized-inventory first_exit=1' ]] || {
+    echo 'FAIL: oversized one-shot inventory lacked the bounded-size diagnostic' >&2
+    exit 1
+}
+assert_stream_snapshot_clean
+
+printf 'Wrong Type Size Used Priority\n/swapfile file 4096 0 -1\n' > "$TMP/after"
+expect_snapshot_cleanup_failure 'parser error precedence' 1 'phase=parse record=1 field=header' 'secondary_exit=73'
+cat "$TMP/before" > "$TMP/after"
+expect_snapshot_cleanup_failure 'successful parse cleanup error' 73 '' 'phase=stream-snapshot-cleanup record=all expected=temporary-file-removed observed=cleanup-error first_exit=73'
 
 cat > "$TMP/after" <<'EOF'
 Filename				Type		Size		Used		Priority

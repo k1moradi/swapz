@@ -5263,6 +5263,15 @@ deactivate swap or open a block device. The `unshare` helper itself is required.
 A missing child marker may skip only on an `unshare` namespace-creation,
 setgroups or user/group-map write failure; missing helper, unexpected interpreter
 or fixture startup failures must fail, not be reported as unavailable namespaces.
+When `/proc/swaps` is supplied as `/dev/stdin`, it may be a one-shot pipe:
+read it once into a mode-0600 private temporary file, reject snapshots larger
+than the parser's 16 MiB bound, and run the existing strict parser on that
+stable snapshot. Do not emit an identity until the whole snapshot parses;
+unlink only the exact snapshot. Preserve the parser's first exit status if
+cleanup also fails, and treat cleanup failure after a successful parse as a
+test failure. Rootless regressions must cover a valid one-shot stream,
+malformed header and row, empty input, over-bound input, and absence of the
+snapshot after each completed parse attempt.
 Rootless stream fixtures must reject
 empty or headerless tables and malformed headers/rows before treating the
 snapshot as clear. Native fixtures also
