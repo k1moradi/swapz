@@ -751,8 +751,6 @@ def campaign_capacity_and_ram(
     except ValueError:
         return None
     peak_ram_bytes = ram_summary["peak_ram_bytes"]
-    limit = QUALIFICATION["CONTRACT"]["acceptance"]["sustained"][
-        "metadata_and_target_peak_ram_bytes_max"]
     if (type(peak_ram_bytes) is not int or
             not 0 < peak_ram_bytes <= RAM_VALIDATOR["MAX_UINT64"]):
         return None
@@ -767,10 +765,9 @@ def campaign_capacity_and_ram(
              replay_peak not in (0, peak_ram_bytes))):
         return None
     return {
-        # The campaign qualification verdict is independent of RAM acceptance.
-        # Retain an authenticated over-limit measurement for release evaluation.
-        "ram_acceptance_status": "FAIL" if peak_ram_bytes > limit else "PASS",
-        "ram_limit_bytes": limit,
+        # Preserve the measured peak even when it is over the frozen limit.
+        # The release evaluator owns the acceptance verdict and rederives it
+        # from the sealed measurement plus the exact frozen policy.
         "page_bytes": 4096,
         "logical_pages": logical_pages,
         "logical_capacity_bytes": logical_capacity_bytes,

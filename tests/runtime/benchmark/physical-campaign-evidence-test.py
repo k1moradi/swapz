@@ -275,15 +275,14 @@ class CapacityRamPropagation(unittest.TestCase):
         return record, trace
 
     def test_measured_below_at_and_over_frozen_limit(self):
-        for offset, expected in ((-1024, "PASS"), (0, "PASS"),
-                                 (1024, "FAIL")):
+        for offset in (-1024, 0, 1024):
             with self.subTest(offset=offset):
                 record, trace = self.synthetic_capacity(self.LIMIT + offset)
                 capacity = EVIDENCE.campaign_capacity_and_ram(
                     [record], self.DEVICE_BYTES, SOURCE, trace)
                 self.assertIsNotNone(capacity)
-                self.assertEqual(capacity["ram_acceptance_status"], expected)
-                self.assertEqual(capacity["ram_limit_bytes"], self.LIMIT)
+                self.assertNotIn("ram_acceptance_status", capacity)
+                self.assertNotIn("ram_limit_bytes", capacity)
                 self.assertEqual(capacity["peak_ram_bytes"],
                                  self.LIMIT + offset)
                 self.assertEqual(
@@ -410,10 +409,10 @@ class CapacityRamPropagation(unittest.TestCase):
     def test_sealer_preserves_measured_fail_and_blocks_unverified(self):
         campaign = self.synthetic_seal(self.LIMIT + 1024)
         self.assertEqual(campaign["campaign_status"], "PASS")
-        self.assertEqual(
-            campaign["capacity_and_ram"]["ram_acceptance_status"], "FAIL")
-        self.assertEqual(
-            campaign["capacity_and_ram"]["peak_ram_bytes"], self.LIMIT + 1024)
+        capacity = campaign["capacity_and_ram"]
+        self.assertNotIn("ram_acceptance_status", capacity)
+        self.assertNotIn("ram_limit_bytes", capacity)
+        self.assertEqual(capacity["peak_ram_bytes"], self.LIMIT + 1024)
         for kwargs in ({"include_trace": False},
                        {"conflicting_host_boot": True}):
             with self.subTest(kwargs=kwargs):
