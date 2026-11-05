@@ -1813,9 +1813,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             raise AssertionError(f"unexpected sysfs listing: {path}")
 
         def remove_test_objects(saved_state, saved_state_dir):
+            nonlocal observed_block_zero
+
             saved_state["stage"] = (
                 "ORACLE_PASS" if teardown_not_complete else "COMPLETE")
             probe._release_partition_ownership(saved_state)
+            # Successful synthetic recovery must update the simulated device
+            # bytes before publishing observations that claim header restore.
+            observed_block_zero = target["header"]
+            events.append(("restore0",))
             result_path = Path(saved_state_dir) / probe.RESULTS_NAME
             saved_results = json.loads(result_path.read_text())
             inventory_after = probe._dm_inventory_snapshot(
@@ -2192,6 +2198,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(state["_test_results"]["final_recovery_state"],
                          "COMPLETE")
         self.assertNotEqual(state["_test_results"].get("oracle_suite"), "PASS")
+        self.assertIn(("restore0",), events)
 
     def test_completed_byte_oracle_with_uncertain_recovery_is_not_physical_pass(self):
         # Completed synthetic mapper I/O and successful restoration are
@@ -2199,6 +2206,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         events, state, _ = self.simulate_physical_run(recovery_failure=True)
         results = state["_test_results"]
         self.assertIn(("recover",), events)
+        self.assertNotIn(("restore0",), events)
         self.assertEqual(state["stage"], "RECOVERY_REQUIRED")
         self.assertEqual(results["final_recovery_state"], "RECOVERY_REQUIRED")
         self.assertEqual(results["oracle_suite"], "PASS")
