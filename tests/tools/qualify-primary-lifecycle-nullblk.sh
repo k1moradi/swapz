@@ -149,6 +149,109 @@ mapper_absence_proven() {
 	done
 }
 
+
+# This pathname is not an ownership token. Keep the original configfs inode
+# and check every observable attribute again before any teardown mutation.
+# Configfs cannot provide an atomic compare-and-rmdir operation or an
+# independent creation generation; uncertainty must retain the resource.
+owned_nullblk_config_identity_unchanged() {
+	local observed_identity
+
+	[[ "$CONFIGNAME" =~ ^nullb-swapz-[a-f0-9]{16}$ &&
+	   "$CONFIG" == "$CONFIGFS/$CONFIGNAME" &&
+	   "$INDEX" =~ ^(0|[1-9][0-9]*)$ &&
+	   "$CONFIG_IDENTITY" =~ ^[0-9]+:[0-9]+:[0-9]+$ &&
+	   -d "$CONFIG" && ! -L "$CONFIG" ]] || return 1
+	observed_identity="$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" ||
+		return 1
+	[[ "$observed_identity" == "$CONFIG_IDENTITY" &&
+	   ! -L "$CONFIG/index" && -r "$CONFIG/index" &&
+	   "$(cat "$CONFIG/index" 2>/dev/null)" == "$INDEX" &&
+	   ! -L "$CONFIG/memory_backed" && -r "$CONFIG/memory_backed" &&
+	   "$(cat "$CONFIG/memory_backed" 2>/dev/null)" == 1 &&
+	   ! -L "$CONFIG/size" && -r "$CONFIG/size" &&
+	   "$(cat "$CONFIG/size" 2>/dev/null)" == "$NULLBLK_SIZE_MIB" &&
+	   ! -L "$CONFIG/blocksize" && -r "$CONFIG/blocksize" &&
+	   "$(cat "$CONFIG/blocksize" 2>/dev/null)" == 4096 ]]
+}
+
+owned_nullblk_live_identity_unchanged() {
+	local observed_disk resolved_partition resolved_dev_block
+
+	owned_nullblk_config_identity_unchanged || return 1
+	[[ -r "$CONFIG/power" && ! -L "$CONFIG/power" &&
+	   "$(cat "$CONFIG/power" 2>/dev/null)" == 1 ]] || return 1
+	[[ -n "$DISK" && -n "$PART_NAME" &&
+	   "$DEVNO" =~ ^[0-9]+:[0-9]+$ &&
+	   "$PART_DEVNO" =~ ^[0-9]+:[0-9]+$ &&
+	   "$DEVNO" == "$NULL_MAJOR:$INDEX" &&
+	   "$LOWER" == "/dev/$DISK" &&
+	   "$PARTITION" == "/dev/$PART_NAME" &&
+	   "$PART_SYSFS" == "/sys/block/$DISK/$PART_NAME" ]] || return 1
+	observed_disk="$(swapz_resolve_owned_disk "$CONFIGNAME" "$INDEX" /sys/block 2>/dev/null)" ||
+		return 1
+	[[ "$observed_disk" == "$DISK" &&
+	   -f "/sys/block/$DISK/dev" && ! -L "/sys/block/$DISK/dev" &&
+	   "$(cat "/sys/block/$DISK/dev" 2>/dev/null)" == "$DEVNO" &&
+	   "$(block_node_devno "$LOWER" 2>/dev/null)" == "$LOWER_NODE_DEVNO" &&
+	   "$LOWER_NODE_DEVNO" == "$DEVNO" &&
+	   "$(blockdev --getsize64 "$LOWER" 2>/dev/null)" == $((NULLBLK_SIZE_MIB * 1024 * 1024)) &&
+	   -f "$PART_SYSFS/dev" && ! -L "$PART_SYSFS/dev" &&
+	   "$(cat "$PART_SYSFS/dev" 2>/dev/null)" == "$PART_DEVNO" &&
+	   "$(block_node_devno "$PARTITION" 2>/dev/null)" == "$PARTITION_NODE_DEVNO" &&
+	   "$PARTITION_NODE_DEVNO" == "$PART_DEVNO" ]] || return 1
+	resolved_partition="$(readlink -f "$PART_SYSFS" 2>/dev/null)" ||
+		return 1
+	resolved_dev_block="$(readlink -f "/sys/dev/block/$PART_DEVNO" 2>/dev/null)" ||
+		return 1
+	[[ -n "$resolved_partition" && "$resolved_dev_block" == "$resolved_partition" ]]
+}
+
+# A failed dmsetup lookup is not mapper-absence evidence. If a mapper exists,
+# check the run UUID and exact durable table before allowing any recovery.
+owned_nullblk_mapper_identity_unchanged() {
+	local observed_uuid observed_table expected_table
+
+	if ! dmsetup info "$DMNAME" >/dev/null 2>&1; then
+		mapper_absence_proven
+		return $?
+	fi
+	[[ "$RUN_ID" =~ ^[0-9a-f]{32}$ && "$PART_DEVNO" =~ ^[0-9]+:[0-9]+$ ]] ||
+		return 1
+	observed_uuid="$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+		tr -d '[:space:]')" || return 1
+	[[ "$observed_uuid" == "SWAPZ-PRIMARY-$RUN_ID" ]] || return 1
+	observed_table="$(dmsetup table "$DMNAME" 2>/dev/null)" ||
+		observed_table="$(dmsetup table --inactive "$DMNAME" 2>/dev/null)" ||
+		return 1
+	expected_table="$(sed -n 's/^dm_table=//p' "$RECOVERY_BASE/primary-manifest-$RUN_ID.txt" 2>/dev/null)" ||
+		return 1
+	[[ -n "$expected_table" && "$observed_table" == "$expected_table" &&
+	   "$observed_table" == "0 "*" swapz $PART_DEVNO "* ]]
+}
+
+# Power-off removes sysfs block identities. Recheck those still observable
+# and the pinned configfs identity before removing its directory.
+owned_nullblk_post_power_identity_unchanged() {
+	owned_nullblk_config_identity_unchanged || return 1
+	[[ -r "$CONFIG/power" && ! -L "$CONFIG/power" &&
+	   "$(cat "$CONFIG/power" 2>/dev/null)" == 0 ]] || return 1
+	# On successful power-off both sysfs nodes may disappear. A node that
+	# remains observable must still match the captured device identity.
+	if [[ -e "/sys/block/$DISK/dev" || -L "/sys/block/$DISK/dev" ]]; then
+		[[ -f "/sys/block/$DISK/dev" && ! -L "/sys/block/$DISK/dev" &&
+		   "$(cat "/sys/block/$DISK/dev" 2>/dev/null)" == "$DEVNO" &&
+		   "$(block_node_devno "$LOWER" 2>/dev/null)" == "$LOWER_NODE_DEVNO" ]] ||
+			return 1
+	fi
+	if [[ -e "$PART_SYSFS/dev" || -L "$PART_SYSFS/dev" ]]; then
+		[[ -f "$PART_SYSFS/dev" && ! -L "$PART_SYSFS/dev" &&
+		   "$(cat "$PART_SYSFS/dev" 2>/dev/null)" == "$PART_DEVNO" &&
+		   "$(block_node_devno "$PARTITION" 2>/dev/null)" == "$PARTITION_NODE_DEVNO" ]] ||
+			return 1
+	fi
+}
+
 if [[ $# -ne 2 || $1 != --validated-source ]]; then
 	blocked "expected --validated-source <40-hex-sha>"
 fi
@@ -210,6 +313,7 @@ PART_SYSFS=
 PARTITION=
 PARTUUID=
 PART_DEVNO=
+CONFIG_IDENTITY=
 BY_PARTUUID=
 RUN_ID=
 
@@ -1095,15 +1199,28 @@ cleanup() {
 	trap - EXIT HUP INT TERM
 	set +e
 
-	if [[ -x "$CONTROL" ]]; then
+	# Do not invoke production recovery on a replaced or unobservable lower:
+	# its mapper/module teardown may otherwise mutate another owner's state.
+	if (( OWN_NULL )) &&
+	   { ! owned_nullblk_live_identity_unchanged ||
+	     ! owned_nullblk_mapper_identity_unchanged; }; then
+		QUARANTINE=1
+		note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_or_mapper_identity_uncertain"
+	fi
+
+	if (( OWN_NULL && ! QUARANTINE )) && [[ -x "$CONTROL" ]]; then
 		stage="$(state_stage 2>/dev/null)"
 		if ! mapper_absence_proven ||
 		   [[ -d /sys/module/dm_swapz ]] ||
 		   [[ "$stage" == STARTING || "$stage" == ACTIVE ||
 		      "$stage" == STOPPING || "$stage" == RECOVERY_REQUIRED ||
 		      "$stage" == RECOVERING || "$stage" == RESTORED ]]; then
-			note "RECOVER_PRIMARY_NULLBLK_LIFECYCLE=attempt stage=$stage"
-			if ! timeout --signal=TERM --kill-after=10s 60s \
+			note "RECOVER_PRIMARY_NULLBLK_LIFECYCLE=attempt"
+			if ! owned_nullblk_live_identity_unchanged ||
+			   ! owned_nullblk_mapper_identity_unchanged; then
+				QUARANTINE=1
+				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_or_mapper_identity_uncertain"
+			elif ! timeout --signal=TERM --kill-after=10s 60s \
 				"$CONTROL" primary recover >/dev/null 2>&1; then
 				QUARANTINE=1
 				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=recovery_failed"
@@ -1243,16 +1360,21 @@ PY
 	fi
 
 	if (( OWN_NULL )) && (( ! QUARANTINE )); then
-		if [[ ! "$CONFIGNAME" =~ ^nullb-swapz-[a-f0-9]{16}$ ||
-		      "$CONFIG" != "$CONFIGFS/$CONFIGNAME" ||
-		      ! -d "$CONFIG" || -L "$CONFIG" ]]; then
+		if ! owned_nullblk_live_identity_unchanged ||
+		   ! owned_nullblk_mapper_identity_unchanged ||
+		   ! mapper_absence_proven || [[ -d /sys/module/dm_swapz ]]; then
 			QUARANTINE=1
 			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
-		else
-			echo 0 > "$CONFIG/power" 2>/dev/null || QUARANTINE=1
-			rmdir -- "$CONFIG" 2>/dev/null || QUARANTINE=1
-			(( QUARANTINE )) &&
-				note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
+		elif ! printf '0\n' 2>/dev/null > "$CONFIG/power"; then
+			QUARANTINE=1
+			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
+		elif ! owned_nullblk_post_power_identity_unchanged ||
+		     ! mapper_absence_proven || [[ -d /sys/module/dm_swapz ]]; then
+			QUARANTINE=1
+			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=config_identity_uncertain"
+		elif ! rmdir -- "$CONFIG" 2>/dev/null; then
+			QUARANTINE=1
+			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=nullblk_cleanup_failed"
 		fi
 	fi
 
@@ -1267,7 +1389,7 @@ PY
 
 	if (( UDEV_RULE_CREATED )); then
 		if (( QUARANTINE )); then
-			note "RETAINED_PRIMARY_NULLBLK_UDEV_RULE=$UDEV_RULE"
+			note "RETAINED_PRIMARY_NULLBLK_UDEV_RULE=private"
 		elif [[ -d "$UDEV_RULES_DIR" && ! -L "$UDEV_RULES_DIR" &&
 		        -f "$UDEV_RULE" && ! -L "$UDEV_RULE" &&
 		        "$(stat -Lc '%u' "$UDEV_RULE" 2>/dev/null)" == 0 &&
@@ -1302,7 +1424,7 @@ PY
 	fi
 
 	if (( QUARANTINE )); then
-		note "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=$TEST_BASE config=$CONFIG"
+		note "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private"
 		(( original_rc == 0 )) && original_rc=1
 	fi
 	exit "$original_rc"
@@ -1410,6 +1532,11 @@ CONFIGNAME="nullb-swapz-$TOKEN"
 CONFIG="$CONFIGFS/$CONFIGNAME"
 mkdir -- "$CONFIG" || blocked "cannot allocate owned null_blk config"
 OWN_NULL=1
+CONFIG_IDENTITY="$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" ||
+	fail "cannot capture created null_blk configfs identity"
+[[ "$CONFIG_IDENTITY" =~ ^[0-9]+:[0-9]+:0$ &&
+   -d "$CONFIG" && ! -L "$CONFIG" ]] ||
+	fail "created null_blk configfs owner or type is unproven"
 echo "$NULLBLK_SIZE_MIB" > "$CONFIG/size"
 echo 4096 > "$CONFIG/blocksize"
 echo 1 > "$CONFIG/memory_backed"
