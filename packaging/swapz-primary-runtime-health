@@ -1198,8 +1198,8 @@ EOF
 # probe output, private transaction data, or unbounded journal content.
 log_observer_diagnostic()
 {
-	printf 'SWAPZ_RUNTIME_OBSERVER phase=%s expected=%s observed=%s command=%s command_status=%s identity_mismatch=%s service_state=%s next=%s\n' \
-		"$1" "$2" "$3" "$4" "$5" "${7:-none}" "${8:-not_applicable}" "$6" >&2
+	printf 'SWAPZ_RUNTIME_OBSERVER phase=%s expected=%s observed=%s command=%s command_status=%s identity_mismatch=%s service_state=%s next=%s check=%s\n' \
+		"$1" "$2" "$3" "$4" "$5" "${7:-none}" "${8:-not_applicable}" "$6" "${9:-$1}" >&2
 }
 
 log_runtime_state()
@@ -1228,6 +1228,12 @@ log_runtime_state()
 	case ",$failure_reasons," in
 	*,mapper_uuid_invalid,*|*,mapper_uuid_not_bound_to_active_run,*)
 		log_observer_diagnostic mapper_identity run_bound_uuid mismatched_uuid dmsetup_info 0 inspect_dmsetup_info_read_only bound observed
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,first_terminal_error,*)
+		# Only a validated signed kernel errno may enter public diagnostics.
+		log_observer_diagnostic target_terminal first_error_zero "$first_error" dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed first_error
 		;;
 	esac
 	case ",$failure_reasons," in

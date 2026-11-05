@@ -7417,7 +7417,11 @@ primary mapper partition type, priority -1 and DM-derived usable capacity
 path-free journal diagnostics,
 configured backing-path disappearance as a hard failure, monitoring-command
 failure as degraded evidence, low-noise unchanged polling, kernel/systemd
-telemetry, and sustained GC pressure without progress. A nominally active
+telemetry, and sustained GC pressure without progress. A confirmed nonzero
+canonical DM `error` must produce a bounded `target_terminal` / `first_error`
+phase/check/expected/observed/command-status diagnostic containing the signed
+kernel errno and a read-only next step; missing or malformed terminal errors
+must never be reported as confirmed first errors. A nominally active
 oneshot mapper must have `SubState=exited` and an active passive swap unit
 must have `SubState=active`; synthetic contradictory substates must fail even
 with successful `Result`, while a failed substate probe must degrade with its

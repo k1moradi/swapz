@@ -3616,6 +3616,7 @@ class RuntimeHealthTests(unittest.TestCase):
                 self.assertIn("target_failure_state_invalid", malformed.stderr)
                 self.assertNotIn("failures=target_failed", malformed.stderr)
                 self.assertNotIn("failures=first_terminal_error", malformed.stderr)
+                self.assertNotIn("phase=target_terminal ", malformed.stderr)
 
         env = self.env.copy()
         env["MOCK_DM_STATUS"] = valid_status.replace("failed=0", "failed=1")
@@ -3624,6 +3625,7 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", failed.stderr)
         self.assertIn("failures=target_failed", failed.stderr)
         self.assertIn("failed=1", failed.stderr)
+        self.assertNotIn("phase=target_terminal ", failed.stderr)
 
         for valid_error in ("-5", "-2147483648", "2147483647"):
             with self.subTest(valid_error=valid_error):
@@ -3635,6 +3637,14 @@ class RuntimeHealthTests(unittest.TestCase):
                 self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", terminal_error.stderr)
                 self.assertIn("failures=first_terminal_error", terminal_error.stderr)
                 self.assertIn(f"first_error={valid_error}", terminal_error.stderr)
+                self.assertIn(
+                    f"phase=target_terminal expected=first_error_zero "
+                    f"observed={valid_error} command=dmsetup_status "
+                    "command_status=0 identity_mismatch=none "
+                    "service_state=observed "
+                    "next=inspect_dmsetup_status_read_only check=first_error",
+                    terminal_error.stderr,
+                )
 
     def test_mapper_device_alias_requires_the_expected_sysfs_dm_name(self) -> None:
         # A substituted mapper alias can match raw backing swap accounting,

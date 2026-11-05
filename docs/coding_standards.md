@@ -3073,9 +3073,12 @@ different type, priority or capacity is a definite FAIL even when a later
 inventory recheck reports an apparently healthy row. Compare each alias using
 its captured major:minor while
 permitting verified unrelated swapfiles and unrelated resolved block devices.
-Emit bounded, path-free observer phase, expected state, classified observed
+Emit bounded, path-free observer phase/check, expected state, classified observed
 state, original probe exit status and a read-only next check only when the
-reported state changes; never promote missing evidence to HEALTHY. Reject
+reported state changes; never promote missing evidence to HEALTHY. Confirmed
+nonzero canonical DM `error` must have a structured `target_terminal` / `first_error`
+diagnostic retaining the validated signed errno and original status-probe exit.
+Missing or malformed error telemetry must not fabricate that attribution. Reject
 duplicate swap sources and impossible Used-greater-than-Size accounting as
 malformed inventory. Because alias identity is resolved after the proc snapshot,
 a HEALTHY or inactive conclusion must re-read the normalized inventory and
