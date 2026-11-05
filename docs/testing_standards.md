@@ -3807,9 +3807,15 @@ authenticated current-run Actions job census and require exactly one completed,
 successful job for native-rootless, Make interface, each of the three focused
 rootless matrix members, and repository policy, plus its own still-running
 conclusion job. Match every job to the checked-out source SHA, run ID and
-attempt. A missing, repeated, cancelled, skipped, failed, stale, malformed or
-additional job, an unavailable Actions API, or an incomplete response is
-BLOCKED even when a subset of other jobs is green. A bounded failure-only
+attempt. Query the attempt-specific Actions jobs endpoint rather than relying
+on the run-level endpoint's default latest-attempt filtering. A missing,
+repeated, cancelled, skipped, failed, stale, malformed or additional job, an
+unavailable Actions API, or an incomplete response is BLOCKED even when a
+subset of other jobs is green. A partial failed-job rerun is therefore
+incomplete qualification evidence: after a genuinely transient cancellation
+or infrastructure failure, rerun the full required workflow attempt for the
+same exact SHA; a reproducible test failure requires a fixing commit and must
+not be converted to PASS by repeated retries. A bounded failure-only
 refusal identifies the failed gate, required proof, observed classification
 and corrective action, without exposing credentials, host paths or unbounded
 external text. Keep the native-rootless aggregate required even if the

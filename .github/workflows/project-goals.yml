@@ -429,7 +429,8 @@ jobs:
                      "checkout-the-exact-published-source")
 
           url = (f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com').rstrip('/')}"
-                 f"/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100")
+                 f"/repos/{repository}/actions/runs/{run_id}/attempts/"
+                 f"{run_attempt}/jobs?per_page=100")
           request = urllib.request.Request(url, headers={
               "Authorization": f"Bearer {token}",
               "Accept": "application/vnd.github+json",
@@ -442,8 +443,8 @@ jobs:
                   raise ValueError("oversized manifest")
               manifest = json.loads(payload)
           except (OSError, ValueError, UnicodeError, TypeError):
-              refuse("job-census-api", "bounded-authenticated-current-run-job-manifest",
-                     "unavailable-or-invalid", "restore-Actions-read-and-recheck-current-run")
+              refuse("job-census-api", "bounded-authenticated-current-attempt-job-manifest",
+                     "unavailable-or-invalid", "restore-Actions-read-and-recheck-current-attempt")
 
           prefixes = (
               "Native rootless", "Make interface", "Rootless source-contract",

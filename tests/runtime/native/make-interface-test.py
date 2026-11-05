@@ -1745,17 +1745,23 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                 "total_count": len(rows) if total_count is None else total_count,
                 "jobs": rows,
             }).encode()
-            response = (mock.patch("urllib.request.urlopen",
-                                   side_effect=OSError(api_error))
-                        if api_error is not None else
-                        mock.patch("urllib.request.urlopen",
-                                   return_value=io.BytesIO(payload)))
+            requested_urls = []
+
+            def open_manifest(request, timeout):
+                self.assertEqual(timeout, 10)
+                requested_urls.append(request.full_url)
+                if api_error is not None:
+                    raise OSError(api_error)
+                return io.BytesIO(payload)
+
             with mock.patch.dict(os.environ, environment), \
                  mock.patch(
                      "subprocess.run",
                      return_value=subprocess.CompletedProcess(
                          [], 0, stdout=checkout_sha or source_sha)), \
-                 response, contextlib.redirect_stdout(io.StringIO()) as output, \
+                 mock.patch("urllib.request.urlopen",
+                            side_effect=open_manifest), \
+                 contextlib.redirect_stdout(io.StringIO()) as output, \
                  contextlib.redirect_stderr(io.StringIO()) as errors:
                 try:
                     exec(compile(self.audit_script, "<exact-SHA CI census>",
@@ -1763,11 +1769,16 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                     exit_code = 0
                 except SystemExit as error:
                     exit_code = error.code
-            return exit_code, output.getvalue(), errors.getvalue()
+            return (exit_code, output.getvalue(), errors.getvalue(),
+                    requested_urls)
 
-        code, output, errors = census(passing_jobs)
+        code, output, errors, requested_urls = census(passing_jobs)
         self.assertEqual((code, output, errors),
                          (0, f"EXACT_SHA_ROOTLESS_CI_COMPLETE={source_sha}\n", ""))
+        self.assertEqual(requested_urls, [
+            "https://api.github.com/repos/fixture/swapz/actions/runs/"
+            "12345/attempts/1/jobs?per_page=100",
+        ])
 
         for scenario in (
                 "missing", "missing-matrix-member", "extra",
@@ -1804,7 +1815,7 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                     total_count = 8
                 else:
                     jobs[-1]["status"] = "completed"
-                code, output, errors = census(
+                code, output, errors, requested_urls = census(
                     jobs, total_count=total_count, checkout_sha=checkout_sha)
                 self.assertNotEqual(code, 0)
                 self.assertEqual(output, "")
@@ -1813,14 +1824,22 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                     self.assertIn(field, errors)
                 self.assertNotIn("fixture-private-token", errors)
                 self.assertLessEqual(len(errors.strip()), 255)
+                self.assertEqual(requested_urls, [
+                    "https://api.github.com/repos/fixture/swapz/actions/runs/"
+                    "12345/attempts/1/jobs?per_page=100",
+                ])
 
-        code, output, errors = census(
+        code, output, errors, requested_urls = census(
             passing_jobs, api_error="token=fixture-private-token /home/private")
         self.assertNotEqual(code, 0)
         self.assertEqual(output, "")
         self.assertIn("gate=job-census-api", errors)
         self.assertNotIn("fixture-private-token", errors)
         self.assertNotIn("/home/private", errors)
+        self.assertEqual(requested_urls, [
+            "https://api.github.com/repos/fixture/swapz/actions/runs/"
+            "12345/attempts/1/jobs?per_page=100",
+        ])
 
 class CiFailureDiagnosticContract(unittest.TestCase):
     """Synthetic rootless diagnostics must never misrepresent CI outcomes."""
