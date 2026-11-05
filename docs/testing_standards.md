@@ -3305,6 +3305,17 @@ never dereferences freed storage. Rootless success does not qualify the
 loaded dm-io callback-once assumption or actual upper BIO lifetime.
 
 
+The remaining non-oldest-snapshot boundary must be a production-linked native
+regression: keep one test-only owner pin across an actual partial `-EIO` lower
+notification and a duplicate finalizer call, while a younger run is paused in
+separate storage. Damage a later transaction but not the oldest sequence.
+Require zero unauthenticated completed-block credit, no mapping or new
+generation, no second upper completion, unchanged younger reservation and
+the original `-EIO` rather than cleanup `-ESTALE`. Fail-only diagnostics must
+give phase, both sequences, expected/observed blocks and completion owners,
+authoritative generations and numeric errno. This does not claim loaded
+callback-once or post-release callback evidence.
+
 Source contracts for the immutable-run split must assert semantic ownership,
 not retired helper names. The prepare function may test whether a synchronous
 write callback is configured, but it must not invoke that callback. Lower I/O

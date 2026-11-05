@@ -1709,6 +1709,21 @@ int swapz_engine_abort_batched_run_tail(struct swapz_engine *e,
 	return swapz_bulk_abort_tail(e, run, run->extent_count);
 }
 
+
+/* Physical completion credit belongs to the fully authenticated run, not
+ * an earlier valid snapshot or a younger still-paused successor. */
+static void swapz_account_authenticated_batched_completion(
+				     struct swapz_engine *engine,
+				     const struct swapz_io_run *run,
+				     swapz_u16 completed_blocks, int lower_succeeded)
+{
+	engine->completed_blocks += completed_blocks;
+	if (lower_succeeded) {
+		engine->bulk_writes++;
+		engine->bulk_extents += run->extent_count;
+	}
+}
+
 int swapz_engine_complete_batched_run(struct swapz_engine *e,
 				    const struct swapz_io_run *run,
 				    swapz_u16 completed_blocks, int io_error,
@@ -1746,15 +1761,16 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 	 * Physical completion is not authority publication: the failure path
 	 * still quarantines the entire reserved run before any map changes.
 	 */
-	e->completed_blocks += completed_blocks;
 	if (error) {
 		int cleanup = swapz_bulk_abort(e, run, 0);
 
-		return cleanup ? cleanup : error;
+		/* A damaged snapshot cannot consume lower-byte credit. */
+		if (!cleanup)
+			swapz_account_authenticated_batched_completion(
+				e, run, completed_blocks, 0);
+		/* The original lower failure outranks secondary cleanup errors. */
+		return error;
 	}
-
-	e->bulk_writes++;
-	e->bulk_extents += run->extent_count;
 	publish_start = swapz_engine_now_ns();
 	for (i = 0; i < run->extent_count; ++i) {
 		const struct swapz_tx *tx = &run->txs[i];
@@ -1769,6 +1785,9 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 			e->publish_wall_ns += swapz_engine_elapsed_ns(
 				publish_start, publish_now);
 			cleanup = swapz_bulk_abort(e, run, i);
+			if (!cleanup)
+				swapz_account_authenticated_batched_completion(
+					e, run, completed_blocks, 1);
 			return cleanup ? cleanup : error;
 		}
 		/*
@@ -1796,12 +1815,18 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 		if (error) {
 			int cleanup = swapz_bulk_abort(e, run, i + 1);
 
+			if (!cleanup)
+				swapz_account_authenticated_batched_completion(
+					e, run, completed_blocks, 1);
 			return cleanup ? cleanup : error;
 		}
 		*committed_pages += run->takes[i];
 		if (run->raw[i])
 			raw_entries++;
 	}
+	/* All snapshots were authenticated, including any aborted replay tail. */
+	swapz_account_authenticated_batched_completion(e, run,
+						completed_blocks, 1);
 	if (*committed_pages != run->page_count)
 		return -EUCLEAN;
 	e->bulk_raw_entries += raw_entries;

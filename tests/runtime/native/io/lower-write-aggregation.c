@@ -1691,10 +1691,244 @@ static int test_stale_lower_completion_keeps_successor_reserved(void)
 	return 0;
 }
 
+
+/*
+ * The oldest sequence alone does not authenticate every paused snapshot.
+ * Keep the predecessor's test-only reference until after a repeated engine
+ * finalizer; this is NOT a second real dm_io callback or a post-release access.
+ */
+static int check_damaged_snapshot_phase(
+				   const char *phase, int condition,
+				   const struct swapz_io_run *predecessor,
+				   const struct swapz_io_run *successor,
+				   const struct synthetic_lower_write_owner *owner,
+				   swapz_u16 reported_blocks,
+				   swapz_u32 expected_credited_blocks,
+				   swapz_u32 expected_oldest_sequence,
+				   swapz_u8 expected_pending,
+				   unsigned int expected_references,
+				   unsigned int expected_final_completions,
+				   int expected_errno, int observed_errno)
+{
+	unsigned int visible = 0, changed_generations = 0;
+	unsigned int index;
+
+	for (index = 0; index < 24; ++index) {
+		visible += maps[index].valid != 0;
+		changed_generations += maps[index].generation != 0;
+	}
+	if (condition && observed_errno == expected_errno &&
+	    e.completed_blocks == expected_credited_blocks &&
+	    a.batch_first_sequence == expected_oldest_sequence &&
+	    a.batch_pending == expected_pending &&
+	    owner->references == expected_references &&
+	    owner->upper_final_completions == expected_final_completions &&
+	    !owner->upper_success_completions && !published_calls &&
+	    !visible && !changed_generations && !e.bulk_writes &&
+	    !e.bulk_extents)
+		return 0;
+
+	fprintf(stderr,
+		"FAIL: lower-write-aggregation scenario=damaged-snapshot "
+		"phase=%s condition=%d predecessor_sequence=%u "
+		"successor_sequence=%u oldest_sequence_expected=%u "
+		"oldest_sequence_observed=%u predecessor_blocks=%u "
+		"successor_blocks=%u reported_blocks=%u "
+		"credited_blocks_expected=%u credited_blocks_observed=%u "
+		"pending_expected=%u pending_observed=%u "
+		"references_expected=%u references_observed=%u "
+		"upper_accepted=%u upper_final_expected=%u "
+		"upper_final_observed=%u upper_success_observed=%u "
+		"publication_observed=%u generation_expected=0 "
+		"predecessor_generation_observed=%u successor_generation_observed=%u "
+		"changed_generations_observed=%u visible_observed=%u "
+		"bulk_writes_observed=%u bulk_extents_observed=%u "
+		"errno_expected=%d errno_observed=%d original_lower_errno=%d\n",
+		phase, condition, predecessor->txs[0].sequence,
+		successor->txs[0].sequence, expected_oldest_sequence,
+		a.batch_first_sequence, predecessor->blocks, successor->blocks,
+		reported_blocks, expected_credited_blocks, e.completed_blocks,
+		expected_pending, a.batch_pending, expected_references,
+		owner->references, owner->accepted_writes,
+		expected_final_completions, owner->upper_final_completions,
+		owner->upper_success_completions, published_calls,
+		maps[0].generation, maps[16].generation,
+		changed_generations, visible, e.bulk_writes, e.bulk_extents,
+		expected_errno, observed_errno, owner->original_lower_errno);
+	return 1;
+}
+
+static int test_damaged_nonoldest_snapshot_preserves_lower_ownership(void)
+{
+	static struct swapz_tx successor_transactions[SWAPZ_MAX_RECORDS];
+	struct swapz_io_run predecessor = { .bytes = bulk, .txs = bulk_txs };
+	struct swapz_io_run successor = {
+		.bytes = (swapz_u8 *)raw_payloads,
+		.txs = successor_transactions,
+	};
+	struct synthetic_lower_write_owner owner = {};
+	struct swapz_tx next_transaction;
+	swapz_u8 predecessor_prepared = 0, successor_prepared = 0;
+	swapz_u8 published = 99, repeated_published = 99;
+	swapz_u16 reported_blocks = 0;
+	swapz_u32 saved_next_block, saved_abandoned;
+	swapz_u32 saved_generation, first_sequence;
+	swapz_u32 next_logical_page = 100;
+	unsigned int index;
+	int error, lower_error;
+
+	error = setup();
+	if (error) {
+		fprintf(stderr, "FAIL: lower-write-aggregation "
+			"scenario=damaged-snapshot phase=setup errno_expected=0 "
+			"errno_observed=%d\n", error);
+		return 1;
+	}
+	error = swapz_engine_prepare_batched_run(
+		&e, pages, 16, &predecessor, &predecessor_prepared, 0);
+	owner.accepted_writes = predecessor_prepared;
+	owner.references = 3; /* Upper owner, lower notification, test-only pin. */
+	first_sequence = predecessor.txs[0].sequence;
+	if (check_damaged_snapshot_phase("predecessor-paused",
+			error == 0 && predecessor_prepared &&
+			predecessor.extent_count >= 2 && predecessor.blocks > 1 &&
+			!a.in_flight, &predecessor, &successor, &owner, 0, 0,
+			first_sequence, predecessor.extent_count, 3, 0, 0, error))
+		return 1;
+
+	partial_fail_on_run = 1;
+	write_sealed(NULL, predecessor_prepared);
+	lower_error = write_run(NULL, predecessor.start_block,
+				predecessor.blocks, predecessor.bytes,
+				&reported_blocks);
+	owner.original_lower_errno = lower_error;
+	owner.references--; /* The sole real lower notification has returned. */
+	if (check_damaged_snapshot_phase("lower-notified",
+			lower_error == -EIO && reported_blocks > 0 &&
+			reported_blocks < predecessor.blocks && run_calls == 1 &&
+			lower_written_bytes ==
+				(unsigned long long)reported_blocks * SWAPZ_BLOCK_BYTES &&
+			!maps_visible_during_run && !ownership_violation &&
+			!sealed_missing_before_lower,
+			&predecessor, &successor, &owner, reported_blocks, 0,
+			first_sequence, predecessor.extent_count, 2, 0,
+			-EIO, lower_error))
+		return 1;
+
+	/* The lower result is pending ordered publication, not buffer reuse.
+	 * A successor stages disjoint bytes while sharing paused authority. */
+	error = swapz_engine_prepare_batched_run(
+		&e, pages + 16, 8, &successor, &successor_prepared, 0);
+	owner.accepted_writes += successor_prepared;
+	owner.references++; /* Unsubmitted successor's accepted upper owner. */
+	saved_next_block = a.next_block;
+	saved_abandoned = a.abandoned_blocks;
+	if (check_damaged_snapshot_phase("successor-paused",
+			error == 0 && successor_prepared && successor.extent_count &&
+			successor.start_block >=
+				predecessor.start_block + predecessor.blocks &&
+			successor.txs[0].sequence ==
+				predecessor.txs[predecessor.extent_count - 1U].sequence + 1U &&
+			a.batch_consumed == 0,
+			&predecessor, &successor, &owner, reported_blocks, 0,
+			first_sequence,
+			predecessor.extent_count + successor.extent_count,
+			3, 0, 0, error))
+		return 1;
+
+	/* Leave the oldest sequence and its CRC valid; corrupt only its follower. */
+	saved_generation = predecessor.txs[1].records[0].generation;
+	predecessor.txs[1].records[0].generation++;
+	if (check_damaged_snapshot_phase("snapshot-damaged",
+			predecessor.txs[0].sequence == a.batch_first_sequence &&
+			predecessor.txs[1].records[0].generation != saved_generation,
+			&predecessor, &successor, &owner, reported_blocks, 0,
+			first_sequence,
+			predecessor.extent_count + successor.extent_count,
+			3, 0, 0, 0))
+		return 1;
+
+	error = swapz_engine_complete_batched_run(
+		&e, &predecessor, reported_blocks, lower_error, &published);
+	owner.upper_final_completions += predecessor_prepared;
+	owner.references--; /* Predecessor upper owner finishes once with EIO. */
+	if (check_damaged_snapshot_phase("failed-finalization",
+			error == lower_error && published == 0 &&
+			!a.in_flight && !a.batch_replaying &&
+			a.batch_consumed == 1 && a.next_block == saved_next_block &&
+			a.abandoned_blocks ==
+				saved_abandoned + predecessor.txs[0].extent_blocks,
+			&predecessor, &successor, &owner, reported_blocks, 0,
+			predecessor.txs[1].sequence,
+			predecessor.extent_count + successor.extent_count - 1U,
+			2, predecessor_prepared, -EIO, error))
+		return 1;
+
+	/* The synthetic repeat is legal ONLY because the test pin remains. */
+	error = swapz_engine_complete_batched_run(
+		&e, &predecessor, reported_blocks, lower_error,
+		&repeated_published);
+	if (check_damaged_snapshot_phase("pinned-duplicate",
+			error == lower_error && repeated_published == 0 &&
+			a.next_block == saved_next_block &&
+			a.abandoned_blocks ==
+				saved_abandoned + predecessor.txs[0].extent_blocks,
+			&predecessor, &successor, &owner, reported_blocks, 0,
+			predecessor.txs[1].sequence,
+			predecessor.extent_count + successor.extent_count - 1U,
+			2, predecessor_prepared, -EIO, error))
+		return 1;
+
+	/* Controlled fixture cleanup restores the exact staged identity.
+	 * No failed completion may consume or release the successor's reserve. */
+	predecessor.txs[1].records[0].generation = saved_generation;
+	for (index = 1; index < predecessor.extent_count; ++index) {
+		error = swapz_batch_resume(&a, &predecessor.txs[index]);
+		if (!error)
+			error = swapz_abort(&a, &a.active_tx);
+		if (error)
+			return check_damaged_snapshot_phase("drain-predecessor", 0,
+				&predecessor, &successor, &owner, reported_blocks,
+				0, a.batch_first_sequence, a.batch_pending,
+				2, predecessor_prepared, 0, error);
+	}
+	for (index = 0; index < successor.extent_count; ++index) {
+		error = swapz_batch_resume(&a, &successor.txs[index]);
+		if (!error)
+			error = swapz_abort(&a, &a.active_tx);
+		if (error)
+			return check_damaged_snapshot_phase("drain-successor", 0,
+				&predecessor, &successor, &owner, reported_blocks,
+				0, a.batch_first_sequence, a.batch_pending,
+				2, predecessor_prepared, 0, error);
+	}
+	owner.upper_final_completions += successor_prepared;
+	owner.references--; /* Successor upper owner is now complete. */
+	owner.references--; /* The pinned predecessor is finally released. */
+	error = swapz_stage(&a, &next_logical_page, 1, 1, &next_transaction);
+	if (check_damaged_snapshot_phase("new-reservation",
+			error == 0 && next_transaction.start_block >= saved_next_block &&
+			next_transaction.start_block >=
+				successor.start_block + successor.blocks &&
+			a.abandoned_blocks > saved_abandoned &&
+			!a.batch_pending && !a.batch_replaying,
+			&predecessor, &successor, &owner, reported_blocks, 0,
+			a.batch_first_sequence, 0, 0, owner.accepted_writes, 0, error))
+		return 1;
+	error = swapz_abort(&a, &next_transaction);
+	if (check_damaged_snapshot_phase("reservation-released",
+			error == 0 && !a.in_flight && !a.batch_pending,
+			&predecessor, &successor, &owner, reported_blocks, 0,
+			a.batch_first_sequence, 0, 0, owner.accepted_writes, 0, error))
+		return 1;
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
 
+	CHECK(test_damaged_nonoldest_snapshot_preserves_lower_ownership() == 0); passed++;
 	CHECK(test_stale_lower_completion_keeps_successor_reserved() == 0); passed++;
 	CHECK(test_duplicate_lower_completion_accounted_once() == 0); passed++;
 	CHECK(test_overcomplete_failed_wrapper_preserves_lower_errno() == 0); passed++;

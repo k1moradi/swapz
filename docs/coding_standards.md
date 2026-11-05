@@ -1978,6 +1978,17 @@ depend on `struct bio`. A future async target may reuse a run buffer only after
 its lower completion has been finalized and every paused transaction has been
 published or aborted.
 
+A matching oldest sequence is necessary but not full snapshot ownership:
+a damaged later transaction may fail authentication after the first has passed.
+Credit lower-completed block, successful-run and extent counters only after
+EVERY transaction in that run has authenticated through ordered resume and
+finish or abort. Failed lower I/O may credit a credible torn prefix only after
+all its snapshots have been successfully quarantined; failed cleanup credits
+nothing, preserves every still-reserved younger run, and must never replace
+the original lower errno with a secondary snapshot/cleanup error. A physically
+completed run with an authenticated replay that later fails payload validation
+still contributes its actual lower-completed blocks.
+
 Completion accounting is a one-shot owner operation, not an idempotent counter
 increment. Before counting credible lower-completed blocks or consuming any
 paused snapshot, the portable completion entry point must prove that its run
