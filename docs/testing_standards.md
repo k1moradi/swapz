@@ -1546,7 +1546,10 @@ engine-rotation regression must model the production survivor-list ordering
 `compressed -> RAW -> compressed...`: queue and publish the leading compressed
 survivor when the following RAW member forces a GC flush, then inject the RAW
 source-read `-EIO` before any destination reservation for that RAW member. The
-failed read must perform no successful lower read or write, consume no
+fault must enter through the same standalone production-shaped RAW relocation
+helper used by the successful retry rather than calling the lower-read shim
+directly, so the regression proves read-before-stage ordering on the failure
+path. The failed read must perform no successful lower read or write, consume no
 destination blocks, retain the published prefix without a second generation
 increment, and preserve the RAW mapping plus all still-authoritative compressed
 source maps. Retry must use the same authenticated victim/destination ownership

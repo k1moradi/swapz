@@ -1176,9 +1176,10 @@ static int test_gc_read_eio_after_published_prefix_resume(void)
 
 	lower_reads_before = lower_reads;
 	lower_writes_before = lower_writes;
+	/* Enter through the standalone production-shaped RAW relocation path so
+	 * this fault proves source READ failure returns before destination stage. */
 	fail_read = 1;
-	original_error = lower_read(
-		NULL, original_raw.start_block, 1U, raw_readback);
+	original_error = relocate_raw_page(8U);
 	if (original_error != -EIO || fail_read ||
 	    lower_reads != lower_reads_before ||
 	    lower_writes != lower_writes_before || !a.gc_allocation ||
