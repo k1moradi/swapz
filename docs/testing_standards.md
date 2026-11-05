@@ -3960,7 +3960,9 @@ must first reproduce the original nonempty-string negation failure for both
 zero and one, then execute the extracted production cleanup with a real
 stopped timeout child and checked parent/child start-time identities. Confirm
 pidfd SIGCONT and bounded direct-child/session cleanup for zero; for one,
-confirm no nested signal or timeout termination, a live foreign process
+record the verified stopped state before cleanup and confirm no nested signal
+or explicit timeout termination (the bounded timeout may later exit naturally),
+a live foreign process
 survives, and both uncertain resources remain. Inject identity-bound wait
 and SIGCONT failures to verify one bounded attempted-versus-skipped diagnostic
 and that the original EXIT/signal status wins over subsequent cleanup failure.

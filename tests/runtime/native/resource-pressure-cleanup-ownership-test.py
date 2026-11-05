@@ -163,6 +163,9 @@ PAIR_CGROUP_PROCESS_IDENTITY="$(capture_nested_child_identity \
     "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" "$PAIR_PROCESS_IDENTITY")" || exit 44
 wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
     "$PAIR_PROCESS_IDENTITY" "$PAIR_CGROUP_PROCESS_IDENTITY" || exit 45
+# Keep the verified stopped-state proof across the bounded outer timeout;
+# process disappearance after cleanup is not proof that SIGCONT was sent.
+printf '%s\n' verified-stopped > "$SESSION/../nested-stopped"
 '''
 
     def test_nested_resume_old_string_guard_reproduction_and_numeric_contract(self):
@@ -251,11 +254,11 @@ stop_direct_owned_child() {
         self.assertFalse((self.root / "unexpected-outer-stop").exists())
         self.assertIsNone(foreign.poll(), "foreign member must not be terminated")
         self.assertEqual(self.cgroup_kill.read_text(encoding="ascii"), "untouched\n")
-        nested_pid = int((self.session / "pair.ready").read_text(
-            encoding="ascii").removeprefix("pid=").strip())
-        nested_stat = Path(f"/proc/{nested_pid}/stat").read_text(
-            encoding="ascii").rsplit(") ", 1)[1].split()
-        self.assertEqual(nested_stat[0], "T", "uncertain child must remain stopped")
+        self.assertEqual((self.root / "nested-stopped").read_text(
+            encoding="ascii"), "verified-stopped\n")
+        # The outer timeout may reap its child after the fixture exits.
+        # The verified stop and absent SIGCONT markers are the stable proof.
+        self.assertFalse((self.root / "nested-resumed").exists())
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
     def test_nested_resume_uncertainty_without_prior_retention_is_diagnostic(self):
