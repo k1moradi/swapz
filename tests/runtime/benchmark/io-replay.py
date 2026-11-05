@@ -2053,8 +2053,8 @@ def replay(args):
                             # Never include Python byte-oracle checking in the
                             # individual I/O latency measurement. Still fail the
                             # operation BEFORE the wave and buffer slot can advance.
-                            operation = ("WRITE" if item["op"] == "W" else "READ")
                             if count != PAGE:
+                                operation = ("WRITE" if item["op"] == "W" else "READ")
                                 raise OSError(
                                     f"short timed {operation} logical I/O "
                                     f"(expected {PAGE} bytes, observed {count})")
