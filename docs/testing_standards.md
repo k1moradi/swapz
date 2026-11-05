@@ -2257,6 +2257,26 @@ typed device label. A v1 numerical PASS is sealed as BLOCKED rather than
 promoted. Host lower-WRITE reduction is not a direct NAND endurance/wear
 measurement and must not be reported as one.
 
+The independent physical evidence audit must classify missing, stale, screened,
+excluded, malformed or otherwise unusable evidence as BLOCKED, not infer a
+measured failure from an incomplete evaluator decision or from false checks
+attached to an unauthenticated cohort. A FAIL requires either a producer's
+terminal failure authenticated against the exact source, host boot, physical
+arm chronology and prospective pair identity, or a complete accepted cohort
+with a coherent measured failure decision. A failing preflight or an unknown
+measurement provenance remains BLOCKED even when an original arm says FAIL.
+Check every attempted index, duplicate pair/run identifier, exact counterbalanced
+raw/swapz temporal order, source and admitted-target binding; retain excluded
+attempts rather than filling them with replacements. The audit must retain the
+first failing cohort/pair/arm, required versus attempted/accepted pair counts,
+evidence class and validated source SHA/target PARTUUID without printing private
+host paths or unsanitized producer errors. The original producer stage, error
+and source artifacts remain immutable; diagnostic redaction must never erase
+them. Rootless synthetic fixtures test these dispositions and must never be
+used as authenticated physical measurements. A qualifying already-sealed
+artifact with verified digests must be reused rather than triggering a
+redundant physical campaign.
+
 
 ## Report contract
 
