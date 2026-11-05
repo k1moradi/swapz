@@ -3383,8 +3383,8 @@ class RuntimeHealthTests(unittest.TestCase):
         # A plausible partial response followed by an error previously passed,
         # including through the old dmsetup info -> awk pipeline.
         for variable, phase, exit_code, verdict, reason in (
-            ("MOCK_DM_INFO_EXIT_CODE", "mapper_info", "17", 1,
-             "mapper_uuid_not_bound_to_active_run"),
+            ("MOCK_DM_INFO_EXIT_CODE", "mapper_info", "17", 2,
+             "mapper_uuid_unavailable"),
             ("MOCK_DM_TABLE_EXIT_CODE", "mapper_table", "18", 2,
              "mapper_table_unavailable"),
             ("MOCK_DM_STATUS_EXIT_CODE", "mapper_status", "19", 2,
@@ -3400,6 +3400,21 @@ class RuntimeHealthTests(unittest.TestCase):
                 self.assertIn(f"phase={phase} ", observed.stderr)
                 self.assertIn(f"command_status={exit_code} ", observed.stderr)
                 self.assertIn("next=inspect_dmsetup_", observed.stderr)
+                if variable == "MOCK_DM_INFO_EXIT_CODE":
+                    self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+                    self.assertNotIn("mapper_uuid_not_bound_to_active_run", observed.stderr)
+
+    def test_empty_dm_info_is_incomplete_not_identity_failure(self) -> None:
+        env = self.env.copy()
+        env["MOCK_DM_UUID"] = " "
+        observed = self.run_helper("once", env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", observed.stderr)
+        self.assertIn("mapper_uuid_unavailable", observed.stderr)
+        self.assertNotIn("mapper_uuid_not_bound_to_active_run", observed.stderr)
+        self.assertIn("phase=mapper_info expected=run_bound_uuid observed=missing_uuid", observed.stderr)
+        self.assertIn("command_status=0", observed.stderr)
+        self.assertIn("next=inspect_dmsetup_info_read_only", observed.stderr)
 
     def test_extra_raw_backing_swap_row_fails_runtime_health(self) -> None:
         # The expected mapper row cannot hide an active selected raw partition.
@@ -3610,7 +3625,6 @@ class RuntimeHealthTests(unittest.TestCase):
         )
         for malformed in (
             valid_status + "\n" + valid_status.replace("failed=0", "failed=1"),
-            valid_status.replace("swapz", "linear", 1),
             valid_status.replace("failed=0", "failed=0 failed=1"),
             valid_status.replace("error=0", "error=0 error=-5"),
             valid_status.replace("error=0", "error=0=corrupt"),
@@ -4278,8 +4292,37 @@ class RuntimeHealthTests(unittest.TestCase):
             "0 216641536 swapz", "0 216641528 swapz", 1
         )
         observed = self.run_helper("once", env)
-        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertEqual(observed.returncode, 1, observed.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
         self.assertIn("mapper_status_geometry_invalid", observed.stderr)
+        self.assertIn("phase=mapper_status_geometry expected=matching_dm_table_geometry", observed.stderr)
+        self.assertIn("observed=contradictory_geometry command=dmsetup_status command_status=0", observed.stderr)
+        self.assertIn("next=inspect_dmsetup_table_and_status_read_only", observed.stderr)
+
+    def test_complete_contradictory_dm_status_is_definite_failure(self) -> None:
+        valid_status = (
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=2 "
+            "gc_destination_advances=0 window_gc_pressure=0"
+        )
+        for header, reason, phase in (
+            ("1 216641536 swapz", "mapper_status_geometry_invalid", "mapper_status_geometry"),
+            ("0 0 swapz", "mapper_status_geometry_invalid", "mapper_status_geometry"),
+            ("0 216641536 linear", "mapper_status_target_invalid", "mapper_status_target"),
+        ):
+            with self.subTest(header=header):
+                env = self.env.copy()
+                env["MOCK_DM_STATUS"] = valid_status.replace("0 216641536 swapz", header, 1)
+                observed = self.run_helper("once", env)
+                self.assertEqual(observed.returncode, 1, observed.stderr)
+                self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", observed.stderr)
+                self.assertIn(reason, observed.stderr)
+                self.assertIn(f"phase={phase} expected=", observed.stderr)
+                self.assertIn("command=dmsetup_status command_status=0", observed.stderr)
+                self.assertIn("next=inspect_dmsetup_", observed.stderr)
 
     def test_missing_dm_status_is_degraded_not_terminal_failure(self) -> None:
         env = self.env.copy()

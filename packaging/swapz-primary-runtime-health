@@ -807,12 +807,16 @@ observe_runtime()
 		[ -n "$dm_uuid" ] || dm_uuid=unavailable
 		[ -n "$dm_table" ] || dm_table=unavailable
 		[ -n "$dm_status" ] || dm_status=unavailable
+		# Missing dmsetup info is incomplete observation, not a proven
+		# mismatch with the transaction identifier.
+		[ "$dm_uuid" != unavailable ] || append_reason observation_reasons mapper_uuid_unavailable
 		# A returned name alone is not proof of the kernel DM UUID grammar.
 		if [ "$dm_uuid" != unavailable ] &&
 		   ! printf '%s\n' "$dm_uuid" | grep -Eq '^SWAPZ-PRIMARY-[0-9a-f]{32}$'; then
 			append_reason failure_reasons mapper_uuid_invalid
 		fi
-		if [ "$active_run" != unavailable ] && [ "$dm_uuid" != "SWAPZ-PRIMARY-$active_run" ]; then
+		if [ "$active_run" != unavailable ] && [ "$dm_uuid" != unavailable ] &&
+		   [ "$dm_uuid" != "SWAPZ-PRIMARY-$active_run" ]; then
 			append_reason failure_reasons mapper_uuid_not_bound_to_active_run
 		fi
 		if [ "$dm_table" != unavailable ]; then
@@ -862,13 +866,21 @@ observe_runtime()
 				set -- $dm_status
 				IFS=$old_ifs
 				set +f
-				if [ "$#" -lt 4 ] || [ "$1" != 0 ] || [ "$3" != swapz ] ||
-				   ! canonical_unsigned "$2" || [ "$2" = 0 ]; then
+				if [ "$#" -lt 4 ] || ! canonical_unsigned "$1" ||
+				   ! canonical_unsigned "$2"; then
 					append_reason observation_reasons mapper_status_invalid
+					dm_status=unavailable
+				elif [ "$1" != 0 ] || [ "$2" = 0 ]; then
+					append_reason failure_reasons mapper_status_geometry_invalid
+					dm_status=unavailable
+				elif [ "$3" != swapz ]; then
+					append_reason failure_reasons mapper_status_target_invalid
 					dm_status=unavailable
 				elif [ "$mapper_table_sectors" != unavailable ] &&
 				     [ "$2" != "$mapper_table_sectors" ]; then
-					append_reason observation_reasons mapper_status_geometry_invalid
+					# Table and status geometry must agree; unlike independent
+					# completion counters, target geometry is immutable.
+					append_reason failure_reasons mapper_status_geometry_invalid
 					dm_status=unavailable
 				fi
 			fi
@@ -1189,7 +1201,24 @@ log_runtime_state()
 		"$kernel_error_count" >&2
 	if [ "$mapper_info_command_status" -ne 0 ]; then
 		log_observer_diagnostic mapper_info run_bound_uuid probe_failed dmsetup_info "$mapper_info_command_status" inspect_dmsetup_info_read_only
+	elif [ "$dm_uuid" = unavailable ] && [ "$mapper_major_minor" != unavailable ]; then
+		log_observer_diagnostic mapper_info run_bound_uuid missing_uuid dmsetup_info 0 inspect_dmsetup_info_read_only
 	fi
+	case ",$failure_reasons," in
+	*,mapper_uuid_invalid,*|*,mapper_uuid_not_bound_to_active_run,*)
+		log_observer_diagnostic mapper_identity run_bound_uuid mismatched_uuid dmsetup_info 0 inspect_dmsetup_info_read_only bound observed
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_status_geometry_invalid,*)
+		log_observer_diagnostic mapper_status_geometry matching_dm_table_geometry contradictory_geometry dmsetup_status "$mapper_status_command_status" inspect_dmsetup_table_and_status_read_only none observed
+		;;
+	esac
+	case ",$failure_reasons," in
+	*,mapper_status_target_invalid,*)
+		log_observer_diagnostic mapper_status_target swapz_target foreign_target dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only bound observed
+		;;
+	esac
 	if [ "$mapper_table_command_status" -ne 0 ]; then
 		log_observer_diagnostic mapper_table single_bound_table probe_failed dmsetup_table "$mapper_table_command_status" inspect_dmsetup_table_read_only
 	fi
