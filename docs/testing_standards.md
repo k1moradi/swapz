@@ -5175,8 +5175,13 @@ phase, specific errno, observed identity category and unmodified mock block
 zero for PARTUUID drift, changed parent, foreign-mounted parent, active
 swapfile, unreadable foreign mount namespace, vanished PID mount table with
 a still-live namespace, stale size, substituted alias, symlink, and same-dev_t
-inode replacement. Diagnostics must not expose private device paths or
-serials. The direct-C production-CLI inventory regression must pass synthetic
+inode replacement. The direct-C fake-opened-descriptor fixture must separately
+model current-mount-view bind-overmount ambiguity after the accepted block-zero
+read: pathname `st_dev` and `st_ino` change while the opened descriptor
+identity remains pinned. That synthetic case must return status 2 with
+originating `ESTALE`, zero pwrite/sync calls and byte-identical block zero; it
+models pathname re-resolution only and is not a real mount or swap race.
+Diagnostics must not expose private device paths or serials. The direct-C production-CLI inventory regression must pass synthetic
 active file and block rows, duplicate rows, malformed and empty tables, truncated
 records, and inaccessible inventory through the real formatter gates, not only
 direct parser calls or injected callback errors. Retest late active, duplicated,
@@ -5194,17 +5199,25 @@ match the exact inventory expected-condition and read-only/no-header-write
 action, and must not echo synthetic swap paths.
 For any nonempty `/proc/swaps` table, the formatter cannot authenticate a
 row's active kernel backing object or its owner, whether it names the selected
-partition, an alias, or unrelated system swap. A formatter refusal must never
-recommend `swapoff` or deactivation from table membership alone; it must
-preserve originating `EOPNOTSUPP` and require only read-only inventory and
-ownership investigation. Any decision to deactivate swap belongs to a
-separately authenticated and authorized owner, outside the formatter. Rootless
-production-CLI diagnostic regressions must assert this safe guidance for
-selected, raw, aliased and unrelated active entries, retaining exact errno,
-zero header mutation and zero syncs. Unsafe recovery advice is a regression,
-not grounds to weaken the complete zero-row inventory prerequisite. This establishes a rootless
-observed-snapshot safety invariant, not exclusive kernel ownership or a bound
-against swapon racing between the final inventory check and header pwrite.
+partition, an alias, or unrelated system swap. This identity limitation
+applies both before and after header publication and does not itself authorize
+deactivation. A pre-publication formatter refusal must never recommend
+`swapoff` or deactivation from table membership alone; it must preserve
+originating `EOPNOTSUPP` and require only read-only inventory and ownership
+investigation. Any decision to deactivate swap belongs to a separately
+authenticated and authorized owner, outside the formatter. Rootless
+production-CLI pre-publication regressions must assert this safe guidance for
+selected raw-path, aliased and unrelated active entries, retaining exact errno,
+zero header mutation and zero syncs. If activity is first observed only after
+header publication was attempted, the diagnostic must still avoid unowned
+deactivation advice, retain the originating errno and report status 3
+`UNCERTAIN` with `RECOVERY REQUIRED`; it must not claim a clean no-write
+refusal. Unsafe recovery advice is a regression, not grounds to weaken the
+complete zero-row inventory prerequisite.
+
+This establishes a rootless observed-snapshot safety invariant, not exclusive
+kernel ownership or a bound against swapon racing between the final inventory
+check and header pwrite.
 A separate deterministic rootless boundary model must inject a valid synthetic
 active row only after the third complete zero-row formatter inventory snapshot,
 while servicing final F_GETFL. It must record that exactly three inventory
