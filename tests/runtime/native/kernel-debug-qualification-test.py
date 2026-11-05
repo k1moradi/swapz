@@ -41,7 +41,6 @@ MODULE_SHA256 = hashlib.sha256(MODULE_BYTES).hexdigest()
 GOOD_LOG = f"""
 SOURCE_HEAD={SOURCE_SHA}
 RUNNING_KERNEL={KERNEL_RELEASE}
-BOOT_ID={BOOT_ID}
 MODULE_SHA256={MODULE_SHA256}  /repo/build/kernel/experimental/dm-swapz.ko
 PASS_LOADED_CONSTRUCTOR_FAILURE_CLEANUP=stages:8 lower_io_delta:0
 PASS_LOADED_COMPOUND_BIO=written_pages:384 verified_pages:384 segs_gt1:2 segs_max:3 nonzero_off:1 compound_pages:128 copy_fallbacks:1 failed:0
@@ -53,8 +52,9 @@ PASS_LOADED_SYNTHETIC_READ_FAULT=page:2048 injected:1 syscall_errno:EIO lower_re
 PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1
 PASS_LOADED_CODEC_ERROR_PATHS=owners:3 injected:3 inline_lower_write_delta:0 submitter_lower_write_delta:0 background_error_completions:1
 PASS_LOADED_COMPLETION_HANDOFF=offloaded:2 verified_pages:128 completed_writes:16512 active_after:0 fault_offloaded:1 fault_injected:1 post_failure_eio:1
+BOOT_ID={BOOT_ID}
 PASS: loaded isolated swapz byte-exact I/O, clean teardown
-""".strip()
+""".strip() + "\n"
 
 
 class KernelDebugQualificationTests(unittest.TestCase):
@@ -202,7 +202,7 @@ class KernelDebugQualificationTests(unittest.TestCase):
         without_boot = "\n".join(
             line for line in GOOD_LOG.splitlines()
             if not line.startswith("BOOT_ID=")
-        )
+        ) + "\n"
         status, reason = self.verify(execution=without_boot)
         self.assertEqual(status, "BLOCKED")
         self.assertIn(f"expected BOOT_ID={BOOT_ID}", reason)
@@ -222,6 +222,60 @@ class KernelDebugQualificationTests(unittest.TestCase):
         self.assertEqual(status, "BLOCKED")
         self.assertIn("observed duplicate markers", reason)
 
+
+    def test_terminal_publication_rejects_mixed_and_failed_sessions(self) -> None:
+        # Match the actual producer: the BOOT_ID/PASS pair is published only
+        # after successful teardown, not alongside the initial source markers.
+        lines = GOOD_LOG.splitlines()
+        boot_marker = f"BOOT_ID={BOOT_ID}"
+        terminal_pass = "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
+        self.assertEqual(lines[-2:], [boot_marker, terminal_pass])
+        self.assertEqual(self.verify()[0], "PASS")
+        self.assertEqual(
+            self.verify(execution=GOOD_LOG +
+                        "EVIDENCE=/synthetic/swapz-deploy.abcdefgh/session.log\n")[0],
+            "PASS")
+
+        # Even a unique, individually valid record set must not qualify when
+        # a terminal success pair is pasted ahead of unfinished loaded work.
+        unfinished_prefix = lines[:-2]
+        stitched_execution = "\n".join(
+            unfinished_prefix[:5] + lines[-2:] + unfinished_prefix[5:]) + "\n"
+        reordered_records = lines.copy()
+        reordered_records[3], reordered_records[4] = (
+            reordered_records[4], reordered_records[3])
+        private_detail = "/private/owner/teardown-evidence"
+        cases = (
+            (GOOD_LOG.rstrip("\n"), "field=terminal newline"),
+            (stitched_execution, "observed=reordered or combined-session markers"),
+            ("\n".join(reordered_records) + "\n", "field=marker order"),
+            (GOOD_LOG.replace(
+                boot_marker, f"TEARDOWN_FAILED=1\n{boot_marker}"),
+             "observed=unknown failure marker"),
+            (GOOD_LOG.replace(
+                boot_marker, f"FAILURE: {private_detail}\n{boot_marker}"),
+             "observed=unknown failure marker"),
+            (GOOD_LOG.replace(
+                boot_marker, f"ERROR: {private_detail}\n{boot_marker}"),
+             "observed=unknown failure marker"),
+            (GOOD_LOG + f"TEARDOWN_FAILED={private_detail}\n",
+             "field=terminal tail"),
+            (GOOD_LOG + GOOD_LOG, "duplicate"),
+        )
+        for execution, explanation in cases:
+            with self.subTest(explanation=explanation):
+                status, reason = self.verify(execution=execution)
+                self.assertEqual(status, "BLOCKED", reason)
+                self.assertIn(explanation, reason)
+                self.assertNotIn(private_detail, reason)
+                self.assertLess(len(reason), 512)
+        status, reason = self.verify(execution=GOOD_LOG.replace(
+            boot_marker, f"TEARDOWN_FAILED=1\n{boot_marker}"))
+        self.assertEqual(status, "BLOCKED")
+        self.assertIn("phase=teardown", reason)
+        self.assertIn(f"source=SOURCE_HEAD:{SOURCE_SHA}", reason)
+        self.assertIn(f"artifact=MODULE_SHA256:{MODULE_SHA256}", reason)
+        self.assertIn("next:", reason)
 
     def test_execution_boot_marker_producer_rootless(self) -> None:
         """Execute the real boot reader and EXIT cleanup without host devices."""
@@ -755,10 +809,10 @@ exit 0
     def test_kernel_and_module_hash_markers_bind_execution(self) -> None:
         without_kernel = "\n".join(
             line for line in GOOD_LOG.splitlines()
-            if not line.startswith("RUNNING_KERNEL="))
+            if not line.startswith("RUNNING_KERNEL=")) + "\n"
         without_module_hash = "\n".join(
             line for line in GOOD_LOG.splitlines()
-            if not line.startswith("MODULE_SHA256="))
+            if not line.startswith("MODULE_SHA256=")) + "\n"
         cases = (
             (without_kernel, "missing running-kernel marker"),
             (GOOD_LOG + f"\nRUNNING_KERNEL={KERNEL_RELEASE}",
@@ -1774,7 +1828,7 @@ exit 0
                         "CONFIG_KCSAN=y", "# CONFIG_KCSAN is not set")
                 (directory / "config").write_text(configuration)
                 (directory / "cmdline").write_text("quiet\n")
-                (directory / "good.log").write_text(replay_log + "\n")
+                (directory / "good.log").write_text(replay_log)
                 environment = {
                     **os.environ,
                     "PATH": str(fake_bin) + os.pathsep + os.defpath,

@@ -886,6 +886,13 @@ def verify_owned_run(
         return "BLOCKED", "validated source SHA is malformed (expected 40 hex digits)"
     if execution is None:
         return "BLOCKED", "owned execution log missing or unreadable"
+    # The producer publishes its terminal BOOT_ID/PASS pair with printf.
+    # A complete-looking PASS without the final newline may be a torn log.
+    if not execution.endswith("\n"):
+        return "BLOCKED", (
+            "execution field=terminal newline phase=publication "
+            "expected=complete newline-terminated log observed=truncated "
+            "or unterminated; next: recapture one complete owned session")
     if kernel_release is None:
         return "BLOCKED", "running kernel release unavailable for evidence binding"
 
@@ -969,6 +976,26 @@ def verify_owned_run(
         return "BLOCKED", "malformed MODULE_SHA256 run marker"
     executed_module_sha256 = module_hash_match.group(1)
 
+    # Preserve the helper's explicit FAIL precedence above. An unrecognized
+    # outcome/control marker is ambiguous evidence, never a clean teardown.
+    # Do not inspect arbitrary stderr payloads or echo them in the result.
+    unknown_failure = any(
+        not line.lstrip().startswith("PASS_") and re.match(
+            r"^[ \t]*(?:[A-Z][A-Z0-9_]*_)?"
+            r"(?:FAIL(?:ED|URE)?|ERROR|ABORTED)(?=$|[:=_ \t])",
+            line, re.IGNORECASE,
+        )
+        for line in execution_lines
+    )
+    if unknown_failure:
+        return "BLOCKED", (
+            "execution field=outcome phase=teardown expected=clean "
+            "observed=unknown failure marker (content withheld); "
+            f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
+            f"{executed_module_sha256}; next: inspect teardown and recapture "
+            "one complete owned session")
+
+    record_positions: list[int] = []
     for record in REQUIRED_RECORDS:
         marker = record.split("=", 1)[0]
         candidates = [
@@ -981,6 +1008,40 @@ def verify_owned_run(
         if (re.fullmatch(record, candidates[0]) is None or
                 not _record_shape_matches(candidates[0], marker)):
             return "BLOCKED", f"malformed loaded run marker: {marker}"
+        record_positions.append(execution_lines.index(candidates[0]))
+
+    # Match the real producer's single-session publication order: validated
+    # source/kernel/module, all loaded records, then the terminal BOOT_ID/PASS
+    # pair. Only the optional retained EVIDENCE locator may follow the pair.
+    publication_positions = [
+        execution_lines.index(source_markers[0]),
+        execution_lines.index(kernel_markers[0]),
+        execution_lines.index(module_hash_markers[0]),
+        *record_positions[:-1],
+        execution_lines.index(boot_markers[0]),
+        record_positions[-1],
+    ]
+    terminal_position = publication_positions[-1]
+    terminal_tail = execution_lines[terminal_position + 1:]
+    if (publication_positions != sorted(publication_positions) or
+            publication_positions[-2] + 1 != terminal_position):
+        return "BLOCKED", (
+            "execution field=marker order phase=publication "
+            "expected=SOURCE_HEAD/RUNNING_KERNEL/MODULE_SHA256, ordered "
+            "loaded records, terminal BOOT_ID/PASS pair "
+            "observed=reordered or combined-session markers; "
+            f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
+            f"{executed_module_sha256}; next: capture one intact owned run")
+    if terminal_tail and not (
+            len(terminal_tail) == 1 and
+            re.fullmatch(r"EVIDENCE=.+/session\.log", terminal_tail[0])):
+        return "BLOCKED", (
+            "execution field=terminal tail phase=publication "
+            "expected=clean PASS followed only by optional EVIDENCE locator "
+            "observed=unexpected post-publication record (content withheld); "
+            f"source=SOURCE_HEAD:{source_sha} artifact=MODULE_SHA256:"
+            f"{executed_module_sha256}; next: inspect teardown and recapture "
+            "one intact owned run")
 
     if not dmesg_contiguous:
         if not baseline:

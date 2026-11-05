@@ -6645,6 +6645,20 @@ premature success marker. A tee failure reports sanitized
 write failure reports `phase=evidence_commit` with partial retained evidence.
 Failed publication never prints the private session path, while successful runs
 retain the existing `EVIDENCE=...` locator after the terminal pair commits.
+The rootless verifier requires a newline-complete owned execution log with
+exactly one source/kernel/module binding in producer order and all required
+loaded records in their real execution order. Only the published terminal
+`BOOT_ID` immediately followed by the exact clean-teardown `PASS:` record
+may close the run; an optional single `EVIDENCE=.../session.log` locator may
+follow it. Reordered or interleaved records, early or duplicated terminal
+claims, trailing unknown output, and unrecognized FAIL/ERROR/ABORTED-like
+control markers block qualification with bounded source/module identities,
+the evidence field, phase, safe observed category and recapture action.
+An execution log's source/hash/boot markers are evidence consistency checks,
+not an authentication signature: this verifier cannot prove that a malicious
+actor did not splice same-boot records with identical artifact digests.
+Only the actual owned-helper execution and separately retained owner evidence
+can establish loaded qualification.
 Interruption before the initial boot-ID read completes remains
 `phase=session_capture`, not an owned-I/O phase. Rootless fixtures execute the
 real producer reader and cleanup with synthetic boot files, deliberately
