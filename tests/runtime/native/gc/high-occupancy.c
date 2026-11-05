@@ -1038,7 +1038,7 @@ static int test_closed_segment_last_discard_rejects_hidden_survivor(void)
 			" generation_after=%" PRIu32
 			" original_errno=%d live_refs=%u mapped_refs=%" PRIu32
 			" available_reserve=%u gc_reads=%llu gc_writes=%llu"
-			" retained_media_bytes=%zu\\n",
+			" retained_media_bytes=%zu\n",
 			__FILE__, __LINE__, (uint32_t)CHURN_SEED,
 			last_logical, hidden_logical, victim, last_logical,
 			prior_generation, maps[last_logical].generation, error,
