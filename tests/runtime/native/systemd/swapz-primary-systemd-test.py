@@ -3603,6 +3603,7 @@ class RuntimeHealthTests(unittest.TestCase):
             ("error=0", "error=1"),
             ("error=0", "error=2147483647"),
             ("error=0", "error=2147483648"),
+            ("error=0", "error=-4096"),
             ("error=0", "error=-2147483649"),
             ("error=0", "error=12junk"),
             ("error=0", "error=not-a-number"),
@@ -3629,9 +3630,8 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertIn("failed=1", failed.stderr)
         self.assertNotIn("phase=target_terminal ", failed.stderr)
 
-        # swapz_fail_at() normalizes every elected target failure to a
-        # negative Linux errno before publishing failed=1.
-        for valid_error in ("-5", "-2147483648"):
+        # swapz_fail_at() publishes canonical Linux errno values.
+        for valid_error in ("-5", "-4095"):
             with self.subTest(valid_error=valid_error):
                 env["MOCK_DM_STATUS"] = valid_status.replace(
                     "error=0", f"error={valid_error}"

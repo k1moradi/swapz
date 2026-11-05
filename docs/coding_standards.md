@@ -3082,9 +3082,9 @@ state, original probe exit status and a read-only next check only when the
 reported state changes; never promote missing evidence to HEALTHY. Confirmed
 nonzero canonical DM `error` must have a structured `target_terminal` / `first_error`
 diagnostic retaining the validated signed errno and original status-probe exit.
-The target's canonical `error` domain is zero or a negative signed-32-bit Linux
-errno; positive values are malformed telemetry and must not be promoted to a
-terminal-error FAIL. A separately valid `failed=1` remains a definite target
+The target's canonical `error` domain matches `swapzctl`: zero or a negative
+Linux errno from -1 through -4095. Positive, out-of-range or noncanonical values
+are malformed telemetry and must not be promoted to a terminal-error FAIL. A separately valid `failed=1` remains a definite target
 FAIL even when its error telemetry is malformed. Missing or malformed error
 telemetry must not fabricate first-error attribution. Reject
 duplicate swap sources and impossible Used-greater-than-Size accounting as

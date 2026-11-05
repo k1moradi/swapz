@@ -114,7 +114,7 @@ canonical_status_error()
 		;;
 	-*)
 		magnitude=${status_error#-}
-		limit=2147483648
+		limit=4095
 		;;
 	*)
 		# The target publishes Linux errno values: zero or a negative int.

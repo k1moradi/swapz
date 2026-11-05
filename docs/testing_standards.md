@@ -7538,8 +7538,8 @@ telemetry, and sustained GC pressure without progress. A confirmed nonzero
 canonical DM `error` must produce a bounded `target_terminal` / `first_error`
 phase/check/expected/observed/command-status diagnostic containing the signed
 kernel errno and a read-only next step. Rootless coverage must accept zero and
-negative signed-32-bit Linux errno values, reject positive/overflow/noncanonical
-error tokens as malformed telemetry, and prove that `failed=1` still yields
+negative Linux errno values from -1 through -4095, reject positive, out-of-range
+or noncanonical error tokens as malformed telemetry, and prove that `failed=1` still yields
 FAIL without fabricated first-error attribution when the error token is
 malformed. Missing or malformed terminal errors must never be reported as
 confirmed first errors. A nominally active
