@@ -5145,8 +5145,10 @@ oracle phases. Rootless controls must inject local HEAD, tracked origin/main
 and canonical remote main drift before the fast-test prerequisite and after
 development evidence, and verify no block-zero write, module insertion,
 mapper creation or oracle invocation. Missing admission-critical facts cannot
-be replaced by optional fast-test telemetry. Keep the final exact-SHA checks:
-no earlier source observation authorizes a later destructive boundary.
+be replaced by optional fast-test telemetry. Keep the final exact-SHA check
+immediately before physical execution. It is point-in-time drift detection,
+not a lock on main; do not move it earlier or treat the pre-fast-test source
+observation as sufficient for that later destructive boundary.
 A recovered header alone never establishes byte-oracle success. A completed
 oracle with uncertain cleanup is still `RECOVERY_REQUIRED`, not a physical
 PASS. Canonical remote main cannot be locked by a read; coordinate a brief

@@ -220,8 +220,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     path, os.getuid(), head, nonce)
 
     def test_development_source_drift_before_fast_test_is_preemptive(self):
+        import pwd
+
         pinned_head = "a" * 40
         changed_head = "c" * 40
+        repository_owner = pwd.getpwuid(
+            os.stat(probe.ROOT, follow_symlinks=False).st_uid).pw_name
         for drift in ("local", "origin", "remote"):
             with self.subTest(drift=drift):
                 def git(*args):
@@ -235,10 +239,15 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         return changed_head if drift == "origin" else pinned_head
                     self.fail(f"unexpected Git read: {args}")
 
+                # Model sudo invocation by the actual checkout owner so this
+                # control reaches the Git source gate instead of stopping at
+                # the independent sudo-wrapper ownership prerequisite.
                 with mock.patch.object(probe.platform, "machine",
                                        return_value="x86_64"), \
                         mock.patch.object(probe, "_require_physical_host"), \
                         mock.patch.object(probe.os, "geteuid", return_value=0), \
+                        mock.patch.dict(os.environ,
+                                        {"SUDO_USER": repository_owner}), \
                         mock.patch.object(probe, "_git", side_effect=git), \
                         mock.patch.object(
                             probe, "_remote_main_sha",
