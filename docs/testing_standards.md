@@ -193,12 +193,15 @@ launched child PID and stable /proc start time, reject the same child once
 exited, and demonstrate that an inherited connected Unix descriptor can carry
 bytes from a different subprocess without changing SO_PEERCRED. This is a
 negative control for exact message-sender proof, not a simulated root-UID
-impersonation or physical admission. After launch, listener setup failure,
-malformed/duplicated private messages and exhausted termination grace must
-preserve the first refusal, use bounded terminate/kill/wait, reap the owned
-Popen child and never print private request bytes. A repeated initial nonce
-must never grant or reuse approval; these controls do not establish target,
-reader, or sudo-descendant teardown on the physical host.
+impersonation or physical admission. The launched qualifier must start in a
+private session/process group so listener setup failure, malformed/duplicated
+private messages and exhausted termination grace can preserve the first refusal,
+use bounded group TERM/KILL plus direct-child wait, reap the Popen child, prove
+the controlled owned group empty, and never print private request bytes. A
+rootless descendant that ignores SIGTERM is a required negative control: direct-
+child-only cleanup must not be accepted as complete. A repeated initial nonce
+must never grant or reuse approval; these controls still do not establish target,
+reader, detached privileged descendants, or sudo teardown on the physical host.
 
 The current wire schema carries source, helper and control-input identity but
 no independently authenticated exact message sender, physical qualification

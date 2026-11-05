@@ -339,6 +339,65 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             real_wait(timeout=5)
             child.stdout.close()
 
+    @unittest.skipIf(os.geteuid() == 0, "rootless cleanup proof requires non-root")
+    def test_owned_process_group_cleanup_reaps_descendant(self):
+        child_source = (
+            "import subprocess,sys,time\n"
+            "descendant = subprocess.Popen([sys.executable, '-I', '-c', "
+            "\"import signal,time; signal.signal(signal.SIGTERM, "
+            "signal.SIG_IGN); print('ready', flush=True); time.sleep(60)\"], "
+            "stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, "
+            "stderr=subprocess.DEVNULL, text=True)\n"
+            "assert descendant.stdout.readline() == 'ready\\n'\n"
+            "print(descendant.pid, flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c", child_source],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True)
+        setattr(child, "_swapz_owned_process_group", child.pid)
+        descendant_pid = int(child.stdout.readline().strip())
+        try:
+            parent._stop_unadmitted_child(child)
+            self.assertIsNotNone(child.returncode)
+            self.assertFalse(Path(f"/proc/{descendant_pid}").exists())
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(child.pid, 0)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            child.stdout.close()
+            if Path(f"/proc/{descendant_pid}").exists():
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_privileged_child_launch_creates_private_session(self):
+        arguments = parent._build_parser().parse_args([
+            "--validated-source", self.SOURCE,
+            "--qualification-report", "/tmp/report.json",
+        ])
+        read_descriptor, write_descriptor = os.pipe()
+        source_pipe = os.fdopen(write_descriptor, "wb", buffering=0)
+        child = mock.Mock(stdin=source_pipe)
+        child.poll.return_value = None
+        try:
+            with mock.patch.object(
+                    parent.subprocess, "Popen", return_value=child) as popen:
+                observed = parent._start_privileged_child(
+                    "/usr/bin/sudo", "/usr/bin/python3", arguments,
+                    Path("/tmp/admission.sock"), 1000,
+                    b"x", self.HELPER_DIGEST)
+            self.assertIs(observed, child)
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+            self.assertEqual(os.read(read_descriptor, 2), b"x")
+        finally:
+            os.close(read_descriptor)
+
     def test_replayed_initial_nonce_cannot_reuse_source_observation(self):
         repeated = self.request("initial", "1" * 32)
         result, responses, diagnostics, _child, check = self.run_exchange(

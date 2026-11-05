@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import select
 import shutil
+import signal
 import socket
 import stat
 import struct
@@ -295,8 +296,63 @@ def _reply(stream, request: dict, status: str,
     stream.flush()
 
 
-def _stop_unadmitted_child(child: subprocess.Popen) -> None:
-    """Bound cleanup of a child that has not received initial admission."""
+def _owned_process_group(child: subprocess.Popen) -> int | None:
+    process_group = getattr(child, "_swapz_owned_process_group", None)
+    if type(process_group) is int and process_group > 1:
+        return process_group
+    return None
+
+
+def _child_exited_without_reaping(child: subprocess.Popen) -> bool:
+    """Observe direct-child exit without releasing its PID/process-group ID."""
+    if child.returncode is not None:
+        return True
+    try:
+        return os.waitid(
+            os.P_PID, child.pid,
+            os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except ChildProcessError:
+        return child.returncode is not None
+
+
+def _wait_child_exit_without_reaping(
+        child: subprocess.Popen, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while not _child_exited_without_reaping(child):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.05, remaining))
+    return True
+
+
+def _owned_process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # The group still exists even if an elevated member is not signalable.
+        return True
+    except OSError as exc:
+        raise Blocked(
+            "cannot inspect unadmitted privileged qualifier process group") from exc
+    return True
+
+
+def _wait_owned_process_group_exit(
+        process_group: int, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while _owned_process_group_exists(process_group):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.05, remaining))
+    return True
+
+
+def _stop_unadmitted_direct_child(child: subprocess.Popen) -> None:
+    """Bound cleanup fallback for an unmarked direct child."""
     if child.poll() is not None:
         return
     try:
@@ -329,6 +385,74 @@ def _stop_unadmitted_child(child: subprocess.Popen) -> None:
         raise Blocked(
             "unadmitted privileged qualifier did not terminate after kill"
         ) from exc
+
+
+def _stop_unadmitted_child(child: subprocess.Popen) -> None:
+    """Bound cleanup of the launched child and its owned process group."""
+    process_group = _owned_process_group(child)
+    if process_group is None:
+        _stop_unadmitted_direct_child(child)
+        return
+
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        _stop_unadmitted_direct_child(child)
+        return
+    except OSError as exc:
+        failure = Blocked(
+            "cannot terminate unadmitted privileged qualifier process group")
+        try:
+            _stop_unadmitted_direct_child(child)
+        except Blocked as direct_error:
+            raise Blocked(
+                f"{failure}; direct child cleanup also failed: "
+                f"{direct_error}") from direct_error
+        raise failure from exc
+
+    # Keep the session leader unreaped during the TERM grace period so its
+    # process-group number cannot be recycled before the group-wide KILL.
+    _wait_child_exit_without_reaping(child, 10)
+
+    try:
+        os.killpg(process_group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        failure = Blocked(
+            "cannot kill unadmitted privileged qualifier process group")
+        try:
+            _stop_unadmitted_direct_child(child)
+        except Blocked as direct_error:
+            raise Blocked(
+                f"{failure}; direct child cleanup also failed: "
+                f"{direct_error}") from direct_error
+        raise failure from exc
+
+    try:
+        child.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        # A direct child that escaped the recorded group still belongs to this
+        # parent; kill it without extending the group-wide grace indefinitely.
+        try:
+            child.kill()
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            raise Blocked(
+                "cannot kill unadmitted privileged qualifier after "
+                "process-group kill") from exc
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired as exc:
+            raise Blocked(
+                "unadmitted privileged qualifier did not terminate after "
+                "process-group and direct kill") from exc
+
+    if not _wait_owned_process_group_exit(process_group, 5):
+        raise Blocked(
+            "unadmitted privileged qualifier process group did not terminate "
+            "after kill")
 
 
 def _stop_unadmitted_child_preserving(
@@ -548,9 +672,17 @@ def _serve_admission(server: socket.socket,
             file=sys.stderr)
 
     parent_stopped_child = False
-    if not passed_phases and child.poll() is None:
+    parent_cleaned_owned_processes = False
+    owned_process_group = _owned_process_group(child)
+    if not passed_phases and owned_process_group is not None:
+        child_exited_before_cleanup = _child_exited_without_reaping(child)
+        _stop_unadmitted_child(child)
+        parent_stopped_child = not child_exited_before_cleanup
+        parent_cleaned_owned_processes = True
+    elif not passed_phases and child.poll() is None:
         _stop_unadmitted_child(child)
         parent_stopped_child = True
+        parent_cleaned_owned_processes = True
     try:
         # Once the admission channel closes, no further phase can succeed.
         # Bound a stuck child so the parent does not lose terminal diagnostics.
@@ -575,7 +707,7 @@ def _serve_admission(server: socket.socket,
         print(
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
             f"admission_refused:phase={admission_boundary}:child_exit={result}:"
-            f"owned_cleanup={'complete' if parent_stopped_child else 'not_required'}",
+            f"owned_cleanup={'complete' if parent_cleaned_owned_processes else 'not_required'}",
             file=sys.stderr)
         return 2
     if not passed_phases:
@@ -583,7 +715,7 @@ def _serve_admission(server: socket.socket,
             "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
             "privileged_child_skipped_source_admission:"
             f"phase=initial:child_exit={result}:"
-            f"owned_cleanup={'complete' if parent_stopped_child else 'not_required'}",
+            f"owned_cleanup={'complete' if parent_cleaned_owned_processes else 'not_required'}",
             file=sys.stderr)
         return 2
     cycle_admitted = any(phase.startswith("cycle-") for phase in passed_phases)
@@ -652,9 +784,11 @@ def _start_privileged_child(
     try:
         child = subprocess.Popen(
             command, cwd=ROOT, stdin=subprocess.PIPE,
-            env=_source_command_environment())
+            env=_source_command_environment(), start_new_session=True)
     except OSError as exc:
         raise Blocked("cannot start commit-bound privileged qualifier") from exc
+    if isinstance(child, subprocess.Popen) and type(child.pid) is int and child.pid > 1:
+        setattr(child, "_swapz_owned_process_group", child.pid)
     if child.stdin is None:
         failure = Blocked("privileged qualifier source pipe is unavailable")
         _stop_unadmitted_child_preserving(child, failure)
