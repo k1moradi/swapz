@@ -8586,6 +8586,17 @@ requirements remain 14 designated frozen pairs and 24 current v2 producer
 pairs; rootless controls provide no physical acceptance.
 No pending prospective-v2 amendment is applied as a retroactive replacement.
 
+The physical producer audit must also type-check every nested pair workload
+before dictionary membership. Wrong-type JSON workload identifiers and
+wrong-type raw-repeat-spread mappings are BLOCKED diagnostics, not unhandled
+TypeError/AttributeError exceptions; an authenticated measurement-phase
+producer FAIL in a different pair must remain FAIL. The sealer must reject
+missing, non-string or unhashable summary/pair identity components before
+using them as dictionary keys, with the failing field, expected and observed
+types, no private values, and safe recapture/reseal guidance. Rootless
+negative controls must test both malformed-only BLOCKED evidence and retained
+independent authenticated FAIL; these controls do not qualify a device.
+
 ### Malformed sealed-campaign nested evidence (rootless evaluator contract)
 
 An evaluator must treat each JSON-compatible nested campaign object as

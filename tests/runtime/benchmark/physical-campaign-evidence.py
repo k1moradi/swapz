@@ -584,9 +584,24 @@ def admitted_device_boundary(snapshot: dict) -> dict:
 
 
 def pair_key(record: dict):
+    # Validate JSON identity types before using the tuple as a dictionary key.
+    # Malformed private records must be rejected without printing their values.
+    for field, expected_type in (
+            ("workload", str), ("pair_id", str),
+            ("pair_index", int), ("order", str)):
+        observed = record.get(field)
+        if (type(observed) is not expected_type or
+                (expected_type is str and not observed)):
+            raise ValueError(
+                "malformed physical pair identity: phase=pair_manifest "
+                f"failed_evidence_field={field} "
+                f"expected_type={expected_type.__name__} "
+                f"observed_type={type(observed).__name__} "
+                "original_error=unavailable verdict=BLOCKED "
+                "safe_action=recapture_and_reseal_campaign")
     return (
-        record.get("workload"), record.get("pair_id"),
-        record.get("pair_index"), record.get("order"))
+        record["workload"], record["pair_id"],
+        record["pair_index"], record["order"])
 
 
 def host_stability(before: dict, after: dict) -> dict:
@@ -997,13 +1012,21 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         workload = record.get("workload")
         pair_index = record.get("pair_index")
         index = pair_index if type(pair_index) is int else None
-        known_workload = workload if workload in workloads else None
+        known_workload = (
+            workload if isinstance(workload, str) and workload in workloads
+            else None)
         if record.get("schema") != PAIR_SCHEMA:
             diagnose("BLOCKED", "pair.schema", PAIR_SCHEMA,
                      workload=known_workload, pair_index=index,
                      reason="pair schema is missing or invalid")
-        if workload not in workloads:
-            diagnose("BLOCKED", "pair.workload", "frozen cohort")
+        if known_workload is None:
+            diagnose(
+                "BLOCKED", "pair.workload", "known workload identifier (str)",
+                reason=(
+                    "phase=pair_manifest failed_evidence_field=records[].workload "
+                    f"expected_type=str observed_type={type(workload).__name__} "
+                    "original_error=unavailable verdict=BLOCKED "
+                    "safe_action=recapture_and_reseal_campaign"))
             continue
         spec = workloads[workload]
         if (index is None or not 1 <= index <= spec["pairs"] or
@@ -1323,7 +1346,20 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
         if not isinstance(decision, dict):
             continue
         if spec["evidence"] == "statistical_paired":
-            spread = (summary.get("raw_repeat_spread") or {}).get(workload)
+            spread_by_workload = summary.get("raw_repeat_spread")
+            if not isinstance(spread_by_workload, dict):
+                diagnose(
+                    "BLOCKED", "raw_repeat_spread", "workload spread mapping (dict)",
+                    workload=workload,
+                    reason=(
+                        "phase=qualification "
+                        "failed_evidence_field=raw_repeat_spread "
+                        f"expected_type=dict observed_type={type(spread_by_workload).__name__} "
+                        "original_error=unavailable verdict=BLOCKED "
+                        "safe_action=recapture_and_reseal_campaign"))
+                spread = None
+            else:
+                spread = spread_by_workload.get(workload)
             bound = QUALIFICATION["CONTRACT"]["screening"][
                 "same_workload_raw_spread_max"]
             if (type(spread) in (int, float) and math.isfinite(spread) and

@@ -255,6 +255,72 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertNotIn("/private/host", str(audit))
         self.assertEqual(record["raw"]["failure_reason"], "/private/host/error")
 
+    def test_malformed_workload_cannot_hide_an_independent_producer_failure(self):
+        failed = pair(1, 1100)
+        failed["status"] = "EXCLUDED"
+        failed["excluded"] = True
+        failed["analysis_usable"] = False
+        failed["raw"]["verdict"] = "FAIL"
+        failed["raw"]["stage"] = "measure"
+        failed["raw"]["failure_reason"] = "synthetic measurement failure"
+
+        for malformed_workload in ([], {"private": "/private/host/secret"},
+                                   None, False):
+            with self.subTest(observed_type=type(malformed_workload).__name__):
+                unrelated = pair(2, 1800)
+                unrelated["workload"] = malformed_workload
+                audit, metrics = inspect(
+                    [failed, unrelated], summary_status="FAIL_OR_INCOMPLETE")
+                self.assertEqual(audit["status"], "FAIL", audit["diagnostics"])
+                self.assertIn("pair.workload", metrics)
+                self.assertEqual(audit["first_failed_phase"], "measure")
+                self.assertEqual(
+                    audit["first_failed_evidence"]["evidence_class"], "FAIL")
+                self.assertEqual(
+                    audit["first_failed_evidence"]["pair_index"], 1)
+                reason = next(d["reason"] for d in audit["diagnostics"]
+                              if d["metric"] == "pair.workload")
+                for item in ("failed_evidence_field=records[].workload",
+                             "expected_type=str",
+                             f"observed_type={type(malformed_workload).__name__}",
+                             "safe_action=recapture_and_reseal_campaign"):
+                    self.assertIn(item, reason)
+                self.assertNotIn("/private/host/secret", str(audit))
+
+                blocked, _ = inspect([unrelated])
+                self.assertEqual(blocked["status"], "BLOCKED")
+                self.assertIsNone(blocked["first_failed_phase"])
+
+    def test_malformed_raw_spread_cannot_hide_producer_failure(self):
+        failed = pair(1, 1100)
+        failed["status"] = "EXCLUDED"
+        failed["excluded"] = True
+        failed["analysis_usable"] = False
+        failed["raw"]["verdict"] = "FAIL"
+        failed["raw"]["stage"] = "measure"
+        failed["raw"]["failure_reason"] = "synthetic measurement failure"
+        decisions = {"sd-service-balanced": {"status": "PASS", "checks": {}}}
+        for malformed_spread in ([0.2], "/private/host/secret"):
+            with self.subTest(observed_type=type(malformed_spread).__name__):
+                audit, metrics = inspect(
+                    [failed], decisions=decisions,
+                    summary_status="FAIL_OR_INCOMPLETE",
+                    raw_repeat_spread=malformed_spread)
+                self.assertEqual(audit["status"], "FAIL", audit["diagnostics"])
+                self.assertIn("raw_repeat_spread", metrics)
+                self.assertEqual(audit["first_failed_phase"], "measure")
+                self.assertEqual(
+                    audit["first_failed_evidence"]["evidence_class"], "FAIL")
+                reason = next(d["reason"] for d in audit["diagnostics"]
+                              if d["metric"] == "raw_repeat_spread")
+                self.assertIn("failed_evidence_field=raw_repeat_spread", reason)
+                self.assertIn("expected_type=dict", reason)
+                self.assertIn(
+                    f"observed_type={type(malformed_spread).__name__}", reason)
+                self.assertIn(
+                    "safe_action=recapture_and_reseal_campaign", reason)
+                self.assertNotIn("/private/host/secret", str(audit))
+
     def test_missing_or_unknown_producer_phase_is_blocked(self):
         # A FAIL verdict without the producer's real measurement phase cannot
         # be promoted by inventing a generic audit phase.
@@ -1229,6 +1295,24 @@ class CapacityRamPropagation(unittest.TestCase):
                 return EVIDENCE.seal_campaign(
                     SOURCE, *paths[:3], pair_paths,
                     paths[-1] if include_trace else None)
+
+    def test_sealer_rejects_malformed_pair_identity_before_hashing(self):
+        for field, malformed in (
+                ("workload", []), ("pair_id", {"private": "/private/secret"}),
+                ("pair_index", True), ("order", [])):
+            with self.subTest(field=field, observed_type=type(malformed).__name__):
+                def corrupt_summary(summary):
+                    summary["records"][0][field] = malformed
+
+                with self.assertRaises(ValueError) as caught:
+                    self.synthetic_seal(
+                        self.LIMIT, summary_mutation=corrupt_summary)
+                error = str(caught.exception)
+                self.assertIn(f"failed_evidence_field={field}", error)
+                self.assertIn(f"observed_type={type(malformed).__name__}", error)
+                self.assertIn(
+                    "safe_action=recapture_and_reseal_campaign", error)
+                self.assertNotIn("/private/secret", error)
 
     def test_sealer_rejects_type_coerced_evaluator_summary(self):
         # Python compares numeric 1 == True and 0 == False. These mutations
