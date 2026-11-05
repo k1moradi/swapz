@@ -7794,12 +7794,15 @@ For an explicitly v2 campaign, the physical sealer audit independently checks
 every frozen-parent and prospective-amendment workload, including decisions
 omitted by the supplied summary. Missing decisions or short attempted/accepted
 cohorts are BLOCKED prerequisites, never automatically producer-proven FAIL.
-A genuine failed/excluded pair or failed measured decision remains FAIL even
-when another cohort is missing. The bounded failure-only audit retains the
-original qualification status, the first failing audit phase, numeric
-expected/observed pair counts and per-pair producer status (only safe enum
-values); arbitrary producer strings, artifact fingerprints and host paths
-must never enter public diagnostics. The two separate complete cohort
+An excluded or evaluator-unusable pair is incomplete evidence and remains
+BLOCKED unless an independent producer or measured check proves failure. A
+terminal arm producer verdict of FAIL and a failed measured decision remain
+FAIL even when another cohort is missing. The bounded audit retains the
+original qualification status and numeric expected/observed pair counts; its
+failure-only fields retain the first producer-proven/derived failed audit phase
+and safe producer status. BLOCKED/UNAVAILABLE evidence must not manufacture a
+failed phase or producer-failure status. Arbitrary producer strings, artifact
+fingerprints and host paths must never enter public diagnostics. The two separate complete cohort
 requirements remain 14 designated frozen pairs and 24 current v2 producer
 pairs; rootless controls provide no physical acceptance.
 No pending prospective-v2 amendment is applied as a retroactive replacement.

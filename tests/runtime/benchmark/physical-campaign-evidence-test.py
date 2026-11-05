@@ -35,7 +35,7 @@ SOURCE = "a" * 40
 
 def arm(candidate, timestamp, run_id, workload="sd-service-balanced"):
     result = {
-        "candidate": candidate, "source_sha": SOURCE,
+        "candidate": candidate, "source_sha": SOURCE, "verdict": "PASS",
         "workload_id": run_id, "arm_boot_id": BOOT,
         "arm_started_monotonic_ns": timestamp,
         "arm_finished_monotonic_ns": timestamp + 100,
@@ -128,8 +128,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
                                      audit["diagnostics"])
                     self.assertEqual(audit["qualification_status"],
                                      reported_status)
-                    self.assertEqual(audit["first_failed_phase"],
-                                     "qualification")
+                    self.assertIsNone(audit["first_failed_phase"])
                     missing = {
                         item["workload"]: (
                             item["expected"]["value"], item["observed"])
@@ -315,6 +314,9 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         records[0]["status"] = "EXCLUDED"
         records[0]["excluded"] = True
         records[0]["analysis_usable"] = False
+        # EXCLUDED alone is incomplete evidence. Preserve one genuine producer
+        # failure so the diagnostic-cap test still exercises FAIL precedence.
+        records[0]["raw"]["verdict"] = "FAIL"
         records[-1]["swapz"]["workload_id"] = records[0]["swapz"]["workload_id"]
         records[-1]["swapz"]["source_sha"] = "b" * 40
         records[-1]["swapz"]["arm_boot_id"] = (
@@ -331,9 +333,10 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             {item["status"] for item in audit["diagnostics"]},
             {"FAIL", "BLOCKED", "UNAVAILABLE"})
         self.assertTrue(any(
-            item["status"] == "FAIL" and item["metric"] == "pair.status" and
-            item["pair_index"] == 1
+            item["status"] == "FAIL" and item["metric"] == "arm.verdict" and
+            item["pair_index"] == 1 and item.get("producer_status") == "FAIL"
             for item in audit["diagnostics"]))
+        self.assertEqual(audit["first_failed_phase"], "arm")
         self.assertTrue(any(
             item["status"] == "BLOCKED" and
             item["metric"] in {
@@ -349,8 +352,16 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertEqual(unavailable["status"], "UNAVAILABLE")
         blocked = copy.deepcopy(baseline)
         blocked["raw"]["source_sha"] = "b" * 40
-        blocked_audit, _ = inspect([blocked])
+        # Match the evaluator consequence of stale provenance. This must not
+        # turn a prerequisite/identity problem into producer-proven failure.
+        blocked["analysis_usable"] = False
+        blocked_audit, _ = inspect(
+            [blocked], summary_status="FAIL_OR_INCOMPLETE")
         self.assertEqual(blocked_audit["status"], "BLOCKED")
+        self.assertIsNone(blocked_audit["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL"
+            for item in blocked_audit["diagnostics"]))
         problem = next(item for item in blocked_audit["diagnostics"]
                        if item["metric"] == "arm.source_sha")
         self.assertEqual(problem["expected"], "admitted source")
@@ -362,12 +373,21 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         excluded["status"] = "EXCLUDED"
         excluded["excluded"] = True
         excluded["analysis_usable"] = False
-        failed, _ = inspect([excluded])
+        incomplete, _ = inspect(
+            [excluded], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(incomplete["status"], "BLOCKED")
+        self.assertIsNone(incomplete["first_failed_phase"])
+
+        producer_failed = copy.deepcopy(excluded)
+        producer_failed["raw"]["verdict"] = "FAIL"
+        failed, _ = inspect(
+            [producer_failed], summary_status="FAIL_OR_INCOMPLETE")
         self.assertEqual(failed["status"], "FAIL")
         producer_failure = next(
             item for item in failed["diagnostics"]
-            if item["metric"] == "pair.status")
-        self.assertEqual(producer_failure["producer_status"], "EXCLUDED")
+            if item["metric"] == "arm.verdict")
+        self.assertEqual(producer_failure["producer_status"], "FAIL")
+        self.assertEqual(failed["first_failed_phase"], "arm")
 
     def test_different_workload_trace_excludes_pair(self):
         record = pair(1, 1100)

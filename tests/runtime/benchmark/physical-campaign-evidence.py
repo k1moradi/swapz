@@ -844,12 +844,14 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
     def diagnose(status, metric_name, expected, observed=None,
                  workload=None, pair_index=None, arm=None,
                  reason="physical evidence missing or inconsistent",
-                 producer_status=None):
+                 producer_status=None, failure_phase=None):
         nonlocal omitted, first_failed_phase
         encountered_statuses.add(status)
-        if first_failed_phase is None:
-            # This is the first failed *audit* phase, not a claim about host I/O.
-            first_failed_phase = metric_name.partition(".")[0]
+        if status == "FAIL" and first_failed_phase is None:
+            # Only producer-proven or independently derived failures own this
+            # field. Missing prerequisites remain BLOCKED/UNAVAILABLE.
+            first_failed_phase = (
+                failure_phase or metric_name.partition(".")[0])
         replacement_index = None
         if len(diagnostics) == MAX_EVIDENCE_DIAGNOSTICS:
             omitted += 1
@@ -884,7 +886,7 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             "observed": value, "workload": workload, "pair_index": pair_index,
             "arm": arm, "reason": reason,
         }
-        if producer_status is not None:
+        if status == "FAIL" and producer_status is not None:
             # Never echo an arbitrary producer string or a private host path.
             detail["producer_status"] = (
                 producer_status if producer_status in ("PASS", "FAIL", "EXCLUDED")
@@ -935,14 +937,17 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                      reason="missing or duplicated attempted pair")
         pair_identifiers.add(identifier)
         if record.get("status") != "PASS" or record.get("excluded") is not False:
-            diagnose("FAIL", "pair.status", "PASS and excluded=false",
+            diagnose("BLOCKED", "pair.status", "PASS and excluded=false",
                      workload=workload, pair_index=index,
-                     reason="failed or excluded trials cannot be dropped",
-                     producer_status=record.get("status"))
+                     reason=(
+                         "excluded or malformed pair requires independent "
+                         "producer/measurement failure proof"))
         if record.get("analysis_usable") is not True:
-            diagnose("FAIL", "pair.analysis_usable", True,
+            diagnose("BLOCKED", "pair.analysis_usable", True,
                      workload=workload, pair_index=index,
-                     reason="screened, wrong cohort, invalid or incomplete pair")
+                     reason=(
+                         "evaluator excluded, screened or could not validate "
+                         "this pair"))
         raw_arm = record.get("raw")
         swapz_arm = record.get("swapz")
         if isinstance(raw_arm, dict) and isinstance(swapz_arm, dict):
@@ -962,6 +967,18 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                 diagnose("UNAVAILABLE", "arm.evidence", "measured physical arm",
                          workload=workload, pair_index=index, arm=label)
                 continue
+            producer_verdict = arm.get("verdict")
+            if producer_verdict == "FAIL":
+                diagnose(
+                    "FAIL", "arm.verdict", "PASS",
+                    workload=workload, pair_index=index, arm=label,
+                    reason="physical arm producer reported terminal failure",
+                    producer_status=producer_verdict, failure_phase="arm")
+            elif producer_verdict != "PASS":
+                diagnose(
+                    "BLOCKED", "arm.verdict", "PASS",
+                    workload=workload, pair_index=index, arm=label,
+                    reason="physical arm terminal verdict is missing or invalid")
             run_identity = (workload, label, arm.get("workload_id"))
             if (not isinstance(run_identity[2], str) or
                     not run_identity[2] or run_identity in run_identifiers):
