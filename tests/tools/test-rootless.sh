@@ -22,6 +22,7 @@ rootless_capture_failure_reason=
 rootless_classified_reason=nonzero_exit
 rootless_classified_subtest=unavailable
 rootless_classified_test=unavailable
+rootless_classified_kind=unavailable
 
 begin_rootless_private_stderr_capture() {
   rootless_capture_directory=
@@ -36,8 +37,8 @@ begin_rootless_private_stderr_capture() {
     mktemp -d "$ROOT/build/tests/rootless-failure.XXXXXXXX" 2>/dev/null
   ) || return 0
   rootless_capture_path="$rootless_capture_directory/diagnostic.log"
-  # The package unittest writes its progress and traceback to stderr. Relay
-  # those bytes unchanged while retaining one private copy for a failed run.
+  # The captured unittests write progress and traceback to stderr. Relay those
+  # bytes unchanged while retaining one private copy for a failed run.
   coproc ROOTLESS_STDERR_CAPTURE {
     umask 077
     # Relay diagnostics are private; never print a failed tee pathname.
@@ -107,27 +108,74 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local failure_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\.test_[A-Za-z0-9_]{1,96}\\)"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\.test_[A-Za-z0-9_]{1,96}\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\.test_[A-Za-z0-9_]{1,96}\\)( \\(phase='([a-z0-9-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
+  local first_progress_kind=
+  local first_progress_test=
+  local first_progress_subtest=unavailable
+  local header_kind
+  local header_test
+  local header_subtest
   local found_failure_header=0
   rootless_classified_reason=nonzero_exit
   rootless_classified_subtest=unavailable
   rootless_classified_test=unavailable
+  rootless_classified_kind=unavailable
   [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
+
+  # unittest preserves execution order in verbose "... FAIL/ERROR" progress
+  # records, but groups detailed ERROR blocks before FAIL blocks in its summary.
+  # Bind the first failed progress record to its matching detailed traceback so
+  # a later teardown error cannot replace the primary assertion.
+  while IFS= read -r line || [[ -n $line ]]; do
+    if [[ $line =~ $progress_regex ]]; then
+      first_progress_test=${BASH_REMATCH[1]}
+      first_progress_kind=${BASH_REMATCH[5]}
+      if [[ -n ${BASH_REMATCH[4]} ]]; then
+        first_progress_subtest=${BASH_REMATCH[4]}
+      fi
+      rootless_classified_test=$first_progress_test
+      rootless_classified_kind=$first_progress_kind
+      rootless_classified_subtest=$first_progress_subtest
+      if [[ $first_progress_kind == FAIL ]]; then
+        rootless_classified_reason=unittest_assertion
+      else
+        rootless_classified_reason=unittest_error
+      fi
+      break
+    fi
+  done < "$diagnostic_path"
 
   while IFS= read -r line || [[ -n $line ]]; do
     if (( found_failure_header == 0 )); then
-      if [[ $line =~ $failure_header_regex ]]; then
-        found_failure_header=1
-        rootless_classified_test=${BASH_REMATCH[2]}
-        if [[ ${BASH_REMATCH[1]} == FAIL ]]; then
-          rootless_classified_reason=unittest_assertion
-        else
-          rootless_classified_reason=unittest_error
-        fi
+      if [[ $line =~ $detailed_header_regex ]]; then
+        header_kind=${BASH_REMATCH[1]}
+        header_test=${BASH_REMATCH[2]}
+        header_subtest=unavailable
         if [[ $line =~ $subtest_regex ]]; then
-          rootless_classified_subtest=${BASH_REMATCH[1]}
+          header_subtest=${BASH_REMATCH[1]}
         fi
+        if [[ -n $first_progress_test ]]; then
+          [[ $header_kind == "$first_progress_kind" &&
+             $header_test == "$first_progress_test" ]] || continue
+          if [[ $first_progress_subtest != unavailable &&
+                $header_subtest != "$first_progress_subtest" ]]; then
+            continue
+          fi
+        else
+          # Synthetic/legacy controls without verbose progress retain the
+          # previous first-detailed-block fallback.
+          rootless_classified_test=$header_test
+          rootless_classified_kind=$header_kind
+          rootless_classified_subtest=$header_subtest
+          if [[ $header_kind == FAIL ]]; then
+            rootless_classified_reason=unittest_assertion
+          else
+            rootless_classified_reason=unittest_error
+          fi
+        fi
+        found_failure_header=1
       fi
       continue
     fi
@@ -137,13 +185,13 @@ classify_rootless_private_unittest_failure() {
     fi
   done < "$diagnostic_path"
 }
-
 report_rootless_failure() {
   local original_exit_code=$1
   local failed_at_line=$2
   local failure_reason=${3:-nonzero_exit}
   local failed_subtest=${4:-unavailable}
   local failed_test=${5:-unavailable}
+  local failed_unittest_kind=${6:-unavailable}
   # ERR is inherited by command substitutions under -E. Their eventual
   # enclosing assertion, not an incidental internal command, owns the failure.
   if (( BASH_SUBSHELL != 0 )); then
@@ -163,8 +211,8 @@ report_rootless_failure() {
   local private_diagnostic_path=${rootless_private_diagnostic_path:-}
   local private_diagnostic_log=${rootless_private_diagnostic_log:-unavailable}
   local private_directory
-  # Ordinary failures allocate only after the failure. The long package suite
-  # may already have a private stderr capture, which is retained only on fail.
+  # Ordinary failures allocate only after the failure. The two captured
+  # unittests may already have private stderr, retained only on fail.
   if [[ -z $private_diagnostic_path ]]; then
     mkdir -p "$ROOT/build/tests" >/dev/null 2>&1
     if [[ -d $ROOT/build/tests && ! -L $ROOT/build/tests ]] &&
@@ -189,19 +237,52 @@ report_rootless_failure() {
       private_diagnostic_path=
       private_diagnostic_log=unavailable
     elif (( captured_bytes > 262144 )); then
-      # Keep the first unittest traceback even when large progress output
-      # pushes it outside the tail. Bound this excerpt and the trailing bytes.
-      if LC_ALL=C awk -v limit=65536 '
-           /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts)\.test_[A-Za-z0-9_]+\)/ && !seen { seen=1 }
-           seen {
-             if ($0 == "======================================================================") exit
-             line = $0 "\n"
-             remaining = limit - written
-             if (length(line) > remaining) line = substr(line, 1, remaining)
-             printf "%s", line
-             written += length(line)
-             if (written >= limit) exit
+      # Keep both ends of the execution-first unittest traceback. The suffix
+      # retains the terminal assertion/exception even if an unusually deep
+      # traceback pushes it beyond the old 64-KiB prefix.
+      if LC_ALL=C awk -v prefix_limit=32768 -v suffix_limit=32768 \
+           -v target_kind="$failed_unittest_kind" \
+           -v target_test="$failed_test" \
+           -v target_subtest="$failed_subtest" '
+           function matches_target(text, pattern) {
+             if (target_test != "unavailable" &&
+                 target_kind != "unavailable") {
+               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts)\\." target_test "\\)"
+               if (text !~ pattern) return 0
+               if (target_subtest != "unavailable" &&
+                   text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
+               return 1
+             }
+             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts)\.test_[A-Za-z0-9_]+\)/
            }
+           function retain_suffix(text, excess) {
+             suffix = suffix text
+             excess = length(suffix) - suffix_limit
+             if (excess > 0) suffix = substr(suffix, excess + 1)
+           }
+           {
+             if (!seen) {
+               if (!matches_target($0)) next
+               seen = 1
+             } else if ($0 == "======================================================================") {
+               exit
+             }
+             line = $0 "\n"
+             remaining = prefix_limit - written
+             if (remaining > 0) {
+               if (length(line) <= remaining) {
+                 printf "%s", line
+                 written += length(line)
+               } else {
+                 printf "%s", substr(line, 1, remaining)
+                 written += remaining
+                 retain_suffix(substr(line, remaining + 1))
+               }
+             } else {
+               retain_suffix(line)
+             }
+           }
+           END { printf "%s", suffix }
          ' "$private_diagnostic_path" > "$private_diagnostic_path.tail" 2>/dev/null &&
          tail -c 192512 -- "$private_diagnostic_path" \
            >> "$private_diagnostic_path.tail" 2>/dev/null &&
@@ -217,9 +298,9 @@ report_rootless_failure() {
       rm -f -- "$private_diagnostic_path.tail" 2>/dev/null
     fi
     if [[ -n $private_diagnostic_path ]] &&
-       ! printf '\n--- swapz rootless attribution ---\nphase=%s\nsubtest=%s\ntest=%s\nreason=%s\nexit_code=%s\nphase_wall_s=%s\nstage_wall_s=%s\nsource_line=%s\nnext_step=inspect_first_captured_FAIL_or_ERROR_locally\n' \
-         "$rootless_phase" "$failed_subtest" "$failed_test" "$failure_reason" \
-         "$original_exit_code" "$phase_wall_seconds" "$stage_wall_seconds" \
+       ! printf '\n--- swapz rootless attribution ---\nphase=%s\nsubtest=%s\ntest=%s\nunittest_kind=%s\nreason=%s\nexit_code=%s\nphase_wall_s=%s\nstage_wall_s=%s\nsource_line=%s\nnext_step=inspect_first_captured_FAIL_or_ERROR_locally\n' \
+         "$rootless_phase" "$failed_subtest" "$failed_test" "$failed_unittest_kind" \
+         "$failure_reason" "$original_exit_code" "$phase_wall_seconds" "$stage_wall_seconds" \
          "$failed_at_line" >> "$private_diagnostic_path"; then
       private_diagnostic_log=unavailable
     fi
@@ -265,6 +346,7 @@ finish_and_report_rootless_unittest() {
     rootless_classified_reason=nonzero_exit
     rootless_classified_subtest=unavailable
     rootless_classified_test=unavailable
+    rootless_classified_kind=unavailable
   fi
   if [[ $rootless_classified_reason == nonzero_exit &&
         $rootless_classified_subtest == unavailable ]]; then
@@ -272,7 +354,7 @@ finish_and_report_rootless_unittest() {
   else
     report_rootless_failure "$original_exit_code" "$command_line" \
       "$rootless_classified_reason" "$rootless_classified_subtest" \
-      "$rootless_classified_test"
+      "$rootless_classified_test" "$rootless_classified_kind"
   fi
 }
 

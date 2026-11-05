@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private, bounded regressions for the real rootless package stderr relay."""
+"""Private, bounded regressions for the real rootless unittest stderr relay."""
 
 import contextlib
 import importlib.util
@@ -19,9 +19,10 @@ ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
 PACKAGE_PHASE = "tests/runtime/native/package-dkms-test.py"
 PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
 PRIVATE_SENTINEL = "PRIVATE_ONLY_TRACEBACK_PAYLOAD"
+LATER_TEARDOWN_SENTINEL = "LATER_TEARDOWN_PRIVATE_PAYLOAD"
 
-# This runs the actual runner functions and the exact package-stage call, not a
-# copy of their implementation. Never execute the rest of the rootless stages.
+# This runs the actual runner functions and exact captured-suite stage calls,
+# not a copy of their implementation. Never execute the other rootless stages.
 FIXTURE = r'''
 python3() {
   [[ $# == 3 && $1 == -B && $3 == -v ]] || return 89
@@ -49,6 +50,20 @@ python3() {
         "ERROR: test_second (__main__.PackageLifecycle.test_second) (phase='cleanup')" \
         'subprocess.TimeoutExpired: should not override the first failure' >&2
       return 37 ;;
+    real_dual)
+      "$SWAPZ_FIXTURE_PYTHON" - <<'PY'
+import unittest
+
+class PrimaryRealSwapContracts(unittest.TestCase):
+    def test_primary(self):
+        self.fail("PRIVATE_ONLY_TRACEBACK_PAYLOAD")
+
+    def tearDown(self):
+        raise OSError("LATER_TEARDOWN_PRIVATE_PAYLOAD")
+
+unittest.main(verbosity=2)
+PY
+      return $? ;;
     primary_ordered)
       printf '%s\n' \
         "FAIL: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
@@ -68,10 +83,12 @@ python3() {
         'AssertionError: later cleanup failed' >&2
       return 52 ;;
     primary_oversized)
-      head -c 307200 /dev/zero | tr '\0' 'x' >&2
-      printf '\n%s\n' \
+      printf '%s\n' \
+        "test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first) ... FAIL" \
         "FAIL: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
-        'Traceback (most recent call last):' \
+        'Traceback (most recent call last):' >&2
+      head -c 98304 /dev/zero | tr '\0' 'x' >&2
+      printf '\n%s\n' \
         'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
         '======================================================================' >&2
       head -c 307200 /dev/zero | tr '\0' 'z' >&2
@@ -195,6 +212,7 @@ class RootlessAttribution(unittest.TestCase):
         self.assertNotIn(str(self.root), "\n".join(markers))
         self.assertNotIn("Traceback", "\n".join(markers))
         self.assertNotIn("subprocess.TimeoutExpired", "\n".join(markers))
+        self.assertNotIn(LATER_TEARDOWN_SENTINEL, "\n".join(markers))
         logs = list(self.root.glob("build/tests/rootless-failure.*/diagnostic.log"))
         if not log_available:
             self.assertIn("log=unavailable", header)
@@ -294,6 +312,20 @@ exec "$SWAPZ_REAL_RM" "$@"
                                  test="test_timeout")
         self.assertIn("subprocess.TimeoutExpired:", log.read_text())
 
+    def test_real_unittest_teardown_order_keeps_primary_assertion(self):
+        result = self.invoke("real_dual", stage=PRIMARY_PHASE)
+        log = self.assert_report(
+            result, status=1, reason="unittest_assertion",
+            test="test_primary", stage=PRIMARY_PHASE)
+        evidence = log.read_text()
+        # unittest groups detailed ERROR blocks before FAIL blocks even though
+        # verbose progress records preserve the execution order.
+        self.assertLess(evidence.index("ERROR: test_primary"),
+                        evidence.index("FAIL: test_primary"))
+        self.assertIn("AssertionError: " + PRIVATE_SENTINEL, evidence)
+        self.assertIn("OSError: " + LATER_TEARDOWN_SENTINEL, evidence)
+        self.assertIn("unittest_kind=FAIL\n", evidence)
+
     def test_primary_pass_preserves_streams_and_removes_capture(self):
         result = self.invoke("pass", stage=PRIMARY_PHASE)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -328,7 +360,9 @@ exec "$SWAPZ_REAL_RM" "$@"
             result, status=43, reason="unittest_assertion",
             test="test_oracle_first", stage=PRIMARY_PHASE)
         self.assertLessEqual(log.stat().st_size, 262144)
-        self.assertIn("AssertionError: " + PRIVATE_SENTINEL, log.read_text())
+        evidence = log.read_text()
+        self.assertIn("AssertionError: " + PRIVATE_SENTINEL, evidence)
+        self.assertIn("unittest_kind=FAIL\n", evidence)
 
     def test_official_native_stage_keeps_first_unittest_failure(self):
         reporter_spec = importlib.util.spec_from_file_location(
@@ -339,10 +373,22 @@ exec "$SWAPZ_REAL_RM" "$@"
         fixture_code = (
             "import sys\n"
             "sys.stderr.write("
-            "'FAIL: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)\\n'"
-            "'AssertionError: first checkpoint\\n'"
-            "'ERROR: test_teardown (__main__.PrimaryRealSwapContracts.test_teardown)\\n'"
-            "'OSError: later teardown failure\\n')\n"
+            "'test_a_primary (__main__.PrimaryRealSwapContracts.test_a_primary) ... FAIL\\n'"
+            "'test_b_later (__main__.PrimaryRealSwapContracts.test_b_later) ... ERROR\\n'"
+            "'======================================================================\\n'"
+            "'ERROR: test_b_later (__main__.PrimaryRealSwapContracts.test_b_later)\\n'"
+            "'OSError: LATER_TEARDOWN_PRIVATE_PAYLOAD\\n'"
+            "'======================================================================\\n'"
+            "'FAIL: test_a_primary (__main__.PrimaryRealSwapContracts.test_a_primary)\\n'"
+            "'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD\\n'"
+            "'FAIL: rootless phase=primary-real-swap-test.py subtest=unavailable "
+            "test=test_a_primary exit=37 reason=unittest_assertion "
+            "phase_s=1 stage_s=2 line=332 "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log\\n'"
+            "'Failed during: tests/runtime/native/primary-real-swap-test.py\\n'"
+            "'Reason: exit=37 reason=unittest_assertion subtest=unavailable "
+            "phase_wall_s=1 stage_wall_s=2 line=332 "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log\\n')\n"
             "sys.exit(37)\n"
         )
         report = {"stages": []}
@@ -353,8 +399,44 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assertEqual(status, 37)
         self.assertEqual(report["stages"][0]["status"], "FAIL")
         self.assertEqual(report["stages"][0]["exit_code"], 37)
-        self.assertIn("test_oracle_first", report["stages"][0]["diagnostic"])
-        self.assertNotIn("test_teardown", report["stages"][0]["diagnostic"])
+        diagnostic = report["stages"][0]["diagnostic"]
+        self.assertIn("test_a_primary", diagnostic)
+        self.assertNotIn("test_b_later", diagnostic)
+        self.assertIn(PRIMARY_PHASE, diagnostic)
+        self.assertIn("build/tests/rootless-failure.ABCD1234/diagnostic.log", diagnostic)
+
+    def test_ci_wrapper_accepts_authoritative_rootless_marker(self):
+        diagnostic_spec = importlib.util.spec_from_file_location(
+            "swapz_rootless_ci_diagnostic", ROOT / "tests/tools/product_goals.py")
+        self.assertIsNotNone(diagnostic_spec.loader)
+        diagnostics = importlib.util.module_from_spec(diagnostic_spec)
+        diagnostic_spec.loader.exec_module(diagnostics)
+        lines = [
+            "ERROR: test_b_later "
+            "(__main__.PrimaryRealSwapContracts.test_b_later)",
+            "OSError: " + LATER_TEARDOWN_SENTINEL,
+            "FAIL: test_a_primary "
+            "(__main__.PrimaryRealSwapContracts.test_a_primary)",
+            "AssertionError: " + PRIVATE_SENTINEL,
+            "FAIL: rootless phase=primary-real-swap-test.py "
+            "subtest=unavailable test=test_a_primary exit=37 "
+            "reason=unittest_assertion phase_s=1 stage_s=2 line=332 "
+            "log=build/tests/rootless-failure.ABCD1234/diagnostic.log",
+        ]
+        diagnostic = diagnostics.diagnose_ci_failure(
+            lines, 1, "native-rootless")
+        self.assertEqual(diagnostic["status"], "FAIL")
+        self.assertEqual(diagnostic["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(diagnostic["exit_code"], 1)
+        self.assertEqual(diagnostic["child_exit_code"], 37)
+        self.assertEqual(diagnostic["rootless_reason"], "unittest_assertion")
+        self.assertEqual(diagnostic["phase"], "primary-real-swap-test.py")
+        self.assertEqual(diagnostic["test"], "test_a_primary")
+        self.assertIn(
+            "build/tests/rootless-failure.ABCD1234/diagnostic.log",
+            diagnostic["reason"])
+        self.assertNotIn(LATER_TEARDOWN_SENTINEL, diagnostic["reason"])
+        self.assertNotIn(PRIVATE_SENTINEL, diagnostic["reason"])
 
     def test_ordinary_exit_124_is_not_claimed_as_timeout(self):
         result = self.invoke("exit124")

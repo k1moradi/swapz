@@ -861,17 +861,23 @@ only rootless suites that may keep a transient private stderr copy while they
 run. One relay process may preserve stderr
 byte-for-byte into a mode-0600 file inside the mode-0700 failure directory; do
 not add a relay process to every passing suite. On PASS the file and directory
-are removed immediately. On failure, retain a bounded 64-KiB excerpt of the first detailed unittest
-failure block plus at most 188 KiB of trailing stderr, followed by bounded
-attribution metadata. This fits the existing 256-KiB capture budget and keeps
-the first traceback even when unrelated progress stderr displaces it from the
-tail. The excerpt matcher must recognize both the package and primary-real-swap
-unittest classes; matching only one class can discard the other suite's first
-assertion before the bounded private log is finalized. Classification
-must stop at the first detailed unittest failure block so a later subtest cannot
-replace the first failing checkpoint. Retain its allowlisted unittest test name
-and first assertion or exception privately, even when teardown adds a later
-failure. The official native-stage diagnostic binds unittest identity to the failing
+are removed immediately. On failure, retain at most 64 KiB from the selected
+execution-first detailed block plus at most 188 KiB of trailing stderr, followed
+by bounded attribution metadata. The selected-block excerpt keeps both a bounded
+prefix and suffix so an unusually deep traceback cannot push its terminal
+assertion or exception beyond the retained prefix. This fits the existing
+256-KiB capture budget and keeps the first traceback even when unrelated
+progress stderr displaces it from the tail. The excerpt matcher must recognize
+both the package and primary-real-swap unittest classes; matching only one class
+can discard the other suite's first assertion before the bounded private log is
+finalized. Python `unittest` preserves execution order in verbose `... FAIL`/`... ERROR`
+progress records but groups detailed `ERROR:` blocks ahead of `FAIL:` blocks in
+its summary. Classification must therefore bind the first failed progress record
+to its matching detailed traceback; a later teardown error must not win merely
+because its detailed block is printed first. Synthetic controls without progress
+records may use the first detailed block as a compatibility fallback. Retain the
+allowlisted execution-first unittest name and first assertion or exception
+privately. The official native-stage diagnostic binds unittest identity to the failing
 rootless marker: when that marker carries an allowlisted test name, that name
 wins over earlier suite output and later teardown; when it carries
 `test=unavailable`, earlier transcript `FAIL:`/`ERROR:` lines must not be
@@ -913,8 +919,10 @@ retains the public suite and artifact name, actual wrapper `exit_code`,
 first causal `first_error`, category and reason, and now also explicitly
 records the source-controlled `phase`, failing unittest or nested test name,
 `expected_contract` and sanitized `observed` diagnostic. A validated
-rootless failure marker may supply a separate `child_exit_code` and
-`rootless_reason`; it must **never** overwrite the outer process status.
+rootless failure marker supplies its allowlisted execution-first `test`, may
+supply a separate `child_exit_code` and `rootless_reason`, and retains the
+repository-relative private-log pointer when available; it must **never**
+overwrite the outer process status.
 Only the `native-rootless` wrapper may promote that marker. Its phase is the
 source-controlled basename emitted by `test-rootless.sh`: allow ordinary
 letters, digits, spaces, dot, underscore, hyphen and the colon used by C-syntax
@@ -932,10 +940,12 @@ Likewise, exit 124 alone cannot establish a watchdog timeout. A runner marker
 that explicitly says it received INT/TERM may report interruption while still
 stating that the interruption's origin is not proven.
 
-Within unittest output the first detailed failing block owns the diagnostic:
-later teardown, cleanup, parser exceptions, and make-summary errors must not
-replace its test identity or donate a later exception when its original error
-is unrecognized. Genuine first native compiler diagnostics are preserved even
+For validated native-rootless output, the runner's execution-first marker owns
+unittest identity because Python may print a later `ERROR:` detail before an
+earlier `FAIL:` detail. Later teardown, cleanup, parser exceptions, and
+make-summary errors must not replace that identity or donate a later exception.
+For ordinary non-rootless unittest output without such a marker, the first
+detailed failing block remains the fallback diagnostic. Genuine first native compiler diagnostics are preserved even
 when an outer rootless marker follows. For a marker-only rootless failure, an
 unrelated earlier expected `FAIL:`/`BLOCKED:` from a passing suite must not
 become the cause. A generic nonzero phase may retain a diagnostic only when it

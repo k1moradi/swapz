@@ -385,6 +385,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
     rootless_pattern = re.compile(
         r"^FAIL: rootless phase=(?P<phase>[A-Za-z0-9_.: -]{1,128}) "
         r"subtest=(?P<subtest>[a-z0-9-]{1,64}|unavailable) "
+        r"test=(?P<test>test_[A-Za-z0-9_]{1,96}|unavailable) "
         r"exit=(?P<exit>[0-9]{1,3}) "
         r"reason=(?P<reason>nonzero_exit|timeout_or_exit_124|"
         r"signal_or_child_exit|received_TERM|received_INT|"
@@ -392,7 +393,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
         r"stderr_relay_failure|stderr_relay_cleanup_failure) "
         r"phase_s=[0-9]+ stage_s=[0-9]+ "
         r"line=(?:[0-9]+|unavailable) "
-        r"log=(?:unavailable|build/tests/rootless-failure\."
+        r"log=(?P<log>unavailable|build/tests/rootless-failure\."
         r"[A-Za-z0-9]{8}/diagnostic\.log)$")
 
     for raw_line in lines:
@@ -469,7 +470,19 @@ def diagnose_ci_failure(lines, exit_code, suite):
                            else exit_code)
     rootless_reason = (rootless_failure["reason"]
                        if rootless_failure is not None else None)
+    rootless_test = (
+        rootless_failure["test"]
+        if rootless_failure is not None and
+        rootless_failure["test"] != "unavailable" else None)
     phase = rootless_failure["phase"] if rootless_failure else suite
+    if rootless_failure is not None:
+        # A validated rootless marker is authoritative for unittest identity.
+        # Do not let reordered detailed blocks or partial relay bytes donate a
+        # different test/exception to the public CI diagnostic.
+        failing_test = None
+        unittest_header = None
+        unittest_error = None
+        unittest_category = None
     compile_phase = (
         phase == "Makefile native and metadata" or phase.startswith("C syntax:"))
 
@@ -516,7 +529,9 @@ def diagnose_ci_failure(lines, exit_code, suite):
         causal_error = first_error or fallback
         category = first_category
 
-    if failing_test is not None:
+    if rootless_test is not None:
+        test_name = rootless_test
+    elif failing_test is not None:
         test_name = failing_test
     elif rootless_failure:
         test_name = phase
@@ -536,6 +551,9 @@ def diagnose_ci_failure(lines, exit_code, suite):
         marker_reason = ("rootless phase=" + phase + " reason=" +
                          rootless_reason + " child_exit=" +
                          str(child_exit_code))
+        if rootless_test is not None:
+            marker_reason += " test=" + rootless_test
+        marker_reason += " log=" + rootless_failure["log"]
         if rootless_reason == "timeout_or_exit_124":
             status, category = "FAIL", "INFRASTRUCTURE"
             reason = (marker_reason +
@@ -549,8 +567,12 @@ def diagnose_ci_failure(lines, exit_code, suite):
             status, category = "CANCELLED", "CANCELLATION"
             reason = (marker_reason +
                       " (runner received an interrupt; origin not proven)")
-        elif rootless_reason == "unittest_assertion":
-            status, category = "FAIL", "RUNTIME_ASSERTION"
+        elif rootless_reason in ("unittest_assertion", "unittest_error"):
+            status = "FAIL"
+            category = ("SOURCE_CONTRACT"
+                        if phase in ("source-contract-test.py",
+                                     "make-interface-test.py")
+                        else "RUNTIME_ASSERTION")
             reason = marker_reason
         elif rootless_reason == "unittest_timeout":
             status, category = "FAIL", "INFRASTRUCTURE"
