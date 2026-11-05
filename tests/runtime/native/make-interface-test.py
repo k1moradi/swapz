@@ -113,9 +113,9 @@ class PublicMakeContract(unittest.TestCase):
                     "  --sb-state) printf '%s\\n' 'SecureBoot enabled';;\n"
                     "  --ignore-keyring)\n"
                     "    [ \"$2\" = --test-key ] && [ \"$#\" = 3 ] || exit 2\n"
-                    "    case \"${SWAPZ_FAKE_MOKUTIL_MODE:-success-empty}\" in\n"
-                    "      success-empty) exit 0;;\n"
-                    "      success-exact) printf '%s\\n' \"$3 is already enrolled\"; exit 0;;\n"
+                    "    case \"${SWAPZ_FAKE_MOKUTIL_MODE:-enrolled-message}\" in\n"
+                    "      status-zero-empty) exit 0;;\n"
+                    "      status-zero-exact) printf '%s\\n' \"$3 is already enrolled\"; exit 0;;\n"
                     "      success-with-warning) printf '%s\\n' 'unrelated diagnostic'; exit 0;;\n"
                     "      enrolled-message) printf '%s\\n' \"$3 is already enrolled\"; exit 1;;\n"
                     "      enrolled-message-with-warning)\n"
@@ -185,7 +185,7 @@ class PublicMakeContract(unittest.TestCase):
             self.assertEqual((fixture / "dm-swapz.ko.calls").read_text(),
                              "call\n")
 
-            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "success-exact"
+            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "enrolled-message"
             verified_exact = subprocess.run(
                 ["bash", str(helper), "--verify", str(module)], env=env,
                 capture_output=True, text=True, timeout=5)
@@ -193,11 +193,9 @@ class PublicMakeContract(unittest.TestCase):
                              verified_exact.stdout + "\n" +
                              verified_exact.stderr)
 
-            # Some Mokutil builds return status 1 while emitting the exact
-            # positive message for this DER certificate. Accept that one
-            # certificate-bound output form, but reject mixed diagnostics,
-            # another certificate's message, negative output and other
-            # failure statuses.
+            # Supported mokutil 0.7.2 reports enrollment only with status 1
+            # and this exact certificate-bound message. Status 0, even with
+            # identical text, is not enrollment evidence.
             env["SWAPZ_FAKE_MOKUTIL_MODE"] = "enrolled-message"
             module.write_bytes(b"module")
             enrolled = subprocess.run(
@@ -214,7 +212,8 @@ class PublicMakeContract(unittest.TestCase):
                              verified_enrolled.stdout + "\n" +
                              verified_enrolled.stderr)
 
-            for mode in ("success-with-warning", "enrolled-message-with-warning",
+            for mode in ("status-zero-empty", "status-zero-exact",
+                         "success-with-warning", "enrolled-message-with-warning",
                          "wrong-certificate", "not-enrolled",
                          "failed-with-positive-text"):
                 with self.subTest(mokutil_mode=mode):
@@ -231,7 +230,7 @@ class PublicMakeContract(unittest.TestCase):
                         (fixture / "dm-swapz.ko.calls").read_text(),
                         "call\ncall\n")
 
-            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "success-empty"
+            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "enrolled-message"
             module.write_bytes(b"module")
             unsigned = subprocess.run(
                 ["bash", str(helper), "--verify", str(module)], env=env,
