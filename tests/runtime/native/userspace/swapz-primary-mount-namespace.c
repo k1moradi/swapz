@@ -29,6 +29,13 @@ static int fixture_inventory_readdir_error;
 static int fixture_inventory_seen_foreign_pid;
 static int fixture_same_namespace_mount_after_self_snapshot;
 static int fixture_same_namespace_mount_injected;
+/* Timed synthetic procfs changes; these do not create actual mounts. */
+static const char *fixture_peer_mountinfo_before_peer_scan;
+static int fixture_peer_mountinfo_before_peer_scan_injected;
+static const char *fixture_peer_mountinfo_after_peer_scan;
+static int fixture_peer_mountinfo_after_peer_scan_injected;
+static int fixture_peer_namespace_changes_between_stats;
+static int fixture_peer_namespace_changed;
 static int fixture_mount_vanish_on_read;
 static int fixture_namespace_stat_error;
 static int fixture_mount_read_error;
@@ -152,8 +159,25 @@ static struct dirent *fixture_readdir(DIR *directory)
 		return NULL;
 	}
 	entry = readdir(directory);
+	if (!entry && !errno && fixture_peer_mountinfo_after_peer_scan) {
+		/*
+		 * The peer's table was already read. A subsequent mount must not
+		 * retroactively change that completed inventory snapshot.
+		 */
+		fixture_file("3031/mountinfo",
+			     fixture_peer_mountinfo_after_peer_scan);
+		fixture_peer_mountinfo_after_peer_scan = NULL;
+		fixture_peer_mountinfo_after_peer_scan_injected = 1;
+		errno = 0;
+	}
 	if (entry && !strcmp(entry->d_name, "3031")) {
 		fixture_inventory_seen_foreign_pid = 1;
+		if (fixture_peer_mountinfo_before_peer_scan) {
+			fixture_file("3031/mountinfo",
+				     fixture_peer_mountinfo_before_peer_scan);
+			fixture_peer_mountinfo_before_peer_scan = NULL;
+			fixture_peer_mountinfo_before_peer_scan_injected = 1;
+		}
 		/*
 		 * Reproduce a mount racing the already-read self snapshot while the
 		 * foreign PID is still provably in the same mount namespace. Both
@@ -227,6 +251,22 @@ static int fixture_stat(const char *path, struct stat *info)
 	if (strstr(path, "/3031/ns/mnt") && fixture_namespace_stat_error) {
 		errno = fixture_namespace_stat_error;
 		return -1;
+	}
+	if (strstr(path, "/3031/ns/mnt") &&
+	    fixture_peer_namespace_changes_between_stats) {
+		/*
+		 * First stat reports the old shared inode; the confirming stat
+		 * must notice that the PID now points at another namespace.
+		 */
+		int result = stat(fixture_path(path, converted), info);
+
+		if (result == 0) {
+			assert(unlink(converted) == 0);
+			fixture_file("3031/ns/mnt", "changed foreign namespace\n");
+			fixture_peer_namespace_changes_between_stats = 0;
+			fixture_peer_namespace_changed = 1;
+		}
+		return result;
 	}
 	if (fixture_regular_swap_path &&
 	    !strcmp(path, fixture_regular_swap_path)) {
@@ -384,6 +424,12 @@ static void fixture_reset(void)
 	fixture_inventory_seen_foreign_pid = 0;
 	fixture_same_namespace_mount_after_self_snapshot = 0;
 	fixture_same_namespace_mount_injected = 0;
+	fixture_peer_mountinfo_before_peer_scan = NULL;
+	fixture_peer_mountinfo_before_peer_scan_injected = 0;
+	fixture_peer_mountinfo_after_peer_scan = NULL;
+	fixture_peer_mountinfo_after_peer_scan_injected = 0;
+	fixture_peer_namespace_changes_between_stats = 0;
+	fixture_peer_namespace_changed = 0;
 	fixture_mount_vanish_on_read = 0;
 	fixture_namespace_stat_error = 0;
 	fixture_mount_read_error = 0;
@@ -618,6 +664,139 @@ static void probe_shared_root_parent_same_namespace_snapshot_gap(void)
 		puts("UNPROVEN: shared-parent same-namespace selected target appeared "
 		     "after self mount snapshot and before peer skip; "
 		     "gate=selected target/namespace identity prevented=none");
+	}
+}
+
+
+/* Assert that every timing control actually fired inside the production scan. */
+static void fixture_expect_timed_change(const char *case_name, int injected)
+{
+	if (!injected) {
+		fprintf(stderr, "FAIL: %s: gate=timed procfs injection did not run\n",
+			case_name);
+		++fixture_failures;
+	}
+}
+
+static void test_controlled_mount_snapshot_timings(void)
+{
+	static const char foreign_selected_mount[] =
+		"36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		"37 36 8:1 / /selected rw - ext4 /dev/selected rw\n";
+	static const char foreign_parent_mount[] =
+		"36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		"37 36 8:0 / /parent rw - ext4 /dev/not-parent rw\n";
+	static const char foreign_selected_bind_mount[] =
+		"36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		"37 36 8:1 /subtree /selected-bind rw - ext4 /dev/not-selected rw\n";
+	static const char foreign_changed_parent_mount[] =
+		"36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		"37 36 8:8 / /changed-parent rw - ext4 /dev/other rw\n";
+	static const char foreign_sibling_mount[] =
+		"36 25 259:9 / / rw - ext4 /dev/foreign-root rw\n"
+		"37 36 8:2 / /sibling rw - ext4 /dev/sibling rw\n";
+	const dev_t root_device = makedev(8U, 4U);
+	const dev_t target_parent = makedev(8U, 0U);
+	const dev_t changed_parent = makedev(8U, 8U);
+	struct swapz_primary_mount_facts facts = {0};
+	int result;
+
+	/* Changes after the self read but before the other PID scan are seen. */
+	fixture_same_parent_root();
+	fixture_peer_mountinfo_before_peer_scan = foreign_selected_mount;
+	expect_mount_identity_admission("timed selected mount before peer scan",
+					root_device, target_parent, 0, 0,
+					"selected target/cross-namespace");
+	fixture_expect_timed_change("timed selected mount before peer scan",
+				    fixture_peer_mountinfo_before_peer_scan_injected);
+
+	fixture_same_parent_root();
+	fixture_peer_mountinfo_before_peer_scan = foreign_parent_mount;
+	expect_mount_identity_admission("timed parent mount before peer scan",
+					root_device, target_parent, 0, 0,
+					"device ancestry/cross-namespace");
+	fixture_expect_timed_change("timed parent mount before peer scan",
+				    fixture_peer_mountinfo_before_peer_scan_injected);
+
+	fixture_same_parent_root();
+	fixture_peer_mountinfo_before_peer_scan = foreign_selected_bind_mount;
+	expect_mount_identity_admission("timed misleading-source bind before peer scan",
+					root_device, target_parent, 0, 0,
+					"selected device number/cross-namespace");
+	fixture_expect_timed_change("timed misleading-source bind before peer scan",
+				    fixture_peer_mountinfo_before_peer_scan_injected);
+
+	/*
+	 * A PID changing namespaces between the two stat calls is NOT eligible
+	 * for the shared-namespace shortcut. The foreign table must be read.
+	 */
+	fixture_same_parent_root();
+	fixture_share_mount_namespace();
+	fixture_file("3031/mountinfo", foreign_selected_mount);
+	fixture_peer_namespace_changes_between_stats = 1;
+	expect_mount_identity_admission("PID namespace changes before confirming skip",
+					root_device, target_parent, 0, 0,
+					"namespace identity/cross-namespace");
+	fixture_expect_timed_change("PID namespace changes before confirming skip",
+				    fixture_peer_namespace_changed);
+
+	/* An incomplete PID inventory fails closed even after a clean peer. */
+	fixture_same_parent_root();
+	fixture_peer_mountinfo_before_peer_scan = foreign_sibling_mount;
+	fixture_inventory_readdir_error = EIO;
+	expect_mount_identity_admission("timed clean peer then incomplete inventory",
+					root_device, target_parent, 0, EIO,
+					"complete PID enumeration");
+	fixture_expect_timed_change("timed clean peer then incomplete inventory",
+				    fixture_peer_mountinfo_before_peer_scan_injected);
+
+	/*
+	 * Parent ancestry is supplied by the caller, not discovered here.
+	 * A stale parent 8:0 sees a clean scan after a new 8:8 parent mount.
+	 * The independent caller must re-resolve ancestry; its fresh argument
+	 * then detects the mount. Neither result proves a physical write.
+	 */
+	fixture_same_parent_root();
+	fixture_peer_mountinfo_before_peer_scan = foreign_changed_parent_mount;
+	expect_mount_identity_admission("timed changed parent with stale argument",
+					root_device, target_parent, 1, 0,
+					"stale parent argument (not coordinator admission)");
+	fixture_expect_timed_change("timed changed parent with stale argument",
+				    fixture_peer_mountinfo_before_peer_scan_injected);
+	expect_mount_identity_admission("timed changed parent with refreshed argument",
+					root_device, changed_parent, 0, 0,
+					"revalidated parent device");
+
+	/*
+	 * A mount arriving after a foreign peer's completed read is another
+	 * bounded-snapshot control. Do not turn an observed clean snapshot into
+	 * a PASS that asserts the production coordinator may mutate.
+	 */
+	fixture_same_parent_root();
+	fixture_peer_mountinfo_after_peer_scan = foreign_selected_mount;
+	errno = 0;
+	result = swapz_primary_read_mount_facts(&facts, target_parent);
+	fixture_expect_timed_change("mount after completed peer snapshot",
+				    fixture_peer_mountinfo_after_peer_scan_injected);
+	if (result == 0 &&
+	    (!facts.root_mount_seen || facts.root_device != root_device)) {
+		fprintf(stderr,
+			"FAIL: mount after completed peer snapshot: "
+			"gate=root identity root_seen=%d root=%u:%u\n",
+			facts.root_mount_seen, major(facts.root_device),
+			minor(facts.root_device));
+		++fixture_failures;
+	} else if (result == 0 && !facts.target_mounted) {
+		puts("UNPROVEN: selected mount appeared after completed foreign "
+		     "PID snapshot; gate=non-atomic mount inventory prevented=none");
+	}
+	if (fixture_mount_fd != -1) {
+		fprintf(stderr,
+			"FAIL: mount after completed peer snapshot: "
+			"gate=mountinfo fd ownership leaked\n");
+		++fixture_failures;
+		(void)close(fixture_mount_fd);
+		fixture_mount_fd = -1;
 	}
 }
 
@@ -1024,6 +1203,7 @@ int main(void)
 	expect_mount_admission("missing table and vanished namespace", 1, 0);
 	test_shared_root_parent_mount_gates();
 	probe_shared_root_parent_same_namespace_snapshot_gap();
+	test_controlled_mount_snapshot_timings();
 	test_shared_root_parent_relationship_gates();
 	test_active_swapfile_gate();
 	test_independent_admission_gates();
