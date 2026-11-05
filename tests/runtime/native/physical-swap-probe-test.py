@@ -128,8 +128,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "dirty": False,
             "nonce": nonce,
             "native_status": "PASS",
-            "loaded_preflight": {"status": "PASS", "check": "complete"},
+            # Mirror the successful producer's complete terminal record.
+            "loaded_preflight": {
+                "status": "PASS", "check": "complete", "errno": "0"},
             "fast_test_status": "PASS",
+            "result_file": "synthetic-fast-mixed.json",
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "development-evidence.json"
@@ -151,6 +154,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 },
                 "fast_test_status": "BLOCKED",
             }
+            # The producer has not generated a result file on this path.
+            blocked.pop("result_file")
             write(blocked)
             admitted = probe._read_fast_test_development_evidence(
                 path, os.getuid(), head, nonce)
@@ -163,9 +168,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "status": "BLOCKED", "check": "kernel_build"}},
                  head, nonce, "other_failure"),
                 ({**base, "dirty": True}, head, nonce, "mismatch"),
+                ({**base, "head": "c" * 40}, head, nonce, "mismatch"),
+                ({**base, "schema": "other-evidence"}, head, nonce,
+                 "mismatch"),
                 (base, head, "c" * 32, "mismatch"),
                 ({**base, "native_status": "PENDING"}, head, nonce,
                  "mismatch"),
+                ({**base, "fast_test_status": "FAIL"}, head, nonce,
+                 "other_failure"),
+                ({**base, "loaded_preflight": {
+                    "status": "BLOCKED", "check": "unclaimed_null_blk",
+                    "errno": "unknown"}}, head, nonce, "other_failure"),
             )
             for record, expected_head, expected_nonce, diagnostic in rejected:
                 with self.subTest(record=record, nonce=expected_nonce):
@@ -1833,6 +1846,40 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                     directory, "/reviewed/review.json")
         return events, state, target
 
+    def test_development_artifact_mismatch_blocks_before_recovery_or_write(self):
+        # A fresh development PASS cannot authorize substituted build bytes.
+        target, evidence = self.physical_preparation_fixture()
+        target["swap_was_active"] = False
+        evidence["development_only"] = True
+        evidence["scope"] = probe.DEVELOPMENT_SCOPE
+        changed_artifacts = dict(evidence["artifact_digests"])
+        changed_artifacts["oracle_sha256"] = "f" * 64
+        with mock.patch.object(probe.os, "geteuid", return_value=0), \
+                mock.patch.object(
+                    probe, "require_development_formatter_inventory_clear"), \
+                mock.patch.object(
+                    probe, "current_development_evidence",
+                    return_value=evidence) as development, \
+                mock.patch.object(
+                    probe, "inspect_target", return_value=target) as inspect, \
+                mock.patch.object(
+                    probe, "_artifact_digests",
+                    return_value=changed_artifacts), \
+                mock.patch.object(probe, "_prepare_state") as prepare, \
+                mock.patch.object(probe, "_write_block0") as write:
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "current build artifacts differ from admitted evidence"):
+                probe.run_probe(
+                    target["device_arg"], target["device_arg"], None, None,
+                    development_only=True)
+        development.assert_called_once_with(None)
+        inspect.assert_called_once_with(
+            target["device_arg"], target["device_arg"],
+            allow_inactive_swap=True)
+        prepare.assert_not_called()
+        write.assert_not_called()
+
     def test_development_active_inventory_blocks_before_test_or_header_write(self):
         rows = (
             "/swapfile file 524284 478600 -1\n",
@@ -2574,6 +2621,19 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(
                     probe.ProbeError,
                     "parent_major_minor expected='8:16' observed='8:32'"):
+                probe._verify_target_identity(target)
+
+        # Do not substitute a partition with unchanged major:minor/geometry.
+        with mock.patch.object(probe, "block_identity",
+                               return_value=(8, 17)), \
+                mock.patch.object(probe, "_run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 0, stdout=str(target["size_bytes"]), stderr="")), \
+                mock.patch.object(probe, "_partition_identity",
+                    return_value=("changed-partuuid", target["size_bytes"])):
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "persistent_identity expected=.*observed=.*changed-partuuid"):
                 probe._verify_target_identity(target)
 
     def test_saved_parent_card_fingerprint_is_rechecked(self):
