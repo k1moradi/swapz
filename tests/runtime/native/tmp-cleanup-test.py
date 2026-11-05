@@ -6,6 +6,7 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 import tempfile
@@ -274,6 +275,88 @@ class OwnedTemporaryCleanupTests(unittest.TestCase):
                 child.stdin.write("x")
                 child.stdin.flush()
             child.wait(timeout=5)
+
+    def test_fd_closed_but_live_mmap_retains_completed_session(self):
+        owned = self.session("Abcd1234")
+        expected_logical_bytes = sum(file.stat().st_size for file in owned.rglob("*")
+                                     if file.is_file())
+        # libc mmap does not retain the duplicate fd that Python's mmap object
+        # normally keeps open; only the live file-backed mapping remains.
+        child_code = (
+            "import ctypes, mmap, os, sys\n"
+            "libc = ctypes.CDLL(None, use_errno=True)\n"
+            "libc.mmap.argtypes = (ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, "
+            "ctypes.c_int, ctypes.c_int, ctypes.c_long)\n"
+            "libc.mmap.restype = ctypes.c_void_p\n"
+            "libc.munmap.argtypes = (ctypes.c_void_p, ctypes.c_size_t)\n"
+            "descriptor = os.open(sys.argv[1], os.O_RDONLY)\n"
+            "mapped = libc.mmap(None, 1, mmap.PROT_READ, mmap.MAP_PRIVATE, descriptor, 0)\n"
+            "assert mapped != ctypes.c_void_p(-1).value\n"
+            "os.close(descriptor)\n"
+            "assert ctypes.string_at(mapped, 1) == b'o'\n"
+            "print('ready', flush=True)\n"
+            "sys.stdin.buffer.read(1)\n"
+            "libc.munmap(mapped, 1)\n"
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-B", "-c", child_code, str(owned / "fixture.bin")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            ready, _, _ = select.select([child.stdout], [], [], 5)
+            self.assertTrue(ready, "mapped-file fixture did not become ready")
+            self.assertEqual(child.stdout.readline().strip(), "ready")
+
+            result = self.run_cleanup()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("removed:0 retained:1", result.stdout)
+            self.assertIn("retained_active:1", result.stdout)
+            self.assertEqual((owned / "fixture.bin").read_bytes(), b"owned payload")
+
+            original_open = open
+
+            def deny_mapping_inventory(path, *args, **kwargs):
+                if path == f"/proc/{child.pid}/maps":
+                    raise PermissionError(errno.EACCES, "synthetic mapping visibility failure")
+                return original_open(path, *args, **kwargs)
+
+            state = cleanup_module.CleanupState()
+            with mock.patch("builtins.open", side_effect=deny_mapping_inventory):
+                with self.assertRaises(PermissionError) as caught:
+                    cleanup_module.cleanup(str(self.root), self.owner_uid, 0o700, state)
+            self.assertEqual(caught.exception.errno, errno.EACCES)
+            self.assertEqual(state.phase, "session-activity")
+            self.assertFalse(state.partial)
+            self.assertTrue(owned.exists())
+
+            with mock.patch("builtins.open", side_effect=deny_mapping_inventory), \
+                 mock.patch.object(sys, "argv", [str(HELPER), str(self.root),
+                                                str(self.owner_uid), "700"]), \
+                 mock.patch.object(sys, "stderr", new_callable=io.StringIO) as diagnostics, \
+                 mock.patch.object(sys, "stdout", new_callable=io.StringIO) as output:
+                self.assertEqual(cleanup_module.main(), 2)
+            self.assertEqual(output.getvalue(), "")
+            self.assertIn("phase=session-activity category=filesystem-error", diagnostics.getvalue())
+            self.assertIn("original_errno=EACCES(13)", diagnostics.getvalue())
+            self.assertIn("retained=unexamined-or-unproved removed=0", diagnostics.getvalue())
+            self.assertIn("session_class=swapz-benchmark ownership_identity=proven",
+                          diagnostics.getvalue())
+            self.assertIn("safe_next_action=inspect-retained-evidence-read-only",
+                          diagnostics.getvalue())
+        finally:
+            child.stdin.close()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=5)
+                raise
+            child.stdout.close()
+
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed:1 retained:0", result.stdout)
+        self.assertIn(f"reclaimed_logical_bytes:{expected_logical_bytes}", result.stdout)
+        self.assertFalse(owned.exists())
 
     def test_unreadable_same_owner_process_inventory_blocks_before_unlink(self):
         owned = self.session("Abcd1234")

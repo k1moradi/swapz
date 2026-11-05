@@ -263,6 +263,8 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                                              entries: list[Entry]) -> bool:
     """Return whether a same-owner process still references inspected session state."""
     identities = session_object_identities(session_stat, entries)
+    mapped_identities = {(os.major(device), os.minor(device), inode)
+                         for device, inode in identities}
     process_count = 0
     reference_count = 0
     with os.scandir("/proc") as iterator:
@@ -302,7 +304,31 @@ def session_referenced_by_same_owner_process(owner_uid: int, session_stat,
                         if (current.st_dev, current.st_ino) in identities:
                             return True
             except (FileNotFoundError, PermissionError):
-                continue
+                pass
+            # A process can retain mapped file pages after its last fd closes.
+            # Match /proc mappings by device/inode, never by private paths.
+            try:
+                with open(os.path.join(process_path, "maps"), "rb") as mappings:
+                    for mapping in mappings:
+                        reference_count += 1
+                        require(reference_count <= MAX_PROCESS_REFERENCES,
+                                "same-owner process references exceed cleanup bound", "bound")
+                        fields = mapping.split(None, 5)
+                        require(len(fields) >= 5,
+                                "same-owner process mapping is malformed", "process-visibility")
+                        device_numbers = fields[3].split(b":", 1)
+                        require(len(device_numbers) == 2,
+                                "same-owner process mapping device is malformed", "process-visibility")
+                        try:
+                            mapping_identity = (int(device_numbers[0], 16),
+                                                int(device_numbers[1], 16), int(fields[4]))
+                        except ValueError as error:
+                            raise CleanupBlocked("same-owner process mapping identity is malformed",
+                                                 "process-visibility") from error
+                        if mapping_identity in mapped_identities:
+                            return True
+            except FileNotFoundError:
+                continue  # Process exited during inventory.
     return False
 
 
@@ -475,9 +501,14 @@ def main() -> int:
                           if isinstance(error, OSError) and error.errno is not None else "none")
         exit_code = 130 if isinstance(error, KeyboardInterrupt) else 2
         retained = "partial-or-uncertain" if state.partial else "unexamined-or-unproved"
+        ownership_identity = ("proven" if state.phase in (
+            "session-inspection", "session-activity", "session-removal",
+            "session-finalization") else "unproved-or-unexamined")
         print(f"BLOCKED: tmp-cleanup phase={state.phase} category={category} "
               f"original_errno={original_errno} exit_code={exit_code} "
-              f"retained={retained} removed={state.removed}", file=sys.stderr)
+              f"retained={retained} removed={state.removed} "
+              f"session_class=swapz-benchmark ownership_identity={ownership_identity} "
+              "safe_next_action=inspect-retained-evidence-read-only", file=sys.stderr)
         return exit_code
     print(f"SWAPZ_TMP_CLEANUP=completed-owned-only removed:{removed} retained:{state.retained} "
           f"reclaimed_logical_bytes:{state.reclaimed_logical_bytes} "
