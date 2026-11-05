@@ -748,122 +748,70 @@ runner/official-pipeline registration; Agent 8 must not edit that wiring.
 
 ### Loaded-preflight ownership and retained cleanup
 
-The loaded preflight must retain executable mode 0755, and the unprivileged
-rootless runner must `bash -n` the original preflight and its isolated fixture
-copy before attempting any loaded operation. Multiline
-`[[ ... ]]` binary comparisons must keep each operand on the same logical
-shell line as `==` (with an explicit continuation when wrapped): a Bash
-parse-time exit 2 is not a simulated authorization refusal. The rootless
-source-contract guard must assert retention of unowned idle modules, never
-automatic module removal or a fabricated auto-removal success marker. Because
-the preflight has no authority to unload an unowned module, `rmmod` is not a
-preflight prerequisite. The isolated rootless fixture must prove that an
-unavailable `rmmod` does not block an otherwise clean preflight while its stub
-still traps any unexpected unload attempt.
+The loaded preflight must retain executable mode 0755. The rootless runner
+must `bash -n` both the original preflight and the isolated fixture copy
+before any loaded operation. Multiline Bash `[[ ... == ... ]]` comparisons
+must remain parseable; a syntax exit 2 is not an authorization refusal.
+An unavailable `rmmod` is not a preflight prerequisite: a pre-existing idle
+module has no proven creation owner, and the fixture must detect any
+unexpected module-unload attempt. No holder PID may be inferred and signaled.
 
-The root preflight is not a host-resource garbage collector. A
-`nullb-swapz-<16 hex>` name, even paired with an idle `dm_swapz` module,
-never grants creation ownership. An unclaimed null_blk remains
-`LOADED_PREFLIGHT=BLOCKED check=unclaimed_null_blk`; only its original owner
-can supply independent creation provenance. A zero module refcount is not
-module creation authority, so preflight must retain the module rather than
-`rmmod` it. No inferred holder PID may be signaled. Benchmark mapper
-`swapz-demo-<token>` and exact `SWAPZ-TEST-<token>` UUID variants are
-separate from primary lifecycle ownership and must never adopt one another.
+The preflight is an **admission gate, never an orphan-resource collector**.
+A configfs `nullb-swapz-<16 hex>` name, an index, full memory-backed
+attributes, matching null_blk driver major/minor, a block-node rdev, a
+sole holder, a benchmark-looking mapper name/UUID, and absence of active
+swap **do not establish exclusive creation authority**, individually or in
+combination. A new preflight process cannot inherit the prior creator's
+descriptors or exclusive claim. Neither a user-supplied token, stale session
+record, nor module refcount grants that claim. `unclaimed_null_blk` must
+remain BLOCKED even for two complete-looking simultaneous objects. Only the
+original creator, acting under independently proven creation authority and
+revalidated live identity, can undertake bounded recovery; the preflight
+must never adopt, power off, unlink or remove those pre-existing objects.
+No owner is instructed to delete ambiguous objects merely to unblock tests.
 
-The rootless loaded-preflight fixture must distinguish two concurrent
-token-shaped but unclaimed configfs objects from an unrelated foreign,
-index-named null_blk device. A fully populated but unclaimed device remains
-BLOCKED; duplicate configfs index claims, incomplete attributes, dual sysfs
-names for a reused index, a second holder and a substituted sole-holder link
-must identify the first missing ownership proof without touching devices.
-These negative controls must reject every synthetic ownership token or device
-identity, fixture path and unsafe unload/remove/delete/power-off recommendation
-from diagnostics.
-The fully populated unclaimed case must also prove its complete fake configfs,
-sysfs, block-node and holder inventory remains unchanged. The pair must return BLOCKED for absent creation
-authority, retain both original objects and their memory-backed attributes,
-and report only proof categories rather than private names or fixture paths.
-The unrelated device, when no dm_swapz mapping is loaded, must remain unchanged
-without a false ownership refusal. Include a matching-prefix foreign decoy
-whose suffix is not a canonical 16-hex token; it must not be adopted or
-removed. Assert that only a positively proved stale mapper reaches
-UUID-targeted removal, only an exact cleanup candidate attempts configfs
-removal, and every other retained synthetic power attribute stays on. A
-post-snapshot same-name replacement must have a demonstrably different
-inode and yield an attributed power-off refusal. A failing final cleanup
-must preserve both its numeric status and the powered-off retained state.
-Changing the mapper UUID after the first snapshot must block removal. A failed
-dependency-name or dependency-device-number probe must also block before any
-mapper removal. Neither path may invoke unowned module
-unload or inferred-PID signaling; an unexpected internal command failure is
-FAIL, not a benign ownership BLOCKED. The final fixture PASS marker must report
-the number of `run_case` preflight fixtures actually executed; the separate
-legacy path-only false-admission demonstration is not a preflight fixture and
-must not be folded into that count. This regular-file evidence cannot establish
-real host ownership or authorize loaded cleanup.
+For diagnostics, read-only checks may evaluate the single-mapper inventory,
+canonical major:minor, benchmark versus primary UUID namespace, dependency
+name and devno, null_blk configfs attributes and index, sysfs alias and
+driver major/minor, lower node rdev, partition markers, active swap aliases,
+mounts, exact holder and pinned configfs/power inode identities. A matching
+snapshot is **live identity only** and still refuses with
+`expected_proof=creation_authority observed_proof=live_identity_only`
+before the first removal. Missing, substituted, malformed, multiply aliased
+or unreadable evidence must refuse at its earlier specific check; a name
+reused after a snapshot or a foreign active swap cannot be cleaned up.
+When the mapper is absent, token-shaped configfs names refuse with
+`check=unclaimed_null_blk expected_proof=creation_authority
+observed_proof=token_name_only`. Unrelated foreign index-named devices and
+noncanonical matching-prefix decoys are retained without a false ownership
+claim. An idle loaded module remains BLOCKED rather than being unloaded.
 
-A positively identified stale benchmark mapper is necessary but not sufficient
-to dispose of its lower. The ordinary benchmark pair intentionally generates
-its mapper token independently from each RAM-lower token, so token equality is
-not provenance and must not be required or inferred. Snapshot both the
-dependency name and its canonical major:minor from Device Mapper, then require
-that exact devno to equal the live null_blk sysfs devno and lower block-node
-`st_rdev`. The current sysfs lower must also expose the exact canonical
-`dm-N` mapper as its sole holder before mapper removal; this rejects an
-index/devno-reused replacement that merely inherited the old name or number.
-Partitioned lowers are not benchmark cleanup candidates, preserving the primary
-lifecycle helper's separate ownership domain.
+Every BLOCKED diagnostic must identify the failing `check`, expected and
+observed proof classes, `original_errno_or_exit` (or `unavailable`),
+a retained-resource action and a read-only safe next action, without
+exposing private tokens, names, paths, device numbers or PID inventories.
+Preserve a captured nonzero shell exit status both in diagnostics and as
+the script exit status when representable in 1..255; an unavailable error
+retains generic refusal exit 1. Never fabricate a kernel errno from a shell
+exit code. Unexpected internal failures are FAIL, not ownership BLOCKED.
 
-Open and retain descriptors for the selected configfs directory and its
-`power` attribute before destructive cleanup, and bind their device/inode
-identities to the captured configfs proof. Resolve the power attribute through
-the pinned directory descriptor rather than the public pathname. Also capture
-index, memory-backed status, positive size, 4096-byte block size and queue mode.
-Require the nullb block major from `/proc/devices`, require the configfs
-index to be the live null_blk minor, require exact sysfs major:minor to equal
-the dependency devno and real lower block node `st_rdev`; missing or
-ambiguous telemetry blocks cleanup. Before mapper removal, revalidate the
-original mapper UUID, mapper device number, zero opens, mounted/swap inventory,
-unchanged dependency-name and dependency-devno outputs, exact sole-holder link,
-plus the original pinned configfs/lower proof. Remove by exact mapper UUID,
-never by an unverified reused name or with force. Before power-off, require the
-same pinned configfs object, unchanged live lower proof and an empty holder
-directory, then write only through the power descriptor opened at acquisition.
-The rootless power-helper fixture must prove that the matching regular power
-inode transitions from 1 to 0, while missing paths and FIFO substitutes refuse
-without writes.
-
-The preflight's rootless identity fixture must translate original paths in
-one pass, matching nested `/proc/devices` and `/sys/dev/block` paths before
-the shorter `/proc`, `/sys` and `/dev` patterns, so each maps to its own
-synthetic namespace. It must provide its own writable fake `/dev/null` for
-redirected diagnostics; a missing synthetic sink must not masquerade as an
-ownership refusal. All original host resources remain untouched. Shell
-failure-status capture belongs outside the Python here-document input: a
-Python parse or open error must never be reported as
-successful power-off. After power-off invalidates sysfs block telemetry, retain the captured configfs
-proof and both pinned descriptor identities through the last immediately
-preceding `rmdir` check. A pathname-based `rmdir` still lacks an atomic
-compare-and-unlink primitive, so its residual concurrent-name-reuse boundary
-must not be described as a kernel atomic guarantee.
-
-On missing, mismatched or substituted proof, fail closed and retain surviving
-state; a successful mapper removal alone is not a passing preflight. Diagnostics
-at cleanup gates use fail-only `phase`, `resource_kind`,
-`expected_proof`, `observed_proof`, `original_errno_or_exit` and
-`retained_state_action` categories, never private resource names or PID
-inventories. The rootless `tests/runtime/native/nullblk-identity-test.sh`
-fixture must prove the original path-only false admission and exercise a real
-benchmark-shaped owned proof with distinct mapper/lower tokens, changed configfs
-inode, missing sysfs proof, mismatched configfs index and
-dependency/sysfs/rdev identities, partitioned-lower and foreign-holder refusal,
-failed/changed/foreign mapper
-dependency observations, namespace refusal, ambiguous module ownership and cleanup failure
-against only synthetic files and stubs. This
-unit evidence never substitutes for authorized loaded testing. Source-contract
-and Make-interface checks must pin UUID-targeted mapper removal and refusal of
-unowned modules and holder signals, never the obsolete destructive branches.
+The private `tests/runtime/native/nullblk-identity-test.sh` fixture must
+rewrite host /proc, /sys, /dev and package paths in a single ordered pass
+and use only fake utilities and regular files. Its legacy path-only
+false-admission demonstration is **not** counted as a preflight case.
+It must cover two unclaimed token-shaped objects, a complete-looking
+unclaimed object, an untrusted old owner record, a foreign decoy, ambiguous
+name/index aliases (including dangling alternate dev symlinks), wrong major,
+mismatched lower devno and index, malformed mapper/swap inventory, active
+swap aliases, incomplete configfs attributes, foreign holders/dependencies,
+substituted configfs inode, failed dependency probes and uncertain cleanup.
+The fixture checks both pinned descriptor identities against path reuse,
+refuses every case before destructive operations, and verifies zero
+attempted mapper removal, configfs power-off/rmdir, module unload or host
+swap mutation. It must preserve both the first numeric status and the
+retained fake inventory. Its final PASS marker must report the actual
+number of `run_case` invocations. Synthetic PASS is not real host ownership,
+loaded qualification or permission to recover the first host's objects.
 
 ### Development decision loop
 

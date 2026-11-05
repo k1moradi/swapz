@@ -27,10 +27,16 @@ mkdir -p "$TMP/sysblock/$NAME" "$TMP/sysblock/nullb7"
 printf '240:7\n' > "$TMP/sysblock/$NAME/dev"
 [[ "$(swapz_resolve_owned_disk "$NAME" 7 "$TMP/sysblock")" == "$NAME" ]] ||
     die "private configfs disk name was not resolved"
+ln -s "$TMP/missing-dev" "$TMP/sysblock/nullb7/dev"
+refused_disk "$NAME" 7 "$TMP/sysblock"
+rm -- "$TMP/sysblock/nullb7/dev"
 rm -- "$TMP/sysblock/$NAME/dev"
 printf '240:7\n' > "$TMP/sysblock/nullb7/dev"
 [[ "$(swapz_resolve_owned_disk "$NAME" 7 "$TMP/sysblock")" == nullb7 ]] ||
     die "indexed disk name was not resolved"
+ln -s "$TMP/missing-dev" "$TMP/sysblock/$NAME/dev"
+refused_disk "$NAME" 7 "$TMP/sysblock"
+rm -- "$TMP/sysblock/$NAME/dev"
 printf '240:7\n' > "$TMP/sysblock/$NAME/dev"
 refused_disk "$NAME" 7 "$TMP/sysblock"
 rm -- "$TMP/sysblock/$NAME/dev" "$TMP/sysblock/nullb7/dev"
@@ -106,6 +112,8 @@ PY
 cat > "$TOOLS/clear-tmp-before-memory-check.sh" <<'SH'
 # Test-only replacement: never touch /tmp or real completion proofs.
 swapz_clear_tmp_before_memory_check() {
+    # Marker only; no real completed-session scratch is ever removed.
+    printf 'called\n' > "$SWAPZ_FIXTURE_ROOT/completed-cleanup-probe"
     if [[ $SWAPZ_FIXTURE_CASE == cleanup_permission ]]; then
         printf 'BLOCKED: exact completed-owned cleanup helper returned EACCES\n' >&2
         return 1
@@ -301,6 +309,18 @@ case "$*" in
         fi
         ;;
     "info -c --noheadings -o open swapz-demo-aaaaaaaaaaaaaaaa")
+        if [[ $SWAPZ_FIXTURE_CASE == replaced_inode &&
+              ! -e "$SWAPZ_FIXTURE_ROOT/retained-original-config" ]]; then
+            # Replace the public pathname after acquisition but before the
+            # pre-removal inode recheck. Pinned descriptors keep the original.
+            fake_root="$SWAPZ_FIXTURE_ROOT"
+            config="$fake_root/sys/kernel/config/nullb/nullb-swapz-cccccccccccccccc"
+            mv -- "$config" "$fake_root/retained-original-config" || exit 98
+            mkdir -- "$config" || exit 98
+            for attribute in index memory_backed size blocksize queue_mode power; do
+                cp -- "$fake_root/retained-original-config/$attribute" "$config/$attribute" || exit 98
+            done
+        fi
         printf '0\n'
         ;;
     *) exit 98 ;;
@@ -322,7 +342,7 @@ reset_fake() {
         "$FIXTURE/retained-original-config" "$FIXTURE/dependency-count" \
         "$FIXTURE/unexpected-rmmod" "$FIXTURE/unexpected-timeout" \
         "$FIXTURE/attempted-mapper-removal" "$FIXTURE/attempted-config-removal" \
-        "$FIXTURE/uuid-seen"
+        "$FIXTURE/completed-cleanup-probe" "$FIXTURE/old-owner-record" "$FIXTURE/uuid-seen"
     mkdir -p "$FIXTURE/proc/self" "$FIXTURE/sys/kernel/config" \
         "$FIXTURE/sys/module" "$FIXTURE/dev/mapper"
     # Keep rewritten stderr suppression inside the private fixture filesystem.
@@ -385,7 +405,7 @@ assert_private_safe_refusal() {
 }
 run_case() {
     local case_name="$1" expected="$2" expected_result="$3" expected_errno="$4"
-    local result=0 output unclaimed_config unclaimed_disk
+    local result=0 output unclaimed_config unclaimed_disk expected_exit=1
     reset_fake
     case "$case_name" in
         missing_capability) printf 'CapEff:\t0000000000000000\n' > "$FIXTURE/proc/self/status" ;;
@@ -393,7 +413,7 @@ run_case() {
             rm -- "$FIXTURE/proc/self/status"
             mkdir "$FIXTURE/proc/self/status"
             ;;
-        missing_module|missing_tool|missing_unused_rmmod|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|foreign_nullb|unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|internal_failure) ;;
+        missing_module|missing_tool|missing_unused_rmmod|cleanup_permission|retained_journal|journal_permission|invalid_debug|low_memory|unrelated_swap|foreign_nullb|unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|stale_owner_record|internal_failure) ;;
         idle_module_busy)
             mkdir -p "$FIXTURE/sys/module/dm_swapz"
             printf '0\n' > "$FIXTURE/sys/module/dm_swapz/refcnt"
@@ -491,6 +511,10 @@ run_case() {
             # Complete-looking attributes and sysfs identity are not provenance.
             setup_owned_lower
             ;;
+        stale_owner_record)
+            setup_owned_lower
+            printf 'token=%s\n' "$LOWER_TOKEN" > "$FIXTURE/old-owner-record"
+            ;;
         unclaimed_nullb_pair|unclaimed_pair_foreign)
             # Two plausible names still provide zero independent creation proof.
             mkdir -p "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN" \
@@ -514,7 +538,7 @@ run_case() {
             ;;
     esac
     if SWAPZ_FIXTURE_CASE="$case_name" SWAPZ_FIXTURE_ROOT="$FIXTURE" \
-        PATH="$STUBS" "$STUBS/bash" "$TOOLS/loaded-preflight.sh" \
+        SWAPZ_NULLBLK_CREATION_AUTHORITY="$TOKEN" PATH="$STUBS" "$STUBS/bash" "$TOOLS/loaded-preflight.sh" \
         > "$FIXTURE/output.log" 2>&1; then
         result=0
     else
@@ -529,12 +553,16 @@ run_case() {
             ;;
     esac
     output="$(cat "$FIXTURE/output.log")"
+    case "$expected_errno" in
+        [1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])
+            expected_exit="$expected_errno" ;;
+    esac
     if [[ "$expected_result" == BLOCKED ]]; then
-        [[ $result == 1 &&
+        [[ $result == "$expected_exit" &&
            "$output" == *"BLOCKED: LOADED_PREFLIGHT=BLOCKED check=$expected errno=$expected_errno "* ]] ||
             die "$case_name failed to refuse with check=$expected errno=$expected_errno status=$result: $output"
     elif [[ "$expected_result" == NOT_AUTHORIZED ]]; then
-        [[ $result == 1 &&
+        [[ $result == "$expected_exit" &&
            "$output" == *"BLOCKED: LOADED_PREFLIGHT=NOT_AUTHORIZED check=$expected errno=$expected_errno "* ]] ||
             die "$case_name did not classify lack of authorization: $output"
     elif [[ "$expected_result" == FAIL ]]; then
@@ -560,7 +588,7 @@ run_case() {
     fi
     # Exact proof classes, not just exit codes; no host/fixture IDs in a refusal.
     case "$case_name" in
-        unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign)
+        unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|stale_owner_record)
             [[ "$output" == *"check=unclaimed_null_blk errno=unavailable remedy=phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk"* ]] ||
                 die "$case_name omitted creation-authority refusal"
             ;;
@@ -586,41 +614,33 @@ run_case() {
             ;;
     esac
     case "$case_name" in
-        unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|ambiguous_index_owner|partial_config_proof|reused_index_alias|extra_foreign_holder|changed_holder_target)
+        unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|stale_owner_record|ambiguous_index_owner|partial_config_proof|reused_index_alias|extra_foreign_holder|changed_holder_target)
             assert_private_safe_refusal "$case_name" "$output"
             ;;
     esac
     [[ -f "$FIXTURE/proc/swaps" ]] || die "host swap inventory was mutated"
+    # Admission must run before even the verified completed-scratch helper.
+    # Only clean preflight passes and the helper's own injected failure reach it.
+    if [[ "$expected_result" == PASS || "$case_name" == cleanup_permission ]]; then
+        [[ -f "$FIXTURE/completed-cleanup-probe" ]] ||
+            die "$case_name skipped its completed-scratch helper"
+    else
+        [[ ! -e "$FIXTURE/completed-cleanup-probe" ]] ||
+            die "$case_name ran completed-scratch cleanup after a BLOCKED admission"
+    fi
     [[ ! -e "$FIXTURE/unexpected-rmmod" &&
        ! -e "$FIXTURE/unexpected-timeout" ]] ||
         die "$case_name attempted unexpected host cleanup"
-    # Only positively proved stale mappers may reach the UUID-targeted remove.
-    if [[ "$case_name" == owned_cleanup || "$case_name" == replaced_inode ||
-          "$case_name" == cleanup_failure ]]; then
-        [[ -f "$FIXTURE/attempted-mapper-removal" ]] ||
-            die "$case_name missed expected authorized mapper-removal attempt"
-    else
-        [[ ! -e "$FIXTURE/attempted-mapper-removal" ]] ||
-            die "$case_name attempted unproved mapper removal"
-    fi
-    if [[ "$case_name" == owned_cleanup || "$case_name" == cleanup_failure ]]; then
-        [[ -f "$FIXTURE/attempted-config-removal" ]] ||
-            die "$case_name missed its original configfs removal attempt"
-    else
-        [[ ! -e "$FIXTURE/attempted-config-removal" ]] ||
-            die "$case_name attempted unproved configfs removal"
-    fi
-    # All retained synthetic power attributes must remain on unless the
-    # independently proved cleanup reached the expected failing rmdir.
+    # No old preflight process can inherit exclusive creation authority.
+    # Even matching UUID, inode, holder and geometry proofs permit no cleanup.
+    [[ ! -e "$FIXTURE/attempted-mapper-removal" &&
+       ! -e "$FIXTURE/attempted-config-removal" ]] ||
+        die "$case_name attempted unclaimed mapper or configfs removal"
+    # Every synthetic power attribute must remain on after a refusal.
     for retained_config in "$FIXTURE"/sys/kernel/config/nullb/nullb-swapz-*; do
         [[ -d $retained_config && -f $retained_config/power ]] || continue
-        if [[ "$case_name" == cleanup_failure ]]; then
-            [[ "$(cat "$retained_config/power")" == 0 ]] ||
-                die "$case_name did not preserve its powered-off retained state"
-        else
-            [[ "$(cat "$retained_config/power")" == 1 ]] ||
-                die "$case_name powered off unproved configfs state"
-        fi
+        [[ "$(cat "$retained_config/power")" == 1 ]] ||
+            die "$case_name powered off unproved configfs state"
     done
     if [[ "$case_name" == foreign_nullb ]]; then
         [[ -d "$FIXTURE/sys/kernel/config/nullb/foreign-device" &&
@@ -646,7 +666,7 @@ run_case() {
                 die "simultaneous foreign null_blk objects were changed"
         fi
     fi
-    if [[ "$case_name" == unclaimed_full_proof ]]; then
+    if [[ "$case_name" == unclaimed_full_proof || "$case_name" == stale_owner_record ]]; then
         unclaimed_config="$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN"
         unclaimed_disk="$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN"
         [[ "$(cat "$unclaimed_config/index")" == 7 &&
@@ -662,24 +682,31 @@ run_case() {
            -L "$unclaimed_disk/holders/dm-0" ]] ||
             die "complete-looking unclaimed null_blk inventory changed"
     fi
-    if [[ "$case_name" == owned_cleanup ]]; then
-        [[ ! -e "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
-           ! -e "$FIXTURE/dev/mapper/swapz-demo-$TOKEN" ]] ||
-            die "owned cleanup did not remove its proven mapper and configfs object"
+    if [[ "$case_name" == stale_owner_record ]]; then
+        [[ "$(cat "$FIXTURE/old-owner-record")" == "token=$LOWER_TOKEN" ]] ||
+            die "untrusted ownership record was consumed or changed"
+    fi
+    if [[ "$case_name" == owned_cleanup || "$case_name" == cleanup_failure ]]; then
+        [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
+           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 1 &&
+           -L "$FIXTURE/sys/block/nullb-swapz-$LOWER_TOKEN/holders/dm-0" &&
+           -L "$FIXTURE/dev/mapper/swapz-demo-$TOKEN" &&
+           ! -e "$FIXTURE/retained-original-config" &&
+           "$output" == *"phase=mapper_remove resource_kind=null_blk expected_proof=creation_authority observed_proof=live_identity_only"* &&
+           "$output" == *"retained_state_action=retain_unclaimed_null_blk"* ]] ||
+            die "$case_name incorrectly admitted stale ownership or mutated the fixture"
     elif [[ "$case_name" == replaced_inode ]]; then
-        [[ "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 1 &&
+        [[ -d "$FIXTURE/retained-original-config" &&
            "$(cat "$FIXTURE/retained-original-config/power")" == 1 &&
+           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 1 &&
            "$(stat -Lc '%d:%i' "$FIXTURE/retained-original-config")" != \
                "$(stat -Lc '%d:%i' "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN")" &&
-           "$output" == *"phase=power_off"* &&
-           "$output" == *"observed_proof=substituted"* ]] ||
-            die "replaced configfs inode was powered off or silently admitted"
-    elif [[ "$case_name" == cleanup_failure ]]; then
-        [[ -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN" &&
-           "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$LOWER_TOKEN/power")" == 0 &&
-           "$output" == *"original_errno_or_exit=98"* &&
-           "$output" == *"retained_state_action=retain_remaining_resources"* ]] ||
-            die "cleanup error failed to retain original status and powered-off configfs state"
+           "$output" == *"phase=mapper_remove resource_kind=null_blk expected_proof=original_inode_index_attributes observed_proof=substituted"* ]] ||
+            die "same-name replacement was not detected before any cleanup"
+    elif [[ "$case_name" == dependency_probe_failure ]]; then
+        [[ "$output" == *"original_errno_or_exit=98"* &&
+           "$output" == *"expected_proof=readable_dependency_devno observed_proof=probe_failed"* ]] ||
+            die "dependency probe masked the original failure status"
     fi
     if [[ "$case_name" == owned_cleanup || "$case_name" == replaced_inode ||
           "$case_name" == cleanup_failure || "$case_name" == missing_sysfs_proof ||
@@ -738,13 +765,13 @@ run_case missing_tool required_tool BLOCKED unavailable
 run_case missing_unused_rmmod LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 run_case invalid_debug kernel_debug_config BLOCKED unavailable
 run_case retained_journal package_journal BLOCKED unavailable
-run_case journal_permission package_journal BLOCKED unavailable
+run_case journal_permission package_journal BLOCKED 98
 run_case cleanup_permission completed_owned_tmp_cleanup BLOCKED unavailable
 run_case idle_module_busy idle_module_removal BLOCKED unavailable
 run_case busy_mapper mapper_inventory BLOCKED unavailable
-run_case mapper_inventory_error mapper_inventory BLOCKED unavailable
-run_case noncanonical_mapper_major mapper_inventory BLOCKED unavailable
-run_case malformed_mapper_fields mapper_inventory BLOCKED unavailable
+run_case mapper_inventory_error mapper_inventory BLOCKED 98
+run_case noncanonical_mapper_major mapper_inventory BLOCKED 2
+run_case malformed_mapper_fields mapper_inventory BLOCKED 2
 run_case mapper_inventory_identity_mismatch mapper_device_identity BLOCKED unavailable
 run_case stale_token stale_run_token BLOCKED unavailable
 run_case changed_mapper_token owned_resource_proof BLOCKED unavailable
@@ -754,20 +781,20 @@ run_case owned_swap_alias active_owned_swap BLOCKED unavailable
 run_case unresolved_swap_alias swap_inventory BLOCKED unavailable
 run_case mounted_mapper mounted_owned_mapper BLOCKED unavailable
 run_case mount_inventory_empty mount_inventory BLOCKED unavailable
-run_case mount_inventory_error mount_inventory BLOCKED unavailable
-run_case swap_inventory_error swap_inventory BLOCKED unavailable
-run_case malformed_swap_inventory swap_inventory BLOCKED unavailable
-run_case unreadable_identity swap_device_identity BLOCKED unavailable
-run_case recognized_readfault owned_mapper_removal BLOCKED unavailable
-run_case recognized_codec owned_mapper_removal BLOCKED unavailable
-run_case recognized_completion owned_mapper_removal BLOCKED unavailable
-run_case recognized_constructor owned_mapper_removal BLOCKED unavailable
+run_case mount_inventory_error mount_inventory BLOCKED 98
+run_case swap_inventory_error swap_inventory BLOCKED 98
+run_case malformed_swap_inventory swap_inventory BLOCKED 2
+run_case unreadable_identity swap_device_identity BLOCKED 13
+run_case recognized_readfault owned_resource_proof BLOCKED unavailable
+run_case recognized_codec owned_resource_proof BLOCKED unavailable
+run_case recognized_completion owned_resource_proof BLOCKED unavailable
+run_case recognized_constructor owned_resource_proof BLOCKED unavailable
 run_case primary_namespace stale_run_token BLOCKED unavailable
 run_case missing_sysfs_proof owned_resource_proof BLOCKED unavailable
 run_case mismatched_devno owned_resource_proof BLOCKED unavailable
 run_case mismatched_index owned_resource_proof BLOCKED unavailable
 run_case dependency_devno_mismatch owned_resource_proof BLOCKED unavailable
-run_case dependency_probe_failure mapper_dependency BLOCKED unavailable
+run_case dependency_probe_failure mapper_dependency BLOCKED 98
 run_case partitioned_lower owned_resource_proof BLOCKED unavailable
 run_case foreign_holder owned_resource_proof BLOCKED unavailable
 run_case extra_foreign_holder owned_resource_proof BLOCKED unavailable
@@ -777,15 +804,16 @@ run_case reused_index_alias owned_resource_proof BLOCKED unavailable
 run_case ambiguous_index_owner null_blk_owner BLOCKED unavailable
 run_case foreign_dependency owned_resource_proof BLOCKED unavailable
 run_case replaced_inode owned_resource_proof BLOCKED unavailable
-run_case cleanup_failure owned_resource_proof BLOCKED 98
-run_case owned_cleanup idle_module_removal BLOCKED unavailable
+run_case cleanup_failure owned_resource_proof BLOCKED unavailable
+run_case owned_cleanup owned_resource_proof BLOCKED unavailable
 run_case unclaimed_nullb unclaimed_null_blk BLOCKED unavailable
 run_case unclaimed_nullb_pair unclaimed_null_blk BLOCKED unavailable
 run_case unclaimed_full_proof unclaimed_null_blk BLOCKED unavailable
+run_case stale_owner_record unclaimed_null_blk BLOCKED unavailable
 run_case unclaimed_pair_foreign unclaimed_null_blk BLOCKED unavailable
 run_case foreign_nullb LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 56 isolated preflight fixtures'
+printf '%s\n' 'PASS: null_blk identity, legacy false admission and 57 isolated preflight fixtures (zero stale-resource cleanup)'

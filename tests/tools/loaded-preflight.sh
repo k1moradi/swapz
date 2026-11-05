@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Private root preflight for make test loaded qualification.
-# It cleans verified completed swapz benchmark scratch before its memory
-# observation and may remove only a proven stale mapping. An idle module
-# without independent creation authority is retained.
+# It cleans verified completed scratch only after null_blk admission.
+# A prior session's name, UUID and live device evidence do not establish
+# creation authority: pre-existing mapping, RAM lower and module are retained.
 set -Eeuo pipefail
 
 # Safety refusals are not reproduced test failures. Never guess a kernel errno
@@ -10,9 +10,19 @@ set -Eeuo pipefail
 refuse() {
     local disposition="$1" check="$2" original_errno="$3"
     shift 3
+    local remedy="$*"
+    if [[ $remedy != *expected_proof=* ]]; then
+        remedy="$remedy; expected_proof=${check}_admission observed_proof=unverified original_errno_or_exit=$original_errno retained_state_action=retain_resources safe_next_action=inspect_read_only"
+    fi
     printf 'BLOCKED: LOADED_PREFLIGHT=%s check=%s errno=%s remedy=%s\n' \
-        "$disposition" "$check" "$original_errno" "$*" >&2
-    exit 1
+        "$disposition" "$check" "$original_errno" "$remedy" >&2
+    # Return a real captured shell exit status unchanged. A missing errno or
+    # numeric errno outside the shell exit range remains a generic refusal.
+    case "$original_errno" in
+        [1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])
+            exit "$original_errno" ;;
+        *) exit 1 ;;
+    esac
 }
 fail() { refuse BLOCKED ownership_proof unavailable "$*"; }
 
@@ -150,12 +160,31 @@ if [[ -e $package_journal || -L $package_journal ]]; then
         :
     else
         journal_status=$?
-        refuse BLOCKED package_journal unavailable "ls_status=$journal_status; inspect journal permissions and recovery ownership"
+        refuse BLOCKED package_journal "$journal_status" "ls_status=$journal_status; inspect journal permissions and recovery ownership"
     fi
     [[ -z $journal_entries ]] ||
         refuse BLOCKED package_journal unavailable "recover the retained package transaction under its own lock; never delete it to retry"
 fi
 
+# A token-shaped configfs name alone does not prove that this run owns it.
+# Never power off or remove another session's RAM device on speculation.
+clean_orphaned_nullb() {
+    local cfgbase=/sys/kernel/config/nullb
+    local cfg name orphan_token
+    [[ -d $cfgbase ]] || return 0
+    for cfg in "$cfgbase"/nullb-swapz-*; do
+        [[ -d $cfg ]] || continue
+        name="${cfg##*/}"
+        orphan_token="${name#nullb-swapz-}"
+        is_hex16 "$orphan_token" || continue
+        refuse BLOCKED unclaimed_null_blk unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk safe_next_action=original_creator_read_only_reconcile"
+    done
+}
+
+if [[ ! -d /sys/module/dm_swapz ]]; then
+    # Resolve ambiguous null_blk ownership before touching completed scratch.
+    # A BLOCKED resource gate must not perform even unrelated preflight cleanup.
+    clean_orphaned_nullb
 if swapz_clear_tmp_before_memory_check; then
     :
 else
@@ -188,23 +217,6 @@ elif (( early_available_kib < 1048576 )); then
         "$early_available_kib" >&2
 fi
 
-# A token-shaped configfs name alone does not prove that this run owns it.
-# Never power off or remove another session's RAM device on speculation.
-clean_orphaned_nullb() {
-    local cfgbase=/sys/kernel/config/nullb
-    local cfg name orphan_token
-    [[ -d $cfgbase ]] || return 0
-    for cfg in "$cfgbase"/nullb-swapz-*; do
-        [[ -d $cfg ]] || continue
-        name="${cfg##*/}"
-        orphan_token="${name#nullb-swapz-}"
-        is_hex16 "$orphan_token" || continue
-        refuse BLOCKED unclaimed_null_blk unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk"
-    done
-}
-
-if [[ ! -d /sys/module/dm_swapz ]]; then
-    clean_orphaned_nullb
     note "LOADED_PREFLIGHT_DM_SWAPZ=absent"
     exit 0
 fi
@@ -257,7 +269,7 @@ if swapz_map_list="$(
     :
 else
     inventory_status=$?
-    refuse BLOCKED mapper_inventory unavailable "pipeline_status=$inventory_status; cannot enumerate pre-existing swapz mappings: expected bounded name (canonical decimal major:minor) records, observed invalid or unreadable listing; inspect dmsetup inventory without cleanup"
+    refuse BLOCKED mapper_inventory "$inventory_status" "pipeline_status=$inventory_status; cannot enumerate pre-existing swapz mappings: expected bounded name (canonical decimal major:minor) records, observed invalid or unreadable listing; inspect dmsetup inventory without cleanup"
 fi
 swapz_map_records=()
 swapz_maps=()
@@ -285,9 +297,13 @@ case "$owned_map" in
 esac
 is_hex16 "$token" ||
     refuse BLOCKED stale_run_token unavailable "mapper ownership token is malformed"
-uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
-    tr -d '[:space:]')" ||
-    refuse BLOCKED mapper_uuid unavailable "cannot read pre-existing dm_swapz mapping UUID"
+if uuid="$(dmsetup info -c --noheadings -o uuid "$owned_map" 2>/dev/null |
+    tr -d '[:space:]')"; then
+    :
+else
+    uuid_status=$?
+    refuse BLOCKED mapper_uuid "$uuid_status" "phase=uuid_snapshot resource_kind=mapper expected_proof=readable_uuid observed_proof=probe_failed original_errno_or_exit=$uuid_status retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
+fi
 case "$uuid" in
     "SWAPZ-TEST-$token"|"SWAPZ-TEST-$token-gc"| \
     "SWAPZ-TEST-$token-discardtrim"|"SWAPZ-TEST-$token-suspend"| \
@@ -309,7 +325,7 @@ assert_not_mounted() {
         mount_status=$?
     fi
     [[ $mount_status == 1 ]] ||
-        refuse BLOCKED mount_inventory unavailable "findmnt_status=$mount_status; cannot prove source is unmounted"
+        refuse BLOCKED mount_inventory "$mount_status" "findmnt_status=$mount_status; cannot prove source is unmounted"
 }
 
 assert_not_active_swap() {
@@ -323,7 +339,7 @@ assert_not_active_swap() {
             refuse BLOCKED swap_device_identity unavailable "owned block source has empty device identity"
     else
         swap_status=$?
-        refuse BLOCKED swap_device_identity unavailable "stat_status=$swap_status; cannot inspect owned block source identity"
+        refuse BLOCKED swap_device_identity "$swap_status" "stat_status=$swap_status; cannot inspect owned block source identity"
     fi
 
     if swap_entries="$(awk '
@@ -351,7 +367,7 @@ assert_not_active_swap() {
         :
     else
         swap_status=$?
-        refuse BLOCKED swap_inventory unavailable "awk_status=$swap_status; cannot parse host swap inventory"
+        refuse BLOCKED swap_inventory "$swap_status" "awk_status=$swap_status; cannot parse host swap inventory"
     fi
 
     [[ -n $swap_entries ]] || return 0
@@ -367,7 +383,7 @@ assert_not_active_swap() {
             :
         else
             swap_status=$?
-            refuse BLOCKED swap_inventory unavailable "stat_status=$swap_status; cannot resolve a block swap identity"
+            refuse BLOCKED swap_inventory "$swap_status" "stat_status=$swap_status; cannot resolve a block swap identity"
         fi
         [[ -n $swap_devno ]] ||
             refuse BLOCKED swap_inventory unavailable "block swap identity is empty"
@@ -388,8 +404,12 @@ read_opens() {
     printf '%s\n' "$val"
 }
 
-dependency_name_proof="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)" ||
-    refuse BLOCKED mapper_dependency unavailable "cannot read pre-existing dm_swapz dependency name"
+if dependency_name_proof="$(dmsetup deps -o devname "$owned_map" 2>/dev/null)"; then
+    :
+else
+    dependency_status=$?
+    refuse BLOCKED mapper_dependency "$dependency_status" "phase=dependency_snapshot resource_kind=mapper expected_proof=readable_dependency_name observed_proof=probe_failed original_errno_or_exit=$dependency_status retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
+fi
 lower_name="$(printf '%s\n' "$dependency_name_proof" | awk '
     /^[[:space:]]*1[[:space:]]+dependencies[[:space:]]*:/ {
         value = $0
@@ -402,8 +422,12 @@ lower_name="$(printf '%s\n' "$dependency_name_proof" | awk '
     }
     END { exit found ? 0 : 1 }
 ')" || refuse BLOCKED mapper_dependency unavailable "mapping does not expose one lower dependency name"
-dependency_devno_proof="$(dmsetup deps -o devno "$owned_map" 2>/dev/null)" ||
-    refuse BLOCKED mapper_dependency unavailable "cannot read pre-existing dm_swapz dependency device number"
+if dependency_devno_proof="$(dmsetup deps -o devno "$owned_map" 2>/dev/null)"; then
+    :
+else
+    dependency_status=$?
+    refuse BLOCKED mapper_dependency "$dependency_status" "phase=dependency_snapshot resource_kind=mapper expected_proof=readable_dependency_devno observed_proof=probe_failed original_errno_or_exit=$dependency_status retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
+fi
 lower_devno="$(printf '%s\n' "$dependency_devno_proof" | awk '
     /^[[:space:]]*1[[:space:]]+dependencies[[:space:]]*:/ {
         value = $0
@@ -471,7 +495,7 @@ lower="/dev/$lower_name"
 ownership_refuse() {
     local phase="$1" resource_kind="$2" expected="$3" observed="$4"
     local status="${5:-unavailable}" retained_action="${6:-retain_unproven_resources}"
-    refuse BLOCKED owned_resource_proof "$status" "phase=$phase resource_kind=$resource_kind expected_proof=$expected observed_proof=$observed original_errno_or_exit=$status retained_state_action=$retained_action"
+    refuse BLOCKED owned_resource_proof "$status" "phase=$phase resource_kind=$resource_kind expected_proof=$expected observed_proof=$observed original_errno_or_exit=$status retained_state_action=$retained_action safe_next_action=original_creator_read_only_reconcile"
 }
 
 read_owned_config_proof() {
@@ -624,13 +648,13 @@ if mapper_dev="$(stat -Lc '%Hr:%Lr' "$mapper" 2>/dev/null)"; then
     :
 else
     mapper_stat_status=$?
-    refuse BLOCKED mapper_device_identity unavailable "stat_status=$mapper_stat_status; cannot stat mapper; no holder signal"
+    refuse BLOCKED mapper_device_identity "$mapper_stat_status" "stat_status=$mapper_stat_status; cannot stat mapper; no holder signal"
 fi
 if canonical_dev="$(stat -Lc '%Hr:%Lr' "$mapper_node" 2>/dev/null)"; then
     :
 else
     canonical_stat_status=$?
-    refuse BLOCKED mapper_device_identity unavailable "stat_status=$canonical_stat_status; cannot stat canonical mapper; no holder signal"
+    refuse BLOCKED mapper_device_identity "$canonical_stat_status" "stat_status=$canonical_stat_status; cannot stat canonical mapper; no holder signal"
 fi
 [[ -n $mapper_dev && $mapper_dev == "$canonical_dev" ]] ||
     refuse BLOCKED mapper_device_identity unavailable "canonical device identity changed; no holder signal"
@@ -697,6 +721,13 @@ assert_not_active_swap "$lower"
 assert_owned_config_proof mapper_remove 1
 assert_owned_mapper_proof
 assert_mapper_is_only_lower_holder mapper_remove
+# Matching live identities, a UUID and a sole holder still cannot prove who
+# created this pre-existing object. This new preflight process has no exclusive
+# creator claim to inherit: stop before mapper removal, power-off or rmdir.
+# The original session must reconcile its retained resources under its own
+# creation authority; preflight never adopts or deletes them.
+ownership_refuse mapper_remove null_blk creation_authority live_identity_only \
+    unavailable retain_unclaimed_null_blk
 if timeout --signal=TERM --kill-after=2s 10s dmsetup remove --retry "$uuid"; then
     :
 else
