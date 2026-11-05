@@ -44,9 +44,12 @@ The root `test_results.json` is sanitized public evidence, not this private reco
 
 ## Historical qualification and physical observations
 
+- [First-host current-source SD mapper development smoke (2026-11-05)](2026-11-05-first-host-current-source-development-smoke.md):
+  one source-bound 128-page mapper oracle with exact header restoration;
+  development-only, not Linux swap or production qualification.
 - [First-host development-only SD mapper smoke (2026-11-05)](2026-11-05-first-host-development-smoke.md):
-  one source-bound, byte-exact 128-page physical mapper oracle with restored header;
-  not real Linux swap, full-card qualification or a production readiness PASS.
+  earlier source-bound 128-page mapper oracle; superseded by the newer
+  source-bound run above and retained for chronology.
 - [Source qualification](historical-source-qualification-snapshots.md) and
   [benchmark narratives](historical-benchmark-qualification-narratives.md):
   prior PASS/FAIL/BLOCKED and tradeoffs.
