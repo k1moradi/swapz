@@ -390,6 +390,32 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         self.assertFalse(any(
             item["status"] == "FAIL" for item in audit["diagnostics"]))
 
+    def test_producer_fail_requires_excluded_pair_disposition_and_schema(self):
+        for mutation in ("pass-disposition", "wrong-schema"):
+            with self.subTest(mutation=mutation):
+                record = pair(1, 1100)
+                record["raw"]["verdict"] = "FAIL"
+                record["raw"]["stage"] = "measure"
+                if mutation == "pass-disposition":
+                    # A producer FAIL cannot coexist with an evaluator-usable
+                    # PASS pair and still become authenticated failure evidence.
+                    pass
+                else:
+                    record["status"] = "EXCLUDED"
+                    record["excluded"] = True
+                    record["analysis_usable"] = False
+                    record["schema"] = "not-the-physical-pair-schema"
+                audit, metrics = inspect(
+                    [record], summary_status="FAIL_OR_INCOMPLETE")
+                self.assertEqual(
+                    audit["status"], "BLOCKED", audit["diagnostics"])
+                if mutation == "wrong-schema":
+                    self.assertIn("pair.schema", metrics)
+                self.assertIsNone(audit["first_failed_phase"])
+                self.assertFalse(any(
+                    item["status"] == "FAIL"
+                    for item in audit["diagnostics"]))
+
     def test_counterbalanced_order_and_duplicate_indices_block_audit(self):
         record = pair(1, 1100)
         record["order"] = "swapz-first"
