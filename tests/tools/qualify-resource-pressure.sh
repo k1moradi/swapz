@@ -316,6 +316,27 @@ PY
     exit 2
 fi
 
+
+read_owned_directory_identity() {
+    local directory_path="$1" identity
+    [[ -d $directory_path && ! -L $directory_path ]] || return 1
+    if ! identity="$(stat -c '%d:%i' -- "$directory_path" 2>/dev/null)"; then
+        return 1
+    fi
+    [[ $identity =~ ^(0|[1-9][0-9]{0,19}):(0|[1-9][0-9]{0,19})$ ]] || return 1
+    printf '%s\n' "$identity"
+}
+
+read_open_directory_identity() {
+    local directory_fd="$1" identity
+    [[ $directory_fd =~ ^[1-9][0-9]*$ ]] || return 1
+    if ! identity="$(stat -Lc '%d:%i' -- "/proc/self/fd/$directory_fd" 2>/dev/null)"; then
+        return 1
+    fi
+    [[ $identity =~ ^(0|[1-9][0-9]{0,19}):(0|[1-9][0-9]{0,19})$ ]] || return 1
+    printf '%s\n' "$identity"
+}
+
 if ! token="$(od -An -N8 -tx1 /dev/urandom 2>/dev/null |
         tr -d '[:space:]' 2>/dev/null)"; then
     printf '%s\n' 'BLOCKED: ID36 random identity unavailable; require readable /dev/urandom and working od/tr before private cgroup creation' >&2
@@ -328,7 +349,7 @@ fi
 CGROUP="$CGROUP_ROOT/swapz-id36-$token"
 # The completed-owned cleanup immediately above positively validated /tmp as
 # root-owned mode 1777. Do not inherit an untrusted TMPDIR into privileged
-# recursive cleanup; keep this small control session under the verified root.
+# control-file cleanup; keep this small control session under the verified root.
 if ! SESSION="$(mktemp -d "/tmp/swapz-id36.XXXXXXXX" 2>/dev/null)"; then
     printf '%s\n' 'BLOCKED: ID36 cannot create private scratch session; require the verified root-owned /tmp to remain writable' >&2
     exit 2
@@ -337,6 +358,20 @@ fi
     printf '%s\n' 'BLOCKED: ID36 private scratch session identity is unsafe; require a newly created real directory' >&2
     exit 2
 }
+SESSION_DIRECTORY_FD=""
+if ! exec {SESSION_DIRECTORY_FD}<"$SESSION"; then
+    printf '%s\n' 'BLOCKED: ID36 private scratch session cannot be pinned; required:open owned directory descriptor observed:unreadable retained_cleanup:private-session' >&2
+    exit 2
+fi
+if ! SESSION_IDENTITY="$(read_owned_directory_identity "$SESSION")"; then
+    printf '%s\n' 'BLOCKED: ID36 private scratch session identity unreadable; required:stable directory device/inode observed:unreadable retained_cleanup:private-session' >&2
+    exit 2
+fi
+if ! session_descriptor_identity="$(read_open_directory_identity "$SESSION_DIRECTORY_FD")" ||
+   [[ $session_descriptor_identity != "$SESSION_IDENTITY" ]]; then
+    printf '%s\n' 'BLOCKED: ID36 private scratch session changed while pinning; required:descriptor/name identity match observed:stale retained_cleanup:private-session' >&2
+    exit 2
+fi
 READY="$SESSION/pressure.ready"
 PRESSURE_ACTIVATE="$SESSION/pressure.activate"
 PRESSURE_ACTIVE="$SESSION/pressure.active"
@@ -347,6 +382,10 @@ PRESSURE_LOG="$SESSION/pressure.log"
 PAIR_LOG="$SESSION/pair.log"
 PRESSURE_PID=""
 PAIR_PID=""
+PRESSURE_PROCESS_IDENTITY=""
+PAIR_PROCESS_IDENTITY=""
+CGROUP_DIRECTORY_FD=""
+CGROUP_IDENTITY=""
 PASS_EVIDENCE=""
 # A foreign process in the private ID36 cgroup invalidates exclusive ownership.
 # Retain both evidence resources rather than applying group-wide cleanup.
@@ -491,8 +530,27 @@ preserve_pair_failure_before_telemetry() {
 }
 
 # A recorded PID alone is not cleanup authority: Bash may have reaped a
-# child, leaving its numeric PID available for an unrelated process. Only
-# signal a still-running direct background job of this exact shell.
+# child, leaving its numeric PID available for an unrelated process. Use the
+# job table only for liveness; every terminating signal is sent through a
+# pidfd bound to the captured direct-child start time.
+pidfd_signal_supported() {
+    python3 -I -B - <<'PY'
+import os
+import signal
+
+try:
+    pidfd = os.pidfd_open(os.getpid())
+    signal.pidfd_send_signal(pidfd, 0)
+except (AttributeError, OSError):
+    raise SystemExit(1)
+finally:
+    try:
+        os.close(pidfd)
+    except NameError:
+        pass
+PY
+}
+
 direct_owned_child_running() {
     local tracked_pid="$1" job_pid
     [[ $tracked_pid =~ ^[1-9][0-9]*$ && ${#tracked_pid} -le 7 ]] || return 1
@@ -502,25 +560,150 @@ direct_owned_child_running() {
     return 1
 }
 
+capture_direct_child_identity() {
+    local tracked_pid="$1" identity
+    direct_owned_child_running "$tracked_pid" || return 1
+    if ! identity="$(python3 -I -B - "$tracked_pid" "$$" <<'PY'
+from pathlib import Path
+import sys
+
+pid = int(sys.argv[1])
+expected_parent = int(sys.argv[2])
+try:
+    raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    closing = raw.rfind(") ")
+    if closing < 0:
+        raise ValueError
+    fields = raw[closing + 2:].split()
+    if len(fields) < 20 or int(fields[1]) != expected_parent:
+        raise ValueError
+    start_time = fields[19]
+    if not start_time.isdecimal() or start_time == "0":
+        raise ValueError
+except (OSError, ValueError):
+    raise SystemExit(1)
+print(start_time)
+PY
+    )"; then
+        return 1
+    fi
+    direct_owned_child_running "$tracked_pid" || return 1
+    printf '%s\n' "$identity"
+}
+
+# Return 0 only after signaling the exact captured process through pidfd.
+# Return 3 when that process is gone/replaced and 2 when ownership telemetry
+# itself is unavailable. No numeric PID is ever passed to kill(1).
+signal_direct_owned_child() {
+    local tracked_pid="$1" expected_identity="$2" signal_number="$3"
+    python3 -I -B - "$tracked_pid" "$$" "$expected_identity" "$signal_number" <<'PY'
+import os
+from pathlib import Path
+import signal
+import sys
+
+pid = int(sys.argv[1])
+expected_parent = int(sys.argv[2])
+expected_start = sys.argv[3]
+signal_number = int(sys.argv[4])
+try:
+    pidfd = os.pidfd_open(pid)
+except ProcessLookupError:
+    raise SystemExit(3)
+except (AttributeError, OSError):
+    raise SystemExit(2)
+try:
+    raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    closing = raw.rfind(") ")
+    if closing < 0:
+        raise ValueError
+    fields = raw[closing + 2:].split()
+    if (len(fields) < 20 or int(fields[1]) != expected_parent or
+            fields[19] != expected_start):
+        raise SystemExit(3)
+    signal.pidfd_send_signal(pidfd, signal_number)
+except ProcessLookupError:
+    raise SystemExit(3)
+except (AttributeError, OSError, ValueError):
+    raise SystemExit(2)
+finally:
+    os.close(pidfd)
+PY
+}
+
+signal_owned_child_if_running() {
+    local tracked_pid="$1" expected_identity="$2" signal_number="$3"
+    local signal_status
+
+    direct_owned_child_running "$tracked_pid" || return 3
+    if signal_direct_owned_child "$tracked_pid" "$expected_identity" \
+            "$signal_number"; then
+        return 0
+    else
+        signal_status=$?
+    fi
+    if (( signal_status == 3 )); then
+        # If Bash still owns a running job at this numeric PID, an identity
+        # mismatch is uncertainty, not permission to signal or wait forever.
+        direct_owned_child_running "$tracked_pid" && return 2
+        return 3
+    fi
+    return 2
+}
+
 stop_direct_owned_child() {
-    local tracked_pid="$1" grace_before_term="$2"
+    local tracked_pid="$1" expected_identity="$2" grace_before_term="$3"
+    local signal_status
+
     [[ -n $tracked_pid ]] || return 0
-    if [[ $grace_before_term == no ]] && direct_owned_child_running "$tracked_pid"; then
-        kill -TERM -- "$tracked_pid" 2>/dev/null || true
+    if [[ -z $expected_identity ]]; then
+        direct_owned_child_running "$tracked_pid" && return 2
+        wait "$tracked_pid" 2>/dev/null || true
+        return 0
+    fi
+    if [[ $grace_before_term == no ]]; then
+        if signal_owned_child_if_running "$tracked_pid" "$expected_identity" 15; then
+            :
+        else
+            signal_status=$?
+            if (( signal_status == 3 )); then
+                wait "$tracked_pid" 2>/dev/null || true
+                return 0
+            fi
+            (( signal_status == 2 )) && return 2
+        fi
     fi
     for _ in {1..40}; do
         direct_owned_child_running "$tracked_pid" || break
         sleep 0.05
     done
     if direct_owned_child_running "$tracked_pid"; then
-        kill -TERM -- "$tracked_pid" 2>/dev/null || true
+        if signal_owned_child_if_running "$tracked_pid" "$expected_identity" 15; then
+            :
+        else
+            signal_status=$?
+            if (( signal_status == 3 )); then
+                wait "$tracked_pid" 2>/dev/null || true
+                return 0
+            fi
+            (( signal_status == 2 )) && return 2
+        fi
         for _ in {1..40}; do
             direct_owned_child_running "$tracked_pid" || break
             sleep 0.05
         done
     fi
     if direct_owned_child_running "$tracked_pid"; then
-        kill -KILL -- "$tracked_pid" 2>/dev/null || true
+        if signal_owned_child_if_running "$tracked_pid" "$expected_identity" 9; then
+            :
+        else
+            signal_status=$?
+            if (( signal_status == 3 )); then
+                wait "$tracked_pid" 2>/dev/null || true
+                return 0
+            fi
+            (( signal_status == 2 )) && return 2
+        fi
         for _ in {1..40}; do
             direct_owned_child_running "$tracked_pid" || break
             sleep 0.05
@@ -537,7 +720,7 @@ stop_direct_owned_child() {
 # canonical nonempty inventory must never authorize cgroup.kill. The kernel's
 # rmdir supplies the final occupied-cgroup refusal after our last snapshot.
 classify_cleanup_cgroup_membership() {
-    local membership_path="$CGROUP/cgroup.procs" observation
+    local membership_path="/proc/self/fd/$CGROUP_DIRECTORY_FD/cgroup.procs" observation
     if [[ ! -f $membership_path || ! -r $membership_path || -L $membership_path ]]; then
         printf '%s\n' unreadable
         return 0
@@ -574,23 +757,78 @@ classify_cleanup_cgroup_membership() {
     printf '%s\n' "$observation"
 }
 
-# Retain both resources and report only bounded categories, never a PID list or
-# a private path. Preserve the original FAIL/signal status over later BLOCKED.
+classify_cleanup_session_entries() {
+    local observation
+    if ! observation="$(python3 -I -B - "$SESSION_DIRECTORY_FD" <<'PY'
+import os
+import stat
+import sys
+
+directory_fd = int(sys.argv[1])
+allowed = {
+    "pressure.ready",
+    "pressure.activate",
+    "pressure.active",
+    "pressure.stop",
+    "pair.ready",
+    "pair.go",
+    "pressure.log",
+    "pair.log",
+}
+try:
+    names = os.listdir(directory_fd)
+except OSError:
+    print("unreadable")
+    raise SystemExit(0)
+if len(names) > len(allowed) or any(name not in allowed for name in names):
+    print("unexpected")
+    raise SystemExit(0)
+for name in names:
+    try:
+        entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except OSError:
+        print("unreadable")
+        raise SystemExit(0)
+    if not stat.S_ISREG(entry.st_mode):
+        print("unsafe")
+        raise SystemExit(0)
+print("known")
+PY
+    )"; then
+        printf '%s\n' unreadable
+        return 0
+    fi
+    case "$observation" in
+        known|unexpected|unsafe|unreadable)
+            printf '%s\n' "$observation"
+            ;;
+        *)
+            printf '%s\n' unreadable
+            ;;
+    esac
+}
+
+# Retain evidence and report only bounded categories, never a PID list or path.
+# Preserve the original FAIL/signal status over a later cleanup BLOCKED result.
 report_cleanup_refusal() {
     local phase="$1" observed="$2" original_exit="$3" severity=BLOCKED
     (( original_exit == 0 || original_exit == 2 )) || severity=FAIL
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
     case "$phase" in
         rmdir)
-            printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:exclusive empty canonical membership and removable cgroup observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
+            printf '%s: ID36 isolated cgroup cleanup did not complete; phase:%s required:same created cgroup identity with exclusive empty canonical membership observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
                 "$severity" "$phase" "$observed" "$original_exit" >&2
             ;;
-        session-remove)
-            printf '%s: ID36 private scratch cleanup did not complete; phase:%s required:owned removable private session observed:%s original_exit:%s retained_cleanup:private-session\n' \
+        session-identity|session-signal|session-inventory)
+            printf '%s: ID36 private scratch ownership refused; phase:%s required:same created private-session identity and only canonical ID36 entries observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
+                "$severity" "$phase" "$observed" "$original_exit" >&2
+            ;;
+        session-remove|session-post-rmdir)
+            printf '%s: ID36 private scratch cleanup did not complete; phase:%s required:same created removable private session with only known entries observed:%s original_exit:%s retained_cleanup:private-session\n' \
                 "$severity" "$phase" "$observed" "$original_exit" >&2
             ;;
         *)
-            printf '%s: ID36 cleanup ownership refused; phase:%s required:exclusive empty canonical membership and positively owned direct children observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
+            printf '%s: ID36 cleanup ownership refused; phase:%s required:same created cgroup identity, exclusive empty canonical membership and positively owned direct children observed:%s original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' \
                 "$severity" "$phase" "$observed" "$original_exit" >&2
             ;;
     esac
@@ -598,11 +836,38 @@ report_cleanup_refusal() {
 
 cleanup() {
     local result=$? original_result observed initially_retained
+    local current_identity child_cleanup_status
+    local session_fd_path="/proc/self/fd/$SESSION_DIRECTORY_FD"
     original_result=$result
     initially_retained=$RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION
     trap - EXIT HUP INT TERM
     set +e
-    (: > "$STOP") 2>/dev/null || true
+
+    # The cooperative stop path is itself private-session state. Revalidate the
+    # created directory before touching it, and never clobber an existing name.
+    if ! current_identity="$(read_owned_directory_identity "$SESSION")"; then
+        report_cleanup_refusal session-signal unreadable "$original_result"
+    elif [[ $current_identity != "$SESSION_IDENTITY" ]]; then
+        report_cleanup_refusal session-signal stale "$original_result"
+    elif [[ -L $session_fd_path/pressure.stop ]]; then
+        report_cleanup_refusal session-signal stale "$original_result"
+    elif [[ -e $session_fd_path/pressure.stop &&
+            ! -f $session_fd_path/pressure.stop ]]; then
+        report_cleanup_refusal session-signal unsafe "$original_result"
+    elif [[ ! -e $session_fd_path/pressure.stop ]] &&
+         ! (set -C; : > "$session_fd_path/pressure.stop") 2>/dev/null &&
+         [[ ! -f $session_fd_path/pressure.stop ||
+            -L $session_fd_path/pressure.stop ]]; then
+        # The pair may concurrently publish the same regular stop marker after
+        # a verified replay failure. Noclobber distinguishes that safe race
+        # from an unsafe replacement without truncating either file.
+        report_cleanup_refusal session-signal unreadable "$original_result"
+    elif ! current_identity="$(read_owned_directory_identity "$SESSION")"; then
+        report_cleanup_refusal session-signal unreadable "$original_result"
+    elif [[ $current_identity != "$SESSION_IDENTITY" ]]; then
+        report_cleanup_refusal session-signal stale "$original_result"
+    fi
+
     if (( initially_retained )); then
         if (( original_result == 0 || original_result == 2 )); then
             printf 'BLOCKED: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" >&2
@@ -610,15 +875,28 @@ cleanup() {
             printf 'FAIL: ID36 cleanup ownership refused; phase:prior-admission required:exclusive private cgroup observed:foreign-or-uncertain original_exit:%s retained_cleanup:child-cgroup-and-private-session\n' "$original_result" >&2
         fi
     fi
-    if [[ -n $PAIR_PID ]] && ! stop_direct_owned_child "$PAIR_PID" no; then
-        report_cleanup_refusal pair-child owned-child-still-running "$original_result"
+
+    if [[ -n $PAIR_PID ]]; then
+        stop_direct_owned_child "$PAIR_PID" "$PAIR_PROCESS_IDENTITY" no
+        child_cleanup_status=$?
+        if (( child_cleanup_status == 1 )); then
+            report_cleanup_refusal pair-child owned-child-still-running "$original_result"
+        elif (( child_cleanup_status == 2 )); then
+            report_cleanup_refusal pair-child owned-child-identity-unreadable "$original_result"
+        fi
     fi
-    if [[ -n $PRESSURE_PID ]] && ! stop_direct_owned_child "$PRESSURE_PID" yes; then
-        report_cleanup_refusal pressure-child owned-child-still-running "$original_result"
+    if [[ -n $PRESSURE_PID ]]; then
+        stop_direct_owned_child "$PRESSURE_PID" "$PRESSURE_PROCESS_IDENTITY" yes
+        child_cleanup_status=$?
+        if (( child_cleanup_status == 1 )); then
+            report_cleanup_refusal pressure-child owned-child-still-running "$original_result"
+        elif (( child_cleanup_status == 2 )); then
+            report_cleanup_refusal pressure-child owned-child-identity-unreadable "$original_result"
+        fi
     fi
+
     if (( RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
-        # Retain an earlier admission or child-termination refusal even when
-        # the original command status happened to be successful.
+        # Retain an earlier admission, identity or child-termination refusal.
         :
     elif (( ! ${CGROUP_WAS_CREATED:-0} )); then
         # A failed mkdir never granted this invocation ownership of a
@@ -626,9 +904,11 @@ cleanup() {
         if [[ -e $CGROUP || -L $CGROUP ]]; then
             report_cleanup_refusal cgroup-identity unowned "$original_result"
         fi
-    elif [[ -L $CGROUP || ( -e $CGROUP && ! -d $CGROUP ) ]]; then
+    elif ! current_identity="$(read_owned_directory_identity "$CGROUP")"; then
+        report_cleanup_refusal cgroup-identity unreadable "$original_result"
+    elif [[ $current_identity != "$CGROUP_IDENTITY" ]]; then
         report_cleanup_refusal cgroup-identity stale "$original_result"
-    elif [[ -d $CGROUP ]]; then
+    else
         # Bounded grace for known processes to leave. Any other observation
         # immediately retains the evidence rather than broad-killing a group.
         for _ in {1..40}; do
@@ -639,32 +919,54 @@ cleanup() {
         if [[ $observed != empty ]]; then
             report_cleanup_refusal membership "$observed" "$original_result"
         else
-            # A new arrival after the first empty observation must not be
-            # silently accepted. rmdir also refuses a later occupied group.
+            # A new arrival or path replacement after the first empty
+            # observation must not be silently accepted.
             observed="$(classify_cleanup_cgroup_membership)"
             if [[ $observed != empty ]]; then
                 report_cleanup_refusal pre-rmdir "$observed" "$original_result"
+            elif ! current_identity="$(read_owned_directory_identity "$CGROUP")"; then
+                report_cleanup_refusal pre-rmdir unreadable "$original_result"
+            elif [[ $current_identity != "$CGROUP_IDENTITY" ]]; then
+                report_cleanup_refusal pre-rmdir stale "$original_result"
             elif ! rmdir "$CGROUP" 2>/dev/null; then
                 report_cleanup_refusal rmdir occupied-or-unremovable "$original_result"
             elif [[ -e $CGROUP || -L $CGROUP ]]; then
                 report_cleanup_refusal post-rmdir stale "$original_result"
             fi
         fi
-    elif [[ ${CGROUP_WAS_CREATED:-0} == 1 ]]; then
-        report_cleanup_refusal cgroup-identity stale "$original_result"
     fi
+
     if (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
-        if [[ ! -d $SESSION || -L $SESSION ]]; then
+        if ! current_identity="$(read_owned_directory_identity "$SESSION")"; then
+            report_cleanup_refusal session-identity unreadable "$original_result"
+        elif [[ $current_identity != "$SESSION_IDENTITY" ]]; then
             report_cleanup_refusal session-identity stale "$original_result"
-        elif ! rm -rf -- "$SESSION" 2>/dev/null; then
-            RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
-            if (( original_result == 0 || original_result == 2 )); then
-                printf 'BLOCKED: ID36 private scratch cleanup did not complete; phase:session-remove required:owned removable private session observed:unremovable original_exit:%s retained_cleanup:private-session\n' "$original_result" >&2
-            else
-                printf 'FAIL: ID36 private scratch cleanup did not complete; phase:session-remove required:owned removable private session observed:unremovable original_exit:%s retained_cleanup:private-session\n' "$original_result" >&2
+        else
+            observed="$(classify_cleanup_session_entries)"
+            if [[ $observed != known ]]; then
+                report_cleanup_refusal session-inventory "$observed" "$original_result"
+            elif ! rm -f -- "$session_fd_path/pressure.ready" \
+                    "$session_fd_path/pressure.activate" \
+                    "$session_fd_path/pressure.active" \
+                    "$session_fd_path/pressure.stop" "$session_fd_path/pair.ready" \
+                    "$session_fd_path/pair.go" "$session_fd_path/pressure.log" \
+                    "$session_fd_path/pair.log" 2>/dev/null; then
+                report_cleanup_refusal session-remove unremovable-known-entry "$original_result"
+            fi
+        fi
+        if (( ! RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION )); then
+            if ! current_identity="$(read_owned_directory_identity "$SESSION")"; then
+                report_cleanup_refusal session-identity unreadable "$original_result"
+            elif [[ $current_identity != "$SESSION_IDENTITY" ]]; then
+                report_cleanup_refusal session-identity stale "$original_result"
+            elif ! rmdir "$SESSION" 2>/dev/null; then
+                report_cleanup_refusal session-remove occupied-or-unremovable "$original_result"
+            elif [[ -e $SESSION || -L $SESSION ]]; then
+                report_cleanup_refusal session-post-rmdir stale "$original_result"
             fi
         fi
     fi
+
     if (( RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION && result == 0 )); then
         result=2
     fi
@@ -679,11 +981,32 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+if ! pidfd_signal_supported; then
+    printf '%s\n' 'BLOCKED: ID36 pidfd signaling unavailable; phase:pidfd-preflight required:identity-bound direct-child termination support observed:unavailable original_exit:2 cleanup_obligation:normal-owned-session-cleanup' >&2
+    exit 2
+fi
+
 mkdir "$CGROUP" 2>/dev/null || {
     printf '%s\n' 'BLOCKED: ID36 cannot create isolated cgroup; require delegated writable cgroup v2 memory/CPU subtree without changing existing host groups' >&2
     exit 2
 }
 CGROUP_WAS_CREATED=1
+if ! exec {CGROUP_DIRECTORY_FD}<"$CGROUP"; then
+    RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    printf '%s\n' 'BLOCKED: ID36 created cgroup cannot be pinned; phase:cgroup-create required:open owned directory descriptor observed:unreadable retained_cleanup:child-cgroup-and-private-session' >&2
+    exit 2
+fi
+if ! CGROUP_IDENTITY="$(read_owned_directory_identity "$CGROUP")"; then
+    RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    printf '%s\n' 'BLOCKED: ID36 created cgroup identity unreadable; phase:cgroup-create required:stable directory device/inode observed:unreadable retained_cleanup:child-cgroup-and-private-session' >&2
+    exit 2
+fi
+if ! cgroup_descriptor_identity="$(read_open_directory_identity "$CGROUP_DIRECTORY_FD")" ||
+   [[ $cgroup_descriptor_identity != "$CGROUP_IDENTITY" ]]; then
+    RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+    printf '%s\n' 'BLOCKED: ID36 created cgroup changed while pinning; phase:cgroup-create required:descriptor/name identity match observed:stale retained_cleanup:child-cgroup-and-private-session' >&2
+    exit 2
+fi
 for control in memory.max memory.high memory.current memory.peak memory.events cpu.pressure cgroup.procs; do
     [[ -e "$CGROUP/$control" ]] || {
         printf 'BLOCKED: ID36 missing cgroup v2 control %s; provide delegated memory/CPU controllers and a kernel supporting this telemetry\n' "$control" >&2
@@ -896,10 +1219,18 @@ SWAPZ_ID36_REPLAY_TIMEOUT_SECONDS="$PAIR_REPLAY_TIMEOUT_SECONDS" \
     --async-prepare --resource-pressure-short --shared-plan "$SHARED_PLAN" \
     >"$PAIR_LOG" 2>&1 &
 PAIR_PID=$!
+if ! PAIR_PROCESS_IDENTITY="$(capture_direct_child_identity "$PAIR_PID" 2>/dev/null)"; then
+    PAIR_PROCESS_IDENTITY=""
+    if direct_owned_child_running "$PAIR_PID"; then
+        printf '%s\n' 'BLOCKED: ID36 owned-RAM pair process identity unavailable after launch; required:direct-child pidfd identity observed:unreadable retained_cleanup:child-cgroup-and-private-session' >&2
+        RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+        exit 2
+    fi
+fi
 
 for _ in {1..600}; do
     [[ -s $PAIR_READY ]] && break
-    kill -0 "$PAIR_PID" 2>/dev/null || {
+    direct_owned_child_running "$PAIR_PID" || {
         if ! pair_fail_reason="$(bounded_safe_log_reason "$PAIR_LOG" 'FAIL: ')"; then
             printf '%s\n' 'FAIL: ID36 owned-RAM pair exited before prewarm and private failure log is unavailable' >&2
             exit 1
@@ -947,10 +1278,18 @@ bash -c '
     --activate-file "$PRESSURE_ACTIVATE" --active-file "$PRESSURE_ACTIVE" \
     --stop-file "$STOP" >"$PRESSURE_LOG" 2>&1 &
 PRESSURE_PID=$!
+if ! PRESSURE_PROCESS_IDENTITY="$(capture_direct_child_identity "$PRESSURE_PID" 2>/dev/null)"; then
+    PRESSURE_PROCESS_IDENTITY=""
+    if direct_owned_child_running "$PRESSURE_PID"; then
+        printf '%s\n' 'BLOCKED: ID36 pressure-helper process identity unavailable after launch; required:direct-child pidfd identity observed:unreadable retained_cleanup:child-cgroup-and-private-session' >&2
+        RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
+        exit 2
+    fi
+fi
 
 for _ in {1..800}; do
     [[ -s $READY ]] && break
-    kill -0 "$PRESSURE_PID" 2>/dev/null || {
+    direct_owned_child_running "$PRESSURE_PID" || {
         if ! pressure_blocked_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'BLOCKED: ')"; then
             printf '%s\n' 'BLOCKED: ID36 pressure-helper diagnostic telemetry is unreadable; require the private scratch log to remain readable' >&2
             exit 2
@@ -1045,7 +1384,7 @@ if ! (: > "$PRESSURE_ACTIVATE") 2>/dev/null; then
 fi
 for _ in {1..800}; do
     [[ -s $PRESSURE_ACTIVE ]] && break
-    kill -0 "$PRESSURE_PID" 2>/dev/null || {
+    direct_owned_child_running "$PRESSURE_PID" || {
         if ! pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ')"; then
             printf '%s\n' 'BLOCKED: ID36 pressure-helper diagnostic telemetry unreadable during staged activation; require the private scratch log to remain readable' >&2
             exit 2
@@ -1194,7 +1533,7 @@ fi
     printf 'FAIL: ID36 CPU oversubscription produced no CPU PSI stall evidence: observed:%s required_min:1 unit:usec; inspect delegated CPU pressure controller\n' "$cpu_some_delta" >&2
     exit 1
 }
-kill -0 "$PRESSURE_PID" 2>/dev/null || {
+direct_owned_child_running "$PRESSURE_PID" || {
     if ! pressure_fail_reason="$(bounded_safe_log_reason "$PRESSURE_LOG" 'FAIL: ')"; then
         printf '%s\n' 'BLOCKED: ID36 pressure-helper diagnostic telemetry unreadable after qualification; require the private scratch log to remain readable' >&2
         exit 2

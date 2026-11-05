@@ -12,7 +12,7 @@ QUALIFIER = ROOT / "tests/tools/qualify-resource-pressure.sh"
 
 
 def shell_function(name: str) -> str:
-    """Extract production Bash without running privileged admission or pressure."""
+    """Extract a top-level shell function without running the privileged script."""
     source = QUALIFIER.read_text(encoding="utf-8")
     beginning = re.search(rf"^{re.escape(name)}\(\) \{{\n", source, re.MULTILINE)
     if beginning is None:
@@ -27,8 +27,12 @@ class CleanupOwnershipFixtures(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.functions = "\n".join(shell_function(name) for name in (
-            "direct_owned_child_running", "stop_direct_owned_child",
-            "classify_cleanup_cgroup_membership", "report_cleanup_refusal", "cleanup"))
+            "read_owned_directory_identity", "read_open_directory_identity",
+            "direct_owned_child_running", "capture_direct_child_identity",
+            "signal_direct_owned_child", "signal_owned_child_if_running",
+            "stop_direct_owned_child", "classify_cleanup_cgroup_membership",
+            "classify_cleanup_session_entries", "report_cleanup_refusal",
+            "cleanup"))
         cls.source = QUALIFIER.read_text(encoding="utf-8")
 
     def setUp(self):
@@ -46,26 +50,47 @@ class CleanupOwnershipFixtures(unittest.TestCase):
 
     def execute(self, body: str = "", *, status: int = 0,
                 retain: bool = False, preamble: str = "") -> subprocess.CompletedProcess[str]:
+        # Separate synthetic invocations share one fixture only within a test;
+        # discard the previous invocation's owned stop marker first.
+        stop_path = self.session / "pressure.stop"
+        if stop_path.is_file() and not stop_path.is_symlink():
+            stop_path.unlink()
+
         # This stub models the kernel's refusal to remove an occupied cgroup;
         # ordinary directories contain fake control files, unlike kernfs.
         rmdir_stub = '''
 rmdir() {
-    if [[ -f $CGROUP/cgroup.procs && ! -s $CGROUP/cgroup.procs ]]; then
-        command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
-        command rmdir -- "$CGROUP"
+    if [[ $1 == "$CGROUP" ]]; then
+        if [[ -f $CGROUP/cgroup.procs && ! -s $CGROUP/cgroup.procs ]]; then
+            command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+            command rmdir -- "$CGROUP"
+        else
+            return 1
+        fi
     else
-        return 1
+        command rmdir "$@"
     fi
 }
 '''
         script = (
             'set -Eeuo pipefail\n'
-            'CGROUP=$1\nSESSION=$2\nSTOP=$2/stop\n'
-            'PAIR_PID=""\nPRESSURE_PID=""\npair_cgroup_pid="123"\n'
-            'CGROUP_WAS_CREATED=1\n'
+            'CGROUP=$1\nSESSION=$2\n'
+            'READY=$2/pressure.ready\nPRESSURE_ACTIVATE=$2/pressure.activate\n'
+            'PRESSURE_ACTIVE=$2/pressure.active\nSTOP=$2/pressure.stop\n'
+            'PAIR_READY=$2/pair.ready\nPAIR_GO=$2/pair.go\n'
+            'PRESSURE_LOG=$2/pressure.log\nPAIR_LOG=$2/pair.log\n'
+            'PAIR_PID=""\nPRESSURE_PID=""\n'
+            'PAIR_PROCESS_IDENTITY=""\nPRESSURE_PROCESS_IDENTITY=""\n'
+            'SESSION_DIRECTORY_FD=""\nCGROUP_DIRECTORY_FD=""\n'
+            'pair_cgroup_pid="123"\nCGROUP_WAS_CREATED=1\n'
             f'RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION={int(retain)}\n'
             'PASS_EVIDENCE="PASS_ID36_RESOURCE_PRESSURE=synthetic"\n'
-            + self.functions + '\n' + rmdir_stub + preamble + '\n'
+            + self.functions + '\n'
+            + 'exec {SESSION_DIRECTORY_FD}<"$SESSION"\n'
+            + 'exec {CGROUP_DIRECTORY_FD}<"$CGROUP"\n'
+            + 'SESSION_IDENTITY="$(read_owned_directory_identity "$SESSION")"\n'
+            + 'CGROUP_IDENTITY="$(read_owned_directory_identity "$CGROUP")"\n'
+            + rmdir_stub + preamble + '\n'
             + body + '\nset +e\n'
             + (f'(exit {status})\n' if status else 'true\n')
             + 'cleanup\n'
@@ -126,10 +151,10 @@ rmdir() {
         self.assert_retained(self.execute(), "foreign")
 
     def test_malformed_duplicate_overflow_and_unreadable_inventory(self):
-        for content in ("123\n123\n", "123\n-1\n", "000123\n",
-                        "4194305\n", "123\n" * 129, "bad\n"):
-            with self.subTest(content=content[:20]):
-                self.membership.write_text(content, encoding="ascii")
+        for member_content in ("123\n123\n", "123\n-1\n", "000123\n",
+                               "4194305\n", "123\n" * 129, "bad\n"):
+            with self.subTest(content=member_content[:20]):
+                self.membership.write_text(member_content, encoding="ascii")
                 self.assert_retained(self.execute(), "malformed")
         self.membership.unlink()
         self.assert_retained(self.execute(), "unreadable")
@@ -156,8 +181,11 @@ awk() {
     def test_arrival_during_rmdir_preserves_evidence(self):
         preamble = '''
 rmdir() {
-    printf '%s\\n' 456 > "$CGROUP/cgroup.procs"
-    return 1
+    if [[ $1 == "$CGROUP" ]]; then
+        printf '%s\\n' 456 > "$CGROUP/cgroup.procs"
+        return 1
+    fi
+    command rmdir "$@"
 }
 '''
         result = self.execute(preamble=preamble)
@@ -167,9 +195,13 @@ rmdir() {
     def test_reappearing_cgroup_path_after_rmdir_preserves_session(self):
         preamble = '''
 rmdir() {
-    command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
-    command rmdir -- "$CGROUP" || return 1
-    command mkdir -- "$CGROUP"
+    if [[ $1 == "$CGROUP" ]]; then
+        command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+        command rmdir -- "$CGROUP" || return 1
+        command mkdir -- "$CGROUP"
+        return 0
+    fi
+    command rmdir "$@"
 }
 '''
         result = self.execute(preamble=preamble)
@@ -177,6 +209,62 @@ rmdir() {
         self.assertIn("phase:post-rmdir", result.stderr)
         self.assertTrue(self.cgroup.exists())
         self.assertTrue(self.session.exists())
+        self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+
+    def test_cgroup_replacement_before_cleanup_is_stale(self):
+        preamble = '''
+command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+command rmdir -- "$CGROUP"
+command mkdir -- "$CGROUP"
+: > "$CGROUP/cgroup.procs"
+printf '%s\\n' untouched > "$CGROUP/cgroup.kill"
+'''
+        result = self.execute(preamble=preamble)
+        self.assert_retained(result, "stale")
+        self.assertIn("phase:cgroup-identity", result.stderr)
+
+    def test_session_replacement_cannot_be_signaled_or_deleted(self):
+        target = self.root / "foreign-target"
+        target.write_text("secret\n", encoding="ascii")
+        preamble = '''
+command rmdir -- "$SESSION"
+command mkdir -- "$SESSION"
+printf '%s\\n' foreign > "$SESSION/foreign.keep"
+ln -s "${SESSION%/*}/foreign-target" "$STOP"
+'''
+        result = self.execute(preamble=preamble)
+        self.assert_retained(result, "stale")
+        self.assertIn("phase:session-signal", result.stderr)
+        self.assertEqual(target.read_text(encoding="ascii"), "secret\n")
+        self.assertEqual((self.session / "foreign.keep").read_text(encoding="ascii"),
+                         "foreign\n")
+
+    def test_existing_regular_stop_marker_is_accepted(self):
+        result = self.execute(preamble=': > "$STOP"\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "PASS_ID36_RESOURCE_PRESSURE=synthetic\n")
+        self.assertFalse(self.cgroup.exists())
+        self.assertFalse(self.session.exists())
+
+    def test_existing_stop_symlink_is_never_followed(self):
+        target = self.root / "foreign-target"
+        target.write_text("secret\n", encoding="ascii")
+        preamble = 'ln -s "${SESSION%/*}/foreign-target" "$STOP"\n'
+        result = self.execute(preamble=preamble)
+        self.assert_retained(result, "stale")
+        self.assertIn("phase:session-signal", result.stderr)
+        self.assertEqual(target.read_text(encoding="ascii"), "secret\n")
+
+    def test_unknown_session_entry_blocks_nonrecursive_cleanup(self):
+        result = self.execute(preamble="printf '%s\\n' foreign > \"$SESSION/foreign.keep\"\n")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertFalse(self.cgroup.exists())
+        self.assertTrue(self.session.exists())
+        self.assertEqual((self.session / "foreign.keep").read_text(encoding="ascii"),
+                         "foreign\n")
+        self.assertTrue((self.session / "pressure.stop").is_file())
+        self.assertIn("phase:session-inventory", result.stderr)
+        self.assertIn("observed:unexpected", result.stderr)
         self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
 
     def test_prior_retention_and_original_failure_precedence(self):
@@ -195,10 +283,11 @@ rmdir() {
         self.assert_retained(result, "unowned")
 
     def test_missing_previously_created_cgroup_retains_session(self):
-        self.membership.unlink()
-        self.cgroup_kill.unlink()
-        self.cgroup.rmdir()
-        result = self.execute()
+        preamble = '''
+command rm -f -- "$CGROUP/cgroup.procs" "$CGROUP/cgroup.kill"
+command rmdir -- "$CGROUP"
+'''
+        result = self.execute(preamble=preamble)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("phase:cgroup-identity", result.stderr)
         self.assertTrue(self.session.exists())
@@ -220,9 +309,65 @@ rmdir() {
                                    stderr=subprocess.DEVNULL)
         self.addCleanup(lambda: self.stop_foreign(foreign))
         self.membership.write_text(f"{foreign.pid}\n", encoding="ascii")
-        result = self.execute(preamble="sleep 30 & PAIR_PID=$!\n")
+        preamble = '''
+sleep 30 >/dev/null 2>&1 &
+PAIR_PID=$!
+PAIR_PROCESS_IDENTITY="$(capture_direct_child_identity "$PAIR_PID")"
+'''
+        result = self.execute(preamble=preamble)
         self.assert_retained(result, "foreign")
         self.assertIsNone(foreign.poll(), "foreign cgroup member must survive")
+
+    def test_pinned_directory_identity_detects_same_path_replacement(self):
+        helpers = (shell_function("read_owned_directory_identity") +
+                   shell_function("read_open_directory_identity"))
+        directory = self.root / "pinned"
+        directory.mkdir()
+        script = helpers + r'''
+directory=$1
+exec {directory_fd}<"$directory"
+before="$(read_owned_directory_identity "$directory")"
+pinned="$(read_open_directory_identity "$directory_fd")"
+rmdir "$directory"
+mkdir "$directory"
+after="$(read_owned_directory_identity "$directory")"
+[[ $before == "$pinned" ]]
+[[ $after != "$pinned" ]]
+'''
+        result = self.run_simple_shell(script, directory)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pidfd_identity_mismatch_refuses_signal(self):
+        helpers = "\n".join(shell_function(name) for name in (
+            "direct_owned_child_running", "capture_direct_child_identity",
+            "signal_direct_owned_child"))
+        script = helpers + r'''
+sleep 30 >/dev/null 2>&1 &
+tracked_pid=$!
+identity="$(capture_direct_child_identity "$tracked_pid")"
+bad_identity=$((identity + 1))
+set +e
+signal_direct_owned_child "$tracked_pid" "$bad_identity" 15
+signal_status=$?
+set -e
+kill -0 "$tracked_pid"
+kill -TERM "$tracked_pid"
+wait "$tracked_pid" 2>/dev/null || true
+printf '%s\n' "$signal_status"
+'''
+        result = subprocess.run(
+            ["bash", "-c", "set -Eeuo pipefail\n" + script],
+            capture_output=True, text=True, timeout=8, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "3\n")
+
+    @staticmethod
+    def run_simple_shell(script: str, *arguments: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", "-c", "set -Eeuo pipefail\n" + script, "fixture",
+             *map(str, arguments)],
+            capture_output=True, text=True, timeout=8, check=False,
+        )
 
     @staticmethod
     def stop_foreign(process: subprocess.Popen):
@@ -234,10 +379,24 @@ rmdir() {
             process.kill()
             process.wait(timeout=3)
 
-    def test_source_never_uses_cgroup_wide_termination(self):
+    def test_source_never_uses_ambiguous_group_or_pid_termination(self):
         self.assertNotIn('> "$CGROUP/cgroup.kill"', self.source)
-        self.assertIn('CGROUP_WAS_CREATED=1', self.source)
-        self.assertIn('report_cleanup_refusal', self.source)
+        self.assertNotIn('kill -TERM -- "$tracked_pid"', self.source)
+        self.assertNotIn('kill -KILL -- "$tracked_pid"', self.source)
+        self.assertNotIn('rm -rf -- "$SESSION"', self.source)
+        self.assertIn("os.pidfd_open(pid)", self.source)
+        self.assertIn("signal.pidfd_send_signal(pidfd, signal_number)", self.source)
+        self.assertIn('CGROUP_IDENTITY="$(read_owned_directory_identity "$CGROUP")"',
+                      self.source)
+        self.assertIn('SESSION_IDENTITY="$(read_owned_directory_identity "$SESSION")"',
+                      self.source)
+        self.assertIn('local membership_path="/proc/self/fd/$CGROUP_DIRECTORY_FD/cgroup.procs"',
+                      self.source)
+        self.assertIn('local session_fd_path="/proc/self/fd/$SESSION_DIRECTORY_FD"',
+                      self.source)
+        self.assertIn("classify_cleanup_session_entries", self.source)
+        self.assertIn("read_open_directory_identity", self.source)
+        self.assertIn("report_cleanup_refusal", self.source)
 
 
 if __name__ == "__main__":

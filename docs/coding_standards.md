@@ -1493,19 +1493,42 @@ Regression coverage must use synthetic proc/cgroup fixtures and fake workers,
 never actual host memory pressure or privileged cgroup mutation.
 
 ID36 cleanup never writes group-wide `cgroup.kill`: a membership snapshot cannot
-authenticate a process that enters before the later group-wide signal. Use the
-cooperative stop file, and signal only running directly tracked Bash child jobs,
-never a previously recorded PID number by itself. After reaping, classify
-`cgroup.procs` with bounded canonical parsing; any nonempty, foreign, stale,
-malformed, missing or unreadable inventory retains both the child cgroup and
-private session and cannot print PASS. Recheck the empty inventory immediately
-before `rmdir`; an occupied or replaced group or failed removal likewise
-retains evidence. A failed initial cgroup creation grants no teardown ownership.
-Cleanup diagnostics identify phase, required ownership, observed safe category,
+authenticate a process that enters before the later group-wide signal. The
+Bash job table is liveness evidence only, not terminating-signal authority.
+Capture each direct child's canonical `/proc/<pid>/stat` start time and parent
+while it is still a running job, require pidfd signaling support before
+launching ID36 children, and send TERM/KILL only through a pidfd after
+revalidating that captured process identity. Never signal from a previously
+recorded numeric PID alone.
+
+Pin both the newly created child cgroup and private scratch directory with open
+directory descriptors, and require each descriptor identity to match the named
+path immediately after opening it. Holding that descriptor prevents same-path
+replacement from recycling the removed inode into the ownership proof. After reaping, read `cgroup.procs` through
+the pinned cgroup descriptor with bounded canonical parsing; any nonempty,
+foreign, stale, malformed, missing or unreadable inventory retains both the
+child cgroup and private session and cannot print PASS. Revalidate the named
+cgroup identity immediately before `rmdir`; an occupied or replaced group or
+failed removal likewise retains evidence. A failed initial cgroup creation
+grants no teardown ownership.
+
+The cooperative stop marker and cleanup of known scratch entries must use the
+pinned session descriptor after confirming the named path still identifies the
+created session. A verified failed pair may already have published the regular
+stop marker; accept that regular file without truncating it, reject symlinks or
+non-regular substitutions, and otherwise create the marker with noclobber.
+Never recursively delete the session. Before deleting any evidence, inventory
+the pinned directory and require every present entry to be one of the fixed
+ID36 names and a regular file. Any unexpected, non-regular or unreadable entry
+retains the complete session. Only then remove the fixed entries through the
+pinned descriptor and require the directory to be empty before `rmdir`; any
+path replacement or later arrival retains the remaining evidence. Cleanup
+diagnostics identify phase, required ownership, observed safe category,
 original exit status and retained obligation without paths or PID lists;
 original FAIL/signal status takes precedence over cleanup BLOCKED. Rootless
-regression fixtures must inject late membership changes and deletion races
-without mutating host cgroups.
+regression fixtures must inject PID-identity mismatch, late membership,
+same-path directory replacement, stop-marker substitution, unknown session
+entries and deletion races without mutating host cgroups.
 
 ### Foreground GC pressure and scaling telemetry
 
