@@ -1815,13 +1815,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         def remove_test_objects(saved_state, saved_state_dir):
             nonlocal observed_block_zero
 
-            saved_state["stage"] = (
-                "ORACLE_PASS" if teardown_not_complete else "COMPLETE")
-            if not teardown_not_complete:
+            if teardown_not_complete:
+                saved_state["stage"] = "ORACLE_PASS"
+            else:
                 # Production recovery restores and rereads block zero before
                 # marking recovery complete and releasing partition ownership.
                 observed_block_zero = target["header"]
                 events.append(("restore0",))
+                saved_state["stage"] = "COMPLETE"
             probe._release_partition_ownership(saved_state)
             result_path = Path(saved_state_dir) / probe.RESULTS_NAME
             saved_results = json.loads(result_path.read_text())
