@@ -3538,6 +3538,29 @@ proofs or failed owned cleanup block admission; neither helper broadly empties
 cleanup after earlier loaded stages, without weakening the 1 GiB
 `MemAvailable` threshold.
 
+The matching PID/source markers alone never authorize deletion. A completed
+session also requires a private, single-linked `session.log` with the exact
+source SHA in its initial 4 KiB and the producer's successful ordinary-teardown
+record in its final 4 KiB; reads must be descriptor-pinned, same-mount and
+bounded independent of log size. Missing, mismatched, replaced, or nonprivate
+proof retains the session. This is same-owner corroboration, not cryptographic
+attestation against a privileged actor able to forge both markers and logs.
+Keep the teardown log and owner/completion records until scratch removal ends;
+after proof removal, a failed final rmdir leaves non-resumable retained state,
+never a fabricated cleanup PASS. Rootless native fixtures must cover foreign
+occupants, symlinks, hardlinks, substitutions, interrupted removal, unreadable
+entries, and injected unlink/rmdir/close errors.
+
+On refusal, the private helper emits the phase, category, original errno (when
+present) or process exit code, prior fully removed count, and conservative
+retained-state disposition without echoing paths or PID inventories. The first
+operation error takes precedence over secondary descriptor-close failure.
+Successful output is a single bounded aggregate of completed removals and
+unproved retained candidates, never per-entry success chatter. The existing
+external 30-second watchdog bounds the caller's wait under normal scheduling;
+a journal-blocked uninterruptible syscall may outlive a kill signal, so the
+watchdog is not proof of a strict kernel-side I/O deadline.
+
 The owned pair first creates and fully faults both 64MiB memory-backed
 `null_blk` devices outside the ID36 cgroup. It then migrates its benchmark
 process into the cgroup, proves that membership, and stops at a private barrier.
