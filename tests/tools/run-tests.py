@@ -2328,9 +2328,10 @@ def failure_context(output, *, loaded=True, default_phase=None):
     primary_lifecycle_command_failure = None
     primary_prepare_failure = None
     if loaded:
-        # The lifecycle helper prints the coordinator's own fixed BLOCKED line
-        # before its generic lifecycle marker. Preserve only the operation and
-        # strerror-shaped tail; never copy paths, IDs or arbitrary child output.
+        # Preserve only fixed coordinator phases and strerror-shaped text;
+        # never copy paths, IDs or arbitrary child output. The prepare helper
+        # validates and re-emits its phase record, but intentionally keeps the
+        # coordinator wrapper private, so the report must not depend on it.
         for line in output.splitlines():
             prepare_match = re.fullmatch(
                 r"PRIMARY_PREPARE=FAILED phase=([a-z0-9-]{1,64}) "
@@ -2470,21 +2471,19 @@ def failure_context(output, *, loaded=True, default_phase=None):
                     "[id]", msg, flags=re.I)
                 msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)
                 label = lifecycle_prefix.partition(":")[0]
-                if primary_lifecycle_command_failure is not None:
+                if primary_prepare_failure is not None:
+                    detail_phase, error_number, detail_error = (
+                        primary_prepare_failure)
+                    reason = (
+                        f"{label}: coordinator preparation phase="
+                        f"{detail_phase} errno={error_number} "
+                        f"error={detail_error}")[:180]
+                elif primary_lifecycle_command_failure is not None:
                     operation, coordinator_error = (
                         primary_lifecycle_command_failure)
-                    if (operation == "preparation" and
-                            primary_prepare_failure is not None):
-                        detail_phase, error_number, detail_error = (
-                            primary_prepare_failure)
-                        reason = (
-                            f"{label}: coordinator preparation phase="
-                            f"{detail_phase} errno={error_number} "
-                            f"error={detail_error}")[:180]
-                    else:
-                        reason = (
-                            f"{label}: coordinator {operation}: "
-                            f"{coordinator_error}")[:180]
+                    reason = (
+                        f"{label}: coordinator {operation}: "
+                        f"{coordinator_error}")[:180]
                 else:
                     reason = f"{label}: {msg[:155]}"
                 break

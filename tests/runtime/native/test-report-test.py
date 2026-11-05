@@ -3640,6 +3640,26 @@ class ReportContract(unittest.TestCase):
             "error=Operation not permitted")
         self.assertNotIn("0123456789abcdef", reason)
 
+        # The owned-nullblk helper re-emits the validated phase record but
+        # intentionally does not expose its captured command wrapper. Preserve
+        # the actionable sub-check without requiring that wrapper line.
+        prepare_gate_without_wrapper = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+            "PRIMARY_PREPARE=FAILED phase=qualification-report-read "
+            "errno=13 error=Permission denied "
+            "run_id=0123456789abcdef0123456789abcdef "
+            "claim=none\n"
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: "
+            "production coordinator prepare failed on owned null_blk\n"
+        )
+        phase, reason = runner.failure_context(prepare_gate_without_wrapper)
+        self.assertEqual(phase, "owned RAM primary lifecycle prepare")
+        self.assertEqual(
+            reason,
+            "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator preparation "
+            "phase=qualification-report-read errno=13 error=Permission denied")
+        self.assertNotIn("0123456789abcdef", reason)
+
         interrupted = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE\n"
             "PASS_LOADED_PRIMARY_NULLBLK_LIFECYCLE=run_id:redacted\n"
