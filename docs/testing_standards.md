@@ -4262,7 +4262,10 @@ first refusal and remaining session ownership; no cgroup.kill or loaded host
 pressure cleanup is permitted by these rootless proofs. A repeated HUP/INT/TERM
 during EXIT cleanup must not abort the remaining ownership-checked teardown
 or replace an already failing original status (including 143) or prior cleanup
-refusal. If cleanup began successfully, the first such signal supplies its
+refusal. The EXIT trap must capture the entry status and mark cleanup active
+before calling the cleanup function, so a signal arriving before its local
+signal traps are installed is latched rather than terminating teardown. If
+cleanup began successfully, the first such signal supplies its
 129/130/143 status, suppresses PASS even if both resources are removed, and
 produces one path-free cleanup-signal diagnostic with proven ownership,
 resumption and exact retention. If that signal precedes a later cleanup
