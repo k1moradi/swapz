@@ -1555,6 +1555,35 @@ zero or an impossible count, and degrade rather than assume health when those
 fields are unavailable. Normal one-for-one GC/roll-forward must not decrement
 the count.
 
+### Primary runtime-health diagnostic attribution
+
+The production runtime-health observer keeps the established HEALTHY, WARN,
+FAIL and DEGRADED classification contract: definite identity/service/runtime
+contradictions are FAIL, incomplete observation is DEGRADED, nonterminal
+pressure/error evidence is WARN, and only complete consistent evidence is
+HEALTHY. Diagnostic reporting must not promote or demote a snapshot merely to
+make it easier to describe.
+
+Every non-HEALTHY reason must have a bounded `SWAPZ_RUNTIME_OBSERVER` record
+that identifies the phase and check, expected proof, observed class, originating
+command status (or the validated target errno when the terminal status owns the
+failure), retained-state disposition, and a safe inspection action. A semantic
+mismatch after a successful probe reports command status zero; failed systemd,
+dmsetup, inventory or journal probes retain their actual command status.
+Diagnostics must not print device paths, PARTUUIDs, recovery run IDs or private
+journal/recovery text. WARN and DEGRADED records are observation only: they are
+never permission to remove a mapper, disable unrelated swap, delete recovery
+evidence, or blindly retry. A sustained GC stall may require the normal primary
+stop path, but the observer itself remains read-only and must report inspection
+before any operator action.
+
+The exact-SHA systemd/package workflow must execute
+`tests/runtime/native/systemd/swapz-primary-runtime-health-diagnostics-test.py`
+in addition to the existing shared systemd fixture. The standalone regression
+may reuse that fixture's synthetic mocks but must not modify the shared test,
+activate real systemd, load a module, mutate swap, require root, or perform
+physical-device operations.
+
 The native authority suite must also exercise a fixed 16 GiB maximum-capacity
 regression fixture: one SWZ header block,
 1 MiB segment rounding, and the authority's `ceil(logical_pages / 8)` reserve

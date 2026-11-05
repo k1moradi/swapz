@@ -82,6 +82,16 @@ append_reason()
 	eval "$variable=\$current"
 }
 
+reason_present()
+{
+	reason_list=$1
+	wanted_reason=$2
+	case ",$reason_list," in
+	*,"$wanted_reason",*) return 0 ;;
+	esac
+	return 1
+}
+
 canonical_unsigned()
 {
 	unsigned_value=$1
@@ -1124,27 +1134,39 @@ EOF
 		append_reason observation_reasons passive_swap_enablement_unavailable
 		;;
 	esac
-	mapper_active=$(unit_property "$mapper_service" ActiveState 2>/dev/null || printf 'unavailable')
+	observe_runtime_unit_property "$mapper_service" ActiveState
+	mapper_active=$runtime_unit_property_value
+	mapper_active_command_status=$runtime_unit_property_command_status
+	mapper_active_category=$runtime_unit_property_category
 	observe_runtime_unit_property "$mapper_service" SubState
 	mapper_sub=$runtime_unit_property_value
 	mapper_sub_command_status=$runtime_unit_property_command_status
 	mapper_sub_category=$runtime_unit_property_category
-	mapper_result=$(unit_property "$mapper_service" Result 2>/dev/null || printf 'unavailable')
-	swap_unit_active=$(unit_property "$mapper_swap_unit" ActiveState 2>/dev/null || printf 'unavailable')
+	observe_runtime_unit_property "$mapper_service" Result
+	mapper_result=$runtime_unit_property_value
+	mapper_result_command_status=$runtime_unit_property_command_status
+	mapper_result_category=$runtime_unit_property_category
+	observe_runtime_unit_property "$mapper_swap_unit" ActiveState
+	swap_unit_active=$runtime_unit_property_value
+	swap_unit_active_command_status=$runtime_unit_property_command_status
+	swap_unit_active_category=$runtime_unit_property_category
 	observe_runtime_unit_property "$mapper_swap_unit" SubState
 	swap_unit_sub=$runtime_unit_property_value
 	swap_unit_sub_command_status=$runtime_unit_property_command_status
 	swap_unit_sub_category=$runtime_unit_property_category
-	swap_unit_result=$(unit_property "$mapper_swap_unit" Result 2>/dev/null || printf 'unavailable')
-	case "$mapper_active" in
-	active) ;;
-	unavailable) append_reason observation_reasons mapper_service_state_unavailable ;;
-	*) append_reason failure_reasons mapper_service_not_active ;;
+	observe_runtime_unit_property "$mapper_swap_unit" Result
+	swap_unit_result=$runtime_unit_property_value
+	swap_unit_result_command_status=$runtime_unit_property_command_status
+	swap_unit_result_category=$runtime_unit_property_category
+	case "$mapper_active_category:$mapper_active" in
+	value:active) ;;
+	value:unavailable|invalid_output:*|probe_failed:*) append_reason observation_reasons mapper_service_state_unavailable ;;
+	value:*) append_reason failure_reasons mapper_service_not_active ;;
 	esac
-	case "$swap_unit_active" in
-	active) ;;
-	unavailable) append_reason observation_reasons passive_swap_unit_state_unavailable ;;
-	*) append_reason failure_reasons passive_swap_unit_not_active ;;
+	case "$swap_unit_active_category:$swap_unit_active" in
+	value:active) ;;
+	value:unavailable|invalid_output:*|probe_failed:*) append_reason observation_reasons passive_swap_unit_state_unavailable ;;
+	value:*) append_reason failure_reasons passive_swap_unit_not_active ;;
 	esac
 	# The oneshot mapper remains active/exited; the passive swap is active/active.
 	# Contradictory observed substates must not pass, but missing telemetry is
@@ -1163,15 +1185,15 @@ EOF
 	invalid_output) append_reason observation_reasons passive_swap_unit_substate_telemetry_invalid ;;
 	probe_failed) append_reason observation_reasons passive_swap_unit_substate_unavailable ;;
 	esac
-	case "$mapper_result" in
-	success) ;;
-	unavailable) append_reason observation_reasons mapper_service_result_unavailable ;;
-	*) append_reason failure_reasons mapper_service_failed ;;
+	case "$mapper_result_category:$mapper_result" in
+	value:success) ;;
+	value:unavailable|invalid_output:*|probe_failed:*) append_reason observation_reasons mapper_service_result_unavailable ;;
+	value:*) append_reason failure_reasons mapper_service_failed ;;
 	esac
-	case "$swap_unit_result" in
-	success) ;;
-	unavailable) append_reason observation_reasons passive_swap_unit_result_unavailable ;;
-	*) append_reason failure_reasons passive_swap_unit_failed ;;
+	case "$swap_unit_result_category:$swap_unit_result" in
+	value:success) ;;
+	value:unavailable|invalid_output:*|probe_failed:*) append_reason observation_reasons passive_swap_unit_result_unavailable ;;
+	value:*) append_reason failure_reasons passive_swap_unit_failed ;;
 	esac
 
 	if ! hibernation_config_check; then
@@ -1206,68 +1228,157 @@ log_runtime_attribution()
 {
 	# Keep failure provenance separate from health classification. This helper
 	# only reports already-classified observations and never repairs host state.
-	case ",$failure_reasons,$observation_reasons," in
-	*,backing_device_unavailable,*)
+	if reason_present "$failure_reasons" backing_device_unavailable || reason_present "$observation_reasons" backing_device_unavailable; then
 		log_observer_diagnostic selected_backing selected_partition_present missing_selected_partition path_exists 1 inspect_selected_partition_read_only none not_applicable selected_device_presence
-		;;
-	esac
-	case ",$failure_reasons,$observation_reasons," in
-	*,selected_target_identity_unavailable,*)
+	fi
+	if reason_present "$failure_reasons" selected_target_identity_unavailable || reason_present "$observation_reasons" selected_target_identity_unavailable; then
 		log_observer_diagnostic selected_target canonical_manager_partition_identity unproven_identity manager_target_identity 1 inspect_primary_target_and_manager_read_only none not_applicable selected_identity
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,active_transaction_identity_invalid,*)
+	fi
+	if reason_present "$failure_reasons" active_transaction_identity_invalid; then
 		log_observer_diagnostic active_transaction matching_active_state_and_partition_claim incomplete_or_stale_claim active_run_id 1 inspect_recovery_evidence_read_only bound not_applicable active_owner_claim
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,mapper_missing,*)
+	fi
+	if reason_present "$failure_reasons" mapper_missing; then
 		log_observer_diagnostic mapper_presence bound_primary_mapper missing_mapper path_exists 1 inspect_dmsetup_info_read_only none not_applicable mapper_device_presence
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,mapper_device_identity_invalid,*)
+	fi
+	if reason_present "$failure_reasons" mapper_device_identity_invalid; then
 		mapper_name_observation_status=0
 		[ "$mapper_dm_name" != unavailable ] || mapper_name_observation_status=1
 		log_observer_diagnostic mapper_device_identity swapz_primary_dm_name foreign_or_unavailable_dm_name sysfs_dm_name "$mapper_name_observation_status" inspect_dmsetup_info_read_only bound not_applicable mapper_dm_name
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,mapper_service_not_active,*)
-		log_observer_diagnostic mapper_service_state active_service not_active systemctl_show 0 inspect_systemctl_show_read_only none observed mapper_active_state
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,passive_swap_unit_not_active,*)
-		log_observer_diagnostic passive_swap_unit_state active_swap_unit not_active systemctl_show 0 inspect_systemctl_show_read_only none observed passive_swap_active_state
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,mapper_service_failed,*)
-		log_observer_diagnostic mapper_service_result success_result non_success_result systemctl_show 0 inspect_systemctl_show_read_only none observed mapper_result
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,passive_swap_unit_failed,*)
-		log_observer_diagnostic passive_swap_unit_result success_result non_success_result systemctl_show 0 inspect_systemctl_show_read_only none observed passive_swap_result
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,target_failed,*)
+	fi
+	if reason_present "$failure_reasons" mapper_table_not_single_target; then
+		log_observer_diagnostic mapper_table single_bound_table multiline_or_multiple_targets dmsetup_table 0 inspect_dmsetup_table_read_only none observed mapper_table_shape
+	fi
+	if reason_present "$failure_reasons" mapper_table_invalid; then
+		log_observer_diagnostic mapper_table production_table_contract invalid_table_contract dmsetup_table 0 inspect_dmsetup_table_read_only none observed mapper_table_contract
+	fi
+	if reason_present "$failure_reasons" mapper_backing_identity_mismatch; then
+		log_observer_diagnostic mapper_backing selected_partition_identity mismatched_backing_identity dmsetup_table 0 inspect_dmsetup_table_and_selected_identity_read_only bound observed mapper_backing_identity
+	fi
+	if reason_present "$failure_reasons" mapper_service_not_active; then
+		log_observer_diagnostic mapper_service_state active_service not_active systemctl_show "$mapper_active_command_status" inspect_systemctl_show_read_only none observed mapper_active_state
+	fi
+	if reason_present "$failure_reasons" passive_swap_unit_not_active; then
+		log_observer_diagnostic passive_swap_unit_state active_swap_unit not_active systemctl_show "$swap_unit_active_command_status" inspect_systemctl_show_read_only none observed passive_swap_active_state
+	fi
+	if reason_present "$failure_reasons" mapper_service_failed; then
+		log_observer_diagnostic mapper_service_result success_result non_success_result systemctl_show "$mapper_result_command_status" inspect_systemctl_show_read_only none observed mapper_result
+	fi
+	if reason_present "$failure_reasons" passive_swap_unit_failed; then
+		log_observer_diagnostic passive_swap_unit_result success_result non_success_result systemctl_show "$swap_unit_result_command_status" inspect_systemctl_show_read_only none observed passive_swap_result
+	fi
+	if reason_present "$failure_reasons" target_failed; then
 		log_observer_diagnostic target_terminal zero_failed_latch failed_latched dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed failed
-		;;
-	esac
-	case ",$failure_reasons," in
-	*,hibernation_resume_configuration_conflict,*)
+	fi
+	if reason_present "$failure_reasons" gc_reserve_role_count_invalid; then
+		log_observer_diagnostic gc_reserve valid_initial_and_current_role_counts invalid_role_count dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed gc_reserve_roles
+	fi
+	if reason_present "$failure_reasons" gc_reserve_exhausted; then
+		log_observer_diagnostic gc_reserve nonzero_current_reserve_roles reserve_exhausted dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed gc_reserve_roles
+	fi
+	if reason_present "$failure_reasons" mapper_swap_inventory_invalid; then
+		log_observer_diagnostic swap_inventory single_primary_mapper invalid_primary_mapper_count read_swap_inventory "$swap_inventory_command_status" inspect_proc_swaps_and_sysfs_read_only none observed primary_mapper_count
+	fi
+	if reason_present "$failure_reasons" hibernation_resume_configuration_conflict; then
 		log_observer_diagnostic hibernation_resume no_primary_resume_conflict unsafe_or_unverifiable_resume hibernation_config_check 1 inspect_resume_configuration_read_only none not_applicable hibernation_safety
-		;;
-	esac
-	case ",$warning_reasons," in
-	*,gc_reserve_degraded,*)
+	fi
+	if reason_present "$failure_reasons" sustained_gc_stall; then
+		log_observer_diagnostic gc_progress pressure_has_forward_progress sustained_stall dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_and_normal_primary_stop_read_only none observed gc_stall_progress
+	fi
+
+	if reason_present "$warning_reasons" flush_errors; then
+		log_observer_diagnostic target_flush zero_flush_errors nonzero_flush_errors dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed flush_error_counter
+	fi
+	if reason_present "$warning_reasons" lower_discard_errors; then
+		log_observer_diagnostic target_discard zero_lower_discard_errors nonzero_lower_discard_errors dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed discard_error_counter
+	fi
+	if reason_present "$warning_reasons" logical_write_errors; then
+		log_observer_diagnostic target_write zero_logical_write_errors nonzero_logical_write_errors dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed logical_write_error_counter
+	fi
+	if reason_present "$warning_reasons" endio_write_errors; then
+		log_observer_diagnostic target_endio zero_endio_write_errors nonzero_endio_write_errors dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed endio_write_error_counter
+	fi
+	if reason_present "$warning_reasons" forced_endio_errors; then
+		log_observer_diagnostic target_endio zero_forced_endio_errors nonzero_forced_endio_errors dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed forced_endio_error_counter
+	fi
+	if reason_present "$warning_reasons" gc_reserve_degraded; then
 		log_observer_diagnostic gc_reserve initial_reserve_role_count reduced_reserve_role_count dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed gc_reserve_roles
-		;;
-	esac
+	fi
+	if reason_present "$warning_reasons" swap_capacity_low; then
+		log_observer_diagnostic swap_capacity below_ninety_percent_occupancy high_occupancy read_swap_inventory "$swap_inventory_command_status" inspect_proc_swaps_read_only none observed swap_occupancy
+	fi
+
+	if reason_present "$observation_reasons" mapper_table_unavailable && [ "$mapper_table_command_status" -eq 0 ]; then
+		log_observer_diagnostic mapper_table single_bound_table missing_output dmsetup_table 0 inspect_dmsetup_table_read_only none observed mapper_table_observation
+	fi
+	if reason_present "$observation_reasons" mapper_status_not_single_target; then
+		log_observer_diagnostic mapper_status single_complete_status multiline_or_multiple_targets dmsetup_status 0 inspect_dmsetup_status_read_only none observed mapper_status_shape
+	fi
+	if reason_present "$observation_reasons" mapper_status_invalid; then
+		log_observer_diagnostic mapper_status canonical_status_geometry invalid_status_contract dmsetup_status 0 inspect_dmsetup_status_read_only none observed mapper_status_contract
+	fi
+	if reason_present "$observation_reasons" mapper_status_unavailable && [ "$mapper_status_command_status" -eq 0 ]; then
+		log_observer_diagnostic mapper_status single_complete_status missing_output dmsetup_status 0 inspect_dmsetup_status_read_only none observed mapper_status_observation
+	fi
+	if reason_present "$observation_reasons" dm_status_counter_unavailable; then
+		log_observer_diagnostic target_counters complete_error_counter_set incomplete_counter_set dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed target_error_counters
+	fi
+	if reason_present "$observation_reasons" dm_status_counter_invalid; then
+		log_observer_diagnostic target_counters canonical_unsigned_error_counters invalid_counter_value dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed target_error_counters
+	fi
+	if reason_present "$observation_reasons" gc_progress_telemetry_unavailable; then
+		log_observer_diagnostic gc_progress complete_progress_counters incomplete_or_invalid_progress_counters dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed gc_progress_counters
+	fi
+	if reason_present "$observation_reasons" target_failure_state_unavailable; then
+		log_observer_diagnostic target_terminal complete_failed_and_error_state incomplete_terminal_state dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed target_terminal_state
+	fi
+	if reason_present "$observation_reasons" target_failure_state_invalid; then
+		log_observer_diagnostic target_terminal canonical_failed_and_error_state invalid_terminal_state dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed target_terminal_state
+	fi
+	if reason_present "$observation_reasons" gc_reserve_telemetry_unavailable; then
+		log_observer_diagnostic gc_reserve complete_reserve_role_counters incomplete_or_invalid_reserve_counters dmsetup_status "$mapper_status_command_status" inspect_dmsetup_status_read_only none observed gc_reserve_roles
+	fi
+	if reason_present "$observation_reasons" swap_accounting_invalid; then
+		log_observer_diagnostic swap_inventory canonical_size_and_used_accounting invalid_swap_accounting read_swap_inventory "$swap_inventory_command_status" inspect_proc_swaps_read_only none observed swap_accounting
+	fi
+	if reason_present "$observation_reasons" mapper_service_state_unavailable; then
+		case "$mapper_active_category:$mapper_active" in
+		invalid_output:*) mapper_active_observed=invalid_output ;;
+		probe_failed:*) mapper_active_observed=probe_failed ;;
+		value:unavailable) mapper_active_observed=literal_unavailable ;;
+		*) mapper_active_observed=unavailable ;;
+		esac
+		log_observer_diagnostic mapper_service_state active_service "$mapper_active_observed" systemctl_show "$mapper_active_command_status" inspect_systemctl_show_read_only none inferred mapper_active_state
+	fi
+	if reason_present "$observation_reasons" passive_swap_unit_state_unavailable; then
+		case "$swap_unit_active_category:$swap_unit_active" in
+		invalid_output:*) swap_unit_active_observed=invalid_output ;;
+		probe_failed:*) swap_unit_active_observed=probe_failed ;;
+		value:unavailable) swap_unit_active_observed=literal_unavailable ;;
+		*) swap_unit_active_observed=unavailable ;;
+		esac
+		log_observer_diagnostic passive_swap_unit_state active_swap_unit "$swap_unit_active_observed" systemctl_show "$swap_unit_active_command_status" inspect_systemctl_show_read_only none inferred passive_swap_active_state
+	fi
+	if reason_present "$observation_reasons" mapper_service_result_unavailable; then
+		case "$mapper_result_category:$mapper_result" in
+		invalid_output:*) mapper_result_observed=invalid_output ;;
+		probe_failed:*) mapper_result_observed=probe_failed ;;
+		value:unavailable) mapper_result_observed=literal_unavailable ;;
+		*) mapper_result_observed=unavailable ;;
+		esac
+		log_observer_diagnostic mapper_service_result success_result "$mapper_result_observed" systemctl_show "$mapper_result_command_status" inspect_systemctl_show_read_only none inferred mapper_result
+	fi
+	if reason_present "$observation_reasons" passive_swap_unit_result_unavailable; then
+		case "$swap_unit_result_category:$swap_unit_result" in
+		invalid_output:*) swap_unit_result_observed=invalid_output ;;
+		probe_failed:*) swap_unit_result_observed=probe_failed ;;
+		value:unavailable) swap_unit_result_observed=literal_unavailable ;;
+		*) swap_unit_result_observed=unavailable ;;
+		esac
+		log_observer_diagnostic passive_swap_unit_result success_result "$swap_unit_result_observed" systemctl_show "$swap_unit_result_command_status" inspect_systemctl_show_read_only none inferred passive_swap_result
+	fi
+	if reason_present "$observation_reasons" kernel_log_unavailable; then
+		log_observer_diagnostic kernel_log bounded_recent_kernel_errors probe_failed journalctl 1 inspect_kernel_journal_read_only none inferred kernel_log_observation
+	fi
 }
 
 log_runtime_state()
@@ -1453,7 +1564,7 @@ monitor_loop()
 		else
 			capacity_bucket=normal
 		fi
-		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$passive_enablement\|$passive_enablement_command_status\|$mapper_sub\|$mapper_sub_category\|$swap_unit_sub\|$swap_unit_sub_category\|$mapper_sub_command_status\|$swap_unit_sub_command_status\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_info_observation_state\|$mapper_table_command_status\|$mapper_status_command_status
+		signature=$health_state\|$failure_reasons\|$warning_reasons\|$observation_reasons\|$passive_enablement\|$passive_enablement_command_status\|$mapper_sub\|$mapper_sub_category\|$swap_unit_sub\|$swap_unit_sub_category\|$mapper_sub_command_status\|$swap_unit_sub_command_status\|$selected_major_minor\|$dm_uuid\|$capacity_bucket\|$failed\|$first_error\|$flush_err\|$upper_write_completed_err\|$endio_write_seen_err\|$segment_discards_failed\|$gc_reserve_segments_initial\|$gc_reserve_segments_current\|$gc_destination_advances\|$mapper_active\|$mapper_result\|$swap_unit_active\|$swap_unit_result\|$kernel_error_count\|$swap_inventory_state\|$swap_inventory_command_status\|$swap_inventory_consistency_state\|$swap_inventory_recheck_command_status\|$mapper_info_command_status\|$mapper_info_observation_state\|$mapper_table_command_status\|$mapper_status_command_status\|$mapper_active_category\|$mapper_active_command_status\|$mapper_result_category\|$mapper_result_command_status\|$swap_unit_active_category\|$swap_unit_active_command_status\|$swap_unit_result_category\|$swap_unit_result_command_status
 		if [ "$signature" != "$previous_signature" ]; then
 			log_runtime_state
 			previous_signature=$signature

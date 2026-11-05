@@ -49,6 +49,8 @@ jobs:
         run: python3 -B tests/runtime/native/package-dkms-test.py -v
       - name: Rootless systemd runtime-health readiness
         run: python3 -B tests/runtime/native/systemd/swapz-primary-systemd-test.py -v
+      - name: Rootless runtime-health diagnostic attribution
+        run: python3 -B tests/runtime/native/systemd/swapz-primary-runtime-health-diagnostics-test.py -v
       - name: Verify patch hygiene
         shell: bash
         run: |

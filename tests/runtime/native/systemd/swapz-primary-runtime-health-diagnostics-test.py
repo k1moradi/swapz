@@ -133,6 +133,129 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         self.assertIn("phase=kernel_log", result.stderr)
         self.assertIn("retained_state=unchanged", result.stderr)
 
+    def test_invalid_mapper_table_contract_is_attributed(self) -> None:
+        dmsetup_mock = self.fixture.bin / "dmsetup"
+        original_mock = dmsetup_mock.read_text(encoding="utf-8")
+        valid_table = "0 216641536 swapz 8:1 0 64 0 2 0 1 0 0"
+        self.assertIn(valid_table, original_mock)
+        dmsetup_mock.write_text(
+            original_mock.replace(valid_table, valid_table[:-1] + "1"),
+            encoding="utf-8",
+        )
+        result = self.fixture.run_helper("once")
+        self.assert_diagnostic(result, 1, "FAIL", "mapper_table_invalid",
+                               "mapper_table", "mapper_table_contract",
+                               "inspect_dmsetup_table_read_only")
+
+    def test_mapper_backing_identity_mismatch_is_attributed(self) -> None:
+        dmsetup_mock = self.fixture.bin / "dmsetup"
+        original_mock = dmsetup_mock.read_text(encoding="utf-8")
+        valid_table = "0 216641536 swapz 8:1 0 64 0 2 0 1 0 0"
+        self.assertIn(valid_table, original_mock)
+        dmsetup_mock.write_text(
+            original_mock.replace(valid_table, valid_table.replace("8:1", "8:2")),
+            encoding="utf-8",
+        )
+        result = self.fixture.run_helper("once")
+        self.assert_diagnostic(result, 1, "FAIL", "mapper_backing_identity_mismatch",
+                               "mapper_backing", "mapper_backing_identity",
+                               "inspect_dmsetup_table_and_selected_identity_read_only")
+
+    def test_gc_reserve_exhaustion_is_attributed(self) -> None:
+        env = self.fixture.env.copy()
+        env["MOCK_DM_STATUS"] = (
+            "0 216641536 swapz failed=0 error=0 flush_err=0 "
+            "segment_discards_failed=0 upper_write_completed_err=0 "
+            "endio_write_seen_err=0 endio_write_forced_err=0 "
+            "gc_victims=5 gc_pages=20 gc_no_headroom_skips=0 "
+            "gc_reserve_segments_initial=2 gc_reserve_segments_current=0 "
+            "gc_destination_advances=1 window_gc_pressure=1"
+        )
+        result = self.fixture.run_helper("once", env)
+        self.assert_diagnostic(result, 1, "FAIL", "gc_reserve_exhausted",
+                               "gc_reserve", "gc_reserve_roles",
+                               "inspect_dmsetup_status_read_only")
+
+    def test_missing_primary_swap_row_is_attributed(self) -> None:
+        (self.fixture.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n", encoding="ascii"
+        )
+        result = self.fixture.run_helper("once")
+        self.assert_diagnostic(result, 1, "FAIL", "mapper_swap_inventory_invalid",
+                               "swap_inventory", "primary_mapper_count",
+                               "inspect_proc_swaps_and_sysfs_read_only")
+
+    def test_systemctl_probe_status_survives_degraded_observation(self) -> None:
+        systemctl_mock = self.fixture.bin / "systemctl"
+        original_mock = systemctl_mock.read_text(encoding="utf-8")
+        active_state_line = 'ActiveState) echo "\${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;'
+        self.assertIn(active_state_line, original_mock)
+        systemctl_mock.write_text(
+            original_mock.replace(
+                active_state_line,
+                'ActiveState)\n'
+                '    [ "\${MOCK_ACTIVE_STATE_EXIT:-0}" = 0 ] || '
+                'exit "$MOCK_ACTIVE_STATE_EXIT"\n'
+                '    echo "\${MOCK_SYSTEMD_ACTIVE_STATE:-active}" ;;',
+            ),
+            encoding="utf-8",
+        )
+        env = self.fixture.env.copy()
+        env["MOCK_ACTIVE_STATE_EXIT"] = "7"
+        result = self.fixture.run_helper("once", env)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=DEGRADED", result.stderr)
+        self.assertIn("mapper_service_state_unavailable", result.stderr)
+        self.assertIn(
+            "phase=mapper_service_state expected=active_service "
+            "observed=probe_failed command=systemctl_show command_status=7",
+            result.stderr,
+        )
+        self.assertIn("retained_state=unchanged", result.stderr)
+        self.assertNotIn("dmsetup remove", result.stderr)
+        self.assertNotIn("swapoff", result.stderr)
+
+    def test_swap_capacity_warning_has_read_only_inspection(self) -> None:
+        primary_path = self.fixture.dev / "mapper" / "swapz-primary"
+        (self.fixture.proc / "swaps").write_text(
+            "Filename Type Size Used Priority\n"
+            f"{primary_path} partition 108320764 100000000 -1\n",
+            encoding="ascii",
+        )
+        result = self.fixture.run_helper("once")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=WARN", result.stderr)
+        self.assertIn("swap_capacity_low", result.stderr)
+        self.assertIn(
+            "phase=swap_capacity expected=below_ninety_percent_occupancy "
+            "observed=high_occupancy",
+            result.stderr,
+        )
+        self.assertIn("next=inspect_proc_swaps_read_only", result.stderr)
+        self.assertIn("retained_state=unchanged", result.stderr)
+
+    def test_sustained_gc_stall_has_structured_stop_inspection(self) -> None:
+        env = self.fixture.env.copy()
+        env["MOCK_DM_STALL_COUNTER_FILE"] = str(self.fixture.root / "gc-stall-counter")
+        env["SWAPZ_PRIMARY_TEST_MAX_POLLS"] = "4"
+        env["SWAPZ_PRIMARY_TEST_STALL_POLLS"] = "3"
+        result = self.fixture.run_helper("monitor", env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SWAPZ_RUNTIME_HEALTH=FAIL", result.stderr)
+        self.assertIn("failures=sustained_gc_stall", result.stderr)
+        self.assertIn(
+            "phase=gc_progress expected=pressure_has_forward_progress "
+            "observed=sustained_stall",
+            result.stderr,
+        )
+        self.assertIn("check=gc_stall_progress retained_state=unchanged", result.stderr)
+        self.assertIn(
+            "next=inspect_dmsetup_status_and_normal_primary_stop_read_only",
+            result.stderr,
+        )
+        self.assertNotIn("dmsetup remove", result.stderr)
+        self.assertNotIn("swapoff", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
