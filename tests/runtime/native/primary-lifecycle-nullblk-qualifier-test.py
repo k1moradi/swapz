@@ -4,7 +4,8 @@
 Finalizer safety standard: retain creation and power-inode identity, refuse
 same-name replacement and unobservable/foreign state before recovery, bind
 the destructive power write to the pinned original inode without creation,
-preserve the first error, and redact private cleanup diagnostics.
+keep partial-setup cleanup nounset-safe, preserve the first error, and redact
+private cleanup diagnostics.
 """
 
 from pathlib import Path
@@ -568,6 +569,126 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         self.assertNotRegex(self.script, r"(?m)^\s*git\s")
         self.assertNotIn("$(git ", self.script)
 
+
+
+    def test_partial_owned_setup_cleanup_is_nounset_safe(self):
+        initialization = self.script[
+            self.script.index("OWN_NULL=0"):
+            self.script.index('[[ ! -e "$TEST_BASE"', self.script.index("OWN_NULL=0"))]
+        for variable in (
+                "INDEX", "DEVNO", "NULL_MAJOR", "LOWER_NODE_DEVNO",
+                "PART_NAME", "PARTITION_NODE_DEVNO"):
+            with self.subTest(variable=variable):
+                self.assertRegex(initialization, rf"(?m)^{variable}=$")
+
+        def shell_function(name):
+            begin = self.script.index(name + "() {")
+            end = self.script.index("\n}", begin) + 2
+            return self.script[begin:end]
+
+        helpers = "\n".join(shell_function(name) for name in (
+            "owned_nullblk_config_identity_unchanged",
+            "owned_nullblk_live_identity_unchanged",
+        ))
+        cleanup = shell_function("cleanup")
+
+        with TemporaryDirectory(
+                prefix="swapz-primary-partial-cleanup-") as directory:
+            fixture = Path(directory)
+            configfs = fixture / "configfs"
+            configfs.mkdir()
+            name = "nullb-swapz-" + "f" * 16
+            config = configfs / name
+            config.mkdir()
+            for attribute, value in (
+                    ("index", "7\n"),
+                    ("memory_backed", "1\n"),
+                    ("size", "256\n"),
+                    ("blocksize", "4096\n"),
+                    ("power", "1\n")):
+                (config / attribute).write_text(value, encoding="ascii")
+            config_identity = config.stat()
+            power_identity = (config / "power").stat()
+            action_log = fixture / "actions"
+
+            fixture_cleanup = cleanup.replace(
+                "/sys/module/dm_swapz", str(fixture / "absent-module"))
+            settings = {
+                "CONFIGFS": configfs,
+                "CONFIGNAME": name,
+                "CONFIG": config,
+                "CONFIG_IDENTITY": (
+                    f"{config_identity.st_dev}:"
+                    f"{config_identity.st_ino}:"
+                    f"{config_identity.st_uid}"
+                ),
+                "CONFIG_POWER_IDENTITY": (
+                    f"{power_identity.st_dev}:"
+                    f"{power_identity.st_ino}:"
+                    f"{power_identity.st_uid}"
+                ),
+                "NULLBLK_SIZE_MIB": "256",
+                "INDEX": "",
+                "DISK": "",
+                "DEVNO": "",
+                "NULL_MAJOR": "",
+                "LOWER": "",
+                "LOWER_NODE_DEVNO": "",
+                "PART_SYSFS": "",
+                "PART_NAME": "",
+                "PARTITION": "",
+                "PARTUUID": "",
+                "PART_DEVNO": "",
+                "PARTITION_NODE_DEVNO": "",
+                "DMNAME": "swapz-primary",
+                "RUN_ID": "",
+                "RECOVERY_BASE": fixture / "missing-recovery",
+                "CONTROL": fixture / "missing-control",
+                "SWAPS_ID_BEFORE": "unchanged",
+                "OWN_NULL": "1",
+                "QUARANTINE": "0",
+                "UDEV_RULE_CREATED": "0",
+                "UDEV_RULES_DIR_CREATED": "0",
+                "TEST_BASE_CREATED": "0",
+                "TEST_BASE": fixture / "private-evidence",
+                "BY_PARTUUID": "",
+                "ACTION_LOG": action_log,
+            }
+            setup = "\n".join(
+                f"{key}={shlex.quote(str(value))}"
+                for key, value in settings.items())
+            fake_commands = r'''
+note() { printf '%s\n' "$*"; }
+mapper_absence_proven() { return 0; }
+swapz_swap_inventory_identity() { printf 'unchanged\n'; }
+rmdir() {
+    printf 'rmdir\n' >> "$ACTION_LOG"
+    command rmdir "$@"
+}
+'''
+            program = (
+                "set -u\n" + setup + "\n" + fake_commands + helpers +
+                "\n" + fixture_cleanup +
+                "\ntrap cleanup EXIT\nexit 73\n")
+            result = subprocess.run(
+                ["bash", "-c", program], cwd=ROOT,
+                capture_output=True, text=True, timeout=10, check=False)
+
+            self.assertEqual(result.returncode, 73,
+                             result.stdout + result.stderr)
+            self.assertNotIn("unbound variable", result.stderr)
+            self.assertEqual(
+                (config / "power").read_text(encoding="ascii"), "1\n")
+            self.assertTrue(config.is_dir())
+            self.assertFalse(action_log.exists())
+            self.assertIn(
+                "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE="
+                "config_or_mapper_identity_uncertain", result.stdout)
+            self.assertIn(
+                "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private",
+                result.stdout)
+            self.assertNotIn(name, result.stdout + result.stderr)
+            self.assertNotIn(str(fixture), result.stdout + result.stderr)
 
     def test_finalizer_revalidates_identity_before_every_mutation(self):
         cleanup = self.script[
