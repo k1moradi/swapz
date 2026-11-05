@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 ROOTLESS_RUNNER = ROOT / "tests/tools/test-rootless.sh"
@@ -183,6 +184,21 @@ case "$SWAPZ_RELAY_SCENARIO" in
       head -c 307200 /dev/zero | tr '\0' 'z' >&2
       printf '\n' >&2
     fi
+    exit 2 ;;
+  native_assertion)
+    printf '%s\n' \
+      'FAIL: test_expected (__main__.PreviouslyPassing.test_expected)' \
+      'mapping-authority: Assertion failed: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+      'make[1]: *** [Makefile:154: test-mapping] Error 134' \
+      'make[1]: *** [Makefile:160: test-userspace] Error 1' >&2
+    exit 2 ;;
+  malformed_python)
+    printf '%s\n' \
+      'Traceback (most recent call last):' \
+      'TypeError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+      'make[1]: *** [Makefile:160: test-userspace] Error 1' >&2
+    exit 2 ;;
+  silent_nonzero)
     exit 2 ;;
   first_make_failure)
     printf '%s\n' \
@@ -360,14 +376,16 @@ class RootlessAttribution(unittest.TestCase):
     def test_make_does_not_inherit_earlier_expected_fail(self):
         result = self.invoke("unrelated", stage=MAKE_PHASE)
         log = self.assert_report(
-            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+            result, status=2, reason="nonzero_exit", subtest="test-mapping",
+            stage=MAKE_PHASE)
         self.assertIn("FAIL: test_expected", log.read_text())
         self.assertNotIn("AFTER_PACKAGE", result.stdout)
 
     def test_make_first_failed_target_precedes_later_compile(self):
         result = self.invoke("first_make_failure", stage=MAKE_PHASE)
         log = self.assert_report(
-            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+            result, status=2, reason="nonzero_exit", subtest="test-mapping",
+            stage=MAKE_PHASE)
         evidence = log.read_text()
         self.assertLess(evidence.index("test-mapping"),
                         evidence.index("swapz-primary-late-race-test.py"))
@@ -375,6 +393,35 @@ class RootlessAttribution(unittest.TestCase):
                       if line.startswith("FAIL: rootless "))
         self.assertIn("test=unavailable", marker)
         self.assertNotIn(LATE_RACE_TEST, marker)
+
+
+    def test_make_native_assertion_identifies_first_target_not_later_cleanup(self):
+        result = self.invoke("native_assertion", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", subtest="test-mapping",
+            stage=MAKE_PHASE)
+        self.assertIn("Assertion failed: " + PRIVATE_SENTINEL, log.read_text())
+        marker = next(line for line in result.stderr.splitlines()
+                      if line.startswith("FAIL: rootless "))
+        self.assertIn("test=unavailable", marker)
+        self.assertNotIn("test-userspace", marker)
+        self.assertNotIn("test_expected", marker)
+        self.assertNotIn(PRIVATE_SENTINEL, marker)
+
+    def test_make_malformed_python_evidence_retains_nested_target(self):
+        result = self.invoke("malformed_python", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", subtest="test-userspace",
+            stage=MAKE_PHASE)
+        self.assertIn("TypeError: " + PRIVATE_SENTINEL, log.read_text())
+        self.assertIn("unittest_kind=unavailable", log.read_text())
+
+    def test_make_silent_nonzero_does_not_invent_a_cause(self):
+        result = self.invoke("silent_nonzero", stage=MAKE_PHASE)
+        log = self.assert_report(
+            result, status=2, reason="nonzero_exit", stage=MAKE_PHASE)
+        self.assertNotIn("Traceback (most recent call last):", log.read_text())
+        self.assertIn("test=unavailable", log.read_text())
 
     def test_make_oversized_stderr_retains_first_compiler_error(self):
         result = self.invoke("oversized", stage=MAKE_PHASE)
@@ -580,6 +627,67 @@ exec "$SWAPZ_REAL_RM" "$@"
         evidence = log.read_text()
         self.assertIn("AssertionError: " + PRIVATE_SENTINEL, evidence)
         self.assertIn("unittest_kind=FAIL\n", evidence)
+
+
+    def test_direct_rootless_zero_tail_budget_and_duplicate_capture(self):
+        reporter_spec = importlib.util.spec_from_file_location(
+            "swapz_direct_failure_budget_reporter", ROOT / "tests/tools/run-tests.py")
+        reporter = importlib.util.module_from_spec(reporter_spec)
+        reporter_spec.loader.exec_module(reporter)
+        capture_directory = self.root / "build/tests/rootless-failure.Abc123xy"
+        capture_directory.mkdir(parents=True, mode=0o700)
+        private_log = capture_directory / "diagnostic.log"
+        first_label = (
+            b"\n--- first matched tmp-cleanup unittest failure "
+            b"(private; not a public test identity) ---\n")
+        tail_label = (
+            b"\n--- official stage merged stdout/stderr tail "
+            b"(context only) ---\n")
+        initial_bytes = b"\n--- swapz rootless attribution ---\n"
+        initial_bytes += b"x" * (
+            262144 - len(first_label) - len(tail_label) - 1 -
+            len(initial_bytes))
+        private_log.write_bytes(initial_bytes)
+        private_log.chmod(0o600)
+        marker = (
+            "FAIL: rootless phase=tmp-cleanup-test.py "
+            "subtest=unavailable test=unavailable exit=37 "
+            "reason=nonzero_exit phase_s=1 stage_s=2 line=9 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        transcript = (
+            "test_first (__main__.OwnedTemporaryCleanupTests.test_first) ... FAIL\n"
+            "FAIL: test_first (__main__.OwnedTemporaryCleanupTests.test_first)\n"
+            "Traceback (most recent call last):\n"
+            "AssertionError: " + PRIVATE_SENTINEL + "\n"
+            + "=" * 70 + "\n" + marker)
+        with mock.patch.object(reporter, "ROOT", self.root):
+            reporter.retain_direct_rootless_first_failure(transcript, 37)
+            evidence = private_log.read_bytes()
+            self.assertEqual(len(evidence), 262144)
+            # With one byte for the first block, no tail bytes remain.
+            # A [-0:] slice would accidentally duplicate the transcript.
+            self.assertEqual(evidence[len(initial_bytes):],
+                             first_label + b"\n" + tail_label)
+            self.assertNotIn(PRIVATE_SENTINEL.encode(), evidence)
+
+            # A pre-captured log must never get a second stderr transcript.
+            private_log.write_bytes(b"PRECAPTURED_STDERR\n")
+            reporter.retain_direct_rootless_first_failure(transcript, 37)
+            self.assertEqual(private_log.read_bytes(), b"PRECAPTURED_STDERR\n")
+
+            # Without a matching block, do not invent a first traceback.
+            private_log.write_bytes(b"\n--- swapz rootless attribution ---\n")
+            missing = transcript.replace(
+                "FAIL: test_first (__main__.OwnedTemporaryCleanupTests.test_first)\n"
+                "Traceback (most recent call last):\n"
+                "AssertionError: " + PRIVATE_SENTINEL + "\n",
+                "ERROR: test_cleanup (__main__.UnrelatedTest.test_cleanup)\n"
+                "TypeError: " + LATER_TEARDOWN_SENTINEL + "\n")
+            reporter.retain_direct_rootless_first_failure(missing, 37)
+            evidence = private_log.read_text()
+            self.assertIn("no authenticated direct unittest traceback", evidence)
+            self.assertNotIn("first matched direct rootless unittest failure",
+                             evidence)
 
     def test_official_native_stage_reports_make_fixture_compile_safely(self):
         reporter_spec = importlib.util.spec_from_file_location(

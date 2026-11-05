@@ -70,6 +70,34 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertIn("phase=package-dkms-test.py", failure["first_error"])
         self.assertNotEqual(failure["status"], "PASS")
 
+
+    def test_nested_make_target_preserves_exit_and_hides_private_evidence(self):
+        marker = (
+            "FAIL: rootless phase=Makefile native and metadata "
+            "subtest=test-mapping test=unavailable exit=2 reason=nonzero_exit "
+            "phase_s=1 stage_s=2 line=476 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        failure = self.diagnose(
+            "FAIL: test_expected (__main__.EarlierPassingCase)\n"
+            "AssertionError: unrelated expected negative fixture\n"
+            "mapping-authority: Assertion failed: PRIVATE_RESOURCE_IDENTIFIER\n"
+            "make[1]: *** [Makefile:154: test-mapping] Error 1\n"
+            "make[1]: *** [Makefile:160: test-userspace] Error 1\n"
+            + marker, 1)
+        self.assertEqual(failure["status"], "FAIL")
+        self.assertEqual(failure["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(failure["phase"], "Makefile native and metadata")
+        self.assertEqual(failure["test"],
+                         "Makefile native and metadata[test-mapping]")
+        self.assertEqual(failure["exit_code"], 1)
+        self.assertEqual(failure["child_exit_code"], 2)
+        self.assertEqual(failure["rootless_reason"], "nonzero_exit")
+        self.assertIn("build/tests/rootless-failure.Abc123xy/diagnostic.log",
+                      failure["first_error"])
+        self.assertNotIn("PRIVATE_RESOURCE_IDENTIFIER", json.dumps(failure))
+        self.assertNotIn("EarlierPassingCase", json.dumps(failure))
+        self.assertNotIn("test-userspace", json.dumps(failure))
+
     def test_timeout_signal_and_shell_exit_remain_distinct(self):
         timeout = self.diagnose("", 124)
         self.assertEqual(timeout["category"], "INFRASTRUCTURE")

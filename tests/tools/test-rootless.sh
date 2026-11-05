@@ -204,6 +204,8 @@ classify_rootless_private_make_failure() {
   local traceback_line_regex='^[[:space:]]*File "([^"]*/)?swapz-primary-late-race-test[.]py", line [0-9]+, in (compile_and_run|main|<module>)$'
   local make_error_regex='^make(\[[0-9]+\])?: \*\*\* \[[^]]+\] Error [0-9]+$'
   local make_target_error_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:[0-9]+: test-userspace\] Error [0-9]+$'
+  # Identify only source-controlled nested Make targets, never a guessed executable.
+  local make_nested_target_regex='^make(\[[0-9]+\])?: \*\*\* \[Makefile:[0-9]+: (test-(codec|predictor|mapping|gc|lower-io|userspace|replay-helper|anon-page-analyzer))\] Error [0-9]+$'
   local traceback_seen=0
   local compile_assertion_seen=0
   local compiler_error_seen=0
@@ -225,6 +227,9 @@ classify_rootless_private_make_failure() {
     elif (( compile_assertion_seen )) && [[ $line == *': error:'* ]]; then
       compiler_error_seen=1
     elif [[ $line =~ $make_error_regex ]]; then
+      if [[ $line =~ $make_nested_target_regex ]]; then
+        rootless_classified_subtest=${BASH_REMATCH[2]}
+      fi
       if [[ $line =~ $make_target_error_regex ]] &&
          (( traceback_seen && compile_assertion_seen && compiler_error_seen )); then
         # The declaration and arbitrary source paths remain private. The exact
@@ -483,7 +488,8 @@ if (( rootless_make_exit_code != 0 )); then
   if [[ -z $rootless_capture_failure_reason ]]; then
     classify_rootless_private_make_failure "$rootless_private_diagnostic_path"
   fi
-  if [[ $rootless_classified_test != unavailable ]]; then
+  if [[ $rootless_classified_test != unavailable ||
+        $rootless_classified_subtest != unavailable ]]; then
     report_rootless_failure "$rootless_make_exit_code" "$rootless_make_command_line" \
       "$rootless_classified_reason" "$rootless_classified_subtest" \
       "$rootless_classified_test" "$rootless_classified_kind"

@@ -1083,7 +1083,11 @@ only in the private diagnostic. Oversized captures must retain a bounded
 late-race traceback excerpt plus the first compiler `error:` line even when
 more than the normal transcript tail follows from other parallel jobs.
 A prior passing suite's expected `FAIL:` text cannot authenticate a later
-failing suite. Incomplete relays or absent matching evidence retain
+failing suite. A generic nested Make failure may disclose only the first
+source-controlled `tests/suites/Makefile` target from its own `make: ***` error
+as a `subtest` (for example, `test-mapping`). This is a target-level phase hint,
+not proof of an individual executable, Python traceback, or native assertion
+category; a silent or unrecognized failure keeps `subtest=unavailable`. Incomplete relays or absent matching evidence retain
 `test=unavailable reason=nonzero_exit`. Python `unittest` preserves execution order in verbose `... FAIL`/`... ERROR`
 progress records but groups detailed `ERROR:` blocks ahead of `FAIL:` blocks in
 its summary. Classification must therefore bind the first failed progress record
