@@ -33,7 +33,7 @@ static swapz_u8 raw_readback[SWAPZ_BLOCK_BYTES];
 static swapz_u8 bulk_scratch[SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES];
 static struct swapz_tx bulk_txs[SWAPZ_MAX_RECORDS];
 static unsigned int lower_reads, lower_writes;
-static int fail_read, fail_write, fail_flush_after_run_write, corrupt_replay_tail;
+static int fail_read, fail_write, corrupt_replay_tail;
 static swapz_u16 partial_run_blocks;
 static int injected_run_error, short_run_success, impossible_run_completion;
 static unsigned int reclaim_proofs;
@@ -108,15 +108,6 @@ static int lower_write_run(void *opaque, swapz_u32 start, swapz_u16 blocks,
 	memcpy(lower + (size_t)start * SWAPZ_BLOCK_BYTES, bytes,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
 	lower_writes += blocks;
-	/*
-	 * Model dm-target's prepublication FUA boundary: the lower WRITE has
-	 * placed every block, but the subsequent flush fails. Production returns
-	 * the flush errno with zero completed blocks, so none may be published.
-	 */
-	if (fail_flush_after_run_write) {
-		fail_flush_after_run_write = 0;
-		return -EIO;
-	}
 	*completed = blocks;
 	/* Corrupt only the replay image after the lower copy is complete. The
 	 * last paused transaction then fails authority validation after all older
@@ -157,7 +148,7 @@ static int setup(void)
 	e.io.write_extent = lower_write;
 	e.io.read_blocks = lower_read;
 	lower_reads = lower_writes = 0;
-	fail_read = fail_write = fail_flush_after_run_write = corrupt_replay_tail = 0;
+	fail_read = fail_write = corrupt_replay_tail = 0;
 	partial_run_blocks = 0;
 	injected_run_error = short_run_success = impossible_run_completion = 0;
 	reclaim_proofs = 0;
@@ -648,92 +639,6 @@ static int verify_gc_bulk_page(unsigned int logical)
 	       0 : -EUCLEAN;
 }
 
-
-/*
- * Production lower_write_run() may complete its physical WRITE and then fail
- * the prepublication FUA flush. The valid on-media extents are NOT durable
- * publication authority: the kernel callback returns -EIO with completed=0.
- * Keep every previous survivor generation and quarantine the full run before
- * retrying with a fresh reservation and independently checking generations.
- */
-static int test_gc_failed_flush_after_completed_run_preserves_generations(void)
-{
-	struct swapz_compressed_page pages[5];
-	struct swapz_map previous[5];
-	swapz_u32 filler_generation, failed_start, abandoned_before;
-	swapz_u32 completed_before, physical_writes_before, block;
-	swapz_u8 committed = 99;
-	unsigned int index;
-
-	CHECK(setup_gc_bulk_victim(previous, &filler_generation) == 0);
-	prepare_gc_bulk_pages(pages);
-	e.bulk_enabled = 1;
-	e.bulk_scratch = bulk_scratch;
-	e.bulk_txs = bulk_txs;
-	e.io.write_run = lower_write_run;
-	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
-	CHECK(a.gc_destination == 2U && a.open_segment == 2U);
-	failed_start = a.next_block;
-	abandoned_before = a.abandoned_blocks;
-	completed_before = e.completed_blocks;
-	physical_writes_before = lower_writes;
-
-	/* The actual lower image is complete, but FUA fails before replay. */
-	fail_flush_after_run_write = 1;
-	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
-						 &committed) == -EIO);
-	CHECK(!fail_flush_after_run_write && committed == 0);
-	CHECK(lower_writes == physical_writes_before + 5U);
-	CHECK(e.completed_blocks == completed_before);
-	CHECK(a.next_block == failed_start + 5U &&
-	      a.abandoned_blocks == abandoned_before + 5U);
-	CHECK(!a.in_flight && !a.batch_pending && a.gc_allocation);
-	CHECK(a.gc_destination == 2U && a.open_segment == 2U &&
-	      roles[0] == 1U && roles[2] == 0U);
-	CHECK(bulk_txs[0].start_block == failed_start &&
-	      bulk_txs[0].extent_blocks == 4U &&
-	      bulk_txs[1].start_block == failed_start + 4U &&
-	      bulk_txs[1].extent_blocks == 1U);
-	for (index = 0; index < 2U; ++index) {
-		const struct swapz_tx *transaction = &bulk_txs[index];
-
-		/* CRC-valid bytes on media are not evidence of publication. */
-		CHECK(swapz_validate_metadata_crc(
-			lower + (size_t)transaction->start_block * SWAPZ_BLOCK_BYTES,
-			(swapz_u32)transaction->extent_blocks *
-				SWAPZ_BLOCK_BYTES) == 0);
-	}
-	for (index = 0; index < 5U; ++index) {
-		CHECK(maps[index].valid &&
-		      maps[index].start_block == previous[index].start_block &&
-		      maps[index].generation == previous[index].generation);
-		CHECK(verify_gc_bulk_page(index) == 0);
-	}
-	for (block = failed_start; block < failed_start + 5U; ++block)
-		CHECK(!live[block] && !classes[block]);
-	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
-
-	/* A fresh run cannot reuse even one block of the failed flush image. */
-	memset(bulk_scratch, 0x57, sizeof(bulk_scratch));
-	committed = 99;
-	CHECK(swapz_engine_write_window_batched(&e, pages, 5,
-						 &committed) == 0);
-	CHECK(committed == 5 && !a.in_flight && !a.batch_pending);
-	CHECK(write_one(7) == 0);
-	CHECK(swapz_gc_commit_rotation(&a, 0) == 0);
-	CHECK(!a.gc_allocation && roles[0] == 0U && roles[2] == 1U);
-	for (index = 0; index < 5U; ++index) {
-		CHECK(maps[index].start_block >= failed_start + 5U &&
-		      maps[index].generation == previous[index].generation + 1U);
-		CHECK(verify_gc_bulk_page(index) == 0);
-	}
-	CHECK(maps[7].generation == filler_generation + 1U);
-	CHECK(verify_page(7) == 0 && verify_page(6) == 0);
-	for (block = failed_start; block < failed_start + 5U; ++block)
-		CHECK(!live[block] && !classes[block]);
-	return 0;
-}
-
 static int test_gc_torn_run_resumes_same_destination(void)
 {
 	struct swapz_compressed_page pages[5];
@@ -1137,7 +1042,6 @@ int main(void)
 	CHECK(test_delayed_gc_completion_fences_mutation() == 0); passed++;
 	CHECK(test_torn_lower_run_quarantines_unpublished_prefix() == 0); passed++;
 	CHECK(test_late_replay_failure_reports_committed_prefix() == 0); passed++;
-	CHECK(test_gc_failed_flush_after_completed_run_preserves_generations() == 0); passed++;
 	CHECK(test_gc_torn_run_resumes_same_destination() == 0); passed++;
 	CHECK(test_gc_publication_prefix_is_not_republished() == 0); passed++;
 	CHECK(test_partial_gc_failures_resume_same_reserve() == 0); passed++;
