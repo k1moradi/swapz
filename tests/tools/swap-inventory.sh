@@ -53,13 +53,13 @@ swapz_swap_inventory_identity() {
             inventory_bytes += length($0) + 1
             if (inventory_bytes > 16777216)
                 reject("inventory", "at-most-16MiB", "oversized-inventory")
-            if (length($0) >= 8192)
+            # length($0) excludes the mandatory newline byte.
+            if (length($0) >= 8191)
                 reject("record", "shorter-than-8192-bytes", "oversized-record")
         }
         NR == 1 {
-            if (NF != 5 || $1 != "Filename" || $2 != "Type" ||
-                $3 != "Size" || $4 != "Used" || $5 != "Priority")
-                reject("header", "five-column-header", "invalid-header")
+            if ($0 != "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority")
+                reject("header", "exact-tabbed-five-column-header", "invalid-header")
             next
         }
         {
@@ -88,7 +88,7 @@ swapz_swap_inventory_identity() {
         }
         END {
             if (NR == 0)
-                reject("header", "five-column-header", "empty-inventory")
+                reject("header", "exact-tabbed-five-column-header", "empty-inventory")
         }
     ' "$input")"; then
         :
