@@ -1626,8 +1626,11 @@ static int test_discard_range_prevalidation_rejects_detached_page_list_cycle(voi
 			"%s:%d: FAIL discard page-list proof bad_page=1 segment=0 "
 			"class=detached_cycle expected=head_reachable "
 			"observed=detached_two_page_cycle original_error=%d "
-			"retained_authority=%s lower_mutations=0\n",
-			__FILE__, __LINE__, error, state_retained ? "yes" : "no");
+			"retained_authority=%s lower_mutations=0 "
+			"safe_disposition=%s\n",
+			__FILE__, __LINE__, error, state_retained ? "yes" : "no",
+			state_retained ? "fail_closed_no_publication" :
+				"unexpected_authority_change");
 		return 1;
 	}
 	return 0;
@@ -1748,6 +1751,160 @@ static int test_discard_range_prevalidation_blocks_late_sidecar_corruption(void)
 	return 0;
 }
 
+
+static int test_discard_range_prevalidation_restores_shared_compressed_gc_underflow(void)
+{
+	enum {
+		test_logical_pages = 2U,
+		test_physical_blocks = 4U * SWAPZ_SEGMENT_BLOCKS,
+		test_segments = 4U,
+		test_payload_length = 512U,
+	};
+	const swapz_u32 none = ~(swapz_u32)0;
+	const swapz_u32 record_live_bytes =
+		test_payload_length + sizeof(struct swapz_record);
+	const swapz_u32 record_io_cost =
+		record_live_bytes + 2U * SWAPZ_BLOCK_BYTES;
+	struct swapz_authority test_authority;
+	struct swapz_map test_maps[test_logical_pages];
+	struct swapz_map maps_before[test_logical_pages];
+	swapz_u16 test_live[test_physical_blocks];
+	swapz_u16 live_before[test_physical_blocks];
+	swapz_u8 test_classes[test_physical_blocks];
+	swapz_u8 classes_before[test_physical_blocks];
+	swapz_u8 test_roles[test_segments];
+	swapz_u8 roles_before[test_segments];
+	swapz_u32 test_mapped_pages[test_segments];
+	swapz_u32 mapped_before[test_segments];
+	swapz_u32 test_first_page[test_segments];
+	swapz_u32 first_before[test_segments];
+	swapz_u32 test_last_page[test_segments];
+	swapz_u32 last_before[test_segments];
+	swapz_u32 test_prev_page[test_logical_pages];
+	swapz_u32 prev_before[test_logical_pages];
+	swapz_u32 test_next_page[test_logical_pages];
+	swapz_u32 next_before[test_logical_pages];
+	swapz_u32 test_gc_live_bytes[test_segments];
+	swapz_u32 gc_live_before[test_segments];
+	swapz_u32 test_gc_io_cost[test_segments];
+	swapz_u32 gc_io_before[test_segments];
+	swapz_u16 test_gc_min_blocks[test_segments];
+	swapz_u16 gc_min_before[test_segments];
+	swapz_u32 reserve_before;
+	swapz_u32 open_segment_before;
+	swapz_u32 next_block_before;
+	swapz_u32 next_probe_before;
+	int error;
+	int state_retained;
+
+	CHECK(swapz_authority_init(&test_authority, test_maps, test_live,
+				   test_classes, test_logical_pages,
+				   test_physical_blocks) == 0);
+	CHECK(swapz_enable_segment_rotation(&test_authority, test_roles,
+					    test_segments) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(&test_authority,
+						   test_mapped_pages,
+						   test_segments) == 0);
+	CHECK(swapz_enable_segment_page_lists(
+		      &test_authority, test_first_page, test_last_page,
+		      test_prev_page, test_next_page, test_segments,
+		      test_logical_pages) == 0);
+	CHECK(swapz_enable_segment_gc_accounting(
+		      &test_authority, test_gc_live_bytes, test_gc_io_cost,
+		      test_gc_min_blocks, test_segments) == 0);
+
+	test_maps[0] = (struct swapz_map) {
+		.start_block = 0U,
+		.generation = 7U,
+		.payload_length = test_payload_length,
+		.record_index = 0U,
+		.extent_blocks = 2U,
+		.valid = 1U,
+	};
+	test_maps[1] = (struct swapz_map) {
+		.start_block = 0U,
+		.generation = 11U,
+		.payload_length = test_payload_length,
+		.record_index = 1U,
+		.extent_blocks = 2U,
+		.valid = 1U,
+	};
+	test_live[0] = 2U;
+	test_classes[0] = 2U;
+	test_mapped_pages[0] = 2U;
+	test_first_page[0] = 0U;
+	test_last_page[0] = 1U;
+	test_prev_page[0] = none;
+	test_next_page[0] = 1U;
+	test_prev_page[1] = 0U;
+	test_next_page[1] = none;
+
+	/*
+	 * The aggregate compressed live-byte score is valid for page zero but one
+	 * byte short for page one after the first temporary decrement. This forces
+	 * the cumulative second-page refusal rather than an immediate first-page
+	 * failure, while the physical shared-extent reference count remains valid.
+	 */
+	test_gc_live_bytes[0] = 2U * record_live_bytes - 1U;
+	test_gc_io_cost[0] = 2U * record_io_cost;
+	test_gc_min_blocks[0] = 0U;
+
+	memcpy(maps_before, test_maps, sizeof(maps_before));
+	memcpy(live_before, test_live, sizeof(live_before));
+	memcpy(classes_before, test_classes, sizeof(classes_before));
+	memcpy(roles_before, test_roles, sizeof(roles_before));
+	memcpy(mapped_before, test_mapped_pages, sizeof(mapped_before));
+	memcpy(first_before, test_first_page, sizeof(first_before));
+	memcpy(last_before, test_last_page, sizeof(last_before));
+	memcpy(prev_before, test_prev_page, sizeof(prev_before));
+	memcpy(next_before, test_next_page, sizeof(next_before));
+	memcpy(gc_live_before, test_gc_live_bytes, sizeof(gc_live_before));
+	memcpy(gc_io_before, test_gc_io_cost, sizeof(gc_io_before));
+	memcpy(gc_min_before, test_gc_min_blocks, sizeof(gc_min_before));
+	reserve_before = test_authority.reserve_blocks;
+	open_segment_before = test_authority.open_segment;
+	next_block_before = test_authority.next_block;
+	next_probe_before = test_authority.next_segment_probe;
+
+	error = swapz_prevalidate_discard_range(
+		&test_authority, 0U, test_logical_pages);
+	state_retained =
+		!memcmp(maps_before, test_maps, sizeof(maps_before)) &&
+		!memcmp(live_before, test_live, sizeof(live_before)) &&
+		!memcmp(classes_before, test_classes, sizeof(classes_before)) &&
+		!memcmp(roles_before, test_roles, sizeof(roles_before)) &&
+		!memcmp(mapped_before, test_mapped_pages, sizeof(mapped_before)) &&
+		!memcmp(first_before, test_first_page, sizeof(first_before)) &&
+		!memcmp(last_before, test_last_page, sizeof(last_before)) &&
+		!memcmp(prev_before, test_prev_page, sizeof(prev_before)) &&
+		!memcmp(next_before, test_next_page, sizeof(next_before)) &&
+		!memcmp(gc_live_before, test_gc_live_bytes,
+			sizeof(gc_live_before)) &&
+		!memcmp(gc_io_before, test_gc_io_cost, sizeof(gc_io_before)) &&
+		!memcmp(gc_min_before, test_gc_min_blocks,
+			sizeof(gc_min_before)) &&
+		test_authority.reserve_blocks == reserve_before &&
+		test_authority.open_segment == open_segment_before &&
+		test_authority.next_block == next_block_before &&
+		test_authority.next_segment_probe == next_probe_before;
+	if (error != -EUCLEAN || !state_retained) {
+		fprintf(stderr,
+			"%s:%d: FAIL discard cumulative GC proof bad_page=1 "
+			"segment=0 expected_class=gc_score_covers_shared_reference "
+			"observed_class=gc_live_bytes_short_by_one "
+			"expected_bytes=%u observed_bytes=%u original_error=%d "
+			"retained_authority=%s lower_mutations=0 "
+			"safe_disposition=%s\n",
+			__FILE__, __LINE__, record_live_bytes,
+			record_live_bytes - 1U, error,
+			state_retained ? "yes" : "no",
+			state_retained ? "fail_closed_no_publication" :
+				"unexpected_authority_change");
+		return 1;
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -1776,6 +1933,7 @@ int main(void)
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_rejects_detached_page_list_cycle() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_blocks_late_sidecar_corruption() == 0); passed++;
+	CHECK(test_discard_range_prevalidation_restores_shared_compressed_gc_underflow() == 0); passed++;
 	printf("SWAPZ_EXACT_AUTHORITY_TESTS_PASS=%d\n", passed);
 	return 0;
 }
