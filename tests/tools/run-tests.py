@@ -2395,7 +2395,8 @@ def retain_direct_rootless_first_failure(output, child_exit_code):
                 pass
 
 
-def failure_context(output, *, loaded=True, default_phase=None):
+def failure_context(output, *, loaded=True, default_phase=None,
+                    child_exit_code=None):
     """Return a sanitized failure phase/reason without leaking host details.
 
     Loaded diagnostics track the last named owned-device phase. Earlier
@@ -2540,7 +2541,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
             r"test=(unavailable|test_[A-Za-z0-9_]{1,96}|"
             r"swapz-primary-late-race-test[.]py) "
             r"exit=([0-9]{1,3}) reason=([a-z0-9_]{1,64}) "
-            r"phase_s=[0-9]+ stage_s=[0-9]+ line=[0-9]+ "
+            r"phase_s=[0-9]+ stage_s=[0-9]+ line=(?:[0-9]+|unavailable) "
             r"log=(?:unavailable|build/tests/rootless-failure\."
             r"[A-Za-z0-9]{8}/diagnostic[.]log)")
         for line in output.splitlines():
@@ -2555,7 +2556,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
             rootless_compile_failure = None
             rootless_invalid_late_race_identity = False
             match = rootless_marker_re.fullmatch(candidate)
-            if match:
+            if match and (child_exit_code is None or
+                          int(match.group(4)) == child_exit_code):
                 rootless_last_marker = match
                 marker_phase, marker_subtest, marker_test, marker_exit, marker_reason = (
                     match.groups())
@@ -2583,16 +2585,28 @@ def failure_context(output, *, loaded=True, default_phase=None):
 
     # The fixed failing source phase and complete private-log pointer are
     # authenticated by Bash; a nested unittest identity is not.
-    if (not loaded and rootless_last_marker is not None and
-            rootless_last_marker.group(1) == "tmp-cleanup-test.py" and
-            rootless_last_marker.group(2) == "unavailable" and
-            rootless_last_marker.group(3) == "unavailable"):
-        return (
-            "tmp-cleanup-test.py",
-            f"Rootless child exit={rootless_last_marker.group(4)} "
-            f"reason={rootless_last_marker.group(5)} "
-            "subtest=unavailable test=unavailable "
+    # Preserve this attribution for every failed source phase, not just the
+    # tmp-cleanup suite; outer Make errors and cleanup diagnostics are secondary.
+    rootless_attribution = None
+    if not loaded and rootless_last_marker is not None:
+        marker_phase, marker_subtest, marker_test, marker_exit, marker_reason = (
+            rootless_last_marker.groups())
+        phase = marker_phase
+        if rootless_invalid_late_race_identity:
+            # A rejected native-compile claim cannot become a public test name.
+            marker_subtest = marker_test = "unavailable"
+        rootless_attribution = (
+            f"child_exit={marker_exit} reason={marker_reason} "
+            f"subtest={marker_subtest} test={marker_test} "
             f"log={rootless_last_marker.group(0).rsplit(' log=', 1)[1]}")
+        if marker_test == "unavailable":
+            summary = ("Rootless late-race failure identity was not authenticated"
+                       if rootless_invalid_late_race_identity else
+                       "Rootless child failed")
+            return phase, summary + "; " + rootless_attribution
+    elif not loaded and rootless_failure_marker_seen:
+        # An invalid final marker cannot borrow an earlier phase/test identity.
+        return phase, "Rootless failure marker malformed or unverified"
 
     native_diagnostic = None
     if not loaded:
@@ -2765,6 +2779,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
             reason = (("Child returned nonzero without a sanitized loaded diagnostic marker")
                       if loaded else
                       "Child returned nonzero in this non-privileged stage")
+    if rootless_attribution is not None:
+        reason += "; " + rootless_attribution
     return phase, reason
 
 LOADED_PROGRESS_PREFIXES = (
@@ -2967,7 +2983,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         if explicit_primary_failure or explicit_loaded_failure or blocked_marker:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
-                default_phase=None if parse_bench else title)
+                default_phase=None if parse_bench else title,
+                child_exit_code=observed_exit_code)
             if inconsistent_exit:
                 record["diagnostic"] += (
                     f"; expected=nonzero observed_exit={observed_exit_code}"
@@ -3011,7 +3028,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
-                default_phase=None if parse_bench else title)
+                default_phase=None if parse_bench else title,
+                child_exit_code=observed_exit_code)
     result["stages"].append(record)
     if predictor_evidence is not None:
         result.setdefault("evidence", {})["predictor"] = predictor_evidence

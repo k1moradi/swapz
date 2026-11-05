@@ -1258,8 +1258,13 @@ cannot claim a matched traceback. An earlier rootless marker superseded by a
 later marker cannot authenticate the earlier failure. The public report retains
 only source-controlled phase, original exit, fixed reason and sanitized log
 pointer; `subtest=unavailable test=unavailable` remains unless Bash itself
-authenticates nested identity. Secondary diagnostic failures must never replace
-the original child failure. Read retained evidence locally, never publish it.
+authenticates nested identity. The official stage reporter must preserve the
+full relative `log=` pointer for every complete, status-matched final Bash
+marker, including `line=unavailable`; a malformed or exit-mismatched marker
+cannot borrow an earlier suite's apparent test identity. Nested Make exits and
+private errno text are not independently authenticated. Secondary diagnostic
+failures must never replace the original child failure. Read retained evidence
+locally, never publish it.
 
 ### Native CI failure evidence contract
 

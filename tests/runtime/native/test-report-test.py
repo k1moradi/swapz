@@ -3408,8 +3408,11 @@ class ReportContract(unittest.TestCase):
         phase, reason = runner.failure_context(
             classified, loaded=False,
             default_phase="Native and rootless contracts")
-        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertEqual(phase, "primary-real-swap-test.py")
         self.assertIn("Unit test failed: test_oracle_first", reason)
+        self.assertIn("child_exit=37", reason)
+        self.assertIn("log=build/tests/rootless-failure.ABC12345/diagnostic.log",
+                      reason)
         self.assertNotIn("test_expected_negative", reason)
         self.assertNotIn("test_teardown", reason)
 
@@ -3426,9 +3429,9 @@ class ReportContract(unittest.TestCase):
         phase, reason = runner.failure_context(
             marker_only, loaded=False,
             default_phase="Native and rootless contracts")
-        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertEqual(phase, "C syntax: physical lifecycle seam")
         self.assertNotIn("test_expected_negative", reason)
-        self.assertIn("C syntax: physical lifecycle seam", reason)
+        self.assertIn("child_exit=1", reason)
 
         malformed_marker = (
             earlier_expected
@@ -3446,7 +3449,129 @@ class ReportContract(unittest.TestCase):
             default_phase="Native and rootless contracts")
         self.assertEqual(phase, "Native and rootless contracts")
         self.assertNotIn("test_expected_negative", reason)
-        self.assertIn("make-interface-test.py", reason)
+        self.assertNotIn("make-interface-test.py", reason)
+        self.assertIn("malformed or unverified", reason)
+
+    def test_rootless_first_failure_preserves_exact_marker_and_redaction(self):
+        """Only the final status-matched Bash marker can supply test identity."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        source_sha = "f" * 40
+        private_path = "/private/device/SECRET_RESOURCE"
+        diagnostic_log = (
+            "build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        # These transcripts are synthetic: native stderr never proves a
+        # nested test name, errno or later cleanup as the first failed child.
+        cases = (
+            ("nested Make Error 134",
+             "make[2]: *** [Makefile:120: test-userspace] Error 134\n"
+             "make: *** [Makefile:15: test] Error 2\n",
+             "Makefile native and metadata", "test-userspace",
+             "unavailable", "nonzero_exit", 2, "99"),
+            ("native assertion",
+             "FAIL: test_wrong (__main__.Unrelated.test_wrong)\n"
+             "AssertionError: " + private_path + "\n",
+             "Makefile native and metadata", "unavailable",
+             "unavailable", "nonzero_exit", 2, "99"),
+            ("silent nonzero", "", "C syntax: physical lifecycle seam",
+             "unavailable", "unavailable", "nonzero_exit", 43, "unavailable"),
+            ("authenticated compiler error",
+             "private.c:12: error: " + private_path + "\n",
+             "Makefile native and metadata", "compile",
+             "swapz-primary-late-race-test.py", "native_compile", 2, "99"),
+            ("unproven compiler error",
+             "private.c:12: error: " + private_path + "\n",
+             "Makefile native and metadata", "unavailable",
+             "unavailable", "nonzero_exit", 2, "99"),
+            ("truncated transcript", "x" * 300000 + "\n",
+             "Makefile native and metadata", "unavailable",
+             "unavailable", "nonzero_exit", 2, "99"),
+            ("relay failure", "stderr relay incomplete\n",
+             "package-dkms-test.py", "unavailable",
+             "unavailable", "stderr_relay_failure", 37, "99"),
+            ("malformed JSON", '{"private":"' + private_path + '"}\n',
+             "test-report-test.py", "unavailable",
+             "unavailable", "nonzero_exit", 1, "99"),
+            ("multiple failures",
+             "FAIL: test_expected_negative "
+             "(__main__.PassingFixture.test_expected_negative)\n"
+             "FAIL: test_first (__main__.Other.test_first)\n"
+             "ERROR: test_later (__main__.Other.test_later)\n",
+             "primary-real-swap-test.py", "preflight",
+             "test_first", "unittest_assertion", 52, "99"),
+        )
+        for (label, transcript, failing_phase, subtest, reported_test,
+             reason, child_exit, source_line) in cases:
+            with self.subTest(case=label):
+                marker = (
+                    f"FAIL: rootless phase={failing_phase} "
+                    f"subtest={subtest} test={reported_test} exit={child_exit} "
+                    f"reason={reason} phase_s=1 stage_s=2 line={source_line} "
+                    f"log={diagnostic_log}\n")
+                report = {"tested_commit_sha": source_sha, "stages": []}
+                with patch.object(
+                        runner.subprocess, "run",
+                        return_value=SimpleNamespace(
+                            stdout=transcript + marker,
+                            returncode=child_exit)), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    observed_exit = runner.run_stage(
+                        "Native and rootless contracts", ["unused"], report)
+                stage = report["stages"][0]
+                self.assertEqual(observed_exit, child_exit)
+                self.assertEqual(report["tested_commit_sha"], source_sha)
+                self.assertEqual(stage["status"], "FAIL")
+                self.assertEqual(stage["exit_code"], child_exit)
+                self.assertEqual(stage["failed_phase"], failing_phase)
+                for token in (
+                        f"child_exit={child_exit}", f"reason={reason}",
+                        f"subtest={subtest}", f"test={reported_test}",
+                        f"log={diagnostic_log}"):
+                    self.assertIn(token, stage["diagnostic"])
+                if reported_test.startswith("test_"):
+                    self.assertIn(
+                        "Unit test failed: " + reported_test,
+                        stage["diagnostic"])
+                else:
+                    self.assertNotIn(
+                        "Unit test failed:", stage["diagnostic"])
+                public_json = json.dumps(report)
+                self.assertNotIn(private_path, public_json)
+                self.assertNotIn("test_expected_negative", public_json)
+                self.assertNotIn("test_wrong", public_json)
+                self.assertNotIn("test_later", public_json)
+                self.assertNotIn("Error 134", public_json)
+
+        # A marker with a wrong child status or malformed log location cannot
+        # authenticate a preceding, apparently precise unittest traceback.
+        forged = (
+            "FAIL: test_earlier (__main__.Earlier.test_earlier)\n"
+            "FAIL: rootless phase=Makefile native and metadata "
+            "subtest=compile test=test_earlier exit=2 "
+            "reason=unittest_assertion phase_s=1 stage_s=2 line=99 "
+            f"log={diagnostic_log}\n")
+        for label, output in (
+                ("exit mismatch", forged),
+                ("malformed marker",
+                 forged.replace(f"log={diagnostic_log}",
+                                "log=/private/invalid"))):
+            with self.subTest(case=label):
+                report = {"stages": []}
+                with patch.object(
+                        runner.subprocess, "run",
+                        return_value=SimpleNamespace(
+                            stdout=output, returncode=1)), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    runner.run_stage(
+                        "Native and rootless contracts", ["unused"], report)
+                stage = report["stages"][0]
+                self.assertEqual(stage["exit_code"], 1)
+                self.assertEqual(stage["failed_phase"],
+                                 "Native and rootless contracts")
+                self.assertNotIn("test_earlier", json.dumps(stage))
+                self.assertNotIn(diagnostic_log, json.dumps(stage))
+                self.assertIn("malformed or unverified", stage["diagnostic"])
 
     def test_tmp_cleanup_official_failure_retains_private_first_unittest(self):
         """Rootless negative controls for the unwrapped failing source suite."""
