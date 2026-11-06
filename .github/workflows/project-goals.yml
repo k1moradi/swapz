@@ -402,9 +402,16 @@ jobs:
 
           def refuse(gate, required, observed, corrective):
               # Only source-controlled labels and bounded classifications reach CI logs.
-              print(f"CI_NOT_QUALIFIED gate={gate} required={required} "
-                    f"observed={observed} corrective_procedure={corrective}",
-                    file=sys.stderr)
+              safe_source_sha = (source_sha if re.fullmatch(r"[0-9a-f]{40}", source_sha)
+                                 else "invalid")
+              diagnostic_prefix = (
+                  f"CI_NOT_QUALIFIED tested_sha={safe_source_sha} "
+                  f"phase=exact-sha-census gate={gate} required={required} "
+                  f"observed={observed} corrective_procedure=")
+              # Retain the source and failing gate, not an overlong next-step label.
+              next_step = (corrective if len(diagnostic_prefix) + len(corrective) <= 255
+                           else "inspect-first-failure")
+              print(diagnostic_prefix + next_step, file=sys.stderr)
               raise SystemExit(1)
 
 

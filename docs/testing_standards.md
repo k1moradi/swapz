@@ -7866,6 +7866,14 @@ old CI run or saved report for a prior source cannot become evidence for a
 new owner-host execution; these fixtures never write `test_results.json` or
 claim live device qualification.
 
+The project-goals current-attempt job census emits fail-only, bounded
+`CI_NOT_QUALIFIED` diagnostics. Each refusal identifies the validated
+`tested_sha` (or `invalid` for untrusted identity), the
+`phase=exact-sha-census`, failing `gate`, `required` and `observed` states,
+and a safe `corrective_procedure`. Keep the line at most 255 characters,
+never include an Actions token, raw API exception or private path, and
+never request a job manifest when checkout identity already mismatches.
+
 Canonical CI release evidence contains exactly one row for each of the three
 mandatory workflows, with distinct canonical positive signed-64-bit GitHub
 run IDs. Extra, malformed, or duplicated rows cannot qualify the release even

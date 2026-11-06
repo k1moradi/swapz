@@ -1847,8 +1847,9 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                     jobs, total_count=total_count, checkout_sha=checkout_sha)
                 self.assertNotEqual(code, 0)
                 self.assertEqual(output, "")
-                for field in ("gate=", "required=", "observed=",
-                              "corrective_procedure="):
+                for field in (f"tested_sha={source_sha}",
+                              "phase=exact-sha-census", "gate=", "required=",
+                              "observed=", "corrective_procedure="):
                     self.assertIn(field, errors)
                 self.assertNotIn("fixture-private-token", errors)
                 self.assertLessEqual(len(errors.strip()), 255)
@@ -1872,6 +1873,16 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
             "https://api.github.com/repos/fixture/swapz/actions/runs/"
             "12345/attempts/1/jobs?per_page=100",
         ])
+
+        # Invalid source identities must not leak into diagnostics or call GitHub.
+        environment["GITHUB_SHA"] = "private-untrusted-source-token"
+        code, output, errors, requested_urls = census(passing_jobs)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(output, "")
+        self.assertIn("tested_sha=invalid", errors)
+        self.assertIn("phase=exact-sha-census", errors)
+        self.assertNotIn("private-untrusted-source-token", errors)
+        self.assertEqual(requested_urls, [])
 
 class CiFailureDiagnosticContract(unittest.TestCase):
     """Synthetic rootless diagnostics must never misrepresent CI outcomes."""
