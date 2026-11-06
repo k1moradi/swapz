@@ -6813,8 +6813,13 @@ in a name-specific `generator.early` drop-in before it releases the
 mapper-service mask. It must recheck that guard both immediately before and
 immediately after mask release; a missing, replaced or noncanonical guard
 keeps or restores the mapper mask, and a foreign noncanonical guard must be
-preserved rather than overwritten. The rootless package contract must model a
-normal-dir fstab-generated mapper swap that shadows the vendor unit, prove the
+preserved rather than overwritten. Canonical passive-guard verification must
+be byte-exact without reusing the manager-response `cmp` fault path, so an
+injected comparison failure keeps its original selection phase and status. If
+the early generator directory becomes inaccessible after mask release, report
+publication ownership as unprovable rather than misclassifying it as guard
+loss. The rootless package contract must model a normal-dir fstab-generated
+mapper swap that shadows the vendor unit, prove the
 unguarded effective unit has no blocking condition, then prove the real
 generator's early drop-in restores the passive lifecycle refusals and makes
 the same indirect job fail its condition. No service start or real swap action

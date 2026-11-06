@@ -226,8 +226,26 @@ passive_swap_guard_is_active()
 	[ -d "$passive_swap_dropin_dir" ] && [ ! -L "$passive_swap_dropin_dir" ] &&
 		[ -f "$passive_swap_dropin" ] && [ ! -L "$passive_swap_dropin" ] ||
 		return 1
-	printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/\n' |
-		cmp -s - "$passive_swap_dropin"
+	if passive_guard_size=$(wc -c < "$passive_swap_dropin"); then :; else
+		return $?
+	fi
+	[ "$passive_guard_size" -eq 73 ] || return 1
+	passive_guard_line_1=
+	passive_guard_line_2=
+	passive_guard_line_3=
+	passive_guard_line_4=
+	passive_guard_extra=
+	{
+		IFS= read -r passive_guard_line_1 &&
+			IFS= read -r passive_guard_line_2 &&
+			IFS= read -r passive_guard_line_3 &&
+			IFS= read -r passive_guard_line_4 &&
+			! IFS= read -r passive_guard_extra
+	} < "$passive_swap_dropin" || return 1
+	[ "$passive_guard_line_1" = '[Unit]' ] &&
+		[ "$passive_guard_line_2" = 'RefuseManualStart=yes' ] &&
+		[ "$passive_guard_line_3" = 'RefuseManualStop=yes' ] &&
+		[ "$passive_guard_line_4" = 'ConditionPathExists=!/' ]
 }
 cleanup()
 {
@@ -855,7 +873,8 @@ if rm -f -- "$mapper_unit"; then
 	mask_validation=publication-ownership-not-proven
 	if [ -e "$mapper_unit" ] || [ -L "$mapper_unit" ]; then
 		mask_validation=mask-not-released
-	elif ! passive_swap_guard_is_active; then
+	elif [ -x "$early_dir" ] && [ ! -L "$early_dir" ] &&
+		! passive_swap_guard_is_active; then
 		mask_validation=passive-guard-not-retained
 	fi
 else
