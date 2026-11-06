@@ -8589,19 +8589,38 @@ def publish(source_sha):
                         remote_tested = (remote_json.get("tested_commit_sha") or
                                          remote_json.get("source_sha"))
                         if isinstance(remote_tested, str) and \
-                                re.fullmatch(r"[0-9a-f]{40}", remote_tested) and \
-                                remote_tested != source_sha:
-                            tested_ancestor = run(
-                                "merge-base", "--is-ancestor",
-                                source_sha, remote_tested)
-                            if tested_ancestor is None:
-                                continue
-                            if tested_ancestor.returncode > 1:
-                                return ("GIT_SYNC_FAILED: git merge-base failed while "
-                                        "evaluating remote qualification evidence")
-                            if not tested_ancestor.returncode:
-                                return (f"SKIPPED_GIT_SYNC: newer-source qualification "
-                                        f"evidence already published ({remote_tested[:12]})")
+                                re.fullmatch(r"[0-9a-f]{40}", remote_tested):
+                            if remote_tested == source_sha:
+                                report_changed = run(
+                                    "diff", "--quiet", head_sha, remote_sha,
+                                    "--", GIT_RESULT)
+                                if report_changed is None:
+                                    continue
+                                if report_changed.returncode > 1:
+                                    return (
+                                        "GIT_SYNC_FAILED: could not compare "
+                                        "concurrent qualification evidence")
+                                if report_changed.returncode:
+                                    return (
+                                        "SKIPPED_GIT_SYNC: concurrent "
+                                        "qualification evidence already "
+                                        f"published ({remote_tested[:12]})")
+                            else:
+                                tested_ancestor = run(
+                                    "merge-base", "--is-ancestor",
+                                    source_sha, remote_tested)
+                                if tested_ancestor is None:
+                                    continue
+                                if tested_ancestor.returncode > 1:
+                                    return (
+                                        "GIT_SYNC_FAILED: git merge-base "
+                                        "failed while evaluating remote "
+                                        "qualification evidence")
+                                if not tested_ancestor.returncode:
+                                    return (
+                                        "SKIPPED_GIT_SYNC: newer-source "
+                                        "qualification evidence already "
+                                        f"published ({remote_tested[:12]})")
                     except (ValueError, UnicodeDecodeError):
                         pass
             retry_sha, error = build_report_commit(remote_sha)

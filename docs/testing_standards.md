@@ -3123,7 +3123,19 @@ publication attempt.
 
 ### Evidence-monotonic report publication
 
-Report publication must be strictly evidence-monotonic. When publishing `test_results.json` to `origin/main`, if `origin/main` has advanced while the test suite was running, the publisher fetches `origin/main` and inspects the remote `test_results.json`. If `origin/main` already carries qualification evidence from a tested commit that is an ancestor or newer descendant of the local tested source (`git merge-base --is-ancestor local_tested remote_tested`), publication is declined with `SKIPPED_GIT_SYNC` so that delayed or concurrent runs cannot overwrite newer qualification evidence with older results. Furthermore, the ancestor evaluation must fail closed: if `git merge-base` returns an error status (exit code > 1), publication halts with `GIT_SYNC_FAILED` rather than proceeding under uncertain ancestry.
+Report publication must be strictly evidence-monotonic. When publishing
+`test_results.json` to `origin/main`, if `origin/main` has advanced while
+the test suite was running, the publisher fetches `origin/main` and inspects
+the remote report. Newer-source evidence is protected by
+`git merge-base --is-ancestor local_tested remote_tested`: a remote tested
+source that is a descendant of the local tested source causes
+`SKIPPED_GIT_SYNC`, so delayed runs cannot overwrite newer qualification
+evidence. A concurrent main advance that merely inherits the unchanged report
+for the same tested source remains eligible for publication. If the fetched
+head instead changes `test_results.json` while still reporting that same
+tested source, the remote report is newer same-source evidence and the delayed
+local result is declined with `SKIPPED_GIT_SYNC`. Report comparison and
+ancestor errors fail closed with `GIT_SYNC_FAILED`.
 
 Every console table printed by the official `make test` reporter must have a
 clear, self-contained Markdown title immediately before an unindented
