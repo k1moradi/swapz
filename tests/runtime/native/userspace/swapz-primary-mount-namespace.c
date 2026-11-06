@@ -29,6 +29,8 @@
 #ifndef SYS_listmount
 #define SYS_listmount 458
 #endif
+_Static_assert(SYS_statmount == 457 && SYS_listmount == 458,
+	       "fixture syscall numbers must match Linux x86_64/arm64 UAPI");
 
 /*
  * Compile the actual production manager, without SWAPZ_PRIMARY_ROOTLESS_TEST:

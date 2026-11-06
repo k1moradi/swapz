@@ -389,7 +389,11 @@ production-C fixture must keep filtered leader and non-leader mountinfo
 syntactically clean while this direct namespace inventory contains a hidden
 selected partition or parent, and require busy or fail-closed rather than
 admission. It must also inject direct-inventory failure and prove the pinned
-namespace descriptor closes.
+namespace descriptor closes. When a supported CI compiler's libc headers do
+not yet publish `SYS_statmount`/`SYS_listmount`, this synthetic fixture may
+define the architecture-common x86_64/arm64 syscall numbers solely for its
+intercepted seam; that does not assert the runner kernel implements the ABI and
+must not weaken the production unsupported-kernel refusal.
 
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
