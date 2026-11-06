@@ -1089,13 +1089,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "--qualification-report", "/synthetic/report.json",
             "--source-admission-socket", "/synthetic/socket",
             "--source-admission-parent-uid", "1000",
+            "--source-admission-parent-process-id", "1234",
+            "--source-admission-parent-start-ticks", "5678",
         ])
         channel = mock.Mock()
         channel.close.side_effect = OSError("synthetic close failure")
         with mock.patch.dict(os.environ, {}, clear=True), \
                 mock.patch.object(os, "geteuid", return_value=0), \
-                mock.patch.object(qualify, "SourceAdmissionClient",
-                                  return_value=channel), \
+                mock.patch.object(
+                    qualify, "SourceAdmissionClient",
+                    return_value=channel) as admission_factory, \
                 mock.patch.object(qualify, "_execute_admitted",
                                   side_effect=qualify.Blocked("source proof failed")):
             with self.assertRaisesRegex(
@@ -1103,6 +1106,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     "source proof failed; cleanup also failed: "
                     "source admission channel: synthetic close failure"):
                 qualify.execute(arguments)
+        admission_factory.assert_called_once_with(
+            "/synthetic/socket", 1000, 1234, 5678, "a" * 40)
         channel.close.assert_called_once_with()
 
     def test_owned_source_admission_closes_before_success(self):
@@ -1111,6 +1116,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             "--qualification-report", "/synthetic/report.json",
             "--source-admission-socket", "/synthetic/socket",
             "--source-admission-parent-uid", "1000",
+            "--source-admission-parent-process-id", "1234",
+            "--source-admission-parent-start-ticks", "5678",
         ])
         channel = mock.Mock()
         expected = {"status": "PASS"}
@@ -1122,10 +1129,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True), \
                 mock.patch.object(os, "geteuid", return_value=0), \
                 mock.patch.object(
-                    qualify, "SourceAdmissionClient", return_value=channel), \
+                    qualify, "SourceAdmissionClient",
+                    return_value=channel) as admission_factory, \
                 mock.patch.object(
                     qualify, "_execute_admitted", side_effect=admitted):
             self.assertIs(qualify.execute(arguments), expected)
+        admission_factory.assert_called_once_with(
+            "/synthetic/socket", 1000, 1234, 5678, "a" * 40)
         channel.close.assert_called_once_with()
 
     def test_private_workspace_is_cleaned_when_mode_hardening_fails(self):

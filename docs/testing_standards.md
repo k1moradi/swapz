@@ -556,7 +556,11 @@ three-process reparent regression must observe the intermediary exiting,
 the terminal parent's PPID changing with stable start ticks, and a genuine
 nonce-bound synthetic approval. Separate negative controls must reject a stale
 launch-bound creator before any socket connection and reject missing /proc
-identity. Neither result authorizes physical admission. The rootless
+identity. Rootless execute-path fixtures that mock the source-admission client
+must still supply and assert propagation of the mandatory launch-bound parent
+PID and start ticks; otherwise they only exercise the earlier incomplete-channel
+refusal and cannot qualify cleanup/error-preservation behavior. Neither result
+authorizes physical admission. The rootless
 AF_UNIX regression must reject that higher-ancestor listener, including after
 it replaces a real nearest parent's socket, while preserving a direct parent's
 synthetic approval. Recheck the selected effective UID at every approval
