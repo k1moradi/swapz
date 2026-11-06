@@ -11477,6 +11477,14 @@ static int swapz_primary_unload_owned_module(
 #endif
 }
 
+/*
+ * Failure-observation labels below are per-call stack evidence, not lifecycle
+ * state. The partition lock serializes cooperative transaction ownership, but
+ * the *_by_call outputs only say whether this invocation issued a mutation;
+ * they are never proof that kernel state was observed. Mark OBSERVED only after
+ * the corresponding helper returns with its independent proof complete. No
+ * descriptor or observation ownership escapes these coordinator functions.
+ */
 static int swapz_primary_start_prepared(void)
 {
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -11532,6 +11540,10 @@ static int swapz_primary_start_prepared(void)
 	int result = -1;
 	int saved_errno = EIO;
 	const char *failure_phase = "admission";
+	const char *persistence_boundary = "none";
+	const char *durable_observation = "UNOBSERVED";
+	const char *mapper_observation = "UNOBSERVED";
+	const char *swap_observation = "UNOBSERVED";
 
 	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
 		errno = ENOTSUP;
@@ -11572,6 +11584,7 @@ static int swapz_primary_start_prepared(void)
 		errno = EPERM;
 		goto out;
 	}
+	durable_observation = "OBSERVED";
 	if (swapz_primary_read_qualification_report(&qualification) < 0 ||
 	    strcmp(qualification.source_sha, manifest.source_sha) ||
 	    strcmp(qualification.report_sha256,
@@ -11683,10 +11696,14 @@ static int swapz_primary_start_prepared(void)
 	starting_state = state;
 	starting_state.stage = SWAPZ_PRIMARY_STAGE_STARTING;
 	failure_phase = "state-starting";
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &starting_state, 0) < 0)
 		goto out;
 	starting_persisted = 1;
+	durable_observation = "OBSERVED";
+	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-starting");
 	failure_phase = "header-write";
 	if (swapz_primary_module_load_intent_write_at(
@@ -11792,6 +11809,7 @@ static int swapz_primary_start_prepared(void)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-module-loaded");
 	failure_phase = "mapper-create";
+	mapper_observation = "UNCERTAIN";
 	if (swapz_primary_dm_create_mapper(
 		    recovery_fd, lock_fd, &manifest, module_loaded_by_call,
 		    &mapper_created_by_call, &mapper_resumed_by_call,
@@ -11799,6 +11817,7 @@ static int swapz_primary_start_prepared(void)
 	    !mapper_created_by_call || !mapper_resumed_by_call ||
 	    mapper_device == 0)
 		goto out;
+	mapper_observation = "OBSERVED";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mapper-resumed");
 	failure_phase = "mapper-format";
 	if (swapz_primary_format_mapper_swap(
@@ -11806,15 +11825,19 @@ static int swapz_primary_start_prepared(void)
 		goto out;
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-mkswap");
 	failure_phase = "swapon";
+	swap_observation = "UNCERTAIN";
 	if (swapz_primary_activate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest, mapper_device,
 		    &swap_activated_by_call) < 0 ||
 	    !swap_activated_by_call)
 		goto out;
+	swap_observation = "OBSERVED";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("start-swapon");
 	failure_phase = "state-active";
 	active_state = starting_state;
 	active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &active_state, 0) < 0)
 		goto out;
@@ -11827,27 +11850,18 @@ out:
 			"original_errno=%d persistence_boundary=%s "
 			"durable=%s mapper=%s swap=%s\n",
 			failure_phase, saved_errno, strerror(saved_errno),
-			saved_errno,
-			!strcmp(failure_phase, "state-starting") ||
-			!strcmp(failure_phase, "state-active") ?
-				"state-rename-close-directory-fsync" : "none",
-			!strcmp(failure_phase, "state-starting") ||
-			!strcmp(failure_phase, "state-active") ?
-				"UNCERTAIN" :
-				(starting_persisted ? "OBSERVED" : "UNOBSERVED"),
-			mapper_created_by_call ||
-			!strcmp(failure_phase, "mapper-create") ?
-				"UNCERTAIN" : "UNOBSERVED",
-			swap_activated_by_call ||
-			!strcmp(failure_phase, "swapon") ?
-				"UNCERTAIN" : "UNOBSERVED");
+			saved_errno, persistence_boundary, durable_observation,
+			mapper_observation, swap_observation);
 	if (result < 0 && failure_expected && failure_observed)
 		fprintf(stderr,
 			"PRIMARY_START=ADMISSION_DETAIL phase=%s expected=%s "
-			"observed=%s errno=%d retained_state=%s "
-			"target_unchanged=true\n",
+			"observed=%s errno=%d original_errno=%d "
+			"persistence_boundary=%s durable=%s mapper=%s swap=%s "
+			"retained_state=%s target_unchanged=true\n",
 			failure_phase, failure_expected, failure_observed,
-			saved_errno, starting_persisted ?
+			saved_errno, saved_errno, persistence_boundary,
+			durable_observation, mapper_observation, swap_observation,
+			starting_persisted ?
 				"STARTING_PENDING_RECOVERY_UPDATE" : "READY");
 	if (result < 0 && starting_persisted && recovery_fd >= 0 &&
 	    lock_fd >= 0)
@@ -11934,6 +11948,10 @@ static int swapz_primary_stop_active(void)
 	int result = -1;
 	int saved_errno = EIO;
 	const char *failure_phase = "admission";
+	const char *persistence_boundary = "none";
+	const char *durable_observation = "UNOBSERVED";
+	const char *mapper_observation = "UNOBSERVED";
+	const char *swap_observation = "UNOBSERVED";
 
 	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
 		errno = ENOTSUP;
@@ -11973,24 +11991,33 @@ static int swapz_primary_stop_active(void)
 		errno = EPERM;
 		goto out;
 	}
+	durable_observation = "OBSERVED";
 	stopping_state = state;
 	stopping_state.stage = SWAPZ_PRIMARY_STAGE_STOPPING;
 	failure_phase = "state-stopping";
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &stopping_state, 0) < 0)
 		goto out;
 	stopping_persisted = 1;
+	durable_observation = "OBSERVED";
+	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-stopping");
 	failure_phase = "swapoff";
+	swap_observation = "UNCERTAIN";
 	if (swapz_primary_deactivate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest,
 		    &swap_deactivated_by_call) < 0)
 		goto out;
+	swap_observation = "OBSERVED";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-swapoff");
 	failure_phase = "mapper-remove";
+	mapper_observation = "UNCERTAIN";
 	if (swapz_primary_dm_remove_mapper(
 		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0)
 		goto out;
+	mapper_observation = "OBSERVED";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-mapper-removed");
 	failure_phase = "module-unload";
 	if (swapz_primary_unload_owned_module(
@@ -12020,18 +12047,27 @@ static int swapz_primary_stop_active(void)
 	failure_phase = "state-restored";
 	restored_state = stopping_state;
 	restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
 		goto out;
+	durable_observation = "OBSERVED";
+	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("stop-restored");
 	failure_phase = "state-complete";
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &complete_state, 0) < 0)
 		goto out;
 	complete_persisted = 1;
+	durable_observation = "OBSERVED";
 	failure_phase = "owner-release";
+	persistence_boundary = "owner-unlink-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_release_partition_owner_at(
 		    recovery_fd, lock_fd, manifest.run_id, 0) < 0)
 		goto out;
@@ -12044,27 +12080,8 @@ out:
 			"original_errno=%d persistence_boundary=%s "
 			"durable=%s mapper=%s swap=%s\n",
 			failure_phase, saved_errno, strerror(saved_errno),
-			saved_errno,
-			!strcmp(failure_phase, "owner-release") ?
-				"owner-unlink-directory-fsync" :
-				(!strcmp(failure_phase, "state-stopping") ||
-				 !strcmp(failure_phase, "state-restored") ||
-				 !strcmp(failure_phase, "state-complete") ?
-				 "state-rename-close-directory-fsync" : "none"),
-			complete_persisted ? "OBSERVED" :
-				(!strcmp(failure_phase, "state-stopping") ||
-				 !strcmp(failure_phase, "state-restored") ||
-				 !strcmp(failure_phase, "state-complete") ?
-				 "UNCERTAIN" :
-				 (stopping_persisted ? "OBSERVED" : "UNOBSERVED")),
-			mapper_removed_by_call ? "OBSERVED" :
-				(!strcmp(failure_phase, "mapper-remove") ||
-				 module_unloaded_by_call ?
-				 "UNCERTAIN" : "UNOBSERVED"),
-			swap_deactivated_by_call ? "OBSERVED" :
-				(!strcmp(failure_phase, "swapoff") ||
-				 mapper_removed_by_call ?
-				 "UNCERTAIN" : "UNOBSERVED"));
+			saved_errno, persistence_boundary, durable_observation,
+			mapper_observation, swap_observation);
 	if (result < 0 && stopping_persisted && !complete_persisted &&
 	    recovery_fd >= 0 && lock_fd >= 0)
 		saved_errno = swapz_primary_require_recovery_preserving_errno(
@@ -12122,6 +12139,10 @@ static int swapz_primary_recover(void)
 	int result = -1;
 	int saved_errno = EIO;
 	const char *failure_phase = "admission";
+	const char *persistence_boundary = "none";
+	const char *durable_observation = "UNOBSERVED";
+	const char *mapper_observation = "UNOBSERVED";
+	const char *swap_observation = "UNOBSERVED";
 
 	if (!SWAPZ_PRIMARY_EXECUTION_ENABLED) {
 		errno = ENOTSUP;
@@ -12155,6 +12176,7 @@ static int swapz_primary_recover(void)
 		errno = EPERM;
 		goto out;
 	}
+	durable_observation = "OBSERVED";
 	if (swapz_primary_header_backup_read_at(
 		    recovery_fd, lock_fd, manifest.run_id,
 		    manifest.original_header_sha256, 0, original_header) < 0 ||
@@ -12194,11 +12216,16 @@ static int swapz_primary_recover(void)
 		struct swapz_primary_state recovery_required_state;
 
 		if (swapz_primary_recovery_required_state(
-			    &state, &recovery_required_state) < 0 ||
-		    swapz_primary_state_write_at(
+			    &state, &recovery_required_state) < 0)
+			goto out;
+		persistence_boundary = "state-rename-close-directory-fsync";
+		durable_observation = "UNCERTAIN";
+		if (swapz_primary_state_write_at(
 			    recovery_fd, lock_fd, &recovery_required_state, 0) < 0)
 			goto out;
 		state = recovery_required_state;
+		durable_observation = "OBSERVED";
+		persistence_boundary = "none";
 	}
 	failure_phase = "state-recovering";
 	if (swapz_primary_transaction_manifest_matches_at(
@@ -12209,22 +12236,30 @@ static int swapz_primary_recover(void)
 
 	recovering_state = state;
 	recovering_state.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &recovering_state, 0) < 0)
 		goto out;
 	recovering_persisted = 1;
+	durable_observation = "OBSERVED";
+	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-recovering");
 
 	failure_phase = "swapoff";
+	swap_observation = "UNCERTAIN";
 	if (swapz_primary_deactivate_mapper_swap(
 		    recovery_fd, lock_fd, &manifest,
 		    &swap_deactivated_by_call) < 0)
 		goto out;
+	swap_observation = "OBSERVED";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-swapoff");
 	failure_phase = "mapper-remove";
+	mapper_observation = "UNCERTAIN";
 	if (swapz_primary_dm_remove_mapper(
 		    recovery_fd, lock_fd, &manifest, &mapper_removed_by_call) < 0)
 		goto out;
+	mapper_observation = "OBSERVED";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-mapper-removed");
 	failure_phase = "module-unload";
 	if (swapz_primary_unload_owned_module(
@@ -12255,18 +12290,27 @@ static int swapz_primary_recover(void)
 
 	restored_state = recovering_state;
 	restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
 		goto out;
+	durable_observation = "OBSERVED";
+	persistence_boundary = "none";
 	SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("recover-restored");
 	failure_phase = "state-complete";
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+	persistence_boundary = "state-rename-close-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &complete_state, 0) < 0)
 		goto out;
 	complete_persisted = 1;
+	durable_observation = "OBSERVED";
 	failure_phase = "owner-release";
+	persistence_boundary = "owner-unlink-directory-fsync";
+	durable_observation = "UNCERTAIN";
 	if (swapz_primary_release_partition_owner_at(
 		    recovery_fd, lock_fd, manifest.run_id, 0) < 0)
 		goto out;
@@ -12279,29 +12323,8 @@ out:
 			"original_errno=%d persistence_boundary=%s "
 			"durable=%s mapper=%s swap=%s\n",
 			failure_phase, saved_errno, strerror(saved_errno),
-			saved_errno,
-			!strcmp(failure_phase, "owner-release") ?
-				"owner-unlink-directory-fsync" :
-				(!strcmp(failure_phase, "state-normalize") ||
-				 !strcmp(failure_phase, "state-recovering") ||
-				 !strcmp(failure_phase, "state-restored") ||
-				 !strcmp(failure_phase, "state-complete") ?
-				 "state-rename-close-directory-fsync" : "none"),
-			complete_persisted ? "OBSERVED" :
-				(!strcmp(failure_phase, "state-normalize") ||
-				 !strcmp(failure_phase, "state-recovering") ||
-				 !strcmp(failure_phase, "state-restored") ||
-				 !strcmp(failure_phase, "state-complete") ?
-				 "UNCERTAIN" :
-				 (recovering_persisted ? "OBSERVED" : "UNOBSERVED")),
-			mapper_removed_by_call ? "OBSERVED" :
-				(!strcmp(failure_phase, "mapper-remove") ||
-				 module_unloaded_by_call ?
-				 "UNCERTAIN" : "UNOBSERVED"),
-			swap_deactivated_by_call ? "OBSERVED" :
-				(!strcmp(failure_phase, "swapoff") ||
-				 mapper_removed_by_call ?
-				 "UNCERTAIN" : "UNOBSERVED"));
+			saved_errno, persistence_boundary, durable_observation,
+			mapper_observation, swap_observation);
 	if (result < 0 && recovering_persisted && !complete_persisted &&
 	    recovery_fd >= 0 && lock_fd >= 0)
 		saved_errno = swapz_primary_require_recovery_preserving_errno(

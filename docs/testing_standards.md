@@ -104,6 +104,25 @@ refusals must name the operation, first numeric errno, recovery-state errno
 when it also fails, the persistence boundary and honest durable/mapper/swap
 observability (OBSERVED, UNOBSERVED or UNCERTAIN). Source-extracted fixtures
 must never execute privileged swap, mapper or device operations.
+
+Observation labels are proof labels, not syscall-attempt labels. A successful
+idempotent helper that proves swap already inactive or a mapper already absent
+records OBSERVED even when its *_by_call output is false. Conversely, a
+mutation-attempt flag may become true before the independent post-mutation
+proof completes; if that proof fails, the corresponding state is UNCERTAIN
+rather than OBSERVED. START, STOP and RECOVER update diagnostic observations
+only after the full proof-returning helper succeeds. At the owner-marker unlink
+plus recovery-directory fsync boundary, a failed STOP or RECOVER reports
+durable=UNCERTAIN even when the COMPLETE state record itself was previously
+observed. Every START admission-detail refusal repeats the original errno,
+persistence boundary and durable/mapper/swap observations.
+
+Stale-run state-write coverage exercises the production owner-claim gate, not
+a replacement predicate. With a newer run active, stale ACTIVE and COMPLETE
+swapz_primary_state_write_at() calls plus stale
+swapz_primary_state_require_recovery_at() fail before parsing or replacing
+the newer canonical state. State bytes and the newer owner marker remain
+byte-for-byte unchanged and the fixture does not print either run ID.
 Lifecycle source-order audits must follow the shared helper to its state-write
 dependency instead of requiring the persistence call to appear inline in each
 coordinator body. Audit the ordinary preprocessed executable function bodies,

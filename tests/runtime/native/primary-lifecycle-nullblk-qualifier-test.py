@@ -993,6 +993,503 @@ int main(void) { return execute_transaction() < 0 ? 0 : 1; }
                     self.assertIn("mapper=1", mutant.stdout)
 
 
+
+    def test_lifecycle_observability_tracks_completed_proof_not_by_call_flags(self):
+        """OBSERVED means the proof helper completed, not merely an ioctl ran."""
+        stop_recover = (
+            ("STOP", "static int swapz_primary_stop_active(",
+             "static int swapz_primary_recover(", "stop-mapper-removed"),
+            ("RECOVER", "static int swapz_primary_recover(",
+             "static int swapz_primary_read_only_plan(",
+             "recover-mapper-removed"),
+        )
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+
+struct synthetic_manifest { int unused; };
+static int deactivate_mode;
+static int remove_mode;
+static int deactivate_calls;
+static int remove_calls;
+
+static int injected_deactivate(
+    int recovery_fd, int lock_fd, const struct synthetic_manifest *manifest,
+    int *deactivated_by_call)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)manifest;
+    ++deactivate_calls;
+    *deactivated_by_call = 0;
+    if (deactivate_mode != 0) {
+        errno = EBUSY;
+        return -1;
+    }
+    return 0; /* Exact inventory already proved inactive. */
+}
+
+static int injected_remove(
+    int recovery_fd, int lock_fd, const struct synthetic_manifest *manifest,
+    int *removed_by_call)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)manifest;
+    ++remove_calls;
+    *removed_by_call = remove_mode == 2;
+    if (remove_mode == 1 || remove_mode == 2) {
+        errno = EIO;
+        return -1;
+    }
+    return 0; /* Exact absence may be proved without a remove ioctl. */
+}
+
+#define swapz_primary_deactivate_mapper_swap injected_deactivate
+#define swapz_primary_dm_remove_mapper injected_remove
+#define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) ((void)0)
+
+static int run_case(void)
+{
+    const int recovery_fd = 7;
+    const int lock_fd = 8;
+    struct synthetic_manifest manifest = {0};
+    int swap_deactivated_by_call = 0;
+    int mapper_removed_by_call = 0;
+    const char *failure_phase = "admission";
+    const char *swap_observation = "UNOBSERVED";
+    const char *mapper_observation = "UNOBSERVED";
+    int result = -1;
+"""
+        suffix = r"""
+after_steps:
+out:
+    printf("result=%d errno=%d deactivate=%d remove=%d "
+           "phase=%s swap=%s mapper=%s by_call=%d/%d\n",
+           result, errno, deactivate_calls, remove_calls, failure_phase,
+           swap_observation, mapper_observation,
+           swap_deactivated_by_call, mapper_removed_by_call);
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc != 3)
+        return 64;
+    deactivate_mode = atoi(argv[1]);
+    remove_mode = atoi(argv[2]);
+    return run_case();
+}
+"""
+        expected_cases = (
+            # Already-inactive swap is OBSERVED even though no swapoff was
+            # performed; a failed mapper proof remains UNCERTAIN.
+            (0, 1, "swap=OBSERVED mapper=UNCERTAIN by_call=0/0"),
+            # A remove ioctl followed by failed absence proof is not OBSERVED.
+            (0, 2, "swap=OBSERVED mapper=UNCERTAIN by_call=0/1"),
+            # Already-absent mapper is OBSERVED without a remove ioctl.
+            (0, 0, "swap=OBSERVED mapper=OBSERVED by_call=0/0"),
+            # A definite swapoff failure cannot establish post-call state and
+            # must not enter mapper removal.
+            (1, 0, "swap=UNCERTAIN mapper=UNOBSERVED by_call=0/0"),
+        )
+        for operation, begin, end, last_interrupt in stop_recover:
+            body_start = self.primary.index(begin)
+            body = self.primary[
+                body_start:self.primary.index(end, body_start)]
+            first = body.index('failure_phase = "swapoff";')
+            last = body.index(
+                f'SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER("{last_interrupt}");',
+                first)
+            snippet = body[first:last]
+            owner_phase = body.index('failure_phase = "owner-release";')
+            owner_call = body.index(
+                "swapz_primary_release_partition_owner_at(", owner_phase)
+            owner_window = body[owner_phase:owner_call]
+            self.assertIn(
+                'persistence_boundary = "owner-unlink-directory-fsync";',
+                owner_window)
+            self.assertIn(
+                'durable_observation = "UNCERTAIN";', owner_window)
+            with TemporaryDirectory(
+                    prefix=f"swapz-primary-{operation.lower()}-observability-"
+            ) as directory:
+                fixture = Path(directory)
+                source = fixture / "observability.c"
+                binary = fixture / "observability"
+                compiler = [
+                    "cc", "-std=c11", "-O2", "-Wall", "-Wextra",
+                    "-Werror", "-Wpedantic", str(source), "-o", str(binary),
+                ]
+                source.write_text(
+                    prefix + snippet + "\ngoto after_steps;\n" + suffix,
+                    encoding="utf-8")
+                subprocess.run(compiler, check=True, cwd=ROOT)
+                for deactivate_mode, remove_mode, expected in expected_cases:
+                    with self.subTest(
+                            operation=operation,
+                            deactivate=deactivate_mode,
+                            remove=remove_mode):
+                        result = subprocess.run(
+                            [
+                                str(binary), str(deactivate_mode),
+                                str(remove_mode),
+                            ],
+                            cwd=ROOT, capture_output=True, text=True,
+                            check=False, timeout=5,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn(expected, result.stdout)
+                        if deactivate_mode != 0:
+                            self.assertIn("remove=0", result.stdout)
+
+                # Negative controls: deleting either post-success proof marker
+                # must make the corresponding exact-observation case fail.
+                for assignment, expected in (
+                        ('swap_observation = "OBSERVED";',
+                         "swap=OBSERVED mapper=UNCERTAIN by_call=0/0"),
+                        ('mapper_observation = "OBSERVED";',
+                         "swap=OBSERVED mapper=OBSERVED by_call=0/0")):
+                    with self.subTest(
+                            operation=operation, mutation=assignment):
+                        mutated = snippet.replace(assignment, "", 1)
+                        self.assertNotEqual(mutated, snippet)
+                        source.write_text(
+                            prefix + mutated + "\ngoto after_steps;\n" +
+                            suffix, encoding="utf-8")
+                        subprocess.run(compiler, check=True, cwd=ROOT)
+                        remove_mode = 1 if assignment.startswith("swap") else 0
+                        mutant = subprocess.run(
+                            [str(binary), "0", str(remove_mode)],
+                            cwd=ROOT, capture_output=True, text=True,
+                            check=False, timeout=5,
+                        )
+                        self.assertEqual(mutant.returncode, 0, mutant.stderr)
+                        self.assertNotIn(expected, mutant.stdout)
+
+        start_begin = self.primary.index(
+            "static int swapz_primary_start_prepared(")
+        start_end = self.primary.index(
+            "static int swapz_primary_state_recoverable(", start_begin)
+        start = self.primary[start_begin:start_end]
+        mapper_call = start.index("swapz_primary_dm_create_mapper(")
+        mapper_proof = start.index(
+            'mapper_observation = "OBSERVED";', mapper_call)
+        swapon_call = start.index(
+            "swapz_primary_activate_mapper_swap(", mapper_proof)
+        swap_proof = start.index(
+            'swap_observation = "OBSERVED";', swapon_call)
+        active_write = start.index(
+            "swapz_primary_state_write_at(", swap_proof)
+        self.assertLess(mapper_call, mapper_proof)
+        self.assertLess(mapper_proof, swapon_call)
+        self.assertLess(swapon_call, swap_proof)
+        self.assertLess(swap_proof, active_write)
+        active_window = start[swap_proof:active_write]
+        self.assertIn('durable_observation = "UNCERTAIN";', active_window)
+        self.assertIn(
+            'persistence_boundary = "state-rename-close-directory-fsync";',
+            active_window)
+        detail_begin = start.index('"PRIMARY_START=ADMISSION_DETAIL')
+        detail_end = start.index(");", detail_begin)
+        detail = start[detail_begin:detail_end]
+        for field in (
+                "original_errno=%d", "persistence_boundary=%s",
+                "durable=%s", "mapper=%s", "swap=%s"):
+            self.assertIn(field, detail)
+
+    def test_stale_run_state_updates_cannot_mutate_newer_owner(self):
+        """Exercise the production owner-claim gate in both state writers."""
+        owner_start = self.primary.index(
+            "static int swapz_primary_owner_claim_matches_at(")
+        owner_end = self.primary.index(
+            "\n/*\n * READY with an exact active marker", owner_start)
+        owner_claim = self.primary[owner_start:owner_end]
+
+        write_start = self.primary.index("int swapz_primary_state_write_at(")
+        write_end = self.primary.index(
+            "\nint swapz_primary_state_require_recovery_at(", write_start)
+        state_write = self.primary[write_start:write_end]
+
+        recovery_start = write_end + 1
+        recovery_end = self.primary.index(
+            "\n#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST", recovery_start)
+        require_recovery = self.primary[recovery_start:recovery_end]
+
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define SWAPZ_PRIMARY_STATE_RECORD_MAX 4096U
+#define SWAPZ_PRIMARY_PARTITION_NAME_BYTES 128U
+#define SWAPZ_PRIMARY_RUN_ID_LENGTH 32U
+#define SWAPZ_PRIMARY_STAGE_READY 0
+#define SWAPZ_PRIMARY_STAGE_ACTIVE 2
+#define SWAPZ_PRIMARY_STAGE_COMPLETE 7
+
+struct swapz_primary_target {
+    uint32_t device_major;
+    uint32_t device_minor;
+    char partuuid[37];
+};
+struct swapz_primary_state {
+    char run_id[SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U];
+    int stage;
+    int has_recovery_previous_stage;
+    int recovery_previous_stage;
+};
+static struct swapz_primary_target swapz_primary_selected_target = {
+    7U, 9U, "synthetic"
+};
+#define SWAPZ_PRIMARY_PARTUUID (swapz_primary_selected_target.partuuid)
+
+static int unexpected_state_path_calls;
+static int mutation_attempts;
+
+static int swapz_primary_valid_run_id(const char *run_id)
+{
+    return run_id && strlen(run_id) == SWAPZ_PRIMARY_RUN_ID_LENGTH;
+}
+static int swapz_primary_state_valid(const struct swapz_primary_state *state)
+{
+    return state && swapz_primary_valid_run_id(state->run_id);
+}
+static int swapz_primary_target_valid(const struct swapz_primary_target *target)
+{
+    return target == &swapz_primary_selected_target;
+}
+static int swapz_primary_state_lock_valid(
+    int recovery_fd, int lock_fd, uid_t expected_owner)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)expected_owner;
+    return 1;
+}
+static int swapz_primary_record_read_at(
+    int recovery_fd, const char *name, uid_t expected_owner,
+    char *record, size_t capacity, size_t *length, struct stat *identity)
+{
+    int fd;
+    ssize_t count;
+    int saved_errno;
+
+    (void)expected_owner;
+    (void)identity;
+    fd = openat(recovery_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0)
+        return -1;
+    count = read(fd, record, capacity);
+    saved_errno = errno;
+    if (close(fd) < 0 && count >= 0)
+        return -1;
+    if (count < 0) {
+        errno = saved_errno;
+        return -1;
+    }
+    *length = (size_t)count;
+    return 0;
+}
+static int swapz_primary_state_parse(
+    const char *record, size_t length, struct swapz_primary_state *state)
+{
+    (void)record;
+    (void)length;
+    (void)state;
+    ++unexpected_state_path_calls;
+    errno = EFAULT;
+    return -1;
+}
+static int swapz_primary_state_transition_allowed(
+    const struct swapz_primary_state *current,
+    const struct swapz_primary_state *next)
+{
+    (void)current;
+    (void)next;
+    ++unexpected_state_path_calls;
+    return 0;
+}
+static int swapz_primary_state_format(
+    const struct swapz_primary_state *state, char *record, size_t capacity)
+{
+    (void)state;
+    (void)record;
+    (void)capacity;
+    ++unexpected_state_path_calls;
+    errno = EFAULT;
+    return -1;
+}
+static int swapz_primary_replace_record_at(
+    int recovery_fd, const char *name, const char *run_id,
+    const char *record, uid_t expected_owner)
+{
+    (void)recovery_fd;
+    (void)name;
+    (void)run_id;
+    (void)record;
+    (void)expected_owner;
+    ++mutation_attempts;
+    errno = EFAULT;
+    return -1;
+}
+static int swapz_primary_recovery_required_state(
+    const struct swapz_primary_state *current,
+    struct swapz_primary_state *recovery_required)
+{
+    (void)current;
+    (void)recovery_required;
+    ++unexpected_state_path_calls;
+    errno = EFAULT;
+    return -1;
+}
+"""
+        suffix = r"""
+static int read_exact_file(
+    int directory_fd, const char *name, char *buffer, size_t capacity,
+    size_t *length)
+{
+    int fd = openat(directory_fd, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    ssize_t count;
+    int saved_errno;
+
+    if (fd < 0)
+        return -1;
+    count = read(fd, buffer, capacity);
+    saved_errno = errno;
+    if (close(fd) < 0 && count >= 0)
+        return -1;
+    if (count < 0) {
+        errno = saved_errno;
+        return -1;
+    }
+    *length = (size_t)count;
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    struct swapz_primary_state stale = {0};
+    char before[256];
+    char after[256];
+    size_t before_length;
+    size_t after_length;
+    int directory_fd;
+    int active_result;
+    int active_errno;
+    int complete_result;
+    int complete_errno;
+    int recovery_result;
+    int recovery_errno;
+
+    if (argc != 3)
+        return 64;
+    directory_fd = open(argv[1], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (directory_fd < 0)
+        return 65;
+    memcpy(stale.run_id, argv[2], SWAPZ_PRIMARY_RUN_ID_LENGTH + 1U);
+    stale.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
+    if (read_exact_file(
+            directory_fd, "primary-state.json", before, sizeof(before),
+            &before_length) < 0)
+        return 66;
+
+    errno = 0;
+    active_result = swapz_primary_state_write_at(
+        directory_fd, 7, &stale, getuid());
+    active_errno = errno;
+    stale.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
+    errno = 0;
+    complete_result = swapz_primary_state_write_at(
+        directory_fd, 7, &stale, getuid());
+    complete_errno = errno;
+    errno = 0;
+    recovery_result = swapz_primary_state_require_recovery_at(
+        directory_fd, 7, argv[2], getuid());
+    recovery_errno = errno;
+
+    if (read_exact_file(
+            directory_fd, "primary-state.json", after, sizeof(after),
+            &after_length) < 0)
+        return 67;
+    if (close(directory_fd) < 0)
+        return 68;
+    printf("active=%d/%d complete=%d/%d recovery=%d/%d "
+           "mutations=%d unexpected=%d unchanged=%d\n",
+           active_result, active_errno, complete_result, complete_errno,
+           recovery_result, recovery_errno, mutation_attempts,
+           unexpected_state_path_calls,
+           before_length == after_length &&
+               memcmp(before, after, before_length) == 0);
+    return 0;
+}
+"""
+        run_a = "a" * 32
+        run_b = "b" * 32
+        with TemporaryDirectory(prefix="swapz-primary-stale-writer-") as temp:
+            fixture = Path(temp)
+            source = fixture / "stale-writer.c"
+            binary = fixture / "stale-writer"
+            source.write_text(
+                prefix + owner_claim + state_write + require_recovery + suffix,
+                encoding="utf-8")
+            subprocess.run(
+                [
+                    "cc", "-std=c11", "-O2", "-Wall", "-Wextra",
+                    "-Werror", "-Wpedantic", str(source), "-o", str(binary),
+                ],
+                cwd=ROOT, check=True,
+            )
+            expected_b = (
+                '{"major":7,"minor":9,"partuuid":"synthetic",'
+                f'"run_id":"{run_b}"}}\n'
+            )
+            expected_a = (
+                '{"major":7,"minor":9,"partuuid":"synthetic",'
+                f'"run_id":"{run_a}"}}\n'
+            )
+            active_path = fixture / "partition-synthetic.active"
+            consumed_a_path = fixture / f"consumed-{run_a}.json"
+            consumed_b_path = fixture / f"consumed-{run_b}.json"
+            active_path.write_text(expected_b, encoding="ascii")
+            consumed_a_path.write_text(expected_a, encoding="ascii")
+            consumed_b_path.write_text(expected_b, encoding="ascii")
+            canonical_state = (
+                f'{{"run_id":"{run_b}","stage":"READY"}}\n'
+            )
+            state_path = fixture / "primary-state.json"
+            state_path.write_text(canonical_state, encoding="ascii")
+            for path in (
+                    active_path, consumed_a_path, consumed_b_path, state_path):
+                path.chmod(0o600)
+            outcome = subprocess.run(
+                [str(binary), str(fixture), run_a],
+                cwd=ROOT, capture_output=True, text=True,
+                check=False, timeout=5,
+            )
+            self.assertEqual(outcome.returncode, 0, outcome.stderr)
+            self.assertIn(
+                f"active=-1/{errno.EPERM} complete=-1/{errno.EPERM} "
+                f"recovery=-1/{errno.EPERM} mutations=0 unexpected=0 "
+                "unchanged=1",
+                outcome.stdout,
+            )
+            self.assertTrue(
+                state_path.read_text(encoding="ascii") == canonical_state,
+                "stale state writer changed newer canonical state")
+            self.assertTrue(
+                active_path.read_text(encoding="ascii") == expected_b,
+                "stale state writer changed newer owner marker")
+            self.assertNotRegex(outcome.stdout + outcome.stderr,
+                                r"\b[0-9a-f]{32}\b")
+
     def test_owner_release_failure_and_stale_run_leave_recoverable_evidence(self):
         """Exercise the actual owner-release body against synthetic files."""
         begin = self.primary.index(
@@ -1178,7 +1675,9 @@ int main(int argc, char **argv)
                     else:
                         self.assertTrue(outcome.stdout.startswith("result=0 "))
                     self.assertEqual(marker.exists(), not removed)
-                    self.assertEqual(state.read_text(encoding="ascii"), original)
+                    self.assertTrue(
+                        state.read_text(encoding="ascii") == original,
+                        "owner-release failure changed canonical state")
                     self.assertEqual(outcome.stderr, "")
 
             # Mutant proves the post-unlink fsync failure cannot be treated
