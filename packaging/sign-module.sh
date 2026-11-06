@@ -101,8 +101,10 @@ secure_boot_state() {
             return
         fi
         case "$output" in
-            "SecureBoot enabled") printf '%s\n' 'enabled|0'; return ;;
-            "SecureBoot disabled") printf '%s\n' 'disabled|0'; return ;;
+            "SecureBoot enabled"|$'SecureBoot enabled\nSecureBoot validation is disabled in shim')
+                printf '%s\n' 'enabled|0'; return ;;
+            "SecureBoot disabled"|$'SecureBoot disabled\nPlatform is in Setup Mode')
+                printf '%s\n' 'disabled|0'; return ;;
             *) printf '%s\n' 'unknown|0'; return ;;
         esac
     fi

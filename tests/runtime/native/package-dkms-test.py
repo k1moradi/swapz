@@ -334,7 +334,10 @@ case "${1:-}" in
   --sb-state)
     case "$SWAPZ_FAKE_SECURE_BOOT" in
       enabled) echo 'SecureBoot enabled';;
+      enabled-shim-validation-disabled)
+        printf '%s\n' 'SecureBoot enabled' 'SecureBoot validation is disabled in shim';;
       disabled) echo 'SecureBoot disabled';;
+      setup-mode) printf '%s\n' 'SecureBoot disabled' 'Platform is in Setup Mode';;
       ambiguous) printf '%s\n' 'SecureBoot disabled' 'SecureBoot enabled';;
       *) echo 'unknown';;
     esac
@@ -775,6 +778,12 @@ exec "{flock_binary}" "$@"
         )
         self.assert_absent()
 
+        setup_mode = self.invoke(
+            "install", {"SWAPZ_FAKE_SECURE_BOOT": "setup-mode"})
+        self.assertEqual(setup_mode.returncode, 0, setup_mode.stderr)
+        self.assertNotIn("cryptographic signature verified", setup_mode.stdout)
+        self.assertEqual(self.invoke("uninstall").returncode, 0)
+
         result = self.invoke(
             "install", {
                 "SWAPZ_FAKE_SECURE_BOOT": "enabled",
@@ -809,6 +818,21 @@ exec "{flock_binary}" "$@"
             "install", {"SWAPZ_FAKE_SECURE_BOOT": "enabled"})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cryptographic signature verified", result.stdout)
+        self.assertEqual(self.invoke("uninstall").returncode, 0)
+
+        shim_validation_disabled = self.invoke(
+            "install", {
+                "SWAPZ_FAKE_SECURE_BOOT":
+                    "enabled-shim-validation-disabled",
+            })
+        self.assertEqual(
+            shim_validation_disabled.returncode, 0,
+            shim_validation_disabled.stderr,
+        )
+        self.assertIn(
+            "cryptographic signature verified",
+            shim_validation_disabled.stdout,
+        )
         self.assertEqual(self.invoke("uninstall").returncode, 0)
 
         result = self.invoke(
