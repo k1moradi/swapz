@@ -4761,7 +4761,12 @@ expects status 8 (`readiness-child-start-changed`); zero is malformed telemetry
 and must be rejected earlier with status 2, not mistaken for a pidfd or
 timeout-parent status. When an identity status differs from the expected one,
 the fixture diagnostic should include both numeric and symbolic actual status.
-Release its grandchild by closing the owned pipe, not by signaling an orphan.
+The launcher must publish the child PID atomically through a sibling temporary
+file and rename: file existence can become visible before direct writes have
+filled the file. The reader must accept only a complete positive decimal PID
+within its bounded wait, and release the grandchild by closing the owned pipe,
+not by signaling an orphan or treating an empty/partial marker as process
+identity evidence.
 Successful synthetic cleanup prints only a
 `ROOTLESS_FIXTURE_ID36_CLEANUP` marker, never an actual
 `PASS_ID36_RESOURCE_PRESSURE` token.

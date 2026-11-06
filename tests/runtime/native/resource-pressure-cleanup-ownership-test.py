@@ -236,7 +236,10 @@ import time
 child = subprocess.Popen(
     [sys.executable, "-I", "-c", "import sys; sys.stdin.buffer.read(1)"],
     stdin=sys.stdin, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-Path(sys.argv[1]).write_text(str(child.pid), encoding="ascii")
+pid_record = Path(sys.argv[1])
+pending_pid_record = pid_record.with_name(pid_record.name + ".pending")
+pending_pid_record.write_text(str(child.pid), encoding="ascii")
+os.replace(pending_pid_record, pid_record)
 while not Path(sys.argv[2]).exists():
     time.sleep(0.01)
 os._exit(0)
@@ -247,13 +250,20 @@ os._exit(0)
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL)
             try:
+                nested_pid_text = ""
                 for _ in range(300):
-                    if child_pid_path.exists():
+                    try:
+                        nested_pid_text = child_pid_path.read_text(encoding="ascii")
+                    except FileNotFoundError:
+                        nested_pid_text = ""
+                    if nested_pid_text.isdecimal() and int(nested_pid_text) > 0:
                         break
                     self.assertIsNone(parent.poll(), "launcher exited early")
                     time.sleep(0.01)
-                self.assertTrue(child_pid_path.exists())
-                nested_pid = int(child_pid_path.read_text(encoding="ascii"))
+                self.assertTrue(
+                    nested_pid_text.isdecimal() and int(nested_pid_text) > 0,
+                    "launcher did not atomically publish a valid child PID")
+                nested_pid = int(nested_pid_text)
                 parent_stat = Path(f"/proc/{parent.pid}/stat").read_text(
                     encoding="ascii")
                 parent_start = parent_stat[parent_stat.rfind(") ") + 2:].split()[19]
