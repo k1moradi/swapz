@@ -2152,6 +2152,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         artifact_drift_before_mutation or recovery_failure):
                     state["_test_results"] = json.loads(
                         (Path(directory) / probe.RESULTS_NAME).read_text())
+                if state.get("stage") == "COMPLETE":
+                    # The producer commits oracle_suite=PASS only after final
+                    # restoration/evidence validation; the teardown snapshot
+                    # predates that decision and cannot be used as final proof.
+                    state["_test_results"] = json.loads(
+                        (Path(directory) / probe.RESULTS_NAME).read_text())
                 state["_test_observed_header"] = observed_block_zero
                 state["_test_owner_marker"] = os.path.isfile(
                     Path(directory) / f"partition-{target['partuuid']}.active")
