@@ -2168,7 +2168,11 @@ an impossible count earns zero lower-completion credit and quarantines the
 extent, but may select `-EUCLEAN` only when the lower callback reported no
 original error. A definitive per-extent lower errno must also survive a
 secondary authority-finish error such as `-ESTALE`: a damaged active handle
-remains outstanding and must not be reported as cleanly drained or released. This guards engine replay only:
+remains outstanding and must not be reported as cleanly drained or released.
+The same first-error selection applies to batched replay cleanup and standalone
+RAW finalization. Reporting precedence never authorizes recovery: if secondary
+finalization leaves authority in-flight or paused ownership unresolved, the
+mapper must fail closed rather than classify the first lower error as retryable. This guards engine replay only:
 duplicate dm-io callbacks, upper BIO reference release, and the lifetime of
 a reused packed buffer still require separate loaded completion qualification.
 

@@ -15,6 +15,17 @@
 int swapz_page_is_zero(const swapz_u8 *page);
 
 /*
+ * Error-selection only. A negative errno already owned by an earlier phase
+ * outranks later cleanup/finalization; a nonnegative first result is not a
+ * definitive errno and the later result retains its existing canonicalization.
+ * Ownership uncertainty remains a separate fail-closed condition for callers.
+ */
+static inline int swapz_preserve_first_error(int first_error, int later_error)
+{
+	return first_error < 0 ? first_error : later_error;
+}
+
+/*
  * Experimental synchronous lower-I/O boundary for an ORDERED worker.
  * It is NOT a Device Mapper callback yet. All memory is preallocated by
  * the caller. Every write callback MUST return only after full lower I/O

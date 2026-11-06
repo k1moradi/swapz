@@ -324,6 +324,46 @@ static int test_per_extent_overcomplete_failure_preserves_errno(void)
 	return 0;
 }
 
+static int test_first_error_selection_contract(void)
+{
+	static const struct {
+		const char *phase;
+		int first_error;
+		int later_error;
+		int expected_error;
+		unsigned int outstanding;
+	} cases[] = {
+		{ "lower-before-finalization", -EIO, -ESTALE, -EIO, 1 },
+		{ "publication-before-cleanup", -EBADMSG, -EUCLEAN, -EBADMSG, 1 },
+		{ "cleanup-only", 0, -ESTALE, -ESTALE, 1 },
+		{ "malformed-positive-first", EIO, -EIO, -EIO, 1 },
+		{ "all-success", 0, 0, 0, 0 },
+	};
+	unsigned int index;
+
+	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); ++index) {
+		int observed = swapz_preserve_first_error(
+			cases[index].first_error, cases[index].later_error);
+
+		if (observed != cases[index].expected_error) {
+			fprintf(stderr,
+				"lower-write-aggregation scenario=first-error-selection "
+				"phase=%s original_lower_or_upper_error=%d "
+				"secondary_error=%d expected_error=%d observed_error=%d "
+				"expected_order=first-error-before-secondary "
+				"observed_order=error-selection outstanding_operations=%u "
+				"safe_recovery=%s\n",
+				cases[index].phase, cases[index].first_error,
+				cases[index].later_error, cases[index].expected_error,
+				observed, cases[index].outstanding,
+				cases[index].outstanding ?
+					"retain-owner-refuse-clean-drain" : "complete");
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /*
  * A definitive per-extent lower failure must outrank a secondary authority
  * finish error. This deliberately damages the active token after the lower
@@ -358,6 +398,76 @@ static int test_per_extent_lower_failure_before_stale_finish(void)
 			e.completed_blocks, a.in_flight);
 		return 1;
 	}
+	return 0;
+}
+
+/*
+ * A successfully completed lower run can still fail while authority replays
+ * it. Force the first replay to reject corrupted payload bytes, then make the
+ * next paused transaction fail cleanup. The replay error is the first error
+ * and must survive while the unresolved tail remains owned and uncredited.
+ */
+static int test_replay_error_survives_secondary_cleanup_failure(void)
+{
+	struct swapz_io_run run = { .bytes = bulk, .txs = bulk_txs };
+	swapz_u8 prepared = 0, committed = 99;
+	swapz_u16 completed = 0;
+	swapz_u8 pending_before;
+	swapz_u32 tail_logical, saved_tail_generation;
+	size_t corrupted_byte;
+	unsigned int index;
+	int error, observed_cleanup_error;
+
+	CHECK(setup() == 0);
+	CHECK(swapz_engine_prepare_batched_run(&e, pages, 16, &run,
+					       &prepared, 0) == 0);
+	CHECK(prepared == 16 && run.extent_count >= 2);
+	pending_before = a.batch_pending;
+	write_sealed(NULL, prepared);
+	CHECK(write_run(NULL, run.start_block, run.blocks,
+			run.bytes, &completed) == 0);
+	CHECK(completed == run.blocks);
+
+	tail_logical = run.txs[1].records[0].logical_page;
+	CHECK(tail_logical < 128);
+	saved_tail_generation = maps[tail_logical].generation;
+	maps[tail_logical].generation++;
+	corrupted_byte =
+		((size_t)run.offsets[0] + run.txs[0].extent_blocks) *
+		SWAPZ_BLOCK_BYTES - 1U;
+	run.bytes[corrupted_byte] ^= 1U;
+
+	error = swapz_engine_complete_batched_run(
+		&e, &run, completed, 0, &committed);
+	/* The failed internal cleanup is read-only on this stale tail. Repeating
+	 * that validation proves the secondary errno without consuming ownership. */
+	observed_cleanup_error = swapz_batch_resume(&a, &run.txs[1]);
+	if (error != -EBADMSG || observed_cleanup_error != -ESTALE ||
+	    committed || e.completed_blocks || published_calls ||
+	    a.batch_pending != pending_before - 1U || a.batch_consumed != 1U ||
+	    a.in_flight || a.batch_replaying || !a.abandoned_blocks) {
+		fprintf(stderr,
+			"lower-write-aggregation scenario=replay-secondary-cleanup "
+			"phase=authority-replay original_lower_error=0 "
+			"original_replay_error=%d secondary_cleanup_error=%d "
+			"expected_upper_error=%d observed_upper_error=%d "
+			"expected_completed_blocks=0 observed_completed_blocks=%u "
+			"expected_order=replay-error-before-cleanup "
+			"observed_order=completion-return "
+			"expected_outstanding_batch=%u observed_outstanding_batch=%u "
+			"safe_recovery=retain-paused-owner-refuse-clean-drain\n",
+			-EBADMSG, observed_cleanup_error, -EBADMSG, error,
+			e.completed_blocks, pending_before - 1U, a.batch_pending);
+		return 1;
+	}
+
+	run.bytes[corrupted_byte] ^= 1U;
+	maps[tail_logical].generation = saved_tail_generation;
+	for (index = 1; index < run.extent_count; ++index) {
+		CHECK(swapz_batch_resume(&a, &run.txs[index]) == 0);
+		CHECK(swapz_abort(&a, &a.active_tx) == 0);
+	}
+	CHECK(!a.batch_pending && !a.batch_replaying && !a.in_flight);
 	return 0;
 }
 
@@ -2223,7 +2333,9 @@ int main(void)
 	CHECK(test_immutable_run_failure_quarantines_all() == 0); passed++;
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;
 	CHECK(test_per_extent_overcomplete_failure_preserves_errno() == 0); passed++;
+	CHECK(test_first_error_selection_contract() == 0); passed++;
 	CHECK(test_per_extent_lower_failure_before_stale_finish() == 0); passed++;
+	CHECK(test_replay_error_survives_secondary_cleanup_failure() == 0); passed++;
 	CHECK(test_failed_run_acks_nothing() == 0); passed++;
 	CHECK(test_overwrite_failed_run_preserves_old_pages() == 0); passed++;
 	CHECK(test_publication_observer_follows_authority_publish() == 0); passed++;

@@ -1416,10 +1416,9 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 					engine->write_scratch, bytes,
 					completed, error);
 
-			/* Preserve a definitive lower error when authority cleanup
-			 * also fails. Its unresolved reservation forbids clean drain. */
-			if (error >= 0)
-				error = finish_error;
+			/* Preserve a definitive lower error when authority finalization
+			 * also fails. Unresolved ownership is handled separately. */
+			error = swapz_preserve_first_error(error, finish_error);
 		}
 		engine->publish_wall_ns += swapz_engine_elapsed_ns(
 			phase_start, swapz_engine_now_ns());
@@ -1864,7 +1863,7 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 			if (!cleanup)
 				swapz_account_authenticated_batched_completion(
 					e, run, completed_blocks, 1);
-			return cleanup ? cleanup : error;
+			return swapz_preserve_first_error(error, cleanup);
 		}
 		/*
 		 * batch_resume() authenticated tx against its paused CRC and copied
@@ -1894,7 +1893,7 @@ int swapz_engine_complete_batched_run(struct swapz_engine *e,
 			if (!cleanup)
 				swapz_account_authenticated_batched_completion(
 					e, run, completed_blocks, 1);
-			return cleanup ? cleanup : error;
+			return swapz_preserve_first_error(error, cleanup);
 		}
 		*committed_pages += run->takes[i];
 		if (run->raw[i])

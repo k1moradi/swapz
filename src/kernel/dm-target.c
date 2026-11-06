@@ -3961,6 +3961,18 @@ static int swapz_gc_flush(struct swapz_dm *ctx)
 					 ctx->gc_count, &completed);
 	ctx->gc_pages += completed;
 	ctx->gc_count = 0;
+	/*
+	 * The engine may preserve an earlier lower/replay errno while a later
+	 * finalization failure leaves authority ownership unresolved. GC normally
+	 * retries lower EIO, so explicitly make this combination terminal rather
+	 * than misclassifying uncertain ownership as recoverable.
+	 */
+	if (error && (ctx->authority.in_flight ||
+		      ctx->authority.batch_replaying ||
+		      ctx->authority.batch_pending))
+		swapz_fail_at(ctx, error, "write",
+			      swapz_failure_category(error),
+			      "gc-engine-finalization");
 	return error;
 }
 
@@ -3969,7 +3981,7 @@ static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
 {
 	struct swapz_tx tx;
 	swapz_u8 completed = 0;
-	int error;
+	int error, finish_error;
 
 	if (old->extent_blocks != 1 || old->start_block >= ctx->physical_blocks)
 		return -EUCLEAN;
@@ -3988,7 +4000,14 @@ static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
 	if (!error && completed == 1)
 		error = swapz_verify_raw_write(ctx, tx.start_block,
 					   ctx->input_page);
-	error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
+	finish_error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page,
+				      completed, error);
+	if (finish_error && (finish_error != error || ctx->authority.in_flight))
+		swapz_fail_at(ctx, error < 0 ? error : finish_error, "write",
+			      swapz_failure_category(
+				      error < 0 ? error : finish_error),
+			      "gc-raw-finalization");
+	error = swapz_preserve_first_error(error, finish_error);
 	if (!error)
 		ctx->gc_pages++;
 	return error;
@@ -4983,7 +5002,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 						&ctx->engine, &inflight->run, 0,
 						older_error, &aborted);
 
-					error = cleanup ? cleanup : older_error;
+					error = swapz_preserve_first_error(older_error,
+									 cleanup);
 					goto commit_done;
 				}
 			}
@@ -5291,7 +5311,7 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 {
 	struct swapz_tx tx;
 	swapz_u8 completed = 0;
-	int error;
+	int error, finish_error;
 
 	error = swapz_copy_bio_accounted(bio, ctx->input_page, false,
 					 &ctx->ordered_write_copy_wall_ns,
@@ -5325,7 +5345,9 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 	if (!error && completed == 1)
 		error = swapz_verify_raw_write(ctx, tx.start_block,
 					   ctx->input_page);
-	error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
+	finish_error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page,
+				      completed, error);
+	error = swapz_preserve_first_error(error, finish_error);
 	if (!error) {
 		ctx->raw_pages++;
 		ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;

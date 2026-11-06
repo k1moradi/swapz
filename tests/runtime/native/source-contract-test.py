@@ -1942,7 +1942,17 @@ static swapz_u16 swapz_probe_set(
             ctor.index("swapz_authority_validate_geometry("),
             ctor.index("ctx->maps = kvcalloc"))
         self.assertIn("swapz_gc_flush(ctx)", compact)
-        self.assertIn("swapz_finish_raw(&ctx->authority", body("swapz_gc_move_raw"))
+        gc_flush = body("swapz_gc_flush")
+        gc_raw = body("swapz_gc_move_raw")
+        self.assertIn("finish_error = swapz_finish_raw(&ctx->authority", gc_raw)
+        self.assertIn(
+            "error = swapz_preserve_first_error(error, finish_error);", gc_raw)
+        self.assertIn('"gc-raw-finalization"', gc_raw)
+        self.assertIn("ctx->authority.in_flight", gc_raw)
+        self.assertIn("ctx->authority.in_flight", gc_flush)
+        self.assertIn("ctx->authority.batch_replaying", gc_flush)
+        self.assertIn("ctx->authority.batch_pending", gc_flush)
+        self.assertIn('"gc-engine-finalization"', gc_flush)
         self.assertIn("if (a->live_records[block])", compact)
 
     def test_discard_validates_entire_range_before_mutating(self):
@@ -2156,10 +2166,14 @@ int main(void) {
             "ctx->prepublication_fua = !!(bio->bi_opf & REQ_FUA);")
         raw_write = raw.index("error = swapz_lower_write(", raw_set)
         raw_clear = raw.index("ctx->prepublication_fua = false;", raw_write)
-        raw_publish = raw.index("error = swapz_finish_raw(", raw_clear)
+        raw_publish = raw.index("finish_error = swapz_finish_raw(", raw_clear)
+        raw_precedence = raw.index(
+            "error = swapz_preserve_first_error(error, finish_error);",
+            raw_publish)
         self.assertLess(raw_set, raw_write)
         self.assertLess(raw_write, raw_clear)
         self.assertLess(raw_clear, raw_publish)
+        self.assertLess(raw_publish, raw_precedence)
 
         # Zero elision has no lower data write; its required FUA must still
         # succeed before discard_page advances the logical generation.
@@ -2174,6 +2188,18 @@ int main(void) {
         self.assertIn("(!recoverable_gc_error || committed)", flush)
         self.assertIn("swapz_fail(ctx, error)", flush)
         self.assertNotIn("DM_MAPIO_KILL; /* Until FUA", body("swapz_map"))
+
+    def test_first_io_error_survives_secondary_finalization_failures(self):
+        complete = source_body("swapz_engine_complete_batched_run", ENGINE)
+        flush = body("swapz_flush_window")
+        self.assertEqual(
+            complete.count(
+                "return swapz_preserve_first_error(error, cleanup);"), 2)
+        self.assertNotIn("return cleanup ? cleanup : error;", complete)
+        self.assertIn(
+            "error = swapz_preserve_first_error(older_error,",
+            flush)
+        self.assertNotIn("error = cleanup ? cleanup : older_error;", flush)
 
     def test_valid_empty_flush_protocol_and_failure_accounting(self):
         # REQ_OP_FLUSH as a BIO is rejected in Linux blk-core itself.
