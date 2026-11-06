@@ -2316,6 +2316,32 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 
 		error = failure ? failure : -EIO;
 	}
+	/*
+	 * RAW_SELECTED may have reached lower I/O while its speculative codec
+	 * still ran. Lower completion alone cannot authorize authority replay:
+	 * join every selected-RAW producer now so a late negative result aborts
+	 * the reserved run before any new generation can be published.
+	 */
+	if (!error) {
+		for (index = 0; index < inflight->count; ++index) {
+			error = swapz_wait_raw_selected_preparation(
+				inflight->bios[index]);
+			if (error) {
+				swapz_fail(ctx, error);
+				break;
+			}
+		}
+	}
+	/*
+	 * A different preparation producer can elect terminal failure while this
+	 * join sleeps. Recheck the target latch immediately before authority
+	 * replay so a concurrent terminal error cannot publish a fresh mapping.
+	 */
+	if (!error && smp_load_acquire(&ctx->failed)) {
+		int failure = READ_ONCE(ctx->last_error);
+
+		error = failure ? failure : -EIO;
+	}
 	publish_before = ctx->engine.publish_wall_ns;
 	publish_crc_before = ctx->authority.publish_crc_wall_ns;
 	complete_start = ktime_get_ns();
@@ -2351,21 +2377,6 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 			ctx->accepted_work_lower_idle_post_lower_ns += post_lower_ns;
 	}
 
-	/*
-	 * RAW_SELECTED may have reached lower I/O while its speculative codec
-	 * still ran. Preserve that overlap, but do not publish a successful run
-	 * to upper completion until every selected-RAW producer has terminated.
-	 */
-	if (!error && committed == inflight->count) {
-		for (index = 0; index < inflight->count; ++index) {
-			error = swapz_wait_raw_selected_preparation(
-				inflight->bios[index]);
-			if (error) {
-				swapz_fail(ctx, error);
-				break;
-			}
-		}
-	}
 	/* No successor may treat this run as complete before publication. */
 	swapz_lane_gap_publish(ctx, inflight->lane_epoch, lower_end,
 			       lane_observed_ns, finalize_end,
