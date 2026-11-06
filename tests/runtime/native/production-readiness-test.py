@@ -3450,7 +3450,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
 
         for mutation in (
                 "missing-failure-phase", "wrong-failure-phase",
-                "wrong-diagnostic-expected", "wrong-diagnostic-reason"):
+                "wrong-diagnostic-expected", "wrong-diagnostic-reason",
+                "wrong-diagnostics-type"):
             with self.subTest(producer_diagnostic=mutation):
                 unauthenticated = physical_campaign_failure_evidence(
                     encoded(policy))
@@ -3462,8 +3463,11 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     diagnostic["failure_phase"] = "teardown"
                 elif mutation == "wrong-diagnostic-expected":
                     diagnostic["expected"] = "EXCLUDED"
-                else:
+                elif mutation == "wrong-diagnostic-reason":
                     diagnostic["reason"] = "synthetic detached failure"
+                else:
+                    unauthenticated["physical_evidence_audit"][
+                        "diagnostics"] = None
                 unauthenticated_result = evaluate(
                     policy=policy, campaign=unauthenticated)
                 self.assertEqual(

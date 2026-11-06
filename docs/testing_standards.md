@@ -9152,7 +9152,9 @@ producer diagnostic whose expected PASS, producer FAIL status and failure phase
 agree with the first-failure witness; a missing or contradictory diagnostic
 phase cannot be promoted to measured FAIL. Its public blocker identifies the
 producer-failure binding field and expected/observed schema classes, not the
-private producer error text. Report the
+private producer error text. Wrong-typed or null diagnostic collections are
+controlled BLOCKED evidence and must not raise while checking that binding.
+Report the
 invalid field and expected/observed types with bounded, redacted recapture
 guidance. Regression fixtures must locate an authenticating diagnostic by the
 failure-witness identity rather than retained-list position, and type-strict

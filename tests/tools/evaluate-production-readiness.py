@@ -709,7 +709,9 @@ def _physical_producer_failure_diagnostic_is_valid(
         audit: dict[str, Any], first_failure: dict[str, Any]) -> bool:
     """Bind an arm FAIL to the producer's bounded retained diagnostic."""
     phase = audit.get("first_failed_phase")
+    diagnostics = audit.get("diagnostics")
     if (
+            not isinstance(diagnostics, list) or
             first_failure.get("metric") != "arm.verdict" or
             not isinstance(phase, str) or
             re.fullmatch(
@@ -729,7 +731,7 @@ def _physical_producer_failure_diagnostic_is_valid(
         diagnostic.get("observed") is None and
         diagnostic.get("reason") ==
         "authenticated physical producer terminal measurement failure"
-        for diagnostic in audit.get("diagnostics", ())
+        for diagnostic in diagnostics
     )
 
 
