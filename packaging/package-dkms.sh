@@ -1087,6 +1087,13 @@ state = {
     "kernel_release": kernel_release,
     "backup_files": entries,
 }
+
+
+def canonical_json(value):
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
 # Never silently rebaseline a backed-up file after the prepared checkpoint.
 if final.exists() or final.is_symlink():
     if final.is_symlink() or not final.is_file():
@@ -1104,13 +1111,12 @@ if final.exists() or final.is_symlink():
     if (not isinstance(previous, dict)
             or set(previous) != set(state)
             or previous.get("phase") not in allowed_phases
-            or previous_bytes != (json.dumps(previous, sort_keys=True,
-                                             separators=(",", ":")) + "\n").encode()):
+            or previous_bytes != (canonical_json(previous) + "\n").encode()):
         raise SystemExit("noncanonical previous package journal")
     for field in ("schema", "version", "kernel_release", "backup_files"):
-        if previous.get(field) != state[field]:
+        if canonical_json(previous.get(field)) != canonical_json(state[field]):
             raise SystemExit(f"package rollback snapshot changed: {field}")
-state_bytes = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
+state_bytes = (canonical_json(state) + "\n").encode()
 if len(state_bytes) > 1024 * 1024:
     raise SystemExit("package journal exceeds size bound")
 # A failed rename can leave a fully written temp journal. Only retry when
@@ -1268,8 +1274,13 @@ entries = state.get("backup_files")
 if not isinstance(entries, list) or len(entries) > 1024:
     raise SystemExit("invalid rollback file manifest")
 seen = set()
+entry_fields = {"path", "sha256", "size", "mode", "uid", "gid"}
 for entry in entries:
-    relative = entry.get("path") if isinstance(entry, dict) else None
+    if (not isinstance(entry, dict) or set(entry) != entry_fields
+            or any(type(entry[field]) is not int or entry[field] < 0
+                   for field in ("size", "mode", "uid", "gid"))):
+        raise SystemExit("invalid rollback file manifest entry")
+    relative = entry["path"]
     if (not isinstance(relative, str) or not relative or len(relative) > 4096
             or relative != Path(relative).as_posix()
             or Path(relative).is_absolute()
@@ -1281,16 +1292,16 @@ for entry in entries:
     if path.is_symlink() or not path.is_file():
         raise SystemExit("missing or substituted rollback file")
     metadata = path.stat()
-    if (entry.get("size") != metadata.st_size
-            or entry.get("mode") != stat.S_IMODE(metadata.st_mode)
-            or entry.get("uid") != metadata.st_uid
-            or entry.get("gid") != metadata.st_gid):
+    if (entry["size"] != metadata.st_size
+            or entry["mode"] != stat.S_IMODE(metadata.st_mode)
+            or entry["uid"] != metadata.st_uid
+            or entry["gid"] != metadata.st_gid):
         raise SystemExit("rollback file metadata changed")
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
-    if entry.get("sha256") != digest.hexdigest():
+    if entry["sha256"] != digest.hexdigest():
         raise SystemExit("rollback file digest changed")
 actual = set()
 for path in backup.rglob("*"):

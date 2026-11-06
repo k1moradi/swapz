@@ -3615,6 +3615,46 @@ exec "{flock_binary}" "$@"
         self.assertTrue(transaction.exists())
         self.assertFalse((self.prefix / "sbin/swapzctl").exists())
 
+    def test_recover_rejects_type_coerced_and_duplicate_journal_fields(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        transaction = self.kill_at_durable_phase(
+            "uninstall", "dkms-removed")
+        state_path = transaction / "state.json"
+        canonical_state = state_path.read_text()
+        state = json.loads(canonical_state)
+        self.assertTrue(state["backup_files"])
+
+        metadata_entry = state["backup_files"][0]
+        original_mode = metadata_entry["mode"]
+        self.assertIs(type(original_mode), int)
+        metadata_entry["mode"] = float(original_mode)
+        self.assertEqual(metadata_entry["mode"], original_mode)
+        state_path.write_text(
+            json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
+
+        type_coerced = self.invoke("recover")
+        self.assertNotEqual(type_coerced.returncode, 0)
+        self.assertIn(
+            "recovery snapshot verification failed", type_coerced.stderr)
+        self.assertTrue(transaction.exists())
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+
+        mode_token = f'"mode":{original_mode}'
+        self.assertGreaterEqual(canonical_state.count(mode_token), 1)
+        state_path.write_text(canonical_state.replace(
+            mode_token, f'"mode":0,{mode_token}', 1))
+        duplicate = self.invoke("recover")
+        self.assertNotEqual(duplicate.returncode, 0)
+        self.assertIn("recovery snapshot verification failed", duplicate.stderr)
+        self.assertTrue(transaction.exists())
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
+
+        state_path.write_text(canonical_state)
+        recovered = self.invoke("recover")
+        self.assertEqual(recovered.returncode, 0, recovered.stderr)
+        self.assertFalse(transaction.exists())
+        self.assert_installed_exact()
+
     def test_recover_partial_initial_install_and_compressed_module(self):
         transaction = self.kill_at_durable_phase("install", "source-created")
         blocked = self.invoke("install")

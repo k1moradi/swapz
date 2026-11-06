@@ -8138,7 +8138,12 @@ checkpoint must also durably record the new transaction-directory entry before
 any removal. The installer must not modify the snapshot after preparation:
 every later phase must recheck its file hashes and metadata, fsync its new
 journal file and the transaction directory, and need not re-fsync the unchanged
-snapshot files, backup directories or transaction parent. Activation-capable
+snapshot files, backup directories or transaction parent. Rollback journal JSON
+is exact-schema authority: each backup-file record contains only `path`,
+`sha256`, `size`, `mode`, `uid` and `gid`; numeric metadata must be JSON
+integers, never booleans or floats. Canonical admission must reject duplicate
+keys and numerically equal type substitutions rather than silently normalizing
+them during the next phase transition. Activation-capable
 entry points are removed before DKMS/module mutation. Every destructive transition,
 including DKMS removal, source/module removal, depmod and systemd reload, has a
 durable phase. Failure or a caught HUP/INT/TERM must restore the exact verified
