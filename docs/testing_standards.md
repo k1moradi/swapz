@@ -9656,7 +9656,10 @@ Owner, real-swap and cold-boot release refusals must likewise report the
 failing source, tested-commit, qualified-artifact, target or mapper-identity
 gate by bounded match/mismatch/invalid binding classes. They must not echo
 required or forged source SHAs, module or evidence digests, target PARTUUIDs,
-host identifiers or attacker-controlled mapper names. Rootless synthetic
+host identifiers or attacker-controlled mapper names. Nested metadata-RAM
+validation may retain safe numeric and boolean detail, but source SHA, host
+boot-ID and mapper-UUID differences must be translated to binding classes
+before the validator error reaches a public release blocker. Rootless synthetic
 regressions must include mismatched valid identities, wrong signed artifact
 digests, malformed or overflowing counts, and both PASS- and FAIL-claimed
 boot evidence. An invalid class is not permission to authenticate a producer

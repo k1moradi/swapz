@@ -1776,6 +1776,8 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "source_mismatch": lambda trace: trace.update(source_sha="b" * 40),
             "boot_mismatch": lambda trace: trace.update(
                 host_boot_id="22222222-2222-4222-8222-222222222222"),
+            "mapper_mismatch": lambda trace: trace.update(
+                mapper_uuid="SWAPZ-PRIMARY-" + "e" * 32),
         }
         for name, damage in corruptions.items():
             with self.subTest(corruption=name):
@@ -1806,14 +1808,34 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     expected_gap in blocker
                     for blocker in result["code_blockers"]),
                     (name, result["code_blockers"]))
-                if name in ("source_mismatch", "boot_mismatch"):
-                    identity_metric = (
-                        "metric=source_sha" if name == "source_mismatch"
-                        else "metric=host_boot_id")
-                    self.assertTrue(any(
-                        identity_metric in blocker
-                        for blocker in result["code_blockers"]),
-                        (name, result["code_blockers"]))
+                identity_expectations = {
+                    "source_mismatch": (
+                        "metric=source_sha",
+                        "observed_source_identity_class=mismatch",
+                        (SOURCE, "b" * 40)),
+                    "boot_mismatch": (
+                        "metric=host_boot_id",
+                        "observed_host_boot_identity_class=mismatch",
+                        (campaign["capacity_and_ram"][
+                            "metadata_ram_host_binding"]["host_boot_id"],
+                         "22222222-2222-4222-8222-222222222222")),
+                    "mapper_mismatch": (
+                        "metric=mapper_uuid",
+                        "observed_mapper_identity_class=mismatch",
+                        (campaign["capacity_and_ram"]["mapper_uuid"],
+                         "SWAPZ-PRIMARY-" + "e" * 32)),
+                }
+                if name in identity_expectations:
+                    identity_metric, identity_class, protected_values = (
+                        identity_expectations[name])
+                    identity_diagnostics = "\n".join(
+                        blocker for blocker in result["code_blockers"]
+                        if "sealed campaign RAM trace is invalid" in blocker)
+                    self.assertIn(identity_metric, identity_diagnostics)
+                    self.assertIn(identity_class, identity_diagnostics)
+                    for protected_value in protected_values:
+                        self.assertNotIn(
+                            protected_value, identity_diagnostics)
                 if name == "recovered_but_mapper_reappeared":
                     self.assertTrue(any(
                         "metric=mapper_present observed=true" in blocker
@@ -4271,6 +4293,54 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     forged_module, HOST_ID, TARGET["partuuid"]):
                 self.assertNotIn(protected_value, diagnostics)
 
+
+    def test_cold_boot_failure_target_diagnostics_separate_target_and_parent(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw, policy_raw = encoded(report), encoded(policy)
+        cases = (
+            ("forged-target",
+             {"selected_partuuid": "ffffffff-01"},
+             "mismatch", "match", "ffffffff-01"),
+            ("malformed-target",
+             {"selected_partuuid": "private-target-identity"},
+             "invalid", "match", "private-target-identity"),
+            ("invalid-parent",
+             {"selected_target_parent": "/private/parent-never-publish"},
+             "match", "invalid", "/private/parent-never-publish"),
+        )
+        for label, overrides, target_class, parent_class, protected_value in cases:
+            with self.subTest(case=label):
+                raw = cold_boot_evidence_raw(
+                    status="FAIL", failure_reasons="swapz_target_error",
+                    **overrides)
+                evidence = current_evidence(report_raw, policy_raw)
+                evidence["release_evidence"]["owner_observed_reboot"].update(
+                    status="FAIL", observed=True, overall="FAIL",
+                    evidence_sha256=hashlib.sha256(raw).hexdigest())
+                result = evaluate(
+                    report, evidence, policy, cold_boot_raw=raw)
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+                diagnostics = "\n".join(result["cold_boot_blockers"])
+                self.assertIn(
+                    "expected_target_identity_class=authorized_target",
+                    diagnostics)
+                self.assertIn(
+                    f"observed_target_identity_class={target_class}",
+                    diagnostics)
+                self.assertIn(
+                    "expected_parent_identity_class="
+                    "current_valid_removable_parent",
+                    diagnostics)
+                self.assertIn(
+                    f"observed_parent_identity_class={parent_class}",
+                    diagnostics)
+                for value in (
+                        protected_value, TARGET["partuuid"], SOURCE,
+                        ARTIFACTS["module_sha256"], HOST_ID):
+                    self.assertNotIn(value, diagnostics)
+
     def test_cold_boot_refusals_classify_target_and_module_without_raw_values(self):
         report = owner_report()
         policy = acceptance_policy()
@@ -4326,7 +4396,12 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             for field, invalid_count in (
                     ("required_pairs", True),
                     ("attempted_pairs", False),
+                    ("accepted_pairs", True),
+                    ("required_pairs", -1),
+                    ("attempted_pairs", -1),
                     ("accepted_pairs", -1),
+                    ("required_pairs", 2 ** 64),
+                    ("attempted_pairs", -(2 ** 64)),
                     ("accepted_pairs", 2 ** 64)):
                 with self.subTest(campaign=campaign_factory.__name__,
                                   field=field, count=invalid_count):
@@ -4339,7 +4414,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     diagnostics = "\n".join(result["code_blockers"])
                     self.assertNotIn(TARGET["partuuid"], diagnostics)
                     self.assertNotIn(SOURCE, diagnostics)
-                    if invalid_count == 2 ** 64:
+                    if (
+                            type(invalid_count) is int and
+                            abs(invalid_count) >
+                            EVALUATOR.RAM_TRACE_VALIDATOR["MAX_UINT64"]):
                         self.assertIn("JSON integer exceeds evidence bound",
                                       diagnostics)
                     else:

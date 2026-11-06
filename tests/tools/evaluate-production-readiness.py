@@ -56,6 +56,7 @@ MAJOR_MINOR_RE = re.compile(r"^[0-9]+:[0-9]+$")
 KERNEL_RELEASE_RE = re.compile(r"^[A-Za-z0-9._+-]{1,127}$")
 BOOT_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+MAPPER_UUID_RE = re.compile(r"^SWAPZ-[A-Za-z0-9-]{1,120}$")
 RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 RUN_ID_DECIMAL_RE = re.compile(r"^[1-9][0-9]*$")
 ENV_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -404,6 +405,63 @@ def _identity_binding_class(
             identity_pattern.fullmatch(observed) is None):
         return "invalid"
     return "match" if required == observed else "mismatch"
+
+
+def _metadata_ram_validation_issue(
+        failure: ValueError, capacity_and_ram: Any, source_sha: str) -> str:
+    """Redact protected RAM-evidence identities while retaining safe detail."""
+    message = str(failure)
+    trace = (
+        capacity_and_ram.get("metadata_ram_trace")
+        if isinstance(capacity_and_ram, dict) else None)
+    host_binding = (
+        capacity_and_ram.get("metadata_ram_host_binding")
+        if isinstance(capacity_and_ram, dict) else None)
+
+    if "metric=source_sha" in message:
+        observed_source = (
+            trace.get("source_sha") if isinstance(trace, dict) else None)
+        return (
+            "sealed campaign RAM trace is invalid: "
+            "phase=metadata_ram_trace metric=source_sha "
+            "expected_source_identity_class=release_source "
+            f"observed_source_identity_class="
+            f"{_identity_binding_class(source_sha, observed_source, GIT_SHA_RE)} "
+            "verdict=BLOCKED reason=metadata_ram_source_binding")
+
+    if "metric=mapper_uuid" in message:
+        expected_mapper = (
+            capacity_and_ram.get("mapper_uuid")
+            if isinstance(capacity_and_ram, dict) else None)
+        observed_mapper = (
+            trace.get("mapper_uuid") if isinstance(trace, dict) else None)
+        return (
+            "sealed campaign RAM trace is invalid: "
+            "phase=metadata_ram_trace metric=mapper_uuid "
+            "expected_mapper_identity_class=sealed_campaign_mapper "
+            f"observed_mapper_identity_class="
+            f"{_identity_binding_class(expected_mapper, observed_mapper, MAPPER_UUID_RE)} "
+            "verdict=BLOCKED reason=metadata_ram_mapper_binding")
+
+    if "metric=host_boot_id" in message:
+        expected_boot_id = (
+            host_binding.get("host_boot_id")
+            if isinstance(host_binding, dict) else None)
+        observed_boot_id = (
+            trace.get("host_boot_id") if isinstance(trace, dict) else None)
+        observed_boot_class = (
+            "invalid"
+            if "host binding identity is invalid" in message
+            else _identity_binding_class(
+                expected_boot_id, observed_boot_id, BOOT_ID_RE))
+        return (
+            "sealed campaign RAM trace is invalid: "
+            "phase=metadata_ram_trace metric=host_boot_id "
+            "expected_host_boot_identity_class=sealed_host_boundary "
+            f"observed_host_boot_identity_class={observed_boot_class} "
+            "verdict=BLOCKED reason=metadata_ram_host_boot_binding")
+
+    return f"sealed campaign RAM trace is invalid: {message}"
 
 
 def _parse_utc_evidence_time(value: Any) -> int | None:
@@ -1897,7 +1955,8 @@ def validate_physical_campaign_evidence(
                         f"minimum={host_after[:80]!r} "
                         "required=not_before_host_after_capture")
             except ValueError as exc:
-                reject(f"sealed campaign RAM trace is invalid: {exc}")
+                reject(_metadata_ram_validation_issue(
+                    exc, capacity_and_ram, source_sha))
 
     stability = campaign.get("host_stability")
     if not _physical_host_stability_is_valid(stability):
@@ -2746,24 +2805,36 @@ def validate_cold_boot_failure_evidence(
             "verdict=BLOCKED reason=wrong_kernel_identity")
 
     selected_size = _bounded_decimal_text(cold_boot["selected_target_size_bytes"])
+    observed_target = _normalize_target({
+        "partuuid": cold_boot["selected_partuuid"],
+        "size_bytes": selected_size,
+    })
+    observed_target_class = (
+        "invalid"
+        if target is None or observed_target is None else
+        "match" if observed_target == target else "mismatch")
+    parent_identity_valid = (
+        MAJOR_MINOR_RE.fullmatch(
+            cold_boot["selected_target_major_minor"]) is not None and
+        cold_boot["selected_target_removable"] == "1" and
+        re.fullmatch(
+            r"[A-Za-z0-9._-]+",
+            cold_boot["selected_target_parent"]) is not None and
+        not (
+            cold_boot["selected_target_serial"] == "unavailable" and
+            cold_boot["selected_target_wwn"] == "unavailable"))
     if (
-            target is None or selected_size is None or
-            cold_boot["selected_partuuid"] != target[0] or
-            selected_size != target[1] or
-            not MAJOR_MINOR_RE.fullmatch(
-                cold_boot["selected_target_major_minor"]) or
-            cold_boot["selected_target_removable"] != "1" or
-            not re.fullmatch(
-                r"[A-Za-z0-9._-]+", cold_boot["selected_target_parent"]) or
-            (cold_boot["selected_target_serial"] == "unavailable" and
-             cold_boot["selected_target_wwn"] == "unavailable")):
+            target is None or observed_target != target or
+            not parent_identity_valid):
         reject(
             "persistent cold-boot failure target identity is not exact: "
             "evidence_class=persistent_cold_boot "
             "first_failed_phase=failure_authentication "
             "expected_target_identity_class=authorized_target "
-            f"observed_target_identity_class="
-            f"{'invalid' if target is None or selected_size is None else 'mismatch'} "
+            f"observed_target_identity_class={observed_target_class} "
+            "expected_parent_identity_class=current_valid_removable_parent "
+            f"observed_parent_identity_class="
+            f"{'match' if parent_identity_valid else 'invalid'} "
             "verdict=BLOCKED reason=wrong_target_identity")
 
     module_hash = (
