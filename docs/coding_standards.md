@@ -178,11 +178,12 @@ completion may quarantine its reserved destination, but must preserve
 all pre-existing authoritative maps and sidecars. Use deterministic rootless
 fault injection to exercise this invariant without lower-device I/O.
 
-Authority proof cursors must also avoid identifiers that collide with Linux
-context macros such as `current`; use descriptive names such as
-`current_logical`. The rootless source-contract regression must retain that
-lexical guard in addition to sparse kernel qualification, because userspace
-exact-C compilation does not expand the kernel macro.
+Authority proof traversal locals must avoid identifiers that collide with Linux
+context macros such as `current` and use descriptive role-bearing names:
+`current_logical`, `last_logical` and `visited_pages`. The rootless
+source-contract regression must retain that lexical guard in addition to sparse
+kernel qualification, because userspace exact-C compilation does not expand the
+kernel macro.
 
 For compressed extents published with more than one record, every sibling map
 must retain an in-map shared-extent witness. Before direct DISCARD, RAW COW,

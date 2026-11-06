@@ -687,7 +687,7 @@ static int swapz_verify_shared_extent_release(
 	target_segment = target_start / SWAPZ_SEGMENT_BLOCKS;
 
 	if (swapz_segment_page_lists_enabled(a)) {
-		swapz_u32 current_logical, last = none, visited = 0;
+		swapz_u32 current_logical, last_logical = none, visited_pages = 0;
 		swapz_u32 mapped_pages;
 
 		if (!swapz_segment_page_lists_complete(a) ||
@@ -707,7 +707,7 @@ static int swapz_verify_shared_extent_release(
 			swapz_u64 record_bit;
 
 			if (current_logical >= a->logical_pages ||
-			    visited >= mapped_pages ||
+			    visited_pages >= mapped_pages ||
 			    swapz_page_list_validate_entry_cached(a, current_logical, 1))
 				return swapz_map_proof_refuse(
 					transition, "extent_release_page_list",
@@ -750,12 +750,12 @@ static int swapz_verify_shared_extent_release(
 						transition, "unexpected_reference",
 						-EUCLEAN);
 			}
-			last = current_logical;
+			last_logical = current_logical;
 			current_logical = a->page_next_in_segment[current_logical];
-			visited++;
+			visited_pages++;
 		}
-		if (visited != mapped_pages ||
-		    last != a->segment_last_page[target_segment])
+		if (visited_pages != mapped_pages ||
+		    last_logical != a->segment_last_page[target_segment])
 			return swapz_map_proof_refuse(
 				transition, "extent_release_page_list", -EUCLEAN);
 	}
