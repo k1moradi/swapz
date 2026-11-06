@@ -11,7 +11,7 @@ RefuseManualStop=yes
 # The generator mirrors these lifecycle refusals and the false condition in
 # generator.early because normal generator output can otherwise outrank this
 # packaged /usr unit.
-ConditionPathExists=!/dev/null
+ConditionPathExists=!/
 
 [Swap]
 What=/dev/mapper/swapz-primary

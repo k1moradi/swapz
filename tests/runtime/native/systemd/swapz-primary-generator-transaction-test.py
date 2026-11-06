@@ -150,7 +150,7 @@ class GeneratorPublicationTest(unittest.TestCase):
             self.assertEqual(
                 self.passive_guard().read_text(),
                 "[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\n"
-                "ConditionPathExists=!/dev/null\n",
+                "ConditionPathExists=!/\n",
             )
         service = MAPPER_SERVICE.read_text()
         passive = PASSIVE_SWAP.read_text()
@@ -159,7 +159,7 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertIn("WantedBy=swap.target", service)
         self.assertIn("RefuseManualStart=yes", passive)
         # RefuseManualStart alone allows dependency-queued start jobs.
-        self.assertIn("ConditionPathExists=!/dev/null", passive)
+        self.assertIn("ConditionPathExists=!/", passive)
         self.assertNotIn("WantedBy=swap.target", passive)
         generator_source = self.generator.read_text()
         for host_path in ("/dev/sda1", "/dev/sda4"):

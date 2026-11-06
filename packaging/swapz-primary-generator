@@ -226,7 +226,7 @@ passive_swap_guard_is_active()
 	[ -d "$passive_swap_dropin_dir" ] && [ ! -L "$passive_swap_dropin_dir" ] &&
 		[ -f "$passive_swap_dropin" ] && [ ! -L "$passive_swap_dropin" ] ||
 		return 1
-	printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/dev/null\n' |
+	printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/\n' |
 		cmp -s - "$passive_swap_dropin"
 }
 cleanup()
@@ -444,7 +444,7 @@ if [ ! -d "$passive_swap_dropin_dir" ] || [ -L "$passive_swap_dropin_dir" ]; the
 	fail 1 passive-guard generator-output unsafe-passive-directory mapper-active-job
 fi
 passive_swap_temporary=$stage_dir/passive-swap.conf
-if printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/dev/null\n' > "$passive_swap_temporary"; then :; else
+if printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/\n' > "$passive_swap_temporary"; then :; else
 	fail "$?" passive-guard generator-output write-passive-dropin mapper-active-job
 fi
 if chmod 0644 "$passive_swap_temporary"; then :; else

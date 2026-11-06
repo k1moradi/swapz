@@ -137,7 +137,7 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("RefuseManualStart=yes", passive)
         self.assertIn("RefuseManualStop=yes", passive)
-        self.assertRegex(passive, r"(?m)^ConditionPathExists=!/dev/null$")
+        self.assertRegex(passive, r"(?m)^ConditionPathExists=!/$")
         self.assertNotIn("[Install]", passive)
         with tempfile.TemporaryDirectory(prefix="swapz-passive-unit-") as location:
             staged = Path(location) / r"dev-mapper-swapz\x2dprimary.swap"
@@ -148,7 +148,7 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
             )
             self.assertEqual(verified.returncode, 0, verified.stderr)
         checked = subprocess.run(
-            ["systemd-analyze", "condition", "ConditionPathExists=!/dev/null"],
+            ["systemd-analyze", "condition", "ConditionPathExists=!/"],
             capture_output=True, text=True, check=False, timeout=30,
         )
         self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
@@ -219,7 +219,7 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
             self.assertEqual(
                 guard.read_text(encoding="ascii"),
                 "[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\n"
-                "ConditionPathExists=!/dev/null\n",
+                "ConditionPathExists=!/\n",
             )
             environment["SYSTEMD_UNIT_PATH"] = f"{early}:{normal}:{vendor}"
             guarded = subprocess.run(
