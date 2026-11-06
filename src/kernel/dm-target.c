@@ -2351,7 +2351,6 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 			ctx->accepted_work_lower_idle_post_lower_ns += post_lower_ns;
 	}
 
-
 	/*
 	 * RAW_SELECTED may have reached lower I/O while its speculative codec
 	 * still ran. Preserve that overlap, but do not publish a successful run
@@ -2367,7 +2366,6 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 			}
 		}
 	}
-
 	/* No successor may treat this run as complete before publication. */
 	swapz_lane_gap_publish(ctx, inflight->lane_epoch, lower_end,
 			       lane_observed_ns, finalize_end,

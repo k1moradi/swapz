@@ -964,8 +964,6 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 	return 0;
 }
 
-
-
 int main(void)
 {
 	int passed = 0;
