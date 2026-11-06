@@ -899,6 +899,9 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 	struct swapz_tx transaction;
 	/* Serialized authority snapshot: failed retries may change probe telemetry,
 	 * but must not change mappings, physical ownership or policy state. */
+	static struct swapz_map retained_maps[LOGICAL_PAGES];
+	static swapz_u16 retained_live[PHYSICAL_BLOCKS];
+	static swapz_u8 retained_classes[PHYSICAL_BLOCKS];
 	swapz_u8 retained_roles[PHYSICAL_SEGMENTS];
 	swapz_u32 retained_segment_maps[PHYSICAL_SEGMENTS];
 	swapz_u32 retained_program_counts[PHYSICAL_SEGMENTS];
@@ -992,6 +995,9 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 	      a.gc_forbidden_victim == victim &&
 	      roles[victim] && roles[first_destination] &&
 	      !roles[second_destination]);
+	memcpy(retained_maps, maps, sizeof(retained_maps));
+	memcpy(retained_live, live, sizeof(retained_live));
+	memcpy(retained_classes, classes, sizeof(retained_classes));
 	memcpy(retained_roles, roles, sizeof(retained_roles));
 	memcpy(retained_segment_maps, segment_maps, sizeof(retained_segment_maps));
 	memcpy(retained_program_counts, program_counts,
@@ -1014,7 +1020,13 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 		const int stage_error = swapz_stage(
 			&a, &last_logical, 1U, 1U, &transaction);
 		const unsigned int observed_reserves = reserve_segments();
+		const int mappings_retained =
+			!memcmp(maps, retained_maps, sizeof(retained_maps));
+		const int physical_sidecars_retained =
+			!memcmp(live, retained_live, sizeof(retained_live)) &&
+			!memcmp(classes, retained_classes, sizeof(retained_classes));
 		const int state_retained =
+			mappings_retained && physical_sidecars_retained &&
 			a.gc_allocation && a.gc_destination == second_destination &&
 			a.gc_forbidden_victim == victim &&
 			a.gc_forbidden_open == retained_forbidden_open &&
@@ -1029,8 +1041,6 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 				sizeof(retained_segment_maps)) &&
 			!memcmp(program_counts, retained_program_counts,
 				sizeof(retained_program_counts)) &&
-			!memcmp(&maps[last_logical], &authoritative_last,
-				sizeof(authoritative_last)) &&
 			live[authoritative_last.start_block] == 1U &&
 			classes[authoritative_last.start_block] == 1U &&
 			!live[uncertain_block] && !classes[uncertain_block] &&
@@ -1038,6 +1048,32 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 
 		if (advance_error != -ENOSPC || stage_error != -ENOSPC ||
 		    !state_retained) {
+			swapz_u32 first_changed_logical = LOGICAL_PAGES;
+			swapz_u32 first_changed_physical = PHYSICAL_BLOCKS;
+			swapz_u32 scan_index;
+
+			if (!mappings_retained) {
+				for (scan_index = 0U; scan_index < LOGICAL_PAGES;
+				     ++scan_index) {
+					if (memcmp(&maps[scan_index],
+						   &retained_maps[scan_index],
+						   sizeof(maps[scan_index]))) {
+						first_changed_logical = scan_index;
+						break;
+					}
+				}
+			}
+			if (!physical_sidecars_retained) {
+				for (scan_index = 0U; scan_index < PHYSICAL_BLOCKS;
+				     ++scan_index) {
+					if (live[scan_index] != retained_live[scan_index] ||
+					    classes[scan_index] !=
+						    retained_classes[scan_index]) {
+						first_changed_physical = scan_index;
+						break;
+					}
+				}
+			}
 			fprintf(stderr,
 				"GC_RESERVE_EXHAUSTION_FAIL phase=terminal_retry "
 				"attempt=%u victim=%u victim_recycle_eligible=0 "
@@ -1052,6 +1088,8 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 				"expected_abandoned=%u observed_abandoned=%u "
 				"original_lower_errno=%d advance_errno=%d "
 				"stage_errno=%d state_retained=%d "
+				"mappings_retained=%d physical_sidecars_retained=%d "
+				"first_changed_logical=%u first_changed_physical=%u "
 				"recovery_possible=0\n",
 				attempt, victim, second_destination,
 				(unsigned int)live[authoritative_last.start_block],
@@ -1060,7 +1098,9 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 				retained_next_probe, a.next_segment_probe,
 				retained_committed, a.committed_blocks,
 				retained_abandoned, a.abandoned_blocks,
-				-EIO, advance_error, stage_error, state_retained);
+				-EIO, advance_error, stage_error, state_retained,
+				mappings_retained, physical_sidecars_retained,
+				first_changed_logical, first_changed_physical);
 			return 1;
 		}
 		CHECK(verify_all_pages() == 0);

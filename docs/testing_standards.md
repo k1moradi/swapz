@@ -1686,8 +1686,9 @@ numeric available-reserve count, original errno, retained authoritative-mapping
 state and whether progress remains possible.
 When an owned recovery has exhausted the last replacement reserve, repeat
 destination-advance and RAW-staging refusals in the existing high-occupancy
-rootless oracle. Across retries, preserve surviving mappings, independent
-generations and physical liveness, mapped counts, segment roles and program
+rootless oracle. Snapshot and compare the complete authoritative map,
+live-record and extent-class arrays across every refusal; also preserve
+independent generations, mapped counts, segment roles and program
 counts, GC ownership identifiers, allocation cursor/probe, committed blocks
 and abandoned blocks. The full, recovery-owned destination is not an available
 replacement just because it retains a reserve role. Probe telemetry may rise,
