@@ -4074,7 +4074,16 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 diagnostics = "\n".join(authenticated["code_blockers"])
                 self.assertIn("verdict=FAIL reason=authenticated_producer_failure",
                               diagnostics)
-                self.assertIn(f"required_source_sha={SOURCE}", diagnostics)
+                for expected in (
+                        "expected_source_identity_class=release_source",
+                        "observed_source_identity_class=match",
+                        "artifact_binding_class=match",
+                        "qualification_target_binding_class=match"):
+                    self.assertIn(expected, diagnostics)
+                self.assertNotIn(
+                    f"required_source_sha={SOURCE}", diagnostics)
+                self.assertNotIn(
+                    f"observed_source_sha={SOURCE}", diagnostics)
                 self.assertNotIn(private_marker, diagnostics)
                 self.assertNotIn(
                     private_marker, json.dumps(authenticated, sort_keys=True))
@@ -4141,12 +4150,18 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
                     self.assertEqual(result["release_verdict"], "BLOCKED")
                     self.assertTrue(any(
-                        f"required_source_sha={SOURCE}" in blocker and
-                        f"observed_source_sha={SOURCE}" in blocker and
+                        "expected_source_identity_class=release_source"
+                        in blocker and
+                        "observed_source_identity_class=match" in blocker and
                         "verdict=BLOCKED" in blocker and
                         "reason=missing_or_contradictory_campaign_proof"
                         in blocker for blocker in result["code_blockers"]),
                         result["code_blockers"])
+                    diagnostics = "\n".join(result["code_blockers"])
+                    self.assertNotIn(
+                        f"required_source_sha={SOURCE}", diagnostics)
+                    self.assertNotIn(
+                        f"observed_source_sha={SOURCE}", diagnostics)
                     if fault in malformed_count_faults:
                         field, observed = malformed_count_faults[fault]
                         self.assertTrue(any(

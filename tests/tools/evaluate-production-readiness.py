@@ -3334,11 +3334,6 @@ def evaluate_release(
             observed_source_class = (
                 "match" if observed_source == source_sha else
                 "mismatch" if _valid_source(observed_source) else "invalid")
-            safe_required_source_sha = (
-                source_sha if _valid_source(source_sha) else "invalid")
-            safe_observed_source_sha = (
-                observed_source if _valid_source(observed_source)
-                else "invalid")
             audit = (
                 physical_campaign_evidence.get("physical_evidence_audit")
                 if isinstance(physical_campaign_evidence, dict) else None)
@@ -3406,8 +3401,6 @@ def evaluate_release(
                 "physical_campaign: evidence_class=sealed_physical_campaign "
                 f"first_failed_phase={failed_phase} "
                 f"original_status={safe_status} "
-                f"required_source_sha={safe_required_source_sha} "
-                f"observed_source_sha={safe_observed_source_sha} "
                 "expected_source_identity_class=release_source "
                 f"observed_source_identity_class={observed_source_class} "
                 f"artifact_binding_class={artifact_binding_class} "
