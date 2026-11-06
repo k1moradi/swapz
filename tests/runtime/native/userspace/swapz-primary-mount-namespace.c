@@ -750,6 +750,69 @@ static void expect_nonleader_bound_refusal(
 }
 
 
+/*
+ * A disappearing leader namespace marker does not establish that all of its
+ * sibling tasks exited. A surviving task may hold a different mount namespace
+ * with the selected partition or its parent mounted. The inventory must
+ * report a busy target or fail closed; a clean admission is never sufficient.
+ * This is a synthetic procfs identity check, not a loaded-host namespace claim.
+ */
+static void expect_surviving_task_with_missing_leader_namespace(
+	const char *case_name, const char *task_mountinfo)
+{
+	struct swapz_primary_mount_facts facts = {0};
+	const dev_t expected_root = makedev(259U, 0U);
+	int result;
+	int first_errno;
+
+	fixture_reset();
+	fixture_file("3031/task/3032/mountinfo", task_mountinfo);
+	fixture_unlink("3031/ns/mnt");
+	errno = 0;
+	result = swapz_primary_read_mount_facts(&facts, makedev(8U, 0U));
+	first_errno = errno;
+
+	if (result == 0 && !facts.target_mounted) {
+		fprintf(stderr,
+			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
+			"identity_class=leader-marker-absent-live-worker "
+			"expected=BUSY-or-BLOCKED observed=ADMITTED "
+			"original_errno=none "
+			"safe_retry=complete-fresh-task-inventory "
+			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED\n",
+			case_name);
+		++fixture_failures;
+	}
+	if (result == 0 &&
+	    (!facts.root_mount_seen || facts.root_device != expected_root)) {
+		fprintf(stderr,
+			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
+			"identity_class=coordinator-root-changed "
+			"expected=original-root-preserved observed=mismatched-root "
+			"original_errno=none safe_retry=complete-fresh-task-inventory\n",
+			case_name);
+		++fixture_failures;
+	}
+	if (fixture_mount_fd != -1 || fixture_coordinator_task_mount_fd != -1) {
+		fprintf(stderr,
+			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
+			"identity_class=descriptor-lifetime "
+			"expected=all-mountinfo-fds-closed observed=open-fd "
+			"original_errno=%d safe_retry=close-owned-fds-and-rescan\n",
+			case_name, result < 0 ? first_errno : 0);
+		++fixture_failures;
+		if (fixture_mount_fd != -1) {
+			(void)close(fixture_mount_fd);
+			fixture_mount_fd = -1;
+		}
+		if (fixture_coordinator_task_mount_fd != -1) {
+			(void)close(fixture_coordinator_task_mount_fd);
+			fixture_coordinator_task_mount_fd = -1;
+		}
+	}
+}
+
 /* Keep the original controls anchored to their original synthetic identities. */
 static void expect_mount_admission(const char *case_name, int should_allow,
 				   int expected_errno)
@@ -1544,6 +1607,20 @@ int main(void)
 	}
 	if (fixture_task_namespace_reuse_injected)
 		fixture_unlink("3031/task/3032/ns/mnt.retired");
+
+	/*
+	 * A leader may be absent from /proc/<pid>/ns/mnt while the task directory
+	 * still exposes a live non-leader. A vanished leader must never hide that
+	 * task's selected partition or selected physical parent.
+	 */
+	expect_surviving_task_with_missing_leader_namespace(
+		"missing leader marker with live selected task",
+		"36 25 259:10 / / rw - ext4 /thread-root rw\n"
+		"37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
+	expect_surviving_task_with_missing_leader_namespace(
+		"missing leader marker with live parent-mounted task",
+		"36 25 259:10 / / rw - ext4 /thread-root rw\n"
+		"37 36 8:0 / /parent rw - ext4 /dev/parent rw\n");
 
 	/* Exercise both finite task-count and aggregate mountinfo-byte ceilings. */
 	fixture_reset();

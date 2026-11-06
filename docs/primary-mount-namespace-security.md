@@ -30,6 +30,14 @@ No target mount in `/proc/self/mountinfo` is insufficient evidence. A missing,
 malformed, truncated, unreadable, or partially read inventory is not a clear
 inventory. The `/proc` directory itself being inaccessible is a refusal.
 Repeated PID entries or PID churn do not justify replacing observed root facts.
+A missing leader `/proc/<pid>/ns/mnt` marker is **not** proof that
+`/proc/<pid>/task` has no surviving non-leader threads: where the task
+inventory remains visible, inspect it or refuse admission as BLOCKED.
+The owned rootless fixture must inject an absent leader marker with a visible
+selected-partition task and, independently, a selected-parent task. Either
+a busy observation or fail-closed error is acceptable; a clean admission is
+a regression failure. A missing leader marker with inaccessible task inventory
+is ambiguity, not positive evidence of safe process exit.
 
 For each PID with an **unopened** mountinfo table, errors `EINVAL`, `ENOENT`,
 and `ESRCH` mean ordinary process-exit churn **only if** a follow-up stat of
@@ -81,6 +89,7 @@ alone proves the required refusal-before-mutation contract.
 | Selected parent `8:0` only in PID `3031` | Refuse |
 | Local or other PID mountinfo malformed, empty or missing while namespace lives | Refuse |
 | PID inventory or mountinfo permission denied | Refuse |
+| Leader namespace marker absent while visible worker task holds selected partition or parent | Busy or BLOCKED; never admit from leader disappearance alone |
 | Opened PID mountinfo has an I/O error | Refuse |
 | `EINVAL`, `ENOENT`, `ESRCH` opening PID mountinfo, namespace still present | Refuse |
 | Same errors, namespace proven absent | Admit if every other check is clean |
@@ -97,7 +106,7 @@ ignores regular-file `st_dev`. Their failure is a useful P0 regression signal,
 from a cross-PID scanner, the C behavior fixture must be wired to the actual
 production admission boundary rather than keeping an obsolete dependency on
 `swapz_primary_read_mount_facts()`. Publication of a test does not close issue
-#94. The remaining risks include hidden/inaccessible PID namespaces, detached
+#94. A foreign task's mountinfo can also be filtered by its process root even with an unchanged namespace inode; successful namespace stats do not prove a full-root view. A prior harmless tmpfs/chroot observation does not prove destructive selected-storage admission. The remaining risks include hidden/inaccessible PID namespaces, detached
 mount namespace FDs, stacked-filesystem aliases, cloned/reused device
 identities, and time-of-check/time-of-use races; visible process scanning is not
 an atomic, whole-host proof of physical device identity.
