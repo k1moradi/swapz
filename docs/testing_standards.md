@@ -249,6 +249,12 @@ require proof that the task-specific injection fired, so a leader access error
 cannot satisfy that case. Reject malformed non-leader task mountinfo, fail
 closed when a reused TID changes its mount-namespace identity between the initial and
 confirming stats, and permit a task already absent at namespace inspection.
+Source-extracted fixtures must include the production helpers called by the
+extracted reader, including `swapz_primary_mountinfo_full_root`, and model its
+`/proc/.../root` observations for synthetic tasks without consulting the host
+PID tree. Compile the real reader and its mutation-negative control with the
+same strict warning flags so missing fixture dependencies or host-process
+lookups cannot hide the intended admission test.
 A missing foreign leader `ns/mnt` marker is not evidence that the whole
 thread group exited. Exercise leader disappearance at every pre-task-scan
 window: absent at the initial namespace stat, lost between the same-namespace

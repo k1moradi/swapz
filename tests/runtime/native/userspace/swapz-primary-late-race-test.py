@@ -579,9 +579,11 @@ static int fixture_proc_stat(const char *path, struct stat *info)
 static ssize_t fixture_proc_readlink(const char *path, char *buffer,
                                      size_t size)
 {
+    const char *basename = strrchr(path, '/');
     size_t length;
 
-    if (strcmp(path, "/proc/self/root"))
+    if (strncmp(path, "/proc/", sizeof("/proc/") - 1U) || !basename ||
+        strcmp(basename, "/root"))
         return readlink(path, buffer, size);
     length = sizeof(fixture_self_root) - 1U;
     if (length > size)
@@ -1405,6 +1407,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         "swapz_primary_proc_entry_is_pid",
         "swapz_primary_mountinfo_read_fd",
         "swapz_primary_mountinfo_exit_error",
+        "swapz_primary_mountinfo_full_root",
         "swapz_primary_read_nonleader_mount_facts",
         "swapz_primary_read_mount_facts",
     ))
