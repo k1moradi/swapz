@@ -6528,8 +6528,9 @@ positions 8, 13, 18 and 23; each identifier must contain a nonzero hex digit.
 The two root-owned, single-link, non-group/world-writable regular files are
 read without following symlinks, with stable metadata. Each allows exactly
 zero or one trailing LF, never whitespace trimming or any other trailing bytes.
-Missing, malformed, oversized or changing inputs yield `UNAVAILABLE` with
-redacted `phase=host_identity` refusal categories. The JSON schema label stays
+Missing, malformed, oversized or changing inputs, or an unavailable runtime
+architecture, yield `UNAVAILABLE` with redacted `phase=host_identity` refusal
+categories. The JSON schema label stays
 `swapz-host-v1` because the production parser requires it; that label is not
 the digest version. Raw machine IDs, DMI UUIDs and hostnames are never published. Only committed reports with
 that exact identity, overall PASS and all five stages PASS enter its history.
@@ -8066,7 +8067,7 @@ The primary qualification reader accepts only the root-owned
 be a stable, single-link regular file with no group/world write permission and
 at most 64 MiB. The C parser requires schema `swapz-test-results-v1`, matching
 source and tested-commit SHAs, overall PASS, the RAM-backed qualification
-scope, the same x86_64 machine-id digest, all five named stages with PASS and
+scope, the same live x86_64 hardware-bound host digest, all five named stages with PASS and
 exit code zero, and AVAILABLE SHA-256 values for the formatter, module and
 oracle. It rejects duplicate required keys, malformed or trailing JSON, a
 different source or host, and incomplete stages. This report-content check

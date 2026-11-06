@@ -8612,9 +8612,16 @@ def _read_host_identity_record(path, byte_limit):
 
 
 def report_host_identity():
-    """Stable OS installation identity; never publish raw machine-id or hostname."""
+    """Stable hardware-and-OS identity; never publish raw identifiers or hostname."""
     # The qualification JSON parser still requires v1; its digest is v2.
     schema = "swapz-host-v1"
+
+    def refusal(expected_class, observed_class, reason):
+        return {"schema": schema, "status": "UNAVAILABLE",
+                "phase": "host_identity", "expected_input_class": expected_class,
+                "observed_validity_class": observed_class,
+                "refusal_reason": reason}
+
     records = []
     inputs = (
         ("/sys/class/dmi/id/product_uuid", 40,
@@ -8624,18 +8631,12 @@ def report_host_identity():
          "root_owned_regular_machine_id_32_hex_optional_lf"),
     )
     for path, byte_limit, pattern, expected_class in inputs:
-        def refusal(observed_class, reason):
-            return {"schema": schema, "status": "UNAVAILABLE",
-                    "phase": "host_identity", "expected_input_class": expected_class,
-                    "observed_validity_class": observed_class,
-                    "refusal_reason": reason}
-
         try:
             record = _read_host_identity_record(path, byte_limit)
         except FileNotFoundError:
-            return refusal("missing", "file_missing")
+            return refusal(expected_class, "missing", "file_missing")
         except OSError:
-            return refusal("unreadable", "read_failed")
+            return refusal(expected_class, "unreadable", "read_failed")
         except ValueError as error:
             reason = str(error)
             if reason not in ("untrusted_metadata", "changed_during_read",
@@ -8644,17 +8645,21 @@ def report_host_identity():
             observed = {"untrusted_metadata": "untrusted",
                         "changed_during_read": "changed",
                         "oversized_file": "malformed"}.get(reason, "untrusted")
-            return refusal(observed, reason)
+            return refusal(expected_class, observed, reason)
         if record.endswith(b"\n"):
             record = record[:-1]
         if (re.fullmatch(pattern, record) is None or
                 not any(byte not in (ord("0"), ord("-")) for byte in record)):
-            return refusal("malformed", "invalid_format_or_zero")
+            return refusal(expected_class, "malformed", "invalid_format_or_zero")
         records.append(record.lower())
-    return {"schema": schema, "architecture": os.uname().machine,
+
+    try:
+        architecture = os.uname().machine
+    except OSError:
+        return refusal("runtime_architecture", "unavailable", "uname_failed")
+    return {"schema": schema, "architecture": architecture,
             "id_sha256": hashlib.sha256(
                 b"swapz-host-v2\0" + b"".join(records)).hexdigest()}
-
 
 # Each refresh re-reads every committed report (~1.3 MB JSON per run, growing by
 # one per qualification on each computer); slow two-core hosts need headroom.

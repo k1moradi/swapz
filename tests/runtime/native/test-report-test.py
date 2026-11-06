@@ -1577,6 +1577,34 @@ class ReportContract(unittest.TestCase):
                         "observed_validity_class": observed, "refusal_reason": reason})
                     self.assertNotIn("private", json.dumps(result))
 
+
+    def test_host_identity_architecture_lookup_failure_is_sanitized(self):
+        from unittest.mock import patch
+
+        records = {
+            "/sys/class/dmi/id/product_uuid":
+                b"00112233-4455-6677-8899-aabbccddeeff\n",
+            "/etc/machine-id": b"0123456789abcdef0123456789abcdef\n",
+        }
+        with patch.object(
+                runner, "_read_host_identity_record",
+                side_effect=lambda path, limit: records[path]), \
+                patch.object(
+                    runner.os, "uname",
+                    side_effect=OSError("private runtime architecture detail")):
+            result = runner.report_host_identity()
+
+        self.assertEqual(result, {
+            "schema": "swapz-host-v1", "status": "UNAVAILABLE",
+            "phase": "host_identity",
+            "expected_input_class": "runtime_architecture",
+            "observed_validity_class": "unavailable",
+            "refusal_reason": "uname_failed"})
+        serialized = json.dumps(result)
+        self.assertNotIn("private", serialized)
+        for record in records.values():
+            self.assertNotIn(record.decode("ascii").strip(), serialized)
+
     def test_host_identity_reader_refuses_symlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             private_record = Path(directory) / "record"
