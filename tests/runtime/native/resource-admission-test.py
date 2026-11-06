@@ -894,19 +894,7 @@ sample_host_memory_admission
                 "signal_nested_owned_child",
             )
         )
-        ppid_mismatch_action = shell_function(
-            QUALIFIER, "nested_pair_identity_action").replace(
-                "nested_pair_identity_action() {",
-                "nested_pair_identity_action_ppid_mismatch() {", 1)
-        child_stat_read = (
-            "                state, observed_parent, observed_child_start = "
-            "read_stat(child_pid)\n")
-        self.assertEqual(ppid_mismatch_action.count(child_stat_read), 1)
-        ppid_mismatch_action = ppid_mismatch_action.replace(
-            child_stat_read,
-            child_stat_read + "                observed_parent = parent_pid + 1\n",
-            1)
-        script = functions + ppid_mismatch_action + r'''
+        script = functions + r'''
 tmp=$1
 ready=$tmp/ready
 go=$tmp/go
@@ -925,39 +913,91 @@ done
 child="$(awk -F= '$1 == "pid" && NF == 2 { print $2 }' "$ready")"
 child_start="$(capture_nested_child_identity "$child" "$parent" "$parent_start")" || exit 22
 wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 23
-if nested_pair_identity_action_ppid_mismatch signal "$child" "$parent" \
-        "$parent_start" "$child_start" 18; then
-    printf '%s\n' 'changed child parent was accepted for resume' >&2
-    exit 24
-else
-    status=$?
-    if [[ $status != 7 ]]; then
-        category="$(nested_pair_identity_status_category "$status")"
-        printf 'changed child parent status mismatch: expected=7(readiness-child-reparented) observed=%s(%s)\n' \
-            "$status" "$category" >&2
-        exit 25
-    fi
-fi
-# A refused PPID mismatch must leave the exact child stopped.
-wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 26
 # Keep the negative control syntactically valid so it reaches the identity
 # comparison rather than the earlier malformed-start-time refusal (status 2).
 wrong_child_start="$((child_start + 1))"
 if signal_nested_owned_child "$child" "$parent" "$parent_start" "$wrong_child_start" 18; then
     printf '%s\n' 'wrong child start time was accepted' >&2
-    exit 27
+    exit 24
 else
     status=$?
     if [[ $status != 8 ]]; then
         category="$(nested_pair_identity_status_category "$status")"
         printf 'wrong child start status mismatch: expected=8(readiness-child-start-changed) observed=%s(%s)\n' \
             "$status" "$category" >&2
-        exit 28
+        exit 25
     fi
 fi
-wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 29
+wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 26
 : > "$go"
-signal_nested_owned_child "$child" "$parent" "$parent_start" "$child_start" 18 || exit 30
+signal_nested_owned_child "$child" "$parent" "$parent_start" "$child_start" 18 || exit 27
+wait "$parent"
+'''
+        result = self.run_shell(script, self.root)
+        self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+        self.assertEqual(result.stderr, "")
+
+    def test_nested_pair_ppid_mismatch_refuses_resume(self):
+        functions = "".join(
+            shell_function(QUALIFIER, name)
+            for name in (
+                "direct_owned_child_running",
+                "capture_direct_child_identity",
+                "nested_pair_identity_action",
+                "nested_pair_identity_status_category",
+                "capture_nested_child_identity",
+                "wait_nested_child_stopped",
+                "signal_nested_owned_child",
+            )
+        )
+        ppid_mismatch_action = shell_function(
+            QUALIFIER, "nested_pair_identity_action").replace(
+                "nested_pair_identity_action() {",
+                "nested_pair_identity_action_ppid_mismatch() {", 1)
+        child_stat_read = (
+            "                state, observed_parent, observed_child_start = "
+            "read_stat(child_pid)\n")
+        self.assertEqual(ppid_mismatch_action.count(child_stat_read), 1)
+        ppid_mismatch_action = ppid_mismatch_action.replace(
+            child_stat_read,
+            child_stat_read + "                observed_parent = parent_pid + 1\n",
+            1)
+        script = functions + ppid_mismatch_action + r'''
+tmp=$1
+ready=$tmp/reparent.ready
+go=$tmp/reparent.go
+timeout --signal=TERM --kill-after=1s 10s bash -c '
+    printf "pid=%s\n" "$" > "$1"
+    kill -STOP "$"
+    [[ -f $2 ]]
+' _ "$ready" "$go" &
+parent=$!
+parent_start="$(capture_direct_child_identity "$parent")" || exit 31
+for _ in {1..100}; do
+    [[ -s $ready ]] && break
+    direct_owned_child_running "$parent" || exit 32
+    sleep 0.01
+done
+child="$(awk -F= '$1 == "pid" && NF == 2 { print $2 }' "$ready")"
+child_start="$(capture_nested_child_identity "$child" "$parent" "$parent_start")" || exit 33
+wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 34
+if nested_pair_identity_action_ppid_mismatch signal "$child" "$parent" \
+        "$parent_start" "$child_start" 18; then
+    printf '%s\n' 'changed child parent was accepted for resume' >&2
+    exit 35
+else
+    status=$?
+    if [[ $status != 7 ]]; then
+        category="$(nested_pair_identity_status_category "$status")"
+        printf 'changed child parent status mismatch: expected=7(readiness-child-reparented) observed=%s(%s)\n' \
+            "$status" "$category" >&2
+        exit 36
+    fi
+fi
+# A refused PPID mismatch must leave the exact child stopped.
+wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 37
+: > "$go"
+signal_nested_owned_child "$child" "$parent" "$parent_start" "$child_start" 18 || exit 38
 wait "$parent"
 '''
         result = self.run_shell(script, self.root)
