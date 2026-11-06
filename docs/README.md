@@ -1,8 +1,11 @@
 # swapz
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
-
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands; the sole owner-approved exception is the development decision loop `make fast_test`, which never qualifies a source, never writes or publishes `test_results.json` and never replaces `make test`. Private scripts and CI jobs are implementation details, not operator interfaces.
+**Canonical naming and qualification policies:** [VISION.md](VISION.md) defines
+swapz's immutable product/module/target/SWZ identities and the official
+`make test` qualification interface, with `make fast_test` limited to a
+non-qualifying development loop. See [the root Make API](compile.md#root-make-api)
+for supported command behavior and [AGENTS.md](../AGENTS.md) plus
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md) for current operating restrictions.
 
 swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ physical extents. Ordinary compression uses LZ4. **Main compression requirement:** every emulated-device test and benchmark runs the production stack with delta64 rescue enabled, the `DELTA64_SHUF8` 8-byte byte-plane shuffle (byte shuffle, confirmed by the owner as the requirement; not a bit-level bitshuffle), and LZ4. A scalar sampled classifier runs before ordinary LZ4; high-score pages may run delta64 + shuffle + LZ4 first and directly adopt a sufficiently small candidate, while lower-score pages retain the ordinary-LZ4 packing-cliff route. Delta64-off is not a supported emulated-device benchmark, plot series, or performance comparison. The module-level disable switch remains only as a debugging/compatibility escape hatch and does not qualify an emulated-device result. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
 
