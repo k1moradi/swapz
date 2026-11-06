@@ -368,7 +368,10 @@ devno/alias parser: either the configfs-derived disk name or the index-derived
 disk name may exist, never both, and an alternate disk entry remains ambiguous
 even when its dev attribute is absent or dangling. Reject malformed or multiply
 reported /proc driver majors and preserve the first parser status in the
-refusal; no telemetry, token, or stale mapper snapshot grants creation authority.
+refusal. Configfs numeric identity attributes must likewise be bounded,
+single-record, newline-terminated canonical unsigned values; command
+substitution must not normalize malformed attributes into identity proof.
+No telemetry, token, or stale mapper snapshot grants creation authority.
 
 
 ### Physical formatter descriptor and SWZ header contract
