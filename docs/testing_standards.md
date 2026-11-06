@@ -9042,6 +9042,8 @@ without weakening unrelated package tests; it is a test watchdog, not a
 production latency promise. The independently one-second nonterminating
 fixture must still SIGKILL its process group, and post-kill reaping is itself
 bounded to eight seconds so watchdog cleanup cannot wait indefinitely.
+Compressed SIGKILL recovery must carry its codec attribution into replay so
+the recovery invocation receives the same finite compressed-DKMS budget.
 Short-deadline SIGKILL recovery, failed transaction exits, mixed compressed-
 image refusal, DKMS registration ownership and quarantine remain required.
 An unhandled watchdog expiry must use an allowlisted codec classification and

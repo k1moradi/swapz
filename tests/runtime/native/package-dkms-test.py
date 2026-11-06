@@ -3610,7 +3610,8 @@ exec "{flock_binary}" "$@"
             "install", "dkms-installed",
             {"SWAPZ_FAKE_DKMS_MODULE_SUFFIX": ".zst"})
         self.assertTrue(Path(str(self.installed_module) + ".zst").exists())
-        recovered = self.invoke("recover")
+        recovered = self.invoke(
+            "recover", {"SWAPZ_FAKE_DKMS_MODULE_SUFFIX": ".zst"})
         self.assertEqual(recovered.returncode, 0, recovered.stderr)
         self.assert_absent()
         self.assertFalse(Path(str(self.installed_module) + ".zst").exists())
