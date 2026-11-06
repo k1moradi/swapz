@@ -3642,7 +3642,12 @@ order, exact clean tested-source identity, matching kernel/build provenance,
 the required loaded verdicts, and final formatter/module/oracle digests.
 A report-only advance of `main` may preserve the tested source, but cannot
 make a stale source, changed implementation, dirty input, missing stage or
-missing artifact current qualification.
+missing artifact current qualification. Before recording or publishing PASS,
+the runner must also require the actual kernel release, valid current
+hardware-bound host identity, exact clean generated build-source header and
+byte-exact formatter/module/oracle digests. A failed binding refuses PASS
+with a sanitized phase/reason; FAIL/BLOCKED reports remain historical evidence
+and cannot be promoted by subsequent report-only commits.
 
 Build provenance and the qualification runner must resolve a report-only
 `main` descendant to the same nearest non-report source commit. The Makefile's
@@ -3665,7 +3670,10 @@ non-report code revision; generated report-only ancestors modify only
 normalization has no fixed report-chain depth, so repeated qualifications of
 unchanged code cannot eventually turn a report-only commit into tested source.
 The report is built on the actual current main head so report-on-report updates
-remain normal fast-forwards. Transient push/fetch failures receive a bounded
+remain normal fast-forwards. A claimed PASS is rejected before Git plumbing
+unless the complete canonical stage matrix and live host/kernel/build/artifact
+bindings are valid; an incomplete or contradictory synthetic PASS must never
+be published even if its two source fields agree. Transient push/fetch failures receive a bounded
 exponential backoff retry. A moved main head is accepted only when the exact
 tested source remains its ancestor. Divergence, force-push, report branches/PRs,
 and replacing newer source bytes remain forbidden.

@@ -2179,6 +2179,62 @@ def qualification_artifact_digests():
     return {"status": "AVAILABLE", **digests}
 
 
+def official_pass_binding_refusal(report, source_sha):
+    """Fail closed before announcing or publishing source-qualified PASS."""
+    if report.get("schema") != "swapz-test-results-v1":
+        return "invalid_report_schema"
+    if report.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY":
+        return "invalid_qualification_scope"
+    if (report.get("source_sha") != source_sha or
+            report.get("tested_commit_sha") != source_sha):
+        return "source_identity_mismatch"
+    stages = report.get("stages")
+    if (not isinstance(stages, list) or
+            any(not isinstance(stage, dict) for stage in stages) or
+            qualification_overall(0, stages) != "PASS"):
+        return "incomplete_or_failed_stages"
+    artifacts = report.get("qualified_artifacts")
+    if not owner_qualification_artifacts_available(artifacts):
+        return "unavailable_artifact_digests"
+    if artifacts != qualification_artifact_digests():
+        return "artifact_digest_mismatch_or_unavailable"
+    identity = report.get("host_identity")
+    if (not isinstance(identity, dict) or
+            set(identity) != {"schema", "architecture", "id_sha256"} or
+            identity.get("schema") != "swapz-host-v1" or
+            not isinstance(identity.get("architecture"), str) or
+            not _valid_sha256(identity.get("id_sha256")) or
+            identity != report_host_identity()):
+        return "host_identity_mismatch_or_unavailable"
+    if report.get("kernel_release") != os.uname().release:
+        return "kernel_release_mismatch"
+
+    expected_header = (
+        f'#define SWAPZ_BUILD_SOURCE_SHA "{source_sha}"\n'
+        '#define SWAPZ_BUILD_SOURCE_CLEAN 1\n'
+        '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n').encode("ascii")
+    try:
+        with os.fdopen(os.open(
+                ROOT / "build/source-build-info.h",
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
+                getattr(os, "O_CLOEXEC", 0)), "rb") as build_header:
+            before = os.fstat(build_header.fileno())
+            if (not stat.S_ISREG(before.st_mode) or
+                    before.st_size != len(expected_header)):
+                return "build_provenance_mismatch"
+            header = build_header.read(len(expected_header) + 1)
+            after = os.fstat(build_header.fileno())
+    except OSError:
+        return "build_provenance_unavailable"
+    if (header != expected_header or
+            (before.st_dev, before.st_ino, before.st_size,
+             before.st_mtime_ns, before.st_ctime_ns) !=
+            (after.st_dev, after.st_ino, after.st_size,
+             after.st_mtime_ns, after.st_ctime_ns)):
+        return "build_provenance_mismatch"
+    return None
+
+
 def write_report(result):
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     # Newlines allow ranged reader requests. Omitting indentation keeps the
@@ -8414,6 +8470,12 @@ def publish(source_sha):
             return "SKIPPED_GIT_SYNC: report does not match tested Git commit"
     except (OSError, ValueError):
         return "SKIPPED_GIT_SYNC: JSON report is unreadable"
+    if contents.get("overall") not in ("PASS", "FAIL", "BLOCKED", "INCOMPLETE"):
+        return "SKIPPED_GIT_SYNC: phase=report-admission reason=invalid_overall"
+    if contents["overall"] == "PASS":
+        refusal = official_pass_binding_refusal(contents, source_sha)
+        if refusal:
+            return f"SKIPPED_GIT_SYNC: phase=report-admission reason={refusal}"
 
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
@@ -8879,6 +8941,13 @@ def main():
         # Preserve passed stages; missing artifacts do not qualify source.
         result["overall"] = "INCOMPLETE"
         exit_code = 2
+    if not exit_code and result["overall"] == "PASS":
+        refusal = official_pass_binding_refusal(
+            result, result["tested_commit_sha"])
+        if refusal:
+            result["overall"] = "INCOMPLETE"
+            exit_code = 2
+            print(f"  Qualification refusal: phase=report-binding reason={refusal}")
     if not exit_code and result["overall"] != "PASS":
         exit_code = 2
     result["benchmarks"]["lane_gap_attribution"] = lane_gap_attribution_rows(

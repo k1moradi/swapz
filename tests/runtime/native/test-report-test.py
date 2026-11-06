@@ -3407,6 +3407,9 @@ class ReportContract(unittest.TestCase):
                      mock.patch.object(
                          runner, "qualification_artifact_digests",
                          return_value=available_artifacts), \
+                     mock.patch.object(
+                         runner, "official_pass_binding_refusal",
+                         return_value=None), \
                      mock.patch.object(runner, "lane_gap_attribution_rows",
                                        return_value=[]), \
                      mock.patch.object(
@@ -4561,6 +4564,10 @@ class ReportContract(unittest.TestCase):
                         "tested_commit_sha": source_sha,
                         "overall": "BLOCKED",
                     }
+                    runner.write_report({**original, "overall": "PASS"})
+                    self.assertIn(
+                        "phase=report-admission reason=incomplete_or_failed_stages",
+                        runner.publish(source_sha))
                     runner.write_report(original)
                     # A staged previous/generated report is not a source edit.
                     # Publication must replace it without masking real C changes.
@@ -4582,7 +4589,7 @@ class ReportContract(unittest.TestCase):
                         original)
 
                     self.assertEqual(runner.git_sha(), source_sha)
-                    updated = dict(original, overall="PASS")
+                    updated = dict(original, overall="FAIL")
                     runner.write_report(updated)
                     second = runner.publish(source_sha)
                     self.assertIn("SYNCED_GIT", second)
@@ -4600,7 +4607,7 @@ class ReportContract(unittest.TestCase):
                     self.assertEqual(len(list(checkout.glob("*.json"))), 1)
 
                     (checkout / "source.c").write_text("unsaved owner change\n")
-                    blocked = dict(updated, overall="FAIL")
+                    blocked = dict(updated, overall="BLOCKED")
                     runner.write_report(blocked)
                     before = git("--git-dir", str(origin), "rev-parse",
                                  "refs/heads/main", cwd=sandbox).stdout.strip()
@@ -4663,6 +4670,21 @@ class ReportContract(unittest.TestCase):
             runner.ROOT = checkout
             try:
                 self.assertEqual(runner.git_sha(), source_sha)
+                self.assertEqual(
+                    git("log", "-1", "--format=%H", "HEAD", "--", ".",
+                        ":(exclude)test_results.json",
+                        cwd=checkout).stdout.strip(), source_sha)
+                (checkout / "source.c").write_text("changed source\n")
+                git("add", "source.c", cwd=checkout)
+                git("commit", "-m", "Later executable source", cwd=checkout)
+                changed_sha = git("rev-parse", "HEAD",
+                                  cwd=checkout).stdout.strip()
+                self.assertNotEqual(changed_sha, source_sha)
+                self.assertEqual(runner.git_sha(), changed_sha)
+                self.assertEqual(
+                    git("log", "-1", "--format=%H", "HEAD", "--", ".",
+                        ":(exclude)test_results.json",
+                        cwd=checkout).stdout.strip(), changed_sha)
             finally:
                 runner.ROOT = old_root
 
@@ -4823,7 +4845,7 @@ class ReportContract(unittest.TestCase):
                         "schema": "swapz-test-results-v1",
                         "source_sha": c1_sha,
                         "tested_commit_sha": c1_sha,
-                        "overall": "PASS",
+                        "overall": "FAIL",
                     }
                     runner.write_report(older_report)
                     notice = runner.publish(c1_sha)
@@ -4915,7 +4937,7 @@ class ReportContract(unittest.TestCase):
                         "schema": "swapz-test-results-v1",
                         "source_sha": c1_sha,
                         "tested_commit_sha": c1_sha,
-                        "overall": "PASS",
+                        "overall": "FAIL",
                     }
                     runner.write_report(older_report)
                     notice = runner.publish(c1_sha)
@@ -5003,7 +5025,7 @@ class ReportContract(unittest.TestCase):
                         "schema": "swapz-test-results-v1",
                         "source_sha": c2_sha,
                         "tested_commit_sha": c2_sha,
-                        "overall": "PASS",
+                        "overall": "FAIL",
                     }
                     runner.write_report(newer_report)
                     notice = runner.publish(c2_sha)
@@ -5386,6 +5408,94 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
                     git.assert_not_called()
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
+
+    def test_pass_publication_requires_actual_source_artifact_and_host_binding(self):
+        """Synthetic PASS rows cannot become official Git evidence."""
+        import copy
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory(prefix="publish-binding-") as name:
+            original_root, original_report = runner.ROOT, runner.REPORT
+            try:
+                runner.ROOT = Path(name)
+                runner.REPORT = runner.ROOT / runner.GIT_RESULT
+                header = runner.ROOT / "build/source-build-info.h"
+                header.parent.mkdir()
+                expected_header = (
+                    f'#define SWAPZ_BUILD_SOURCE_SHA "{self.SOURCE_SHA}"\n'
+                    '#define SWAPZ_BUILD_SOURCE_CLEAN 1\n'
+                    '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"\n')
+                header.write_text(expected_header, encoding="ascii")
+                identity = {
+                    "schema": "swapz-host-v1",
+                    "architecture": runner.os.uname().machine,
+                    "id_sha256": "f" * 64,
+                }
+                baseline = self.passing_report()
+                baseline["kernel_release"] = runner.os.uname().release
+                baseline["host_identity"] = identity
+
+                scenarios = (
+                    ("missing_stage", "incomplete_or_failed_stages",
+                     lambda report: report["stages"].pop()),
+                    ("failed_stage", "incomplete_or_failed_stages",
+                     lambda report: report["stages"][1].update(
+                         status="FAIL", exit_code=7)),
+                    ("contradictory_exit", "incomplete_or_failed_stages",
+                     lambda report: report["stages"][1].update(exit_code=1)),
+                    ("missing_hash", "unavailable_artifact_digests",
+                     lambda report: report["qualified_artifacts"].pop(
+                         "module_sha256")),
+                    ("wrong_hash", "artifact_digest_mismatch_or_unavailable",
+                     lambda report: report["qualified_artifacts"].update(
+                         module_sha256="e" * 64)),
+                    ("other_host", "host_identity_mismatch_or_unavailable",
+                     lambda report: report["host_identity"].update(
+                         id_sha256="e" * 64)),
+                    ("malformed_host", "host_identity_mismatch_or_unavailable",
+                     lambda report: report["host_identity"].update(
+                         id_sha256="NOT-A-DIGEST")),
+                    ("wrong_kernel", "kernel_release_mismatch",
+                     lambda report: report.update(kernel_release="other-kernel")),
+                )
+                with mock.patch.object(
+                        runner, "report_host_identity", return_value=identity), \
+                     mock.patch.object(
+                         runner, "qualification_artifact_digests",
+                         return_value=baseline["qualified_artifacts"]), \
+                     mock.patch.object(runner, "git_result") as git:
+                    runner.write_report(baseline)
+                    # Valid in-memory fixture reaches checkout admission,
+                    # which is unavailable in this isolated directory.
+                    self.assertIn(
+                        "not an authenticated Git checkout",
+                        runner.publish(self.SOURCE_SHA))
+                    self.assertTrue(git.called)
+
+                    for label, reason, mutate in scenarios:
+                        with self.subTest(case=label):
+                            report = copy.deepcopy(baseline)
+                            mutate(report)
+                            runner.write_report(report)
+                            git.reset_mock()
+                            self.assertEqual(
+                                runner.publish(self.SOURCE_SHA),
+                                "SKIPPED_GIT_SYNC: phase=report-admission "
+                                f"reason={reason}")
+                            git.assert_not_called()
+
+                    runner.write_report(baseline)
+                    header.write_text(expected_header.replace(
+                        "SWAPZ_BUILD_SOURCE_CLEAN 1",
+                        "SWAPZ_BUILD_SOURCE_CLEAN 0"), encoding="ascii")
+                    git.reset_mock()
+                    self.assertEqual(
+                        runner.publish(self.SOURCE_SHA),
+                        "SKIPPED_GIT_SYNC: phase=report-admission "
+                        "reason=build_provenance_mismatch")
+                    git.assert_not_called()
+            finally:
+                runner.ROOT, runner.REPORT = original_root, original_report
 
     def test_qualified_artifact_digest_guard_checks_actual_bytes(self):
         """Execute the package hash gate against isolated artifact bytes."""
