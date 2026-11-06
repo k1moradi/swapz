@@ -7598,9 +7598,15 @@ wrong module vermagic, stale/missing DKMS registration and Secure Boot
 signature/enrollment failure must all remain BLOCKED. A verified detached
 signature plus an enrolled MOK must never imply kernel load acceptance.
 A hash producer that exits unsuccessfully must not establish artifact identity
-even when its stdout matches the expected SHA-256; rootless package fixtures
-must exercise failed producers with plausible stdout for both qualification
-inputs and already-installed files, preserving exit-status attribution.
+even when its stdout matches the expected SHA-256. Every qualified-input,
+staged-copy, retained-snapshot and installed-artifact digest refusal must name
+the exact artifact class, expected versus observed digest/provenance, producer
+status and safe read-only next step. Recovery snapshot path-key hashing must
+capture and validate the hash producer result before using it as a backup
+filename; nesting that producer inside another command's argument must never
+hide its failure status. Rootless package fixtures must exercise plausible
+digest stdout with failed producers for qualification inputs, staged/promoted
+artifacts, existing installed files and snapshot path-key generation.
 Secure Boot state admission requires a complete recognized state from a
 successful `mokutil --sb-state` probe, or the existing direct EFI-variable
 fallback when `mokutil` is absent. If `mokutil` fails and `/sys/firmware/efi`

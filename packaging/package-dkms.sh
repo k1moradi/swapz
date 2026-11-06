@@ -261,11 +261,20 @@ hash_file() {
   sha256sum -- "$path" | awk '{print $1}'
 }
 
-# A matching digest string from a failed hash producer is not identity proof.
-hash_matches() {
-  local expected_hash="$1" artifact_path="$2" observed_hash
-  observed_hash="$(hash_file "$artifact_path" 2>/dev/null)" || return 1
-  [[ "$observed_hash" == "$expected_hash" ]]
+# Recovery snapshot filenames use a digest of the canonical destination path.
+# Capture the producer status before using that digest as a filename component.
+hash_path_key() {
+  local path="$1" digest status=0 observed=malformed_output
+  digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')" ||
+    status=$?
+  if (( status != 0 )) || [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+    (( status != 0 )) && observed=producer_failed
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=package_snapshot_path_key check=sha256 expected=successful_canonical_path_digest observed=%s command_status=%s next=inspect_sha256sum_tool_read_only retained_state=unchanged\n' \
+      "$observed" "$status" >&2
+    (( status != 0 )) && return "$status"
+    return 1
+  fi
+  printf '%s\n' "$digest"
 }
 
 # Report only named artifact classes and canonical digests, never private paths.
@@ -535,6 +544,8 @@ verify_owned_legacy() {
   verify_source_manifest && verify_binary_manifest
 }
 
+qualification_identity_digest_failure=0
+
 verify_qualification_identity() {
   local -a identity_lines
   local source_sha report_sha cli_sha module_sha oracle_sha
@@ -568,10 +579,18 @@ verify_qualification_identity() {
   build_source_clean="$(sed -n 's/^#define SWAPZ_BUILD_SOURCE_CLEAN \([01]\)$/\1/p'     "$src/src/kernel/swapz-build-info.h")"
   [[ "$build_source_sha" == "$source_sha" && "$build_source_clean" == 1 ]] ||
     return 1
-  hash_matches "$cli_sha" "$cli" &&
-    hash_matches "$oracle_sha" "$helper" &&
-    hash_matches "$module_sha" "$module_snapshot" &&
-    hash_matches "$module_sha" "$installed_module"
+  report_qualified_digest installed_swapzctl "$cli_sha" "$cli" \
+      installed_marker_unverified ||
+    { qualification_identity_digest_failure=1; return 1; }
+  report_qualified_digest installed_roundtrip_oracle "$oracle_sha" "$helper" \
+      installed_marker_unverified ||
+    { qualification_identity_digest_failure=1; return 1; }
+  report_qualified_digest installed_module_snapshot "$module_sha" "$module_snapshot" \
+      installed_marker_unverified ||
+    { qualification_identity_digest_failure=1; return 1; }
+  report_qualified_digest installed_dm-swapz.ko "$module_sha" "$installed_module" \
+      installed_marker_unverified ||
+    { qualification_identity_digest_failure=1; return 1; }
 }
 
 module_candidates_absent() {
@@ -646,6 +665,7 @@ report_module_resolution_failure() {
 }
 
 verify_owned() {
+  qualification_identity_digest_failure=0
   verify_owned_legacy || return 1
   verify_installed_module_set || return 1
   [[ -f "$src/$qualification_marker" && ! -L "$src/$qualification_marker" &&
@@ -674,12 +694,14 @@ report_existing_package_drift() {
   installed_file_metadata "$src/$qualification_marker" 644 || return 0
   stored_module_sha="$(sed -n 's/^module_sha256=\([0-9a-f]\{64\}\)$/\1/p' "$src/$qualification_marker" 2>/dev/null || true)"
   stored_cli_sha="$(sed -n 's/^swapzctl_sha256=\([0-9a-f]\{64\}\)$/\1/p' "$src/$qualification_marker" 2>/dev/null || true)"
-  if [[ "$stored_module_sha" =~ ^[0-9a-f]{64}$ ]]; then
-    report_qualified_digest installed_dm-swapz.ko "$stored_module_sha" "$installed_module" installed_marker_unverified || true
-    report_qualified_digest installed_module_snapshot "$stored_module_sha" "$module_snapshot" installed_marker_unverified || true
-  fi
-  if [[ "$stored_cli_sha" =~ ^[0-9a-f]{64}$ ]]; then
-    report_qualified_digest installed_swapzctl "$stored_cli_sha" "$cli" installed_marker_unverified || true
+  if (( qualification_identity_digest_failure == 0 )); then
+    if [[ "$stored_module_sha" =~ ^[0-9a-f]{64}$ ]]; then
+      report_qualified_digest installed_dm-swapz.ko "$stored_module_sha" "$installed_module" installed_marker_unverified || true
+      report_qualified_digest installed_module_snapshot "$stored_module_sha" "$module_snapshot" installed_marker_unverified || true
+    fi
+    if [[ "$stored_cli_sha" =~ ^[0-9a-f]{64}$ ]]; then
+      report_qualified_digest installed_swapzctl "$stored_cli_sha" "$cli" installed_marker_unverified || true
+    fi
   fi
   if [[ -f "$installed_module" && ! -L "$installed_module" ]] &&
      ! verify_module_resolution; then
@@ -1453,6 +1475,7 @@ PY
 }
 
 backup_verified_package_for_uninstall() {
+  local file backup_key
   backup_dir="$transaction_dir/backup"
   mkdir -m0700 "$backup_dir" "$backup_dir/source" "$backup_dir/source/src" \
     "$backup_dir/source/src/kernel" "$backup_dir/files"
@@ -1463,7 +1486,8 @@ backup_verified_package_for_uninstall() {
   for file in "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
       "$primary_generator" "$mapper_service" "$boot_verifier_service" \
       "$runtime_health_service" "$primary_swap"; do
-    cp -a -- "$file" "$backup_dir/files/$(printf '%s' "$file" | sha256sum | awk '{print $1}')"
+    backup_key="$(hash_path_key "$file")" || return $?
+    cp -a -- "$file" "$backup_dir/files/$backup_key" || return $?
   done
   printf '%s\n' \
     "$cli" "$boot_verifier" "$runtime_health" "$helper" "$module_snapshot" \
@@ -1477,7 +1501,7 @@ restore_uninstall_file_backups_except_cli() {
   [[ -f "$backup_dir/file-paths" && ! -L "$backup_dir/file-paths" ]] || return 1
   while IFS= read -r path; do
     [[ "$path" == "$cli" ]] && continue
-    digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')" || return 1
+    digest="$(hash_path_key "$path")" || return $?
     backup_path="$backup_dir/files/$digest"
     [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
     install -d -m0755 "$(dirname "$path")" || return 1
@@ -1488,7 +1512,7 @@ restore_uninstall_file_backups_except_cli() {
 
 restore_uninstall_cli_backup() {
   local digest backup_path temporary_cli
-  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')" || return 1
+  digest="$(hash_path_key "$cli")" || return $?
   backup_path="$backup_dir/files/$digest"
   [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
   install -d -m0755 "$cli_dir" || return 1
@@ -2305,7 +2329,9 @@ if [[ -n "$existing_kind" ]]; then
       "$primary_generator" "$mapper_service" "$boot_verifier_service" \
       "$runtime_health_service" "$primary_swap"; do
     [[ -f "$file" && ! -L "$file" ]] || continue
-    cp -a -- "$file" "$backup_dir/files/$(printf '%s' "$file" | sha256sum | awk '{print $1}')"
+    backup_key="$(hash_path_key "$file")" ||
+      blocked "cannot derive verified package backup path key"
+    cp -a -- "$file" "$backup_dir/files/$backup_key"
     printf '%s\n' "$file" >> "$backup_dir/file-paths"
   done
   cp -a -- "$installed_module" "$backup_dir/installed-module"
@@ -2327,10 +2353,15 @@ chmod 0644 "$stage_dir/swapz-primary-mapper.service" "$stage_dir/swapz-primary-b
 chmod 0755 "$stage_dir/swapz-primary-generator"
 install -m0644 packaging/swapz-primary.swap "$stage_dir/$swap_unit_name"
 
-hash_matches "$qualified_cli_sha256" "$stage_dir/swapzctl" &&
-  hash_matches "$qualified_oracle_sha256" "$stage_dir/device-roundtrip" &&
-  hash_matches "$qualified_module_sha256" "$stage_dir/dm-swapz.ko" ||
-  blocked "staged artifact digest mismatch"
+report_qualified_digest staged_swapzctl "$qualified_cli_sha256" \
+    "$stage_dir/swapzctl" qualified_report ||
+  blocked "staged swapzctl digest verification failed"
+report_qualified_digest staged_roundtrip_oracle "$qualified_oracle_sha256" \
+    "$stage_dir/device-roundtrip" qualified_report ||
+  blocked "staged round-trip oracle digest verification failed"
+report_qualified_digest staged_dm-swapz.ko "$qualified_module_sha256" \
+    "$stage_dir/dm-swapz.ko" qualified_report ||
+  blocked "staged module digest verification failed"
 
 persist_transaction_state prepared
 
@@ -2350,7 +2381,7 @@ restore_file_backups_except_cli() {
   [[ -f "$backup_dir/file-paths" ]] || return 0
   while IFS= read -r path; do
     [[ "$path" == "$cli" ]] && continue
-    digest="$(printf '%s' "$path" | sha256sum | awk '{print $1}')" || return 1
+    digest="$(hash_path_key "$path")" || return $?
     backup_path="$backup_dir/files/$digest"
     [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
     install -d -m0755 "$(dirname "$path")" || return 1
@@ -2362,7 +2393,7 @@ restore_file_backups_except_cli() {
 restore_cli_backup() {
   local digest backup_path temporary_cli
   [[ -f "$backup_dir/file-paths" ]] || return 0
-  digest="$(printf '%s' "$cli" | sha256sum | awk '{print $1}')" || return 1
+  digest="$(hash_path_key "$cli")" || return $?
   backup_path="$backup_dir/files/$digest"
   [[ -f "$backup_path" && ! -L "$backup_path" ]] || return 1
   install -d -m0755 "$cli_dir" || return 1
@@ -2701,10 +2732,15 @@ new_files_committed=1
     "$runtime_health_service" "$primary_swap" "$installed_module"
   printf '%s  %s\n' "$qualified_cli_sha256" "$cli"
 } > "$src/$binary_manifest"
-hash_matches "$qualified_oracle_sha256" "$helper" &&
-  hash_matches "$qualified_module_sha256" "$module_snapshot" &&
-  hash_matches "$qualified_module_sha256" "$installed_module" ||
-  blocked "installed artifact digest mismatch"
+report_qualified_digest installed_roundtrip_oracle "$qualified_oracle_sha256" \
+    "$helper" qualified_report ||
+  blocked "installed round-trip oracle digest verification failed"
+report_qualified_digest installed_module_snapshot "$qualified_module_sha256" \
+    "$module_snapshot" qualified_report ||
+  blocked "installed module snapshot digest verification failed"
+report_qualified_digest installed_dm-swapz.ko "$qualified_module_sha256" \
+    "$installed_module" qualified_report ||
+  blocked "installed module digest verification failed"
 durable_package_paths "$boot_verifier" "$runtime_health" "$helper" \
   "$module_snapshot" "$primary_generator" "$mapper_service" \
   "$boot_verifier_service" "$runtime_health_service" "$primary_swap" \

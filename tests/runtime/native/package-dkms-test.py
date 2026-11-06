@@ -2648,9 +2648,19 @@ exec "{flock_binary}" "$@"
         self.tool("sha256sum", (
             "#!/usr/bin/env bash\n"
             "set -eu\n"
-            'if [[ "${1:-}" == -- && "${2:-}" == "${SWAPZ_FAKE_HASH_FAIL_FOR:-}" ]]; then\n'
-            f'  "{real_sha256sum}" "$@"\n'
-            "  exit 71\n"
+            'if [[ "$#" -eq 0 && "${SWAPZ_FAKE_HASH_STDIN_FAILURE:-0}" == 1 ]]; then\n'
+            f'  "{real_sha256sum}"\n'
+            "  exit 72\n"
+            "fi\n"
+            'if [[ "${1:-}" == -- ]]; then\n'
+            '  artifact="${2:-}"\n'
+            '  exact="${SWAPZ_FAKE_HASH_FAIL_FOR:-}"\n'
+            '  contains="${SWAPZ_FAKE_HASH_FAIL_CONTAINS:-}"\n'
+            '  if [[ -n "$exact" && "$artifact" == "$exact" ]] ||\n'
+            '     [[ -n "$contains" && "$artifact" == *"$contains"* ]]; then\n'
+            f'    "{real_sha256sum}" "$@"\n'
+            "    exit 71\n"
+            "  fi\n"
             "fi\n"
             f'exec "{real_sha256sum}" "$@"\n'
         ))
@@ -2670,6 +2680,38 @@ exec "{flock_binary}" "$@"
         self.assertNotIn(str(self.home), qualified_failure.stderr)
         self.assert_absent()
 
+        staged_failure = self.invoke(
+            "install",
+            {"SWAPZ_FAKE_HASH_FAIL_CONTAINS": "/stage/device-roundtrip"})
+        self.assertNotEqual(staged_failure.returncode, 0)
+        self.assertIn(
+            "artifact=staged_roundtrip_oracle check=sha256 "
+            "provenance=qualified_report", staged_failure.stderr)
+        self.assertIn(
+            "observed_sha256=unavailable command_status=71",
+            staged_failure.stderr)
+        self.assertIn(
+            "next=inspect_qualification_and_artifact_bytes_read_only",
+            staged_failure.stderr)
+        self.assertNotIn(str(self.home), staged_failure.stderr)
+        self.assert_absent()
+
+        installed_oracle = self.prefix / "libexec/swapz/device-roundtrip"
+        promoted_failure = self.invoke(
+            "install", {"SWAPZ_FAKE_HASH_FAIL_FOR": str(installed_oracle)})
+        self.assertNotEqual(promoted_failure.returncode, 0)
+        self.assertIn(
+            "artifact=installed_roundtrip_oracle check=sha256 "
+            "provenance=qualified_report", promoted_failure.stderr)
+        self.assertIn(
+            "observed_sha256=unavailable command_status=71",
+            promoted_failure.stderr)
+        self.assertIn(
+            "next=inspect_qualification_and_artifact_bytes_read_only",
+            promoted_failure.stderr)
+        self.assertNotIn(str(self.home), promoted_failure.stderr)
+        self.assert_absent()
+
         installed = self.invoke("install")
         self.assertEqual(installed.returncode, 0, installed.stderr)
         installed_failure = self.invoke(
@@ -2687,6 +2729,21 @@ exec "{flock_binary}" "$@"
             "observed_sha256=unavailable command_status=71",
             installed_failure.stderr)
         self.assertNotIn(str(self.home), installed_failure.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
+        snapshot_key_failure = self.invoke(
+            "uninstall", {"SWAPZ_FAKE_HASH_STDIN_FAILURE": "1"})
+        self.assertNotEqual(snapshot_key_failure.returncode, 0)
+        self.assertIn(
+            "artifact=package_snapshot_path_key check=sha256 "
+            "expected=successful_canonical_path_digest "
+            "observed=producer_failed command_status=72",
+            snapshot_key_failure.stderr)
+        self.assertIn(
+            "next=inspect_sha256sum_tool_read_only",
+            snapshot_key_failure.stderr)
+        self.assertNotIn(str(self.home), snapshot_key_failure.stderr)
         self.assert_installed_exact()
         self.assertEqual(self.uninstall_transactions(), [])
 
