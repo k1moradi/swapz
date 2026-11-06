@@ -29,20 +29,48 @@ STAGES = (
 # Upgrade publication can exceed the old 8-second test deadline on this host.
 # Keep crash-injection waits bounded while allowing durable filesystem work to finish.
 DURABLE_CHECKPOINT_TIMEOUT_SECONDS = 30
-# A complete package operation crosses multiple durable journal and directory
-# fsyncs. The former 15-second fixture limit kills a valid 16-second fsync;
-# give the operation two bounded checkpoint windows. The one-second hung-child
-# cleanup regression below remains independent of this I/O allowance.
-PACKAGE_TRANSACTION_TIMEOUT_SECONDS = 2 * DURABLE_CHECKPOINT_TIMEOUT_SECONDS
+# Keep the ordinary fixture watchdog unchanged. Only known compressed-DKMS
+# variants get the wider budget proven necessary by the controlled 16-second
+# fsync witness below. Process-group reaping after a watchdog kill is bounded
+# independently so timeout cleanup cannot become an unbounded wait.
+PACKAGE_TRANSACTION_TIMEOUT_SECONDS = 15
+COMPRESSED_DKMS_TRANSACTION_TIMEOUT_SECONDS = 60
+PACKAGE_PROCESS_GROUP_REAP_TIMEOUT_SECONDS = 8
+COMPRESSED_DKMS_SUFFIXES = frozenset((".zst", ".xz", ".gz"))
+
+
+def package_codec_variant(environment):
+    """Return a bounded codec label suitable for failure diagnostics."""
+    raw_variants = tuple(
+        environment.get(name, "")
+        for name in (
+            "SWAPZ_FAKE_DKMS_MODULE_SUFFIX",
+            "SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX",
+            "SWAPZ_FAKE_REMOVE_RETAIN_SUFFIX",
+        )
+        if environment.get(name, "")
+    )
+    known_variants = {
+        variant for variant in raw_variants
+        if variant in COMPRESSED_DKMS_SUFFIXES
+    }
+    if len(known_variants) == 1:
+        return next(iter(known_variants))
+    if len(known_variants) > 1:
+        return "mixed"
+    return "unknown" if raw_variants else "uncompressed"
 
 
 class PackageInvocationTimeout(subprocess.TimeoutExpired):
     """Report an expired test watchdog without exposing sandbox paths."""
 
-    def __init__(self, action, codec_variant, budget, elapsed, disposition):
+    def __init__(
+            self, action, codec_variant, budget, budget_reason, elapsed,
+            disposition):
         super().__init__(["bash", "package-dkms.sh", action], budget)
         self.action = action
         self.codec_variant = codec_variant
+        self.budget_reason = budget_reason
         self.elapsed = elapsed
         self.disposition = disposition
 
@@ -51,7 +79,8 @@ class PackageInvocationTimeout(subprocess.TimeoutExpired):
             f"SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant={self.codec_variant} "
             f"operation={self.action} elapsed_seconds={self.elapsed:.3f} "
             f"budget_seconds={self.timeout:g} "
-            f"final_process_disposition=reaped_exit_{self.disposition} "
+            f"budget_reason={self.budget_reason} "
+            f"final_process_disposition={self.disposition} "
             "first_cause=fixture_watchdog_expired"
         )
 
@@ -460,33 +489,52 @@ esac
             "systemd-escape",
             "#!/bin/sh\nprintf '%s\\n' 'dev-mapper-swapz\\x2dprimary.swap'\n")
 
-    def invoke(self, action, extra=None,
-               timeout=PACKAGE_TRANSACTION_TIMEOUT_SECONDS):
+    def invoke(self, action, extra=None, timeout=None):
         env = dict(self.env)
         if extra:
             env.update(extra)
+        codec_variant = package_codec_variant(env)
+        if timeout is None:
+            if (codec_variant in COMPRESSED_DKMS_SUFFIXES or
+                    codec_variant == "mixed"):
+                timeout = COMPRESSED_DKMS_TRANSACTION_TIMEOUT_SECONDS
+                budget_reason = "compressed_dkms_durable_io"
+            else:
+                timeout = PACKAGE_TRANSACTION_TIMEOUT_SECONDS
+                budget_reason = "ordinary_fixture_watchdog"
+        else:
+            budget_reason = "explicit_test_watchdog"
+
         command = ["bash", str(self.script), action, str(self.prefix)]
         start_time = time.monotonic()
-        with subprocess.Popen(
-                command, cwd=self.repo_root, env=env, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True,
-                start_new_session=True) as process:
+        process = subprocess.Popen(
+            command, cwd=self.repo_root, env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # The timed-out shell's children must not outlive the sandbox.
             try:
-                stdout, stderr = process.communicate(timeout=timeout)
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(
+                    timeout=PACKAGE_PROCESS_GROUP_REAP_TIMEOUT_SECONDS)
+                disposition = f"reaped_exit_{process.returncode}"
             except subprocess.TimeoutExpired:
-                # The timed-out shell's children must not outlive the sandbox.
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.communicate()
-                codec_variant = (
-                    env.get("SWAPZ_FAKE_DKMS_MODULE_SUFFIX") or
-                    env.get("SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX") or
-                    "uncompressed")
-                raise PackageInvocationTimeout(
-                    action, codec_variant, timeout,
-                    time.monotonic() - start_time, process.returncode) from None
+                disposition = "kill_sent_reap_timeout"
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+            raise PackageInvocationTimeout(
+                action, codec_variant, timeout, budget_reason,
+                time.monotonic() - start_time, disposition) from None
+        finally:
+            if process.poll() is not None:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None and not stream.closed:
+                        stream.close()
         return subprocess.CompletedProcess(
             command, process.returncode, stdout, stderr)
 
@@ -580,13 +628,26 @@ esac
         try:
             self.script = fixture
             with self.assertRaises(PackageInvocationTimeout) as caught:
-                self.invoke("install", timeout=1)
+                self.invoke(
+                    "install", {
+                        "SWAPZ_FAKE_DKMS_MODULE_SUFFIX": ".xz",
+                        # A malformed extra suffix must never be echoed.
+                        "SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX": str(self.home),
+                    }, timeout=1)
+            diagnostic = str(caught.exception)
             self.assertEqual(
                 caught.exception.cmd, ["bash", "package-dkms.sh", "install"])
-            self.assertIn(
-                "final_process_disposition=reaped_exit_-9",
-                str(caught.exception))
-            self.assertNotIn(str(self.home), str(caught.exception))
+            self.assertGreaterEqual(caught.exception.elapsed, 1)
+            for expected in (
+                    "codec_variant=.xz",
+                    "operation=install",
+                    "elapsed_seconds=",
+                    "budget_seconds=1",
+                    "budget_reason=explicit_test_watchdog",
+                    "final_process_disposition=reaped_exit_-9",
+                    "first_cause=fixture_watchdog_expired"):
+                self.assertIn(expected, diagnostic)
+            self.assertNotIn(str(self.home), diagnostic)
         finally:
             self.script = original_script
         self.assertTrue(ready_marker.exists(), "timeout fixture never started")
@@ -1940,7 +2001,6 @@ exec "{flock_binary}" "$@"
         )
         self.assert_absent()
         self.assertFalse(list((self.home / "transactions").glob("swapz-package.*")))
-
 
     def test_compressed_xz_uninstall_completes_after_slow_durable_fsync(self):
         codec_variant = ".xz"

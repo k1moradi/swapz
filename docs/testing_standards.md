@@ -9005,20 +9005,23 @@ attributes to that same validated arm record; a summary `armed=true` bit alone
 must never make `PRODUCTION_READY_FOR_OWNER_REBOOT` PASS.
 
 
-The package fixture's full-operation watchdog is 60 seconds (two existing
-30-second durable-checkpoint windows), not the former 15-second per-invocation
-deadline: a completed transaction can legitimately spend more than 15 seconds
-inside a filesystem durability boundary. A rootless compressed .xz uninstall
-must interpose at exactly one Python fsync, delay it 16 seconds, still call the
-real fsync, preserve the original successful exit and verify the final absent
-state with no uninstall journal. The independently one-second nonterminating
-fixture must still SIGKILL and reap its entire process group; short-deadline
-SIGKILL recovery, failed transaction exits, mixed compressed-image refusal,
-DKMS registration ownership and quarantine remain required. An unhandled
-watchdog expiry must identify codec, operation, elapsed and budgeted seconds,
-final reaped process disposition and watchdog as first cause without exposing
-private sandbox paths. This synthetic timing witness does not replace a real
-F2FS durability trace or change production script behavior.
+The package fixture retains its ordinary 15-second operation watchdog. Only
+known compressed-DKMS fixture variants (.zst, .xz and .gz) receive a finite
+60-second budget: the controlled .xz witness delays exactly one Python fsync
+for 16 seconds, then calls the real fsync and must preserve the original
+successful uninstall status, final absent state and empty uninstall journal.
+The wider compressed budget allows multiple durable transaction boundaries
+without weakening unrelated package tests; it is a test watchdog, not a
+production latency promise. The independently one-second nonterminating
+fixture must still SIGKILL its process group, and post-kill reaping is itself
+bounded to eight seconds so watchdog cleanup cannot wait indefinitely.
+Short-deadline SIGKILL recovery, failed transaction exits, mixed compressed-
+image refusal, DKMS registration ownership and quarantine remain required.
+An unhandled watchdog expiry must use an allowlisted codec classification and
+identify operation, elapsed and budgeted seconds, budget reason, final process
+disposition and watchdog as first cause without exposing private sandbox paths.
+This synthetic timing witness does not replace a real F2FS durability trace or
+change production script behavior.
 
 The systemd/package GitHub Actions gate is rootless exact-source evidence, not a
 privileged deployment gate. Its workflow-level concurrency group must contain
