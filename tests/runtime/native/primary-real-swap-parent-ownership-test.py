@@ -666,6 +666,201 @@ print(result.stdout.strip(), flush=True)
         self.assertEqual(observed_process_id, parent_process_id)
         self.assertEqual(observed_start_ticks, start_ticks)
 
+
+    def test_terminal_parent_upstream_ppid_is_not_lineage_authority(self):
+        pinned = ((31001, 31002, 11), (31002, 31003, 12),
+                  (31003, 32000, 13))
+        reparented = ((31001, 31002, 11), (31002, 31003, 12),
+                      (31003, 1, 13))
+        matches = client_helper._source_parent_lineage_matches
+        self.assertTrue(matches(pinned, pinned))
+        self.assertTrue(matches(pinned, reparented))
+        for changed in (
+                (),
+                reparented[:-1],
+                ((31001, 31002, 11), (31002, 31003, 12),
+                 (31003, 1, 14)),  # Authorized PID reuse / changed start ticks.
+                ((31001, 31002, 11), (31002, 31003, 12),
+                 (31004, 1, 13)),  # Different terminal parent.
+                ((31001, 31002, 11), (31002, 31004, 12),
+                 (31003, 1, 13)),  # Broken intermediate parent link.
+                ((31001, 31002, 11), (31004, 31003, 12),
+                 (31003, 1, 13)),  # Replaced intermediate process.
+                ((31001, 31002, 12), (31002, 31003, 12),
+                 (31003, 1, 13)),  # Reused intermediate PID.
+        ):
+            with self.subTest(changed=changed):
+                self.assertFalse(matches(pinned, changed))
+
+    @unittest.skipUnless(
+        hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
+        "orphaned parent cleanup requires Linux pidfd support")
+    def test_live_authorized_parent_upstream_reparenting_allows_approval(self):
+        # Three real processes: intermediary -> listener creator -> client.
+        # The intermediary exits after the client pins the creator, before
+        # approval. Only the creator's upstream PPID may change.
+        source_parent_program = r"""
+import json
+import os
+import select
+import socket
+import subprocess
+import sys
+
+socket_path, helper_path, client_hex, event_fd, control_fd = sys.argv[1:]
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+    listener.bind(socket_path)
+    os.chmod(socket_path, 0o600)
+    listener.listen(1)
+    listener.settimeout(5)
+    client = subprocess.Popen(
+        [sys.executable, "-I", "-B", "-c",
+         bytes.fromhex(client_hex).decode("ascii"),
+         socket_path, helper_path, "normal"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, bufsize=1)
+    try:
+        with listener.accept()[0] as connection:
+            connection.settimeout(5)
+            if not select.select([client.stdout], [], [], 5)[0]:
+                raise RuntimeError("client connect timed out")
+            if client.stdout.readline().strip() != "CONNECTED":
+                raise RuntimeError("client did not pin creator")
+            os.write(int(event_fd), b"CONNECTED\n")
+            if os.read(int(control_fd), 1) != b"G":
+                raise RuntimeError("missing orphan gate")
+            client.stdin.write("GO\n")
+            client.stdin.flush()
+            request_bytes = bytearray()
+            while b"\n" not in request_bytes:
+                fragment = connection.recv(4096)
+                if not fragment:
+                    raise RuntimeError("client closed before request")
+                request_bytes.extend(fragment)
+                if len(request_bytes) > 4096:
+                    raise RuntimeError("oversized request")
+            request_line, _, remainder = request_bytes.partition(b"\n")
+            if remainder:
+                raise RuntimeError("unexpected extra request bytes")
+            request = json.loads(request_line.decode("ascii"))
+            response = {
+                "schema": request["schema"], "status": "PASS",
+                "phase": request["phase"], "nonce": request["nonce"],
+                "source_sha": request["source_sha"],
+                "oracle_sha256": "d" * 64}
+            connection.sendall((json.dumps(response) + "\n").encode("ascii"))
+            if not select.select([client.stdout], [], [], 5)[0]:
+                raise RuntimeError("client reply timed out")
+            outcome = client.stdout.readline().strip()
+            if client.wait(timeout=5):
+                raise RuntimeError("client exited abnormally")
+            os.write(int(event_fd), outcome.encode("ascii") + b"\n")
+    finally:
+        if client.poll() is None:
+            client.kill()
+        client.wait(timeout=5)
+        for stream in (client.stdin, client.stdout, client.stderr):
+            if stream is not None:
+                stream.close()
+"""
+        intermediary_program = r"""
+import os
+import subprocess
+import sys
+
+source_parent_program, socket_path, helper_path, client_hex, event_fd, control_fd = sys.argv[1:]
+source_parent = subprocess.Popen(
+    [sys.executable, "-I", "-B", "-c", source_parent_program,
+     socket_path, helper_path, client_hex, event_fd, control_fd],
+    pass_fds=(int(event_fd), int(control_fd)),
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL)
+print(source_parent.pid, flush=True)
+if sys.stdin.readline() != "ORPHAN\n":
+    raise RuntimeError("missing intermediate exit gate")
+"""
+        with tempfile.TemporaryDirectory(
+                prefix="swapz-live-source-reparent-") as directory:
+            event_read, event_write = os.pipe()
+            control_read, control_write = os.pipe()
+            intermediary = None
+            source_parent_pidfd = None
+            try:
+                intermediary = subprocess.Popen(
+                    [sys.executable, "-I", "-B", "-c",
+                     intermediary_program, source_parent_program,
+                     os.fspath(Path(directory) / "source.sock"),
+                     os.fspath(CLIENT_HELPER),
+                     self.CLIENT.encode("ascii").hex(),
+                     str(event_write), str(control_read)],
+                    pass_fds=(event_write, control_read),
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, bufsize=1)
+                os.close(event_write)
+                event_write = None
+                os.close(control_read)
+                control_read = None
+
+                self.assertTrue(select.select([intermediary.stdout], [], [], 5)[0])
+                source_parent_pid = int(intermediary.stdout.readline().strip())
+                source_parent_pidfd = os.pidfd_open(source_parent_pid)
+                self.assertTrue(select.select([event_read], [], [], 5)[0])
+                self.assertEqual(os.read(event_read, 128), b"CONNECTED\n")
+
+                def source_parent_identity():
+                    process_stat = (
+                        Path("/proc") / str(source_parent_pid) / "stat"
+                    ).read_text(encoding="ascii")
+                    closing_parenthesis = process_stat.rfind(") ")
+                    self.assertGreaterEqual(closing_parenthesis, 0)
+                    fields = process_stat[closing_parenthesis + 2:].split()
+                    self.assertGreaterEqual(len(fields), 20)
+                    return int(fields[1]), int(fields[19])
+
+                before_parent_pid, before_start_ticks = source_parent_identity()
+                self.assertEqual(before_parent_pid, intermediary.pid)
+                intermediary.stdin.write("ORPHAN\n")
+                intermediary.stdin.flush()
+                self.assertEqual(intermediary.wait(timeout=5), 0)
+
+                deadline = time.monotonic() + 5
+                after_parent_pid, after_start_ticks = source_parent_identity()
+                while (after_parent_pid == before_parent_pid and
+                       time.monotonic() < deadline):
+                    time.sleep(0.01)
+                    after_parent_pid, after_start_ticks = source_parent_identity()
+                self.assertNotEqual(after_parent_pid, before_parent_pid)
+                self.assertEqual(after_start_ticks, before_start_ticks)
+
+                os.write(control_write, b"G")
+                self.assertTrue(select.select([event_read], [], [], 5)[0])
+                self.assertEqual(
+                    os.read(event_read, 256).strip(), b"SYNTHETIC_APPROVED")
+            finally:
+                if source_parent_pidfd is not None:
+                    try:
+                        poller = select.poll()
+                        poller.register(source_parent_pidfd, select.POLLIN)
+                        if not poller.poll(0):
+                            signal.pidfd_send_signal(
+                                source_parent_pidfd, signal.SIGKILL, None, 0)
+                    except ProcessLookupError:
+                        pass
+                    finally:
+                        os.close(source_parent_pidfd)
+                if intermediary is not None:
+                    if intermediary.poll() is None:
+                        intermediary.kill()
+                    intermediary.wait(timeout=5)
+                    for stream in (intermediary.stdin, intermediary.stdout,
+                                   intermediary.stderr):
+                        if stream is not None:
+                            stream.close()
+                for descriptor in (
+                        event_read, event_write, control_read, control_write):
+                    if descriptor is not None:
+                        os.close(descriptor)
+
     def test_real_parent_can_send_nonce_bound_synthetic_approval(self):
         for _ in range(3):
             with self.subTest(repetition=_):

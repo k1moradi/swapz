@@ -253,6 +253,22 @@ def _source_parent_ancestors(
         phase, "process_lineage", "ambiguous_process_ancestry")
 
 
+def _source_parent_lineage_matches(
+        pinned_ancestors: tuple[tuple[int, int, int], ...],
+        observed_ancestors: tuple[tuple[int, int, int], ...]) -> bool:
+    """Verify every intermediate link but not the terminal parent's upstream PPID.
+
+    The authorized parent's PID and start ticks remain bound to its live
+    pidfd, socket and effective UID; its own parent is not source authority.
+    """
+    if not pinned_ancestors or len(pinned_ancestors) != len(observed_ancestors):
+        return False
+    return (
+        pinned_ancestors[:-1] == observed_ancestors[:-1] and
+        pinned_ancestors[-1][0] == observed_ancestors[-1][0] and
+        pinned_ancestors[-1][2] == observed_ancestors[-1][2])
+
+
 def _source_nearest_uid_ancestor(
         ancestors: tuple[tuple[int, int, int], ...],
         parent_uid: int, phase: str) -> int | None:
@@ -360,7 +376,8 @@ class SourceAdmissionClient:
                 raise _source_parent_refusal(
                     "connect", "parent_liveness", "pidfd_unavailable")
             parent_pidfd = os.pidfd_open(peer_pid)
-            if ancestors != _source_parent_ancestors("connect", parent_uid):
+            if not _source_parent_lineage_matches(
+                    ancestors, _source_parent_ancestors("connect", parent_uid)):
                 raise _source_parent_refusal(
                     "connect", "parent_ancestry", "changed_parent_process")
             _source_parent_pidfd_alive(parent_pidfd, "connect")
@@ -442,8 +459,9 @@ class SourceAdmissionClient:
         # reference and lineage through the authenticated parent, then recheck
         # the named endpoint. Ancestors above that parent are not authority.
         _source_parent_pidfd_alive(self._parent_pidfd, phase)
-        if _source_parent_ancestors(
-                phase, self._parent_uid) != self._parent_ancestors:
+        if not _source_parent_lineage_matches(
+                self._parent_ancestors,
+                _source_parent_ancestors(phase, self._parent_uid)):
             raise _source_parent_refusal(
                 phase, "parent_ancestry", "changed_parent_process")
         try:
