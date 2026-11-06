@@ -3640,6 +3640,17 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(result["release_verdict"], "BLOCKED")
         self.assertTrue(any(
+            "failed_evidence_field=physical_evidence_audit."
+            "cohort_pair_counts[].accepted_pairs" in blocker and
+            "expected_count_class=analysis_usable_within_"
+            "retained_PASS_nonexcluded" in blocker and
+            "expected_range=0..4" in blocker and
+            "observed_count=5" in blocker and
+            "reason=count_cannot_authenticate_retained_pairs" in blocker and
+            "safe_action=recapture_and_reseal_campaign" in blocker
+            for blocker in result["code_blockers"]),
+            result["code_blockers"])
+        self.assertTrue(any(
             "first_failed_phase=physical_evidence_audit" in blocker and
             f"required_source_sha={SOURCE}" in blocker and
             f"observed_source_sha={SOURCE}" in blocker and

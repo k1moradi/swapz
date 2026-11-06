@@ -8993,5 +8993,9 @@ invalid field and expected/observed types with bounded, redacted recapture
 guidance. Regression fixtures must locate an authenticating diagnostic by the
 failure-witness identity rather than retained-list position, and type-strict
 count controls cover `required_pairs`, `attempted_pairs` and
-`accepted_pairs`. These are rootless verdict-logic controls only, never
-physical acceptance evidence.
+`accepted_pairs`. When accepted counts contradict retained PASS/non-excluded
+pair dispositions, the release blocker must identify the audit count field,
+expected analyzer-usable bound, observed count, unauthenticated-proof reason,
+and safe recapture/reseal action without disclosing private pair content.
+The earlier failed-phase attribution still takes precedence. These are
+rootless verdict-logic controls only, never physical acceptance evidence.

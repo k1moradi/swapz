@@ -1928,6 +1928,40 @@ def validate_physical_campaign_evidence(
             audit_counts = (
                 physical_audit.get("cohort_pair_counts")
                 if isinstance(physical_audit, dict) else None)
+            producer_required_pairs = sum(
+                specification["pairs"]
+                for specification in producer_workloads.values())
+            # The audit counts analyzer-usable attempts, never an EXCLUDED
+            # artifact. Screening may lower accepted_pairs below retained PASS.
+            if (isinstance(audit_counts, dict) and isinstance(pairs, list) and
+                    len(pairs) <= producer_required_pairs):
+                for workload in producer_workloads:
+                    count = audit_counts.get(workload)
+                    if (not isinstance(count, dict) or
+                            type(count.get("accepted_pairs")) is not int):
+                        continue
+                    retained_pass_count = sum(
+                        isinstance(pair, dict) and
+                        pair.get("workload") == workload and
+                        pair.get("status") == "PASS" and
+                        pair.get("excluded") is False
+                        for pair in pairs)
+                    accepted_count = count["accepted_pairs"]
+                    if not 0 <= accepted_count <= retained_pass_count:
+                        reject(
+                            "sealed campaign physical evidence audit count "
+                            "contradiction: phase=physical_evidence_audit "
+                            "failed_evidence_field=physical_evidence_audit."
+                            "cohort_pair_counts[].accepted_pairs "
+                            f"workload={workload} "
+                            "expected_count_class=analysis_usable_within_"
+                            "retained_PASS_nonexcluded "
+                            f"expected_range=0..{retained_pass_count} "
+                            f"observed_count={accepted_count} "
+                            "original_error=unavailable verdict=BLOCKED "
+                            "reason=count_cannot_authenticate_retained_pairs "
+                            "safe_action=recapture_and_reseal_campaign")
+                        break
             audit_pass_counts = (
                 isinstance(audit_counts, dict) and
                 all(
@@ -1979,8 +2013,6 @@ def validate_physical_campaign_evidence(
             # Amendment pairs never substitute for any frozen workload.
             frozen_required_pairs = sum(
                 item["pairs"] for item in frozen_workloads.values())
-            producer_required_pairs = sum(
-                item["pairs"] for item in producer_workloads.values())
             observed_pairs = len(pairs) if isinstance(pairs, list) else 0
             observed_frozen_pairs = sum(
                 1 for pair in pairs

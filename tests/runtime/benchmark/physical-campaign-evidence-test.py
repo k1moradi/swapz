@@ -738,6 +738,18 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             QUALIFICATION.CONTRACT, {workload: specification})
         self.assertTrue(validator(*arguments, pairs, "FAIL_OR_INCOMPLETE"))
 
+        # Issue #100: an EXCLUDED witness cannot also be counted as accepted.
+        excluded_pairs = copy.deepcopy(pairs)
+        excluded_pairs[0].update(status="EXCLUDED", excluded=True)
+        self.assertFalse(validator(
+            *arguments, excluded_pairs, "FAIL_OR_INCOMPLETE"))
+        # Analysis screening may legitimately accept fewer retained PASS pairs.
+        screened_audit = copy.deepcopy(audit)
+        screened_audit["cohort_pair_counts"][workload]["accepted_pairs"] -= 1
+        self.assertTrue(validator(
+            screened_audit, *arguments[1:], excluded_pairs,
+            "FAIL_OR_INCOMPLETE"))
+
         mutations = {
             "name": lambda rows: rows[1].__setitem__(
                 "name", rows[0]["name"]),
