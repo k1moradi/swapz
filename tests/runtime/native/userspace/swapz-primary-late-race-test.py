@@ -144,10 +144,11 @@ enum fixture_scenario {
     FIXTURE_LOCAL_OVERSIZED, FIXTURE_PID_INVENTORY_EACCES,
     FIXTURE_PID_INVENTORY_EIO, FIXTURE_PID_INVENTORY_READDIR_EIO,
     FIXTURE_SYMLINK_MOUNTINFO, FIXTURE_WRONG_TARGET_OPEN,
-    FIXTURE_TRUNCATED_REMOTE, FIXTURE_TRUNCATED_LOCAL,
+    FIXTURE_WRONG_TARGET_GEOMETRY, FIXTURE_TRUNCATED_REMOTE, FIXTURE_TRUNCATED_LOCAL,
     FIXTURE_NAMESPACE_STAT_EACCES, FIXTURE_STALE_PARTUUID,
     FIXTURE_POST_SNAPSHOT_MOUNT, FIXTURE_POST_SNAPSHOT_SWAPON,
     FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES,
+    FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION,
     FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
@@ -172,11 +173,13 @@ static const char *const scenario_names[] = {
     "unreadable PID inventory late", "PID inventory I/O failure late",
     "PID inventory readdir I/O failure late", "symlink mountinfo late",
     "selected device identity changed before exclusive open",
+    "selected device geometry changed before exclusive open",
     "truncated remote mountinfo late", "truncated local mountinfo late",
     "inaccessible PID namespace late", "stale PARTUUID on exclusive open",
     "new mount immediately after final safe inventory",
     "new swap immediately after final safe inventory",
-    "PID inventory becomes unreadable after final safe inventory"
+    "PID inventory becomes unreadable after final safe inventory",
+    "protected selected PARTUUID changes after initial admission"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -201,6 +204,8 @@ static dev_t namespace_identity_late_device;
 static ino_t namespace_identity_initial_inode;
 static ino_t namespace_identity_late_inode;
 static int post_snapshot_injected;
+static char fixture_live_selector_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+static unsigned int fixture_selector_reads;
 static struct swapz_primary_target selected_target;
 static struct swapz_primary_target swapz_primary_selected_target;
 
@@ -779,8 +784,9 @@ static int fixture_observed_swap_device_active(dev_t device)
 
 static int fixture_target(struct swapz_primary_target *target)
 {
+    ++fixture_selector_reads;
     memset(target, 0, sizeof(*target));
-    strcpy(target->partuuid, "f13428f6-01");
+    strcpy(target->partuuid, fixture_live_selector_partuuid);
     target->device_major = 8U;
     target->device_minor = 1U;
     target->device_bytes = 17179869184ULL;
@@ -832,6 +838,8 @@ static int fixture_target_inspect(const char *partuuid,
     *target = selected_target;
     if (scenario == FIXTURE_WRONG_TARGET_OPEN)
         target->device_minor = 2U;
+    if (scenario == FIXTURE_WRONG_TARGET_GEOMETRY)
+        target->device_bytes += 4096U;
     if (scenario == FIXTURE_STALE_PARTUUID)
         strcpy(target->partuuid, "f13428f6-02");
     return 0;
@@ -879,6 +887,15 @@ static int fixture_intent(void)
         abort();
     late = 1;
     fixture_apply_late_inventory();
+    if (scenario == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION) {
+        /*
+         * A previously read selector is not an authorization for a later
+         * mutation. The coordinator must notice a new live PARTUUID without
+         * taking the test's original successful target snapshot on trust.
+         */
+        strcpy(fixture_live_selector_partuuid, "f13428f6-02");
+        post_snapshot_injected = 1;
+    }
     return 0;
 }
 static int fixture_header_write(void)
@@ -904,6 +921,11 @@ static int fixture_header_write(void)
         assert(!post_snapshot_injected);
         post_snapshot_injected = 1;
         assert(swapz_primary_swap_device_active(makedev(8U, 1U)) == 1);
+    } else if (scenario == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION) {
+        /* A changed selected identity must not inherit an earlier safe read. */
+        assert(post_snapshot_injected && fixture_selector_reads == 1U);
+        assert(strcmp(fixture_live_selector_partuuid,
+                      selected_target.partuuid) != 0);
     } else if (scenario == FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES) {
         struct swapz_primary_mount_facts facts = {0};
 
@@ -1063,6 +1085,8 @@ static int check_case(enum fixture_scenario candidate)
     namespace_identity_initial_device = namespace_identity_late_device = 0;
     namespace_identity_initial_inode = namespace_identity_late_inode = 0;
     post_snapshot_injected = 0;
+    fixture_selector_reads = 0U;
+    strcpy(fixture_live_selector_partuuid, "f13428f6-01");
     fixture_reset_mount_inventory();
     if (candidate == FIXTURE_FOREIGN_SELECTED_INITIAL)
         fixture_inventory_file("3031/mountinfo",
@@ -1161,6 +1185,7 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_ROOT_SUBSTITUTED:
     case FIXTURE_ROOT_ON_SELECTED_PARENT:
     case FIXTURE_WRONG_TARGET_OPEN:
+    case FIXTURE_WRONG_TARGET_GEOMETRY:
     case FIXTURE_STALE_PARTUUID:
         expected_error = ESTALE;
         break;
@@ -1188,6 +1213,39 @@ static int check_case(enum fixture_scenario candidate)
                 scenario_names[candidate], fixture_mount_open_count,
                 fixture_mount_read_count, admission_reads);
         return 1;
+    }
+    if (candidate == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION) {
+        /*
+         * This mutation-sensitive current-source negative control never
+         * labels a successful stale selection SAFE. Accept a future ESTALE
+         * refusal only with zero real intercepted mutation boundaries.
+         */
+        int refusal = result < 0 && result_errno == ESTALE &&
+            post_snapshot_injected == 1 && fixture_selector_reads >= 2U &&
+            header_writes == 0U && mapper_mutations == 0U &&
+            mkswap_calls == 0U && swapon_calls == 0U &&
+            active_state_writes == 0U;
+        int gap = result == 0 && post_snapshot_injected &&
+            fixture_selector_reads == 1U && writes == 4U &&
+            starting_state_writes == 1U && active_state_writes == 1U &&
+            recovery_marks == 0U && diagnostic_length == 0U &&
+            admission_reads == 2U && prewrite_reads == 1U;
+
+        if (!refusal && !gap) {
+            fprintf(stderr, "FAIL: phase=post-selector-admission "
+                    "expected=ESTALE-or-documented-gap "
+                    "observed=unexpected-transition errno=%d "
+                    "mutations=%u selector_reads=%u\n",
+                    result_errno, writes, fixture_selector_reads);
+            return 1;
+        }
+        printf("%s: phase=post-selector-admission "
+               "expected=refuse-changed-selection "
+               "observed=%s errno=%d prevented=%s mutations=%u\n",
+               refusal ? "DENY" : "UNPROVEN",
+               refusal ? "ESTALE" : "stale-selection-reached-mutation",
+               refusal ? result_errno : 0, refusal ? "all" : "none", writes);
+        return 0;
     }
     if (gap_probe) {
         /* The injected mount/swap is detected by a diagnostic production
@@ -1251,6 +1309,7 @@ static int check_case(enum fixture_scenario candidate)
             break;
         case FIXTURE_HOLDER_INITIAL:
         case FIXTURE_WRONG_TARGET_OPEN:
+        case FIXTURE_WRONG_TARGET_GEOMETRY:
         case FIXTURE_STALE_PARTUUID:
             phase = "target-exclusive-open";
             break;
@@ -1319,6 +1378,7 @@ static int check_case(enum fixture_scenario candidate)
               candidate == FIXTURE_ROOT_INITIAL ||
               candidate == FIXTURE_HOLDER_INITIAL ||
               candidate == FIXTURE_WRONG_TARGET_OPEN ||
+              candidate == FIXTURE_WRONG_TARGET_GEOMETRY ||
               candidate == FIXTURE_STALE_PARTUUID ||
               candidate == FIXTURE_PARENT_SUBSTITUTED ||
               candidate == FIXTURE_HOLDER_LATE ||
@@ -1373,6 +1433,356 @@ int main(int argc, char **argv)
     return 0;
 }
 '''
+
+
+# A second fixture runs real selector-path and final opened-FD functions.
+# It uses only user-owned temporary regular files, never a block or swap device.
+LAST_USE_HARNESS = r'''
+#define _GNU_SOURCE
+#define SWAPZ_PRIMARY_ROOTLESS_TEST 1
+#include <assert.h>
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <ftw.h>
+#include <limits.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <unistd.h>
+#include "swapz-primary.h"
+#define SWAPZ_PRIMARY_BLOCK_BYTES 4096U
+
+static char fixture_config_base[PATH_MAX];
+static void (*swapz_primary_rootless_selector_before_revalidation)(void);
+#define SWAPZ_PRIMARY_CONFIG_BASE fixture_config_base
+@@SELECTOR_FUNCTIONS@@
+#undef SWAPZ_PRIMARY_CONFIG_BASE
+
+static struct swapz_primary_target swapz_primary_selected_target;
+@@TARGET_VALID_FUNCTIONS@@
+static char fixture_alias_path[PATH_MAX];
+static char fixture_substitute_path[PATH_MAX];
+static char fixture_retained_alias_path[PATH_MAX];
+static int fixture_swap_alias_on_open;
+static unsigned int fixture_alias_switches;
+
+static int fixture_racing_open(const char *path, int flags)
+{
+    if (fixture_swap_alias_on_open && !strcmp(path, fixture_alias_path)) {
+        fixture_swap_alias_on_open = 0;
+        assert(rename(fixture_alias_path, fixture_retained_alias_path) == 0);
+        assert(link(fixture_substitute_path, fixture_alias_path) == 0);
+        ++fixture_alias_switches;
+    }
+    return open(path, flags);
+}
+#define open(path,flags) fixture_racing_open(path,flags)
+@@TARGET_OPEN_FUNCTION@@
+#undef open
+@@HEADER_FUNCTIONS@@
+
+static char fixture_root[PATH_MAX];
+static char fixture_selector_path[PATH_MAX];
+static char fixture_retained_selector_path[PATH_MAX];
+static char fixture_retained_directory_path[PATH_MAX];
+static unsigned int fixture_selector_hooks;
+static int fixture_selector_race;
+
+enum selector_race {
+    SELECTOR_UNCHANGED, SELECTOR_SAME_BYTES_REPLACED,
+    SELECTOR_DIFFERENT_BYTES_REPLACED, SELECTOR_DIRECTORY_REPLACED,
+    SELECTOR_DIRECTORY_REMOVED, SELECTOR_SYMLINK_REPLACED,
+    SELECTOR_FRESH_AFTER_SUCCESS, SELECTOR_RACE_COUNT
+};
+
+static void fixture_join(char result[PATH_MAX], const char *base,
+                         const char *component)
+{
+    int length = snprintf(result, PATH_MAX, "%s/%s", base, component);
+
+    assert(length > 0 && length < PATH_MAX);
+}
+
+static void fixture_write_record(const char *path, const char *record)
+{
+    FILE *stream = fopen(path, "wb");
+
+    assert(stream != NULL);
+    assert(fputs(record, stream) >= 0);
+    assert(fclose(stream) == 0);
+}
+
+static void fixture_create_root(void)
+{
+    char directory[] = "/tmp/swapz-late-last-use-XXXXXX";
+
+    assert(mkdtemp(directory) != NULL);
+    assert(strlen(directory) < sizeof(fixture_root));
+    strcpy(fixture_root, directory);
+    fixture_join(fixture_config_base, fixture_root, "config");
+    fixture_join(fixture_selector_path, fixture_config_base, "primary-target");
+    fixture_join(fixture_retained_selector_path, fixture_root,
+                 "previous-selector");
+    fixture_join(fixture_retained_directory_path, fixture_root,
+                 "previous-config");
+    assert(mkdir(fixture_config_base, 0700) == 0);
+    fixture_write_record(fixture_selector_path, "PARTUUID=aaaaaaaa\n");
+    assert(chmod(fixture_selector_path, 0600) == 0);
+    fixture_selector_hooks = 0U;
+    fixture_alias_switches = 0U;
+    fixture_swap_alias_on_open = 0;
+}
+
+static int fixture_remove_entry(const char *path, const struct stat *info,
+                                int type, struct FTW *tree)
+{
+    (void)info;
+    (void)type;
+    (void)tree;
+    return remove(path);
+}
+
+static void fixture_remove_root(void)
+{
+    assert(nftw(fixture_root, fixture_remove_entry, 16,
+                FTW_DEPTH | FTW_PHYS) == 0);
+}
+
+static void fixture_selector_inject(void)
+{
+    ++fixture_selector_hooks;
+    switch (fixture_selector_race) {
+    case SELECTOR_SAME_BYTES_REPLACED:
+    case SELECTOR_DIFFERENT_BYTES_REPLACED:
+    case SELECTOR_SYMLINK_REPLACED:
+        assert(rename(fixture_selector_path,
+                      fixture_retained_selector_path) == 0);
+        if (fixture_selector_race == SELECTOR_SYMLINK_REPLACED) {
+            assert(symlink(fixture_retained_selector_path,
+                           fixture_selector_path) == 0);
+        } else {
+            fixture_write_record(fixture_selector_path,
+                fixture_selector_race == SELECTOR_DIFFERENT_BYTES_REPLACED
+                    ? "PARTUUID=bbbbbbbb\n" : "PARTUUID=aaaaaaaa\n");
+            assert(chmod(fixture_selector_path, 0600) == 0);
+        }
+        break;
+    case SELECTOR_DIRECTORY_REPLACED:
+    case SELECTOR_DIRECTORY_REMOVED:
+        assert(rename(fixture_config_base,
+                      fixture_retained_directory_path) == 0);
+        if (fixture_selector_race == SELECTOR_DIRECTORY_REPLACED) {
+            assert(mkdir(fixture_config_base, 0700) == 0);
+            fixture_write_record(fixture_selector_path,
+                                 "PARTUUID=aaaaaaaa\n");
+            assert(chmod(fixture_selector_path, 0600) == 0);
+        }
+        break;
+    default:
+        abort();
+    }
+}
+
+static void fixture_check_selector(int candidate)
+{
+    char selected_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+    int result;
+    int observed_errno;
+
+    fixture_create_root();
+    fixture_selector_race = candidate;
+    swapz_primary_rootless_selector_before_revalidation =
+        candidate == SELECTOR_UNCHANGED ||
+        candidate == SELECTOR_FRESH_AFTER_SUCCESS
+            ? NULL : fixture_selector_inject;
+    memset(selected_partuuid, 'X', sizeof(selected_partuuid));
+    errno = 0;
+    result = swapz_primary_target_config_read(selected_partuuid);
+    observed_errno = errno;
+    if (candidate == SELECTOR_UNCHANGED ||
+        candidate == SELECTOR_FRESH_AFTER_SUCCESS) {
+        assert(result == 0 && !strcmp(selected_partuuid, "aaaaaaaa"));
+        assert(fixture_selector_hooks == 0U);
+        if (candidate == SELECTOR_FRESH_AFTER_SUCCESS) {
+            /* A previous successful read must not cache the old pathname. */
+            assert(rename(fixture_selector_path,
+                          fixture_retained_selector_path) == 0);
+            fixture_write_record(fixture_selector_path,
+                                 "PARTUUID=bbbbbbbb\n");
+            assert(chmod(fixture_selector_path, 0600) == 0);
+            memset(selected_partuuid, 'X', sizeof(selected_partuuid));
+            assert(swapz_primary_target_config_read(selected_partuuid) == 0);
+            assert(!strcmp(selected_partuuid, "bbbbbbbb"));
+        }
+    } else {
+        assert(result == -1 && observed_errno == ESTALE);
+        assert(selected_partuuid[0] == '\0');
+        assert(fixture_selector_hooks == 1U);
+    }
+    swapz_primary_rootless_selector_before_revalidation = NULL;
+    printf("PASS: phase=selector-last-read case=%d expected=%s "
+           "observed=%s errno=%d output=%s\n", candidate,
+           candidate == SELECTOR_UNCHANGED ||
+           candidate == SELECTOR_FRESH_AFTER_SUCCESS
+               ? "admit-current-inode" : "refuse-stale-inode",
+           result == 0 ? "fresh" : "ESTALE", result == 0 ? 0 : observed_errno,
+           result == 0 ? "current" : "cleared");
+    fixture_remove_root();
+}
+
+static void fixture_create_target_file(const char *path)
+{
+    int fd = open(path, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+
+    assert(fd >= 0);
+    assert(ftruncate(fd, (off_t)SWAPZ_PRIMARY_BLOCK_BYTES) == 0);
+    assert(close(fd) == 0);
+}
+
+static void fixture_check_target_and_header(int race)
+{
+    char target_path[PATH_MAX];
+    char partuuid_alias_path[PATH_MAX];
+    unsigned char original[SWAPZ_PRIMARY_BLOCK_BYTES] = {0};
+    unsigned char replacement[SWAPZ_PRIMARY_BLOCK_BYTES];
+    unsigned char observed[SWAPZ_PRIMARY_BLOCK_BYTES];
+    int fd;
+    int result;
+    int observed_errno;
+
+    fixture_create_root();
+    fixture_join(target_path, fixture_root, "target");
+    fixture_join(fixture_alias_path, fixture_root, "uuid");
+    fixture_join(partuuid_alias_path, fixture_root, "partuuid");
+    fixture_join(fixture_substitute_path, fixture_root, "substitute");
+    fixture_join(fixture_retained_alias_path, fixture_root, "previous-uuid");
+    fixture_create_target_file(target_path);
+    fixture_create_target_file(fixture_substitute_path);
+    assert(link(target_path, fixture_alias_path) == 0);
+    assert(link(target_path, partuuid_alias_path) == 0);
+    memset(&swapz_primary_selected_target, 0,
+           sizeof(swapz_primary_selected_target));
+    strcpy(swapz_primary_selected_target.partuuid, "aaaaaaaa");
+    swapz_primary_selected_target.device_major = 8U;
+    swapz_primary_selected_target.device_minor = 1U;
+    swapz_primary_selected_target.device_bytes = SWAPZ_PRIMARY_BLOCK_BYTES;
+    fixture_swap_alias_on_open = race == 1;
+    errno = 0;
+    fd = swapz_primary_open_target_checked_paths_mode(
+        target_path, fixture_alias_path, partuuid_alias_path,
+        O_RDWR | O_EXCL);
+    observed_errno = errno;
+    if (race == 1) {
+        /* An opened substitute cannot inherit the previously named identity. */
+        assert(fd == -1 && observed_errno == ENODEV);
+        assert(fixture_alias_switches == 1U);
+        fd = open(target_path, O_RDONLY | O_CLOEXEC);
+        assert(fd >= 0);
+        assert(pread(fd, observed, sizeof(observed), 0) ==
+               (ssize_t)sizeof(observed));
+        assert(memcmp(observed, original, sizeof(original)) == 0);
+        printf("PASS: phase=target-exclusive-open expected=refuse-opened-alias "
+               "observed=ENODEV errno=%d header=unchanged\n", observed_errno);
+    } else {
+        assert(fd >= 0 && fixture_alias_switches == 0U);
+        memset(replacement, 0x6a, sizeof(replacement));
+        if (race == 2) {
+            /* A different current header must cause ESTALE before pwrite. */
+            assert(pwrite(fd, replacement, sizeof(replacement), 0) ==
+                   (ssize_t)sizeof(replacement));
+        }
+        errno = 0;
+        result = swapz_primary_write_header_checked_fd(
+            fd, &swapz_primary_selected_target, original,
+            race == 2 ? original : replacement);
+        observed_errno = errno;
+        assert(pread(fd, observed, sizeof(observed), 0) ==
+               (ssize_t)sizeof(observed));
+        if (race == 2) {
+            assert(result == -1 && observed_errno == ESTALE);
+            assert(memcmp(observed, replacement, sizeof(observed)) == 0);
+        } else {
+            assert(result == 0);
+            assert(memcmp(observed, replacement, sizeof(observed)) == 0);
+        }
+        printf("PASS: phase=header-last-use expected=%s "
+               "observed=%s errno=%d header=%s\n",
+               race == 2 ? "refuse-stale-header" : "write-private-control",
+               race == 2 ? "ESTALE" : "written",
+               race == 2 ? observed_errno : 0,
+               race == 2 ? "unchanged-since-race" : "replacement-verified");
+    }
+    assert(close(fd) == 0);
+    fixture_remove_root();
+}
+
+int main(void)
+{
+    int candidate;
+
+    for (candidate = SELECTOR_UNCHANGED;
+         candidate < SELECTOR_RACE_COUNT; ++candidate)
+        fixture_check_selector(candidate);
+    fixture_check_target_and_header(0);
+    fixture_check_target_and_header(1);
+    fixture_check_target_and_header(2);
+    return 0;
+}
+'''
+
+
+def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.CompletedProcess[str]:
+    selector_functions = (
+        "swapz_primary_partuuid_normalize", "swapz_primary_partuuid_valid",
+        "swapz_primary_target_config_parse",
+        "swapz_primary_selector_metadata_matches",
+        "swapz_primary_selector_identity_still_live",
+        "swapz_primary_target_config_read",
+    )
+    target_valid_functions = (
+        "swapz_primary_target_valid", "swapz_primary_same_target_identity",
+    )
+    header_functions = (
+        "swapz_primary_exact_read", "swapz_primary_header_fd_valid",
+        "swapz_primary_write_header_checked_fd",
+    )
+    unit = LAST_USE_HARNESS.replace(
+        "@@SELECTOR_FUNCTIONS@@",
+        "\n\n".join(production_function(source, name)
+                    for name in selector_functions)).replace(
+        "@@TARGET_VALID_FUNCTIONS@@",
+        "\n\n".join(production_function(source, name)
+                    for name in target_valid_functions)).replace(
+        "@@TARGET_OPEN_FUNCTION@@",
+        production_function(source, "swapz_primary_open_target_checked_paths_mode")).replace(
+        "@@HEADER_FUNCTIONS@@",
+        "\n\n".join(production_function(source, name)
+                    for name in header_functions))
+    if "@@" in unit:
+        raise AssertionError("Unexpanded production last-use helper")
+    c_path = workdir / "last-use.c"
+    binary = workdir / "last-use"
+    c_path.write_text(unit)
+    compilation = subprocess.run(
+        ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Wpedantic",
+         "-Wstrict-prototypes", "-Werror",
+         "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+         "-fno-omit-frame-pointer",
+         "-Wno-unused-function", "-Wno-unused-variable",
+         "-I", str(INCLUDE_DIR), str(c_path), "-o", str(binary)],
+        text=True, capture_output=True, check=False, timeout=30)
+    if compilation.returncode:
+        raise AssertionError(f"last-use.c compile failed:\n{compilation.stderr}")
+    return subprocess.run(
+        [str(binary)], text=True, capture_output=True, check=False,
+        timeout=10, env={
+            **os.environ,
+            "ASAN_OPTIONS": "halt_on_error=1:abort_on_error=1:detect_leaks=1",
+            "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"})
 
 
 def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.CompletedProcess[str]:
@@ -1588,6 +1998,12 @@ def main() -> int:
             print(mutant.stdout + mutant.stderr, file=sys.stderr, end="")
             return 1
         print("PASS: negative control exposes all intercepted destructive boundaries")
+        last_use = compile_and_run_last_use(source, workdir)
+        if last_use.returncode:
+            print(last_use.stdout, end="")
+            print(last_use.stderr, file=sys.stderr, end="")
+            return 1
+        print(last_use.stdout, end="")
     return check_namespace_child_failure_boundary()
 
 

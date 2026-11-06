@@ -473,6 +473,39 @@ it as a prevented mutation or as loaded kernel safety. Closing #94 requires
 separate loaded evidence of the kernel-side exclusion and recovery behavior;
 snapshot-only rootless results cannot provide that proof.
 
+The primary late-race generated-C test must also compile and execute the
+production selector identity, checked-open and header-write functions against
+private rootless regular files. After reading a valid selector, replace its
+named inode with identical or different PARTUUID bytes, replace or remove
+the protected configuration-directory inode, and substitute a symlink. A
+change between parsing and final descriptor/name verification must retain
+`ESTALE` and clear the output; a later independent successful read must
+observe the current selector instead of caching a prior read. At the
+checked-open boundary, swap the named alias for a different regular-file
+inode between pre-open stat and the opened descriptor, require `ENODEV`,
+and verify byte-for-byte that the private target is untouched. A stale
+expected header must return `ESTALE` before any writer mutation; an
+unchanged safe control must write and verify the replacement header on a
+private file. For the coordinator's pre-exclusive-open check, changed
+PARTUUID, dev_t and geometry must return `ESTALE` with zero intercepted
+header, mapper, formatter and swapon actions. These checks must use the
+extracted real production functions in dependency order, compile with
+implicit-declaration warnings treated as errors on x86_64 and ARM64, and
+report phase, expected/observed identity and original numeric errno without
+private target identifiers. They prove bounded last-use validation only;
+they do not freeze the configuration or kernel mount/swap inventory after
+the final read and cannot grant physical activation.
+A separate mutation-sensitive coordinator negative control must change the live
+selected PARTUUID *after* an initially valid selector read and *before* the
+coordinator's prewrite inventory check. If the original selection is reused
+and all four intercepted mutations execute, report UNPROVEN with
+`prevented=none`, never SAFE or a physical PASS. An implementation that
+rechecks and refuses the new identity with original `ESTALE` and zero
+intercepted header, mapper, formatter and swapon actions is accepted; an
+unrelated refusal or a missing identity mutation is not a valid negative
+control. This is distinct from an adversarial mount change after every
+read-only inventory snapshot, for which no atomic exclusion proof is implied.
+
 ### Primary real-swap native-host qualification
 
 `docs/production-acceptance.json` is the canonical frozen quantitative
