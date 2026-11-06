@@ -4749,7 +4749,13 @@ timeout with a live reparented pipe-held readiness child is **ambiguous
 ownership**, not child-exited success: preserve the first failure/status, do
 not send PID-number signals, retain both created resources, and report the
 bounded identity category rather than an opaque numeric helper status. The
-same real rootless probe must reject changed parent and child start times.
+same real rootless probe must reject changed parent and child start times. A
+changed-child-start regression must provide a decimal, nonzero value different
+from the captured child start tick so it reaches the identity comparison and
+expects status 8 (`readiness-child-start-changed`); zero is malformed telemetry
+and must be rejected earlier with status 2, not mistaken for a pidfd or
+timeout-parent status. When an identity status differs from the expected one,
+the fixture diagnostic should include both numeric and symbolic actual status.
 Release its grandchild by closing the owned pipe, not by signaling an orphan.
 Successful synthetic cleanup prints only a
 `ROOTLESS_FIXTURE_ID36_CLEANUP` marker, never an actual

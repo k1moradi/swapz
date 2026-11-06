@@ -888,6 +888,7 @@ sample_host_memory_admission
                 "direct_owned_child_running",
                 "capture_direct_child_identity",
                 "nested_pair_identity_action",
+                "nested_pair_identity_status_category",
                 "capture_nested_child_identity",
                 "wait_nested_child_stopped",
                 "signal_nested_owned_child",
@@ -912,12 +913,20 @@ done
 child="$(awk -F= '$1 == "pid" && NF == 2 { print $2 }' "$ready")"
 child_start="$(capture_nested_child_identity "$child" "$parent" "$parent_start")" || exit 22
 wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 23
-if signal_nested_owned_child "$child" "$parent" "$parent_start" 0 18; then
+# Keep the negative control syntactically valid so it reaches the identity
+# comparison rather than the earlier malformed-start-time refusal (status 2).
+wrong_child_start="$((child_start + 1))"
+if signal_nested_owned_child "$child" "$parent" "$parent_start" "$wrong_child_start" 18; then
     printf '%s\n' 'wrong child start time was accepted' >&2
     exit 24
 else
     status=$?
-    [[ $status == 4 ]] || exit 25
+    if [[ $status != 8 ]]; then
+        category="$(nested_pair_identity_status_category "$status")"
+        printf 'wrong child start status mismatch: expected=8(readiness-child-start-changed) observed=%s(%s)\n' \
+            "$status" "$category" >&2
+        exit 25
+    fi
 fi
 wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 26
 : > "$go"
