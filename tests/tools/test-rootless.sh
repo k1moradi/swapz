@@ -43,8 +43,11 @@ begin_rootless_private_stderr_capture() {
   # while retaining one private copy for a failed run.
   coproc ROOTLESS_STDERR_CAPTURE {
     umask 077
+    # Keep the unused coprocess output pipe alive until tee exits. It carries
+    # no child bytes and gives the parent a bounded, fail-only EOF signal.
+    exec 3>&1
     # Relay diagnostics are private; never print a failed tee pathname.
-    tee "$rootless_capture_path" >&2 2>/dev/null
+    exec tee "$rootless_capture_path" >&2 2>/dev/null
   }
   rootless_capture_input_fd=${ROOTLESS_STDERR_CAPTURE[1]}
   rootless_capture_output_fd=${ROOTLESS_STDERR_CAPTURE[0]}
@@ -61,7 +64,7 @@ finish_rootless_private_stderr_capture() {
     # Once the tested child exits, a descendant can still hold the input pipe.
     # Probe the relay's unused output pipe, without copying child output or
     # waiting indefinitely for tee. EOF is the only complete-capture proof.
-    if ! exec {rootless_capture_input_fd}>&- 2>/dev/null; then
+    if ! exec {rootless_capture_input_fd}>&-; then
       rootless_capture_failure_reason=stderr_relay_failure
     fi
     if IFS= read -r -n 1 -t 5 -u "$rootless_capture_output_fd" \
@@ -75,7 +78,9 @@ finish_rootless_private_stderr_capture() {
       rootless_capture_failure_reason=stderr_relay_failure
       kill -KILL "$rootless_capture_pid" 2>/dev/null || :
     fi
-    exec {rootless_capture_output_fd}<&- 2>/dev/null || :
+    if ! exec {rootless_capture_output_fd}<&-; then
+      rootless_capture_failure_reason=stderr_relay_failure
+    fi
     if wait "$rootless_capture_pid" 2>/dev/null; then
       :
     else

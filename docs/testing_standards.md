@@ -1637,8 +1637,10 @@ surviving regular file as the sole pointed private diagnostic instead of
 orphaning it and allocating a second log. A capture from a nonzero relay is
 diagnostic-only and must not classify the child as a unittest assertion, error
 or timeout because completeness is unknown. After the tested child exits, the
-relay must receive a bounded EOF probe on its unused output pipe before wait:
-an inherited input writer or stalled relay cannot indefinitely hide the first
+relay must retain an unused output-pipe descriptor through the owned tee
+process and receive a bounded EOF probe on that pipe before wait; do not
+redirect the runner's stderr while closing its parent-side descriptors. An
+inherited input writer or stalled relay cannot indefinitely hide the first
 child exit. Kill an incomplete owned relay, never classify its partial stderr,
 and preserve the child status even if the relay or its cleanup fails. This
 relay-bound timeout is not evidence of a child deadline or an exit-124 watchdog.
