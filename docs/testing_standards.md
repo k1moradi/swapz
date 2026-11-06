@@ -7164,11 +7164,16 @@ failure exits. Never reveal the private PARTUUID, selector text, or host device
 path, and never log this failure envelope on successful publication.
 The final failure envelope must include the fixed mapper unit, the expected
 native start/stop owner, actual verified/unverified early mask state, and
-original command status. The transaction fixture must run rootless
-`systemd-analyze verify` against its existing fake early/normal generator
-directories and a normal-priority passive swap shadow: a valid graph must be
-accepted, while an invalid selector after a valid run must produce a masked
-mapper unit without retaining target-specific dependencies. This proves
+original command status. The pre-directory argument refusal must remain
+canonical even if the environment supplies the generator's internal mask-state
+gate as `1` or as nonnumeric text: exit 2, report `observed_mask=not-evaluated`,
+and do not inspect an unset early directory. The transaction fixture must run
+rootless `systemd-analyze verify` against its existing fake early/normal
+generator directories and a normal-priority passive swap shadow. With systemd
+debug unit output enabled, a valid graph must show the generated mapper drop-in
+and its exact selected `Requires`/`After` device plus `Conflicts`/`Before` raw
+swap relationships; after an invalid selector, the mapper must be masked and
+those effective target-specific relationship lines must be absent. This proves
 configuration precedence, not real occupied-swap shutdown behavior.
 
 These dependencies are not a

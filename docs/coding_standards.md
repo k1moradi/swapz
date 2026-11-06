@@ -877,8 +877,11 @@ identify phase, selected-source category, check, original status and withheld
 output, without printing protected configuration. Each fail-only generator
 summary must also name the fixed mapper unit, its expected native
 `swapzctl primary start`/`stop` owner and the verified or unverified early
-mask state (or `not-evaluated` before directory admission). A mask inspection
-is not evidence of live swap state. Preserve independent
+mask state (or `not-evaluated` before directory admission). Diagnostic-only
+state gates used by the refusal path must be initialized by the script before
+that path can run; inherited environment variables must never enable mask
+inspection before the output directories and owned mask pathname exist. A mask
+inspection is not evidence of live swap state. Preserve independent
 pre-hibernation refusal on failed selector admission. This dependency only names the PARTUUID
 alias; the deployment gate must also prevent the same partition from being
 started as raw swap through a by-UUID or other alias. Static units stay

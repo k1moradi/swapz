@@ -150,29 +150,37 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
 
     def test_argument_failure_does_not_invent_selected_identity(self) -> None:
-        result = subprocess.run(
-            [str(self.generator)],
-            env=self.environment,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("phase=arguments", result.stderr)
-        self.assertIn("validation=count", result.stderr)
-        self.assertIn("identity_class=not-evaluated", result.stderr)
-        self.assertIn("observed_graph=not-evaluated", result.stderr)
-        self.assertIn("original_status=2", result.stderr)
-        self.assertIn(
-            "action=inspect-generator-invocation-and-output-directories-read-only-before-retry",
-            result.stderr,
-        )
-        self.assertNotIn("protected-partuuid-unverified", result.stderr)
-        self.assertNotIn("validated-manager-partuuid", result.stderr)
-        self.assertNotIn("PARTUUID=", result.stderr)
-        self.assertFalse(self.mask().exists())
-        self.assertFalse(self.mapper_dropin().exists())
+        for inherited_mask_state in (None, "1", "invalid"):
+            with self.subTest(inherited_mask_state=inherited_mask_state):
+                environment = self.environment.copy()
+                if inherited_mask_state is None:
+                    environment.pop("mask_evaluation_enabled", None)
+                else:
+                    environment["mask_evaluation_enabled"] = inherited_mask_state
+                result = subprocess.run(
+                    [str(self.generator)],
+                    env=environment,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("phase=arguments", result.stderr)
+                self.assertIn("validation=count", result.stderr)
+                self.assertIn("identity_class=not-evaluated", result.stderr)
+                self.assertIn("observed_graph=not-evaluated", result.stderr)
+                self.assertIn("original_status=2", result.stderr)
+                self.assertIn("observed_mask=not-evaluated", result.stderr)
+                self.assertIn(
+                    "action=inspect-generator-invocation-and-output-directories-read-only-before-retry",
+                    result.stderr,
+                )
+                self.assertNotIn("protected-partuuid-unverified", result.stderr)
+                self.assertNotIn("validated-manager-partuuid", result.stderr)
+                self.assertNotIn("PARTUUID=", result.stderr)
+                self.assertFalse(self.mask().exists())
+                self.assertFalse(self.mapper_dropin().exists())
 
     def test_valid_selected_ordering_exclusive_raw_conflict_and_repeat(self) -> None:
         device, raw = identities(SELECTED)
@@ -1336,6 +1344,7 @@ class GeneratorPublicationTest(unittest.TestCase):
         if analyzer is None:
             self.skipTest("systemd-analyze unavailable")
 
+        device, raw = identities(SELECTED)
         # Layer the actual fake generator directories over unmodified unit
         # contracts. No host manager, device, swap or systemctl is touched.
         unit_directory = self.root / "unit-files"
@@ -1359,6 +1368,10 @@ class GeneratorPublicationTest(unittest.TestCase):
             f"{self.early}:{self.normal}:{unit_directory}:"
             "/usr/lib/systemd/system:/lib/systemd/system"
         )
+        # Ask systemd itself to print the merged unit relationships. This
+        # proves the fake generator directories are contributing semantics,
+        # rather than treating verify's zero exit as syntax-only evidence.
+        analyzer_environment["SYSTEMD_LOG_LEVEL"] = "debug"
 
         def verify_units() -> subprocess.CompletedProcess[str]:
             return subprocess.run(
@@ -1377,6 +1390,16 @@ class GeneratorPublicationTest(unittest.TestCase):
         )
         accepted = verify_units()
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        accepted_output = accepted.stdout + accepted.stderr
+        self.assertIn(str(self.mapper_dropin()), accepted_output)
+        for relationship, unit in (
+            ("Requires", device),
+            ("After", device),
+            ("Conflicts", raw),
+            ("Before", raw),
+        ):
+            with self.subTest(relationship=relationship):
+                self.assertIn(f"{relationship}: {unit}", accepted_output)
 
         # A refused selector after an authorized run retires target-specific
         # dependencies and leaves a real generator.early unit mask.
@@ -1385,7 +1408,16 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertFalse(self.device_dropin(SELECTED).exists())
         blocked = verify_units()
         self.assertNotEqual(blocked.returncode, 0)
-        self.assertIn("masked", blocked.stderr.lower())
+        blocked_output = blocked.stdout + blocked.stderr
+        self.assertIn("masked", blocked_output.lower())
+        for relationship, unit in (
+            ("Requires", device),
+            ("After", device),
+            ("Conflicts", raw),
+            ("Before", raw),
+        ):
+            with self.subTest(relationship=relationship):
+                self.assertNotIn(f"{relationship}: {unit}", blocked_output)
         self.assertNotIn(SELECTED, refused.stderr)
 
 

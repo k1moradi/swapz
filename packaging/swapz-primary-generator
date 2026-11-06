@@ -6,6 +6,9 @@ umask 077
 selected_identity_class=not-evaluated
 observed_graph_state=not-evaluated
 failure_action=inspect-generator-invocation-and-output-directories-read-only-before-retry
+# Never inherit this diagnostic-only gate from the generator environment.
+# Before output-directory admission there is no safe mask pathname to inspect.
+mask_evaluation_enabled=0
 
 fail()
 {
