@@ -46,7 +46,7 @@ The root `test_results.json` is sanitized public evidence, not this private reco
 
 ## Historical qualification and physical observations
 
-The newest first-host checkpoint is [development and owned-RAM smoke at
+The 2026-11-06 first-host checkpoint is [development and owned-RAM smoke at
 `535560c3`](2026-11-06-first-host-535560c3-development-and-loaded-smoke.md).
 It records one source-bound SD-card mapper-page oracle and a separate
 standalone owned-RAM loaded smoke. Both are development evidence; neither is
@@ -86,6 +86,12 @@ read the timestamp and source SHA in [production status](../production-status.js
   current helper validates parent PID/start identity, peer credentials and
   pidfd liveness. Neither the old synthetic probe nor this fix qualifies real
   swap; interruption cleanup requires separate source-bound review.
+- [Agent 7 real-swap oracle auxiliary controls](agent7-real-swap-oracle-rootless-evidence.txt):
+  the historical `b7f5109d` source-bound audit recorded 43/43 auxiliary
+  rootless checks. Three excerpt-transcription harnesses were externally
+  source-matched, not self-bound; the complete terminal qualifier was **NOT RUN**.
+  No mapper, module or real Linux swap was exercised. This is not an owner
+  `make test`, loaded-host, physical or current-source PASS.
 - [Agent 17 DISCARD debugging archive](agent17-discard-debugging/README.md):
   original standalone pre/post-fix models and full-map scan investigation;
   their hashes and historical observations are preserved, not a production-C
