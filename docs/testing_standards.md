@@ -3714,9 +3714,14 @@ commit becomes the new identity. It must query the parsed root Makefile at
 each committed source identity and after a dirty source edit, preserving
 the clean-state distinction, and require the official reporter's `git_sha()`
 to resolve the same synthetic repository revision in every phase rather than
-validating only a duplicated Git expression. Its separate incremental-build mock runs under
-ignored `build/`, with no tracked source at that relative path: generated
-provenance there is `unknown`, clean 0, not a false clean-source claim.
+validating only a duplicated Git expression. Its separate incremental-build
+mock may live under the outer ignored `build/`, but it must initialize its
+own non-main Git checkout and track the fixture inputs before qualification.
+Initial and unchanged runs must bind the copied Makefile and reporter to that
+fixture SHA with clean 1. Later intentional source edits remain uncommitted
+development changes: they retain the same source SHA, generate clean 0, run
+the synthetic stages for incremental timestamp checks, and must refuse
+qualification at report binding rather than claim a clean tested source.
 
 After writing the file, `make test` automatically publishes only that report
 to `main` using Git plumbing. `tested_commit_sha` names the nearest

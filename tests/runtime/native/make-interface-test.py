@@ -630,15 +630,13 @@ class PublicMakeContract(unittest.TestCase):
             rootless_script.write_text("\n".join(script_lines) + "\n")
             # Synthetic records mirror the modeled RAM-only session schemas;
             # mock Kbuild / loaded phase never touch actual host devices.
-            # This is STILL an unprivileged mock. Resolve provenance exactly
-            # as the outer runner does: a report-only HEAD names its nearest
-            # non-report source revision rather than the generated report.
+            # This is STILL an unprivileged mock. The loaded fixture replaces
+            # this marker with its own committed source SHA at execution time.
             runner_spec = importlib.util.spec_from_file_location(
                 "swapz_fixture_runner", ROOT / "tests/tools/run-tests.py")
             runner_contract = importlib.util.module_from_spec(runner_spec)
             runner_spec.loader.exec_module(runner_contract)
-            mocked_source_sha = runner_contract.git_sha()
-            self.assertRegex(mocked_source_sha, r"^[0-9a-f]{40}$")
+            mocked_source_sha = "SWAPZ_FIXTURE_SOURCE_SHA"
 
             def mock_kernel_write(mode, target):
                 record = {field: 0 for field in runner_contract.KERNEL_WRITE_FIELDS}
@@ -1332,6 +1330,7 @@ class PublicMakeContract(unittest.TestCase):
                     f"PASS_WRITE_PIPELINE_DEPTH={depth}",
                 ))
             script = ("#!/bin/bash\nset -eu\n"
+                      "source_sha=$(git rev-parse --verify HEAD)\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"
                       "printf '%s\\n' "
@@ -1339,9 +1338,30 @@ class PublicMakeContract(unittest.TestCase):
                       "printf '%s\\n' "
                       "'KERNEL_DEBUG_OBSERVATION=checked:1 baseline_stable:1 "
                       "reports:0 swapz_reports:0'\n"
-                      "cat <<'MOCK_RECORDS'\n" + "\n".join(records) +
+                      "sed \"s/SWAPZ_FIXTURE_SOURCE_SHA/$source_sha/g\" "
+                      "<<'MOCK_RECORDS'\n" + "\n".join(records) +
                       "\nMOCK_RECORDS\n")
             (fixture / "tests/tools/test-loaded.sh").write_text(script)
+
+            def fixture_git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments], cwd=fixture, check=True,
+                    capture_output=True, text=True, timeout=5)
+
+            # Give the copied Makefile and reporter one real, isolated source
+            # identity. The non-main branch also makes report publication inert.
+            fixture_git("init", "--initial-branch=fixture")
+            fixture_git("config", "user.name", "swapz incremental fixture")
+            fixture_git("config", "user.email",
+                        "swapz-incremental-fixture@example.invalid")
+            fixture_git("add", ".")
+            fixture_git("commit", "-m", "fixture: tracked incremental source")
+            runner_contract.ROOT = fixture
+            fixture_source_sha = runner_contract.git_sha()
+            self.assertRegex(fixture_source_sha, r"^[0-9a-f]{40}$")
+            self.assertEqual(
+                fixture_source_sha,
+                fixture_git("rev-parse", "HEAD").stdout.strip())
 
             env = os.environ.copy()
             env.pop("MAKEFLAGS", None)
@@ -1351,14 +1371,28 @@ class PublicMakeContract(unittest.TestCase):
             env["SWAPZ_SIGNING_TEST_LOG"] = str(sign_calls)
             make_invocations = []
 
-            def execute(phase):
+            def execute(phase, *, expect_clean):
                 print(f"MAKE_INCREMENTAL_PHASE={phase}", flush=True)
                 proc = subprocess.run(
                     ["make", "test", f"KDIR={fixture / 'fake-headers'}"],
                     cwd=fixture, env=env, capture_output=True, text=True,
                     timeout=30)
-                self.assertEqual(proc.returncode, 0,
-                                 proc.stdout + "\n" + proc.stderr)
+                if expect_clean:
+                    self.assertEqual(
+                        proc.returncode, 0,
+                        f"phase={phase} first_error=clean fixture refused "
+                        f"reason={proc.stdout}\n{proc.stderr}")
+                else:
+                    self.assertEqual(
+                        proc.returncode, 2,
+                        f"phase={phase} first_error=dirty fixture exit mismatch "
+                        f"reason={proc.stdout}\n{proc.stderr}")
+                    self.assertIn(
+                        "Qualification refusal: phase=report-binding "
+                        "reason=build_provenance_mismatch",
+                        proc.stdout,
+                        f"phase={phase} first_error=missing dirty refusal "
+                        "reason=qualification must reject clean=0 provenance")
                 make_invocations.append(phase)
                 self.assertEqual(
                     sign_calls.read_text(), "call\n" * len(make_invocations),
@@ -1368,20 +1402,24 @@ class PublicMakeContract(unittest.TestCase):
                     proc.stdout,
                     r"independent compilation uses automatic -j[1-9][0-9]*[.]",
                 )
+                self.assertEqual(
+                    runner_contract.git_sha(), fixture_source_sha,
+                    f"phase={phase} first_error=reporter source changed "
+                    "reason=dirty development edits must not advance HEAD")
                 build_info = (fixture / "build/source-build-info.h").read_text()
-                # The isolated mock lives under ignored build/, so the
-                # source-history pathspec must not claim it is clean source.
                 self.assertIn(
-                    '#define SWAPZ_BUILD_SOURCE_SHA "unknown"',
+                    f'#define SWAPZ_BUILD_SOURCE_SHA "{fixture_source_sha}"',
                     build_info,
-                    "phase=incremental-fixture first_error=unexpected source "
-                    "reason=ignored mock has no tracked source history",
+                    f"phase={phase} first_error=unexpected source "
+                    "reason=Makefile and reporter must bind the fixture HEAD",
                 )
+                expected_clean_string = "1" if expect_clean else "0"
                 self.assertIn(
-                    '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "0"',
+                    f'#define SWAPZ_BUILD_SOURCE_CLEAN_STRING '
+                    f'"{expected_clean_string}"',
                     build_info,
-                    "phase=incremental-fixture first_error=unexpected clean state "
-                    "reason=unknown source cannot claim clean provenance",
+                    f"phase={phase} first_error=unexpected clean state "
+                    "reason=generated provenance must reflect fixture dirtiness",
                 )
                 order = (fixture / "build/order.log").read_text().splitlines()
                 self.assertEqual(order[-5:],
@@ -1399,12 +1437,12 @@ class PublicMakeContract(unittest.TestCase):
             direct_probe = fixture / "build/tests/direct-write-probe"
             direct_read_probe = fixture / "build/tests/direct-read-probe"
             cli_out = fixture / "build/userspace/swapzctl"
-            execute("initial")
+            execute("initial", expect_clean=True)
             tracked = (module, w1_module, w2_module, staged,
                        w1_staged, w2_staged, staged_make, device,
                        direct_probe, direct_read_probe, cli_out)
             first = {p: p.stat().st_mtime_ns for p in tracked}
-            execute("unchanged")
+            execute("unchanged", expect_clean=True)
             self.assertEqual(first,
                              {p: p.stat().st_mtime_ns for p in tracked},
                              "An unchanged make test must reuse binaries "
@@ -1412,7 +1450,7 @@ class PublicMakeContract(unittest.TestCase):
 
             time.sleep(0.03)
             cli.write_text("int main(void) { return 1; }\n")
-            execute("cli-source")
+            execute("cli-source", expect_clean=False)
             self.assertGreater(cli_out.stat().st_mtime_ns, first[cli_out],
                                "MAKE_INCREMENTAL_PHASE=cli-source")
             for p in (module, w1_module, w2_module, staged,
@@ -1426,7 +1464,7 @@ class PublicMakeContract(unittest.TestCase):
             authority_header.write_text(
                 authority_header.read_text() +
                 "\n/* incremental authority dependency probe */\n")
-            execute("authority-header")
+            execute("authority-header", expect_clean=False)
             self.assertGreater(
                 cli_out.stat().st_mtime_ns, second[cli_out],
                 "MAKE_INCREMENTAL_PHASE=authority-header")
@@ -1438,7 +1476,7 @@ class PublicMakeContract(unittest.TestCase):
             second = {p: p.stat().st_mtime_ns for p in tracked}
             time.sleep(0.03)
             kernel_source.write_text("int fake_kernel_source = 2;\n")
-            execute("kernel-source")
+            execute("kernel-source", expect_clean=False)
             self.assertEqual(staged.read_text(), kernel_source.read_text(),
                              "MAKE_INCREMENTAL_PHASE=kernel-source")
             self.assertGreater(staged.stat().st_mtime_ns, second[staged])
@@ -1460,7 +1498,7 @@ class PublicMakeContract(unittest.TestCase):
                              for p in (module, w1_module, w2_module)]
             time.sleep(0.03)
             from_version.write_text(to_version)
-            execute("version")
+            execute("version", expect_clean=False)
             for p, old_mtime in zip(headers, before_version):
                 self.assertGreater(p.stat().st_mtime_ns, old_mtime)
                 self.assertIn(to_version.strip(), p.read_text())

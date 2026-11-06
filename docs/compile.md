@@ -44,9 +44,13 @@ source SHA selects the latest commit touching any path other than the root
 relabel the source or previously qualified artifacts; a later real source
 commit advances the identity. The clean flag is 1 only with a resolved source
 SHA and no modified or untracked inputs in the checked kernel, userspace,
-Makefile and packaging paths. Unknown source history yields `unknown` and 0;
-an isolated mock inside ignored `build/` must not claim clean source provenance.
-The report's `source_sha` and `tested_commit_sha` remain the official runner's
+Makefile and packaging paths. Unknown source history yields `unknown` and 0.
+A copied mock inside ignored `build/` has no clean provenance merely by
+inheritance; a test that needs source-bound qualification must create its own
+tracked fixture checkout. The Make-interface incremental fixture uses a
+non-main nested repository so its copied Makefile and reporter bind the same
+synthetic SHA without publishing. The report's `source_sha` and
+`tested_commit_sha` remain the official runner's
 exact tested-source identifiers, not the SHA of its report-publication commit.
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the release-metadata source. Kbuild generates the version header; DKMS and userspace resolve the same value.
