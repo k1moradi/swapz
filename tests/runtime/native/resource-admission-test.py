@@ -1022,8 +1022,7 @@ ready=$tmp/exited.ready
 go=$tmp/exited.go
 exited=$tmp/exited.marker
 release=$tmp/exited.release
-python3 -I -B - "$ready" "$go" "$exited" "$release" <<'PY' \
-        </dev/null >/dev/null 2>&1 &
+python3 -I -B - "$ready" "$go" "$exited" "$release" <<'PY' >/dev/null 2>&1 &
 from pathlib import Path
 import signal
 import subprocess
@@ -1065,7 +1064,10 @@ if not release.exists():
 child.wait()
 PY
 parent=$!
-parent_start="$(capture_direct_child_identity "$parent")" || exit 40
+if ! parent_start="$(capture_direct_child_identity "$parent")"; then
+    printf '%s\n' 'fixture precondition failed: exited-child parent identity unavailable' >&2
+    exit 40
+fi
 for _ in {1..200}; do
     [[ -s $ready ]] && break
     direct_owned_child_running "$parent" || exit 41

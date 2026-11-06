@@ -4884,7 +4884,12 @@ identity evidence.
 The focused negative controls must also exercise status 3 with an actually
 exited nested child while its captured parent remains live, and status 7 with
 a live stopped exact child whose observed PPID is synthetically changed after
-both exact pidfds have opened. The status-7 signal attempt must refuse before
+both exact pidfds have opened.
+The status-3 launcher must use its directly tracked external Python parent
+rather than infer creator identity from nested-shell `$`; the fixture heredoc
+is that parent's source stdin and must not be overridden by another stdin
+redirection. Failure to capture the parent identity is a bounded fixture
+precondition failure, not evidence for status 3. The status-7 signal attempt must refuse before
 SIGCONT and prove the exact child remains stopped; neither mismatch may be
 treated as cleanup authority.
 Keep the status-3 and status-7 controls in separate bounded fixture invocations
