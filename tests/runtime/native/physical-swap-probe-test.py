@@ -1718,7 +1718,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               helper_sha_mismatch=False,
                               artifact_drift_before_mutation=False,
                               recovery_failure=False,
-                              teardown_oracle_metadata=None):
+                              teardown_oracle_metadata=None,
+                              oracle_evidence_fault=None):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         if development_only:
@@ -1833,6 +1834,35 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         command, 0,
                         stdout="TRACE" * probe.MAX_RECORDED_OUTPUT_CHARS,
                         stderr="")
+                # Model the actual C oracle's affirmative line independently;
+                # zero exit with no comparison line cannot prove exact I/O.
+                if command[2] == "--expect-dm-uuid":
+                    oracle_stdout = (
+                        "PASS: owned V3 DM 128-page direct I/O, flush, "
+                        "full readback, overwrite\n")
+                else:
+                    labels = {
+                        "--delta64-write-series": "delta64-write",
+                        "--delta64-verify-series": "delta64-verify",
+                        "--segmented-write-series": "segmented write",
+                        "--segmented-verify-series": "segmented verify",
+                        "--write-series": "write",
+                        "--verify-series": "verify",
+                        "--thp-write-series": "THP compound-folio write",
+                        "--thp-verify-series": "THP compound-folio verify",
+                    }
+                    oracle_stdout = (
+                        f"PASS: owned swapz direct {labels[command[2]]} "
+                        f"series count={command[3]} round={command[4]}\n")
+                if oracle_evidence_fault == "missing":
+                    oracle_stdout = ""
+                elif oracle_evidence_fault == "contradictory":
+                    oracle_stdout = "FAIL: forged result despite exit zero\n"
+                elif oracle_evidence_fault == "wrong_count":
+                    oracle_stdout = oracle_stdout.replace("128-page", "0-page")
+                    oracle_stdout = oracle_stdout.replace("count=128", "count=0")
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=oracle_stdout, stderr="")
             if command[:2] == ["dmsetup", "info"]:
                 if command == ["dmsetup", "info", "-c", "--noheadings",
                                "-o", "name,uuid"]:
@@ -1981,6 +2011,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 saved_results["major_minor"] = "8:99"
             elif teardown_oracle_metadata == "stale_approval":
                 saved_results["approval_consumed"] = False
+            elif teardown_oracle_metadata == "missing_cleanup":
+                saved_results["final_mapper_present"] = True
+            elif teardown_oracle_metadata == "invalid_phase_count":
+                saved_results["physical_oracle_phases"][0]["stdout"] = (
+                    "PASS: owned V3 DM 0-page direct I/O, flush, "
+                    "full readback, overwrite\n")
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -2099,7 +2135,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         truncated_oracle_at is not None or \
                         teardown_missing_gate or teardown_fabricated_lower or \
                         source_drift is not None or helper_sha_mismatch or \
-                        artifact_drift_before_mutation or recovery_failure:
+                        artifact_drift_before_mutation or recovery_failure or \
+                        oracle_evidence_fault is not None:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
                             "mapper|UUID|identity|table|backing|injected|phase failed|oracle phase .* failed|restoration/evidence|final_recovery_state|main or the bound helper changed|qualified artifacts changed") as rejected:
@@ -2226,6 +2263,31 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertTrue(uncertain["_test_owner_marker"])
         self.assertTrue(uncertain["_test_consumed_claim"])
 
+    def test_zero_exit_without_valid_oracle_comparison_cannot_pass(self):
+        for invalid_evidence in ("missing", "contradictory", "wrong_count"):
+            with self.subTest(invalid_evidence=invalid_evidence), \
+                    mock.patch("builtins.print") as printed:
+                events, state, target = self.simulate_physical_run(
+                    development_only=True,
+                    oracle_evidence_fault=invalid_evidence)
+                results = state["_test_results"]
+                first_phase = results["physical_oracle_phases"][0]
+                self.assertEqual(first_phase["return_code"], 0)
+                self.assertEqual(first_phase["status"], "FAIL")
+                self.assertIn("oracle_output_error", first_phase)
+                self.assertNotEqual(results.get("oracle_suite"), "PASS")
+                self.assertEqual(state["stage"], "COMPLETE")
+                self.assertEqual(state["_test_observed_header"], target["header"])
+                self.assertTrue(state["_test_consumed_claim"])
+                self.assertFalse(state["_test_owner_marker"])
+                self.assertFalse(any(
+                    call.args and str(call.args[0]).startswith(
+                        "PHYSICAL_DEVELOPMENT_SMOKE=PASS")
+                    for call in printed.call_args_list))
+                self.assertFalse(any(
+                    event[0] == "command" and event[1][0] in {"swapon", "swapoff"}
+                    for event in events))
+
     def test_complete_restoration_cannot_certify_misbound_oracle_evidence(self):
         # The synthetic COMPLETE/header match is deliberately true for every
         # case; only final oracle/provenance/approval evidence is corrupted.
@@ -2241,6 +2303,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             ("target_identity", True, "major_minor_mismatch",
              "matching", "not_applicable"),
             ("stale_approval", False, "matching", "matching", "stale"),
+            ("missing_cleanup", True, "matching", "matching", "not_applicable"),
+            ("invalid_phase_count", True, "matching", "matching", "not_applicable"),
         )
         for (damaged_field, development_only, target_identity_proof,
              source_helper_artifact_binding, approval_proof) in cases:

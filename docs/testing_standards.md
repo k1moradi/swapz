@@ -5781,7 +5781,12 @@ immediately before physical execution. It is point-in-time drift detection,
 not a lock on main; do not move it earlier or treat the pre-fast-test source
 observation as sufficient for that later destructive boundary.
 A recovered header alone never establishes byte-oracle success. The
-development result requires an executed successful byte-oracle phase, durable
+reviewed C oracle must emit its exact affirmative comparison line with the
+expected operation, page count and round; zero exit with empty output, a
+conflicting line, or a wrong count is not sufficient. Validate every persisted
+phase again after recovery, so rewritten durable metadata cannot inherit
+worker success.
+The development result requires an executed successful byte-oracle phase, durable
 `COMPLETE`, the exact original header, an inactive target, and a consumed
 one-use claim with no outstanding ownership marker. `oracle_suite=PASS`
 must denote a final evidence decision, not just a worker's zero exit code:

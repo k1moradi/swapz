@@ -1868,6 +1868,31 @@ def _verify_owned_mapper(state, target):
     return mapper
 
 
+def _expected_physical_oracle_stdout(options):
+    """Exact affirmative output of the reviewed device-roundtrip C oracle."""
+    if len(options) == 2 and options[0] == "--expect-dm-uuid":
+        return ("PASS: owned V3 DM 128-page direct I/O, flush, "
+                "full readback, overwrite\n")
+    if len(options) != 3 or options[1] != "128":
+        return None
+    mode, _, round_number = options
+    output_modes = {
+        "--delta64-write-series": ("delta64-write", ("1",)),
+        "--delta64-verify-series": ("delta64-verify", ("1",)),
+        "--segmented-write-series": ("segmented write", ("5",)),
+        "--segmented-verify-series": ("segmented verify", ("5", "6")),
+        "--write-series": ("write", ("6",)),
+        "--verify-series": ("verify", ("5", "7")),
+        "--thp-write-series": ("THP compound-folio write", ("7",)),
+        "--thp-verify-series": ("THP compound-folio verify", ("7",)),
+    }
+    expected = output_modes.get(mode)
+    if expected is None or round_number not in expected[1]:
+        return None
+    return (f"PASS: owned swapz direct {expected[0]} series "
+            f"count=128 round={round_number}\n")
+
+
 def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
                                results, phase, options=()):
     command = [oracle, mapper, *options]
@@ -1946,8 +1971,18 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
         entry["trace_error"] = (
             "oracle_or_status_trace expected=complete observed=truncated")
 
+    expected_stdout = _expected_physical_oracle_stdout(options)
+    if (expected_stdout is None or entry["stdout"] != expected_stdout
+            or entry["stderr"] != "" or entry["timed_out"] is not False):
+        entry["oracle_output_error"] = (
+            "operation=device_roundtrip phase=oracle_execution "
+            f"original_exit={entry['return_code']!r} "
+            "expected=exact_affirmative_comparison_line_and_empty_stderr "
+            "observed=missing_or_contradictory_or_wrong_count "
+            "safe_next_step=inspect_results_read_only")
     passed = (
         entry["return_code"] == 0
+        and "oracle_output_error" not in entry
         and entry.get("post_oracle_identity") == "PASS"
         and _swapz_status_healthy(after_status)
         and entry["lower_io_delta"] is not None
@@ -2305,6 +2340,95 @@ def _remove_test_objects(state, state_dir):
                    lock_held=True, module_owned_by_process=True)
 
 
+def _final_physical_oracle_evidence_error(results, state, target,
+                                          evidence, review, phases, oracle,
+                                          mapper, development_only):
+    """Fail closed on missing, rewritten, or unbound durable oracle evidence."""
+    expected_header_sha256 = hashlib.sha256(target["header"]).hexdigest()
+    bindings = {
+        "source_commit_sha": evidence["source_sha"],
+        "current_git_head": evidence["head"],
+        "helper_git_sha": evidence["head"],
+        "helper_sha256": evidence["helper_sha256"],
+        "artifact_sha256": evidence["artifact_digests"],
+        "live_artifact_sha256_before_mutation": evidence["artifact_digests"],
+        "run_id": review["run_id"],
+        "partuuid": target["partuuid"],
+        "major_minor": f"{target['major']}:{target['minor']}",
+        "device_size_bytes": target["size_bytes"],
+        "original_header_sha256": expected_header_sha256,
+        "development_only": development_only,
+        "evidence_class": ("DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION"
+                           if development_only else "PHYSICAL_CORRECTNESS_SMOKE"),
+    }
+    for field, expected in bindings.items():
+        if results.get(field) != expected:
+            return f"{field}_mismatch"
+    saved_bindings = {
+        "source_sha": evidence["source_sha"],
+        "helper_git_sha": evidence["head"],
+        "helper_sha256": evidence["helper_sha256"],
+        "run_id": review["run_id"],
+        "partuuid": target["partuuid"],
+        "major": target["major"],
+        "minor": target["minor"],
+        "size_bytes": target["size_bytes"],
+        "header_sha256": expected_header_sha256,
+        "development_only": development_only,
+    }
+    for field, expected in saved_bindings.items():
+        if state.get(field) != expected:
+            return f"saved_{field}_mismatch"
+    if results.get("oracle_suite") != "PHASES_PASS_RECOVERY_PENDING":
+        return "unexpected_provisional_oracle_status"
+    entries = results.get("physical_oracle_phases")
+    if not isinstance(entries, list) or len(entries) != len(phases):
+        return "missing_or_extra_phase"
+    for index, ((phase, options), entry) in enumerate(zip(phases, entries)):
+        if not isinstance(entry, dict):
+            return f"phase_{index}_nonobject"
+        if (entry.get("phase") != phase or
+                entry.get("argv") != [oracle, mapper, *options]):
+            return f"phase_{index}_identity_or_arguments_mismatch"
+        if (entry.get("status") != "PASS" or
+                type(entry.get("return_code")) is not int or
+                entry["return_code"] != 0 or
+                entry.get("timed_out") is not False or
+                entry.get("post_oracle_identity") != "PASS"):
+            return f"phase_{index}_incomplete_or_failed"
+        if (entry.get("stdout") != _expected_physical_oracle_stdout(options)
+                or entry.get("stderr") != "" or
+                "trace_error" in entry or "oracle_output_error" in entry):
+            return f"phase_{index}_invalid_comparison_output"
+        if (not _swapz_status_healthy(entry.get("dmsetup_status_before")) or
+                not _swapz_status_healthy(entry.get("dmsetup_status_after"))):
+            return f"phase_{index}_invalid_mapper_health"
+        try:
+            lower_io_delta = _lower_io_delta(
+                entry.get("block_stats_before"), entry.get("block_stats_after"))
+        except ProbeError:
+            return f"phase_{index}_invalid_lower_counters"
+        if entry.get("lower_io_delta") != lower_io_delta:
+            return f"phase_{index}_contradictory_lower_counters"
+    if results.get("final_block0_sha256") != expected_header_sha256:
+        return "restored_header_sha256_mismatch"
+    if (results.get("final_mapper_present") is not False or
+            results.get("final_module_present") is not False or
+            results.get("active_partition_marker_present") is not False or
+            results.get("run_claim_consumed") is not True):
+        return "incomplete_cleanup_or_ownership"
+    row = results.get("final_swap_row")
+    if development_only:
+        if row is not None or results.get("target_remains_inactive") is not True:
+            return "development_backing_not_inactive"
+    elif (not isinstance(row, dict) or row.get("kind") != "partition"
+          or row.get("size_kib") != state.get("swap_size_kib")
+          or row.get("priority") != state.get("swap_priority")
+          or results.get("approval_consumed") is not True):
+        return "production_swap_or_approval_not_restored"
+    return None
+
+
 def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
               development_only=False):
     if os.geteuid() != 0:
@@ -2565,7 +2689,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     phase_name, options)
             state["stage"] = "ORACLE_PASS"
             _save_state(state_dir, state)
-            results["oracle_suite"] = "PASS"
+            # Worker success remains provisional until recovery and durable
+            # evidence are independently verified.
+            results["oracle_suite"] = "PHASES_PASS_RECOVERY_PENDING"
             results["final_recovery_state"] = "ORACLE_PASS"
             _save_results(state_dir, results)
         except BaseException as exc:
@@ -2672,6 +2798,18 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     failures.append(
                         "kernel_diagnostics expected=healthy observed="
                         + diagnostics_error)
+                if failure is None:
+                    oracle_error = _final_physical_oracle_evidence_error(
+                        results, state, target, evidence, review, phases,
+                        oracle, mapper, development_only)
+                    if oracle_error is not None:
+                        failures.append(
+                            "operation=validate_durable_oracle "
+                            "phase=final_oracle_evidence "
+                            "first_errno_or_exit=worker_exit_0 "
+                            "expected=complete_exact_bound_oracle_and_recovery "
+                            f"observed={oracle_error} "
+                            "safe_next_step=inspect_results_read_only")
                 if failures and failure is None:
                     failure = ProbeError(
                         "final physical restoration/evidence checks failed: "
@@ -2683,6 +2821,10 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         if failure is not None:
             print(f"PHYSICAL_RESULTS={state_dir / RESULTS_NAME}", file=sys.stderr)
             raise ProbeError(str(failure)) from failure
+        # Persist the final PASS only after verified recovery and the exact
+        # durable oracle/source/target evidence agree.
+        results["oracle_suite"] = "PASS"
+        _save_results(state_dir, results)
         # A successful oracle alone cannot publish success before normal
         # mapper/module removal, swap restoration, and evidence validation.
         if development_only:
