@@ -276,6 +276,11 @@ cleanup()
 	# successful restoration command. Carry the first failing status into
 	# that call; the EXIT trap still supplies its own actual exit status.
 	cleanup_original_status=${1-$?}
+	# Rollback is the activation safety boundary. Once cleanup begins, ignore
+	# further termination signals until owned publication state and the early
+	# mask have been reverified; otherwise a second signal can abort rollback
+	# and replace the original failure status with the signal handler's status.
+	trap '' HUP INT TERM
 	cleanup_command_status=0
 	# Remove a partial graph while the mapper mask is still in force. Never
 	# follow a substituted symlink to an external destination.
@@ -455,7 +460,9 @@ cleanup()
 	fi
 }
 trap cleanup EXIT
-trap 'exit 1' HUP INT TERM
+# A signal initiating rollback must also suppress later termination signals
+# before the EXIT trap begins; cleanup itself repeats this for command failures.
+trap 'trap "" HUP INT TERM; exit 1' HUP INT TERM
 [ "$preexisting_unit" = none ] ||
 	fail 1 mask generator-output unexpected-existing-unit mapper-active-job
 for other_output_dir in "$normal_dir" "$late_dir"; do

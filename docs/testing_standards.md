@@ -7261,6 +7261,10 @@ postconditions as independent checks after a first genuine command failure:
 zero-status cleanup is never enough to establish absence of stale paths.
 A failing generator must reverify the early `/dev/null` mapper mask after the
 EXIT trap has finished all cleanup mutations, not only before cleanup starts.
+Once rollback begins, HUP/INT/TERM must be ignored until cleanup has reverified
+its owned publication state and early mask. Inject TERM from a cleanup command
+after a genuine publication failure and require the original failure status,
+verified mask, no owned target drop-ins or private staging, and complete rollback.
 Inject secondary cleanup commands that return nonzero after unlink or report
 success without unlinking, then substitute a foreign early mapper-unit symlink.
 An independently staged mask replacement must recover even when the direct

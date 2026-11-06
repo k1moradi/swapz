@@ -157,6 +157,11 @@ class GeneratorPublicationTest(unittest.TestCase):
                     environment.pop("mask_evaluation_enabled", None)
                 else:
                     environment["mask_evaluation_enabled"] = inherited_mask_state
+                environment.update({
+                    "selected_identity_class": "inherited-private-state",
+                    "observed_graph_state": "inherited-private-state",
+                    "failure_action": "inherited-private-state",
+                })
                 result = subprocess.run(
                     [str(self.generator)],
                     env=environment,
@@ -179,6 +184,7 @@ class GeneratorPublicationTest(unittest.TestCase):
                 self.assertNotIn("protected-partuuid-unverified", result.stderr)
                 self.assertNotIn("validated-manager-partuuid", result.stderr)
                 self.assertNotIn("PARTUUID=", result.stderr)
+                self.assertNotIn("inherited-private-state", result.stderr)
                 self.assertFalse(self.mask().exists())
                 self.assertFalse(self.mapper_dropin().exists())
 
@@ -326,6 +332,38 @@ class GeneratorPublicationTest(unittest.TestCase):
                     self.assert_blocked(result, "publication")
                     self.assertFalse(self.device_dropin(SELECTED).exists())
         executable.unlink()
+
+    def test_signal_during_failed_publication_rollback_preserves_original_failure(self) -> None:
+        rename = self.commands / "mv"
+        rename.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*50-selected-target.conf)\n'
+            '    /usr/bin/mv "$@" || exit $?\n'
+            '    exit 71 ;;\n'
+            'esac\nexec /usr/bin/mv "$@"\n',
+            encoding="ascii",
+        )
+        rename.chmod(0o755)
+        removal = self.commands / "rm"
+        removal.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*50-swapz-timeout.conf)\n'
+            '    kill -TERM "$PPID" || exit $?\n'
+            '    exec /usr/bin/rm "$@" ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n',
+            encoding="ascii",
+        )
+        removal.chmod(0o755)
+        result = self.run_generator()
+        self.assertEqual(result.returncode, 71, result.stderr)
+        self.assert_blocked(result, "publication")
+        self.assertIn("phase=rollback expected=owned-dropins-absent", result.stderr)
+        self.assertIn("original_status=71", result.stderr)
+        self.assertIn("rollback=complete", result.stderr)
+        self.assertEqual(os.readlink(self.mask()), "/dev/null")
+        self.assertFalse(self.mapper_dropin().exists())
+        self.assertFalse(self.device_dropin(SELECTED).exists())
+        self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
 
     def test_output_symlink_substitution_and_colliding_units_are_blocked(self) -> None:
         outside = self.root / "outside"
