@@ -967,8 +967,8 @@ tmp=$1
 ready=$tmp/reparent.ready
 go=$tmp/reparent.go
 timeout --signal=TERM --kill-after=1s 10s bash -c '
-    printf "pid=%s\n" "$" > "$1"
-    kill -STOP "$"
+    printf "pid=%s\n" "$$" > "$1"
+    kill -STOP "$$"
     [[ -f $2 ]]
 ' _ "$ready" "$go" &
 parent=$!

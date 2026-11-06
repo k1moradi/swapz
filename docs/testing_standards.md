@@ -4834,6 +4834,8 @@ SIGCONT and prove the exact child remains stopped; neither mismatch may be
 treated as cleanup authority.
 Keep the status-3 and status-7 controls in separate bounded fixture invocations
 so one identity boundary cannot consume another control's subprocess deadline.
+A stopped-child fixture must publish its own shell PID with `$$` verbatim
+before SIGSTOP; a truncated shell PID token is malformed fixture evidence.
 Successful synthetic cleanup prints only a
 `ROOTLESS_FIXTURE_ID36_CLEANUP` marker, never an actual
 `PASS_ID36_RESOURCE_PRESSURE` token.
