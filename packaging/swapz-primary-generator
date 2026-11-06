@@ -2,8 +2,10 @@
 # Emit selected-target ordering for the disabled primary-swap systemd units.
 set -eu
 umask 077
-# Publish only an allowlisted selector class, never the protected identity.
-selected_identity_class=protected-partuuid-unverified
+# Publish only allowlisted diagnostic classes, never the protected identity.
+selected_identity_class=not-evaluated
+observed_graph_state=not-evaluated
+failure_action=inspect-generator-invocation-and-output-directories-read-only-before-retry
 
 fail()
 {
@@ -12,10 +14,10 @@ fail()
 	failure_source=$3
 	failure_validation=$4
 	failure_withheld=$5
-	printf 'swapz-primary-generator: phase=%s source=%s validation=%s status=%s withheld=%s identity_class=%s expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap observed_graph=unverified original_status=%s action=inspect-early-mask-and-protected-selector-read-only-before-retry\n' \
+	printf 'swapz-primary-generator: phase=%s source=%s validation=%s status=%s withheld=%s identity_class=%s expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap observed_graph=%s original_status=%s action=%s\n' \
 		"$failure_phase" "$failure_source" "$failure_validation" \
 		"$failure_status" "$failure_withheld" "$selected_identity_class" \
-		"$failure_status" >&2
+		"$observed_graph_state" "$failure_status" "$failure_action" >&2
 	exit "$failure_status"
 }
 
@@ -695,6 +697,11 @@ done
 # and escaping. The generator must never infer or substitute a target itself.
 # Bound manager stdout on disk before shell expansion, retaining its exit status.
 response_file=$stage_dir/units
+# From this point the protected selector is being evaluated, but its private
+# PARTUUID remains untrusted until the manager response is fully validated.
+selected_identity_class=protected-partuuid-unverified
+observed_graph_state=unverified
+failure_action=inspect-early-mask-and-protected-selector-read-only-before-retry
 if (ulimit -f 2; "@SWAPZ_SBINDIR@/swapzctl" primary systemd-units) > "$response_file" 2>/dev/null; then :; else
 	fail "$?" selection protected-selector manager-status mapper-active-job
 fi

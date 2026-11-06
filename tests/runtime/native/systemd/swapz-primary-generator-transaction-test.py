@@ -125,13 +125,49 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertFalse(self.mapper_dropin().exists())
         self.assertRegex(result.stderr, rf"phase={re.escape(phase)}\b")
         self.assertRegex(result.stderr, r"source=[a-z-]+ validation=[a-z-]+ status=\d+ withheld=.*mapper-active-job")
-        self.assertRegex(result.stderr, r"identity_class=(protected-partuuid-unverified|validated-manager-partuuid)\b")
-        self.assertIn("expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap", result.stderr)
-        self.assertIn("observed_graph=unverified", result.stderr)
+        self.assertRegex(
+            result.stderr,
+            r"identity_class=(not-evaluated|protected-partuuid-unverified|"
+            r"validated-manager-partuuid)\b",
+        )
+        self.assertIn(
+            "expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap",
+            result.stderr,
+        )
+        self.assertRegex(result.stderr, r"observed_graph=(not-evaluated|unverified)\b")
         self.assertIn(f"original_status={result.returncode}", result.stderr)
-        self.assertIn("action=inspect-early-mask-and-protected-selector-read-only-before-retry", result.stderr)
+        self.assertRegex(
+            result.stderr,
+            r"action=(inspect-generator-invocation-and-output-directories-read-only-before-retry|"
+            r"inspect-early-mask-and-protected-selector-read-only-before-retry)\b",
+        )
         self.assertNotIn("PARTUUID=", result.stderr)
         self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
+
+    def test_argument_failure_does_not_invent_selected_identity(self) -> None:
+        result = subprocess.run(
+            [str(self.generator)],
+            env=self.environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("phase=arguments", result.stderr)
+        self.assertIn("validation=count", result.stderr)
+        self.assertIn("identity_class=not-evaluated", result.stderr)
+        self.assertIn("observed_graph=not-evaluated", result.stderr)
+        self.assertIn("original_status=2", result.stderr)
+        self.assertIn(
+            "action=inspect-generator-invocation-and-output-directories-read-only-before-retry",
+            result.stderr,
+        )
+        self.assertNotIn("protected-partuuid-unverified", result.stderr)
+        self.assertNotIn("validated-manager-partuuid", result.stderr)
+        self.assertNotIn("PARTUUID=", result.stderr)
+        self.assertFalse(self.mask().exists())
+        self.assertFalse(self.mapper_dropin().exists())
 
     def test_valid_selected_ordering_exclusive_raw_conflict_and_repeat(self) -> None:
         device, raw = identities(SELECTED)
@@ -179,7 +215,8 @@ class GeneratorPublicationTest(unittest.TestCase):
         result = self.run_generator()
         self.assert_blocked(result, "passive-guard")
         self.assertIn("validation=conflicting-passive-dropin", result.stderr)
-        self.assertIn("identity_class=protected-partuuid-unverified", result.stderr)
+        self.assertIn("identity_class=not-evaluated", result.stderr)
+        self.assertIn("observed_graph=not-evaluated", result.stderr)
         self.assertEqual(self.passive_guard().read_text(encoding="ascii"), foreign)
 
     def test_passive_guard_is_rechecked_after_mask_release(self) -> None:
@@ -211,6 +248,8 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assert_blocked(result, "selection")
         self.assertIn("source=protected-selector", result.stderr)
         self.assertIn("status=39", result.stderr)
+        self.assertIn("identity_class=protected-partuuid-unverified", result.stderr)
+        self.assertIn("observed_graph=unverified", result.stderr)
         self.assertFalse(self.device_dropin(CHANGED).exists())
 
     def test_missing_ambiguous_or_unsafe_selector_refuses_any_mapper(self) -> None:

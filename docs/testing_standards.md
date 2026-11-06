@@ -6880,13 +6880,17 @@ have a 30-second bound, and the official rootless stage keeps the original
 nonzero test exit, privately captured stderr, and suite-phase attribution.
 No service start, installation, swap activation, or device access is permitted.
 On every generator refusal, retain the original numeric command or validation
-exit status and emit only an allowlisted identity class (protected/unverified
-PARTUUID or manager-validated PARTUUID), the expected mapper-to-device/raw-swap
-conflict graph, an explicitly unverified observed graph, and a read-only mask,
-selector and unit-inventory remediation. Rootless tests must exercise both
-identity-class states with controlled failure exits. Never reveal the private
-PARTUUID, selector text, or host device path, and never log this failure
-envelope on successful publication.
+exit status and emit only an allowlisted identity class: `not-evaluated`
+before selector evaluation, protected/unverified PARTUUID once manager
+selection begins, or manager-validated PARTUUID after canonical response
+validation. The expected mapper-to-device/raw-swap conflict graph remains
+redacted; its observed state is `not-evaluated` before selection and
+`unverified` until successful publication. Remediation must stay read-only
+and match the phase: invocation/output-directory inspection before selection,
+then mask, selector and unit-inventory inspection after selection begins.
+Rootless tests must exercise all three identity-class states with controlled
+failure exits. Never reveal the private PARTUUID, selector text, or host device
+path, and never log this failure envelope on successful publication.
 
 These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another
