@@ -519,7 +519,18 @@ connection and again before and after each approval. The client must select the
 that process. Merely finding the peer anywhere in the ancestry would also trust
 a higher same-UID shell or launcher which could replace the socket. Conversely,
 ancestors above the authenticated parent are not authority; their exit or
-reparenting must not revoke an otherwise unchanged live parent. The rootless
+reparenting must not revoke an otherwise unchanged live parent. At connection
+and each approval boundary, require exact `(PID, PPID, start_ticks)` equality
+for every intermediate ancestry entry. For only the terminal authorized
+parent, require exact `(PID, start_ticks)` equality while freshly validating
+its parseable /proc identity, effective UID, live pidfd, unchanged socket inode
+and kernel-credentialed reply sender. An upstream PPID change does not excuse
+PID reuse, a changed intermediate link, unavailable /proc identity, listener
+handoff, unauthorized child, stale session or incomplete proof. The rootless
+three-process reparent regression must observe the intermediary exiting,
+the terminal parent's PPID changing with stable start ticks, and a genuine
+nonce-bound synthetic approval; a separate missing-/proc negative control
+must still refuse. Neither result authorizes physical admission. The rootless
 AF_UNIX regression must reject that higher-ancestor listener, including after
 it replaces a real nearest parent's socket, while preserving a direct parent's
 synthetic approval. Recheck the selected effective UID at every approval

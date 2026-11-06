@@ -692,6 +692,23 @@ print(result.stdout.strip(), flush=True)
             with self.subTest(changed=changed):
                 self.assertFalse(matches(pinned, changed))
 
+
+    def test_missing_process_identity_remains_blocked(self):
+        # A saved terminal PID/start time cannot authorize missing live /proc.
+        with mock.patch.object(
+                client_helper.os, "getppid", return_value=31001), \
+             mock.patch.object(
+                 client_helper.Path, "read_text", autospec=True,
+                 side_effect=FileNotFoundError(2, "identity unavailable")):
+            with self.assertRaises(client_helper.Blocked) as refusal:
+                client_helper._source_parent_ancestors("initial", os.geteuid())
+        for detail in (
+                "phase=initial", "check=process_lineage",
+                "observed=unavailable_process_identity", "errno=2",
+                "authorization=BLOCKED",
+                "next=inspect_parent_identity_read_only"):
+            self.assertIn(detail, str(refusal.exception))
+
     @unittest.skipUnless(
         hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
         "orphaned parent cleanup requires Linux pidfd support")
