@@ -3419,6 +3419,47 @@ static void test_repeat_format_is_idempotent_and_non_destructive(void)
  * the correct O_EXCL request. An existing header must not skip F_GETFL.
  * This mock cannot establish actual Linux block-device exclusivity.
  */
+/*
+ * A matching O_RDWR fake descriptor must also establish the idempotent
+ * success branch's returned mode without publishing another header.
+ */
+static void test_real_cli_existing_header_read_write_mode_is_idempotent(void)
+{
+	unsigned char original_header[SWAPZ_SUPERBLOCK_BYTES];
+	char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+	unsigned int previous_pwrite_calls;
+	int observed_errno, status;
+
+	admission_start(ADMISSION_UNCHANGED);
+	make_valid_header(admission_fixture.block_zero,
+			  admission_fixture.geometry_bytes);
+	memcpy(original_header, admission_fixture.block_zero,
+	       sizeof(original_header));
+	previous_pwrite_calls = test_pwrite_calls;
+	status = admission_capture_cli(report, &observed_errno);
+	if (status != 0 || report[0] != '\0' ||
+	    admission_fixture.observed_open_flags !=
+		    (O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW) ||
+	    (admission_fixture.observed_descriptor_flags & O_ACCMODE) != O_RDWR ||
+	    admission_fixture.opens != 1U ||
+	    admission_fixture.reads != 1U ||
+	    admission_fixture.descriptor_queries != 1U ||
+	    admission_fixture.writes != 0U ||
+	    admission_fixture.syncs != 0U ||
+	    admission_fixture.closes != 1U ||
+	    test_pwrite_calls != previous_pwrite_calls ||
+	    memcmp(original_header, admission_fixture.block_zero,
+		   sizeof(original_header))) {
+		fprintf(stderr, "FAIL: phase=existing-header-idempotent "
+			"expected=returned-O_RDWR-and-zero-mutation "
+			"status=%d observed_errno=%d queries=%u writes=%u syncs=%u\n",
+			status, observed_errno, admission_fixture.descriptor_queries,
+			admission_fixture.writes, admission_fixture.syncs);
+		abort();
+	}
+	admission_stop();
+}
+
 static void test_real_cli_existing_header_descriptor_modes_refuse(void)
 {
 	static const struct {
@@ -3569,6 +3610,7 @@ int main(void)
 	test_publication_failures_are_explicitly_uncertain();
 	test_zero_header_format_and_readback();
 	test_repeat_format_is_idempotent_and_non_destructive();
+	test_real_cli_existing_header_read_write_mode_is_idempotent();
 	test_real_cli_existing_header_descriptor_modes_refuse();
 	test_disappearance_after_write_is_never_success();
 	test_truncated_read_and_close_failure_are_not_success();

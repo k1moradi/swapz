@@ -495,8 +495,12 @@ Block zero is accepted only when it is all zero or is an exact existing SWZ
 authorization header. The shared validator requires the eight-byte magic,
 format version, 4096-byte header length, exact opened-device byte size, nonzero
 16-byte UUID, and every reserved byte at offsets 40..4095 zero. A valid
-existing header is an idempotent success only after another identity recheck
-and performs no write. An unrecognized nonzero header is refused. A new header
+existing header is an idempotent success only after another identity recheck,
+a fresh F_GETFL check that the returned descriptor is O_RDWR, and no write.
+Production-CLI rootless controls must demonstrate both the positive O_RDWR
+existing-header path and negative O_RDONLY/O_WRONLY or failed F_GETFL paths
+with exactly one descriptor close and zero writes or syncs. The positive
+mock does not prove kernel O_EXCL holder exclusion or physical card identity. An unrecognized nonzero header is refused. A new header
 starts from a zeroed 4096-byte buffer, uses a cryptographically random UUID
 with RFC-4122 version/variant bits, leaves all reserved bytes zero, and must pass
 `swapz_sb_valid()` before publication.
