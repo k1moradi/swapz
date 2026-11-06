@@ -261,6 +261,124 @@ static int write_two_block_page(swapz_u32 logical)
 	return swapz_finish(&a, &tx, multi_block_bytes, extent_bytes, 2U, 0);
 }
 
+static int write_shared_pages(const swapz_u32 logical_pages[2])
+{
+	struct swapz_tx tx;
+	struct swapz_builder builder;
+	int rc;
+
+	rc = swapz_stage(&a, logical_pages, 2U, 1U, &tx);
+	if (rc)
+		return rc;
+	rc = swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES, tx.sequence);
+	if (!rc) {
+		memset(data, 0x31, sizeof(data));
+		rc = swapz_append(&builder, logical_pages[0],
+				  tx.records[0].generation, data, sizeof(data));
+	}
+	if (!rc) {
+		memset(data, 0x32, sizeof(data));
+		rc = swapz_append(&builder, logical_pages[1],
+				  tx.records[1].generation, data, sizeof(data));
+	}
+	if (!rc)
+		rc = swapz_seal(&builder);
+	if (rc) {
+		swapz_abort(&a, &tx);
+		return rc;
+	}
+	return swapz_finish(&a, &tx, bytes, SWAPZ_BLOCK_BYTES, 1U, 0);
+}
+
+static int test_indexed_shared_extent_hidden_sibling_release_is_rejected(void)
+{
+	const swapz_u32 shared_pages[2] = { 0U, 1U };
+	const swapz_u32 replacement_page = 0U;
+	const swapz_u32 none = ~(swapz_u32)0;
+	int scenario;
+
+	for (scenario = 0; scenario < 3; ++scenario) {
+		struct swapz_tx replacement_tx;
+		struct swapz_builder builder;
+		struct swapz_map protected_map;
+		swapz_u32 shared_start;
+		int error;
+		int invalidation_prevented;
+
+		CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+		CHECK(write_shared_pages(shared_pages) == 0);
+		CHECK(write_page(2U) == 0);
+		shared_start = maps[0].start_block;
+		CHECK(shared_start == maps[1].start_block &&
+		      maps[0].shared_extent && maps[1].shared_extent &&
+		      live[shared_start] == 2U && mapped_pages[0] == 3U);
+		protected_map = maps[1];
+
+		/*
+		 * Forge both bounded reverse-index witnesses so page 1 is hidden,
+		 * while its primary map remains authoritative. Page 2 keeps the cached
+		 * segment non-final, bypassing the whole-segment dead proof.
+		 */
+		live[shared_start] = 1U;
+		mapped_pages[0] = 2U;
+		first_page[0] = 0U;
+		last_page[0] = 2U;
+		prev_page[0] = none;
+		next_page[0] = 2U;
+		prev_page[2] = 0U;
+		next_page[2] = none;
+		prev_page[1] = none;
+		next_page[1] = none;
+
+		if (scenario == 0) {
+			snapshot_integrity();
+			error = swapz_discard_page(&a, replacement_page);
+		} else {
+			CHECK(swapz_stage(&a, &replacement_page, 1U, 1U,
+					  &replacement_tx) == 0);
+			if (scenario == 1) {
+				CHECK(swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES,
+						  replacement_tx.sequence) == 0);
+				memset(data, 0x61, sizeof(data));
+				CHECK(swapz_append(&builder, replacement_page,
+						   replacement_tx.records[0].generation,
+						   data, sizeof(data)) == 0);
+				CHECK(swapz_seal(&builder) == 0);
+			} else {
+				memset(bytes, 0x62, SWAPZ_BLOCK_BYTES);
+			}
+			snapshot_integrity();
+			if (scenario == 1)
+				error = swapz_finish(&a, &replacement_tx, bytes,
+						     SWAPZ_BLOCK_BYTES, 1U, 0);
+			else
+				error = swapz_finish_raw(&a, &replacement_tx, bytes,
+							 1U, 0);
+		}
+
+		invalidation_prevented =
+			error == -EUCLEAN && integrity_unchanged() &&
+			maps[1].valid &&
+			!memcmp(&maps[1], &protected_map, sizeof(protected_map)) &&
+			live[shared_start] == 1U &&
+			(scenario == 0 || !a.in_flight);
+		if (!invalidation_prevented) {
+			fprintf(stderr,
+				"%s:%d FAIL range=[0,1) expected_generation=%u "
+				"expected_references=2 observed_references=%u "
+				"conflict=hidden_shared_sibling operation=%s "
+				"original_errno=%d invalidation_prevented=%s\n",
+				__FILE__, __LINE__, protected_map.generation,
+				(unsigned int)live[shared_start],
+				scenario == 0 ? "discard" :
+				scenario == 1 ? "compressed_cow" : "raw_cow",
+				error, invalidation_prevented ? "yes" : "no");
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static int test_recycle_wholly_dead_segment(void)
 {
 	int i;
@@ -1155,6 +1273,7 @@ int main(void)
 	CHECK(test_indexed_false_empty_victim_cannot_exchange_gc_roles() == 0); passed++;
 	CHECK(test_forged_virgin_witness_still_requires_full_map_proof() == 0); passed++;
 	CHECK(test_false_final_mapping_discard_is_rejected() == 0); passed++;
+	CHECK(test_indexed_shared_extent_hidden_sibling_release_is_rejected() == 0); passed++;
 	CHECK(test_roll_forward_rejects_unrelated_map_sidecar_corruption() == 0); passed++;
 	CHECK(test_gc_commit_rejects_unrelated_survivor_corruption() == 0); passed++;
 	CHECK(test_gc_commit_rejects_live_extent_interior_metadata() == 0); passed++;

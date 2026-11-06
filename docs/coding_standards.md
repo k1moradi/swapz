@@ -182,12 +182,15 @@ For compressed extents published with more than one record, every sibling map
 must retain an in-map shared-extent witness. Before direct DISCARD, RAW COW,
 compressed COW or GC relocation would reduce that extent's physical reference
 count to zero, authority must independently prove that no sibling survives.
-Production uses the preallocated per-segment intrusive page list and verifies
-its complete mapped-page traversal; callers without that reverse index use the
-full logical map. Multi-page DISCARD instead folds this condition into its
-single post-model full-map preflight, before the first generation changes. A
-stale-low liveness sidecar must therefore fail closed without invalidating a
-sibling mapping or publishing a replacement.
+Production may use the preallocated per-segment intrusive page list as an
+early consistency gate, but that reverse index and its mapped-page count are
+cached sidecars, not final ownership authority. A would-be final shared-extent
+release must still confirm overlapping references against the complete primary
+logical map, even when the reverse-index sidecars are mutually self-consistent.
+Multi-page DISCARD instead folds this condition into its single post-model
+full-map preflight, before the first generation changes. A stale-low liveness
+sidecar, including one paired with a forged-low reverse index, must therefore
+fail closed without invalidating a sibling mapping or publishing a replacement.
 
 Range DISCARD must preflight every requested mapping before the first
 logical generation or liveness mutation. A valid extent start index alone is

@@ -656,10 +656,11 @@ static int swapz_map_proof_refuse(const char *transition,
 
 /*
  * A shared compressed extent is physically releasable only after its current
- * authoritative siblings are independently accounted. Production traverses
- * the bounded per-segment page list; research callers without that index use
- * the legacy full logical-map fallback. This runs only when a shared extent's
- * physical reference count is about to reach zero.
+ * authoritative siblings are independently accounted. Production first
+ * validates its bounded per-segment page list as a cheap corruption gate, then
+ * confirms the would-be final release against the primary logical map. This
+ * runs only when a shared extent's physical reference count is about to reach
+ * zero, so false-low reverse-index sidecars cannot hide a surviving sibling.
  */
 static int swapz_verify_shared_extent_release(
 	const struct swapz_authority *a, const struct swapz_map *target,
@@ -757,7 +758,17 @@ static int swapz_verify_shared_extent_release(
 		    last != a->segment_last_page[target_segment])
 			return swapz_map_proof_refuse(
 				transition, "extent_release_page_list", -EUCLEAN);
-	} else {
+	}
+
+	/*
+	 * The page list and mapped-page count are cached reverse indexes, not
+	 * ownership authority. A coordinated stale-low fault can omit a sibling
+	 * from both while its primary map remains valid. Recount the overlapping
+	 * authoritative maps before the physical reference can reach zero.
+	 */
+	found = 0;
+	record_mask = 0;
+	{
 		swapz_u32 logical;
 
 		for (logical = 0; logical < a->logical_pages; ++logical) {
