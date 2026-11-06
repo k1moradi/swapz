@@ -7623,8 +7623,10 @@ public diagnostics carry only phase, original errno when observable (or
 and the next read-only inspection action. A definitely failed setup operation
 after fresh null_blk creation is FAIL, not preclaim BLOCKED. Missing exact udev
 publication after otherwise successful commands is not a proven owned-operation
-failure: it remains BLOCKED, quarantines the claimed resource and private
-evidence, and can never be promoted to PASS. Initialize only
+failure: it remains BLOCKED. Preserve its raw diagnostic only in private
+evidence, then allow normal identity-revalidated teardown of the positively
+owned fixture; quarantine the device or rule only if that rollback becomes
+unprovable or fails. The refusal can never be promoted to PASS. Initialize only
 that RAM partition using the portable plain `mkswap <partition>` form; do not
 pass `--no-discard`, which is not an `mkswap` option.
 The primary-lifecycle fixture has a valid SWAPZ header before creating its

@@ -2789,10 +2789,11 @@ CONTROL=/private-mock-only
             self.assertNotIn("FAIL_PRIMARY_NULLBLK_LIFECYCLE:", denied.stderr)
             self.assertNotIn("PASS_", denied.stdout + denied.stderr)
             self.assertIn("UDEV_PARTUUID_DIAGNOSTIC=private", denied.stdout)
-            quarantine = alias_check.index("\tQUARANTINE=1")
+            retention = alias_check.index("\tRETAIN_PRIVATE_EVIDENCE=1")
             refusal = alias_check.index(
                 '\tblocked "phase=udev-alias-publication')
-            self.assertLess(quarantine, refusal)
+            self.assertLess(retention, refusal)
+            self.assertNotIn("\tQUARANTINE=1", alias_check)
             for identifier in ("7fb9401d-04", "/mock-only", str(configfs),
                                str(private_rule)):
                 self.assertNotIn(identifier, denied.stdout + denied.stderr)
@@ -2932,6 +2933,7 @@ CONTROL=/private-mock-only
                 "SWAPS_ID_BEFORE": "unchanged",
                 "OWN_NULL": "1",
                 "QUARANTINE": "0",
+                "RETAIN_PRIVATE_EVIDENCE": "0",
                 "UDEV_RULE_CREATED": "0",
                 "UDEV_RULES_DIR_CREATED": "0",
                 "TEST_BASE_CREATED": "0",
@@ -3454,6 +3456,7 @@ exit 0
                     "ACTION_LOG": actions,
                     "OWN_NULL": "1",
                     "QUARANTINE": "0",
+                    "RETAIN_PRIVATE_EVIDENCE": "0",
                     "UDEV_RULE_CREATED": "0",
                     "UDEV_RULES_DIR_CREATED": "0",
                     "TEST_BASE_CREATED": "0",
@@ -3601,6 +3604,22 @@ rmdir() {
         self.assertIn(
             "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private",
             settle_failure.stdout)
+
+    def test_cleanup_retains_private_diagnostics_without_preemptive_device_quarantine(self):
+        cleanup = self.script[
+            self.script.index("cleanup() {"):
+            self.script.index("trap cleanup EXIT")]
+        self.assertIn(
+            '(( ! RETAIN_PRIVATE_EVIDENCE )); then', cleanup)
+        self.assertIn(
+            'if (( QUARANTINE || RETAIN_PRIVATE_EVIDENCE )); then', cleanup)
+        alias_start = self.script.index(
+            'if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then',
+            self.script.index("udev_alias_verified() {"))
+        alias_end = self.script.index('\nmkswap "$PARTITION"', alias_start)
+        alias_path = self.script[alias_start:alias_end]
+        self.assertIn("RETAIN_PRIVATE_EVIDENCE=1", alias_path)
+        self.assertNotIn("QUARANTINE=1", alias_path)
 
     def test_cleanup_quarantines_unfinished_durable_state(self):
         self.assertIn("unfinished_or_ambiguous_durable_state", self.script)

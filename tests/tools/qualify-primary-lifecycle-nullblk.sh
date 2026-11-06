@@ -365,6 +365,7 @@ TEST_BASE_CREATED=0
 UDEV_RULE_CREATED=0
 UDEV_RULES_DIR_CREATED=0
 QUARANTINE=0
+RETAIN_PRIVATE_EVIDENCE=0
 CONFIG=
 UDEV_RULE=
 UDEV_RULE_CONTENT=
@@ -1498,7 +1499,8 @@ PY
 		rmdir -- "$UDEV_RULES_DIR" 2>/dev/null || true
 	fi
 
-	if (( TEST_BASE_CREATED )) && (( ! QUARANTINE )); then
+	if (( TEST_BASE_CREATED )) && (( ! QUARANTINE )) &&
+	   (( ! RETAIN_PRIVATE_EVIDENCE )); then
 		if [[ ! "$TOKEN" =~ ^[a-f0-9]{16}$ ||
 		      "$TEST_BASE" != "/var/lib/swapz-primary-owned-nullblk-test-$TOKEN" ||
 		      ! -d "$TEST_BASE" || -L "$TEST_BASE" ||
@@ -1510,7 +1512,7 @@ PY
 		fi
 	fi
 
-	if (( QUARANTINE )); then
+	if (( QUARANTINE || RETAIN_PRIVATE_EVIDENCE )); then
 		note "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private"
 		(( original_rc == 0 )) && original_rc=1
 	fi
@@ -1870,7 +1872,7 @@ else
 	else
 		note "UDEV_PARTUUID_DIAGNOSTIC=unavailable"
 	fi
-	QUARANTINE=1
+	RETAIN_PRIVATE_EVIDENCE=1
 	blocked "phase=udev-alias-publication original_errno=unavailable expected=owned-recorded-alias observed=publication-unproven ownership=claimed next=inspect-private-evidence"
 fi
 
