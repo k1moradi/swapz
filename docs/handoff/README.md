@@ -87,11 +87,12 @@ read the timestamp and source SHA in [production status](../production-status.js
   pidfd liveness. Neither the old synthetic probe nor this fix qualifies real
   swap; interruption cleanup requires separate source-bound review.
 - [Agent 7 real-swap oracle auxiliary controls](agent7-real-swap-oracle-rootless-evidence.txt):
-  the historical `b7f5109d` source-bound audit recorded 43/43 auxiliary
-  rootless checks. Three excerpt-transcription harnesses were externally
-  source-matched, not self-bound; the complete terminal qualifier was **NOT RUN**.
-  No mapper, module or real Linux swap was exercised. This is not an owner
-  `make test`, loaded-host, physical or current-source PASS.
+  the historical audit at `b7f5109d` recorded 43/43 auxiliary rootless checks.
+  The producer harness self-enforced source binding; the other three
+  excerpt-transcription harnesses were externally source-matched, not self-bound.
+  The complete terminal qualifier was **NOT RUN**. No mapper, module or real
+  Linux swap was exercised. This is not an owner `make test`, loaded-host,
+  physical or current-source PASS.
 - [Agent 17 DISCARD debugging archive](agent17-discard-debugging/README.md):
   original standalone pre/post-fix models and full-map scan investigation;
   their hashes and historical observations are preserved, not a production-C
