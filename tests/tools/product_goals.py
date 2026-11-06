@@ -263,14 +263,30 @@ def _ci_safe_line(line):
     line = line.replace(str(Path(__file__).resolve().parents[2]), "<workspace>")
     line = re.sub(
         r"(?i)\b((?:authorization:\s*(?:bearer|basic)\s+)|"
-        r"(?:(?:access[_-]?)?token|password|secret|api[_-]?key|"
-        r"private[_-]?key)\s*[:=]\s*)[^\s]+",
+        r"(?:(?:access[_-]?)?token(?:[_-]?path)?|password|secret|api[_-]?key|"
+        r"private[_-]?key|(?:part)?uuid|serial|wwn|campaign(?:[_-]?id)?|"
+        r"device[_-]?id)\s*[:=]\s*)[^\s]+",
         r"\1<redacted>", line)
     line = re.sub(r"\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}",
                   "<redacted>", line)
     # Child-supplied structured values and absolute host paths are never
     # public first-error evidence, even when attached to an AssertionError.
     line = re.sub(r"\{[^\r\n]*\}", "<structured-evidence-redacted>", line)
+    json_scalar = (
+        r'"(?:\\.|[^"\\])*"|'
+        r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|"
+        r"true|false|null"
+    )
+    json_array_pattern = (
+        r"\[(?:\s*(?:" + json_scalar + r")"
+        + r"(?:\s*,\s*(?:" + json_scalar + r"))*\s*)\]"
+    )
+    line = re.sub(
+        json_array_pattern, "<structured-evidence-redacted>", line)
+    line = re.sub(
+        r"(?i)\b((?:actual|observed|payload|response|json)\s*[:=]\s*)"
+        r"(?:" + json_scalar + r")",
+        r"\1<structured-evidence-redacted>", line)
     # Preserve only the two source-controlled contract-suite basenames so
     # failure classification survives redaction of their containing host root.
     line = re.sub(
@@ -412,6 +428,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
     make_target = None
     first_make_failure = None
     rootless_failure = None
+    rootless_detail = None
     rootless_marker_seen = False
     contract_suite = any(name in suite for name in
                          ("contract", "policy", "interface", "layout"))
@@ -431,6 +448,20 @@ def diagnose_ci_failure(lines, exit_code, suite):
         r"line=(?:[0-9]+|unavailable) "
         r"log=(?P<log>unavailable|build/tests/rootless-failure\."
         r"[A-Za-z0-9]{8}/diagnostic\.log)$")
+    rootless_detail_pattern = re.compile(
+        r"^Reason: exit=(?P<exit>[0-9]{1,3}) "
+        r"reason=(?P<reason>nonzero_exit|native_compile|timeout_or_exit_124|"
+        r"signal_or_child_exit|received_TERM|received_INT|"
+        r"unittest_assertion|unittest_error|unittest_timeout|"
+        r"stderr_relay_failure|stderr_relay_cleanup_failure) "
+        r"subtest=(?P<subtest>[a-z0-9-]{1,64}|unavailable) "
+        r"phase_wall_s=[0-9]+ stage_wall_s=[0-9]+ "
+        r"line=(?:[0-9]+|unavailable) "
+        r"log=(?P<log>unavailable|build/tests/rootless-failure\."
+        r"[A-Za-z0-9]{8}/diagnostic\.log) "
+        r"first_errno=(?P<errno>[1-9][0-9]{0,3}|unavailable) "
+        r"cleanup=(?P<cleanup>not_independently_verified|"
+        r"relay_incomplete|relay_cleanup_failed)$")
 
     for raw_line in lines:
         safe_line = _ci_safe_line(raw_line)
@@ -470,6 +501,21 @@ def diagnose_ci_failure(lines, exit_code, suite):
                 rootless_marker_seen = True
             rootless_failure = (
                 rootless_match.groupdict() if rootless_match else None)
+            rootless_detail = None
+            continue
+
+        rootless_detail_match = (
+            rootless_detail_pattern.fullmatch(safe_line)
+            if suite == "native-rootless" and rootless_failure is not None
+            else None)
+        if rootless_detail_match:
+            candidate_detail = rootless_detail_match.groupdict()
+            if all(candidate_detail[key] == rootless_failure[key]
+                   for key in ("exit", "reason", "subtest", "log")):
+                errno_value = candidate_detail["errno"]
+                if (errno_value == "unavailable" or
+                        int(errno_value) <= 4095):
+                    rootless_detail = candidate_detail
             continue
 
         if (first_make_failure is None and suite == "native-rootless"
@@ -759,14 +805,24 @@ def diagnose_ci_failure(lines, exit_code, suite):
     if rootless_shell_syntax_check_failed:
         expected_contract = "source-controlled shell script passes bash -n"
 
-    errno_match = re.match(
-        r"^(?:OSError|PermissionError|FileNotFoundError): "
-        r"\[Errno ([0-9]{1,5})\]", causal_error or "")
-    first_errno = int(errno_match.group(1)) if errno_match else None
+    errno_match = re.search(
+        r"(?:\[Errno (?P<exception_errno>[1-9][0-9]{0,3})\]|"
+        r"\berrno=(?P<reported_errno>[1-9][0-9]{0,3})\b)",
+        causal_error or "")
+    first_errno = None
+    if errno_match:
+        errno_text = (errno_match.group("exception_errno") or
+                      errno_match.group("reported_errno"))
+        if int(errno_text) <= 4095:
+            first_errno = int(errno_text)
     cleanup_disposition = {
         "stderr_relay_failure": "relay_incomplete",
         "stderr_relay_cleanup_failure": "relay_cleanup_failed",
     }.get(rootless_reason, "not_independently_verified")
+    if rootless_detail is not None:
+        cleanup_disposition = rootless_detail["cleanup"]
+        if rootless_detail["errno"] != "unavailable":
+            first_errno = int(rootless_detail["errno"])
     result = {
         "status": status, "category": category,
         "test": test_name, "phase": phase,

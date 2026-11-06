@@ -24,6 +24,7 @@ rootless_classified_reason=nonzero_exit
 rootless_classified_subtest=unavailable
 rootless_classified_test=unavailable
 rootless_classified_kind=unavailable
+rootless_classified_errno=unavailable
 
 begin_rootless_private_stderr_capture() {
   rootless_capture_directory=
@@ -96,8 +97,7 @@ finish_rootless_private_stderr_capture() {
     if [[ -n $rootless_capture_directory ]]; then
       rmdir -- "$rootless_capture_directory" 2>/dev/null || cleanup_failed=1
     fi
-  elif (( capture_exit_code == 0 )) &&
-       [[ -n $rootless_capture_path && -f $rootless_capture_path &&
+  elif [[ -n $rootless_capture_path && -f $rootless_capture_path &&
           ! -L $rootless_capture_path ]]; then
     rootless_private_diagnostic_path=$rootless_capture_path
     rootless_private_diagnostic_log="build/tests/${rootless_capture_directory##*/}/diagnostic.log"
@@ -115,9 +115,11 @@ finish_rootless_private_stderr_capture() {
   if (( cleanup_failed != 0 )) && [[ -z $rootless_capture_failure_reason ]]; then
     rootless_capture_failure_reason=stderr_relay_cleanup_failure
   fi
-  # If cleanup failed before unlinking the capture, keep that one private file
-  # as the pointed failure diagnostic instead of orphaning it and allocating a
-  # second log. A failed relay makes its contents non-authoritative below.
+  # A failed child retains any surviving regular capture even when the relay
+  # itself failed. Partial bytes remain private diagnostic evidence only; they
+  # never authenticate unittest identity. If cleanup failed before unlinking a
+  # passing capture, reuse that file instead of orphaning it and allocating a
+  # second log.
   if (( cleanup_failed != 0 )) &&
      [[ -n $rootless_capture_directory && -d $rootless_capture_directory &&
         ! -L $rootless_capture_directory && -n $rootless_capture_path &&
@@ -141,6 +143,8 @@ classify_rootless_private_unittest_failure() {
   # Other generator subtest keys identify a failed method, never public data.
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.test_[A-Za-z0-9_]{1,96}\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9-]{1,64})'\\)$"
+  local errno_regex='^(OSError|PermissionError|FileNotFoundError): \[Errno ([1-9][0-9]{0,3})\]'
+  local errno_candidate
   local first_progress_kind=
   local first_progress_test=
   local first_progress_subtest=unavailable
@@ -152,6 +156,7 @@ classify_rootless_private_unittest_failure() {
   rootless_classified_subtest=unavailable
   rootless_classified_test=unavailable
   rootless_classified_kind=unavailable
+  rootless_classified_errno=unavailable
   [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
 
   # unittest preserves execution order in verbose "... FAIL/ERROR" progress
@@ -218,6 +223,12 @@ classify_rootless_private_unittest_failure() {
     [[ $line == '======================================================================' ]] && break
     if [[ $line == *"subprocess.TimeoutExpired:"* ]]; then
       rootless_classified_reason=unittest_timeout
+    elif [[ $rootless_classified_errno == unavailable &&
+            $line =~ $errno_regex ]]; then
+      errno_candidate=${BASH_REMATCH[2]}
+      if (( 10#$errno_candidate <= 4095 )); then
+        rootless_classified_errno=$errno_candidate
+      fi
     fi
   done < "$diagnostic_path"
 }
@@ -242,6 +253,7 @@ classify_rootless_private_make_failure() {
   rootless_classified_subtest=unavailable
   rootless_classified_test=unavailable
   rootless_classified_kind=unavailable
+  rootless_classified_errno=unavailable
   [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
   while IFS= read -r line || [[ -n $line ]]; do
     if [[ $line == 'Traceback (most recent call last):' ]]; then
@@ -299,6 +311,18 @@ report_rootless_failure() {
   local failed_subtest=${4:-unavailable}
   local failed_test=${5:-unavailable}
   local failed_unittest_kind=${6:-unavailable}
+  local failed_errno=${7:-unavailable}
+  local cleanup_disposition=${8:-not_independently_verified}
+  if [[ $failed_errno != unavailable ]]; then
+    if [[ ! $failed_errno =~ ^[1-9][0-9]{0,3}$ ]] ||
+       (( 10#$failed_errno > 4095 )); then
+      failed_errno=unavailable
+    fi
+  fi
+  case $cleanup_disposition in
+    not_independently_verified|relay_incomplete|relay_cleanup_failed) ;;
+    *) cleanup_disposition=not_independently_verified ;;
+  esac
   # ERR is inherited by command substitutions under -E. Their eventual
   # enclosing assertion, not an incidental internal command, owns the failure.
   if (( BASH_SUBSHELL != 0 )); then
@@ -307,7 +331,8 @@ report_rootless_failure() {
   rootless_failure_reported=1
   trap - ERR EXIT INT TERM
   set +e
-  if (( $# == 2 )); then
+  if [[ $failure_reason == nonzero_exit &&
+        $failed_subtest == unavailable && $failed_test == unavailable ]]; then
     case $original_exit_code in
       124) failure_reason=timeout_or_exit_124 ;;
       13[0-9]|14[0-9]|15[0-9]) failure_reason=signal_or_child_exit ;;
@@ -433,10 +458,11 @@ report_rootless_failure() {
       rm -f -- "$private_diagnostic_path.tail" 2>/dev/null
     fi
     if [[ -n $private_diagnostic_path ]] &&
-       ! printf '\n--- swapz rootless attribution ---\nphase=%s\nsubtest=%s\ntest=%s\nunittest_kind=%s\nreason=%s\nexit_code=%s\nphase_wall_s=%s\nstage_wall_s=%s\nsource_line=%s\nnext_step=inspect_first_captured_FAIL_or_ERROR_locally\n' \
+       ! printf '\n--- swapz rootless attribution ---\nphase=%s\nsubtest=%s\ntest=%s\nunittest_kind=%s\nreason=%s\nexit_code=%s\nfirst_errno=%s\ncleanup_disposition=%s\nphase_wall_s=%s\nstage_wall_s=%s\nsource_line=%s\nnext_step=inspect_first_captured_FAIL_or_ERROR_locally\n' \
          "$rootless_phase" "$failed_subtest" "$failed_test" "$failed_unittest_kind" \
-         "$failure_reason" "$original_exit_code" "$phase_wall_seconds" "$stage_wall_seconds" \
-         "$failed_at_line" >> "$private_diagnostic_path"; then
+         "$failure_reason" "$original_exit_code" "$failed_errno" "$cleanup_disposition" \
+         "$phase_wall_seconds" "$stage_wall_seconds" "$failed_at_line" \
+         >> "$private_diagnostic_path"; then
       private_diagnostic_log=unavailable
     fi
   fi
@@ -452,10 +478,10 @@ report_rootless_failure() {
     "$failure_reason" "$phase_wall_seconds" "$stage_wall_seconds" \
     "$failed_at_line" "$private_diagnostic_log" >&2
   printf 'Failed during: %s\n' "$failure_phase" >&2
-  printf 'Reason: exit=%s reason=%s subtest=%s phase_wall_s=%s stage_wall_s=%s line=%s log=%s\n' \
+  printf 'Reason: exit=%s reason=%s subtest=%s phase_wall_s=%s stage_wall_s=%s line=%s log=%s first_errno=%s cleanup=%s\n' \
     "$original_exit_code" "$failure_reason" "$failed_subtest" \
     "$phase_wall_seconds" "$stage_wall_seconds" "$failed_at_line" \
-    "$private_diagnostic_log" >&2
+    "$private_diagnostic_log" "$failed_errno" "$cleanup_disposition" >&2
   printf '%s\n' \
     'NEXT: inspect the mode-0600 local log and first captured FAIL/ERROR; do not publish private data.' >&2
   exit "$original_exit_code"
@@ -467,10 +493,16 @@ report_rootless_failure() {
 finish_and_report_rootless_unittest() {
   local original_exit_code=$1
   local command_line=$2
+  local cleanup_disposition=not_independently_verified
   finish_rootless_private_stderr_capture "$original_exit_code"
+  case $rootless_capture_failure_reason in
+    stderr_relay_failure) cleanup_disposition=relay_incomplete ;;
+    stderr_relay_cleanup_failure) cleanup_disposition=relay_cleanup_failed ;;
+  esac
   if (( original_exit_code == 0 )); then
     if [[ -n $rootless_capture_failure_reason ]]; then
-      report_rootless_failure 1 "$command_line" "$rootless_capture_failure_reason"
+      report_rootless_failure 1 "$command_line" "$rootless_capture_failure_reason" \
+        unavailable unavailable unavailable unavailable "$cleanup_disposition"
     fi
     return 0
   fi
@@ -483,15 +515,12 @@ finish_and_report_rootless_unittest() {
     rootless_classified_subtest=unavailable
     rootless_classified_test=unavailable
     rootless_classified_kind=unavailable
+    rootless_classified_errno=unavailable
   fi
-  if [[ $rootless_classified_reason == nonzero_exit &&
-        $rootless_classified_subtest == unavailable ]]; then
-    report_rootless_failure "$original_exit_code" "$command_line"
-  else
-    report_rootless_failure "$original_exit_code" "$command_line" \
-      "$rootless_classified_reason" "$rootless_classified_subtest" \
-      "$rootless_classified_test" "$rootless_classified_kind"
-  fi
+  report_rootless_failure "$original_exit_code" "$command_line" \
+    "$rootless_classified_reason" "$rootless_classified_subtest" \
+    "$rootless_classified_test" "$rootless_classified_kind" \
+    "$rootless_classified_errno" "$cleanup_disposition"
 }
 
 rootless_unexpected_error() {
@@ -533,20 +562,23 @@ else
   rootless_make_exit_code=$?
 fi
 finish_rootless_private_stderr_capture "$rootless_make_exit_code"
+rootless_make_cleanup_disposition=not_independently_verified
+case $rootless_capture_failure_reason in
+  stderr_relay_failure) rootless_make_cleanup_disposition=relay_incomplete ;;
+  stderr_relay_cleanup_failure) rootless_make_cleanup_disposition=relay_cleanup_failed ;;
+esac
 if (( rootless_make_exit_code != 0 )); then
   if [[ -z $rootless_capture_failure_reason ]]; then
     classify_rootless_private_make_failure "$rootless_private_diagnostic_path"
   fi
-  if [[ $rootless_classified_test != unavailable ||
-        $rootless_classified_subtest != unavailable ]]; then
-    report_rootless_failure "$rootless_make_exit_code" "$rootless_make_command_line" \
-      "$rootless_classified_reason" "$rootless_classified_subtest" \
-      "$rootless_classified_test" "$rootless_classified_kind"
-  fi
-  report_rootless_failure "$rootless_make_exit_code" "$rootless_make_command_line"
+  report_rootless_failure "$rootless_make_exit_code" "$rootless_make_command_line" \
+    "$rootless_classified_reason" "$rootless_classified_subtest" \
+    "$rootless_classified_test" "$rootless_classified_kind" \
+    "$rootless_classified_errno" "$rootless_make_cleanup_disposition"
 fi
 if [[ -n $rootless_capture_failure_reason ]]; then
-  report_rootless_failure 1 "$rootless_make_command_line" "$rootless_capture_failure_reason"
+  report_rootless_failure 1 "$rootless_make_command_line" "$rootless_capture_failure_reason" \
+    unavailable unavailable unavailable unavailable "$rootless_make_cleanup_disposition"
 fi
 rootless_phase='tests/runtime/native/source-contract-test.py'
 rootless_phase_started_seconds=$SECONDS

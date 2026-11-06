@@ -1689,7 +1689,9 @@ process and receive a bounded EOF probe on that pipe before wait; do not
 redirect the runner's stderr while closing its parent-side descriptors. An
 inherited input writer or stalled relay cannot indefinitely hide the first
 child exit. Kill an incomplete owned relay, never classify its partial stderr,
-and preserve the child status even if the relay or its cleanup fails. This
+but retain a surviving regular private capture when the tested child already
+failed so the first diagnostic is not discarded merely because relay completion
+failed. Preserve the child status even if the relay or its cleanup fails. This
 relay-bound timeout is not evidence of a child deadline or an exit-124 watchdog.
 Relay diagnostics may not print
 private filesystem paths. Failure-log allocation must not follow a symlinked
@@ -1809,12 +1811,20 @@ classifications. None of these labels changes test severity or qualification.
 
 The existing v1 CI diagnostic additionally gives the first observed exit
 (`first_exit_code`), a numeric original `first_errno` or null when unknown,
-and `cleanup_disposition`. An unverified child cleanup remains explicitly
+and `cleanup_disposition`. The authoritative rootless `FAIL:` marker grammar
+remains unchanged for report-producer compatibility. Its immediately following
+fixed `Reason:` line may append only `first_errno=<number|unavailable>` and
+`cleanup=<fixed-state>`; the CI parser may consume those fields only when
+exit, reason, subtest and safe relative log repeat the final authenticated
+marker exactly. A nested errno may be promoted only from the matched first
+unittest detailed block, never from arbitrary boundary or cleanup text. An
+unverified child cleanup remains explicitly
 `not_independently_verified`; relay-only failures may use fixed incomplete or
 cleanup-failure labels but never assert successful child teardown. The existing
 `expected_contract` and `observed` fields remain the public expected/actual
-conditions. Redact structured child-supplied JSON and absolute host paths
-before promoting first-error text; do not infer protected identities. Keep
+conditions. Redact structured child-supplied JSON, token paths, UUID/PARTUUID,
+serial/WWN, campaign identifiers, device IDs, and absolute host paths before
+promoting first-error text; do not infer protected identities. Keep
 only the allowlisted source-contract and make-interface script basenames
 visible after redacting their private containing root, so original source
 contract failures retain their existing classification.

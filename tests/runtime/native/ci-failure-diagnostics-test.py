@@ -54,11 +54,12 @@ exec sleep 30
         self.assertEqual(diagnosis["child_exit_code"], 37)
         self.assertEqual(diagnosis["phase"], "package-dkms-test.py")
         self.assertEqual(diagnosis["test"], "package-dkms-test.py")
-        self.assertEqual(diagnosis["cleanup_disposition"],
-                         "not_independently_verified")
+        self.assertEqual(diagnosis["cleanup_disposition"], "relay_incomplete")
         self.assertNotIn(self.attribution.PRIVATE_SENTINEL, json.dumps(diagnosis))
         self.assertEqual(diagnosis["rootless_private_log"],
                          "build/tests/" + private_log.parent.name + "/diagnostic.log")
+        self.assertIn("AssertionError: " + self.attribution.PRIVATE_SENTINEL,
+                      private_log.read_text())
 
     def test_first_assertion_and_later_teardown_remain_separate(self):
         result = self.fixture.invoke(
@@ -75,19 +76,62 @@ exec sleep 30
         self.assertNotIn(self.attribution.LATER_TEARDOWN_SENTINEL,
                          json.dumps(diagnosis))
 
+    def test_nested_errno_reaches_ci_without_private_exception_text(self):
+        result = self.fixture.invoke(
+            "ownership_errno", stage=self.attribution.OWNERSHIP_PHASE)
+        private_log = self.fixture.assert_report(
+            result, status=52, reason="unittest_error", test="test_group",
+            stage=self.attribution.OWNERSHIP_PHASE)
+        diagnosis = self.diagnostics.diagnose_ci_failure(
+            result.stderr.splitlines(), result.returncode, "native-rootless")
+        self.assertEqual(diagnosis["first_exit_code"], 52)
+        self.assertEqual(diagnosis["first_errno"], 9)
+        self.assertEqual(diagnosis["cleanup_disposition"],
+                         "not_independently_verified")
+        self.assertNotIn(self.attribution.PRIVATE_SENTINEL,
+                         json.dumps(diagnosis))
+        self.assertIn("OSError: [Errno 9] " + self.attribution.PRIVATE_SENTINEL,
+                      private_log.read_text())
+
     def test_real_signal_exit_124_and_private_structured_values(self):
         signalled = self.diagnostics.diagnose_ci_failure(
             [], -11, "ci-failure-diagnostics")
         self.assertEqual(signalled["termination"], "signal SIGSEGV")
         self.assertEqual(signalled["first_exit_code"], -11)
         self.assertEqual(signalled["status"], "FAIL")
+        self.assertEqual(signalled["category"], "RUNTIME_ASSERTION")
         interrupted = self.diagnostics.diagnose_ci_failure(
             [], -15, "ci-failure-diagnostics")
         self.assertEqual(interrupted["status"], "CANCELLED")
+        self.assertEqual(interrupted["category"], "CANCELLATION")
         returned_124 = self.diagnostics.diagnose_ci_failure(
             [], 124, "ci-failure-diagnostics")
         self.assertIn("not proven", returned_124["reason"])
         self.assertEqual(returned_124["first_exit_code"], 124)
+        self.assertEqual(returned_124["category"], "INFRASTRUCTURE")
+        assertion_124 = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: rootless phase=package-dkms-test.py "
+             "subtest=unavailable test=test_guard exit=124 "
+             "reason=unittest_assertion phase_s=1 stage_s=2 line=22 "
+             "log=unavailable"],
+            1, "native-rootless")
+        self.assertEqual(assertion_124["status"], "FAIL")
+        self.assertEqual(assertion_124["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(assertion_124["rootless_reason"], "unittest_assertion")
+        self.assertEqual(assertion_124["first_exit_code"], 124)
+        self.assertNotIn("watchdog", assertion_124["reason"])
+        legacy_relay = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: rootless phase=package-dkms-test.py "
+             "subtest=unavailable test=unavailable exit=1 "
+             "reason=stderr_relay_failure phase_s=1 stage_s=2 line=22 "
+             "log=unavailable"],
+            1, "native-rootless")
+        self.assertEqual(legacy_relay["cleanup_disposition"],
+                         "relay_incomplete")
+        reported_errno = self.diagnostics.diagnose_ci_failure(
+            ["INFRASTRUCTURE: cannot start test: errno=28 No space left on device"],
+            127, "ci-failure-diagnostics")
+        self.assertEqual(reported_errno["first_errno"], 28)
         private = self.diagnostics.diagnose_ci_failure(
             ["FAIL: test_private (__main__.Fixture)",
              'AssertionError: expected=/private/fixture/token actual={"id":"FORGED_ID"}'],
@@ -97,6 +141,17 @@ exec sleep 30
         self.assertIn("<structured-evidence-redacted>", private["first_error"])
         self.assertNotIn("FORGED_ID", json.dumps(private))
         self.assertNotIn("/private/fixture", json.dumps(private))
+        safe = self.diagnostics._ci_safe_line(
+            'AssertionError: token_path=build/private/token.json '
+            'PARTUUID=PRIVATE_CARD campaign=FORGED_CAMPAIGN '
+            'device_id=PRIVATE_DEVICE actual=["FORGED_ARRAY"] observed=123456')
+        self.assertNotIn("build/private/token.json", safe)
+        self.assertNotIn("PRIVATE_CARD", safe)
+        self.assertNotIn("FORGED_CAMPAIGN", safe)
+        self.assertNotIn("PRIVATE_DEVICE", safe)
+        self.assertNotIn("FORGED_ARRAY", safe)
+        self.assertNotIn("123456", safe)
+        self.assertIn("<structured-evidence-redacted>", safe)
 
     def test_contract_classification_survives_private_root_redaction(self):
         failure = self.diagnostics.diagnose_ci_failure(
