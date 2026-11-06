@@ -212,7 +212,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         partition_write = self.script.index(
             'if ! sfdisk --lock --wipe always "$LOWER"')
         partition_settle = self.script.index(
-            'udevadm settle --timeout=10 || blocked "udev did not settle owned null_blk partition"',
+            'udevadm settle --timeout=10 >/dev/null 2>&1 || owned_setup_failed "partition-udev-settle"',
             partition_write,
         )
         self.assertLess(partition_write, partition_settle)
@@ -2760,25 +2760,62 @@ CONTROL=/private-mock-only
             alias_check = self.script[
                 alias_start:self.script.index('\nmkswap "$PARTITION"', alias_start)]
             missing_alias = configfs / "missing-by-partuuid"
+            private_evidence = configfs / "private-evidence"
+            private_evidence.mkdir(mode=0o700)
+            private_rule = configfs / "owned-fixture.rules"
+            private_rule.write_text(
+                'ACTION=="add", ENV{ID_PART_ENTRY_UUID}=="7fb9401d-04"\n',
+                encoding="ascii")
             program = (
                 "set -Eeuo pipefail\n"
+                'fail() { printf "FAIL_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 1; }\n'
                 'blocked() { printf "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 2; }\n'
                 'note() { printf "%s\\n" "$*"; }\n'
                 'udevadm() { return 1; }\n'
                 f"BY_PARTUUID={shlex.quote(str(missing_alias))}\n"
+                f"EVIDENCE_BASE={shlex.quote(str(private_evidence))}\n"
+                f"UDEV_RULE={shlex.quote(str(private_rule))}\n"
                 f"PART_SYSFS={shlex.quote(str(configfs))}\n"
-                "PARTUUID=7fb9401d-04\nUDEV_DEVPATH=/mock-only\n"
-                "UDEV_RULE=\n" + alias_check)
+                "QUARANTINE=0\nPARTUUID=7fb9401d-04\n"
+                "UDEV_DEVPATH=/mock-only\n" + alias_check)
             denied = subprocess.run(
                 ["bash", "-c", program], capture_output=True,
                 text=True, timeout=5, check=False)
-            self.assertEqual(denied.returncode, 2, denied.stderr)
-            self.assertIn(
-                "udev did not publish the owned partition by-PARTUUID node",
-                denied.stderr)
+            self.assertEqual(denied.returncode, 1, denied.stderr)
+            self.assertIn("FAIL_PRIMARY_NULLBLK_LIFECYCLE:", denied.stderr)
+            self.assertIn("phase=udev-alias-publication", denied.stderr)
+            self.assertIn("UDEV_PARTUUID_DIAGNOSTIC=private", denied.stdout)
+            for identifier in ("7fb9401d-04", "/mock-only", str(configfs),
+                               str(private_rule)):
+                self.assertNotIn(identifier, denied.stdout + denied.stderr)
+            self.assertIn("7fb9401d-04", (
+                private_evidence / "udev-alias-diagnostic.log").read_text())
             self.assertFalse(missing_alias.exists())
             self.assertEqual(sentinel.read_text(encoding="ascii"),
                              "do-not-touch\n")
+
+    def test_rootless_failed_owned_partition_write_is_fail(self):
+        start = self.script.index('if ! sfdisk --lock --wipe always "$LOWER"')
+        end = self.script.index("\nfi", start) + len("\nfi")
+        helper_start = self.script.index("owned_setup_failed() {")
+        helper_end = self.script.index("\n}", helper_start) + len("\n}")
+        shell = (
+            "set -Eeuo pipefail\n"
+            'LOWER=/fake-owned-only\n'
+            'fail() { printf "FAIL_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 1; }\n'
+            'blocked() { printf "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 2; }\n'
+            'sfdisk() { return 11; }\n'
+            + self.script[helper_start:helper_end] + "\n"
+            + self.script[start:end] + "\n"
+        )
+        result = subprocess.run(
+            ["bash", "-c", shell], capture_output=True,
+            text=True, timeout=5, check=False)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("phase=partition-table-write", result.stderr)
+        self.assertIn("ownership=claimed", result.stderr)
+        self.assertNotIn("/fake-owned-only", result.stdout + result.stderr)
+        self.assertNotIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE", result.stderr)
 
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)

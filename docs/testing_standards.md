@@ -7575,7 +7575,13 @@ recorded `DEVLINKS` property as well as by block-device identity; never create
 the alias with a shell symlink.
 Remove the temporary rule after null_blk teardown and require its alias to be
 gone. If publication fails, capture the exact fixture rule, relevant udev
-properties, and udev's event-rule diagnostic before cleanup. Initialize only
+properties, and udev's event-rule diagnostic before cleanup. The raw
+rule, PARTUUID and DEVPATH remain in root-owned private failure evidence;
+public diagnostics carry only phase, original errno when observable (or
+`unavailable`), expected and observed identity classes, ownership status,
+and the next read-only inspection action. A definitely failed setup operation
+after fresh null_blk creation is FAIL, not preclaim BLOCKED; missing exact udev
+publication retains the owned resource in quarantine. Initialize only
 that RAM partition using the portable plain `mkswap <partition>` form; do not
 pass `--no-discard`, which is not an `mkswap` option.
 The primary-lifecycle fixture has a valid SWAPZ header before creating its

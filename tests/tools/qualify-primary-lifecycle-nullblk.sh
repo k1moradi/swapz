@@ -14,6 +14,12 @@ fail() {
 	printf 'FAIL_PRIMARY_NULLBLK_LIFECYCLE: %s\n' "$*" >&2
 	exit 1
 }
+# A failed owned operation is FAIL, not a preclaim admission BLOCKED.
+# Command exit codes are not errno values; do not invent a Linux errno.
+owned_setup_failed() {
+	local failure_phase="$1"
+	fail "phase=$failure_phase original_errno=unavailable expected=owned-setup-operation-success observed=command-failed ownership=claimed next=inspect-private-evidence"
+}
 blocked() {
 	printf 'BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\n' "$*" >&2
 	exit 2
@@ -1713,7 +1719,7 @@ LOWER_NODE_DEVNO="$(block_node_devno "$LOWER")" ||
 
 DISK_ID="$(printf '%s' "$TOKEN" | cut -c1-8)"
 [[ "$DISK_ID" != 00000000 ]] || DISK_ID=1a2b3c4d
-if ! sfdisk --lock --wipe always "$LOWER" >/dev/null <<EOF
+if ! sfdisk --lock --wipe always "$LOWER" >/dev/null 2>&1 <<EOF
 label: dos
 label-id: 0x$DISK_ID
 unit: sectors
@@ -1721,9 +1727,9 @@ unit: sectors
 start=2048, type=82
 EOF
 then
-	blocked "cannot create partition table on owned RAM null_blk"
+	owned_setup_failed "partition-table-write"
 fi
-udevadm settle --timeout=10 || blocked "udev did not settle owned null_blk partition"
+udevadm settle --timeout=10 >/dev/null 2>&1 || owned_setup_failed "partition-udev-settle"
 
 partition_count=0
 for candidate in "/sys/block/$DISK/"*; do
@@ -1789,10 +1795,10 @@ udev_alias_verified() {
 # partition alias, add a temporary exact-DEVPATH rule. Udev must create and
 # record the alias used by the production coordinator; the shell never
 # fabricates the symlink.
-udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" ||
-	blocked "cannot trigger udev for the owned null_blk partition"
-udevadm settle --timeout=10 ||
-	blocked "udev did not settle the owned null_blk partition add event"
+udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" >/dev/null 2>&1 ||
+	owned_setup_failed "partition-udev-trigger"
+udevadm settle --timeout=10 >/dev/null 2>&1 ||
+	owned_setup_failed "partition-udev-add-settle"
 for ignored in {1..20}; do
 	if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then
 		break
@@ -1805,8 +1811,8 @@ if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then
 	[[ -d /run/udev && ! -L /run/udev ]] ||
 		blocked "udev runtime directory is unavailable for the owned fixture rule"
 	if [[ ! -d "$UDEV_RULES_DIR" ]]; then
-		install -d -m 0755 -- "$UDEV_RULES_DIR" ||
-			blocked "cannot create the temporary udev rules directory"
+		install -d -m 0755 -- "$UDEV_RULES_DIR" >/dev/null 2>&1 ||
+			owned_setup_failed "udev-rules-directory-create"
 		UDEV_RULES_DIR_CREATED=1
 	fi
 	[[ -d "$UDEV_RULES_DIR" && ! -L "$UDEV_RULES_DIR" ]] ||
@@ -1830,13 +1836,13 @@ if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then
 		blocked "cannot create the exact owned-null_blk udev rule"
 	fi
 	UDEV_RULE_CREATED=1
-	chmod 0644 "$UDEV_RULE" || blocked "cannot set temporary udev rule mode"
-	udevadm control --reload-rules ||
-		blocked "udev did not reload the temporary owned-null_blk rule"
-	udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" ||
-		blocked "cannot retrigger udev for the owned null_blk partition"
-	udevadm settle --timeout=10 ||
-		blocked "udev did not settle the exact owned-nullblk rule"
+	chmod 0644 "$UDEV_RULE" >/dev/null 2>&1 || owned_setup_failed "udev-rule-chmod"
+	udevadm control --reload-rules >/dev/null 2>&1 ||
+		owned_setup_failed "udev-rule-reload"
+	udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" >/dev/null 2>&1 ||
+		owned_setup_failed "udev-rule-trigger"
+	udevadm settle --timeout=10 >/dev/null 2>&1 ||
+		owned_setup_failed "udev-rule-settle"
 	for ignored in {1..50}; do
 		udev_alias_verified && break
 		udevadm settle --timeout=1 >/dev/null 2>&1 || true
@@ -1847,15 +1853,25 @@ fi
 if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then
 	udev_alias_verified || fail "by-PARTUUID alias is not udev-recorded for the owned partition"
 else
-	note "UDEV_PARTUUID_DIAGNOSTIC=devpath:$UDEV_DEVPATH partuuid:$PARTUUID rule:$UDEV_RULE"
-	if [[ -n "$UDEV_RULE" && -f "$UDEV_RULE" && ! -L "$UDEV_RULE" ]]; then
-		sed -n '1p' "$UDEV_RULE" >&2
+	# Preserve raw udev evidence only in the private root-owned run directory.
+	# The outer redirect also masks failure to open that private diagnostic.
+	if (
+		{
+			if [[ -n "$UDEV_RULE" && -f "$UDEV_RULE" && ! -L "$UDEV_RULE" ]]; then
+				sed -n '1p' "$UDEV_RULE" >&2
+			fi
+			udevadm info --query=property --path="$PART_SYSFS" 2>/dev/null |
+				grep -E '^(DEVPATH|DEVTYPE|ID_PART_ENTRY_UUID|DEVLINKS)=' >&2 || true
+			udevadm test --verbose --action=add "$PART_SYSFS" 2>&1 |
+				grep -E "$UDEV_RULE|$UDEV_DEVPATH|$PARTUUID|by-partuuid|[Ee]rror|[Ff]ailed|Invalid" >&2 || true
+		} > "$EVIDENCE_BASE/udev-alias-diagnostic.log" 2>&1
+	) 2>/dev/null; then
+		note "UDEV_PARTUUID_DIAGNOSTIC=private"
+	else
+		note "UDEV_PARTUUID_DIAGNOSTIC=unavailable"
 	fi
-	udevadm info --query=property --path="$PART_SYSFS" 2>/dev/null |
-		grep -E '^(DEVPATH|DEVTYPE|ID_PART_ENTRY_UUID|DEVLINKS)=' >&2 || true
-	udevadm test --verbose --action=add "$PART_SYSFS" 2>&1 |
-		grep -E "$UDEV_RULE|$UDEV_DEVPATH|$PARTUUID|by-partuuid|[Ee]rror|[Ff]ailed|Invalid" >&2 || true
-	blocked "udev did not publish the owned partition by-PARTUUID node"
+	QUARANTINE=1
+	fail "phase=udev-alias-publication original_errno=unavailable expected=owned-recorded-alias observed=missing ownership=claimed next=inspect-private-evidence"
 fi
 
 mkswap "$PARTITION" >/dev/null ||
