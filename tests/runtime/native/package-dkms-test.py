@@ -2640,6 +2640,56 @@ exec "{flock_binary}" "$@"
         self.assertEqual(binary.read_bytes(), b"tampered-userspace\n")
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
 
+    def test_failed_sha256sum_with_matching_stdout_refuses_provenance(self):
+        # A producer failure must not become a matching checksum merely
+        # because its stdout contains the expected digest.
+        real_sha256sum = shutil.which("sha256sum")
+        self.assertIsNotNone(real_sha256sum)
+        self.tool("sha256sum", (
+            "#!/usr/bin/env bash\n"
+            "set -eu\n"
+            'if [[ "${1:-}" == -- && "${2:-}" == "${SWAPZ_FAKE_HASH_FAIL_FOR:-}" ]]; then\n'
+            f'  "{real_sha256sum}" "$@"\n'
+            "  exit 71\n"
+            "fi\n"
+            f'exec "{real_sha256sum}" "$@"\n'
+        ))
+
+        qualified_failure = self.invoke(
+            "install", {"SWAPZ_FAKE_HASH_FAIL_FOR": str(self.module)})
+        self.assertNotEqual(qualified_failure.returncode, 0)
+        self.assertIn(
+            "artifact=qualified_dm-swapz.ko check=sha256 "
+            "provenance=qualified_report", qualified_failure.stderr)
+        self.assertIn(
+            "observed_sha256=unavailable command_status=71",
+            qualified_failure.stderr)
+        self.assertIn(
+            "next=inspect_qualification_and_artifact_bytes_read_only",
+            qualified_failure.stderr)
+        self.assertNotIn(str(self.home), qualified_failure.stderr)
+        self.assert_absent()
+
+        installed = self.invoke("install")
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        installed_failure = self.invoke(
+            "install",
+            {"SWAPZ_FAKE_HASH_FAIL_FOR": str(self.installed_module)})
+        self.assertNotEqual(installed_failure.returncode, 0)
+        self.assertIn(
+            "existing package is partial, foreign, or modified",
+            installed_failure.stderr)
+        self.assertIn(
+            "artifact=installed_dm-swapz.ko check=sha256 "
+            "provenance=installed_marker_unverified",
+            installed_failure.stderr)
+        self.assertIn(
+            "observed_sha256=unavailable command_status=71",
+            installed_failure.stderr)
+        self.assertNotIn(str(self.home), installed_failure.stderr)
+        self.assert_installed_exact()
+        self.assertEqual(self.uninstall_transactions(), [])
+
     def test_installed_digest_mismatch_is_not_silently_repaired(self):
         self.assertEqual(self.invoke("install").returncode, 0)
         self.installed_module.write_bytes(b"tampered-installed-module\n")

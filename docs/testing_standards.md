@@ -7566,6 +7566,10 @@ unverified. Missing installed `swapzctl`, mismatched installed module bytes,
 wrong module vermagic, stale/missing DKMS registration and Secure Boot
 signature/enrollment failure must all remain BLOCKED. A verified detached
 signature plus an enrolled MOK must never imply kernel load acceptance.
+A hash producer that exits unsuccessfully must not establish artifact identity
+even when its stdout matches the expected SHA-256; rootless package fixtures
+must exercise failed producers with plausible stdout for both qualification
+inputs and already-installed files, preserving exit-status attribution.
 Secure Boot state admission requires a complete recognized state from a
 successful `mokutil --sb-state` probe, or the existing direct EFI-variable
 fallback when `mokutil` is absent. If `mokutil` fails and `/sys/firmware/efi`

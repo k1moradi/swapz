@@ -261,18 +261,29 @@ hash_file() {
   sha256sum -- "$path" | awk '{print $1}'
 }
 
+# A matching digest string from a failed hash producer is not identity proof.
+hash_matches() {
+  local expected_hash="$1" artifact_path="$2" observed_hash
+  observed_hash="$(hash_file "$artifact_path" 2>/dev/null)" || return 1
+  [[ "$observed_hash" == "$expected_hash" ]]
+}
+
 # Report only named artifact classes and canonical digests, never private paths.
 # A stored installed marker is diagnostic evidence, not qualification authority.
 report_qualified_digest() {
   local artifact_name="$1" expected_hash="$2" artifact_path="$3" provenance="$4"
-  local observed_hash=missing_or_unsafe
+  local observed_hash=missing_or_unsafe command_status=not_run
   if [[ -f "$artifact_path" && ! -L "$artifact_path" ]]; then
-    observed_hash="$(hash_file "$artifact_path" 2>/dev/null || true)"
-    [[ "$observed_hash" =~ ^[0-9a-f]{64}$ ]] || observed_hash=unavailable
+    command_status=0
+    observed_hash="$(hash_file "$artifact_path" 2>/dev/null)" ||
+      command_status=$?
+    if (( command_status != 0 )) || [[ ! "$observed_hash" =~ ^[0-9a-f]{64}$ ]]; then
+      observed_hash=unavailable
+    fi
   fi
-  [[ "$observed_hash" == "$expected_hash" ]] && return 0
-  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=%s check=sha256 provenance=%s expected_sha256=%s observed_sha256=%s next=inspect_qualification_and_artifact_bytes_read_only retained_state=unchanged\n' \
-    "$artifact_name" "$provenance" "$expected_hash" "$observed_hash" >&2
+  [[ "$command_status" == 0 && "$observed_hash" == "$expected_hash" ]] && return 0
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=%s check=sha256 provenance=%s expected_sha256=%s observed_sha256=%s command_status=%s next=inspect_qualification_and_artifact_bytes_read_only retained_state=unchanged\n' \
+    "$artifact_name" "$provenance" "$expected_hash" "$observed_hash" "$command_status" >&2
   return 1
 }
 
@@ -557,10 +568,10 @@ verify_qualification_identity() {
   build_source_clean="$(sed -n 's/^#define SWAPZ_BUILD_SOURCE_CLEAN \([01]\)$/\1/p'     "$src/src/kernel/swapz-build-info.h")"
   [[ "$build_source_sha" == "$source_sha" && "$build_source_clean" == 1 ]] ||
     return 1
-  [[ "$(hash_file "$cli")" == "$cli_sha" &&
-     "$(hash_file "$helper")" == "$oracle_sha" &&
-     "$(hash_file "$module_snapshot")" == "$module_sha" &&
-     "$(hash_file "$installed_module")" == "$module_sha" ]]
+  hash_matches "$cli_sha" "$cli" &&
+    hash_matches "$oracle_sha" "$helper" &&
+    hash_matches "$module_sha" "$module_snapshot" &&
+    hash_matches "$module_sha" "$installed_module"
 }
 
 module_candidates_absent() {
@@ -2316,9 +2327,9 @@ chmod 0644 "$stage_dir/swapz-primary-mapper.service" "$stage_dir/swapz-primary-b
 chmod 0755 "$stage_dir/swapz-primary-generator"
 install -m0644 packaging/swapz-primary.swap "$stage_dir/$swap_unit_name"
 
-[[ "$(hash_file "$stage_dir/swapzctl")" == "$qualified_cli_sha256" &&
-   "$(hash_file "$stage_dir/device-roundtrip")" == "$qualified_oracle_sha256" &&
-   "$(hash_file "$stage_dir/dm-swapz.ko")" == "$qualified_module_sha256" ]] ||
+hash_matches "$qualified_cli_sha256" "$stage_dir/swapzctl" &&
+  hash_matches "$qualified_oracle_sha256" "$stage_dir/device-roundtrip" &&
+  hash_matches "$qualified_module_sha256" "$stage_dir/dm-swapz.ko" ||
   blocked "staged artifact digest mismatch"
 
 persist_transaction_state prepared
@@ -2690,9 +2701,9 @@ new_files_committed=1
     "$runtime_health_service" "$primary_swap" "$installed_module"
   printf '%s  %s\n' "$qualified_cli_sha256" "$cli"
 } > "$src/$binary_manifest"
-[[ "$(hash_file "$helper")" == "$qualified_oracle_sha256" &&
-   "$(hash_file "$module_snapshot")" == "$qualified_module_sha256" &&
-   "$(hash_file "$installed_module")" == "$qualified_module_sha256" ]] ||
+hash_matches "$qualified_oracle_sha256" "$helper" &&
+  hash_matches "$qualified_module_sha256" "$module_snapshot" &&
+  hash_matches "$qualified_module_sha256" "$installed_module" ||
   blocked "installed artifact digest mismatch"
 durable_package_paths "$boot_verifier" "$runtime_health" "$helper" \
   "$module_snapshot" "$primary_generator" "$mapper_service" \
