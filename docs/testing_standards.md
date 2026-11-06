@@ -515,7 +515,10 @@ header, mapper, formatter and swapon actions. These checks must use the
 extracted real production functions in dependency order, compile with
 implicit-declaration warnings treated as errors on x86_64 and ARM64, and
 report phase, expected/observed identity and original numeric errno without
-private target identifiers. They prove bounded last-use validation only;
+private target identifiers. When two extracted helper groups share a production
+dependency (for example PARTUUID normalization), emit that function exactly
+once in the generated translation unit; a duplicate definition or an implicit
+declaration is a harness failure, not product evidence. They prove bounded last-use validation only;
 they do not freeze the configuration or kernel mount/swap inventory after
 the final read and cannot grant physical activation.
 The mutation-sensitive coordinator controls must use the extracted production

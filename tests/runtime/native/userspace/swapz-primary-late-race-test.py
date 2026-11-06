@@ -1946,8 +1946,9 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     swap_function = production_function(source, "swapz_primary_swap_device_active")
     selector_source = "\n\n".join(
         production_function(source, name) for name in SELECTOR_FUNCTIONS)
+    # The selector extraction already provides partuuid normalization.
+    # Keep each production helper definition exactly once in the generated TU.
     target_helpers = '\n\n'.join(production_function(source, name) for name in (
-        "swapz_primary_partuuid_normalize",
         "swapz_primary_target_valid",
         "swapz_primary_target_identity_equal",
     ))
