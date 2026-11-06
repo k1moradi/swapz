@@ -642,6 +642,21 @@ without target, mapper or service mutation. This admission check cannot lock
 a pathname against subsequent privileged changes; mutating callers still
 require their existing last-use target and authorization checks.
 
+The production primary-start transaction must pin its root-owned, no-follow
+configuration-directory and selector-file descriptors *before* obtaining the
+selected target, and retain both until the last pre-header mutation boundary.
+The independent selector reader must still validate record contents. Before
+writing the header, require that the admitted pinned directory/file metadata
+still matches both live names; reread and compare the current normalized
+selector to the manifest; revalidate the inspected partition major:minor,
+PARTUUID and geometry; and check opened identities again after rereading.
+Any mismatch must fail closed before header write, mapper creation, formatter
+or swapon, report a redacted phase/mismatch class and first errno, and preserve
+STARTING recovery ownership and close-error precedence. Close both retained
+pins successfully before destructive work. This is last-use validation, not
+a kernel-atomic exclusion guarantee against later privileged replacement or
+same-device-number physical reader substitution.
+
 The private real-swap qualification helper must bind the protected physical
 selector to one context-managed O_NOFOLLOW/O_CLOEXEC descriptor. Inspect the
 pathname before opening, fstat the opened regular root-owned mode-0600

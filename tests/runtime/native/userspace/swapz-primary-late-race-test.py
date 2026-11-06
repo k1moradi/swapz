@@ -45,6 +45,16 @@ def production_function(source: str, name: str) -> str:
     raise AssertionError(f"Unclosed production function: {name}")
 
 
+def production_struct(source: str, name: str) -> str:
+    """Return the exact source type rather than a copied test model."""
+    opening = f"struct {name} {{"
+    if source.count(opening) != 1:
+        raise AssertionError(f"Expected one production type for {name}")
+    first = source.index(opening)
+    ending = source.index("\n};", first) + len("\n};")
+    return source[first:ending]
+
+
 def production_define(source: str, name: str) -> str:
     """Return one simple production #define verbatim."""
     matches = re.findall(
@@ -59,6 +69,9 @@ SELECTOR_FUNCTIONS = (
     "swapz_primary_target_config_parse",
     "swapz_primary_selector_metadata_matches",
     "swapz_primary_selector_identity_still_live",
+    "swapz_primary_selector_admission_open",
+    "swapz_primary_selector_admission_close",
+    "swapz_primary_selector_admission_still_live",
     "swapz_primary_target_config_read",
 )
 
@@ -142,6 +155,7 @@ static char fixture_config_base[PATH_MAX];
 static void (*swapz_primary_rootless_selector_before_revalidation)(void);
 #define SWAPZ_PRIMARY_ROOTLESS_TEST 1
 #define SWAPZ_PRIMARY_CONFIG_BASE fixture_config_base
+@@SELECTOR_ADMISSION_TYPE@@
 @@SELECTOR_FUNCTIONS@@
 #undef SWAPZ_PRIMARY_CONFIG_BASE
 #undef SWAPZ_PRIMARY_ROOTLESS_TEST
@@ -173,6 +187,7 @@ enum fixture_scenario {
     FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION,
     FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION,
     FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION,
+    FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION,
     FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
@@ -205,7 +220,8 @@ static const char *const scenario_names[] = {
     "PID inventory becomes unreadable after final safe inventory",
     "protected selected PARTUUID changes after initial admission",
     "protected selector inode changes after initial admission",
-    "protected configuration-directory inode changes after initial admission"
+    "protected configuration-directory inode changes after initial admission",
+    "selected target geometry changes after initial admission"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -231,6 +247,7 @@ static ino_t namespace_identity_initial_inode;
 static ino_t namespace_identity_late_inode;
 static int post_snapshot_injected;
 static unsigned int fixture_selector_reads;
+static unsigned int fixture_geometry_last_use_checks;
 static struct stat fixture_initial_selector_info;
 static struct stat fixture_initial_config_info;
 static struct swapz_primary_target selected_target;
@@ -953,6 +970,10 @@ static int fixture_target_inspect(const char *partuuid,
         target->device_minor = 2U;
     if (scenario == FIXTURE_WRONG_TARGET_GEOMETRY)
         target->device_bytes += 4096U;
+    if (scenario == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION && late) {
+        ++fixture_geometry_last_use_checks;
+        target->device_bytes += 4096U;
+    }
     if (scenario == FIXTURE_STALE_PARTUUID)
         strcpy(target->partuuid, "f13428f6-02");
     return 0;
@@ -1017,6 +1038,9 @@ static int fixture_intent(void)
                FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION) {
         /* Same selector bytes, different protected directory identity. */
         fixture_replace_config_directory();
+        post_snapshot_injected = 1;
+    } else if (scenario == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION) {
+        /* The inspected target changes size only after initial admission. */
         post_snapshot_injected = 1;
     }
     return 0;
@@ -1190,7 +1214,9 @@ static int swapz_primary_shared_root_scope_record_live(
 }
 
 /* The actual production coordinator function is inserted verbatim. */
+#define SWAPZ_PRIMARY_CONFIG_BASE fixture_config_base
 @@START_FUNCTION@@
+#undef SWAPZ_PRIMARY_CONFIG_BASE
 #undef swapz_primary_target_config_read
 #undef close
 #undef swapz_primary_swap_device_active
@@ -1221,7 +1247,7 @@ static int check_case(enum fixture_scenario candidate)
     namespace_identity_initial_device = namespace_identity_late_device = 0;
     namespace_identity_initial_inode = namespace_identity_late_inode = 0;
     post_snapshot_injected = 0;
-    fixture_selector_reads = 0U;
+    fixture_selector_reads = fixture_geometry_last_use_checks = 0U;
     fixture_prepare_selector(candidate);
     fixture_reset_mount_inventory();
     if (candidate == FIXTURE_FOREIGN_SELECTED_INITIAL)
@@ -1339,6 +1365,7 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION:
     case FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION:
     case FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION:
+    case FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION:
         /* These mutation controls have their own explicit post-admission verdict. */
         break;
     default:
@@ -1355,40 +1382,59 @@ static int check_case(enum fixture_scenario candidate)
                 fixture_mount_read_count, admission_reads);
         return 1;
     }
-    if (fixture_selector_race(candidate)) {
+
+    if (fixture_selector_race(candidate) ||
+        candidate == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION) {
         /*
          * These mutation-sensitive controls never label a successful stale
-         * selector snapshot SAFE. A future refusal is valid only after a fresh
-         * production selector read and before any intercepted mutation.
+         * selector snapshot SAFE. A refusal is valid only after production's
+         * identity check and before any intercepted mutation.
+         * Fail-first production control: a stale admitted identity must not
+         * reach any mutation. The original source reached all four actions.
          */
+        int geometry_drift =
+            candidate == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION;
+        const char *expected_phase = geometry_drift ?
+            "phase=prewrite-target-identity" :
+            "phase=prewrite-protected-selector-identity";
+        const char *expected_mismatch = geometry_drift ?
+            "observed=target-geometry-changed" :
+            candidate == FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION ?
+                "observed=configuration-directory-identity-changed" :
+                "observed=selector-file-identity-changed";
+        char expected_errno[48];
+        int expected_length = snprintf(expected_errno, sizeof(expected_errno),
+                                       "original_errno=%d", ESTALE);
         int refusal = result < 0 && result_errno == ESTALE &&
-            post_snapshot_injected == 1 && fixture_selector_reads >= 1U &&
+            post_snapshot_injected == 1 &&
+            (geometry_drift ? fixture_geometry_last_use_checks == 1U :
+             fixture_selector_reads >= 1U) &&
             header_writes == 0U && mapper_mutations == 0U &&
             mkswap_calls == 0U && swapon_calls == 0U &&
-            active_state_writes == 0U;
-        int gap = result == 0 && post_snapshot_injected &&
-            fixture_selector_reads == 1U && writes == 4U &&
-            starting_state_writes == 1U && active_state_writes == 1U &&
-            recovery_marks == 0U && diagnostic_length == 0U &&
-            admission_reads == 2U && prewrite_reads == 1U &&
-            active_inventory_reads == 4U &&
-            mount_conflict_observations == 0U &&
-            late_mount_conflict_observations == 0U;
-
-        if (!refusal && !gap) {
-            fprintf(stderr, "FAIL: phase=post-selector-admission "
-                    "expected=ESTALE-or-documented-gap "
-                    "observed=unexpected-transition errno=%d "
-                    "mutations=%u selector_reads=%u case=%d\n",
-                    result_errno, writes, fixture_selector_reads, candidate);
+            module_loads == 0U && starting_state_writes == 1U &&
+            active_state_writes == 0U && recovery_marks == 1U &&
+            owner_release_calls == 0U &&
+            strstr(diagnostic, expected_phase) != NULL &&
+            strstr(diagnostic, expected_mismatch) != NULL &&
+            expected_length > 0 && (size_t)expected_length < sizeof(expected_errno) &&
+            strstr(diagnostic, expected_errno) != NULL &&
+            strstr(diagnostic, "retained_state=STARTING_PENDING_RECOVERY_UPDATE") != NULL &&
+            !strstr(diagnostic, "f13428f6") &&
+            !strstr(diagnostic, "0123456789abcdef");
+        if (!refusal) {
+            fprintf(stderr, "FAIL: phase=post-admission-last-use "
+                    "expected=ESTALE-and-zero-mutation "
+                    "observed=%s first_errno=%d mutations=%u "
+                    "selector_reads=%u geometry_rechecks=%u case=%d\n",
+                    result == 0 ? "stale-selection-reached-mutation" :
+                                  "incorrect-refusal",
+                    result_errno, writes, fixture_selector_reads,
+                    fixture_geometry_last_use_checks, candidate);
             return 1;
         }
-        printf("%s: phase=post-selector-admission case=%d "
-               "expected=refuse-changed-selector-identity "
-               "observed=%s errno=%d prevented=%s mutations=%u\n",
-               refusal ? "DENY" : "UNPROVEN", candidate,
-               refusal ? "ESTALE" : "stale-selection-reached-mutation",
-               refusal ? result_errno : 0, refusal ? "all" : "none", writes);
+        printf("DENY: phase=post-admission-last-use case=%d "
+               "observed=ESTALE first_errno=%d prevented=all mutations=0\n",
+               candidate, result_errno);
         return 0;
     }
     if (gap_probe) {
@@ -1445,6 +1491,12 @@ static int check_case(enum fixture_scenario candidate)
         case FIXTURE_ROOT_INITIAL:
             phase = "shared-root-parent-authorization-record";
             break;
+        case FIXTURE_PARENT_SUBSTITUTED:
+            phase = "prewrite-target-parent-identity";
+            break;
+        case FIXTURE_ROOT_SUBSTITUTED:
+            phase = "prewrite-root-parent-identity";
+            break;
         case FIXTURE_DM_INITIAL:
             phase = "module-mapper-inventory";
             break;
@@ -1471,7 +1523,21 @@ static int check_case(enum fixture_scenario candidate)
         assert(expected_length > 0 &&
                (size_t)expected_length < sizeof(expected_diagnostic));
         expected_diagnostic_length = (size_t)expected_length;
-        if (candidate == FIXTURE_ROOT_INITIAL) {
+        if (candidate == FIXTURE_ROOT_INITIAL ||
+            candidate == FIXTURE_PARENT_SUBSTITUTED ||
+            candidate == FIXTURE_ROOT_SUBSTITUTED) {
+            const char *expected_class =
+                candidate == FIXTURE_ROOT_INITIAL ?
+                    "exact-host-root-target-parent-layout-record" :
+                candidate == FIXTURE_PARENT_SUBSTITUTED ?
+                    "unchanged-admitted-target-parent-device" :
+                    "unchanged-admitted-root-parent-device";
+            const char *observed_class =
+                candidate == FIXTURE_ROOT_INITIAL ?
+                    "missing-mismatched-or-unverifiable" :
+                candidate == FIXTURE_PARENT_SUBSTITUTED ?
+                    "target-parent-device-changed" :
+                    "root-parent-device-changed";
             int detail_length = snprintf(
                 expected_diagnostic + expected_diagnostic_length,
                 sizeof(expected_diagnostic) - expected_diagnostic_length,
@@ -1480,8 +1546,8 @@ static int check_case(enum fixture_scenario candidate)
                 "persistence_boundary=none durable=OBSERVED "
                 "mapper=UNOBSERVED swap=UNOBSERVED retained_state=READY "
                 "target_unchanged=true\n",
-                phase, "exact-host-root-target-parent-layout-record",
-                "missing-mismatched-or-unverifiable", expected_error,
+                phase, expected_class,
+                observed_class, expected_error,
                 expected_error);
 
             assert(detail_length > 0 &&
@@ -1603,6 +1669,7 @@ LAST_USE_HARNESS = r'''
 static char fixture_config_base[PATH_MAX];
 static void (*swapz_primary_rootless_selector_before_revalidation)(void);
 #define SWAPZ_PRIMARY_CONFIG_BASE fixture_config_base
+@@SELECTOR_ADMISSION_TYPE@@
 @@SELECTOR_FUNCTIONS@@
 #undef SWAPZ_PRIMARY_CONFIG_BASE
 
@@ -1888,6 +1955,8 @@ def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.Completed
         "swapz_primary_write_header_checked_fd",
     )
     unit = LAST_USE_HARNESS.replace(
+        "@@SELECTOR_ADMISSION_TYPE@@",
+        production_struct(source, "swapz_primary_selector_admission")).replace(
         "@@SELECTOR_FUNCTIONS@@",
         "\n\n".join(production_function(source, name)
                     for name in SELECTOR_FUNCTIONS)).replace(
@@ -1951,6 +2020,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     target_helpers = '\n\n'.join(production_function(source, name) for name in (
         "swapz_primary_target_valid",
         "swapz_primary_target_identity_equal",
+        "swapz_primary_target_revalidate",
     ))
     target_open = production_function(source, "swapz_primary_target_open_exclusive")
     mount_reader = '\n\n'.join(production_function(source, name) for name in (
@@ -1968,6 +2038,8 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         coordinator = omit_final_revalidation(coordinator)
     unit = HARNESS.replace('@@PRODUCTION_DEFINES@@', production_defines).replace(
         '@@PARSERS@@', parser_source).replace(
+        '@@SELECTOR_ADMISSION_TYPE@@',
+        production_struct(source, "swapz_primary_selector_admission")).replace(
         '@@SELECTOR_FUNCTIONS@@', selector_source).replace(
         '@@MOUNT_READER@@', mount_reader).replace(
         '@@SWAP_FUNCTION@@', swap_function).replace(

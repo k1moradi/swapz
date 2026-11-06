@@ -532,25 +532,25 @@ boundary. After that successful read and before the coordinator's prewrite
 inventory check, independently replace: (1) the selector inode with a different
 valid PARTUUID, (2) the selector inode with identical bytes, and (3) the
 protected configuration-directory inode with an equivalent selector. Each
-fixture must prove the inode or directory identity actually changed. If the
-coordinator reuses its earlier selection and all four intercepted mutations
-execute, report UNPROVEN with `prevented=none`, never SAFE or a physical PASS.
-At the header seam a **diagnostic** fresh production-reader call may prove that
-changed bytes are now visible, or that identical bytes alone cannot establish
-inode continuity; that diagnostic read occurs only after the unsafe boundary
-has already been observed and must not be counted as coordinator revalidation.
-An implementation that revalidates the protected selector identity and refuses
-the changed identity with original `ESTALE` and zero intercepted header,
-mapper, formatter and swapon actions is accepted. Do not require a particular
-helper-call count: a fresh production reread and a retained-descriptor identity
-check are both valid implementations of this behavioral invariant. An unrelated
-refusal or a missing identity mutation is not a valid negative control. Dispatch these
-scenarios explicitly before the generic safe-admission/default-case check.
-The unsafe witness must include a successful initial and final mount read, four
-independent swap-inventory observations, and zero falsely observed mount
-conflicts before synthetic mutation. This is distinct from an adversarial
-mount change after every read-only inventory snapshot, for which no atomic
-exclusion proof is implied.
+fixture must prove the inode or directory identity actually changed. A stale
+admitted selector that reaches any of the four intercepted mutations is now
+a **FAIL**, not an acceptable UNPROVEN outcome: require production `ESTALE`,
+zero header writes, zero mapper actions, zero formatter calls and zero swapon
+calls, plus a phase/mismatch-class/first-errno diagnostic with no protected
+identity bytes. The STARTING recovery marker must remain owner-controlled.
+The independent control with an unchanged selector must still complete all
+four synthetic actions successfully. The first selector read and prewrite
+reread must use the actual source-extracted production reader, and the pinned
+directory/file identities must come from source-extracted production helpers,
+not hand-written models. A diagnostic reread in the intercepted header seam
+cannot count as prevention; an unrelated rejection or race never injected is
+also a failure. Add a post-admission, prewrite target-geometry drift control;
+the existing selected-parent and root-parent substitution controls must
+refuse before any mutation. The unsafe baseline has successful initial/final
+mount reads, four independent swap-inventory observations and no false
+mount conflicts. Keep the separate post-final-snapshot mount/swap/inventory
+races explicitly UNPROVEN: no rootless read-only recheck demonstrates atomic
+exclusion or binds a physical reader across device-number reuse.
 
 ### Primary real-swap native-host qualification
 

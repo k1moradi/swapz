@@ -903,6 +903,17 @@ static int swapz_primary_selector_metadata_matches(
 }
 
 /*
+ * Start retains opened protected-selector identities through the final
+ * non-mutating check. Only its coordinator owns these two descriptors.
+ */
+struct swapz_primary_selector_admission {
+	int directory_fd;
+	int selector_fd;
+	struct stat directory_info;
+	struct stat selector_info;
+};
+
+/*
  * The caller retains both descriptors through this final admission check.
  * Reopen the live config pathname, not merely the pinned old directory: an
  * administrator may have renamed the complete protected directory away.
@@ -989,6 +1000,164 @@ static int swapz_primary_selector_identity_still_live(
 	}
 	if (close(live_directory_fd) < 0)
 		return -1;
+	return 0;
+}
+
+
+/*
+ * Pin both protected named objects before the transaction reads its selector.
+ * The ordinary reader validates content; the pinned identities reject later
+ * inode and directory replacement, including replacement with identical bytes.
+ */
+static int swapz_primary_selector_admission_open(
+	struct swapz_primary_selector_admission *admission)
+{
+	uid_t expected_owner = 0;
+	int first_errno;
+
+	if (!admission) {
+		errno = EINVAL;
+		return -1;
+	}
+	*admission = (struct swapz_primary_selector_admission) {
+		.directory_fd = -1, .selector_fd = -1
+	};
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	expected_owner = geteuid();
+#endif
+	admission->directory_fd = open(SWAPZ_PRIMARY_CONFIG_BASE,
+		O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (admission->directory_fd < 0)
+		goto fail;
+	if (fstat(admission->directory_fd, &admission->directory_info) < 0)
+		goto fail;
+	if (!S_ISDIR(admission->directory_info.st_mode) ||
+	    admission->directory_info.st_uid != expected_owner ||
+	    (admission->directory_info.st_mode & 0022U)) {
+		errno = EPERM;
+		goto fail;
+	}
+	admission->selector_fd = openat(admission->directory_fd,
+		"primary-target", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (admission->selector_fd < 0)
+		goto fail;
+	if (fstat(admission->selector_fd, &admission->selector_info) < 0)
+		goto fail;
+	if (!S_ISREG(admission->selector_info.st_mode) ||
+	    admission->selector_info.st_uid != expected_owner ||
+	    (admission->selector_info.st_mode & 0022U) ||
+	    admission->selector_info.st_nlink != 1 ||
+	    admission->selector_info.st_size <= 0 ||
+	    (size_t)admission->selector_info.st_size >
+		(sizeof("PARTUUID=") - 1U + SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U)) {
+		errno = EPERM;
+		goto fail;
+	}
+	if (swapz_primary_selector_identity_still_live(
+		SWAPZ_PRIMARY_CONFIG_BASE, admission->directory_fd,
+		admission->selector_fd, &admission->directory_info,
+		&admission->selector_info) < 0)
+		goto fail;
+	return 0;
+
+fail:
+	first_errno = errno ? errno : EIO;
+	if (admission->selector_fd >= 0)
+		(void)close(admission->selector_fd);
+	if (admission->directory_fd >= 0)
+		(void)close(admission->directory_fd);
+	*admission = (struct swapz_primary_selector_admission) {
+		.directory_fd = -1, .selector_fd = -1
+	};
+	errno = first_errno;
+	return -1;
+}
+
+/* Close both pinned descriptors and preserve the first close failure. */
+static int swapz_primary_selector_admission_close(
+	struct swapz_primary_selector_admission *admission)
+{
+	int first_errno = 0;
+	int preserved_errno = errno;
+
+	if (!admission) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (admission->selector_fd >= 0) {
+		if (close(admission->selector_fd) < 0)
+			first_errno = errno;
+		admission->selector_fd = -1;
+	}
+	if (admission->directory_fd >= 0) {
+		if (close(admission->directory_fd) < 0 && !first_errno)
+			first_errno = errno;
+		admission->directory_fd = -1;
+	}
+	errno = first_errno ? first_errno : preserved_errno;
+	return first_errno ? -1 : 0;
+}
+
+
+/*
+ * Report the identity class of a stale name before invoking the full pinned
+ * descriptor/path race check. The name checks only diagnose a refusal: they
+ * never authorize a different inode, and no protected values are printed.
+ */
+static int swapz_primary_selector_admission_still_live(
+	const struct swapz_primary_selector_admission *admission,
+	const char **failure_observed)
+{
+	struct stat named_directory;
+	struct stat named_selector;
+
+	if (!admission || !failure_observed) {
+		errno = EINVAL;
+		return -1;
+	}
+	*failure_observed = "protected-selector-unverifiable";
+	if (fstatat(AT_FDCWD, SWAPZ_PRIMARY_CONFIG_BASE,
+		    &named_directory, AT_SYMLINK_NOFOLLOW) < 0) {
+		*failure_observed = "configuration-directory-unverifiable";
+		if (errno == ENOENT || errno == ENOTDIR || errno == ELOOP)
+			errno = ESTALE;
+		return -1;
+	}
+	if (admission->directory_info.st_dev != named_directory.st_dev ||
+	    admission->directory_info.st_ino != named_directory.st_ino) {
+		*failure_observed = "configuration-directory-identity-changed";
+		errno = ESTALE;
+		return -1;
+	}
+	if (fstatat(admission->directory_fd, "primary-target",
+		    &named_selector, AT_SYMLINK_NOFOLLOW) < 0) {
+		*failure_observed = "selector-file-unverifiable";
+		if (errno == ENOENT || errno == ENOTDIR || errno == ELOOP)
+			errno = ESTALE;
+		return -1;
+	}
+	if (admission->selector_info.st_dev != named_selector.st_dev ||
+	    admission->selector_info.st_ino != named_selector.st_ino) {
+		*failure_observed = "selector-file-identity-changed";
+		errno = ESTALE;
+		return -1;
+	}
+	if (!swapz_primary_selector_metadata_matches(
+		    &admission->directory_info, &named_directory) ||
+	    !swapz_primary_selector_metadata_matches(
+		    &admission->selector_info, &named_selector)) {
+		*failure_observed = "protected-path-metadata-changed";
+		errno = ESTALE;
+		return -1;
+	}
+	if (swapz_primary_selector_identity_still_live(
+		    SWAPZ_PRIMARY_CONFIG_BASE, admission->directory_fd,
+		    admission->selector_fd, &admission->directory_info,
+		    &admission->selector_info) < 0) {
+		*failure_observed = "selector-identity-raced-or-unverifiable";
+		return -1;
+	}
+	*failure_observed = NULL;
 	return 0;
 }
 
@@ -12104,6 +12273,9 @@ static int swapz_primary_start_prepared(void)
 	struct swapz_primary_qualification qualification = {0};
 	struct swapz_primary_mount_facts mount_facts = {0};
 	struct swapz_primary_target target = {0};
+	struct swapz_primary_selector_admission selector_admission = {
+		.directory_fd = -1, .selector_fd = -1
+	};
 	struct swapz_primary_manifest manifest = {0};
 	struct swapz_primary_state state = {0};
 	struct swapz_primary_state starting_state = {0};
@@ -12117,6 +12289,7 @@ static int swapz_primary_start_prepared(void)
 	char live_oracle_sha256[65];
 	char shared_root_scope_sha256[65] = {0};
 	char rechecked_root_scope_sha256[65] = {0};
+	char prewrite_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U] = {0};
 	size_t state_length = 0;
 	dev_t target_parent = 0;
 	dev_t root_parent = 0;
@@ -12161,8 +12334,18 @@ static int swapz_primary_start_prepared(void)
 		errno = EPERM;
 		return -1;
 	}
+	failure_phase = "protected-selector-admission";
+	failure_expected = "root-owned-unchanged-protected-selector";
+	if (swapz_primary_selector_admission_open(&selector_admission) < 0) {
+		failure_observed = "protected-selector-unverifiable";
+		goto out;
+	}
 	if (swapz_primary_configured_target(&target) < 0)
 		goto out;
+	if (swapz_primary_selector_admission_still_live(
+		&selector_admission, &failure_observed) < 0)
+		goto out;
+	failure_expected = NULL;
 	recovery_fd = swapz_primary_recovery_base_open(
 		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
 	if (recovery_fd < 0)
@@ -12333,6 +12516,9 @@ static int swapz_primary_start_prepared(void)
 			    &prewrite_target_parent))
 			goto out;
 		if (prewrite_target_parent != target_parent) {
+			failure_phase = "prewrite-target-parent-identity";
+			failure_expected = "unchanged-admitted-target-parent-device";
+			failure_observed = "target-parent-device-changed";
 			errno = ESTALE;
 			goto out;
 		}
@@ -12348,6 +12534,9 @@ static int swapz_primary_start_prepared(void)
 			    SWAPZ_PRIMARY_TARGET_DEVICE, &prewrite_root_parent))
 			goto out;
 		if (prewrite_root_parent != root_parent) {
+			failure_phase = "prewrite-root-parent-identity";
+			failure_expected = "unchanged-admitted-root-parent-device";
+			failure_observed = "root-parent-device-changed";
 			errno = ESTALE;
 			goto out;
 		}
@@ -12396,6 +12585,55 @@ static int swapz_primary_start_prepared(void)
 			goto out;
 		}
 	}
+	/*
+	 * The last safe prewrite decision must still name the admitted protected
+	 * selector inode, directory and partition geometry. Read-only validation
+	 * cannot freeze privileged pathname or physical-parent changes afterwards.
+	 */
+	failure_phase = "prewrite-protected-selector-identity";
+	failure_expected = "unchanged-admitted-selector-directory-and-file";
+	if (swapz_primary_selector_admission_still_live(
+		&selector_admission, &failure_observed) < 0)
+		goto out;
+	if (swapz_primary_target_config_read(prewrite_partuuid) < 0) {
+		failure_observed = "protected-selector-content-unverifiable";
+		goto out;
+	}
+	if (strcmp(prewrite_partuuid, manifest.target.partuuid)) {
+		failure_observed = "protected-selector-content-changed";
+		errno = ESTALE;
+		goto out;
+	}
+	if (swapz_primary_selector_admission_still_live(
+		&selector_admission, &failure_observed) < 0)
+		goto out;
+	failure_phase = "prewrite-target-identity";
+	failure_expected = "unchanged-admitted-target-partition-and-geometry";
+	if (swapz_primary_target_revalidate(&manifest.target) < 0) {
+		const int first_errno = errno ? errno : EIO;
+		struct swapz_primary_target observed_target = {0};
+
+		failure_observed = "target-identity-unverifiable";
+		if (first_errno == ESTALE &&
+		    swapz_primary_target_inspect(
+			    manifest.target.partuuid, &observed_target) == 0) {
+			failure_observed =
+			    observed_target.device_bytes != manifest.target.device_bytes ?
+				"target-geometry-changed" :
+				"target-partition-identity-changed";
+		}
+		errno = first_errno;
+		goto out;
+	}
+	failure_phase = "prewrite-selector-descriptor-close";
+	failure_expected = "both-admitted-descriptors-closed";
+	if (swapz_primary_selector_admission_close(&selector_admission) < 0) {
+		failure_observed = "descriptor-close-failed";
+		goto out;
+	}
+	failure_expected = NULL;
+	failure_observed = NULL;
+	failure_phase = "header-write";
 	if (swapz_primary_write_header_checked_fd(
 		    target_fd, &manifest.target, original_header, swapz_header) < 0)
 		goto out;
@@ -12451,6 +12689,15 @@ static int swapz_primary_start_prepared(void)
 	result = 0;
 out:
 	saved_errno = errno ? errno : EIO;
+	if (swapz_primary_selector_admission_close(&selector_admission) < 0 &&
+	    result == 0) {
+		result = -1;
+		saved_errno = errno;
+		failure_phase = "protected-selector-descriptor-close";
+		failure_expected = "both-admitted-descriptors-closed";
+		failure_observed = "descriptor-close-failed";
+	}
+	errno = saved_errno;
 	if (result < 0)
 		fprintf(stderr,
 			"PRIMARY_START=FAILED phase=%s errno=%d error=%s "
