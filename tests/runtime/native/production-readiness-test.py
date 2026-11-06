@@ -2237,6 +2237,11 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         physical = real_swap_evidence(report_raw, policy_raw)
         physical_raw = encoded(physical)
 
+        target_binding_refusal = (
+            "phase=qualification_target_binding "
+            "failed_evidence_field=qualification_target_binding "
+            "expected_schema_class=current_physical_target_parent_exact "
+            "observed_schema_class=invalid_incomplete_or_mismatched")
         changes = {
             "ram_summary": (
                 lambda campaign: campaign["capacity_and_ram"][
@@ -2247,10 +2252,19 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 lambda campaign: campaign["qualification_target_binding"][
                     "observed"].update(
                         physical_device_bytes=float(TARGET["size_bytes"])),
-                ("phase=qualification_target_binding "
-                 "failed_evidence_field=qualification_target_binding "
-                 "expected_schema_class=current_physical_target_parent_exact "
-                 "observed_schema_class=invalid_incomplete_or_mismatched")),
+                target_binding_refusal),
+            "target_observation_boolean": (
+                lambda campaign: campaign["qualification_target_binding"][
+                    "observed"].update(physical_device_bytes=True),
+                target_binding_refusal),
+            "target_observation_missing": (
+                lambda campaign: campaign["qualification_target_binding"][
+                    "observed"].pop("physical_device_bytes"),
+                target_binding_refusal),
+            "target_parent_missing": (
+                lambda campaign: campaign["qualification_target_binding"][
+                    "observed"].pop("parent_transport"),
+                target_binding_refusal),
         }
         for name, (damage, expected) in changes.items():
             with self.subTest(case=name):
@@ -2263,6 +2277,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     SOURCE, report, report_raw, evidence, policy, policy_raw,
                     physical, physical_raw, campaign, campaign_raw)
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
                 self.assertEqual(
                     result["METADATA_RAM_MEASUREMENT"]["status"],
                     "NOT_MEASURED")

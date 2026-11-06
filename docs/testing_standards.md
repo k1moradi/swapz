@@ -9174,7 +9174,17 @@ current evaluator/sealer SHA-256 proofs cannot authenticate FAIL. The sealed
 qualification target binding must retain the current sealer's complete physical
 and parent identity (PARTUUID, size, lower and parent major:minor, parent model
 and transport); omitting parent fields is unverifiable rather than a weaker
-identity schema. An authenticated terminal arm FAIL must retain a bounded
+identity schema. The release evaluator must reject floating-point or boolean
+physical byte sizes and missing nested target/physical-parent fields even
+when a campaign self-declares PASS. Its refusal retains
+`first_failed_phase=qualification_target_binding`, the expected schema class
+`current_physical_target_parent_exact` and observed schema class
+`invalid_incomplete_or_mismatched`; contradictory parent observations never
+qualify release. For invalid campaigns, the release blocker also retains
+bounded `required_source_sha` and `observed_source_sha` only for valid
+40-lowercase-hex source identities, substituting `invalid` for malformed
+input while preserving the original status and authenticated FAIL or BLOCKED
+disposition. An authenticated terminal arm FAIL must retain a bounded
 producer diagnostic whose expected PASS, producer FAIL status and failure phase
 agree with the first-failure witness; a missing or contradictory diagnostic
 phase cannot be promoted to measured FAIL. Its public blocker identifies the
@@ -9190,7 +9200,8 @@ count controls cover `required_pairs`, `attempted_pairs` and
 audit count field, its producer-policy, retained-manifest or analyzer-usable
 count class, expected count/range, observed count, unauthenticated-proof reason,
 and safe recapture/reseal action without disclosing private pair content.
-Public release blockers report only source/target/artifact binding classes:
+Public release blockers report only validated source SHA values and
+source/target/artifact binding classes:
 they must not print a physical PARTUUID, pair content, host path, or sealed
 artifact SHA-256 fingerprint. The earlier failed-phase attribution still takes
 precedence. An authenticated measurement FAIL remains FAIL when an unrelated
