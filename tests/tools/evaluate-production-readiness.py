@@ -124,6 +124,13 @@ PHYSICAL_HOST_STABILITY_CHECKS = {
 PHYSICAL_DEVICE_BOUNDARY_KEYS = {
     "major_minor", "swap_rows", "mount_rows", "holders", "quiescent",
 }
+PHYSICAL_QUALIFICATION_TARGET_BINDING_KEYS = {
+    "status", "consistent", "expected", "observed",
+}
+PHYSICAL_QUALIFICATION_TARGET_IDENTITY_KEYS = {
+    "physical_partuuid", "physical_device_bytes", "lower_major_minor",
+    "parent_major_minor", "parent_model", "parent_transport",
+}
 COLD_BOOT_REPORT_KEYS = {
     "schema", "status", "cold_boot_observed", "boot_id", "armed_boot_id",
     "kernel_release", "selected_partuuid", "selected_target_major_minor",
@@ -558,6 +565,35 @@ def _physical_device_boundary_is_quiescent(
     )
 
 
+def _physical_qualification_target_binding_is_valid(
+        value: Any, target: tuple[str, int] | None) -> bool:
+    """Require the complete current sealer target and parent identity."""
+    if (
+            not isinstance(value, dict) or
+            set(value) != PHYSICAL_QUALIFICATION_TARGET_BINDING_KEYS or
+            value.get("status") != "MATCH" or
+            value.get("consistent") is not True):
+        return False
+    expected = value.get("expected")
+    if (
+            not isinstance(expected, dict) or
+            set(expected) != PHYSICAL_QUALIFICATION_TARGET_IDENTITY_KEYS or
+            _normalize_target({
+                "partuuid": expected.get("physical_partuuid"),
+                "size_bytes": expected.get("physical_device_bytes"),
+            }) != target or
+            not isinstance(expected.get("lower_major_minor"), str) or
+            MAJOR_MINOR_RE.fullmatch(expected["lower_major_minor"]) is None or
+            not isinstance(expected.get("parent_major_minor"), str) or
+            MAJOR_MINOR_RE.fullmatch(expected["parent_major_minor"]) is None or
+            not isinstance(expected.get("parent_model"), str) or
+            not expected["parent_model"] or
+            not isinstance(expected.get("parent_transport"), str) or
+            not expected["parent_transport"]):
+        return False
+    return _same_json_value(value.get("observed"), expected)
+
+
 def _malformed_physical_evidence_issue(
         phase: str, field: str, expected_type: str, observed: Any) -> str:
     """Describe malformed nested evidence without echoing its raw value."""
@@ -710,8 +746,14 @@ def _physical_audit_failure_witness_is_valid(
                 re.fullmatch(
                     r"(?:measure|steady|gc|"
                     r"round-[1-9][0-9]*(?:-verify)?)", phase) is None or
-                not any(diagnostic.get("producer_status") == "FAIL"
-                        for diagnostic in matching_diagnostics)):
+                not any(
+                    diagnostic.get("producer_status") == "FAIL" and
+                    diagnostic.get("failure_phase") == phase and
+                    diagnostic.get("expected") == "PASS" and
+                    diagnostic.get("observed") is None and
+                    diagnostic.get("reason") ==
+                    "authenticated physical producer terminal measurement failure"
+                    for diagnostic in matching_diagnostics)):
             return False
         witnesses = [
             pair for pair in pairs
@@ -1725,29 +1767,18 @@ def validate_physical_campaign_evidence(
         reject("sealed campaign authorized target binding mismatch")
 
     target_binding = campaign.get("qualification_target_binding")
-    if (
-            not isinstance(target_binding, dict) or
-            target_binding.get("status") != "MATCH" or
-            target_binding.get("consistent") is not True):
-        reject("sealed campaign qualification target binding is not MATCH")
-    else:
-        expected = target_binding.get("expected")
-        observed = target_binding.get("observed")
-        expected_target = None
-        expected_lower = None
-        if isinstance(expected, dict):
-            expected_target = _normalize_target({
-                "partuuid": expected.get("physical_partuuid"),
-                "size_bytes": expected.get("physical_device_bytes"),
-            })
-            expected_lower = expected.get("lower_major_minor")
-        if (
-                expected_target != target or
-                not isinstance(expected_lower, str) or
-                not MAJOR_MINOR_RE.fullmatch(expected_lower)):
-            reject("sealed campaign qualification target binding is malformed")
-        if not _same_json_value(observed, expected):
-            reject("sealed campaign qualification target observations disagree")
+    if not _physical_qualification_target_binding_is_valid(
+            target_binding, target):
+        reject(
+            "sealed campaign qualification target binding cannot authenticate "
+            "target/parent identity: phase=qualification_target_binding "
+            "failed_evidence_field=qualification_target_binding "
+            "expected_schema_class=current_physical_target_parent_exact "
+            "observed_schema_class=invalid_incomplete_or_mismatched "
+            "expected_identity_class=authorized_target_and_parent "
+            "observed_identity_class=unverifiable verdict=BLOCKED "
+            "reason=target_parent_identity_cannot_authenticate "
+            "safe_action=recapture_and_reseal_campaign")
 
     capacity_and_ram = campaign.get("capacity_and_ram")
     if not isinstance(capacity_and_ram, dict):
@@ -2231,22 +2262,10 @@ def _physical_campaign_failure_is_proven(
             return False
 
     target_binding = record.get("qualification_target_binding")
-    expected = (
-        target_binding.get("expected")
-        if isinstance(target_binding, dict) else None)
-    if (
-            not isinstance(target_binding, dict) or
-            target_binding.get("status") != "MATCH" or
-            target_binding.get("consistent") is not True or
-            not isinstance(expected, dict) or
-            _normalize_target({
-                "partuuid": expected.get("physical_partuuid"),
-                "size_bytes": expected.get("physical_device_bytes"),
-            }) != target or
-            not isinstance(expected.get("lower_major_minor"), str) or
-            not MAJOR_MINOR_RE.fullmatch(expected["lower_major_minor"]) or
-            not _same_json_value(target_binding.get("observed"), expected)):
+    if not _physical_qualification_target_binding_is_valid(
+            target_binding, target):
         return False
+    expected = target_binding["expected"]
 
     if not _physical_host_stability_is_valid(record.get("host_stability")):
         return False

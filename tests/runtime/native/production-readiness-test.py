@@ -498,11 +498,17 @@ def physical_campaign_evidence(policy_raw):
                 "physical_partuuid": TARGET["partuuid"],
                 "physical_device_bytes": TARGET["size_bytes"],
                 "lower_major_minor": "8:1",
+                "parent_major_minor": "8:0",
+                "parent_model": "USB Multi-Card",
+                "parent_transport": "usb",
             },
             "observed": {
                 "physical_partuuid": TARGET["partuuid"],
                 "physical_device_bytes": TARGET["size_bytes"],
                 "lower_major_minor": "8:1",
+                "parent_major_minor": "8:0",
+                "parent_model": "USB Multi-Card",
+                "parent_transport": "usb",
             },
         },
         "capacity_and_ram": {
@@ -646,6 +652,7 @@ def physical_campaign_failure_evidence(policy_raw):
             "arm": arm,
             "reason": "authenticated physical producer terminal failure",
             "producer_status": "FAIL",
+            "failure_phase": "measure",
         }],
         "qualification_status": "FAIL_OR_INCOMPLETE",
         "first_failed_phase": "measure",
@@ -3441,6 +3448,29 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 result["METADATA_RAM_MEASUREMENT"]["status"],
                 "MEASURED_WITHIN_LIMIT")
 
+        for mutation in (
+                "missing-failure-phase", "wrong-failure-phase",
+                "wrong-diagnostic-expected", "wrong-diagnostic-reason"):
+            with self.subTest(producer_diagnostic=mutation):
+                unauthenticated = physical_campaign_failure_evidence(
+                    encoded(policy))
+                diagnostic = unauthenticated[
+                    "physical_evidence_audit"]["diagnostics"][0]
+                if mutation == "missing-failure-phase":
+                    diagnostic.pop("failure_phase")
+                elif mutation == "wrong-failure-phase":
+                    diagnostic["failure_phase"] = "teardown"
+                elif mutation == "wrong-diagnostic-expected":
+                    diagnostic["expected"] = "EXCLUDED"
+                else:
+                    diagnostic["reason"] = "synthetic detached failure"
+                unauthenticated_result = evaluate(
+                    policy=policy, campaign=unauthenticated)
+                self.assertEqual(
+                    unauthenticated_result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(
+                    unauthenticated_result["release_verdict"], "BLOCKED")
+
         blocked = physical_campaign_failure_evidence(encoded(policy))
         blocked_audit = blocked["physical_evidence_audit"]
         blocked_audit["status"] = "BLOCKED"
@@ -3484,6 +3514,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 ("wrong-observed-target", "qualification_target_binding"),
                 ("wrong-lower-device", "qualification_target_binding"),
                 ("missing-expected-target", "qualification_target_binding"),
+                ("missing-parent-major", "qualification_target_binding"),
+                ("malformed-parent-major", "qualification_target_binding"),
+                ("empty-parent-model", "qualification_target_binding"),
+                ("empty-parent-transport", "qualification_target_binding"),
                 ("changed-host", "host_stability"),
                 ("missing-host-check", "host_stability"),
                 ("nonquiescent-boundary", "admitted_device_boundary"),
@@ -3501,6 +3535,18 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     binding["observed"]["lower_major_minor"] = "8:2"
                 elif mutation == "missing-expected-target":
                     binding.pop("expected")
+                elif mutation == "missing-parent-major":
+                    binding["expected"].pop("parent_major_minor")
+                    binding["observed"].pop("parent_major_minor")
+                elif mutation == "malformed-parent-major":
+                    binding["expected"]["parent_major_minor"] = "invalid"
+                    binding["observed"]["parent_major_minor"] = "invalid"
+                elif mutation == "empty-parent-model":
+                    binding["expected"]["parent_model"] = ""
+                    binding["observed"]["parent_model"] = ""
+                elif mutation == "empty-parent-transport":
+                    binding["expected"]["parent_transport"] = ""
+                    binding["observed"]["parent_transport"] = ""
                 elif mutation == "changed-host":
                     campaign["host_stability"].update(
                         status="CHANGED", failed_checks=["source_sha"])

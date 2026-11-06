@@ -930,6 +930,14 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
             detail["producer_status"] = (
                 producer_status if producer_status in ("PASS", "FAIL", "EXCLUDED")
                 else "INVALID")
+            # Retain only the bounded authenticated phase needed to bind the
+            # release witness back to the producer's terminal measurement.
+            detail["failure_phase"] = (
+                failure_phase
+                if isinstance(failure_phase, str) and re.fullmatch(
+                    r"(?:measure|steady|gc|"
+                    r"round-[1-9][0-9]*(?:-verify)?)", failure_phase)
+                else "INVALID")
         if replacement_index is None:
             diagnostics.append(detail)
         else:

@@ -9135,7 +9135,14 @@ omitted. Removing that matching diagnostic leaves a first-failure claim
 unverifiable and yields BLOCKED; omitted diagnostics also prevent audit PASS.
 Malformed count values (including boolean values presented as integers),
 inflated accepted-pair counts, stale source/target bindings, and absent
-current evaluator/sealer SHA-256 proofs cannot authenticate FAIL. Report the
+current evaluator/sealer SHA-256 proofs cannot authenticate FAIL. The sealed
+qualification target binding must retain the current sealer's complete physical
+and parent identity (PARTUUID, size, lower and parent major:minor, parent model
+and transport); omitting parent fields is unverifiable rather than a weaker
+identity schema. An authenticated terminal arm FAIL must retain a bounded
+producer diagnostic whose expected PASS, producer FAIL status and failure phase
+agree with the first-failure witness; a missing or contradictory diagnostic
+phase cannot be promoted to measured FAIL. Report the
 invalid field and expected/observed types with bounded, redacted recapture
 guidance. Regression fixtures must locate an authenticating diagnostic by the
 failure-witness identity rather than retained-list position, and type-strict

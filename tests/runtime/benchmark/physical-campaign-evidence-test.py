@@ -1025,7 +1025,8 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             {"FAIL", "BLOCKED", "UNAVAILABLE"})
         self.assertTrue(any(
             item["status"] == "FAIL" and item["metric"] == "arm.verdict" and
-            item["pair_index"] == 2 and item.get("producer_status") == "FAIL"
+            item["pair_index"] == 2 and item.get("producer_status") == "FAIL" and
+            item.get("failure_phase") == "measure"
             for item in audit["diagnostics"]))
         self.assertEqual(audit["first_failed_phase"], "measure")
         self.assertEqual(audit["first_failed_evidence"], {
@@ -1141,6 +1142,7 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
             item for item in failed["diagnostics"]
             if item["metric"] == "arm.verdict")
         self.assertEqual(producer_failure["producer_status"], "FAIL")
+        self.assertEqual(producer_failure["failure_phase"], "measure")
         self.assertEqual(failed["first_failed_phase"], "measure")
 
     def test_different_workload_trace_excludes_pair(self):
