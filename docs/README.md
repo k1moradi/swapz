@@ -1,11 +1,12 @@
 # swapz
 
-**Canonical naming and qualification policies:** [VISION.md](VISION.md) defines
-swapz's immutable product/module/target/SWZ identities and the official
-`make test` qualification interface, with `make fast_test` limited to a
-non-qualifying development loop. See [the root Make API](compile.md#root-make-api)
-for supported command behavior and [AGENTS.md](../AGENTS.md) plus
-[AGENT_CONTEXT.md](AGENT_CONTEXT.md) for current operating restrictions.
+**Current authority and canonical references:** [AGENTS.md](../AGENTS.md) plus
+[AGENT_CONTEXT.md](AGENT_CONTEXT.md) are the current operating authority.
+[VISION.md](VISION.md) defines the immutable product/module/target/SWZ identities
+and public qualification interface: `make test`, with `make fast_test` limited
+to a non-qualifying development loop. The [root Make API](compile.md#root-make-api)
+defines supported command behavior; [testing standards](testing_standards.md)
+define qualification and evidence rules.
 
 swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ physical extents. Ordinary compression uses LZ4. **Main compression requirement:** every emulated-device test and benchmark runs the production stack with delta64 rescue enabled, the `DELTA64_SHUF8` 8-byte byte-plane shuffle (byte shuffle, confirmed by the owner as the requirement; not a bit-level bitshuffle), and LZ4. A scalar sampled classifier runs before ordinary LZ4; high-score pages may run delta64 + shuffle + LZ4 first and directly adopt a sufficiently small candidate, while lower-score pages retain the ordinary-LZ4 packing-cliff route. Delta64-off is not a supported emulated-device benchmark, plot series, or performance comparison. The module-level disable switch remains only as a debugging/compatibility escape hatch and does not qualify an emulated-device result. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
 
@@ -13,7 +14,8 @@ There is one product. The active product source is under `src/`; test-only code 
 
 ## Product identity and version
 
-The immutable product identities and unversioned SWZ format are specified above.
+The immutable product identities and unversioned SWZ format are defined in
+[VISION.md](VISION.md).
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the single source of truth for release metadata. Do not duplicate the release number in source names, reports, workflow names, binaries, or documentation headings.
 
