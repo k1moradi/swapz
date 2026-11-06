@@ -8814,8 +8814,11 @@ deadline so the watchdog cannot win the fixture race. Before signaling, prove
 that the timeout process is live, directly owns the journal process, and both
 remain in the observer's process group. Require the observer's original
 128+signal exit status (143 for TERM), the explicit `signal=TERM` and
-`process_ownership=owned_timeout_child` record, `timeout_wait_status=124`,
-no PASS, complete timeout/journal cleanup, and revoked one-use token. The
+`process_ownership=owned_timeout_child` record, `timeout_wait_status=124`
+or `timeout_wait_status=143` (the latter is the observed status when the
+supervisor exits on external TERM), no PASS, complete timeout/journal cleanup,
+and revoked one-use token. The extended fixture deadline and live
+process-parent/group proofs must exclude a watchdog-only timeout. The
 TERM-resistant journal control must report `timeout_wait_status=137` after
 the owned timeout performs its bounded KILL escalation. The fail-only signal
 diagnostic must retain the original 128+signal status even if token cleanup

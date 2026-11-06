@@ -1991,14 +1991,14 @@ class BootVerifierTests(unittest.TestCase):
                 stderr,
             )
             # A direct TERM to the observer makes its trap terminate the
-            # still-live timeout supervisor. GNU timeout can return 124 both
-            # for its own deadline and after externally forwarded TERM, so the
-            # status is accepted only with live PID/PPID/PGID proof, the
-            # observer's own 143 signal status, and post-signal child cleanup.
-            self.assertIn(
-                "signal=TERM process_ownership=owned_timeout_child "
-                "timeout_wait_status=124 token_disposition=revoked",
+            # still-live timeout supervisor. GNU timeout can report 124 or
+            # 143 for externally delivered TERM; the extended test deadline,
+            # live PID/PPID/PGID proof, and post-signal cleanup exclude a
+            # watchdog-only completion.
+            self.assertRegex(
                 stderr,
+                r"signal=TERM process_ownership=owned_timeout_child "
+                r"timeout_wait_status=(?:124|143) token_disposition=revoked",
             )
             self.assertEqual(timeout_requested.read_text(encoding="ascii"), "5s\n")
             self.assertIn(
