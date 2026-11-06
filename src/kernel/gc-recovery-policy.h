@@ -14,4 +14,17 @@ static inline int swapz_gc_recovery_retryable_lower_write_error(
 	return recovery_active && is_write && is_eio;
 }
 
+/*
+ * Once that retryable lower error propagates above GC, outer WRITE owners must
+ * not poison the target again. The token must still be active and no terminal
+ * target failure may have been elected while the error was unwinding.
+ */
+static inline int swapz_gc_recovery_retryable_propagated_write_error(
+	int recovery_active, int target_failed, int is_eio)
+{
+	return !target_failed &&
+	       swapz_gc_recovery_retryable_lower_write_error(
+		       recovery_active, 1, is_eio);
+}
+
 #endif

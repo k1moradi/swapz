@@ -2643,9 +2643,17 @@ int main(void) {
         policy = (ROOT / "src/kernel/gc-recovery-policy.h").read_text()
         lower = body("swapz_lower")
         compact = body("swapz_gc_compact_one")
+        accept_write = body("swapz_accept_write")
+        process = body("swapz_process")
 
         self.assertIn(
             "return recovery_active && is_write && is_eio;", policy)
+        normalized_policy = re.sub(r"\s+", " ", policy)
+        self.assertIn(
+            "return !target_failed && "
+            "swapz_gc_recovery_retryable_lower_write_error( "
+            "recovery_active, 1, is_eio);",
+            normalized_policy)
         injected = lower[lower.index(
             "if (op == REQ_OP_WRITE && ctx->write_fault_nth"):lower.index(
                 "if (op == REQ_OP_READ)")]
@@ -2665,6 +2673,23 @@ int main(void) {
         self.assertIn("swapz_fail_at(ctx, lower_error", completion)
         self.assertIn("error != -EIO && error != -ENOSPC", compact)
         self.assertIn("ctx->gc_recovery.active)", compact)
+
+        zero_write = accept_write[
+            accept_write.index("if (length > 0 && length <= 64"):
+            accept_write.index("if (length <= 0 && bulk_raw_eligible)")]
+        standalone_raw = accept_write[
+            accept_write.index("if (length <= 0) {"):
+            accept_write.index("/* batch_bytes now owns")]
+        write_case = process[
+            process.index("case REQ_OP_WRITE:"):
+            process.index("case REQ_OP_READ:")]
+        for propagated_owner in (zero_write, standalone_raw, write_case):
+            normalized_owner = re.sub(r"\s+", " ", propagated_owner)
+            self.assertIn(
+                "swapz_gc_recovery_retryable_propagated_write_error( "
+                "ctx->gc_recovery.active, "
+                "smp_load_acquire(&ctx->failed), error == -EIO)",
+                normalized_owner)
 
     def test_gc_production_uses_exact_segment_mapping_counts(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()

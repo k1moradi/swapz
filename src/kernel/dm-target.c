@@ -6083,7 +6083,11 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		    old_segment != ctx->authority.open_segment)
 			error = swapz_discard_dead_segment(ctx, old_segment);
 		if (error) {
-			swapz_fail(ctx, error);
+			if (!swapz_gc_recovery_retryable_propagated_write_error(
+				    ctx->gc_recovery.active,
+				    smp_load_acquire(&ctx->failed),
+				    error == -EIO))
+				swapz_fail(ctx, error);
 		} else {
 			ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 			ctx->zero_elided_pages++;
@@ -6140,11 +6144,14 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		 * foreground ENOSPC and starts GC. If that GC then hits a transient
 		 * lower READ/WRITE fault, no authority for this RAW write was
 		 * published and the authenticated GC destination remains resumable.
-		 * Every non-GC RAW/FUA error, and any GC error that already marked the
-		 * target failed, remains terminal.
+		 * Every non-capacity non-GC RAW/FUA error, and any GC error that
+		 * already marked the target failed, remains terminal.
 		 */
 		if (error &&
-		    (!ctx->gc_recovery.active || smp_load_acquire(&ctx->failed)))
+		    !swapz_gc_recovery_retryable_propagated_write_error(
+			    ctx->gc_recovery.active,
+			    smp_load_acquire(&ctx->failed),
+			    error == -EIO))
 			swapz_fail(ctx, error);
 		swapz_complete(bio, error);
 		return 0;
@@ -7478,8 +7485,16 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		/* A write BIO is completed by raw_write or flush_window. */
 		error = swapz_accept_write(ctx, bio);
 		if (error) {
-			/* Capacity exhaustion remains local to this WRITE. */
-			if (error != -ENOSPC)
+			/*
+			 * Capacity exhaustion and an authenticated GC lower-WRITE EIO
+			 * remain local to this WRITE. The next nonempty mutation resumes
+			 * the retained GC token before touching authority.
+			 */
+			if (error != -ENOSPC &&
+			    !swapz_gc_recovery_retryable_propagated_write_error(
+				    ctx->gc_recovery.active,
+				    smp_load_acquire(&ctx->failed),
+				    error == -EIO))
 				swapz_fail_at(ctx, error, "write",
 					      swapz_failure_category(error),
 					      "write-admission");
