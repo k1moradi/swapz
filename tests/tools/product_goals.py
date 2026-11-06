@@ -268,6 +268,11 @@ def _ci_safe_line(line):
         r"\1<redacted>", line)
     line = re.sub(r"\b(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]{12,}",
                   "<redacted>", line)
+    # Child-supplied structured values and absolute host paths are never
+    # public first-error evidence, even when attached to an AssertionError.
+    line = re.sub(r"\{[^\r\n]*\}", "<structured-evidence-redacted>", line)
+    line = re.sub(r"(?<![A-Za-z0-9_./])\/[^\s\x27\x22,;:)\]}]+",
+                  "<private-path>", line)
     # Keep the assertion operand, not a potentially huge source literal.
     line = re.sub(
         r"(AssertionError: .*? (?:not |unexpectedly )?found in ).*",
@@ -748,12 +753,22 @@ def diagnose_ci_failure(lines, exit_code, suite):
     if rootless_shell_syntax_check_failed:
         expected_contract = "source-controlled shell script passes bash -n"
 
+    errno_match = re.match(
+        r"^(?:OSError|PermissionError|FileNotFoundError): "
+        r"\[Errno ([0-9]{1,5})\]", causal_error or "")
+    first_errno = int(errno_match.group(1)) if errno_match else None
+    cleanup_disposition = {
+        "stderr_relay_failure": "relay_incomplete",
+        "stderr_relay_cleanup_failure": "relay_cleanup_failed",
+    }.get(rootless_reason, "not_independently_verified")
     result = {
         "status": status, "category": category,
         "test": test_name, "phase": phase,
         "first_error": causal_error, "reason": reason,
         "expected_contract": expected_contract, "observed": causal_error,
-        "exit_code": exit_code,
+        "exit_code": exit_code, "first_exit_code": effective_exit_code,
+        "first_errno": first_errno,
+        "cleanup_disposition": cleanup_disposition,
         "prerequisite": {
             "NATIVE_COMPILE": "hosted Ubuntu compiler, headers, liblz4",
             "HOST_PERMISSION": "unprivileged host filesystem/capability access",
@@ -874,6 +889,7 @@ def _ci_run(argv):
         })
         if launch_errno is not None:
             result["launch_errno"] = launch_errno
+            result["first_errno"] = launch_errno
         try:
             _ci_retain_log(record, destination, result)
         except OSError as error:

@@ -17,6 +17,7 @@ rootless_private_diagnostic_log=
 rootless_capture_directory=
 rootless_capture_path=
 rootless_capture_input_fd=2
+rootless_capture_output_fd=
 rootless_capture_pid=
 rootless_capture_failure_reason=
 rootless_classified_reason=nonzero_exit
@@ -28,6 +29,7 @@ begin_rootless_private_stderr_capture() {
   rootless_capture_directory=
   rootless_capture_path=
   rootless_capture_input_fd=2
+  rootless_capture_output_fd=
   rootless_capture_pid=
   rootless_capture_failure_reason=
   command -v tee >/dev/null 2>&1 || return 0
@@ -45,6 +47,7 @@ begin_rootless_private_stderr_capture() {
     tee "$rootless_capture_path" >&2 2>/dev/null
   }
   rootless_capture_input_fd=${ROOTLESS_STDERR_CAPTURE[1]}
+  rootless_capture_output_fd=${ROOTLESS_STDERR_CAPTURE[0]}
   rootless_capture_pid=$ROOTLESS_STDERR_CAPTURE_PID
 }
 
@@ -52,9 +55,28 @@ finish_rootless_private_stderr_capture() {
   local original_exit_code=$1
   local capture_exit_code=0
   local cleanup_failed=0
+  local relay_read_status=0
+  local relay_unexpected_byte=
   if [[ -n $rootless_capture_pid ]]; then
-    exec {rootless_capture_input_fd}>&-
-    if wait "$rootless_capture_pid"; then
+    # Once the tested child exits, a descendant can still hold the input pipe.
+    # Probe the relay's unused output pipe, without copying child output or
+    # waiting indefinitely for tee. EOF is the only complete-capture proof.
+    if ! exec {rootless_capture_input_fd}>&- 2>/dev/null; then
+      rootless_capture_failure_reason=stderr_relay_failure
+    fi
+    if IFS= read -r -n 1 -t 5 -u "$rootless_capture_output_fd" \
+        relay_unexpected_byte 2>/dev/null; then
+      relay_read_status=0
+    else
+      relay_read_status=$?
+    fi
+    if (( relay_read_status != 1 )) || [[ -n $relay_unexpected_byte ]]; then
+      # An incomplete relay cannot authenticate the first unittest identity.
+      rootless_capture_failure_reason=stderr_relay_failure
+      kill -KILL "$rootless_capture_pid" 2>/dev/null || :
+    fi
+    exec {rootless_capture_output_fd}<&- 2>/dev/null || :
+    if wait "$rootless_capture_pid" 2>/dev/null; then
       :
     else
       capture_exit_code=$?
@@ -102,6 +124,7 @@ finish_rootless_private_stderr_capture() {
   rootless_capture_directory=
   rootless_capture_path=
   rootless_capture_input_fd=2
+  rootless_capture_output_fd=
   rootless_capture_pid=
 }
 
@@ -587,6 +610,9 @@ python3 -B tests/runtime/native/rootless-direct-evidence-test.py -v
 rootless_phase='tests/runtime/native/rootless-attribution-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/rootless-attribution-test.py -v
+rootless_phase='tests/runtime/native/ci-failure-diagnostics-test.py'
+rootless_phase_started_seconds=$SECONDS
+python3 -B tests/runtime/native/ci-failure-diagnostics-test.py
 rootless_phase='tests/runtime/native/package-dkms-test.py'
 rootless_phase_started_seconds=$SECONDS
 begin_rootless_private_stderr_capture
