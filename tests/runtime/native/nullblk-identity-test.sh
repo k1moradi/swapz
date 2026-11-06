@@ -166,6 +166,13 @@ if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
     fi
     exit 0
 fi
+if [[ "\$1" == "-Lc" && "\$2" == "%t:%T" &&
+      "\$3" == "$FIXTURE/dev/foreign-swap" ]]; then
+    # Fake regular nodes otherwise all report 0:0; give the unrelated swap a
+    # distinct synthetic rdev so the alias test models block identity correctly.
+    printf '8:1\n'
+    exit 0
+fi
 exec "$REAL_STAT" "\$@"
 SH
 cat > "$STUBS/id" <<'SH'
