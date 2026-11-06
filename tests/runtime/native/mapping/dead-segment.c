@@ -290,6 +290,36 @@ static int write_shared_pages(const swapz_u32 logical_pages[2])
 	return swapz_finish(&a, &tx, bytes, SWAPZ_BLOCK_BYTES, 1U, 0);
 }
 
+static int write_two_block_shared_pages(const swapz_u32 logical_pages[2])
+{
+	struct swapz_tx tx;
+	struct swapz_builder builder;
+	const swapz_u32 extent_bytes = 2U * SWAPZ_BLOCK_BYTES;
+	int rc;
+
+	rc = swapz_stage(&a, logical_pages, 2U, 2U, &tx);
+	if (rc)
+		return rc;
+	rc = swapz_begin(&builder, multi_block_bytes, extent_bytes, tx.sequence);
+	if (!rc) {
+		memset(data, 0x41, sizeof(data));
+		rc = swapz_append(&builder, logical_pages[0],
+				  tx.records[0].generation, data, sizeof(data));
+	}
+	if (!rc) {
+		memset(data, 0x42, sizeof(data));
+		rc = swapz_append(&builder, logical_pages[1],
+				  tx.records[1].generation, data, sizeof(data));
+	}
+	if (!rc)
+		rc = swapz_seal(&builder);
+	if (rc) {
+		swapz_abort(&a, &tx);
+		return rc;
+	}
+	return swapz_finish(&a, &tx, multi_block_bytes, extent_bytes, 2U, 0);
+}
+
 static int test_indexed_shared_extent_hidden_sibling_release_is_rejected(void)
 {
 	const swapz_u32 shared_pages[2] = { 0U, 1U };
@@ -376,6 +406,106 @@ static int test_indexed_shared_extent_hidden_sibling_release_is_rejected(void)
 			return 1;
 		}
 	}
+	return 0;
+}
+
+
+static int test_discard_range_prevalidation_rejects_overlapping_survivor(void)
+{
+	const swapz_u32 shared_pages[2] = { 0U, 1U };
+	int prevalidate_error;
+	int first_discard_error = 0;
+	int second_discard_error = 0;
+	int partial_commit = 0;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_two_block_shared_pages(shared_pages) == 0);
+	CHECK(write_page(2U) == 0);
+	CHECK(maps[0].start_block == 0U && maps[1].start_block == 0U &&
+	      maps[0].extent_blocks == 2U && maps[1].extent_blocks == 2U &&
+	      maps[0].shared_extent && maps[1].shared_extent &&
+	      live[0] == 2U && classes[0] == 2U && maps[2].start_block == 2U);
+
+	/*
+	 * Fault-inject one otherwise valid RAW survivor into block one, the
+	 * interior of the shared two-block extent. Its own class/liveness and
+	 * list membership remain self-consistent, so only a complete physical
+	 * overlap proof can reject the range before page zero is committed.
+	 */
+	maps[2].start_block = 1U;
+	live[1] = 1U;
+	classes[1] = 1U;
+	live[2] = 0U;
+	classes[2] = 0U;
+
+	snapshot_integrity();
+	prevalidate_error = swapz_prevalidate_discard_range(&a, 0U, 2U);
+	if (prevalidate_error != -EUCLEAN) {
+		first_discard_error = swapz_discard_page(&a, 0U);
+		second_discard_error = swapz_discard_page(&a, 1U);
+		partial_commit =
+			first_discard_error == 0 &&
+			second_discard_error == -EUCLEAN &&
+			!maps[0].valid && maps[1].valid && maps[2].valid;
+		fprintf(stderr,
+			"%s:%d FAIL range=[0,2) shared=[0,2) survivor=[1,2) "
+			"expected_prevalidate=-EUCLEAN observed_prevalidate=%d "
+			"first_discard=%d second_discard=%d partial_commit=%s\n",
+			__FILE__, __LINE__, prevalidate_error,
+			first_discard_error, second_discard_error,
+			partial_commit ? "yes" : "no");
+		return 1;
+	}
+	CHECK(integrity_unchanged());
+	return 0;
+}
+
+static int test_discard_range_prevalidation_rejects_detached_survivor_list(void)
+{
+	const swapz_u32 shared_pages[2] = { 0U, 1U };
+	const swapz_u32 none = ~(swapz_u32)0;
+	int prevalidate_error;
+	int first_discard_error = 0;
+	int second_discard_error = 0;
+	int partial_commit = 0;
+
+	CHECK(setup_indexed(4U * SWAPZ_SEGMENT_BLOCKS) == 0);
+	CHECK(write_shared_pages(shared_pages) == 0);
+	CHECK(write_page(2U) == 0);
+	CHECK(mapped_pages[0] == 3U && first_page[0] == 0U &&
+	      last_page[0] == 2U && next_page[0] == 1U &&
+	      next_page[1] == 2U && prev_page[2] == 1U);
+
+	/*
+	 * Page two remains authoritative and physically live, but detach it from
+	 * the cached segment list while keeping the range pages' local links
+	 * head-reachable and reciprocal. A later final shared release would catch
+	 * the list count mismatch; range prevalidation must catch it first.
+	 */
+	last_page[0] = 1U;
+	next_page[1] = none;
+	prev_page[2] = none;
+	next_page[2] = none;
+
+	snapshot_integrity();
+	prevalidate_error = swapz_prevalidate_discard_range(&a, 0U, 2U);
+	if (prevalidate_error != -EUCLEAN) {
+		first_discard_error = swapz_discard_page(&a, 0U);
+		second_discard_error = swapz_discard_page(&a, 1U);
+		partial_commit =
+			first_discard_error == 0 &&
+			second_discard_error == -EUCLEAN &&
+			!maps[0].valid && maps[1].valid && maps[2].valid;
+		fprintf(stderr,
+			"%s:%d FAIL range=[0,2) detached_survivor=2 "
+			"expected_prevalidate=-EUCLEAN observed_prevalidate=%d "
+			"first_discard=%d second_discard=%d partial_commit=%s\n",
+			__FILE__, __LINE__, prevalidate_error,
+			first_discard_error, second_discard_error,
+			partial_commit ? "yes" : "no");
+		return 1;
+	}
+	CHECK(integrity_unchanged());
 	return 0;
 }
 
@@ -1274,6 +1404,8 @@ int main(void)
 	CHECK(test_forged_virgin_witness_still_requires_full_map_proof() == 0); passed++;
 	CHECK(test_false_final_mapping_discard_is_rejected() == 0); passed++;
 	CHECK(test_indexed_shared_extent_hidden_sibling_release_is_rejected() == 0); passed++;
+	CHECK(test_discard_range_prevalidation_rejects_overlapping_survivor() == 0); passed++;
+	CHECK(test_discard_range_prevalidation_rejects_detached_survivor_list() == 0); passed++;
 	CHECK(test_roll_forward_rejects_unrelated_map_sidecar_corruption() == 0); passed++;
 	CHECK(test_gc_commit_rejects_unrelated_survivor_corruption() == 0); passed++;
 	CHECK(test_gc_commit_rejects_live_extent_interior_metadata() == 0); passed++;

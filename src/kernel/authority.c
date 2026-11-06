@@ -212,6 +212,53 @@ static int swapz_page_list_validate_entry(const struct swapz_authority *a,
 	return swapz_page_list_validate_entry_cached(a, logical, 0);
 }
 
+/*
+ * Full list traversal is reserved for release/reclaim proof boundaries.
+ * Ordinary map publication and non-final reference decrements keep the
+ * existing O(1) local-link validation.
+ */
+static int swapz_page_list_validate_segment_complete(
+	const struct swapz_authority *a, swapz_u32 segment)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	const swapz_u32 maximum_segment_pages =
+		SWAPZ_SEGMENT_BLOCKS * SWAPZ_MAX_RECORDS;
+	swapz_u32 current_logical, last_logical = none, visited_pages = 0;
+	swapz_u32 mapped_pages;
+	int error;
+
+	if (!swapz_segment_page_lists_enabled(a))
+		return 0;
+	error = swapz_page_list_validate_segment(a, segment);
+	if (error)
+		return error;
+	mapped_pages = a->segment_mapped_pages[segment];
+	if (!mapped_pages)
+		return 0;
+	if (mapped_pages > maximum_segment_pages)
+		return -EUCLEAN;
+
+	current_logical = a->segment_first_page[segment];
+	while (current_logical != none) {
+		const struct swapz_map *map;
+
+		if (current_logical >= a->logical_pages ||
+		    visited_pages >= mapped_pages ||
+		    swapz_page_list_validate_entry_cached(
+			    a, current_logical, 1))
+			return -EUCLEAN;
+		map = &a->maps[current_logical];
+		if (!map->valid || map->start_block >= a->physical_blocks ||
+		    map->start_block / SWAPZ_SEGMENT_BLOCKS != segment)
+			return -EUCLEAN;
+		last_logical = current_logical;
+		current_logical = a->page_next_in_segment[current_logical];
+		visited_pages++;
+	}
+	return visited_pages == mapped_pages &&
+	       last_logical == a->segment_last_page[segment] ? 0 : -EUCLEAN;
+}
+
 static void swapz_page_list_unlink_unchecked(struct swapz_authority *a,
 					     swapz_u32 logical,
 					     swapz_u32 segment)
@@ -666,9 +713,6 @@ static int swapz_verify_shared_extent_release(
 	const struct swapz_authority *a, const struct swapz_map *target,
 	swapz_u32 expected_references, const char *transition)
 {
-	const swapz_u32 none = ~(swapz_u32)0;
-	const swapz_u32 maximum_segment_pages =
-		SWAPZ_SEGMENT_BLOCKS * SWAPZ_MAX_RECORDS;
 	const swapz_u32 target_start = target ? target->start_block : 0U;
 	swapz_u32 target_end, target_segment, found = 0;
 	swapz_u64 record_mask = 0;
@@ -686,79 +730,10 @@ static int swapz_verify_shared_extent_release(
 	target_end = target_start + target->extent_blocks;
 	target_segment = target_start / SWAPZ_SEGMENT_BLOCKS;
 
-	if (swapz_segment_page_lists_enabled(a)) {
-		swapz_u32 current_logical, last_logical = none, visited_pages = 0;
-		swapz_u32 mapped_pages;
-
-		if (!swapz_segment_page_lists_complete(a) ||
-		    target_segment >= a->segment_count ||
-		    swapz_page_list_validate_segment(a, target_segment))
-			return swapz_map_proof_refuse(
-				transition, "extent_release_page_list", -EUCLEAN);
-		mapped_pages = a->segment_mapped_pages[target_segment];
-		if (!mapped_pages || mapped_pages > maximum_segment_pages)
-			return swapz_map_proof_refuse(
-				transition, "extent_release_page_list", -EUCLEAN);
-
-		current_logical = a->segment_first_page[target_segment];
-		while (current_logical != none) {
-			const struct swapz_map *map;
-			swapz_u32 map_end;
-			swapz_u64 record_bit;
-
-			if (current_logical >= a->logical_pages ||
-			    visited_pages >= mapped_pages ||
-			    swapz_page_list_validate_entry_cached(a, current_logical, 1))
-				return swapz_map_proof_refuse(
-					transition, "extent_release_page_list",
-					-EUCLEAN);
-			map = &a->maps[current_logical];
-			if (!map->valid ||
-			    map->start_block >= a->physical_blocks ||
-			    !swapz_legal_class(map->extent_blocks) ||
-			    (map->raw &&
-			     (map->extent_blocks != 1U || map->shared_extent)) ||
-			    (!map->raw && swapz_map_record_index(map) &&
-			     !map->shared_extent) ||
-			    map->extent_blocks >
-				    a->physical_blocks - map->start_block ||
-			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
-				    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
-			    map->start_block / SWAPZ_SEGMENT_BLOCKS !=
-				    target_segment)
-				return swapz_map_proof_refuse(
-					transition, "extent_geometry", -EUCLEAN);
-			map_end = map->start_block + map->extent_blocks;
-			if (map->start_block < target_end &&
-			    map_end > target_start) {
-				if (map->start_block != target_start ||
-				    map->extent_blocks != target->extent_blocks ||
-				    map->raw || !map->shared_extent)
-					return swapz_map_proof_refuse(
-						transition, "overlapping_extent",
-						-EUCLEAN);
-				record_bit = (swapz_u64)1U <<
-					swapz_map_record_index(map);
-				if (record_mask & record_bit)
-					return swapz_map_proof_refuse(
-						transition, "duplicate_record",
-						-EUCLEAN);
-				record_mask |= record_bit;
-				found++;
-				if (found > expected_references)
-					return swapz_map_proof_refuse(
-						transition, "unexpected_reference",
-						-EUCLEAN);
-			}
-			last_logical = current_logical;
-			current_logical = a->page_next_in_segment[current_logical];
-			visited_pages++;
-		}
-		if (visited_pages != mapped_pages ||
-		    last_logical != a->segment_last_page[target_segment])
-			return swapz_map_proof_refuse(
-				transition, "extent_release_page_list", -EUCLEAN);
-	}
+	if (swapz_segment_page_lists_enabled(a) &&
+	    swapz_page_list_validate_segment_complete(a, target_segment))
+		return swapz_map_proof_refuse(
+			transition, "extent_release_page_list", -EUCLEAN);
 
 	/*
 	 * The page list and mapped-page count are cached reverse indexes, not
@@ -2180,6 +2155,7 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 	swapz_u32 processed = 0;
 	int error = 0;
 	int needs_full_map_proof = 0;
+	int needs_shared_extent_page_list_proof = 0;
 	int gc_enabled;
 
 	if (!a || !a->maps || first_logical >= a->logical_pages ||
@@ -2262,8 +2238,10 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 		 * be zero. Prove that now, before any generation can advance.
 		 */
 		a->live_records[map->start_block]--;
-		if (!a->live_records[map->start_block] && map->shared_extent)
+		if (!a->live_records[map->start_block] && map->shared_extent) {
 			needs_full_map_proof = 1;
+			needs_shared_extent_page_list_proof = 1;
+		}
 		if (a->segment_mapped_pages)
 			a->segment_mapped_pages[segment]--;
 		if (gc_enabled) {
@@ -2331,6 +2309,35 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 					-EUCLEAN);
 				break;
 			}
+			/*
+			 * The later final shared-release proof rejects physical overlap.
+			 * Detect the same contradiction here so a preceding range page
+			 * cannot commit before that final-page check runs.
+			 */
+			if (a->extent_classes[map->start_block] !=
+			    map->extent_blocks) {
+				error = swapz_map_proof_refuse(
+					"discard_range", "physical_start", -EUCLEAN);
+				break;
+			}
+			{
+				swapz_u8 block_offset;
+
+				for (block_offset = 1U;
+				     block_offset < map->extent_blocks;
+				     ++block_offset)
+					if (a->extent_classes[map->start_block +
+							     block_offset] ||
+					    a->live_records[map->start_block +
+							    block_offset]) {
+						error = swapz_map_proof_refuse(
+							"discard_range",
+							"physical_interior", -EUCLEAN);
+						break;
+					}
+				if (error)
+					break;
+			}
 			segment = map->start_block / SWAPZ_SEGMENT_BLOCKS;
 			if (segment >= a->segment_count) {
 				error = swapz_map_proof_refuse(
@@ -2378,6 +2385,24 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 		a->segment_gc_live_bytes[segment] += live_bytes;
 		a->segment_gc_io_cost[segment] += io_cost;
 		a->segment_gc_min_live_blocks[segment] += min_live_blocks;
+	}
+
+	/*
+	 * Modeling temporarily changes mapped-page counts while list links remain
+	 * untouched, so complete-list validation must run only after rollback.
+	 * This is needed only when a shared extent would be physically released.
+	 */
+	if (!error && needs_shared_extent_page_list_proof &&
+	    swapz_segment_page_lists_enabled(a)) {
+		swapz_u32 segment;
+
+		for (segment = 0; segment < a->segment_count; ++segment)
+			if (swapz_page_list_validate_segment_complete(a, segment)) {
+				error = swapz_map_proof_refuse(
+					"discard_range",
+					"extent_release_page_list", -EUCLEAN);
+				break;
+			}
 	}
 
 	return error;
