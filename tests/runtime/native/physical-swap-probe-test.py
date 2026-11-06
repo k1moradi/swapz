@@ -314,6 +314,81 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertFalse(any(command[:2] == ("dmsetup", "remove")
                              for command in commands))
 
+    def test_development_recovery_final_swap_uncertainty_retains_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            state.update({
+                "stage": "ORACLE_PASS",
+                "swap_was_active": False,
+                "swap_path": None,
+                "swap_size_kib": None,
+                "swap_priority": None,
+                "swap_used_kib": None,
+                "development_only": True,
+                "development_scope": probe.DEVELOPMENT_SCOPE,
+            })
+            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            (state_dir / probe.RESULTS_NAME).write_text(json.dumps({
+                "start_timestamp": "2026-11-06T00:00:00Z",
+            }))
+
+            target = {
+                "device": state["device"], "major": state["major"],
+                "minor": state["minor"], "size_bytes": state["size_bytes"],
+                "partuuid": state["partuuid"],
+            }
+
+            def final_observations(results, saved_state_dir, saved_state,
+                                   observed_target):
+                self.assertEqual(observed_target, target)
+                results["final_swap_error"] = "malformed final swap inventory"
+                probe._save_results(saved_state_dir, results)
+                return {
+                    "errors": ["final_swap_inventory_unverifiable"],
+                    "original_header_matches_final": True,
+                    "restored_swap_verified": False,
+                    "mapper_removal_succeeded": True,
+                    "module_cleanup_succeeded": True,
+                    "unrelated_mapper_inventory_unchanged": True,
+                    "active_partition_marker_present": True,
+                    "run_claim_consumed": True,
+                }
+
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery",
+                        return_value=target), \
+                    mock.patch.object(probe, "_mapper_exists",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_active_swap_for",
+                                      return_value=None), \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=backup), \
+                    mock.patch.object(probe, "_holder_names", return_value=[]), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_final_observations",
+                                      side_effect=final_observations), \
+                    mock.patch.object(
+                        probe, "_release_partition_ownership") as release:
+                with self.assertRaisesRegex(
+                        probe.ProbeError, "final cleanup evidence"):
+                    probe.recover(
+                        state_dir, state["device_arg"], state["device_arg"])
+
+            release.assert_not_called()
+            persisted = json.loads(
+                (state_dir / probe.STATE_NAME).read_text())
+            self.assertEqual(persisted["stage"], "RECOVERY_REQUIRED")
+            self.assertEqual(persisted["stage_before_recovery"], "ORACLE_PASS")
+            self.assertTrue(
+                (self.recovery_base /
+                 f"partition-{state['partuuid']}.active").is_file())
+            self.assertTrue(
+                (self.recovery_base /
+                 f"consumed-{state['run_id']}.json").is_file())
+
     def test_development_recovery_rejects_noncanonical_inactive_state(self):
         cases = (
             ("development_scope", "wrong scope"),
@@ -2037,6 +2112,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             elif teardown_oracle_metadata == "final_swap_inventory_error":
                 # Contradictory raw error must defeat a forged true summary.
                 saved_results["final_swap_error"] = "malformed /proc/swaps"
+            elif teardown_oracle_metadata == "final_block0_error":
+                saved_results["final_block0_error"] = "short final header read"
+            elif teardown_oracle_metadata == "final_mapper_error":
+                saved_results["final_mapper_error"] = "mapper inventory failed"
+            elif teardown_oracle_metadata == "dm_inventory_error":
+                saved_results["dm_inventory_error"] = "dm inventory failed"
             elif teardown_oracle_metadata == "invalid_phase_count":
                 saved_results["physical_oracle_phases"][0]["stdout"] = (
                     "PASS: owned V3 DM 0-page direct I/O, flush, "
@@ -2392,6 +2473,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             ("stale_approval", False, "matching", "matching", "stale"),
             ("missing_cleanup", True, "matching", "matching", "not_applicable"),
             ("final_swap_inventory_error", True, "matching",
+             "matching", "not_applicable"),
+            ("final_block0_error", True, "matching",
+             "matching", "not_applicable"),
+            ("final_mapper_error", True, "matching",
+             "matching", "not_applicable"),
+            ("dm_inventory_error", True, "matching",
              "matching", "not_applicable"),
             ("invalid_phase_count", True, "matching", "matching", "not_applicable"),
             ("development_promotion", True, "matching", "matching", "not_applicable"),

@@ -1661,25 +1661,34 @@ def _module_mapper_preflight():
 
 def _final_observations(results, state_dir, state, target):
     """Collect final identity-only observations; never read test page contents."""
+    current_errors = []
+    current_header_matches = False
     try:
         header = _read_block0(target["device"], target)
         results["final_block0_sha256"] = hashlib.sha256(header).hexdigest()
-        results["original_header_matches_final"] = (
+        current_header_matches = (
             results["final_block0_sha256"] == results.get(
                 "original_header_sha256"))
+        results["original_header_matches_final"] = current_header_matches
     except ProbeError as exc:
         results["final_block0_sha256"] = None
         results["original_header_matches_final"] = False
-        results["final_block0_error"] = _bounded_text(exc)
+        results.setdefault("final_block0_error", _bounded_text(exc))
+        current_errors.append("final_block0_unverifiable")
+
+    current_swap_inventory_verified = True
     try:
         results["final_swap_row"] = _active_swap_for(
             target["major"], target["minor"])
     except ProbeError as exc:
         results["final_swap_row"] = None
-        results["final_swap_error"] = _bounded_text(exc)
+        results.setdefault("final_swap_error", _bounded_text(exc))
+        current_swap_inventory_verified = False
+        current_errors.append("final_swap_inventory_unverifiable")
+
     current_block_stats = _block_stat_snapshot(target)
-    # Final observations run both before and after releasing the durable
-    # partition marker. Preserve the first unavailable sample on later retries.
+    # Final observations may be retried after an uncertain sample. Preserve the
+    # first unavailable sample instead of certifying a later retry as complete.
     if results.get("lower_io_evidence_gate") != "BLOCKED":
         results["block_stats_after"] = current_block_stats
     try:
@@ -1691,6 +1700,7 @@ def _final_observations(results, state_dir, state, target):
         results["lower_io_delta"] = None
         results["lower_io_evidence_gate"] = "BLOCKED"
         results.setdefault("lower_io_evidence_error", _bounded_text(exc))
+
     current_kernel_messages = _kernel_swapz_messages(
         results.get("start_timestamp", "now"))
     if results.get("kernel_diagnostics_gate") != "BLOCKED":
@@ -1703,15 +1713,11 @@ def _final_observations(results, state_dir, state, target):
     else:
         results["kernel_diagnostics_gate"] = "BLOCKED"
         results.setdefault("kernel_diagnostics_error", diagnostics_error)
+
     row = results.get("final_swap_row")
-    # A failed final swap inventory read is not proof of inactivity. Preserve
-    # that uncertainty even if a later cleanup observation reads successfully.
-    final_swap_inventory_verified = "final_swap_error" not in results
-    # The identity-only recovery target omits original swap parameters.
-    # Compare with the durable saved state, including after standalone recovery.
     if state.get("swap_was_active") is True:
-        results["restored_swap_verified"] = (
-            final_swap_inventory_verified
+        current_restored_swap_verified = (
+            current_swap_inventory_verified
             and isinstance(row, dict)
             and row.get("kind") == "partition"
             and type(state.get("swap_size_kib")) is int
@@ -1721,45 +1727,99 @@ def _final_observations(results, state_dir, state, target):
     else:
         # Development-only physical backing smoke preserves an originally
         # inactive target. Absence from /proc/swaps is the required post-state.
-        results["restored_swap_verified"] = (
-            final_swap_inventory_verified
+        current_restored_swap_verified = (
+            current_swap_inventory_verified
             and state.get("development_only") is True
             and state.get("swap_was_active") is False
             and row is None)
+    # A historical failed inventory read remains disqualifying evidence for the
+    # run, even when a later recovery retry can finally verify safe cleanup.
+    results["restored_swap_verified"] = (
+        "final_swap_error" not in results and current_restored_swap_verified)
+
+    current_mapper_removed = False
     try:
         results["final_mapper_present"] = _mapper_exists(state)
+        current_mapper_removed = results["final_mapper_present"] is False
     except ProbeError as exc:
         results["final_mapper_present"] = None
-        results["final_mapper_error"] = _bounded_text(exc)
+        results.setdefault("final_mapper_error", _bounded_text(exc))
+        current_errors.append("final_mapper_unverifiable")
+
     results["final_module_present"] = Path("/sys/module/dm_swapz").exists()
+    current_module_cleanup = results["final_module_present"] is False
     active = _recovery_base(target) / f"partition-{state['partuuid']}.active"
-    results["active_partition_marker_present"] = active.exists()
+    active_marker_present = active.exists()
+    results["active_partition_marker_present"] = active_marker_present
     consumed = _recovery_base(target) / f"consumed-{state['run_id']}.json"
-    results["run_claim_consumed"] = consumed.is_file()
+    run_claim_consumed = consumed.is_file()
+    results["run_claim_consumed"] = run_claim_consumed
     results["approval_consumed"] = (
-        consumed.is_file() if state.get("development_only") is not True else None)
-    results["target_remains_inactive"] = (
-        final_swap_inventory_verified
+        run_claim_consumed if state.get("development_only") is not True else None)
+    current_target_inactive = (
+        current_swap_inventory_verified
         and state.get("development_only") is True
         and state.get("swap_was_active") is False and row is None)
+    results["target_remains_inactive"] = (
+        "final_swap_error" not in results and current_target_inactive)
     results["final_recovery_state"] = state.get("stage")
-    results["mapper_removal_succeeded"] = (
-        results["final_mapper_present"] is False)
-    results["module_cleanup_succeeded"] = (
-        results["final_module_present"] is False)
+    results["mapper_removal_succeeded"] = current_mapper_removed
+    results["module_cleanup_succeeded"] = current_module_cleanup
+
+    current_inventory_unchanged = False
     try:
         results["dm_inventory_after"] = _dm_inventory_snapshot(
             state.get("dm_name"), state.get("dm_uuid"))
+        current_inventory_unchanged = _mapper_inventory_unchanged(
+            results.get("dm_inventory_before"), results["dm_inventory_after"])
         results["unrelated_mapper_inventory_unchanged"] = (
-            _mapper_inventory_unchanged(
-                results.get("dm_inventory_before"),
-                results["dm_inventory_after"]))
+            current_inventory_unchanged)
     except ProbeError as exc:
         results["dm_inventory_after"] = None
         results["unrelated_mapper_inventory_unchanged"] = None
-        results["dm_inventory_error"] = _bounded_text(exc)
+        results.setdefault("dm_inventory_error", _bounded_text(exc))
+        current_errors.append("dm_inventory_unverifiable")
+
     results["end_timestamp"] = _utc_timestamp()
     _save_results(state_dir, results)
+    return {
+        "errors": current_errors,
+        "original_header_matches_final": current_header_matches,
+        "restored_swap_verified": current_restored_swap_verified,
+        "mapper_removal_succeeded": current_mapper_removed,
+        "module_cleanup_succeeded": current_module_cleanup,
+        "unrelated_mapper_inventory_unchanged": current_inventory_unchanged,
+        "active_partition_marker_present": active_marker_present,
+        "run_claim_consumed": run_claim_consumed,
+    }
+
+
+def _final_cleanup_evidence_error(observation):
+    """Return why this cleanup sample is unsafe to release, or None."""
+    if not isinstance(observation, dict):
+        return "cleanup_observation expected=object observed=invalid"
+    errors = observation.get("errors")
+    if not isinstance(errors, list):
+        return "cleanup_observation.errors expected=list observed=invalid"
+    if errors:
+        return "current_errors=" + ",".join(str(error) for error in errors)
+    required_true = (
+        "original_header_matches_final",
+        "restored_swap_verified",
+        "mapper_removal_succeeded",
+        "module_cleanup_succeeded",
+        "unrelated_mapper_inventory_unchanged",
+        "active_partition_marker_present",
+        "run_claim_consumed",
+    )
+    failures = [
+        f"{field} expected=True observed={observation.get(field)!r}"
+        for field in required_true
+        if observation.get(field) is not True
+    ]
+    if failures:
+        return "; ".join(failures)
+    return None
 
 
 def _allocate_dm_identity():
@@ -2225,9 +2285,8 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         elif _active_swap_for(target["major"], target["minor"]) is not None:
             raise ProbeError(
                 "development recovery expected the partition to remain inactive")
-        state["stage"] = "COMPLETE"
-        _save_state(state_dir, state)
         results_path = state_dir / RESULTS_NAME
+        results = None
         if results_path.is_file():
             try:
                 results = _load_unique_json(results_path.read_bytes())
@@ -2235,10 +2294,34 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
                 raise ProbeError("saved physical results record is unreadable") from exc
             if not isinstance(results, dict):
                 raise ProbeError("saved physical results record is not an object")
-            _final_observations(results, state_dir, state, target)
+            # COMPLETE and marker release are cleanup claims. Keep ownership
+            # until one current restored-state sample verifies them.
+            cleanup_observation = _final_observations(
+                results, state_dir, state, target)
+            cleanup_error = _final_cleanup_evidence_error(cleanup_observation)
+            if cleanup_error is not None:
+                state["stage_before_recovery"] = state.get("stage")
+                state["stage"] = "RECOVERY_REQUIRED"
+                state["recovery_error"] = (
+                    "final cleanup evidence expected=verified observed="
+                    + cleanup_error)
+                _save_state(state_dir, state)
+                results["final_recovery_state"] = state["stage"]
+                results["recovery_error"] = state["recovery_error"]
+                results["end_timestamp"] = _utc_timestamp()
+                _save_results(state_dir, results)
+                raise ProbeError(state["recovery_error"])
+        state["stage"] = "COMPLETE"
+        _save_state(state_dir, state)
         _release_partition_ownership(state)
-        if results_path.is_file():
-            _final_observations(results, state_dir, state, target)
+        if results is not None:
+            # Marker unlink + directory fsync is the only state transition after
+            # the verified cleanup sample. Do not perform another fallible
+            # swap/header/mapper observation after ownership is released.
+            results["active_partition_marker_present"] = False
+            results["final_recovery_state"] = state["stage"]
+            results["end_timestamp"] = _utc_timestamp()
+            _save_results(state_dir, results)
         return state
     finally:
         if lock_fd is not None:
@@ -2538,8 +2621,11 @@ def _final_physical_oracle_evidence_error(results, state, target,
             results.get("run_claim_consumed") is not True):
         return "incomplete_cleanup_or_ownership"
     row = results.get("final_swap_row")
-    if "final_swap_error" in results:
-        return "final_swap_inventory_unverifiable"
+    for field in (
+            "final_block0_error", "final_swap_error",
+            "final_mapper_error", "dm_inventory_error"):
+        if field in results:
+            return f"{field}_retained"
     if development_only:
         if row is not None or results.get("target_remains_inactive") is not True:
             return "development_backing_not_inactive"

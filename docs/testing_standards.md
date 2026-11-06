@@ -5891,7 +5891,16 @@ The development result requires an executed successful byte-oracle phase, durabl
 one-use claim with no outstanding ownership marker. A failed final `/proc/swaps`
 inventory observation is not proof of inactivity: retain the first error across
 cleanup retries, reject a contradictory serialized inactivity summary and do
-not publish an oracle PASS. `oracle_suite=PASS`
+not publish an oracle PASS. Apply the same retained-error rule to final block-zero,
+owned-mapper and unrelated-mapper inventory observations. Final restored header,
+swap state, mapper/module absence, unrelated-mapper inventory and ownership
+evidence must be verified while the active recovery marker is still held; any
+uncertainty in the current cleanup sample remains `RECOVERY_REQUIRED`. A later
+successful recovery retry may finish cleanup and release ownership, but retained
+raw errors keep the original oracle result ineligible for PASS. Only after the
+current cleanup gate may recovery durably mark `COMPLETE` and release the
+active marker; marker release itself must not trigger a second fallible
+swap/header/mapper sample. `oracle_suite=PASS`
 must denote a final evidence decision, not just a worker's zero exit code:
 require all exact expected phases complete, source/helper/artifact and target
 bindings consistent with the durable run state, normal recovery, and independent
