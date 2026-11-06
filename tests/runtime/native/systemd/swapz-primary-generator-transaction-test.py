@@ -125,6 +125,11 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertFalse(self.mapper_dropin().exists())
         self.assertRegex(result.stderr, rf"phase={re.escape(phase)}\b")
         self.assertRegex(result.stderr, r"source=[a-z-]+ validation=[a-z-]+ status=\d+ withheld=.*mapper-active-job")
+        self.assertRegex(result.stderr, r"identity_class=(protected-partuuid-unverified|validated-manager-partuuid)\b")
+        self.assertIn("expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap", result.stderr)
+        self.assertIn("observed_graph=unverified", result.stderr)
+        self.assertIn(f"original_status={result.returncode}", result.stderr)
+        self.assertIn("action=inspect-early-mask-and-protected-selector-read-only-before-retry", result.stderr)
         self.assertNotIn("PARTUUID=", result.stderr)
         self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
 
@@ -174,6 +179,7 @@ class GeneratorPublicationTest(unittest.TestCase):
         result = self.run_generator()
         self.assert_blocked(result, "passive-guard")
         self.assertIn("validation=conflicting-passive-dropin", result.stderr)
+        self.assertIn("identity_class=protected-partuuid-unverified", result.stderr)
         self.assertEqual(self.passive_guard().read_text(encoding="ascii"), foreign)
 
     def test_passive_guard_is_rechecked_after_mask_release(self) -> None:
@@ -191,6 +197,7 @@ class GeneratorPublicationTest(unittest.TestCase):
         result = self.run_generator(MOCK_PASSIVE_GUARD=str(self.passive_guard()))
         self.assert_blocked(result, "publication")
         self.assertIn("validation=passive-guard-not-retained", result.stderr)
+        self.assertIn("identity_class=validated-manager-partuuid", result.stderr)
         self.assertEqual(self.passive_guard().read_text(encoding="ascii"), "[Unit]\n")
 
     def test_changed_partuuid_removes_old_ordering_and_new_failure_masks_it(self) -> None:

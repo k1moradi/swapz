@@ -2,6 +2,8 @@
 # Emit selected-target ordering for the disabled primary-swap systemd units.
 set -eu
 umask 077
+# Publish only an allowlisted selector class, never the protected identity.
+selected_identity_class=protected-partuuid-unverified
 
 fail()
 {
@@ -10,9 +12,10 @@ fail()
 	failure_source=$3
 	failure_validation=$4
 	failure_withheld=$5
-	printf 'swapz-primary-generator: phase=%s source=%s validation=%s status=%s withheld=%s\n' \
+	printf 'swapz-primary-generator: phase=%s source=%s validation=%s status=%s withheld=%s identity_class=%s expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap observed_graph=unverified original_status=%s action=inspect-early-mask-and-protected-selector-read-only-before-retry\n' \
 		"$failure_phase" "$failure_source" "$failure_validation" \
-		"$failure_status" "$failure_withheld" >&2
+		"$failure_status" "$failure_withheld" "$selected_identity_class" \
+		"$failure_status" >&2
 	exit "$failure_status"
 }
 
@@ -775,6 +778,7 @@ valid_encoded_partuuid()
 }
 valid_encoded_partuuid "$encoded_device" ||
 	fail 1 selection manager-output invalid-escaped-partuuid mapper-active-job
+selected_identity_class=validated-manager-partuuid
 
 # The mapper job spans bounded mapper start and, on shutdown, can include
 # swapoff followed by mapper teardown. Allow both 120s phases plus slack.
