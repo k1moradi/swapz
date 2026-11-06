@@ -508,8 +508,13 @@ case "$lower_name" in
                     index_owner_status="$config_index_status"
             fi
         done
-        [[ $index_owner_ambiguous == 0 && ${#matches[@]} == 1 ]] ||
+        if [[ $index_owner_ambiguous != 0 ]]; then
             refuse BLOCKED null_blk_owner unavailable "phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=ambiguous_or_unreadable original_errno_or_exit=$index_owner_status retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
+        elif [[ ${#matches[@]} == 0 ]]; then
+            refuse BLOCKED null_blk_owner unavailable "phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=no_matching_owner original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
+        elif [[ ${#matches[@]} != 1 ]]; then
+            refuse BLOCKED null_blk_owner unavailable "phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=multiple_matching_owners original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
+        fi
         owned_config="${matches[0]}"
         ;;
     *)

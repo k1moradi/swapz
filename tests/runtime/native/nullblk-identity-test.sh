@@ -653,8 +653,8 @@ run_case() {
                 die "$case_name omitted creation-authority refusal"
             ;;
         ambiguous_index_owner)
-            [[ "$output" == *"check=null_blk_owner errno=unavailable remedy=phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=ambiguous_or_unreadable original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"* ]] ||
-                die "$case_name did not reject ambiguous index ownership"
+            [[ "$output" == *"check=null_blk_owner errno=unavailable remedy=phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=multiple_matching_owners original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"* ]] ||
+                die "$case_name did not reject multiple matching index owners"
             ;;
         unknown_index_owner)
             [[ "$output" == *"check=null_blk_owner errno=unavailable remedy=phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=ambiguous_or_unreadable original_errno_or_exit=1 retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"* ]] ||
