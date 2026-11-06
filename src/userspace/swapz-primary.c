@@ -9249,6 +9249,7 @@ static int swapz_primary_swap_transition_apply(
 	 * Linux accepts a pathname here. Production supplies /proc/self/fd/N for
 	 * the already-open, identity-checked mapper; the inventory callback then
 	 * proves that the kernel activated/deactivated that exact block dev_t.
+	 * A definite syscall failure is authoritative and returns immediately.
 	 * EINTR is ambiguous, so only the post-syscall inventory can reconcile it.
 	 */
 	errno = 0;
@@ -9257,7 +9258,7 @@ static int swapz_primary_swap_transition_apply(
 		ops->swapoff(ops->context, mapper_path);
 	if (syscall_result < 0)
 		syscall_errno = errno ? errno : EIO;
-	if (!activate && syscall_result < 0 && syscall_errno != EINTR) {
+	if (syscall_result < 0 && syscall_errno != EINTR) {
 		errno = syscall_errno;
 		goto out;
 	}
@@ -9274,10 +9275,6 @@ static int swapz_primary_swap_transition_apply(
 		goto out;
 	if (backing_active > 1) {
 		errno = EPROTO;
-		goto out;
-	}
-	if (activate && syscall_result < 0 && syscall_errno != EINTR) {
-		errno = syscall_errno;
 		goto out;
 	}
 	if ((activate && mapper_active != 1) ||

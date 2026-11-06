@@ -1203,6 +1203,151 @@ int main(int argc, char **argv)
             self.assertTrue(mutant.stdout.startswith("result=0 "))
             self.assertNotIn("syncs=1", mutant.stdout)
 
+
+    def test_definite_swap_syscall_error_preserves_first_errno(self):
+        """Definite errors return before a later inventory failure can replace them."""
+        begin = self.primary.index(
+            "static int swapz_primary_swap_transition_apply(")
+        end = self.primary.index(
+            "static int swapz_primary_mapper_node_retryable_errno(", begin)
+        helper = self.primary[begin:end]
+        early_failure = (
+            "if (syscall_result < 0 && syscall_errno != EINTR) {")
+        self.assertIn(early_failure, helper)
+
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+
+struct swapz_primary_swap_transition_ops {
+    int (*device_active)(void *context, dev_t expected_device);
+    long (*swapon)(void *context, const char *mapper_path);
+    long (*swapoff)(void *context, const char *mapper_path);
+    void *context;
+};
+"""
+        suffix = r"""
+struct fixture_state {
+    int activate;
+    int interrupted;
+    int inventory_calls;
+    int swapon_calls;
+    int swapoff_calls;
+};
+
+static int fake_device_active(void *context, dev_t device)
+{
+    struct fixture_state *state = context;
+
+    ++state->inventory_calls;
+    if (state->inventory_calls == 3) {
+        errno = EIO;
+        return -1;
+    }
+    if (!state->activate && device == 123 && state->inventory_calls == 2)
+        return 1;
+    return 0;
+}
+
+static long fake_swapon(void *context, const char *path)
+{
+    struct fixture_state *state = context;
+
+    (void)path;
+    ++state->swapon_calls;
+    errno = state->interrupted ? EINTR : EBUSY;
+    return -1;
+}
+
+static long fake_swapoff(void *context, const char *path)
+{
+    struct fixture_state *state = context;
+
+    (void)path;
+    ++state->swapoff_calls;
+    errno = state->interrupted ? EINTR : EBUSY;
+    return -1;
+}
+
+int main(int argc, char **argv)
+{
+    struct fixture_state state = {0};
+    int verified = 0;
+    int result;
+
+    if (argc != 3)
+        return 2;
+    state.activate = atoi(argv[1]);
+    state.interrupted = atoi(argv[2]);
+    const struct swapz_primary_swap_transition_ops ops = {
+        fake_device_active, fake_swapon, fake_swapoff, &state
+    };
+
+    errno = 0;
+    result = swapz_primary_swap_transition_apply(
+        state.activate, 123, 456, "/proc/self/fd/9", &ops, &verified);
+    printf("result=%d errno=%d inventory=%d swapon=%d swapoff=%d verified=%d\n",
+           result, result < 0 ? errno : 0, state.inventory_calls,
+           state.swapon_calls, state.swapoff_calls, verified);
+    return 0;
+}
+"""
+        cases = (
+            ("1", "0",
+             f"result=-1 errno={errno.EBUSY} inventory=2 "
+             "swapon=1 swapoff=0 verified=0\n"),
+            ("0", "0",
+             f"result=-1 errno={errno.EBUSY} inventory=2 "
+             "swapon=0 swapoff=1 verified=0\n"),
+            ("1", "1",
+             f"result=-1 errno={errno.EIO} inventory=3 "
+             "swapon=1 swapoff=0 verified=0\n"),
+            ("0", "1",
+             f"result=-1 errno={errno.EIO} inventory=3 "
+             "swapon=0 swapoff=1 verified=0\n"),
+        )
+        with TemporaryDirectory(
+                prefix="swapz-primary-swap-first-errno-") as directory:
+            fixture = Path(directory)
+            source = fixture / "swap-transition-first-errno.c"
+            binary = fixture / "swap-transition-first-errno"
+            compiler = [
+                "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra", "-Werror",
+                str(source), "-o", str(binary),
+            ]
+            source.write_text(prefix + helper + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            for activate, interrupted, expected in cases:
+                with self.subTest(
+                        activate=activate, interrupted=interrupted):
+                    outcome = subprocess.run(
+                        [str(binary), activate, interrupted],
+                        capture_output=True, text=True, timeout=5,
+                        check=False, cwd=ROOT)
+                    self.assertEqual(outcome.returncode, 0, outcome.stderr)
+                    self.assertEqual(outcome.stdout, expected)
+
+            # Negative control: the old activation-only late check lets a
+            # subsequent inventory EIO replace the definite swapon EBUSY.
+            mutant = helper.replace(
+                early_failure,
+                "if (!activate && syscall_result < 0 && "
+                "syscall_errno != EINTR) {",
+                1)
+            self.assertNotEqual(mutant, helper)
+            source.write_text(prefix + mutant + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            outcome = subprocess.run(
+                [str(binary), "1", "0"], capture_output=True, text=True,
+                timeout=5, check=False, cwd=ROOT)
+            self.assertEqual(outcome.returncode, 0, outcome.stderr)
+            self.assertEqual(
+                outcome.stdout,
+                f"result=-1 errno={errno.EIO} inventory=3 "
+                "swapon=1 swapoff=0 verified=0\n")
+
     def test_definite_swapoff_blocks_mapper_removal_in_stop_and_recover(self):
         """Exercise source-extracted coordinator ordering without host syscalls."""
         functions = (

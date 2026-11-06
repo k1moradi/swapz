@@ -33,7 +33,14 @@ and mapper inactive in `/proc/swaps`, invoke ordinary `swapon` through that
 descriptor's `/proc/self/fd/<n>` reference, and independently prove the exact
 mapper active before persisting `ACTIVE`. A definite `swapon` error fails the
 transaction even if later state is surprising; only an interrupted syscall may
-be reconciled by exact active inventory proof. Native activation must request
+be reconciled by exact active inventory proof.
+A definite non-`EINTR` `swapon` or `swapoff` failure is the first error at
+that syscall boundary and must return before any post-call inventory probe can
+replace its errno. Successful or interrupted calls still require the existing
+independent post-call inventory proof; an inventory failure there remains the
+reported error. The source-extracted rootless transition regression must pair a
+definite `EBUSY` with a synthetic later `EIO` and prove `EBUSY` is retained,
+while the matching `EINTR` case reaches the proof and reports its `EIO`. Native activation must request
 Linux released-swap-cluster DISCARD by combining `SWAP_FLAG_DISCARD` with the
 kernel ABI `SWAP_FLAG_DISCARD_PAGES` bit (`0x40000`). It must not request
 `SWAP_FLAG_DISCARD_ONCE`, must not alter swap priority, and must not retry
