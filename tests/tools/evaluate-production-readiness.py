@@ -173,9 +173,10 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
+            # Untrusted JSON keys may contain physical IDs or private paths.
             raise EvidenceError(
-                f"duplicate JSON key: {key[:80]!r}"
-                f"{' (truncated)' if len(key) > 80 else ''}")
+                "duplicate JSON key: observed_schema_class=duplicate_object_key "
+                "key_value=redacted")
         result[key] = value
     return result
 
@@ -1675,18 +1676,12 @@ def validate_physical_campaign_evidence(
             "metric=sealed_at_utc required=canonical_UTC")
     campaign_source_sha = campaign.get("source_sha")
     if campaign_source_sha != source_sha:
-        if (
-                isinstance(campaign_source_sha, str) and
-                GIT_SHA_RE.fullmatch(campaign_source_sha)):
-            reject(
-                "sealed campaign source binding mismatch: "
-                f"metric=source_sha observed={campaign_source_sha} "
-                f"expected={source_sha}")
-        else:
-            reject(
-                "sealed campaign source binding mismatch: "
-                "metric=source_sha observed=invalid "
-                f"expected={source_sha}")
+        observed_source_identity_class = (
+            "mismatch" if _valid_source(campaign_source_sha) else "invalid")
+        reject(
+            "sealed campaign source binding mismatch: metric=source_sha "
+            "expected_source_identity_class=release_source "
+            f"observed_source_identity_class={observed_source_identity_class}")
 
     source_tree_sha = campaign.get("source_tree_sha")
     if (

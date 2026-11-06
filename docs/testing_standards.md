@@ -1623,7 +1623,12 @@ return codes identify a real direct-child signal. A rootless
 128+signal-style status and an explicit child exit are indistinguishable.
 Likewise, exit 124 alone cannot establish a watchdog timeout. A runner marker
 that explicitly says it received INT/TERM may report interruption while still
-stating that the interruption's origin is not proven.
+stating that the interruption's origin is not proven. A time-limited unittest
+is a failed runtime test contract, not proof of a runner outage. Bare exit 124
+and shell signal-style 130/143 (or direct-child INT/TERM signals) must remain
+failed processes of unknown cause without an authenticated runner-interrupt
+marker; neither successful cleanup text nor an old CI status can replace the
+first failed test or make the cause proven.
 
 For validated native-rootless output, the runner's execution-first marker owns
 unittest identity because Python may print a later `ERROR:` detail before an
@@ -8403,6 +8408,10 @@ summary PASS values are BLOCKED until the canonical evaluator validates the
 persistent evidence bytes. Strict JSON rejects duplicate keys,
 nonfinite/overflowing numbers, and more than 128 nested JSON containers before
 decoding, so malformed depth cannot consume unbounded parser/validator recursion.
+Nested duplicate-key diagnostics must identify the duplicate-key schema class
+without echoing attacker-controlled key text. Forged physical-campaign source
+bindings must report expected-versus-observed identity classes, never raw
+campaign source SHAs, target identifiers or private filesystem paths.
 requires a FROZEN canonical production-acceptance policy, hashes the exact
 policy bytes, binds owner `make test`, all three required CI workflows
 (`Native kernel-C project-goal regressions`,

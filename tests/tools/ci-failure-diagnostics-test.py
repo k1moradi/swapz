@@ -219,11 +219,12 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
 
     def test_timeout_signal_and_shell_exit_remain_distinct(self):
         timeout = self.diagnose("", 124)
-        self.assertEqual(timeout["category"], "INFRASTRUCTURE")
+        self.assertEqual(timeout["category"], "UNKNOWN_FAILURE")
         self.assertIn("returned 124", timeout["reason"])
         self.assertIn("not proven", timeout["reason"])
         shell_exit = self.diagnose("", 143)
-        self.assertEqual(shell_exit["status"], "CANCELLED")
+        self.assertEqual(shell_exit["status"], "FAIL")
+        self.assertEqual(shell_exit["category"], "UNKNOWN_FAILURE")
         self.assertNotIn("termination", shell_exit)
         signalled = self.diagnose("", -11)
         self.assertEqual(signalled["status"], "FAIL")
@@ -235,9 +236,32 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "subtest=unavailable test=unavailable exit=124 reason=timeout_or_exit_124 "
             "phase_s=1 stage_s=2 line=22 log=unavailable", 1)
         self.assertEqual(rootless_timeout["child_exit_code"], 124)
-        self.assertEqual(rootless_timeout["category"], "INFRASTRUCTURE")
+        self.assertEqual(rootless_timeout["category"], "UNKNOWN_FAILURE")
         self.assertIn("watchdog not proven", rootless_timeout["reason"])
         self.assertNotIn("termination", rootless_timeout)
+
+    def test_time_limited_unittest_preserves_test_failure_and_private_log(self):
+        marker = (
+            "FAIL: rootless phase=package-dkms-test.py "
+            "subtest=unavailable test=unavailable exit=124 "
+            "reason=unittest_timeout phase_s=1 stage_s=2 line=22 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        failure = self.diagnose(
+            "earlier cleanup completed successfully\n" + marker, 1)
+        self.assertEqual(failure["status"], "FAIL")
+        self.assertEqual(failure["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(failure["phase"], "package-dkms-test.py")
+        self.assertEqual(failure["child_exit_code"], 124)
+        self.assertEqual(failure["exit_code"], 1)
+        self.assertEqual(failure["rootless_reason"], "unittest_timeout")
+        self.assertEqual(
+            failure["rootless_private_log"],
+            "build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        self.assertIn("reason=unittest_timeout", failure["first_error"])
+        self.assertNotIn("cleanup", failure["first_error"])
+        self.assertEqual(
+            failure["expected_contract"],
+            "test assertions and runtime contracts hold")
 
     def test_native_compiler_error_keeps_first_compile_failure(self):
         failure = self.diagnose(

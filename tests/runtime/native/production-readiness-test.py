@@ -2680,6 +2680,47 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     expected in blocker
                     for blocker in result["code_blockers"]))
 
+    def test_nested_duplicate_campaign_keys_block_without_disclosure(self):
+        private_key = "/private/campaign/serial-WWN-never-publish"
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw = encoded(report)
+        policy_raw = encoded(policy)
+        physical = real_swap_evidence(report_raw, policy_raw)
+        physical_raw = encoded(physical)
+        campaign = physical_campaign_evidence(policy_raw)
+        campaign_raw = encoded(campaign)
+        nested_anchor = b'"host_stability":{"checks":{'
+        self.assertIn(nested_anchor, campaign_raw)
+        forged_campaign_raw = campaign_raw.replace(
+            nested_anchor,
+            nested_anchor + (
+                f'"{private_key}":1,"{private_key}":2,').encode(),
+            1)
+        evidence = current_evidence(
+            report_raw, policy_raw, physical_raw, forged_campaign_raw)
+        result = EVALUATOR.evaluate_release(
+            SOURCE, report, report_raw, evidence, policy, policy_raw,
+            physical, physical_raw, campaign, forged_campaign_raw)
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        diagnostics = "\n".join(result["code_blockers"])
+        self.assertIn("observed_schema_class=duplicate_object_key", diagnostics)
+        self.assertNotIn(private_key, diagnostics)
+
+    def test_campaign_source_forgery_reports_identity_class_not_raw_sha(self):
+        campaign = physical_campaign_evidence(encoded(acceptance_policy()))
+        forged_source_sha = "b" * 40
+        campaign["source_sha"] = forged_source_sha
+        result = evaluate(campaign=campaign)
+        self.assertEqual(result["release_verdict"], "BLOCKED")
+        diagnostics = "\n".join(result["code_blockers"])
+        self.assertIn(
+            "metric=source_sha "
+            "expected_source_identity_class=release_source "
+            "observed_source_identity_class=mismatch", diagnostics)
+        self.assertNotIn(forged_source_sha, diagnostics)
+        self.assertNotIn(f"expected={SOURCE}", diagnostics)
+
     def test_strict_json_rejects_duplicate_policy_keys(self):
         with TemporaryDirectory(prefix="swapz-release-json-") as directory:
             path = Path(directory) / "acceptance.json"
