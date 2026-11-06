@@ -781,7 +781,9 @@ static int inject_directory_sync_failure;
 static int sync_attempts;
 static int release_attempts;
 
-static int injected_fsync(int fd)
+/* The skip-fsync mutant removes the only call; external linkage keeps that
+ * generated negative-control translation unit warning-clean under -Werror. */
+int injected_fsync(int fd)
 {
     ++sync_attempts;
     if (inject_directory_sync_failure) {
@@ -934,13 +936,17 @@ static int execute_transaction(void)
     int swap_deactivated_by_call = 0;
     int mapper_removed_by_call = 0;
     const char *failure_phase = "admission";
+    const char *swap_observation = "UNOBSERVED";
+    const char *mapper_observation = "UNOBSERVED";
     int result = -1;
 """
         suffix = r"""
     result = 0;
 out:
-    printf("result=%d errno=%d swapoff=%d mapper=%d phase=%s\n",
-           result, errno, swapoff_attempts, mapper_attempts, failure_phase);
+    printf("result=%d errno=%d swapoff=%d mapper=%d phase=%s "
+           "swap=%s mapper_state=%s\n",
+           result, errno, swapoff_attempts, mapper_attempts, failure_phase,
+           swap_observation, mapper_observation);
     return result;
 }
 int main(void) { return execute_transaction() < 0 ? 0 : 1; }
@@ -975,7 +981,8 @@ int main(void) { return execute_transaction() < 0 ? 0 : 1; }
                     self.assertEqual(
                         outcome.stdout,
                         f"result=-1 errno={errno.EBUSY} swapoff=1 "
-                        "mapper=0 phase=swapoff\n",
+                        "mapper=0 phase=swapoff swap=UNCERTAIN "
+                        "mapper_state=UNOBSERVED\n",
                     )
                     # Mutating the stop gate must expose a DM removal attempt.
                     mutated = snippet.replace(

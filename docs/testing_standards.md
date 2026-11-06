@@ -104,6 +104,13 @@ refusals must name the operation, first numeric errno, recovery-state errno
 when it also fails, the persistence boundary and honest durable/mapper/swap
 observability (OBSERVED, UNOBSERVED or UNCERTAIN). Source-extracted fixtures
 must never execute privileged swap, mapper or device operations.
+Generated STOP/RECOVER snippets that retain production observation updates
+must declare their `swap_observation` and `mapper_observation` locals in the
+fixture wrapper and consume them in the fixture's assertion output. Original
+and mutated source-extracted fixtures must compile with the same `-Werror`
+flags: if a negative-control mutation removes the final reference to a static
+syscall adapter, give that test adapter deliberate external linkage or another
+safe reference instead of suppressing warnings.
 
 Observation labels are proof labels, not syscall-attempt labels. A successful
 idempotent helper that proves swap already inactive or a mapper already absent
