@@ -344,13 +344,22 @@ other_kernel_module_candidates_absent() {
 }
 
 assert_single_kernel_dkms_scope() {
-  local all_kernel_status=""
+  local all_kernel_status="" all_kernel_status_rc=0
   query_dkms_status all_kernel_status -m swapz -v "$version" ||
+    all_kernel_status_rc=$?
+  if (( all_kernel_status_rc != 0 )); then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=dkms_registration_scope check=all_kernel_status expected=current_kernel_only_or_added observed=probe_failed command_status=%s next=inspect_dkms_status_read_only retained_state=unchanged\n' \
+      "$all_kernel_status_rc" >&2
     blocked "cannot inspect DKMS registrations across installed kernels"
-  dkms_status_single_kernel_scope "$all_kernel_status" ||
+  fi
+  if ! dkms_status_single_kernel_scope "$all_kernel_status"; then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=dkms_registration_scope check=all_kernel_status expected=current_kernel_only_or_added observed=other_kernel_or_ambiguous command_status=0 next=inspect_dkms_status_read_only retained_state=unchanged\n' >&2
     blocked "other-kernel or ambiguous DKMS registrations; refusing --all"
-  other_kernel_module_candidates_absent ||
+  fi
+  if ! other_kernel_module_candidates_absent; then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=dkms_module_image_set check=other_kernel_absence expected=no_other_kernel_module_images observed=stale_or_foreign_image command_status=0 next=inspect_installed_kernel_module_images_read_only retained_state=unchanged\n' >&2
     blocked "other-kernel DKMS module variants exist; refusing --all"
+  fi
 }
 
 safe_input_file() {
@@ -587,12 +596,42 @@ prepare_exact_module_restore() {
   fi
 }
 
+module_resolution_observed=not_checked
+module_resolution_command_status=0
+
 verify_module_resolution() {
-  local resolved_module
-  # A producer failure invalidates the observation even if stdout looks right.
-  resolved_module="$(modinfo -n dm_swapz 2>/dev/null)" || return 1
-  resolved_module="$(readlink -f -- "$resolved_module" 2>/dev/null)" || return 1
-  [[ "$resolved_module" == "$installed_module" ]]
+  local module_lookup_output resolved_module
+  module_resolution_observed=not_checked
+  module_resolution_command_status=0
+
+  if module_lookup_output="$(modinfo -n dm_swapz 2>/dev/null)"; then
+    :
+  else
+    module_resolution_command_status=$?
+    module_resolution_observed=probe_failed
+    return 1
+  fi
+  if [[ -z "$module_lookup_output" || "$module_lookup_output" == *$'\n'* ]]; then
+    module_resolution_observed=invalid_output
+    return 1
+  fi
+  if resolved_module="$(readlink -f -- "$module_lookup_output" 2>/dev/null)"; then
+    :
+  else
+    module_resolution_command_status=$?
+    module_resolution_observed=canonicalization_failed
+    return 1
+  fi
+  if [[ -z "$resolved_module" || "$resolved_module" != "$installed_module" ]]; then
+    module_resolution_observed=foreign_path
+    return 1
+  fi
+  module_resolution_observed=owned_path
+}
+
+report_module_resolution_failure() {
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=installed_dm-swapz.ko check=module_lookup expected=qualified_owned_current_kernel_image observed=%s command_status=%s next=inspect_modinfo_module_path_read_only retained_state=unchanged\n' \
+    "$module_resolution_observed" "$module_resolution_command_status" >&2
 }
 
 verify_owned() {
@@ -630,6 +669,10 @@ report_existing_package_drift() {
   fi
   if [[ "$stored_cli_sha" =~ ^[0-9a-f]{64}$ ]]; then
     report_qualified_digest installed_swapzctl "$stored_cli_sha" "$cli" installed_marker_unverified || true
+  fi
+  if [[ -f "$installed_module" && ! -L "$installed_module" ]] &&
+     ! verify_module_resolution; then
+    report_module_resolution_failure
   fi
   if ! verify_source_manifest >/dev/null 2>&1; then
     printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=installed_kernel_sources check=source_manifest expected=recorded_source_hashes observed=mismatch_or_unavailable next=inspect_source_manifest_read_only retained_state=unchanged\n' >&2
@@ -1798,10 +1841,17 @@ assert_no_incomplete_package_transactions
 
 if [[ "$action" == uninstall ]]; then
   uninstall_dkms_status=""
+  uninstall_dkms_status_rc=0
   query_dkms_status uninstall_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
+    uninstall_dkms_status_rc=$?
+  if (( uninstall_dkms_status_rc != 0 )); then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=exact_installed_state expected=one_exact_installed_record observed=probe_failed command_status=%s next=inspect_dkms_status_read_only retained_state=unchanged\n'       "$uninstall_dkms_status_rc" >&2
     blocked "cannot inspect current-kernel DKMS state before package removal"
-  dkms_status_exact_installed "$uninstall_dkms_status" ||
+  fi
+  if ! dkms_status_exact_installed "$uninstall_dkms_status"; then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=exact_installed_state expected=one_exact_installed_record observed=missing_stale_or_ambiguous command_status=0 next=inspect_dkms_status_read_only retained_state=unchanged\n' >&2
     blocked "verified package does not have an installed current-kernel DKMS state"
+  fi
   assert_single_kernel_dkms_scope
   if [[ -z "$test_root" && "$action" == uninstall ]] &&
      [[ -e /sys/module/dm_swapz || -e /sys/module/dm-swapz ]]; then
@@ -1846,6 +1896,7 @@ if [[ "$action" == uninstall ]]; then
     esac
   done
   verify_owned || {
+    report_existing_package_drift
     echo "BLOCKED: uninstall preflight: foreign, absent or modified swapz package; rollback not attempted" >&2
     exit 1
   }
@@ -2173,10 +2224,15 @@ if package_paths_present; then
 fi
 
 current_dkms_status=""
+current_dkms_status_rc=0
 query_dkms_status current_dkms_status -m swapz -v "$version" -k "$kernel_release" ||
+  current_dkms_status_rc=$?
+if (( current_dkms_status_rc != 0 )); then
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=exact_installed_state expected=one_exact_installed_record observed=probe_failed command_status=%s next=inspect_dkms_status_read_only retained_state=unchanged\n'     "$current_dkms_status_rc" >&2
   blocked "cannot inspect current-kernel DKMS state"
+fi
 if [[ -n "$existing_kind" ]] && ! dkms_status_exact_installed "$current_dkms_status"; then
-  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=exact_installed_state expected=one_exact_installed_record observed=missing_stale_or_ambiguous next=inspect_dkms_status_read_only retained_state=unchanged\n' >&2
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=exact_installed_state expected=one_exact_installed_record observed=missing_stale_or_ambiguous command_status=0 next=inspect_dkms_status_read_only retained_state=unchanged\n' >&2
   blocked "verified package does not have an installed current-kernel DKMS state"
 fi
 assert_single_kernel_dkms_scope
@@ -2184,16 +2240,22 @@ if [[ -z "$existing_kind" && -n "$current_dkms_status" ]]; then
   blocked "DKMS state exists without a verified package"
 fi
 if [[ -n "$existing_kind" ]]; then
-  verify_installed_module_set ||
+  if ! verify_installed_module_set; then
+    printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_module_image_set check=module_image_set expected=exactly_one_uncompressed_owned_image observed=missing_or_ambiguous command_status=0 next=inspect_installed_kernel_module_images_read_only retained_state=unchanged\n' >&2
     blocked "verified package does not own exactly one current-kernel module image"
-  verify_module_resolution ||
+  fi
+  if ! verify_module_resolution; then
+    report_module_resolution_failure
     blocked "verified package module lookup does not match package ownership"
+  fi
 fi
 if [[ "$existing_kind" == current ]] &&
    cmp -s "$src/$qualification_marker" <(incoming_identity) &&
    dkms_status_exact_installed "$current_dkms_status"; then
-  verify_module_resolution ||
+  if ! verify_module_resolution; then
+    report_module_resolution_failure
     blocked "installed module lookup does not match package ownership"
+  fi
   echo "Installed swapz package already matches the exact qualified artifacts"
   exit 0
 fi
@@ -2559,19 +2621,31 @@ persist_transaction_state installing-dkms
 persist_transaction_state dkms-installed
 install_test_checkpoint dkms-installed
 status=""
+status_rc=0
 query_dkms_status status -m swapz -v "$version" -k "$kernel_release" ||
+  status_rc=$?
+if (( status_rc != 0 )); then
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=post_install_exact_state expected=one_exact_installed_record observed=probe_failed command_status=%s next=inspect_dkms_status_read_only retained_state=unchanged\n'     "$status_rc" >&2
   blocked "cannot verify current-kernel DKMS state after installation"
-dkms_status_exact_installed "$status" ||
+fi
+if ! dkms_status_exact_installed "$status"; then
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_dkms_registration check=post_install_exact_state expected=one_exact_installed_record observed=missing_stale_or_ambiguous command_status=0 next=inspect_dkms_status_read_only retained_state=unchanged\n' >&2
   blocked "DKMS did not report the current kernel installed"
+fi
 
 existing_module_candidates=()
 for candidate in "${module_candidate_paths[@]}"; do
   [[ -e "$candidate" || -L "$candidate" ]] && existing_module_candidates+=("$candidate")
 done
-[[ ${#existing_module_candidates[@]} == 1 ]] || blocked "unexpected DKMS module paths"
+if (( ${#existing_module_candidates[@]} != 1 )); then
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_module_image_set check=dkms_install_output expected=exactly_one_module_image observed=missing_or_ambiguous command_status=0 next=inspect_dkms_install_outputs_read_only retained_state=unchanged\n' >&2
+  blocked "unexpected DKMS module paths"
+fi
 dkms_installed_module="${existing_module_candidates[0]}"
-[[ -f "$dkms_installed_module" && ! -L "$dkms_installed_module" ]] ||
+if [[ ! -f "$dkms_installed_module" || -L "$dkms_installed_module" ]]; then
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=current_kernel_module_image_set check=dkms_install_output expected=regular_module_image observed=unsafe_or_nonregular command_status=0 next=inspect_dkms_install_outputs_read_only retained_state=unchanged\n' >&2
   blocked "DKMS installed module is not a regular file"
+fi
 persist_transaction_state promoting-qualified-module
 if [[ "$dkms_installed_module" != "$installed_module" ]]; then
   rm -f -- "$dkms_installed_module"
@@ -2588,8 +2662,10 @@ persist_transaction_state depmod-pending
 "$depmod_bin" "$kernel_release"
 report_qualified_digest installed_dm-swapz.ko "$qualified_module_sha256" "$installed_module" qualified_report ||
   blocked "installed module changed during depmod"
-verify_module_resolution ||
+if ! verify_module_resolution; then
+  report_module_resolution_failure
   blocked "module lookup does not resolve to the qualified installed image"
+fi
 persist_transaction_state depmod-complete
 install_test_checkpoint depmod-complete
 

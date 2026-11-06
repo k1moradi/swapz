@@ -179,6 +179,7 @@ class PackageLifecycle(unittest.TestCase):
             SWAPZ_TAMPER_BEFORE_CLI_MARKER=str(
                 self.home / "tamper-before-cli.once"),
             SWAPZ_FAKE_SECURE_BOOT="disabled",
+            SWAPZ_FAKE_SECURE_BOOT_STATUS="0",
             SWAPZ_FAKE_MOK_ENROLLED="1",
             SWAPZ_FAKE_SIGNATURE_VALID="1",
             SWAPZ_FAKE_SIG_KEY="ABCD",
@@ -334,8 +335,10 @@ case "${1:-}" in
     case "$SWAPZ_FAKE_SECURE_BOOT" in
       enabled) echo 'SecureBoot enabled';;
       disabled) echo 'SecureBoot disabled';;
-      *) echo 'unknown'; exit 1;;
+      ambiguous) printf '%s\n' 'SecureBoot disabled' 'SecureBoot enabled';;
+      *) echo 'unknown';;
     esac
+    exit "${SWAPZ_FAKE_SECURE_BOOT_STATUS:-0}"
     ;;
   --ignore-keyring)
     [[ $# == 3 && "$2" == --test-key ]] || exit 2
@@ -672,6 +675,12 @@ exec "{flock_binary}" "$@"
         self.assertNotEqual(status_failure.returncode, 0)
         self.assertIn("cannot inspect current-kernel DKMS state",
                       status_failure.stderr)
+        self.assertIn(
+            "artifact=current_kernel_dkms_registration "
+            "check=exact_installed_state expected=one_exact_installed_record "
+            "observed=probe_failed command_status=44",
+            status_failure.stderr,
+        )
         self.assert_absent()
 
         self.fail_marker.unlink(missing_ok=True)
@@ -713,6 +722,12 @@ exec "{flock_binary}" "$@"
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("cannot inspect current-kernel DKMS state before package removal",
                       failed.stderr)
+        self.assertIn(
+            "artifact=current_kernel_dkms_registration "
+            "check=exact_installed_state expected=one_exact_installed_record "
+            "observed=probe_failed command_status=44",
+            failed.stderr,
+        )
         self.assert_installed_exact()
         self.assertEqual(self.uninstall_transactions(), [])
 
@@ -731,6 +746,34 @@ exec "{flock_binary}" "$@"
         self.assertIn("signature verification", result.stderr)
         self.assert_absent()
         self.cert.write_text("certificate")
+
+        failed_state_probe = self.invoke(
+            "install", {
+                "SWAPZ_FAKE_SECURE_BOOT": "disabled",
+                "SWAPZ_FAKE_SECURE_BOOT_STATUS": "61",
+            })
+        self.assertNotEqual(failed_state_probe.returncode, 0)
+        self.assertIn("artifact=dm-swapz.ko phase=secure_boot_state",
+                      failed_state_probe.stderr)
+        self.assertIn(
+            "expected=authoritative_enabled_or_disabled_state "
+            "observed=probe_failed command_status=61",
+            failed_state_probe.stderr,
+        )
+        self.assertIn("next=inspect_secure_boot_state_read_only",
+                      failed_state_probe.stderr)
+        self.assert_absent()
+
+        ambiguous_state = self.invoke(
+            "install", {"SWAPZ_FAKE_SECURE_BOOT": "ambiguous"})
+        self.assertNotEqual(ambiguous_state.returncode, 0)
+        self.assertIn("artifact=dm-swapz.ko phase=secure_boot_state",
+                      ambiguous_state.stderr)
+        self.assertIn(
+            "observed=unrecognized_or_ambiguous_state command_status=0",
+            ambiguous_state.stderr,
+        )
+        self.assert_absent()
 
         result = self.invoke(
             "install", {
@@ -798,6 +841,14 @@ exec "{flock_binary}" "$@"
             "install", {"SWAPZ_FAKE_MODULE_LOOKUP_EXIT": "62"})
         self.assertNotEqual(failed_lookup.returncode, 0)
         self.assertIn("existing package is partial, foreign, or modified",
+                      failed_lookup.stderr)
+        self.assertIn(
+            "artifact=installed_dm-swapz.ko check=module_lookup "
+            "expected=qualified_owned_current_kernel_image "
+            "observed=probe_failed command_status=62",
+            failed_lookup.stderr,
+        )
+        self.assertIn("next=inspect_modinfo_module_path_read_only",
                       failed_lookup.stderr)
         self.assertNotIn(str(self.home), failed_lookup.stderr)
         self.assert_installed_exact()
@@ -1633,6 +1684,12 @@ exec "{flock_binary}" "$@"
                     result = self.invoke(action, overrides)
                     self.assertNotEqual(result.returncode, 0, result.stdout)
                     self.assertIn("current-kernel DKMS state", result.stderr)
+                    self.assertIn(
+                        "artifact=current_kernel_dkms_registration "
+                        "check=exact_installed_state expected=one_exact_installed_record "
+                        "observed=missing_stale_or_ambiguous",
+                        result.stderr,
+                    )
                     self.assert_installed_exact()
         # Older DKMS comma-separated output is accepted only when exact.
         accepted = self.invoke("install", {
@@ -1656,6 +1713,12 @@ exec "{flock_binary}" "$@"
             "SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX": ".xz"})
         self.assertNotEqual(mixed.returncode, 0)
         self.assertIn("unexpected DKMS module paths", mixed.stderr)
+        self.assertIn(
+            "artifact=current_kernel_module_image_set "
+            "check=dkms_install_output expected=exactly_one_module_image "
+            "observed=missing_or_ambiguous",
+            mixed.stderr,
+        )
         self.assert_absent()
         self.assertFalse(list((self.home / "transactions").glob("swapz-package.*")))
 
@@ -2062,6 +2125,15 @@ exec "{flock_binary}" "$@"
             "uninstall", {"SWAPZ_FAKE_MODULE_LOOKUP": str(foreign)})
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("foreign, absent or modified", failed.stderr)
+        self.assertIn(
+            "artifact=installed_dm-swapz.ko check=module_lookup "
+            "expected=qualified_owned_current_kernel_image "
+            "observed=foreign_path command_status=0",
+            failed.stderr,
+        )
+        self.assertIn("next=inspect_modinfo_module_path_read_only",
+                      failed.stderr)
+        self.assertNotIn(str(self.home), failed.stderr)
         self.assert_installed_exact()
         self.assertEqual(self.uninstall_transactions(), [])
 
@@ -3271,6 +3343,12 @@ exec "{flock_binary}" "$@"
             "SWAPZ_FAKE_DKMS_OTHER_KERNEL": other_kernel})
         self.assertNotEqual(first.returncode, 0)
         self.assertIn("other-kernel", first.stderr)
+        self.assertIn(
+            "artifact=dkms_registration_scope check=all_kernel_status "
+            "expected=current_kernel_only_or_added "
+            "observed=other_kernel_or_ambiguous",
+            first.stderr,
+        )
         self.assert_absent()
 
         self.assertEqual(self.invoke("install").returncode, 0)
@@ -3283,6 +3361,12 @@ exec "{flock_binary}" "$@"
                     "SWAPZ_FAKE_DKMS_OTHER_KERNEL": other_kernel})
                 self.assertNotEqual(refused.returncode, 0)
                 self.assertIn("other-kernel", refused.stderr)
+                self.assertIn(
+                    "artifact=dkms_registration_scope check=all_kernel_status "
+                    "expected=current_kernel_only_or_added "
+                    "observed=other_kernel_or_ambiguous",
+                    refused.stderr,
+                )
                 self.assertEqual(
                     self.dkms_log.read_text().splitlines().count("remove"),
                     before)
@@ -3299,6 +3383,12 @@ exec "{flock_binary}" "$@"
                 self.assertNotEqual(refused.returncode, 0)
                 self.assertIn("other-kernel DKMS module variants",
                               refused.stderr)
+                self.assertIn(
+                    "artifact=dkms_module_image_set check=other_kernel_absence "
+                    "expected=no_other_kernel_module_images "
+                    "observed=stale_or_foreign_image",
+                    refused.stderr,
+                )
                 self.assertTrue(image.exists())
                 self.assertEqual(
                     self.dkms_log.read_text().splitlines().count("remove"),

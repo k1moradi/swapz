@@ -29,6 +29,18 @@ blocked_phase() {
             expected_state=valid_build_time_module_signature
             observed_state=signing_failed
             next_action=inspect_signing_tool_status_without_key_material ;;
+        module_presence)
+            expected_state=regular_module_file
+            observed_state=missing_or_unsafe
+            next_action=inspect_module_artifact_metadata_read_only ;;
+        secure_boot_state)
+            expected_state=authoritative_enabled_or_disabled_state
+            if [[ "$command_status" == 0 ]]; then
+                observed_state=unrecognized_or_ambiguous_state
+            else
+                observed_state=probe_failed
+            fi
+            next_action=inspect_secure_boot_state_read_only ;;
     esac
     # Never replay signer output, private key/certificate paths or material,
     # and never claim that the running kernel accepted the signed module.
@@ -74,42 +86,65 @@ fi
     blocked_phase module_presence 1 "built dm-swapz.ko is missing or not a regular file"
 
 secure_boot_state() {
-    local output value
+    local output status value
     local -a variables
 
+    # A failed producer cannot prove either enabled or disabled state from
+    # plausible stdout. Only exact, successful mokutil output is authoritative.
     if command -v mokutil >/dev/null 2>&1; then
-        output="$(LC_ALL=C mokutil --sb-state 2>/dev/null || true)"
+        status=0
+        if output="$(LC_ALL=C mokutil --sb-state 2>/dev/null)"; then
+            :
+        else
+            status=$?
+            printf 'unknown|%s\n' "$status"
+            return
+        fi
         case "$output" in
-            *"SecureBoot enabled"*) printf '%s\n' enabled; return ;;
-            *"SecureBoot disabled"*) printf '%s\n' disabled; return ;;
+            "SecureBoot enabled") printf '%s\n' 'enabled|0'; return ;;
+            "SecureBoot disabled") printf '%s\n' 'disabled|0'; return ;;
+            *) printf '%s\n' 'unknown|0'; return ;;
         esac
     fi
 
     if [[ ! -d /sys/firmware/efi ]]; then
-        printf '%s\n' disabled
+        printf '%s\n' 'disabled|0'
         return
     fi
 
     shopt -s nullglob
     variables=(/sys/firmware/efi/efivars/SecureBoot-*)
     shopt -u nullglob
-    if (( ${#variables[@]} == 1 )) && [[ -r ${variables[0]} ]] &&
-       command -v od >/dev/null 2>&1; then
-        value="$(od -An -t u1 -j 4 -N 1 "${variables[0]}" 2>/dev/null |
-                 tr -d '[:space:]')"
+    if (( ${#variables[@]} == 1 )) && [[ -r ${variables[0]} ]]; then
+        command -v od >/dev/null 2>&1 || {
+            printf '%s\n' 'unknown|127'
+            return
+        }
+        status=0
+        if value="$(od -An -t u1 -j 4 -N 1 "${variables[0]}" 2>/dev/null |
+                     tr -d '[:space:]')"; then
+            :
+        else
+            status=$?
+            printf 'unknown|%s\n' "$status"
+            return
+        fi
         case "$value" in
-            1) printf '%s\n' enabled; return ;;
-            0) printf '%s\n' disabled; return ;;
+            1) printf '%s\n' 'enabled|0'; return ;;
+            0) printf '%s\n' 'disabled|0'; return ;;
         esac
     fi
 
-    printf '%s\n' unknown
+    printf '%s\n' 'unknown|1'
 }
 
-state="$(secure_boot_state)"
+secure_boot_observation="$(secure_boot_state)"
+state="${secure_boot_observation%%|*}"
+secure_boot_state_status="${secure_boot_observation#*|}"
 [[ "$state" != disabled ]] || exit 0
 [[ "$state" == enabled ]] ||
-    blocked_phase secure_boot_state 1 "cannot determine EFI Secure Boot state"
+    blocked_phase secure_boot_state "$secure_boot_state_status" \
+        "cannot determine EFI Secure Boot state"
 
 key="${SWAPZ_MOK_PRIVATE_KEY:-/var/lib/shim-signed/mok/MOK.priv}"
 cert="${SWAPZ_MOK_CERT:-/var/lib/shim-signed/mok/MOK.der}"

@@ -1776,7 +1776,10 @@ dmsetup, inventory or journal probes retain their actual command status. The jou
 observer must preserve the bounded `journalctl` exit separately from the redacted
 log sample so timeout and probe failure remain attributable without exposing text.
 Diagnostics must not print device paths, PARTUUIDs, recovery run IDs or private
-journal/recovery text. WARN and DEGRADED records are observation only: they are
+journal/recovery text. Every non-HEALTHY `SWAPZ_RUNTIME_HEALTH` summary must
+therefore replace its PARTUUID, backing major:minor and mapper UUID/run identity
+with an explicit redacted class; the structured observer record identifies the
+failed check without echoing those values. WARN and DEGRADED records are observation only: they are
 never permission to remove a mapper, disable unrelated swap, delete recovery
 evidence, or blindly retry. A sustained GC stall may require the normal primary
 stop path, but the observer itself remains read-only and must report inspection
@@ -7418,9 +7421,18 @@ unverified. Missing installed `swapzctl`, mismatched installed module bytes,
 wrong module vermagic, stale/missing DKMS registration and Secure Boot
 signature/enrollment failure must all remain BLOCKED. A verified detached
 signature plus an enrolled MOK must never imply kernel load acceptance.
-Nonzero `modinfo` exit status invalidates module vermagic and installed
-module-path resolution even if stdout appears to match; synthetic negative
-controls must prove both refusals before package mutation.
+Secure Boot state admission requires either exact successful
+`mokutil --sb-state` output or the existing direct EFI-variable fallback when
+`mokutil` is absent. Nonzero `mokutil` status or ambiguous/multiline state
+output is indeterminate and must BLOCK rather than treating plausible stdout as
+proof that Secure Boot is disabled. Nonzero `modinfo` exit status invalidates
+module vermagic and installed module-path resolution even if stdout appears to
+match; synthetic negative controls must prove both refusals before package
+mutation. Installed-module lookup refusals must report a bounded path-status
+class and producer status without printing the resolved path. Stale/ambiguous
+all-kernel DKMS registrations and foreign module images must likewise name the
+failed scope or module-image-set check and direct the operator to read-only
+DKMS/module inspection.
 
 DKMS remains the compatibility/header integration mechanism, not the artifact
 authority. After a successful current-kernel DKMS build/install, packaging must

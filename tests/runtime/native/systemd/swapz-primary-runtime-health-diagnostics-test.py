@@ -25,6 +25,23 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.fixture.tearDown()
 
+    def assert_identity_redacted(self, result) -> None:
+        partuuid = fixture_module["PARTUUID"]
+        active_run_id = fixture_module["ACTIVE_RUN_ID"]
+        for line in result.stderr.splitlines():
+            if line.startswith("SWAPZ_RUNTIME_OBSERVER"):
+                self.assertNotIn(partuuid, line)
+                self.assertNotIn(active_run_id, line)
+            if (line.startswith("SWAPZ_RUNTIME_HEALTH=") and
+                    "SWAPZ_RUNTIME_HEALTH=HEALTHY" not in line):
+                self.assertIn(
+                    "partuuid=redacted backing=redacted mapper_uuid=redacted",
+                    line,
+                )
+                self.assertNotIn(partuuid, line)
+                self.assertNotIn(active_run_id, line)
+                self.assertNotIn("backing=8:1", line)
+
     def assert_diagnostic(
         self, result, expected_status: int, health: str, reason: str, phase: str,
         check: str, next_action: str,
@@ -35,6 +52,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         self.assertIn(f"phase={phase} expected=", result.stderr)
         self.assertIn(f"check={check} retained_state=unchanged", result.stderr)
         self.assertIn(f"next={next_action}", result.stderr)
+        self.assert_identity_redacted(result)
         self.assertNotIn(str(self.fixture.recovery), result.stderr)
         self.assertNotIn(str(self.fixture.etc), result.stderr)
         self.assertNotIn("dmsetup remove", result.stderr)
@@ -113,6 +131,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         self.assertIn("swap_block_identity_unavailable", result.stderr)
         self.assertIn("phase=swap_inventory expected=", result.stderr)
         self.assertIn("retained_state=unchanged", result.stderr)
+        self.assert_identity_redacted(result)
 
     def test_incomplete_status_is_degraded_not_failed(self) -> None:
         env = self.fixture.env.copy()
@@ -123,6 +142,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         self.assertIn("mapper_status_unavailable", result.stderr)
         self.assertIn("phase=mapper_status expected=", result.stderr)
         self.assertIn("retained_state=unchanged", result.stderr)
+        self.assert_identity_redacted(result)
 
     def test_kernel_warning_remains_warn(self) -> None:
         env = self.fixture.env.copy()
@@ -132,6 +152,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         self.assertIn("SWAPZ_RUNTIME_HEALTH=WARN", result.stderr)
         self.assertIn("phase=kernel_log", result.stderr)
         self.assertIn("retained_state=unchanged", result.stderr)
+        self.assert_identity_redacted(result)
 
     def test_invalid_mapper_table_contract_is_attributed(self) -> None:
         dmsetup_mock = self.fixture.bin / "dmsetup"
@@ -214,6 +235,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         self.assertIn("retained_state=unchanged", result.stderr)
         self.assertNotIn("dmsetup remove", result.stderr)
         self.assertNotIn("swapoff", result.stderr)
+        self.assert_identity_redacted(result)
 
     def test_swap_capacity_warning_has_read_only_inspection(self) -> None:
         primary_path = self.fixture.dev / "mapper" / "swapz-primary"
@@ -233,6 +255,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         )
         self.assertIn("next=inspect_proc_swaps_read_only", result.stderr)
         self.assertIn("retained_state=unchanged", result.stderr)
+        self.assert_identity_redacted(result)
 
     def test_sustained_gc_stall_has_structured_stop_inspection(self) -> None:
         env = self.fixture.env.copy()
@@ -255,6 +278,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         )
         self.assertNotIn("dmsetup remove", result.stderr)
         self.assertNotIn("swapoff", result.stderr)
+        self.assert_identity_redacted(result)
 
     def test_journal_probe_status_survives_degraded_observation(self) -> None:
         journalctl_mock = self.fixture.bin / "journalctl"
@@ -276,6 +300,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         )
         self.assertIn("check=kernel_log_observation retained_state=unchanged", result.stderr)
         self.assertIn("next=inspect_kernel_journal_read_only", result.stderr)
+        self.assert_identity_redacted(result)
 
     def test_failed_latch_without_errno_is_not_reported_as_terminal_errno(self) -> None:
         env = self.fixture.env.copy()
@@ -298,6 +323,7 @@ class RuntimeHealthDiagnosticTests(unittest.TestCase):
         )
         self.assertIn("check=failed_latch retained_state=unchanged", result.stderr)
         self.assertNotIn("phase=target_terminal ", result.stderr)
+        self.assert_identity_redacted(result)
 
 
 if __name__ == "__main__":

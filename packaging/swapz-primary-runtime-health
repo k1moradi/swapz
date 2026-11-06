@@ -1394,9 +1394,22 @@ log_runtime_attribution()
 
 log_runtime_state()
 {
+	logged_partuuid=$selected_partuuid
+	logged_backing=$selected_major_minor
+	logged_mapper_uuid=$dm_uuid
+	case "$health_state" in
+	HEALTHY) ;;
+	*)
+		# Failure and warning logs must not disclose host-specific identity.
+		# Structured observer records carry the check class instead.
+		logged_partuuid=redacted
+		logged_backing=redacted
+		logged_mapper_uuid=redacted
+		;;
+	esac
 	printf 'SWAPZ_RUNTIME_HEALTH=%s failures=%s warnings=%s observation_errors=%s partuuid=%s backing=%s mapper_uuid=%s swap_used_kib=%s swap_size_kib=%s swap_remaining_kib=%s swap_occupancy_percent=%s failed=%s first_error=%s flush_err=%s logical_write_err=%s endio_write_err=%s forced_endio_err=%s lower_discard_err=%s gc_victims=%s gc_pages=%s gc_reserve_segments_initial=%s gc_reserve_segments_current=%s gc_destination_advances=%s gc_stall_polls=%s mapper_unit=%s/%s/%s swap_unit=%s/%s/%s kernel_error_count=%s\n' \
 		"$health_state" "${failure_reasons:-none}" "${warning_reasons:-none}" "${observation_reasons:-none}" \
-		"$selected_partuuid" "$selected_major_minor" "$dm_uuid" "$swap_used_kib" "$swap_size_kib" \
+		"$logged_partuuid" "$logged_backing" "$logged_mapper_uuid" "$swap_used_kib" "$swap_size_kib" \
 		"$swap_remaining_kib" "$swap_occupancy_percent" "$failed" "$first_error" "$flush_err" \
 		"$upper_write_completed_err" "$endio_write_seen_err" "$endio_write_forced_err" \
 		"$segment_discards_failed" "$gc_victims" "$gc_pages" \
