@@ -1947,7 +1947,10 @@ class BootVerifierTests(unittest.TestCase):
             self.assertTrue(os.readlink(f"/proc/{verifier.pid}/fd/2").startswith("pipe:["))
             self.assertIn("/.kernel-journal.", os.readlink(f"/proc/{journal_pid}/fd/1"))
             self.assertEqual(os.readlink(f"/proc/{journal_pid}/fd/2"), "/dev/null")
-            os.killpg(verifier.pid, signal.SIGTERM)
+            # Signal only the observer. Its trap owns terminating the timeout
+            # supervisor; a process-group signal would also hit the journal
+            # child and bypass that cleanup path.
+            os.kill(verifier.pid, signal.SIGTERM)
             stdout, stderr = verifier.communicate(timeout=4)
             self.assertEqual(verifier.returncode, 143, stderr)
             self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", stdout)
@@ -1958,7 +1961,7 @@ class BootVerifierTests(unittest.TestCase):
             )
             self.assertIn(
                 "signal=TERM process_ownership=owned_timeout_child "
-                "child_status=143 token_disposition=revoked",
+                "child_status=124 token_disposition=revoked",
                 stderr,
             )
             self.assertFalse(Path(f"/proc/{timeout_pid}").exists())
@@ -3098,7 +3101,12 @@ class BootVerifierTests(unittest.TestCase):
                     latest,
                 )
                 self.assertIn("phase=passive_swap_enablement", observed.stderr)
-                self.assertIn(f"observed={state}", observed.stderr)
+                expected_observed_state = (
+                    "untrusted" if state == "unknown" else state
+                )
+                self.assertIn(
+                    f"observed={expected_observed_state}", observed.stderr
+                )
                 self.assertIn(f"exit_status={exit_status}", observed.stderr)
                 self.assertIn(
                     "token_consumption_state=claimed_non_authoritative",

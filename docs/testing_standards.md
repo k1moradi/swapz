@@ -8476,7 +8476,14 @@ kill-after escalation; do not put the supervisor in the child process group
 that escalation may kill. A signal received between asynchronous launch and
 capturing `$!` must be deferred until the timeout PID is owned, preserving the
 first signal reason. On interruption signal only that owned timeout supervisor,
-wait for its direct child status, then revoke authorization. The fail-only
+wait for its direct child status, then revoke authorization. Rootless signal
+fixtures must signal the observer process directly so the observer's handler,
+not a process-group broadcast, owns supervisor termination. The reported
+`child_status` is the observer's direct GNU `timeout` child status, not the
+raw `journalctl` result; GNU `timeout` may report 124 after a TERM interruption
+while the observer must retain its original 128+signal exit status (for TERM,
+143). Assert both statuses and prove that the timeout and journal processes
+are gone. The fail-only
 signal diagnostic must retain the original 128+signal status even if token
 cleanup and its EXIT retry fail, and identify signal, process ownership, child
 status, token disposition, cleanup phase/status and retained evidence without
@@ -8501,7 +8508,11 @@ status/text contradictions (`static`/nonzero and `disabled`/zero) must
 BLOCK; the documented `disabled`/1 combination remains admitted. Reissue
 the one-use preflight authorization after each observed FAIL/INCOMPLETE and
 verify canonical and claimed token paths are absent. All controls are
-private and rootless; none starts or stops swap.
+private and rootless; none starts or stops swap. If `systemctl is-enabled`
+returns an unrecognized state, its raw output must not be echoed into public
+diagnostics: report `observed=untrusted`, retain the exit status, and classify
+the result as INCOMPLETE. The fixture must assert that sanitization while
+preserving the refusal to certify PASS.
 
 Boot-verifier contracts must prove that a retained package transaction is
 detected by both preflight and post-boot observation after selector parsing.
