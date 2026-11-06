@@ -9,6 +9,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -28,6 +29,31 @@ STAGES = (
 # Upgrade publication can exceed the old 8-second test deadline on this host.
 # Keep crash-injection waits bounded while allowing durable filesystem work to finish.
 DURABLE_CHECKPOINT_TIMEOUT_SECONDS = 30
+# A complete package operation crosses multiple durable journal and directory
+# fsyncs. The former 15-second fixture limit kills a valid 16-second fsync;
+# give the operation two bounded checkpoint windows. The one-second hung-child
+# cleanup regression below remains independent of this I/O allowance.
+PACKAGE_TRANSACTION_TIMEOUT_SECONDS = 2 * DURABLE_CHECKPOINT_TIMEOUT_SECONDS
+
+
+class PackageInvocationTimeout(subprocess.TimeoutExpired):
+    """Report an expired test watchdog without exposing sandbox paths."""
+
+    def __init__(self, action, codec_variant, budget, elapsed, disposition):
+        super().__init__(["bash", "package-dkms.sh", action], budget)
+        self.action = action
+        self.codec_variant = codec_variant
+        self.elapsed = elapsed
+        self.disposition = disposition
+
+    def __str__(self):
+        return (
+            f"SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant={self.codec_variant} "
+            f"operation={self.action} elapsed_seconds={self.elapsed:.3f} "
+            f"budget_seconds={self.timeout:g} "
+            f"final_process_disposition=reaped_exit_{self.disposition} "
+            "first_cause=fixture_watchdog_expired"
+        )
 
 
 def sha256(path):
@@ -434,11 +460,13 @@ esac
             "systemd-escape",
             "#!/bin/sh\nprintf '%s\\n' 'dev-mapper-swapz\\x2dprimary.swap'\n")
 
-    def invoke(self, action, extra=None, timeout=15):
+    def invoke(self, action, extra=None,
+               timeout=PACKAGE_TRANSACTION_TIMEOUT_SECONDS):
         env = dict(self.env)
         if extra:
             env.update(extra)
         command = ["bash", str(self.script), action, str(self.prefix)]
+        start_time = time.monotonic()
         with subprocess.Popen(
                 command, cwd=self.repo_root, env=env, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True,
@@ -452,7 +480,13 @@ esac
                 except ProcessLookupError:
                     pass
                 process.communicate()
-                raise
+                codec_variant = (
+                    env.get("SWAPZ_FAKE_DKMS_MODULE_SUFFIX") or
+                    env.get("SWAPZ_FAKE_DKMS_EXTRA_MODULE_SUFFIX") or
+                    "uncompressed")
+                raise PackageInvocationTimeout(
+                    action, codec_variant, timeout,
+                    time.monotonic() - start_time, process.returncode) from None
         return subprocess.CompletedProcess(
             command, process.returncode, stdout, stderr)
 
@@ -541,12 +575,18 @@ esac
             "  sleep 2\n"
             "  : > \"$SWAPZ_PACKAGE_TEST_ROOT/timeout-child-late\"\n"
             ") &\n"
-            "wait\n")
+            "while :; do sleep 30; done\n")
         original_script = self.script
         try:
             self.script = fixture
-            with self.assertRaises(subprocess.TimeoutExpired):
+            with self.assertRaises(PackageInvocationTimeout) as caught:
                 self.invoke("install", timeout=1)
+            self.assertEqual(
+                caught.exception.cmd, ["bash", "package-dkms.sh", "install"])
+            self.assertIn(
+                "final_process_disposition=reaped_exit_-9",
+                str(caught.exception))
+            self.assertNotIn(str(self.home), str(caught.exception))
         finally:
             self.script = original_script
         self.assertTrue(ready_marker.exists(), "timeout fixture never started")
@@ -1883,7 +1923,8 @@ exec "{flock_binary}" "$@"
                 self.assertEqual(installed.returncode, 0, installed.stderr)
                 self.assert_installed_exact()
                 self.assertFalse(Path(str(self.installed_module) + suffix).exists())
-                removed = self.invoke("uninstall")
+                removed = self.invoke(
+                    "uninstall", {"SWAPZ_FAKE_DKMS_MODULE_SUFFIX": suffix})
                 self.assertEqual(removed.returncode, 0, removed.stderr)
                 self.assert_absent()
 
@@ -1899,6 +1940,54 @@ exec "{flock_binary}" "$@"
         )
         self.assert_absent()
         self.assertFalse(list((self.home / "transactions").glob("swapz-package.*")))
+
+
+    def test_compressed_xz_uninstall_completes_after_slow_durable_fsync(self):
+        codec_variant = ".xz"
+        installed = self.invoke(
+            "install", {"SWAPZ_FAKE_DKMS_MODULE_SUFFIX": codec_variant})
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        self.assert_installed_exact()
+
+        # Interpose only in this sandbox's inline Python durability calls.
+        # Sleep at exactly one fsync boundary, then perform the real fsync.
+        marker = self.home / "slow-fsync.once"
+        self.tool("python3", (
+            f"#!{sys.executable}\n"
+            "import os\n"
+            "import sys\n"
+            "import time\n"
+            "original_fsync = os.fsync\n"
+            "def slow_fsync(descriptor):\n"
+            "    try:\n"
+            "        marker_descriptor = os.open(\n"
+            "            os.environ['SWAPZ_TEST_SLOW_FSYNC_MARKER'],\n"
+            "            os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
+            "    except FileExistsError:\n"
+            "        pass\n"
+            "    else:\n"
+            "        os.close(marker_descriptor)\n"
+            "        time.sleep(float(os.environ['SWAPZ_TEST_SLOW_FSYNC_SECONDS']))\n"
+            "    return original_fsync(descriptor)\n"
+            "os.fsync = slow_fsync\n"
+            "if len(sys.argv) < 2 or sys.argv[1] != '-':\n"
+            "    raise SystemExit(92)\n"
+            "sys.argv = sys.argv[1:]\n"
+            "exec(compile(sys.stdin.read(), '<stdin>', 'exec'))\n"
+        ))
+        start_time = time.monotonic()
+        removed = self.invoke("uninstall", {
+            "SWAPZ_FAKE_DKMS_MODULE_SUFFIX": codec_variant,
+            "SWAPZ_TEST_SLOW_FSYNC_MARKER": str(marker),
+            "SWAPZ_TEST_SLOW_FSYNC_SECONDS": "16",
+        })
+        elapsed = time.monotonic() - start_time
+        self.assertTrue(marker.exists(), "durability shim was not reached")
+        self.assertGreater(elapsed, 15, "slow fsync did not exceed old watchdog")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assert_absent()
+        self.assertFalse(self.dkms_state.exists())
+        self.assertEqual(self.uninstall_transactions(), [])
 
     def test_mixed_compressed_rollback_fails_closed(self):
         self.assertEqual(self.invoke("install").returncode, 0)

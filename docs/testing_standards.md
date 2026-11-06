@@ -8918,6 +8918,21 @@ attributes to that same validated arm record; a summary `armed=true` bit alone
 must never make `PRODUCTION_READY_FOR_OWNER_REBOOT` PASS.
 
 
+The package fixture's full-operation watchdog is 60 seconds (two existing
+30-second durable-checkpoint windows), not the former 15-second per-invocation
+deadline: a completed transaction can legitimately spend more than 15 seconds
+inside a filesystem durability boundary. A rootless compressed .xz uninstall
+must interpose at exactly one Python fsync, delay it 16 seconds, still call the
+real fsync, preserve the original successful exit and verify the final absent
+state with no uninstall journal. The independently one-second nonterminating
+fixture must still SIGKILL and reap its entire process group; short-deadline
+SIGKILL recovery, failed transaction exits, mixed compressed-image refusal,
+DKMS registration ownership and quarantine remain required. An unhandled
+watchdog expiry must identify codec, operation, elapsed and budgeted seconds,
+final reaped process disposition and watchdog as first cause without exposing
+private sandbox paths. This synthetic timing witness does not replace a real
+F2FS durability trace or change production script behavior.
+
 The systemd/package GitHub Actions gate is rootless exact-source evidence, not a
 privileged deployment gate. Its workflow-level concurrency group must contain
 `${{ github.run_id }}` as well as the workflow-specific ref prefix:
