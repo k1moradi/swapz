@@ -3750,15 +3750,15 @@ static int swapz_primary_mountinfo_read_fd(
  *
  * The FIXTURE_DIAGNOSTIC_BYTES fallback exists only for the separate extracted
  * lifecycle fixture, which intentionally isolates the final revalidation
- * coordinator and does not compile Linux syscall headers. The owned production
- * mount-namespace fixture includes this source normally and exercises the real
- * namespace enumeration below.
+ * coordinator. Production uses the stable Linux syscall numbers for the
+ * project's x86_64/arm64 targets even when libc headers predate the names; an
+ * older running kernel returns ENOSYS and remains fail-closed. The owned
+ * production mount-namespace fixture exercises the real namespace enumeration.
  */
 static int swapz_primary_mountinfo_full_root(
 	const char *namespace_path, const char *root_path,
 	const struct stat *expected_namespace_info, dev_t parent_device)
 {
-#if !defined(SYS_statmount) || !defined(SYS_listmount)
 #ifdef FIXTURE_DIAGNOSTIC_BYTES
 	char root_link[PATH_MAX];
 	ssize_t root_length;
@@ -3779,15 +3779,17 @@ static int swapz_primary_mountinfo_full_root(
 	}
 	return 0;
 #else
+#if !defined(__x86_64__) && !defined(__aarch64__)
 	(void)namespace_path;
 	(void)root_path;
 	(void)expected_namespace_info;
 	(void)parent_device;
 	errno = EOPNOTSUPP;
 	return -1;
-#endif
 #else
 	enum {
+		statmount_syscall_number = 457,
+		listmount_syscall_number = 458,
 		mount_id_request_bytes = 32U,
 		namespace_mount_batch = 256U,
 		namespace_parent_depth_max = 4096U,
@@ -3830,6 +3832,14 @@ static int swapz_primary_mountinfo_full_root(
 		       "mount ID request ABI size changed");
 	_Static_assert(sizeof(struct statmount_basic) == 56U,
 		       "statmount basic ABI prefix changed");
+#ifdef SYS_statmount
+	_Static_assert(SYS_statmount == statmount_syscall_number,
+		       "statmount syscall number changed");
+#endif
+#ifdef SYS_listmount
+	_Static_assert(SYS_listmount == listmount_syscall_number,
+		       "listmount syscall number changed");
+#endif
 
 	if (!namespace_path || !root_path || !expected_namespace_info) {
 		errno = EINVAL;
@@ -3882,7 +3892,7 @@ static int swapz_primary_mountinfo_full_root(
 			.mount_id = current_mount_id,
 			.parameter = statmount_required_mask,
 		};
-		if (syscall(SYS_statmount, &request, &mount_status,
+		if (syscall(statmount_syscall_number, &request, &mount_status,
 			    sizeof(mount_status), 0U) < 0)
 			goto out;
 		if (mount_status.size < sizeof(mount_status) ||
@@ -3923,7 +3933,7 @@ static int swapz_primary_mountinfo_full_root(
 		long listed_mounts;
 
 		request.parameter = last_mount_id;
-		listed_mounts = syscall(SYS_listmount, &request, mount_ids,
+		listed_mounts = syscall(listmount_syscall_number, &request, mount_ids,
 					namespace_mount_batch, 0U);
 		if (listed_mounts < 0)
 			goto out;
@@ -3952,7 +3962,7 @@ static int swapz_primary_mountinfo_full_root(
 				.mount_id = mount_ids[index],
 				.parameter = statmount_required_mask,
 			};
-			if (syscall(SYS_statmount, &request, &mount_status,
+			if (syscall(statmount_syscall_number, &request, &mount_status,
 				    sizeof(mount_status), 0U) < 0)
 				goto out;
 			if (mount_status.size < sizeof(mount_status) ||
@@ -3985,6 +3995,7 @@ out:
 	if (result < 0)
 		errno = saved_errno;
 	return result;
+#endif
 #endif
 }
 

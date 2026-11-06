@@ -389,11 +389,13 @@ production-C fixture must keep filtered leader and non-leader mountinfo
 syntactically clean while this direct namespace inventory contains a hidden
 selected partition or parent, and require busy or fail-closed rather than
 admission. It must also inject direct-inventory failure and prove the pinned
-namespace descriptor closes. When a supported CI compiler's libc headers do
-not yet publish `SYS_statmount`/`SYS_listmount`, this synthetic fixture may
-define the architecture-common x86_64/arm64 syscall numbers solely for its
-intercepted seam; that does not assert the runner kernel implements the ABI and
-must not weaken the production unsupported-kernel refusal.
+namespace descriptor closes. On the project's x86_64 and arm64 targets,
+production uses the architecture-common Linux syscall numbers 457/458 even when
+libc headers predate the `SYS_statmount`/`SYS_listmount` names; when those
+names are present, compile-time assertions must agree. The synthetic fixture
+may define the same numbers solely for its intercepted seam. Neither case
+asserts the running kernel implements the 6.18 foreign-namespace ABI: runtime
+`ENOSYS` or an unsupported request remains a fail-closed admission result.
 
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
