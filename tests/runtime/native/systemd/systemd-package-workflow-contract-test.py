@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rootless, dependency-free contract for exact-run systemd/package CI."""
 
+import os
 import re
 import subprocess
 import sys
@@ -151,6 +152,82 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
             capture_output=True, text=True, check=False, timeout=30,
         )
         self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+
+
+    def test_passive_swap_guard_survives_normal_generator_shadow(self) -> None:
+        repo_root = WORKFLOW.parents[2]
+        unit_name = r"dev-mapper-swapz\x2dprimary.swap"
+        with tempfile.TemporaryDirectory(prefix="swapz-passive-shadow-") as location:
+            root = Path(location)
+            normal = root / "normal"
+            early = root / "early"
+            late = root / "late"
+            vendor = root / "vendor"
+            sbin = root / "sbin"
+            for directory in (normal, early, late, vendor, sbin):
+                directory.mkdir()
+
+            # Model systemd-fstab-generator output in normal-dir. It outranks
+            # the packaged /usr unit and therefore hides its false condition.
+            generated = normal / unit_name
+            generated.write_text(
+                "[Unit]\nSourcePath=/etc/fstab\n\n"
+                "[Swap]\nWhat=/dev/mapper/swapz-primary\n",
+                encoding="utf-8",
+            )
+            (vendor / unit_name).write_text(
+                (repo_root / "packaging/swapz-primary.swap").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["SYSTEMD_UNIT_PATH"] = f"{normal}:{vendor}"
+            unguarded = subprocess.run(
+                ["systemd-analyze", "condition", f"--unit={unit_name}"],
+                capture_output=True, text=True, check=False, timeout=30,
+                env=environment,
+            )
+            self.assertEqual(
+                unguarded.returncode, 0,
+                "normal generator output did not shadow the vendor condition: "
+                + unguarded.stdout + unguarded.stderr,
+            )
+
+            manager = sbin / "swapzctl"
+            manager.write_text(
+                "#!/bin/sh\n"
+                "[ \"$1\" = primary ] && [ \"$2\" = systemd-units ] || exit 2\n"
+                "printf 'dev-disk-by\\\\x2dpartuuid-01234567.device "
+                "dev-disk-by\\\\x2dpartuuid-01234567.swap\\n'\n",
+                encoding="ascii",
+            )
+            manager.chmod(0o755)
+            generator = root / "swapz-primary-generator"
+            generator.write_text(
+                (repo_root / "packaging/swapz-primary-generator").read_text(
+                    encoding="utf-8"
+                ).replace("@SWAPZ_SBINDIR@", str(sbin)),
+                encoding="utf-8",
+            )
+            generator.chmod(0o755)
+            completed = subprocess.run(
+                [str(generator), str(normal), str(early), str(late)],
+                capture_output=True, text=True, check=False, timeout=30,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+            guard = early / (unit_name + ".d") / "50-swapz-passive.conf"
+            self.assertEqual(
+                guard.read_text(encoding="ascii"),
+                "[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\n"
+                "ConditionPathExists=!/dev/null\n",
+            )
+            environment["SYSTEMD_UNIT_PATH"] = f"{early}:{normal}:{vendor}"
+            guarded = subprocess.run(
+                ["systemd-analyze", "condition", f"--unit={unit_name}"],
+                capture_output=True, text=True, check=False, timeout=30,
+                env=environment,
+            )
+            self.assertEqual(guarded.returncode, 1, guarded.stdout + guarded.stderr)
 
     def test_generator_transaction_fixture_runs_in_rootless_stage(self) -> None:
         # Keep this separate from the concurrent primary-systemd fixture owner.

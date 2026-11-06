@@ -6791,9 +6791,21 @@ blocks explicit starts only, not dependency-pulled jobs from an accidental
 swapon/swapoff owner, while the .swap unit observes `/proc/swaps` without a
 systemd start job. The exact-SHA systemd/package rootless contract must run
 `systemd-analyze verify` on the escaped swap unit name and
-`systemd-analyze condition` to prove that an indirect start is skipped;
-no service start or real swap action is permitted. A persistent active-ownership
-marker is also required before the provisioning path can be enabled.
+`systemd-analyze condition` to prove that an indirect start is skipped.
+Because normal generator output outranks packaged `/usr` units, the vendor
+condition alone is insufficient: `swapz-primary-generator` must mirror
+`RefuseManualStart=yes`, `RefuseManualStop=yes`, and the same false condition
+in a name-specific `generator.early` drop-in before it releases the
+mapper-service mask. It must recheck that guard both immediately before and
+immediately after mask release; a missing, replaced or noncanonical guard
+keeps or restores the mapper mask, and a foreign noncanonical guard must be
+preserved rather than overwritten. The rootless package contract must model a
+normal-dir fstab-generated mapper swap that shadows the vendor unit, prove the
+unguarded effective unit has no blocking condition, then prove the real
+generator's early drop-in restores the passive lifecycle refusals and makes
+the same indirect job fail its condition. No service start or real swap action
+is permitted. A persistent active-ownership marker is also required before the
+provisioning path can be enabled.
 The native lock primitive must open the same permanent
 `partition-<selected-partuuid>.lock` inode under
 `/var/lib/swapz/physical-recovery`, reject symlinks and unsafe ownership or

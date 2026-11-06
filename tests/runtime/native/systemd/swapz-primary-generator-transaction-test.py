@@ -22,6 +22,7 @@ MAPPER_SERVICE = ROOT / "packaging/swapz-primary-mapper.service"
 PASSIVE_SWAP = ROOT / "packaging/swapz-primary.swap"
 SELECTED = "01234567-89abcdef"
 CHANGED = "fedcba98-76543210"
+PASSIVE_SWAP_UNIT = r"dev-mapper-swapz\x2dprimary.swap"
 
 
 def identities(partuuid: str) -> tuple[str, str]:
@@ -115,6 +116,9 @@ class GeneratorPublicationTest(unittest.TestCase):
     def device_dropin(self, partuuid: str) -> Path:
         return self.normal / (identities(partuuid)[0] + ".d") / "50-swapz-timeout.conf"
 
+    def passive_guard(self) -> Path:
+        return self.early / (PASSIVE_SWAP_UNIT + ".d") / "50-swapz-passive.conf"
+
     def assert_blocked(self, result: subprocess.CompletedProcess[str], phase: str) -> None:
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertEqual(os.readlink(self.mask()), "/dev/null")
@@ -143,6 +147,11 @@ class GeneratorPublicationTest(unittest.TestCase):
                 + "JobTimeoutSec=300s\nJobTimeoutAction=none\n")
             self.assertEqual(self.device_dropin(SELECTED).read_text(),
                 "[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n")
+            self.assertEqual(
+                self.passive_guard().read_text(),
+                "[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\n"
+                "ConditionPathExists=!/dev/null\n",
+            )
         service = MAPPER_SERVICE.read_text()
         passive = PASSIVE_SWAP.read_text()
         self.assertIn("RequiresMountsFor=/var/lib/swapz/physical-recovery", service)
@@ -152,7 +161,37 @@ class GeneratorPublicationTest(unittest.TestCase):
         # RefuseManualStart alone allows dependency-queued start jobs.
         self.assertIn("ConditionPathExists=!/dev/null", passive)
         self.assertNotIn("WantedBy=swap.target", passive)
-        self.assertNotIn("/dev/sda1", self.generator.read_text())
+        generator_source = self.generator.read_text()
+        for host_path in ("/dev/sda1", "/dev/sda4"):
+            self.assertNotIn(host_path, generator_source)
+
+
+
+    def test_foreign_passive_guard_is_preserved_under_mapper_mask(self) -> None:
+        self.passive_guard().parent.mkdir()
+        foreign = "[Unit]\nRefuseManualStart=no\n"
+        self.passive_guard().write_text(foreign, encoding="ascii")
+        result = self.run_generator()
+        self.assert_blocked(result, "passive-guard")
+        self.assertIn("validation=conflicting-passive-dropin", result.stderr)
+        self.assertEqual(self.passive_guard().read_text(encoding="ascii"), foreign)
+
+    def test_passive_guard_is_rechecked_after_mask_release(self) -> None:
+        removal = self.commands / "rm"
+        removal.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '*swapz-primary-mapper.service)\n'
+            '    /usr/bin/rm "$@" || exit $?\n'
+            '    printf "[Unit]\\n" > "$MOCK_PASSIVE_GUARD"\n'
+            '    exit 0 ;;\n'
+            'esac\nexec /usr/bin/rm "$@"\n',
+            encoding="ascii",
+        )
+        removal.chmod(0o755)
+        result = self.run_generator(MOCK_PASSIVE_GUARD=str(self.passive_guard()))
+        self.assert_blocked(result, "publication")
+        self.assertIn("validation=passive-guard-not-retained", result.stderr)
+        self.assertEqual(self.passive_guard().read_text(encoding="ascii"), "[Unit]\n")
 
     def test_changed_partuuid_removes_old_ordering_and_new_failure_masks_it(self) -> None:
         self.assertEqual(self.run_generator().returncode, 0)

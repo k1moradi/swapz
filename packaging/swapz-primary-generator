@@ -219,6 +219,16 @@ published_mapper=0
 published_device=0
 transaction_committed=0
 preserve_stage_dir=0
+passive_swap_dropin_dir=$early_dir/'dev-mapper-swapz\x2dprimary.swap.d'
+passive_swap_dropin=$passive_swap_dropin_dir/50-swapz-passive.conf
+passive_swap_guard_is_active()
+{
+	[ -d "$passive_swap_dropin_dir" ] && [ ! -L "$passive_swap_dropin_dir" ] &&
+		[ -f "$passive_swap_dropin" ] && [ ! -L "$passive_swap_dropin" ] ||
+		return 1
+	printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/dev/null\n' |
+		cmp -s - "$passive_swap_dropin"
+}
 cleanup()
 {
 	# Explicit rollback after a mask-release failure may be called after a
@@ -420,6 +430,39 @@ fi
 # The scratch directory remains private; published unit directories retain
 # their original systemd-readable 0755 mode.
 umask 022
+
+# A normal generator such as systemd-fstab-generator outranks the packaged
+# /usr unit. Mirror the passive lifecycle refusals and false start condition
+# in generator.early so stale fstab output cannot become a second owner.
+if [ -L "$passive_swap_dropin_dir" ]; then
+	fail 1 passive-guard generator-output symlinked-passive-directory mapper-active-job
+fi
+if mkdir -p -- "$passive_swap_dropin_dir"; then :; else
+	fail "$?" passive-guard generator-output create-passive-directory mapper-active-job
+fi
+if [ ! -d "$passive_swap_dropin_dir" ] || [ -L "$passive_swap_dropin_dir" ]; then
+	fail 1 passive-guard generator-output unsafe-passive-directory mapper-active-job
+fi
+passive_swap_temporary=$stage_dir/passive-swap.conf
+if printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/dev/null\n' > "$passive_swap_temporary"; then :; else
+	fail "$?" passive-guard generator-output write-passive-dropin mapper-active-job
+fi
+if chmod 0644 "$passive_swap_temporary"; then :; else
+	fail "$?" passive-guard generator-output chmod-passive-dropin mapper-active-job
+fi
+if [ -e "$passive_swap_dropin" ] || [ -L "$passive_swap_dropin" ]; then
+	passive_swap_guard_is_active ||
+		fail 1 passive-guard generator-output conflicting-passive-dropin mapper-active-job
+else
+	passive_guard_status=0
+	if mv -nT -- "$passive_swap_temporary" "$passive_swap_dropin"; then :; else
+		passive_guard_status=$?
+	fi
+	if [ "$passive_guard_status" -ne 0 ] || ! passive_swap_guard_is_active; then
+		[ "$passive_guard_status" -ne 0 ] || passive_guard_status=1
+		fail "$passive_guard_status" passive-guard generator-output publish-passive-dropin mapper-active-job
+	fi
+fi
 
 # Clear only the generator's own prior target drop-ins, including a previous
 # PARTUUID after a selector change. Other units and drop-ins are not ours.
@@ -788,6 +831,9 @@ fi
 # A failed or falsely successful unlink must not commit the target graph.
 # The earlier publication checks are not proof that both inode identities
 # still match when the barrier is about to be removed.
+if ! passive_swap_guard_is_active; then
+	fail 1 publication generator-output pre-release-passive-guard mapper-active-job
+fi
 if [ -L "$mapper_dropin" ] || [ -L "$device_dropin" ] ||
 	[ ! "$stage_dir/owned-mapper" -ef "$mapper_dropin" ] ||
 	[ ! "$stage_dir/owned-device" -ef "$device_dropin" ]; then
@@ -800,7 +846,8 @@ if rm -f -- "$mapper_unit"; then
 		[ ! -e "$mapper_unit" ] && [ ! -L "$mapper_unit" ] &&
 		[ ! -L "$mapper_dropin" ] && [ ! -L "$device_dropin" ] &&
 		[ "$stage_dir/owned-mapper" -ef "$mapper_dropin" ] &&
-		[ "$stage_dir/owned-device" -ef "$device_dropin" ]; then
+		[ "$stage_dir/owned-device" -ef "$device_dropin" ] &&
+		passive_swap_guard_is_active; then
 		transaction_committed=1
 		exit 0
 	fi
@@ -808,6 +855,8 @@ if rm -f -- "$mapper_unit"; then
 	mask_validation=publication-ownership-not-proven
 	if [ -e "$mapper_unit" ] || [ -L "$mapper_unit" ]; then
 		mask_validation=mask-not-released
+	elif ! passive_swap_guard_is_active; then
+		mask_validation=passive-guard-not-retained
 	fi
 else
 	mask_status=$?

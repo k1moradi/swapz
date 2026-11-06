@@ -8,6 +8,9 @@ RefuseManualStop=yes
 # RefuseManualStart blocks explicit jobs, not starts pulled in as dependencies.
 # A stale swap.target.wants link or fstab request must not perform swapon;
 # keep this unit observational while the mapper service owns all activation.
+# The generator mirrors these lifecycle refusals and the false condition in
+# generator.early because normal generator output can otherwise outrank this
+# packaged /usr unit.
 ConditionPathExists=!/dev/null
 
 [Swap]
