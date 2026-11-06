@@ -5667,6 +5667,8 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         # make-test result from an older source as current qualification.
         relabeled_owner = self.passing_snapshot()
         owner = relabeled_owner["release_evidence"]["exact_source_owner_make_test"]
+        self.assertEqual(owner["source_sha"], self.SOURCE_SHA)
+        self.assertTrue(runner._readiness_artifact_hashes_valid(owner["hashes"]))
         owner["tested_source_sha"] = old_source
         verdict = runner.evaluate_production_readiness(
             relabeled_owner, self.SOURCE_SHA)
