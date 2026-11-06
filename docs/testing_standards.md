@@ -2573,7 +2573,13 @@ child exit 0, the report must still classify the stage as FAIL, preserve
 `child_exit_code: 0`, and append
 `expected=nonzero observed_exit=0 evidence=recognized-failure-marker` to the
 sanitized diagnostic. Its regression must cover both the matching nonzero
-child exit and the contradictory zero exit. Each owned-null_blk lifecycle
+child exit and the contradictory zero exit. The private owned-null_blk qualification report must bind the same live host
+digest as production: `swapz-host-v2` with its terminating NUL, canonical
+lowercase 36-byte DMI product UUID, and lowercase 32-byte machine ID. A
+stale machine-ID-only digest must not be silently accepted; native regression
+must keep the private report fixture aligned with production host identity.
+Only the digest may appear in evidence, never either raw host identifier.
+Each owned-null_blk lifecycle
 rehearsal must allocate
 a fresh root-owned evidence directory bound to the same
 random ownership token used for its null_blk config. Clean teardown may remove

@@ -1537,10 +1537,21 @@ ORACLE_SHA="$(sha256sum "$PREFIX/libexec/swapz/device-roundtrip" | awk '{print $
 HOST_SHA="$(python3 - <<'PY'
 from pathlib import Path
 import hashlib
-machine = Path("/etc/machine-id").read_text(encoding="ascii").strip().lower()
-if len(machine) != 32 or any(c not in "0123456789abcdef" for c in machine):
+machine = Path("/etc/machine-id").read_text(encoding="ascii").removesuffix("\n").lower()
+product_uuid = Path("/sys/class/dmi/id/product_uuid").read_text(
+    encoding="ascii").removesuffix("\n").lower()
+hex_digits = "0123456789abcdef"
+if (len(machine) != 32 or any(byte not in hex_digits for byte in machine) or
+        not any(byte != "0" for byte in machine) or
+        len(product_uuid) != 36 or
+        any(product_uuid[index] != "-" for index in (8, 13, 18, 23)) or
+        any(byte not in hex_digits for index, byte in enumerate(product_uuid)
+            if index not in (8, 13, 18, 23)) or
+        not any(byte != "0" for byte in product_uuid if byte != "-")):
     raise SystemExit(2)
-print(hashlib.sha256(b"swapz-host\0" + machine.encode("ascii")).hexdigest())
+identity = (b"swapz-host-v2\0" + product_uuid.encode("ascii") +
+            machine.encode("ascii"))
+print(hashlib.sha256(identity).hexdigest())
 PY
 )" || blocked "cannot derive live host identity"
 

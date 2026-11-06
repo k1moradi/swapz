@@ -2386,6 +2386,15 @@ int main(int argc, char **argv)
     def test_private_qualification_report_binds_running_kernel_release(self):
         self.assertIn('"kernel_release": os.uname().release', self.script)
 
+    def test_private_qualification_report_uses_production_host_identity(self):
+        self.assertIn('Path("/sys/class/dmi/id/product_uuid")', self.script)
+        self.assertIn('Path("/etc/machine-id")', self.script)
+        self.assertIn('b"swapz-host-v2\\0"', self.script)
+        self.assertNotIn('b"swapz-host\\0"', self.script)
+        self.assertIn(
+            'static const unsigned char prefix[] = "swapz-host-v2";',
+            self.primary)
+
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
