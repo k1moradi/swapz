@@ -106,6 +106,7 @@ HARNESS = r'''
 #define SWAPZ_BUILD_SOURCE_SHA "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 #define SWAPZ_PRIMARY_TARGET_DEVICE makedev(8U, 1U)
 #define SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER(phase) ((void)(phase))
+#define FIXTURE_DIAGNOSTIC_BYTES 2048U
 
 struct swapz_primary_mount_facts {
     dev_t root_device;
@@ -1045,8 +1046,8 @@ static int check_case(enum fixture_scenario candidate)
     int gap_probe;
     int expected_mount_conflict;
     int expected_late_mount_conflict;
-    char diagnostic[512] = {0};
-    char expected_diagnostic[512];
+    char diagnostic[FIXTURE_DIAGNOSTIC_BYTES] = {0};
+    char expected_diagnostic[FIXTURE_DIAGNOSTIC_BYTES];
     size_t diagnostic_length;
     FILE *diagnostic_stream;
     unsigned int writes;
@@ -1083,7 +1084,16 @@ static int check_case(enum fixture_scenario candidate)
     assert(fseek(diagnostic_stream, 0L, SEEK_SET) == 0);
     diagnostic_length = fread(diagnostic, 1U, sizeof(diagnostic) - 1U,
                               diagnostic_stream);
-    assert(!ferror(diagnostic_stream) && feof(diagnostic_stream));
+    if (ferror(diagnostic_stream) || !feof(diagnostic_stream)) {
+        fprintf(stderr,
+                "FAIL: %s: incomplete diagnostic capture bytes=%zu "
+                "limit=%zu read_error=%d eof=%d\n",
+                scenario_names[candidate], diagnostic_length,
+                sizeof(diagnostic) - 1U, ferror(diagnostic_stream),
+                feof(diagnostic_stream));
+        assert(fclose(diagnostic_stream) == 0);
+        return 1;
+    }
     assert(fclose(diagnostic_stream) == 0);
     diagnostic[diagnostic_length] = '\0';
     gap_probe = candidate == FIXTURE_POST_SNAPSHOT_MOUNT ||
@@ -1245,13 +1255,13 @@ static int check_case(enum fixture_scenario candidate)
         default:
             break;
         }
+        /* Every refusal case here follows READY state and manifest proof. */
         expected_length = snprintf(expected_diagnostic,
             sizeof(expected_diagnostic),
             "PRIMARY_START=FAILED phase=%s errno=%d error=%s "
             "original_errno=%d persistence_boundary=none "
-            "durable=%s mapper=UNOBSERVED swap=UNOBSERVED\n",
-            phase, expected_error, strerror(expected_error), expected_error,
-            late ? "OBSERVED" : "UNOBSERVED");
+            "durable=OBSERVED mapper=UNOBSERVED swap=UNOBSERVED\n",
+            phase, expected_error, strerror(expected_error), expected_error);
 
         assert(expected_length > 0 &&
                (size_t)expected_length < sizeof(expected_diagnostic));
@@ -1261,10 +1271,13 @@ static int check_case(enum fixture_scenario candidate)
                 expected_diagnostic + expected_diagnostic_length,
                 sizeof(expected_diagnostic) - expected_diagnostic_length,
                 "PRIMARY_START=ADMISSION_DETAIL phase=%s expected=%s "
-                "observed=%s errno=%d retained_state=READY "
+                "observed=%s errno=%d original_errno=%d "
+                "persistence_boundary=none durable=OBSERVED "
+                "mapper=UNOBSERVED swap=UNOBSERVED retained_state=READY "
                 "target_unchanged=true\n",
                 phase, "exact-host-root-target-parent-layout-record",
-                "missing-mismatched-or-unverifiable", expected_error);
+                "missing-mismatched-or-unverifiable", expected_error,
+                expected_error);
 
             assert(detail_length > 0 &&
                    (size_t)detail_length <
