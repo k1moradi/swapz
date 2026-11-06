@@ -193,9 +193,8 @@ class PublicMakeContract(unittest.TestCase):
                              verified_exact.stdout + "\n" +
                              verified_exact.stderr)
 
-            # Supported mokutil 0.7.2 reports enrollment only with status 1
-            # and this exact certificate-bound message. Status 0, even with
-            # identical text, is not enrollment evidence.
+            # Supported mokutil 0.7.2 reports enrollment with status 1 and
+            # this exact certificate-bound message.
             env["SWAPZ_FAKE_MOKUTIL_MODE"] = "enrolled-message"
             module.write_bytes(b"module")
             enrolled = subprocess.run(
@@ -212,7 +211,26 @@ class PublicMakeContract(unittest.TestCase):
                              verified_enrolled.stdout + "\n" +
                              verified_enrolled.stderr)
 
-            for mode in ("status-zero-empty", "status-zero-exact",
+            # Newer mokutil versions use status 0 with the same exact,
+            # certificate-bound positive enrollment response.
+            env["SWAPZ_FAKE_MOKUTIL_MODE"] = "status-zero-exact"
+            module.write_bytes(b"module")
+            enrolled_status_zero = subprocess.run(
+                ["bash", str(helper), str(module)], env=env,
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(enrolled_status_zero.returncode, 0,
+                             enrolled_status_zero.stdout + "\n" +
+                             enrolled_status_zero.stderr)
+            self.assertEqual((fixture / "dm-swapz.ko.calls").read_text(),
+                             "call\ncall\ncall\n")
+            verified_status_zero = subprocess.run(
+                ["bash", str(helper), "--verify", str(module)], env=env,
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(verified_status_zero.returncode, 0,
+                             verified_status_zero.stdout + "\n" +
+                             verified_status_zero.stderr)
+
+            for mode in ("status-zero-empty",
                          "success-with-warning", "enrolled-message-with-warning",
                          "wrong-certificate", "not-enrolled",
                          "failed-with-positive-text"):
@@ -228,7 +246,7 @@ class PublicMakeContract(unittest.TestCase):
                     self.assertEqual(module.read_bytes(), b"module")
                     self.assertEqual(
                         (fixture / "dm-swapz.ko.calls").read_text(),
-                        "call\ncall\n")
+                        "call\ncall\ncall\n")
 
             env["SWAPZ_FAKE_MOKUTIL_MODE"] = "enrolled-message"
             module.write_bytes(b"module")
@@ -306,16 +324,19 @@ class PublicMakeContract(unittest.TestCase):
                                          dir=build_tests) as directory:
             fixture = pathlib.Path(directory)
             for part in ("src/kernel", "src/userspace", "tests/tools",
-                         "packaging", "fake-headers", "fake-bin"):
+                         "packaging", "fake-headers"):
                 (fixture / part).mkdir(parents=True, exist_ok=True)
 
             (fixture / "Makefile").write_text(MAKE)
+            # The separate signing-hook regression exercises the real helper
+            # with hermetic command mocks. Keep this Makefile fixture inert so
+            # it cannot read the host MOK or invoke a privileged signer.
             (fixture / "packaging/sign-module.sh").write_text(
-                (ROOT / "packaging/sign-module.sh").read_text())
-            fake_mokutil = fixture / "fake-bin/mokutil"
-            fake_mokutil.write_text(
-                "#!/bin/sh\nprintf '%s\\n' 'SecureBoot disabled'\n")
-            fake_mokutil.chmod(0o755)
+                "#!/bin/sh\n"
+                "set -eu\n"
+                "[ \"$#\" -eq 1 ] &&\n"
+                "[ \"$1\" = build/kernel/experimental/dm-swapz.ko ] || exit 2\n"
+                "printf 'call\\n' >> \"${SWAPZ_SIGNING_TEST_LOG:?}\"\n")
             (fixture / "src/kernel/Makefile").write_text(
                 (ROOT / "src/kernel/Makefile").read_text())
             (fixture / "src/kernel/VERSION").write_text(
@@ -1143,7 +1164,9 @@ class PublicMakeContract(unittest.TestCase):
             env.pop("MAKEFLAGS", None)
             env.pop("MFLAGS", None)
             env.pop("W", None)
-            env["PATH"] = f"{fixture / 'fake-bin'}:{env.get('PATH', '')}"
+            sign_calls = fixture / "build/sign-module.calls"
+            env["SWAPZ_SIGNING_TEST_LOG"] = str(sign_calls)
+            make_invocations = []
 
             def execute(phase):
                 print(f"MAKE_INCREMENTAL_PHASE={phase}", flush=True)
@@ -1153,6 +1176,11 @@ class PublicMakeContract(unittest.TestCase):
                     timeout=30)
                 self.assertEqual(proc.returncode, 0,
                                  proc.stdout + "\n" + proc.stderr)
+                make_invocations.append(phase)
+                self.assertEqual(
+                    sign_calls.read_text(), "call\n" * len(make_invocations),
+                    "the hermetic signing stub must observe each make invocation",
+                )
                 self.assertRegex(
                     proc.stdout,
                     r"independent compilation uses automatic -j[1-9][0-9]*[.]",

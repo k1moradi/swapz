@@ -7465,6 +7465,15 @@ inaccessible certificate material, ambiguous or extra diagnostics, locale
 normalization, missing `mokutil`, permission failures, and unexpected
 statuses. No substring match, empty success output, or status value by itself
 may qualify enrollment.
+The signing-hook regression must treat both exact positive pairs as positive
+controls: status 1 with the certificate-bound message for mokutil 0.7.2, and
+status 0 with that same message for newer versions. In particular,
+`status-zero-exact` is not a negative case. Warning text, wrong certificate
+paths, empty output, and other status/output combinations remain negative.
+The incremental root-Make fixture must use an inert, argument-checking signing
+stub and record its calls; it must not invoke the host MOK, private key,
+`mokutil`, `kmodsign`, or `sudo`. The separate signing-hook fixture exercises
+the real helper with hermetic command mocks and a bounded test root.
 The rootless signing regression must also model `sudo kmodsign` replacing the
 module inode with a root-owned output, require restoration to the invoking
 build user's uid/gid after cryptographic verification (including a later

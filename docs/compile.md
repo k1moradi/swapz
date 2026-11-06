@@ -189,11 +189,12 @@ The signing hook parses the Linux module-signature trailer and verifies the
 appended detached PKCS#7/CMS signature over the exact module payload against
 the configured certificate. Enrollment is checked separately against the
 firmware MOK list with `mokutil --ignore-keyring --test-key`; Mokutil versions
-use a status of 1 for the exact `<certificate path> is already enrolled`
-response. For the supported mokutil 0.7.2 behavior, status 0 means the key is
-not enrolled. The hook accepts only status 1 with that exact certificate-bound
-output; empty output, status 0, a different path, localized or mixed output,
-and other statuses remain blocked. This command-line result does not claim
+use different exit statuses for the exact
+`<certificate path> is already enrolled` response: version 0.7.2 uses status
+1, while newer upstream versions use status 0. The hook accepts either status
+only with that exact certificate-bound output; status alone, empty output, a
+different path, localized or mixed output, and other statuses remain blocked.
+This command-line result does not claim
 current kernel-keyring visibility or module acceptance; those are distinct
 runtime facts. `modinfo` signer/key identifiers are metadata and are not
 accepted as cryptographic proof. An unchanged module is not signed again only
