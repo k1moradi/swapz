@@ -629,6 +629,19 @@ must clear caller-visible selector output before any failure, including malforme
 record envelopes and overlength values, so stale authorization cannot survive a
 rejected update.
 
+The production primary-selector reader must retain the opened root-owned
+configuration directory and no-follow selector descriptors until it has parsed
+a local candidate and revalidated the original inode metadata against the
+live named configuration directory and selected file. A regular-file
+replacement or complete directory rename-and-replace must fail with ESTALE
+even when the new selector has identical PARTUUID bytes, and must leave the
+caller-visible target empty. The rootless production-C fixture must force both
+races after reading the bytes, record before/after descriptor and named-path
+identities, and prove that an unchanged protected selector remains accepted
+without target, mapper or service mutation. This admission check cannot lock
+a pathname against subsequent privileged changes; mutating callers still
+require their existing last-use target and authorization checks.
+
 The private real-swap qualification helper must bind the protected physical
 selector to one context-managed O_NOFOLLOW/O_CLOEXEC descriptor. Inspect the
 pathname before opening, fstat the opened regular root-owned mode-0600

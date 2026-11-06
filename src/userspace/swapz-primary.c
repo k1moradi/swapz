@@ -963,6 +963,30 @@ static int swapz_primary_selector_identity_still_live(
 		errno = ESTALE;
 		return -1;
 	}
+	/*
+	 * The live file lookup itself can race with another path replacement.
+	 * Recheck the opened metadata and the config name before publishing.
+	 */
+	if (fstat(directory_fd, &directory_after) < 0 ||
+	    fstat(selector_fd, &selector_after) < 0 ||
+	    fstatat(AT_FDCWD, config_base, &named_directory,
+		    AT_SYMLINK_NOFOLLOW) < 0) {
+		saved_errno = errno;
+		(void)close(live_directory_fd);
+		errno = saved_errno == ENOENT || saved_errno == ENOTDIR ?
+			ESTALE : saved_errno;
+		return -1;
+	}
+	if (!swapz_primary_selector_metadata_matches(
+		    directory_before, &directory_after) ||
+	    !swapz_primary_selector_metadata_matches(
+		    selector_before, &selector_after) ||
+	    !swapz_primary_selector_metadata_matches(
+		    directory_before, &named_directory)) {
+		(void)close(live_directory_fd);
+		errno = ESTALE;
+		return -1;
+	}
 	if (close(live_directory_fd) < 0)
 		return -1;
 	return 0;
