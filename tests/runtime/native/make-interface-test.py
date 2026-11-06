@@ -145,7 +145,9 @@ class PublicMakeContract(unittest.TestCase):
                     "    ;;\n"
                     "  cms)\n"
                     "    [ \"${2:-}\" = -cmsout ] &&\n"
-                    "      printf '%s\\n' '    encapContentInfo:' '      eContent: <ABSENT>'\n"
+                    "      printf '%s\\n' '    encapContentInfo:' "
+                    "'      eContentType: pkcs7-data (1.2.840.113549.1.7.1)' "
+                    "'      eContent: <ABSENT>'\n"
                     "    exit 0;;\n"
                     "  *) exit 2;;\n"
                     "esac\n"
@@ -312,15 +314,20 @@ class PublicMakeContract(unittest.TestCase):
                 SWAPZ_SIGN_TEST_ROOT=str(fixture),
                 SWAPZ_MOK_CERT=str(certificate_der),
             )
-            for detached in (True, False):
-                with self.subTest(detached=detached):
+            cases = (
+                ("detached", (), True),
+                ("attached", ("-nodetach",), False),
+                ("wrong-content-type",
+                 ("-econtent_type", "1.2.3.4.5"), False),
+            )
+            for case, extra_args, accepted in cases:
+                with self.subTest(case=case):
                     args = [openssl, "cms", "-sign", "-binary", "-in",
                             str(payload), "-signer", str(certificate),
                             "-inkey", str(key), "-outform", "DER", "-out",
                             str(signature), "-nocerts", "-noattr", "-md",
                             "sha512"]
-                    if not detached:
-                        args.append("-nodetach")
+                    args.extend(extra_args)
                     subprocess.run(
                         args, check=True, stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL)
@@ -335,14 +342,16 @@ class PublicMakeContract(unittest.TestCase):
                          "--verify", str(module)],
                         cwd=ROOT, env=env, capture_output=True,
                         text=True, timeout=10)
-                    if detached:
+                    if accepted:
                         self.assertEqual(result.returncode, 0, result.stderr)
                         self.assertIn(
                             "kernel acceptance is not claimed", result.stdout)
                     else:
                         self.assertEqual(result.returncode, 2, result.stdout)
                         self.assertIn("phase=cms_verification", result.stderr)
-                        self.assertIn("not demonstrably detached", result.stderr)
+                        self.assertIn(
+                            "not a detached pkcs7-data signature",
+                            result.stderr)
                         self.assertNotIn(str(key), result.stderr)
                         self.assertNotIn(str(certificate_der), result.stderr)
 

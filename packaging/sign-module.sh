@@ -22,7 +22,7 @@ blocked_phase() {
             observed_state=certificate_unavailable
             next_action=inspect_public_certificate_permissions_read_only ;;
         cms_verification)
-            expected_state=detached_cms_signed_by_configured_certificate
+            expected_state=detached_pkcs7_data_cms_signed_by_configured_certificate
             observed_state=encapsulated_or_unverifiable_cms
             next_action=inspect_qualified_module_signature_read_only ;;
         detached_signature)
@@ -177,8 +177,6 @@ command -v python3 >/dev/null 2>&1 ||
     blocked_phase detached_signature 127 "python3 is required"
 command -v mktemp >/dev/null 2>&1 ||
     blocked_phase detached_signature 127 "mktemp is required"
-command -v awk >/dev/null 2>&1 ||
-    blocked_phase cms_verification 127 "awk is required"
 if [[ "$mode" == sign ]]; then
     command -v kmodsign >/dev/null 2>&1 ||
         blocked_phase signature_generation 127 "kmodsign is required"
@@ -404,7 +402,7 @@ write_public_certificate_pem() {
 }
 
 verify_module_signature() {
-    local temp_dir payload_path signature_path certificate_pem
+    local temp_dir payload_path signature_path certificate_pem cms_description_path
     local extract_rc=0 command_rc=0
     signature_command_status=0
 
@@ -439,22 +437,40 @@ verify_module_signature() {
         return 20
     fi
 
-    # OpenSSL accepts encapsulated CMS if its eContent matches -content.
-    # Linux module verification requires detached content even in that case.
+    # OpenSSL accepts encapsulated CMS when its eContent matches -content,
+    # and it verifies detached CMS with an eContentType the kernel rejects.
+    # Linux module verification requires detached pkcs7-data content.
+    cms_description_path="$temp_dir/cms.txt"
     command_rc=0
-    openssl cms -cmsout -print -inform DER -in "$signature_path" 2>/dev/null |
-        awk '
-            /^[[:space:]]*encapContentInfo:[[:space:]]*$/ {
-                in_content = 1
-                next
-            }
-            in_content && /^[[:space:]]*eContent:/ {
-                if ($0 ~ /^[[:space:]]*eContent:[[:space:]]*<ABSENT>[[:space:]]*$/)
-                    detached = 1
-                in_content = 0
-            }
-            END { exit detached ? 0 : 1 }
-        ' >/dev/null 2>&1 || command_rc=$?
+    LC_ALL=C openssl cms -cmsout -print -inform DER -in "$signature_path" \
+        > "$cms_description_path" 2>/dev/null || command_rc=$?
+    if (( command_rc != 0 )); then
+        signature_command_status="$command_rc"
+        rm -rf -- "$temp_dir" 2>/dev/null
+        return 13
+    fi
+    command_rc=0
+    python3 -c '
+import sys
+
+in_content = False
+data_content_type = False
+detached = False
+for raw_line in sys.stdin:
+    line = raw_line.strip()
+    if line == "encapContentInfo:":
+        in_content = True
+        continue
+    if not in_content:
+        continue
+    if line.startswith("eContentType:"):
+        data_content_type = line.endswith("(1.2.840.113549.1.7.1)")
+        continue
+    if line.startswith("eContent:"):
+        detached = line == "eContent: <ABSENT>"
+        break
+raise SystemExit(0 if data_content_type and detached else 1)
+' < "$cms_description_path" >/dev/null 2>&1 || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
         rm -rf -- "$temp_dir" 2>/dev/null
@@ -510,7 +526,7 @@ if [[ "$mode" == verify ]]; then
             ;;
         13)
             blocked_phase cms_verification "$signature_command_status" \
-                "qualified module CMS content is not demonstrably detached"
+                "qualified module CMS content is not a detached pkcs7-data signature"
             ;;
         *)
             blocked_phase detached_signature "$signature_command_status" \
@@ -526,7 +542,7 @@ if (( signature_status == 0 )); then
 fi
 if (( signature_status == 13 )); then
     blocked_phase cms_verification "$signature_command_status" \
-        "existing module CMS content is not demonstrably detached; refusing to append another signature"
+        "existing module CMS content is not a detached pkcs7-data signature; refusing to append another signature"
 fi
 (( signature_status == 10 )) ||
     blocked_phase detached_signature "$signature_command_status" \
@@ -574,7 +590,7 @@ else
     signature_status=$?
     if (( signature_status == 13 )); then
         blocked_phase cms_verification "$signature_command_status" \
-            "new module CMS content is not demonstrably detached"
+            "new module CMS content is not a detached pkcs7-data signature"
     fi
     blocked_phase detached_signature "$signature_command_status" \
         "new module signature failed cryptographic verification against the enrolled configured MOK"

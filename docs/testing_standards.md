@@ -7853,10 +7853,14 @@ Embedded CMS signer certificates must be excluded from signer resolution
 (OpenSSL `-nointern`): `-certfile` alone does not force verification against
 that exact configured and enrolled certificate.
 OpenSSL CMS verification can also accept an attached CMS whose embedded
-content matches the supplied payload. Reject such non-detached CMS content
-before declaring signature validity: Linux module verification requires
-absent encapsulated eContent. A real-CMS rootless control must prove a valid
-detached signature passes while a same-payload attached signature refuses.
+content matches the supplied payload, and it accepts detached SignedData with
+an eContentType that Linux rejects for module signatures. Before declaring
+signature validity, require absent encapsulated eContent and the pkcs7-data
+eContentType OID 1.2.840.113549.1.7.1. Keep this structural check on already
+required tooling so it does not change earlier missing-tool/enrollment
+failure precedence. A real-CMS rootless control must prove a valid detached
+pkcs7-data signature passes while same-payload attached and wrong-content-type
+signatures refuse.
 Certificate identity, `mokutil --ignore-keyring --test-key` firmware-MOK
 enrollment, embedded signer/key metadata, cryptographic signature validity,
 kernel-keyring visibility, and target-kernel acceptance are separate facts.
