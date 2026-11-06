@@ -32,18 +32,22 @@ inventory. The `/proc` directory itself being inaccessible is a refusal.
 Repeated PID entries or PID churn do not justify replacing observed root facts.
 A missing leader `/proc/<pid>/ns/mnt` marker is **not** proof that
 `/proc/<pid>/task` has no surviving non-leader threads: where the task
-inventory remains visible, inspect it or refuse admission as BLOCKED.
-The owned rootless fixture must inject an absent leader marker with a visible
-selected-partition task and, independently, a selected-parent task. Either
+inventory remains visible, inspect it or refuse admission as BLOCKED. This
+remains true if the marker disappears between the initial and confirming
+namespace stats or after an unopened leader mountinfo exit error before its
+follow-up namespace stat. The owned rootless fixture must cover those timing
+windows with visible selected-partition and selected-parent workers. Either
 a busy observation or fail-closed error is acceptable; a clean admission is
 a regression failure. A missing leader marker with inaccessible task inventory
 is ambiguity, not positive evidence of safe process exit.
 
-For each PID with an **unopened** mountinfo table, errors `EINVAL`, `ENOENT`,
-and `ESRCH` mean ordinary process-exit churn **only if** a follow-up stat of
-`/proc/<pid>/ns/mnt` proves that namespace absent (`ENOENT` or `ESRCH`). If
-that namespace exists, the stat fails for any other reason, or the mountinfo
-file was opened before a parse/read/close error, refuse. An `EACCES`, `EPERM`,
+For each PID with an **unopened leader** mountinfo table, errors `EINVAL`,
+`ENOENT`, and `ESRCH` allow that leader table to be skipped only if a
+follow-up stat of `/proc/<pid>/ns/mnt` proves the leader namespace marker
+absent (`ENOENT` or `ESRCH`). That proof does **not** authorize skipping the
+PID's task inventory; inspect visible non-leaders or refuse. If the leader
+namespace exists, the stat fails for any other reason, or the mountinfo file
+was opened before a parse/read/close error, refuse. An `EACCES`, `EPERM`,
 `EIO`, or other unclassified inventory error always refuses. In particular,
 `EINVAL` on mountinfo by itself is not a safe reason to skip a PID. Follow the
 standalone formatter's corrected behavior, not its earlier permissive version.

@@ -49,6 +49,10 @@ static const char *fixture_peer_mountinfo_after_peer_scan;
 static int fixture_peer_mountinfo_after_peer_scan_injected;
 static int fixture_peer_namespace_changes_between_stats;
 static int fixture_peer_namespace_changed;
+static int fixture_peer_namespace_vanishes_between_stats;
+static int fixture_peer_namespace_vanished_between_stats;
+static int fixture_peer_namespace_vanishes_on_mountinfo_open;
+static int fixture_peer_namespace_vanished_on_mountinfo_open;
 static const char *fixture_peer_mountinfo_after_namespace_change;
 static int fixture_mount_vanish_on_read;
 static int fixture_namespace_stat_error;
@@ -132,6 +136,21 @@ static int fixture_open(const char *path, int flags, ...)
 		va_start(arguments, flags);
 		mode = (mode_t)va_arg(arguments, int);
 		va_end(arguments);
+	}
+	if (fixture_path_has_suffix(path, "3031/mountinfo") &&
+	    fixture_peer_namespace_vanishes_on_mountinfo_open &&
+	    fixture_mount_open_error) {
+		char namespace_path[PATH_MAX];
+		int open_error = fixture_mount_open_error;
+
+		assert(unlink(fixture_path("/proc/3031/ns/mnt",
+					   namespace_path)) == 0);
+		fixture_peer_namespace_vanishes_on_mountinfo_open = 0;
+		fixture_peer_namespace_vanished_on_mountinfo_open = 1;
+		/* The injected leader error is one-shot; the worker stays readable. */
+		fixture_mount_open_error = 0;
+		errno = open_error;
+		return -1;
 	}
 	if (fixture_path_has_suffix(path, "3031/task/3032/mountinfo") &&
 	    fixture_task_mount_open_error) {
@@ -399,6 +418,17 @@ static int fixture_stat(const char *path, struct stat *info)
 		return -1;
 	}
 	if (strstr(path, "/3031/ns/mnt") &&
+	    fixture_peer_namespace_vanishes_between_stats) {
+		int result = stat(fixture_path(path, converted), info);
+
+		if (result == 0) {
+			assert(unlink(converted) == 0);
+			fixture_peer_namespace_vanishes_between_stats = 0;
+			fixture_peer_namespace_vanished_between_stats = 1;
+		}
+		return result;
+	}
+	if (strstr(path, "/3031/ns/mnt") &&
 	    fixture_peer_namespace_changes_between_stats) {
 		/*
 		 * Capture the old shared inode for the first production stat, then
@@ -595,6 +625,10 @@ static void fixture_reset(void)
 	fixture_peer_mountinfo_after_peer_scan_injected = 0;
 	fixture_peer_namespace_changes_between_stats = 0;
 	fixture_peer_namespace_changed = 0;
+	fixture_peer_namespace_vanishes_between_stats = 0;
+	fixture_peer_namespace_vanished_between_stats = 0;
+	fixture_peer_namespace_vanishes_on_mountinfo_open = 0;
+	fixture_peer_namespace_vanished_on_mountinfo_open = 0;
 	fixture_peer_mountinfo_after_namespace_change = NULL;
 	fixture_mount_vanish_on_read = 0;
 	fixture_namespace_stat_error = 0;
@@ -757,33 +791,75 @@ static void expect_nonleader_bound_refusal(
  * report a busy target or fail closed; a clean admission is never sufficient.
  * This is a synthetic procfs identity check, not a loaded-host namespace claim.
  */
+enum fixture_leader_namespace_loss_timing {
+	FIXTURE_LEADER_NAMESPACE_ABSENT_BEFORE_SCAN,
+	FIXTURE_LEADER_NAMESPACE_LOST_DURING_CONFIRMATION,
+	FIXTURE_LEADER_NAMESPACE_LOST_ON_MOUNTINFO_OPEN,
+};
+
 static void expect_surviving_task_with_missing_leader_namespace(
-	const char *case_name, const char *task_mountinfo)
+	const char *case_name, const char *task_mountinfo,
+	enum fixture_leader_namespace_loss_timing timing)
 {
 	struct swapz_primary_mount_facts facts = {0};
 	const dev_t expected_root = makedev(259U, 0U);
+	const char *identity_class = NULL;
 	int result;
 	int first_errno;
+	int timing_injected = 1;
 
 	fixture_reset();
+	/* Recreate the worker marker so this regression never depends on test order. */
+	fixture_unlink_if_present("3031/task/3032/ns/mnt");
 	fixture_file("3031/task/3032/ns/mnt",
 		     "surviving non-leader mount namespace\n");
 	fixture_file("3031/task/3032/mountinfo", task_mountinfo);
-	fixture_unlink("3031/ns/mnt");
+	switch (timing) {
+	case FIXTURE_LEADER_NAMESPACE_ABSENT_BEFORE_SCAN:
+		identity_class = "leader-marker-absent-live-worker";
+		fixture_unlink("3031/ns/mnt");
+		break;
+	case FIXTURE_LEADER_NAMESPACE_LOST_DURING_CONFIRMATION:
+		identity_class = "leader-marker-lost-during-confirmation-live-worker";
+		fixture_share_mount_namespace();
+		fixture_peer_namespace_vanishes_between_stats = 1;
+		break;
+	case FIXTURE_LEADER_NAMESPACE_LOST_ON_MOUNTINFO_OPEN:
+		identity_class = "leader-marker-lost-after-mountinfo-open-error-live-worker";
+		fixture_mount_open_error = ENOENT;
+		fixture_peer_namespace_vanishes_on_mountinfo_open = 1;
+		break;
+	default:
+		assert(0 && "invalid leader namespace loss timing");
+	}
+
 	errno = 0;
 	result = swapz_primary_read_mount_facts(&facts, makedev(8U, 0U));
 	first_errno = errno;
+	if (timing == FIXTURE_LEADER_NAMESPACE_LOST_DURING_CONFIRMATION)
+		timing_injected = fixture_peer_namespace_vanished_between_stats;
+	else if (timing == FIXTURE_LEADER_NAMESPACE_LOST_ON_MOUNTINFO_OPEN)
+		timing_injected = fixture_peer_namespace_vanished_on_mountinfo_open;
 
+	if (!timing_injected) {
+		fprintf(stderr,
+			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
+			"identity_class=%s expected=timed-identity-loss "
+			"observed=injection-not-run original_errno=%d "
+			"safe_retry=complete-fresh-task-inventory\n",
+			case_name, identity_class, result < 0 ? first_errno : 0);
+		++fixture_failures;
+	}
 	if (result == 0 && !facts.target_mounted) {
 		fprintf(stderr,
 			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
-			"identity_class=leader-marker-absent-live-worker "
-			"expected=BUSY-or-BLOCKED observed=ADMITTED "
+			"identity_class=%s expected=BUSY-or-BLOCKED observed=ADMITTED "
 			"observed_task_mountinfo_opens=%u original_errno=none "
 			"safe_retry=complete-fresh-task-inventory "
 			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
 			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED\n",
-			case_name, fixture_foreign_task_mountinfo_opens);
+			case_name, identity_class,
+			fixture_foreign_task_mountinfo_opens);
 		++fixture_failures;
 	}
 	if (result == 0 && facts.target_mounted &&
@@ -1638,11 +1714,23 @@ int main(void)
 	expect_surviving_task_with_missing_leader_namespace(
 		"missing leader marker with live selected task",
 		"36 25 259:10 / / rw - ext4 /thread-root rw\n"
-		"37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
+		"37 36 8:1 / /selected rw - ext4 /dev/selected rw\n",
+		FIXTURE_LEADER_NAMESPACE_ABSENT_BEFORE_SCAN);
 	expect_surviving_task_with_missing_leader_namespace(
 		"missing leader marker with live parent-mounted task",
 		"36 25 259:10 / / rw - ext4 /thread-root rw\n"
-		"37 36 8:0 / /parent rw - ext4 /dev/parent rw\n");
+		"37 36 8:0 / /parent rw - ext4 /dev/parent rw\n",
+		FIXTURE_LEADER_NAMESPACE_ABSENT_BEFORE_SCAN);
+	expect_surviving_task_with_missing_leader_namespace(
+		"leader marker lost during confirmation with live selected task",
+		"36 25 259:10 / / rw - ext4 /thread-root rw\n"
+		"37 36 8:1 / /selected rw - ext4 /dev/selected rw\n",
+		FIXTURE_LEADER_NAMESPACE_LOST_DURING_CONFIRMATION);
+	expect_surviving_task_with_missing_leader_namespace(
+		"leader marker lost after mountinfo open error with live parent task",
+		"36 25 259:10 / / rw - ext4 /thread-root rw\n"
+		"37 36 8:0 / /parent rw - ext4 /dev/parent rw\n",
+		FIXTURE_LEADER_NAMESPACE_LOST_ON_MOUNTINFO_OPEN);
 
 	/* Exercise both finite task-count and aggregate mountinfo-byte ceilings. */
 	fixture_reset();

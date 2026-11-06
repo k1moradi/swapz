@@ -220,16 +220,20 @@ cannot satisfy that case. Reject malformed non-leader task mountinfo, fail
 closed when a reused TID changes its mount-namespace identity between the initial and
 confirming stats, and permit a task already absent at namespace inspection.
 A missing foreign leader `ns/mnt` marker is not evidence that the whole
-thread group exited. Inject absent leader namespace identity while a visible
-non-leader still has the selected partition mounted; independently repeat
-with the selected physical parent mounted. Production must observe the task
-as busy or fail closed as BLOCKED, never admit on leader disappearance alone.
+thread group exited. Exercise leader disappearance at every pre-task-scan
+window: absent at the initial namespace stat, lost between the same-namespace
+identity stat and its confirmation, and lost after an unopened leader
+mountinfo returns an exit-class error but before the follow-up namespace stat.
+Across those timings cover both a selected-partition worker and a
+selected-parent worker. Production must observe the task as busy or fail
+closed as BLOCKED, never admit on leader disappearance alone.
 If the leader namespace marker is absent, production must still enumerate an
 available `/proc/<pid>/task` directory and inspect its visible non-leader
 namespace and mountinfo records; it may skip the leader table but must not
 skip the task inventory. Only a separately proven absent task inventory can
-establish that no visible worker remains. The fixture must include a live
-non-leader `ns/mnt` marker. If the selected mount is reported busy, prove
+establish that no visible worker remains. The fixture must recreate a live
+non-leader `ns/mnt` marker for every case so results cannot depend on prior
+test order. If the selected mount is reported busy, prove
 task-specific mountinfo was opened; preserve the coordinator's root identity,
 original errno on error, and closure of owned descriptors. Report the
 admission phase, missing/stale identity class, expected versus observed

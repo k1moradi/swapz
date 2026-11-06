@@ -3909,7 +3909,7 @@ static int swapz_primary_read_mount_facts(
 				namespace_error = errno ? errno : EIO;
 				if (namespace_error == ENOENT ||
 				    namespace_error == ESRCH)
-					continue;
+					goto scan_nonleader_tasks;
 				saved_errno = namespace_error;
 				break;
 			}
@@ -3941,7 +3941,7 @@ static int swapz_primary_read_mount_facts(
 					namespace_error = errno ? errno : EIO;
 					if (namespace_error == ENOENT ||
 					    namespace_error == ESRCH)
-						continue;
+						goto scan_nonleader_tasks;
 					saved_errno = namespace_error;
 					break;
 				}
@@ -3978,6 +3978,12 @@ static int swapz_primary_read_mount_facts(
 				break;
 			}
 		}
+	scan_nonleader_tasks:
+		/*
+		 * A leader can disappear after either namespace observation or an
+		 * unopened mountinfo failure while sibling tasks remain. These jumps
+		 * own no leader mountinfo descriptor; continue with the task inventory.
+		 */
 		path_length = snprintf(path, sizeof(path), "/proc/%s/task",
 				      entry->d_name);
 		if (path_length <= 0 || (size_t)path_length >= sizeof(path)) {
