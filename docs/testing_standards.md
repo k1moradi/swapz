@@ -1029,8 +1029,20 @@ ownership BLOCKED.
 
 The private `tests/runtime/native/nullblk-identity-test.sh` fixture must
 rewrite host /proc, /sys, /dev and package paths in a single ordered pass
-and use only fake utilities and regular files. Its legacy path-only
+using path-component boundaries, and use only fake utilities and regular
+files. Replacing a `/dev` root must not rewrite a nested sysfs attribute such
+as `/sys/block/<device>/dev`. Its legacy path-only
 false-admission demonstration is **not** counted as a preflight case.
+The fixture must test an absent token-name directory separately from a
+present directory containing malformed `dev` telemetry. Recreate the
+synthetic directory before writing each malformed record so fixture setup
+errors cannot masquerade as parser-negative coverage.
+Syntax-check each generated fake command before executing the cases; a syntax
+error in fixture tooling is a test failure, not evidence of a production
+identity refusal.
+When checking redacted diagnostics, validate `safe_next_action` against the
+allowed read-only or creator-revalidation values instead of rejecting generic
+words that may also appear in a phase name such as `mapper_remove`.
 It must cover two unclaimed token-shaped objects, a complete-looking
 unclaimed object, an untrusted old owner record and injected token hint, a
 foreign decoy, ambiguous name/index aliases (including an empty alternate disk

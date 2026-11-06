@@ -52,6 +52,7 @@ refused_disk "$NAME" 7 "$TMP/sysblock"
 refused_disk swapz-0123456789abcdef 7 "$TMP/sysblock"
 refused_disk /dev/nullb7 7 "$TMP/sysblock"
 refused_disk "$NAME" abc "$TMP/sysblock"
+mkdir -p "$TMP/sysblock/$NAME"
 printf 'garbage\n' > "$TMP/sysblock/$NAME/dev"
 refused_disk "$NAME" 7 "$TMP/sysblock"
 printf '240:07\n' > "$TMP/sysblock/$NAME/dev"
@@ -101,13 +102,26 @@ path_replacements = {
     "/boot": str(root / "boot"),
     "/dev": str(root / "dev"),
 }
-# Replace original host paths only once. Replacing /dev in an already-mapped
-# /proc/devices or /sys/dev/block path would destroy the isolated evidence.
-source = re.sub(
-    "|".join(re.escape(original) for original in path_replacements),
+# Replace absolute path roots only once. A root such as `/dev` must not match
+# a later path component in `/sys/block/<device>/dev`.
+path_pattern = re.compile(
+    r"(?<![A-Za-z0-9_./-])(?:"
+    + "|".join(
+        re.escape(original)
+        for original in sorted(path_replacements, key=len, reverse=True)
+    )
+    + r")"
+)
+source = path_pattern.sub(
     lambda match: path_replacements[match.group(0)],
     source,
 )
+rewritten_probe = path_pattern.sub(
+    lambda match: path_replacements[match.group(0)],
+    '"/sys/block/nullb-swapz-cccccccccccccccc/dev"',
+)
+if rewritten_probe != f'"{root}/sys/block/nullb-swapz-cccccccccccccccc/dev"':
+    raise SystemExit("fixture path rewrite altered a nested sysfs dev component")
 source = source.replace(
     '[[ -n $mapper_node && -b $mapper_node ]] ||',
     '[[ -n $mapper_node && -e $mapper_node ]] ||',
@@ -177,8 +191,8 @@ if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
     exit 0
 fi
 if [[ "\$1" == "-Lc" && "\$2" == "%Hr:%Lr" &&
-      { "\$3" == "$FIXTURE/dev/nullb-swapz-$LOWER_TOKEN" ||
-        "\$3" == "$FIXTURE/dev/dm-0"; } ]]; then
+      ( "\$3" == "$FIXTURE/dev/nullb-swapz-$LOWER_TOKEN" ||
+        "\$3" == "$FIXTURE/dev/dm-0" ) ]]; then
     if [[ "\$3" == "$FIXTURE/dev/dm-0" ]]; then
         printf '253:0\n'
     else
@@ -362,6 +376,10 @@ chmod 0755 "$STUBS"/awk "$STUBS"/ls "$STUBS"/stat \
     "$STUBS"/id "$STUBS"/uname "$STUBS"/modprobe \
     "$STUBS"/rmmod "$STUBS"/timeout "$STUBS"/rmdir "$STUBS"/findmnt \
     "$STUBS"/dmsetup "$STUBS"/sleep
+for fake_command in "$STUBS"/*; do
+    [[ -f $fake_command && ! -L $fake_command ]] || continue
+    bash -n "$fake_command" || die "generated fake command has invalid shell syntax"
+done
 
 reset_fake() {
     # Delete only this test's known fake roots; never real /proc, /sys or /dev.
@@ -406,7 +424,7 @@ setup_owned_lower() {
     ln -s "$FIXTURE/sys/block/dm-0" "$disk/holders/dm-0"
 }
 assert_private_safe_refusal() {
-    local case_name="$1" output="$2"
+    local case_name="$1" output="$2" safe_next_action
     [[ "$output" != *"$FIXTURE/"* &&
        "$output" != *"$TOKEN"* &&
        "$output" != *"$OTHER_TOKEN"* &&
@@ -424,13 +442,20 @@ assert_private_safe_refusal() {
        "$output" != *"nullb7"* &&
        "$output" != *"rmmod"* &&
        "$output" != *"unload"* &&
-       "$output" != *"remove"* &&
        "$output" != *"delete"* &&
        "$output" != *"power off"* &&
        "$output" != *"power-off"* &&
        "$output" != *"power_off"* &&
        "$output" != *"claim="* ]] ||
         die "$case_name disclosed a private identity or recommended unsafe cleanup"
+    [[ "$output" =~ safe_next_action=([A-Za-z0-9_-]+) ]] ||
+        die "$case_name omitted its bounded safe next action"
+    safe_next_action="${BASH_REMATCH[1]}"
+    case "$safe_next_action" in
+        inspect_read_only|original_creator_revalidate_then_cleanup_or_read_only_reconcile)
+            ;;
+        *) die "$case_name recommended an unapproved follow-up action" ;;
+    esac
 }
 run_case() {
     local case_name="$1" expected="$2" expected_result="$3" expected_errno="$4"
