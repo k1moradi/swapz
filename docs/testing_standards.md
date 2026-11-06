@@ -307,8 +307,11 @@ that string after the same process chroots to the root of a child mount. The
 fixture must model that real semantic with a nested coordinator root whose
 `statx(STATX_MNT_ID_UNIQUE)` seed has a different `statmount` parent, and
 require fail-closed refusal before the mountinfo-derived child device can become
-the root safety identity. A second namespace identity check must still guard the
-same-namespace peer shortcut. An empty table in a foreign namespace remains
+the root safety identity. It must separately model root ABA where mountinfo
+captured that child device but the later statx seed has already returned to the
+namespace-root mount; the namespace-root statmount device must still match the
+root device parsed from self mountinfo. A second namespace identity check must
+still guard the same-namespace peer shortcut. An empty table in a foreign namespace remains
 ambiguous and must fail closed. Include a regression proving the shortcut
 cannot hide a selected-device mount already present in the coordinator's table.
 
@@ -414,9 +417,11 @@ the filtered table. The current foreign-namespace descriptor ABI requires
 Linux 6.18 or newer, so an older running kernel refuses this admission path.
 The coordinator may retain its mountinfo-derived root-device fact only after
 the pinned self-namespace walk proves that the `statx` root seed is the
-namespace-root mount itself. A self root-link string of `/` is insufficient.
-Before using the same-namespace shortcut it must also complete the pinned
-namespace inventory for its own namespace.
+namespace-root mount itself and the namespace-root `statmount` superblock
+device exactly matches the root device parsed from self mountinfo. A self
+root-link string of `/` is insufficient. Before using the same-namespace
+shortcut it must also complete the pinned namespace inventory for its own
+namespace.
 
 The direct namespace walk is still a bounded snapshot, not a mount lock. PID
 reuse or root ABA after the namespace descriptor is pinned cannot hide an

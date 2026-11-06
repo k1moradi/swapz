@@ -89,11 +89,13 @@ provides the current root-device safety fact. A same-process
 namespace root: Linux still reports `/` after a process chroots to the root of
 a child mount. The coordinator therefore pins its own namespace, seeds the walk
 with `statx(STATX_MNT_ID_UNIQUE)`, follows `statmount` parents, and requires
-that seed mount ID to equal the resulting namespace-root mount ID before the
-mountinfo-derived root device can authorize anything. A nested coordinator
-root refuses with `EAGAIN`; the direct inventory being complete is not enough
-to retain the wrong root-device identity. Only after that check and the direct
-inventory can the same-namespace peer shortcut apply. Leader disappearance
+both that seed mount ID equal the resulting namespace-root mount ID and that the
+namespace-root `statmount` superblock device equal the root `dev_t` captured
+by the already-opened self mountinfo. A stable nested coordinator root fails the
+mount-ID check; a temporary root ABA restored before `statx` fails the device
+cross-check. Both refuse with `EAGAIN`. The direct inventory being complete is
+not enough to retain the wrong root-device identity. Only after those checks
+and the direct inventory can the same-namespace peer shortcut apply. Leader disappearance
 still authorizes skipping only the leader table; visible non-leader tasks retain
 their existing bounded scan and fail-closed rules.
 
@@ -143,7 +145,7 @@ alone proves the required refusal-before-mutation contract.
 | Synthetic observation | Expected result |
 | --- | --- |
 | Local root only; unrelated PID or sibling `8:2` | Admit; preserve root `259:0` |
-| Coordinator chrooted to a child mount while its self root link still reports `/` | Refuse with `EAGAIN`; do not retain the child mount as the host root |
+| Coordinator chrooted to a child mount while its self root link still reports `/`, including restore-before-`statx` root ABA | Refuse with `EAGAIN`; require namespace-root mount ID and device to agree with the retained self-root identity |
 | Selected partition `8:1` only in PID `3031` | Refuse |
 | Selected parent `8:0` only in PID `3031` | Refuse |
 | Local or other PID mountinfo malformed, empty or missing while namespace lives | Refuse |

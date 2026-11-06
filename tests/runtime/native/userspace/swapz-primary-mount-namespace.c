@@ -1859,6 +1859,21 @@ static void test_nested_coordinator_root_identity(void)
 		"coordinator child-mount chroot keeps self root link slash",
 		makedev(259U, 11U), makedev(8U, 0U), 0, EAGAIN,
 		"coordinator-root-namespace-identity");
+
+	/*
+	 * Root ABA: mountinfo was captured while the coordinator root was the
+	 * child mount, but the statx seed has already returned to the namespace
+	 * root. Mount-ID equality alone must not retain the stale child device.
+	 */
+	fixture_reset();
+	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_namespace_root_override_device = makedev(8U, 4U);
+	fixture_file("self/mountinfo",
+		     "36 25 259:11 / / rw - ext4 /chroot-root rw\n");
+	expect_mount_identity_admission(
+		"coordinator root ABA restores before statx root seed",
+		makedev(259U, 11U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator-root-device-identity");
 }
 
 /* A clean-looking foreign mountinfo view can omit selected or parent mounts. */
