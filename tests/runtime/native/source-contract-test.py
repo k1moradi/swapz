@@ -3826,6 +3826,14 @@ int main(void)
                                       capture_output=True, text=True, timeout=5)
             self.assertEqual(executed.returncode, 0, executed.stderr)
 
+    def test_authority_shared_release_cursor_avoids_kernel_current_macro(self):
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        release = source_body("swapz_verify_shared_extent_release", authority)
+        self.assertIn("swapz_u32 current_logical, last", release)
+        self.assertIn("while (current_logical != none)", release)
+        self.assertNotIn("swapz_u32 current, last", release)
+        self.assertNotIn("while (current != none)", release)
+
     def test_raw_crc_protection_and_gc_relocation(self):
         auth = (ROOT / "src/kernel/authority.c").read_text()
         auth_h = (ROOT / "src/kernel/authority.h").read_text()
