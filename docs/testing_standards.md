@@ -7820,6 +7820,22 @@ not read the physical qualification marker, and a private seam cannot
 substitute for the production boot token. Comments and string literals
 containing fake gate or syscall text never satisfy safety assertions.
 
+Synthetic report-admission regressions must execute the actual package
+source-clean guard (including its sanitized failure diagnostic and BLOCKED
+disposition) against isolated generated-header bytes; finding a condition in
+comments, matching a shell literal, or replacing the real rejection body with
+a test-only exit does not establish executable coverage. Negative controls
+include a different 40-hex source, dirty or malformed build cleanliness,
+missing build identity, incorrect running-kernel release, malformed report
+type, repeated or incomplete stage evidence, a failed required stage, and a
+report whose hashes remain populated but whose overall verdict is FAIL.
+The package's actual digest gate must compare final formatter/module/oracle
+artifact bytes to the report, reject changed or absent bytes, and emit only
+bounded expected/observed hashes and a read-only recapture action. A successful
+old CI run or saved report for a prior source cannot become evidence for a
+new owner-host execution; these fixtures never write `test_results.json` or
+claim live device qualification.
+
 Canonical CI release evidence contains exactly one row for each of the three
 mandatory workflows, with distinct canonical positive signed-64-bit GitHub
 run IDs. Extra, malformed, or duplicated rows cannot qualify the release even

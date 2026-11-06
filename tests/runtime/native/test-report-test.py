@@ -5105,6 +5105,17 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
             self.SOURCE_SHA, "b" * 64, "c" * 64, "d" * 64])
 
         scenarios = (
+            ("schema", "swapz-test-results-v1", "other-report-type",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report.update(schema="other-report-type")),
+            ("stages[2].name", "Kernel warnings W=1",
+             "Native and rootless contracts",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report["stages"][2].update(
+                 name=report["stages"][1]["name"])),
+            ("stages", "5-canonical-stages", "<dict>",
+             "rerun-make-test-for-exact-clean-source",
+             lambda report: report.update(stages={})),
             ("tested_commit_sha", self.SOURCE_SHA, "e" * 40,
              "rerun-make-test-for-exact-clean-source",
              lambda report: report.update(tested_commit_sha="e" * 40)),
@@ -5169,6 +5180,11 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
             with self.subTest(field=field, observed=observed):
                 report = copy.deepcopy(passing)
                 mutate(report)
+                if field == "overall":
+                    # Populated, well-formed hashes do not promote a failed run.
+                    self.assertTrue(
+                        runner.owner_qualification_artifacts_available(
+                            report["qualified_artifacts"]))
                 outcome = self.package_report_gate(report)
                 diagnostic = outcome.stderr.strip()
                 message = (
@@ -5239,39 +5255,110 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 
-    def test_kernel_header_source_clean_guard_rejects_mismatched_identity(self):
+    def test_qualified_artifact_digest_guard_checks_actual_bytes(self):
+        """Execute the package hash gate against isolated artifact bytes."""
         import os
         import subprocess
 
         source = (ROOT / "packaging/package-dkms.sh").read_text()
-        admission = source[source.index("qualification_output="):]
-        source_extract = next(
-            line for line in admission.splitlines()
-            if line.startswith('build_source_sha="$(sed -n '))
-        clean_extract = next(
-            line for line in admission.splitlines()
-            if line.startswith('build_source_clean="$(sed -n '))
-        guard_line = next(
-            line for line in admission.splitlines()
-            if line.startswith(
-                'if [[ "$build_source_sha" != "$qualified_source_sha"'))
-        self.assertIn('|| "$build_source_clean" != 1 ]]; then', guard_line)
-        guard = f"{guard_line}\n  exit 1\nfi"
-        script = "\n".join((source_extract, clean_extract, guard))
+        start = source.find("\nhash_file() {")
+        end = source.find("\nquery_dkms_status() {", start)
+        self.assertGreaterEqual(start, 0, "missing package hash helper")
+        self.assertGreater(end, start, "missing package hash guard boundary")
+        helpers = source[start:end]
+        script = (
+            "set -Eeuo pipefail\n" + helpers + "\n"
+            'report_qualified_digest "$1" "$2" "$3" qualified_report\n')
 
-        for header_sha, clean_bit, expected in (
-                (self.SOURCE_SHA, "1", "PASS"),
-                ("e" * 40, "1", "BLOCKED"),
-                (self.SOURCE_SHA, "0", "BLOCKED"),
-                ("A" * 40, "1", "BLOCKED")):
+        for artifact_name in (
+                "qualified_swapzctl", "qualified_dm-swapz.ko",
+                "qualified_roundtrip_oracle"):
+            with self.subTest(artifact=artifact_name):
+                with tempfile.TemporaryDirectory(
+                        prefix="report-artifact-") as name:
+                    artifact = Path(name) / "artifact"
+                    artifact.write_bytes(b"qualified-final-artifact")
+                    expected_hash = hashlib.sha256(
+                        artifact.read_bytes()).hexdigest()
+
+                    def check():
+                        return subprocess.run(
+                            ["bash", "-c", script, "bash", artifact_name,
+                             expected_hash, str(artifact)],
+                            env=os.environ.copy(), capture_output=True,
+                            text=True, check=False, timeout=5)
+
+                    accepted = check()
+                    self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                    self.assertEqual(accepted.stderr, "")
+
+                    artifact.write_bytes(b"stale-or-rebuilt-artifact")
+                    changed = check()
+                    self.assertEqual(changed.returncode, 1)
+                    diagnostic = changed.stderr.strip()
+                    self.assertIn(
+                        f"artifact={artifact_name} check=sha256 "
+                        "provenance=qualified_report", diagnostic)
+                    self.assertIn(f"expected_sha256={expected_hash}", diagnostic)
+                    self.assertIn(
+                        "observed_sha256=" + hashlib.sha256(
+                            artifact.read_bytes()).hexdigest(), diagnostic)
+                    self.assertIn(
+                        "next=inspect_qualification_and_artifact_bytes_read_only "
+                        "retained_state=unchanged", diagnostic)
+                    self.assertNotIn(str(artifact), diagnostic)
+
+                    artifact.unlink()
+                    missing = check()
+                    self.assertEqual(missing.returncode, 1)
+                    self.assertIn("observed_sha256=missing_or_unsafe",
+                                  missing.stderr)
+                    self.assertNotIn(str(artifact), missing.stderr)
+
+    def test_kernel_header_source_clean_guard_rejects_mismatched_identity(self):
+        """Execute the production guard and its diagnostics, not a fake exit."""
+        import os
+        import subprocess
+
+        source = (ROOT / "packaging/package-dkms.sh").read_text()
+        admission_start = source.find("qualification_output=")
+        self.assertGreaterEqual(
+            admission_start, 0, "missing package qualification admission")
+        guard_start = source.find(
+            '\nbuild_source_sha="$(sed -n ', admission_start)
+        guard_end = source.find(
+            '\nif [[ -z "$test_root" ]]; then', guard_start)
+        self.assertGreaterEqual(
+            guard_start, 0, "missing executable build identity extraction")
+        self.assertGreater(
+            guard_end, guard_start, "missing executable build guard boundary")
+        # Preserve the real printf/blocked branch. Only replace blocked()'s
+        # privileged orchestration with the same exit classification.
+        script = (
+            "set -Eeuo pipefail\n"
+            'blocked() { printf "BLOCKED: %s\\n" "$*" >&2; exit 2; }\n'
+            + source[guard_start:guard_end] + "\n")
+
+        for header_sha, clean_bit, expected_source, expected_clean in (
+                (self.SOURCE_SHA, "1", None, None),
+                ("e" * 40, "1", "e" * 40, "1"),
+                (self.SOURCE_SHA, "0", self.SOURCE_SHA, "0"),
+                ("A" * 40, "1", "unavailable", "1"),
+                (self.SOURCE_SHA, "2", self.SOURCE_SHA, "unavailable"),
+                (None, None, "unavailable", "unavailable")):
             with self.subTest(header_sha=header_sha, clean_bit=clean_bit):
                 with tempfile.TemporaryDirectory(
                         prefix="report-build-header-") as name:
                     build_info = Path(name) / "source-build-info.h"
+                    header_lines = []
+                    if header_sha is not None:
+                        header_lines.append(
+                            f'#define SWAPZ_BUILD_SOURCE_SHA "{header_sha}"')
+                    if clean_bit is not None:
+                        header_lines.append(
+                            f"#define SWAPZ_BUILD_SOURCE_CLEAN {clean_bit}")
                     build_info.write_text(
-                        f'#define SWAPZ_BUILD_SOURCE_SHA "{header_sha}"\n'
-                        f"#define SWAPZ_BUILD_SOURCE_CLEAN {clean_bit}\n",
-                        encoding="utf-8")
+                        "\n".join(header_lines) + "\n", encoding="utf-8")
                     environment = {
                         **os.environ,
                         "build_info": str(build_info),
@@ -5280,13 +5367,34 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
                     outcome = subprocess.run(
                         ["bash", "-c", script], env=environment,
                         capture_output=True, text=True, check=False, timeout=5)
-                observed = "PASS" if outcome.returncode == 0 else "BLOCKED"
+                if expected_source is None:
+                    self.assertEqual(outcome.returncode, 0, outcome.stderr)
+                    self.assertEqual(outcome.stderr, "")
+                    continue
+
+                diagnostic = outcome.stderr.strip()
                 self.assertEqual(
-                    observed, expected,
-                    f"field=build/source-build-info.h tested_source="
-                    f"{self.SOURCE_SHA} expected={expected} observed={observed}; "
-                    "next=rebuild clean qualified artifacts for this exact "
-                    "source and running kernel")
+                    outcome.returncode, 2,
+                    f"field=build/source-build-info.h source={self.SOURCE_SHA} "
+                    f"expected=BLOCKED observed=exit-{outcome.returncode}; "
+                    "next=rebuild exact clean qualified artifacts")
+                self.assertIn(
+                    "artifact=qualified_kernel_build_info "
+                    "check=source_provenance", diagnostic)
+                self.assertIn(
+                    f"expected_source_sha={self.SOURCE_SHA}", diagnostic)
+                self.assertIn(
+                    f"observed_source_sha={expected_source}", diagnostic)
+                self.assertIn("expected_clean=1", diagnostic)
+                self.assertIn(
+                    f"observed_clean={expected_clean}", diagnostic)
+                self.assertIn(
+                    "next=inspect_qualification_and_build_info_read_only "
+                    "retained_state=unchanged", diagnostic)
+                self.assertIn(
+                    "BLOCKED: build provenance does not match the "
+                    "qualified clean source", diagnostic)
+                self.assertNotIn(str(build_info), diagnostic)
 
     def test_private_first_failure_survives_later_error_without_public_paths(self):
         import stat
@@ -5536,6 +5644,38 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         verdict = runner.evaluate_production_readiness(
             missing_package_ci, self.SOURCE_SHA)
         self.assertEqual(verdict["evidence_statuses"]["required_ci"], "BLOCKED")
+
+    def test_stale_ci_and_old_owner_report_cannot_qualify_new_build(self):
+        # Every old CI run still reports success; its source is nevertheless
+        # not the source of the current qualified/installed binary identities.
+        snapshot = self.passing_snapshot()
+        old_source = "e" * 40
+        for run in snapshot["release_evidence"]["required_ci"]["runs"]:
+            run["head_sha"] = old_source
+        snapshot["release_evidence"]["exact_source_owner_make_test"][
+            "tested_source_sha"] = old_source
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        for evidence_name in ("required_ci", "exact_source_owner_make_test"):
+            self.assertEqual(
+                verdict["evidence_statuses"][evidence_name], "BLOCKED")
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertNotEqual(verdict["release_verdict"], "PASS")
+
+    def test_failed_owner_report_with_populated_hashes_stays_failed(self):
+        snapshot = self.passing_snapshot()
+        owner = snapshot["release_evidence"]["exact_source_owner_make_test"]
+        self.assertTrue(runner._readiness_artifact_hashes_valid(
+            owner["hashes"]))
+        owner["overall"] = "FAIL"
+        owner["status"] = "FAIL"
+        verdict = runner.evaluate_production_readiness(
+            snapshot, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["exact_source_owner_make_test"],
+            "FAIL")
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "FAIL")
+        self.assertEqual(verdict["release_verdict"], "FAIL")
 
     def test_required_ci_requires_completed_success_and_concrete_run_id(self):
         for field, value in (
