@@ -65,6 +65,14 @@ static unsigned int fixture_peer_mountinfo_completed_reads;
 static const char *fixture_regular_swap_path;
 static dev_t fixture_regular_swap_device;
 static char fixture_self_root[PATH_MAX] = "/";
+static char fixture_self_task_root[PATH_MAX] = "/";
+static char fixture_foreign_root[PATH_MAX] = "/";
+static char fixture_foreign_task_root[PATH_MAX] = "/";
+static int fixture_foreign_root_read_error;
+static int fixture_peer_root_changes_on_mountinfo_open;
+static int fixture_peer_root_change_injected;
+static unsigned int fixture_foreign_root_checks;
+static unsigned int fixture_foreign_task_root_checks;
 
 static void fixture_file(const char *relative, const char *contents);
 
@@ -136,6 +144,13 @@ static int fixture_open(const char *path, int flags, ...)
 		va_start(arguments, flags);
 		mode = (mode_t)va_arg(arguments, int);
 		va_end(arguments);
+	}
+
+	if (!strcmp(path, "/proc/3031/mountinfo") &&
+	    fixture_peer_root_changes_on_mountinfo_open) {
+		strcpy(fixture_foreign_root, "/changed-process-root");
+		fixture_peer_root_changes_on_mountinfo_open = 0;
+		fixture_peer_root_change_injected = 1;
 	}
 	if (fixture_path_has_suffix(path, "3031/mountinfo") &&
 	    fixture_peer_namespace_vanishes_on_mountinfo_open &&
@@ -472,14 +487,30 @@ static int fixture_lstat(const char *path, struct stat *info)
 
 static ssize_t fixture_readlink(const char *path, char *buffer, size_t size)
 {
+	const char *root_target;
 	size_t length;
 
-	if (strcmp(path, "/proc/self/root"))
+	if (!strcmp(path, "/proc/self/root"))
+		root_target = fixture_self_root;
+	else if (!strcmp(path, "/proc/self/task/65536/root"))
+		root_target = fixture_self_task_root;
+	else if (!strcmp(path, "/proc/3031/root")) {
+		++fixture_foreign_root_checks;
+		if (fixture_foreign_root_read_error) {
+			errno = fixture_foreign_root_read_error;
+			return -1;
+		}
+		root_target = fixture_foreign_root;
+	} else if (!strcmp(path, "/proc/3031/task/3032/root")) {
+		++fixture_foreign_task_root_checks;
+		root_target = fixture_foreign_task_root;
+	} else {
 		return readlink(path, buffer, size);
-	length = strlen(fixture_self_root);
+	}
+	length = strlen(root_target);
 	if (length > size)
 		length = size;
-	memcpy(buffer, fixture_self_root, length);
+	memcpy(buffer, root_target, length);
 	return (ssize_t)length;
 }
 
@@ -641,6 +672,14 @@ static void fixture_reset(void)
 	fixture_regular_swap_path = NULL;
 	fixture_regular_swap_device = 0;
 	strcpy(fixture_self_root, "/");
+	strcpy(fixture_self_task_root, "/");
+	strcpy(fixture_foreign_root, "/");
+	strcpy(fixture_foreign_task_root, "/");
+	fixture_foreign_root_read_error = 0;
+	fixture_peer_root_changes_on_mountinfo_open = 0;
+	fixture_peer_root_change_injected = 0;
+	fixture_foreign_root_checks = 0U;
+	fixture_foreign_task_root_checks = 0U;
 	fixture_unlink_if_present("self/ns/mnt");
 	fixture_unlink_if_present("3031/ns/mnt");
 	fixture_file("self/ns/mnt", "coordinator mount namespace\n");
@@ -1516,6 +1555,60 @@ static void test_independent_admission_gates(void)
 	assert(rmdir(holder_path) == 0);
 }
 
+
+/* A clean-looking foreign mountinfo view can omit selected or parent mounts. */
+static void test_root_filtered_foreign_mountinfo(void)
+{
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /foreign-root rw\n"
+		     "37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
+	expect_mount_admission("complete foreign-root view detects selected", 0, 0);
+
+	fixture_reset();
+	strcpy(fixture_foreign_root, "/chroot-jail");
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /filtered-root rw\n");
+	expect_mount_admission("filtered foreign view hides selected", 0, EAGAIN);
+	if (fixture_foreign_root_checks == 0U) {
+		fprintf(stderr, "FAIL: case=foreign-filtered-selected "
+			"reason=peer-root-not-inspected expected=EAGAIN\n");
+		++fixture_failures;
+	}
+
+	fixture_reset();
+	strcpy(fixture_foreign_root, "/chroot-jail");
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /filtered-root rw\n");
+	expect_mount_admission("filtered foreign view hides selected parent", 0,
+			       EAGAIN);
+
+	/*
+	 * Changing a process root after the first check, but before mountinfo
+	 * open, preserves its PID and namespace stat identity in this fixture.
+	 * A second root check must reject the mismatched captured view.
+	 */
+	fixture_reset();
+	fixture_peer_root_changes_on_mountinfo_open = 1;
+	expect_mount_admission("foreign root changes during mountinfo open", 0,
+			       EAGAIN);
+	if (!fixture_peer_root_change_injected) {
+		fprintf(stderr, "FAIL: case=foreign-root-change "
+			"reason=root-change-not-injected expected=EAGAIN\n");
+		++fixture_failures;
+	}
+
+	fixture_reset();
+	fixture_foreign_root_read_error = EACCES;
+	expect_mount_admission("unreadable foreign process root", 0, EACCES);
+
+	/* The coordinator's full-root table covers this same namespace. */
+	fixture_reset();
+	fixture_share_mount_namespace();
+	strcpy(fixture_foreign_root, "/chroot-jail");
+	expect_mount_admission("same-namespace chroot shortcut remains safe", 1, 0);
+}
+
 int main(void)
 {
 	char proc_template[] = "/tmp/swapz-primary-proc-XXXXXX";
@@ -1746,6 +1839,25 @@ int main(void)
 		"aggregate non-leader mountinfo byte ceiling",
 		1U, SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES, 1U);
 
+
+	/*
+	 * The leader's full-root table is clean, but a live foreign worker is
+	 * chrooted below a mounted selected partition. Its filtered mountinfo
+	 * omits that row; an unchanged namespace inode must not admit storage.
+	 */
+	fixture_reset();
+	fixture_file("3031/task/3032/ns/mnt", "live worker mount namespace\n");
+	fixture_file("3031/task/3032/mountinfo",
+		     "36 25 259:10 / / rw - ext4 /filtered-worker-root rw\n");
+	strcpy(fixture_foreign_task_root, "/worker-jail");
+	expect_mount_admission("chroot-filtered foreign non-leader", 0, EAGAIN);
+	if (fixture_foreign_task_root_checks == 0U) {
+		fprintf(stderr,
+			"FAIL: case=chroot-filtered-foreign-nonleader "
+			"reason=task-root-not-inspected expected=EAGAIN\n");
+		++fixture_failures;
+	}
+
 	/* A task that is gone before namespace inspection is safe to skip. */
 	fixture_reset();
 	fixture_unlink("3031/task/3032/mountinfo");
@@ -1831,7 +1943,7 @@ int main(void)
 	strcpy(fixture_self_root, "/coordinator-chroot");
 	fixture_file("3031/mountinfo", "");
 	expect_mount_admission("chrooted coordinator keeps empty peer ambiguous",
-			       0, EINVAL);
+			       0, EAGAIN);
 	fixture_reset();
 	fixture_share_mount_namespace();
 	fixture_file("self/mountinfo",
@@ -1920,6 +2032,7 @@ int main(void)
 	fixture_unlink("3031/ns/mnt");
 	expect_mount_admission("missing table and vanished namespace", 1, 0);
 	test_shared_root_parent_mount_gates();
+	test_root_filtered_foreign_mountinfo();
 	probe_shared_root_parent_same_namespace_snapshot_gap();
 	test_controlled_mount_snapshot_timings();
 	test_shared_root_parent_relationship_gates();

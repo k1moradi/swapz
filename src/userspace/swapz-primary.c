@@ -3735,6 +3735,33 @@ static int swapz_primary_mountinfo_read_fd(
 	return 0;
 }
 
+
+/*
+ * Linux filters a task's mountinfo by its filesystem root at open time.
+ * A matching mount namespace inode alone cannot establish a complete view.
+ * Reject a task outside the visible namespace root; this check is repeated
+ * after reading because the task may change root or be replaced during scan.
+ * Neither observation freezes mounts or pins a PID/TID across syscalls.
+ */
+static int swapz_primary_mountinfo_full_root(const char *root_path)
+{
+	char root_link[PATH_MAX];
+	ssize_t root_length;
+
+	if (!root_path) {
+		errno = EINVAL;
+		return -1;
+	}
+	root_length = readlink(root_path, root_link, sizeof(root_link));
+	if (root_length < 0)
+		return -1;
+	if (root_length != 1 || root_link[0] != '/') {
+		errno = EAGAIN;
+		return -1;
+	}
+	return 0;
+}
+
 static int swapz_primary_mountinfo_exit_error(int error)
 {
 	return error == EINVAL || error == ENOENT || error == ESRCH;
@@ -3756,6 +3783,7 @@ static int swapz_primary_read_nonleader_mount_facts(
 	struct dirent *entry;
 	char namespace_path[PATH_MAX];
 	char mountinfo_path[PATH_MAX];
+	char root_path[PATH_MAX];
 	int saved_errno = 0;
 
 	if (!task_directory_path || !leader_namespace_path || !leader_tid ||
@@ -3841,6 +3869,26 @@ static int swapz_primary_read_nonleader_mount_facts(
 			saved_errno = EOVERFLOW;
 			break;
 		}
+
+		path_length = snprintf(root_path, sizeof(root_path),
+				       "%s/%s/root", task_directory_path,
+				       entry->d_name);
+		if (path_length <= 0 ||
+		    (size_t)path_length >= sizeof(root_path)) {
+			saved_errno = EOVERFLOW;
+			break;
+		}
+		if (swapz_primary_mountinfo_full_root(root_path) < 0) {
+			int root_error = errno ? errno : EIO;
+
+			/* An unopened, proven vanished task may still be skipped. */
+			if (swapz_primary_mountinfo_exit_error(root_error) &&
+			    stat(namespace_path, &confirmed_namespace_info) < 0 &&
+			    (errno == ENOENT || errno == ESRCH))
+				continue;
+			saved_errno = root_error;
+			break;
+		}
 		fd = open(mountinfo_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 		if (fd < 0) {
 			int open_error = errno ? errno : EIO;
@@ -3873,6 +3921,11 @@ static int swapz_primary_read_nonleader_mount_facts(
 		if (confirmed_namespace_info.st_dev != namespace_info.st_dev ||
 		    confirmed_namespace_info.st_ino != namespace_info.st_ino) {
 			saved_errno = EAGAIN;
+			break;
+		}
+
+		if (swapz_primary_mountinfo_full_root(root_path) < 0) {
+			saved_errno = errno ? errno : EIO;
 			break;
 		}
 		if (bytes_read > SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES - *total_bytes) {
@@ -3913,6 +3966,7 @@ static int swapz_primary_read_mount_facts(
 	char self_pid[32];
 	char path[PATH_MAX];
 	char namespace_path[PATH_MAX];
+	char root_path[PATH_MAX];
 	struct stat self_namespace_info;
 	ssize_t self_root_length;
 	size_t visible_task_count = 1U;
@@ -3942,11 +3996,13 @@ static int swapz_primary_read_mount_facts(
 	if (stat("/proc/self/ns/mnt", &self_namespace_info) < 0)
 		return -1;
 	self_root_length = readlink("/proc/self/root", path, sizeof(path) - 1U);
-	if (self_root_length >= 0 &&
-	    (size_t)self_root_length < sizeof(path) - 1U) {
-		path[self_root_length] = '\0';
-		self_root_is_namespace_root = !strcmp(path, "/");
+	if (self_root_length < 0)
+		return -1;
+	if (self_root_length != 1 || path[0] != '/') {
+		errno = EAGAIN;
+		return -1;
 	}
+	self_root_is_namespace_root = 1;
 	/*
 	 * mountinfo is scoped to a task's mount namespace. Top-level /proc
 	 * enumeration returns thread-group leaders only, so inspect each visible
@@ -3956,7 +4012,8 @@ static int swapz_primary_read_mount_facts(
 	 * table covers every mount in its namespace. A task in that same namespace
 	 * can have a process-root-filtered mountinfo file, so skip only tasks whose
 	 * namespace inode matches and revalidate that identity immediately before
-	 * skipping. A chrooted coordinator cannot use this shortcut.
+	 * skipping. A chrooted coordinator cannot establish a full-root inventory
+	 * and must refuse admission, not merely avoid the shortcut.
 	 * This is a bounded snapshot, so every unreadable or ambiguous table fails
 	 * closed rather than being treated as evidence that the device is unused.
 	 */
@@ -4042,7 +4099,27 @@ static int swapz_primary_read_mount_facts(
 			else
 				namespace_info = confirmed_namespace_info;
 		}
+
 		if (!skip_leader_mountinfo) {
+			path_length = snprintf(root_path, sizeof(root_path),
+					      "/proc/%s/root", entry->d_name);
+			if (path_length <= 0 ||
+			    (size_t)path_length >= sizeof(root_path)) {
+				saved_errno = EOVERFLOW;
+				break;
+			}
+			if (swapz_primary_mountinfo_full_root(root_path) < 0) {
+				int root_error = errno ? errno : EIO;
+
+				/* A vanished leader never excuses surviving tasks. */
+				if (swapz_primary_mountinfo_exit_error(root_error) &&
+				    stat(namespace_path,
+					 &confirmed_namespace_info) < 0 &&
+				    (errno == ENOENT || errno == ESRCH))
+					goto scan_nonleader_tasks;
+				saved_errno = root_error;
+				break;
+			}
 			path_length = snprintf(path, sizeof(path),
 					      "/proc/%s/mountinfo", entry->d_name);
 			if (path_length <= 0 ||
@@ -4086,6 +4163,11 @@ static int swapz_primary_read_mount_facts(
 			if (confirmed_namespace_info.st_dev != namespace_info.st_dev ||
 			    confirmed_namespace_info.st_ino != namespace_info.st_ino) {
 				saved_errno = EAGAIN;
+				break;
+			}
+
+			if (swapz_primary_mountinfo_full_root(root_path) < 0) {
+				saved_errno = errno ? errno : EIO;
 				break;
 			}
 			if (bytes_read >

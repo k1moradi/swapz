@@ -59,6 +59,32 @@ name/UUID and table ownership, selected/parent `holders` and `slaves`, and
 source/parent topology. Unrelated host swapfiles need not be rejected solely
 for existing. No mount scan substitutes for swap/DM/holder inspection.
 
+## Root-filtered process inventories
+
+A foreign process or non-leader task can retain the same mount-namespace
+identity and numeric PID/start ticks while `chroot` restricts the mountinfo
+rows available to the coordinator. A rootless isolated 4 MiB tmpfs probe
+confirmed the defect: a mountinfo descriptor opened before chroot still shows
+the private mount, while a new `/proc/<pid>/mountinfo` descriptor opened after
+chroot omits it. This does not simulate a selected physical partition.
+
+The reader now refuses an unreadable or non-`/` process root for every
+foreign namespace table, checks that root before opening and after reading
+mountinfo, and refuses a non-`/` coordinator root. An unchanged namespace
+inode is never substituted for root-completeness evidence; a vanished leader
+still requires its surviving tasks to be inspected. A matching local
+full-root namespace remains covered by the coordinator's validated table.
+The rootless fixture exercises hidden selected and selected-parent views,
+the non-leader path, a same-PID/root transition during open, and unreadable
+root evidence. Those checks are independent of root identity, selected
+device, parent and recovery-storage gates.
+
+The observations are bounded and not atomic: a process can change its root
+and change back between checks, a PID can be reused, and mounts can arrive
+after the scan. This change is a fail-closed filter for the reproduced
+chroot condition, not an assertion of whole-host exhaustive exclusion or
+physical device acceptance.
+
 ## Final mutation boundary
 
 The coordinator must repeat the cross-namespace mount admission **after all
