@@ -5663,9 +5663,28 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
             verdict["evidence_statuses"]["required_ci"], "BLOCKED", message)
         self.assertNotEqual(verdict["release_verdict"], "PASS", message)
 
+        # A current release-evidence wrapper cannot relabel a saved owner
+        # make-test result from an older source as current qualification.
+        relabeled_owner = self.passing_snapshot()
+        owner = relabeled_owner["release_evidence"]["exact_source_owner_make_test"]
+        owner["tested_source_sha"] = old_source
+        verdict = runner.evaluate_production_readiness(
+            relabeled_owner, self.SOURCE_SHA)
+        message = (
+            f"gate=exact_source_owner_make_test "
+            f"wrapper_source={self.SOURCE_SHA} tested_source={old_source}; "
+            "next=reject relabeled stale owner evidence and rerun make test")
+        self.assertEqual(
+            verdict["evidence_statuses"]["exact_source_owner_make_test"],
+            "BLOCKED", message)
+        self.assertEqual(
+            verdict["reasons"]["exact_source_owner_make_test"],
+            "PASS payload is incomplete or unqualified", message)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED", message)
+        self.assertNotEqual(verdict["release_verdict"], "PASS", message)
+
         # Model an actually stale owner result: both the evidence record and
-        # the make-test payload identify the prior source. Do not manufacture a
-        # contradictory current wrapper around an old tested_commit_sha.
+        # the make-test payload identify the prior source.
         stale_owner = self.passing_snapshot()
         owner = stale_owner["release_evidence"]["exact_source_owner_make_test"]
         owner["source_sha"] = old_source
