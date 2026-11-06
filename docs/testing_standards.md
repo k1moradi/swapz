@@ -430,6 +430,13 @@ names are present, compile-time assertions must agree. The synthetic fixture
 may define the same numbers solely for its intercepted seam. Neither case
 asserts the running kernel implements the 6.18 foreign-namespace ABI: runtime
 `ENOSYS` or an unsupported request remains a fail-closed admission result.
+The syscall seam must independently inject `ENOSYS` and `EPERM` into
+`statmount` and `listmount`, force more than one 256-ID `listmount`
+batch with the selected device only in a later batch, and fail closed when a
+later batch errors after an earlier clean batch. A stacked-mount control must
+return an unrelated covering mount ID before a covered selected-device ID and
+require the scanner to inspect both IDs exposed by `listmount`; this proves
+scanner traversal, not arbitrary stacked-filesystem backing ancestry.
 
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
