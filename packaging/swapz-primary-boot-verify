@@ -724,9 +724,6 @@ passive_swap_unit_guard()
 
 valid_runtime_preflight_authorization()
 {
-
-valid_runtime_preflight_authorization()
-{
 	authorization_file=$1
 	# Report files are observations, not authority. Validate only the token
 	# atomically claimed away from swapzctl's canonical authorization pathname.

@@ -3122,7 +3122,6 @@ class BootVerifierTests(unittest.TestCase):
         self.assertFalse((self.report / "runtime" / "primary-execution.env").exists())
 
     def test_changed_selector_and_missing_media_never_pick_another_card(self) -> None:
-    def test_changed_selector_and_missing_media_never_pick_another_card(self) -> None:
         for scenario in ("selected_card_removed", "wrong_partuuid"):
             with self.subTest(scenario=scenario):
                 self.write_boot_id(BOOT_A)
