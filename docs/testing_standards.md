@@ -3863,8 +3863,11 @@ authenticated current-run Actions job census and require exactly one completed,
 successful job for native-rootless, Make interface, each of the three focused
 rootless matrix members, and repository policy, plus its own still-running
 conclusion job. Match every job to the checked-out source SHA, run ID and
-attempt. Query the attempt-specific Actions jobs endpoint rather than relying
-on the run-level endpoint's default latest-attempt filtering. A missing,
+attempt. Verify the checked-out source matches the run SHA before opening
+an authenticated network request; a source mismatch must make zero Actions
+API calls and refuse locally. Query the attempt-specific Actions jobs endpoint
+rather than relying on the run-level endpoint's default latest-attempt
+filtering. A missing,
 repeated, cancelled, skipped, failed, stale, malformed or additional job, an
 unavailable Actions API, or an incomplete response is BLOCKED even when a
 subset of other jobs is green. A partial failed-job rerun is therefore

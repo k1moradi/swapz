@@ -1824,10 +1824,14 @@ class ProjectGoalsRepositoryPolicyContract(unittest.TestCase):
                     self.assertIn(field, errors)
                 self.assertNotIn("fixture-private-token", errors)
                 self.assertLessEqual(len(errors.strip()), 255)
-                self.assertEqual(requested_urls, [
-                    "https://api.github.com/repos/fixture/swapz/actions/runs/"
-                    "12345/attempts/1/jobs?per_page=100",
-                ])
+                # Checkout identity is checked before any authenticated API call.
+                if scenario == "checkout-mismatch":
+                    self.assertEqual(requested_urls, [])
+                else:
+                    self.assertEqual(requested_urls, [
+                        "https://api.github.com/repos/fixture/swapz/actions/runs/"
+                        "12345/attempts/1/jobs?per_page=100",
+                    ])
 
         code, output, errors, requested_urls = census(
             passing_jobs, api_error="token=fixture-private-token /home/private")
