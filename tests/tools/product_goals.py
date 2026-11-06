@@ -271,7 +271,13 @@ def _ci_safe_line(line):
     # Child-supplied structured values and absolute host paths are never
     # public first-error evidence, even when attached to an AssertionError.
     line = re.sub(r"\{[^\r\n]*\}", "<structured-evidence-redacted>", line)
-    line = re.sub(r"(?<![A-Za-z0-9_./])\/[^\s\x27\x22,;:)\]}]+",
+    # Preserve only the two source-controlled contract-suite basenames so
+    # failure classification survives redaction of their containing host root.
+    line = re.sub(
+        r"(?<![A-Za-z0-9_./])/(?:[^/\s\x27\x22,;:)\]}]+/)*"
+        r"(source-contract|make-interface)-test\.py\b",
+        r"<private-path>/\1-test.py", line)
+    line = re.sub(r"(?<![A-Za-z0-9_./>])\/[^\s\x27\x22,;:)\]}]+",
                   "<private-path>", line)
     # Keep the assertion operand, not a potentially huge source literal.
     line = re.sub(

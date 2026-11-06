@@ -98,6 +98,16 @@ exec sleep 30
         self.assertNotIn("FORGED_ID", json.dumps(private))
         self.assertNotIn("/private/fixture", json.dumps(private))
 
+    def test_contract_classification_survives_private_root_redaction(self):
+        failure = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: test_contract (__main__.SourceQualification.test_contract)",
+             '  File "/private/checkout/tests/runtime/native/source-contract-test.py", line 42',
+             "ValueError: substring not found"],
+            1, "native-rootless")
+        self.assertEqual(failure["category"], "SOURCE_CONTRACT")
+        self.assertEqual(failure["first_error"], "ValueError: substring not found")
+        self.assertNotIn("/private/checkout", json.dumps(failure))
+
 
 if __name__ == "__main__":
     unittest.main()

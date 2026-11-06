@@ -1765,7 +1765,10 @@ and `cleanup_disposition`. An unverified child cleanup remains explicitly
 cleanup-failure labels but never assert successful child teardown. The existing
 `expected_contract` and `observed` fields remain the public expected/actual
 conditions. Redact structured child-supplied JSON and absolute host paths
-before promoting first-error text; do not infer protected identities.
+before promoting first-error text; do not infer protected identities. Keep
+only the allowlisted source-contract and make-interface script basenames
+visible after redacting their private containing root, so original source
+contract failures retain their existing classification.
 If sanitized-log retention itself fails, the original test exit and cause are
 still reported, while `log=unavailable` and the numeric diagnostic errno
 describe that secondary evidence failure. All promoted fields use the existing
