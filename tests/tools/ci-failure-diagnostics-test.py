@@ -236,7 +236,8 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "phase_s=1 stage_s=2 line=22 log=unavailable", 1)
         self.assertEqual(rootless_timeout["child_exit_code"], 124)
         self.assertEqual(rootless_timeout["category"], "INFRASTRUCTURE")
-        self.assertIn("not proof", rootless_timeout["reason"])
+        self.assertIn("watchdog not proven", rootless_timeout["reason"])
+        self.assertNotIn("termination", rootless_timeout)
 
     def test_native_compiler_error_keeps_first_compile_failure(self):
         failure = self.diagnose(
@@ -274,6 +275,8 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
                       failure["first_error"])
         self.assertNotIn("PRIVATE_DECLARATION", failure["first_error"])
         self.assertNotIn("/private/", failure["first_error"])
+        self.assertNotIn("PRIVATE_DECLARATION", json.dumps(failure))
+        self.assertNotIn("/private/", json.dumps(failure))
 
         unauthenticated = self.diagnose(
             marker.replace("subtest=compile", "subtest=unavailable"), 2)
@@ -283,6 +286,8 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertIn("did not authenticate", unauthenticated["reason"])
         self.assertNotIn("swapz-primary-late-race-test.py",
                          unauthenticated["first_error"])
+        self.assertNotIn("swapz-primary-late-race-test.py",
+                         json.dumps(unauthenticated))
 
         wrong_reason = self.diagnose(
             marker.replace("reason=native_compile",
@@ -292,6 +297,43 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertIn("did not authenticate", wrong_reason["reason"])
         self.assertNotIn("swapz-primary-late-race-test.py",
                          wrong_reason["first_error"])
+        self.assertNotIn("swapz-primary-late-race-test.py",
+                         json.dumps(wrong_reason))
+        self.assertNotIn("[compile]", json.dumps(wrong_reason))
+
+        forged_nonzero = self.diagnose(
+            "/private/source/production.c:4923:13: error: "
+            "PRIVATE_DECLARATION\n" +
+            marker.replace("reason=native_compile", "reason=nonzero_exit")
+                  .replace("subtest=compile", "subtest=unavailable"), 2)
+        self.assertEqual(forged_nonzero["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(forged_nonzero["test"],
+                         "Makefile native and metadata")
+        self.assertIn("did not authenticate", forged_nonzero["reason"])
+        self.assertNotIn("PRIVATE_DECLARATION", json.dumps(forged_nonzero))
+        self.assertNotIn("/private/", json.dumps(forged_nonzero))
+        self.assertNotIn("swapz-primary-late-race-test.py",
+                         json.dumps(forged_nonzero))
+
+        forged_timeout = self.diagnose(
+            marker.replace("reason=native_compile", "reason=timeout_or_exit_124")
+                  .replace("exit=2 ", "exit=124 "), 1)
+        self.assertEqual(forged_timeout["status"], "FAIL")
+        self.assertEqual(forged_timeout["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(forged_timeout["test"],
+                         "Makefile native and metadata")
+        self.assertIn("did not authenticate", forged_timeout["reason"])
+        self.assertNotIn("[compile]", json.dumps(forged_timeout))
+
+        forged_interrupt = self.diagnose(
+            marker.replace("reason=native_compile", "reason=received_TERM")
+                  .replace("exit=2 ", "exit=143 "), 1)
+        self.assertEqual(forged_interrupt["status"], "FAIL")
+        self.assertEqual(forged_interrupt["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(forged_interrupt["test"],
+                         "Makefile native and metadata")
+        self.assertIn("did not authenticate", forged_interrupt["reason"])
+        self.assertNotIn("[compile]", json.dumps(forged_interrupt))
 
     def test_rootless_signal_style_exit_remains_ambiguous(self):
         marker = (

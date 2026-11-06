@@ -1537,9 +1537,11 @@ timeout-or-exit-124, signal-or-child-exit, received INT/TERM, and stderr
 relay/relay-cleanup failure. `native_compile` is accepted only for the exact
 Make phase, `subtest=compile`, `test=swapz-primary-late-race-test.py`, and
 child exit 2. A late-race filename combined with any other reason, subtest,
-phase, or child status is unauthenticated: outer reporters must suppress that
-nested identity, use a generic unknown category, and must not fall back to the
-private compiler declaration.
+phase, or child status is unauthenticated: outer reporters must suppress the
+test and subtest identity, keep the validated outer phase, use a generic unknown
+category even when the marker claims timeout, signal or runner interruption,
+and must not borrow earlier Make/compiler diagnostics or the private compiler
+declaration.
 
 An OSError at child launch retains its original `launch_errno` and sanitized
 OS error text without publishing the executable or command string. Negative

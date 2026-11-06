@@ -576,7 +576,12 @@ def diagnose_ci_failure(lines, exit_code, suite):
         # that a compile phase keeps its first compiler error even if verbose
         # compiler output separates it from the marker. This prevents expected
         # negative output from an earlier passing suite becoming the cause.
-        if rootless_shell_syntax_check_failed:
+        if rootless_invalid_late_race_identity:
+            # Invalid late-race identity cannot borrow an earlier Make or
+            # compiler error, even under a generic failure reason.
+            causal_error = None
+            category = None
+        elif rootless_shell_syntax_check_failed:
             # Earlier passing suites may have printed expected FAIL/BLOCKED
             # diagnostics mentioning this script. The validated phase wins.
             causal_error = None
@@ -632,7 +637,8 @@ def diagnose_ci_failure(lines, exit_code, suite):
         test_name = failing_test
     elif rootless_failure:
         test_name = phase
-        if rootless_failure["subtest"] != "unavailable":
+        if (not rootless_invalid_late_race_identity and
+                rootless_failure["subtest"] != "unavailable"):
             test_name += "[" + rootless_failure["subtest"] + "]"
     else:
         test_name = make_target or suite
@@ -651,7 +657,11 @@ def diagnose_ci_failure(lines, exit_code, suite):
         if rootless_test is not None:
             marker_reason += " test=" + rootless_test
         marker_reason += " log=" + rootless_failure["log"]
-        if rootless_shell_syntax_check_failed:
+        if rootless_invalid_late_race_identity:
+            status, category = "FAIL", "UNKNOWN_FAILURE"
+            reason = (marker_reason +
+                      " (late-race attribution fields did not authenticate)")
+        elif rootless_shell_syntax_check_failed:
             status, category = "FAIL", "SOURCE_CONTRACT"
             reason = (marker_reason +
                       " (bash -n source check exited 2; inspect private "
@@ -672,10 +682,6 @@ def diagnose_ci_failure(lines, exit_code, suite):
         elif rootless_native_compile:
             status, category = "FAIL", "NATIVE_COMPILE"
             reason = marker_reason
-        elif rootless_invalid_late_race_identity:
-            status, category = "FAIL", "UNKNOWN_FAILURE"
-            reason = (marker_reason +
-                      " (late-race attribution fields did not authenticate)")
         elif rootless_reason == "native_compile":
             status, category = "FAIL", "UNKNOWN_FAILURE"
             reason = (marker_reason +
