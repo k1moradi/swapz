@@ -1,15 +1,5 @@
 {
 "benchmarks": {
-"delta64_prepare": {
-"overall": "NOT_RUN",
-"reason": "retired from routine qualification"
-},
-"delta64_prepare_sessions": [],
-"delta64_rescue": {
-"overall": "NOT_RUN",
-"reason": "retired; production delta64+DELTA64_SHUF8+LZ4 is fixed on"
-},
-"delta64_rescue_sessions": [],
 "goal_scorecard": {
 "overall": "UNAVAILABLE",
 "rows": [
@@ -183,59 +173,28 @@
 }
 ]
 },
-"k1_read_bypass": {
-"overall": "NOT_RUN",
-"reason": "refuted and retired"
-},
-"k1_read_bypass_sessions": [],
 "lane_gap_attribution": [],
 "loaded_correctness": {
-"overall": "INCOMPLETE",
-"reason": "missing loaded correctness markers: raw-read,id36,primary-lifecycle,primary-interruption-recovery,primary-negative-recovery"
+"overall": "NOT_RUN"
 },
 "lz4_acceleration": {
-"overall": "NOT_RUN",
-"reason": "retired; ordinary LZ4 is fixed at acceleration 1"
+"overall": "NOT_RUN"
 },
 "lz4_acceleration_sessions": [],
-"parallel_read_ab": {
-"overall": "NOT_RUN",
-"reason": "promoted fixed-on; routine fan-out A/B retired"
-},
-"parallel_read_ab_sessions": [],
-"read_coalesce_ab": {
-"overall": "INCOMPLETE",
-"reason": "five counterbalanced matched rounds required"
-},
-"read_coalesce_ab_sessions": [],
-"read_coalesce_cap": {
-"overall": "NOT_RUN",
-"reason": "retired; production coalescing cap is fixed at 8 blocks"
-},
-"read_coalesce_cap_sessions": [],
-"sd_read_coalesce_ab": {
-"overall": "INCOMPLETE",
-"reason": "five counterbalanced matched rounds required"
-},
-"sd_read_coalesce_ab_sessions": [],
 "sessions": [],
 "storage_envelope_sessions": [],
 "storage_envelopes": {
-"overall": "NOT_RUN",
-"reason": "storage-envelope sweep not executed"
+"overall": "NOT_RUN"
 },
 "verdicts": {
-"overall": "INCOMPLETE",
-"reason": "sd_emulated: required counterbalanced sessions missing"
+"overall": "NOT_RUN"
 },
 "write_pipeline_depth": {
-"overall": "NOT_RUN",
-"reason": "refuted and retired from routine qualification"
+"overall": "NOT_RUN"
 },
 "write_pipeline_depth_sessions": [],
 "write_saturation": {
-"overall": "INCOMPLETE",
-"reason": "sd_emulated: write-only evidence shape mismatch"
+"overall": "NOT_RUN"
 },
 "write_saturation_sessions": []
 },
@@ -287,70 +246,27 @@
 ],
 "scope": "OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY"
 },
-"gc_scan_scale": {
-"rows": [
-{
-"incremental_select_ns": 6037,
-"legacy_dead_probe_ns": 691595,
-"legacy_score_scan_ns": 9379174,
-"logical_pages": 262144,
-"mapped_dead_probe_ns": 3530,
-"relocation_list_ns": 1844,
-"relocation_scan_ns": 1390775,
-"segments": 1024,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 21391,
-"legacy_dead_probe_ns": 2887796,
-"legacy_score_scan_ns": 37499322,
-"logical_pages": 1048576,
-"mapped_dead_probe_ns": 12283,
-"relocation_list_ns": 2712,
-"relocation_scan_ns": 5517146,
-"segments": 4096,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 74306,
-"legacy_dead_probe_ns": 9738588,
-"legacy_score_scan_ns": 137730563,
-"logical_pages": 4194304,
-"mapped_dead_probe_ns": 47163,
-"relocation_list_ns": 2840,
-"relocation_scan_ns": 21194048,
-"segments": 16384,
-"victim_records": 256
-},
-{
-"incremental_select_ns": 383721,
-"legacy_dead_probe_ns": 44116396,
-"legacy_score_scan_ns": 635609575,
-"logical_pages": 27080192,
-"mapped_dead_probe_ns": 179173,
-"relocation_list_ns": 2266,
-"relocation_scan_ns": 104406083,
-"segments": 105782,
-"victim_records": 256
-}
-],
-"scope": "OFFLINE_NATIVE_GC_SCALE_ONLY"
-},
-"kernel_debug": {
-"overall": "INCOMPLETE",
-"reason": "kernel debug evidence marker missing or duplicated"
-},
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1594,
+"inverse_ns_per_page": 186,
 "name": "scalar",
-"transform_ns_per_page": 1617
+"transform_ns_per_page": 248
 },
 {
-"inverse_ns_per_page": 1042,
+"inverse_ns_per_page": 275,
 "name": "sse2",
-"transform_ns_per_page": 847
+"transform_ns_per_page": 175
+},
+{
+"inverse_ns_per_page": 127,
+"name": "avx2",
+"transform_ns_per_page": 80
+},
+{
+"inverse_ns_per_page": 89,
+"name": "avx512",
+"transform_ns_per_page": 71
 }
 ],
 "classifier": {
@@ -360,9 +276,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 520,
+"ns_per_page": 77,
 "sample_pairs": 32,
-"scalar_ns_per_page": 520,
+"scalar_ns_per_page": 77,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -377,7 +293,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11691
+"wall_ns_per_page": 2404
 },
 {
 "acceleration": 2,
@@ -385,7 +301,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11471
+"wall_ns_per_page": 2225
 },
 {
 "acceleration": 3,
@@ -393,7 +309,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 11170
+"wall_ns_per_page": 2125
 },
 {
 "acceleration": 4,
@@ -401,7 +317,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10553
+"wall_ns_per_page": 2100
 }
 ],
 "negative_pages": 256,
@@ -418,9 +334,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6112,
-"modeled_wall_ns_total": 3520768,
-"ns_per_saved_block": 67707,
+"modeled_wall_ns_per_page": 1651,
+"modeled_wall_ns_total": 951296,
+"ns_per_saved_block": 18294,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -445,29 +361,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 975,
+"baseline_ns_per_page": 181,
 "order": "baseline_first",
-"unrolled_ns_per_page": 816
+"unrolled_ns_per_page": 174
 },
 {
-"baseline_ns_per_page": 955,
+"baseline_ns_per_page": 182,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 861
+"unrolled_ns_per_page": 175
 },
 {
-"baseline_ns_per_page": 947,
+"baseline_ns_per_page": 182,
 "order": "baseline_first",
-"unrolled_ns_per_page": 870
+"unrolled_ns_per_page": 176
 },
 {
-"baseline_ns_per_page": 957,
+"baseline_ns_per_page": 182,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 817
+"unrolled_ns_per_page": 178
 },
 {
-"baseline_ns_per_page": 955,
+"baseline_ns_per_page": 183,
 "order": "baseline_first",
-"unrolled_ns_per_page": 815
+"unrolled_ns_per_page": 175
 }
 ],
 "repeats_per_arm": 64,
@@ -516,14 +432,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69128,
+"ns_per_saved_block": 18751,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 6840,
-"routed_cpu_ns_total": 3940297,
+"routed_cpu_ns_per_page": 1855,
+"routed_cpu_ns_total": 1068842,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -571,14 +487,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 69561,
+"ns_per_saved_block": 18850,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 6642,
-"routed_cpu_ns_total": 3825880,
+"routed_cpu_ns_per_page": 1799,
+"routed_cpu_ns_total": 1036784,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -626,14 +542,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 67707,
+"ns_per_saved_block": 18294,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6112,
-"routed_cpu_ns_total": 3520768,
+"routed_cpu_ns_per_page": 1651,
+"routed_cpu_ns_total": 951296,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -681,14 +597,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 67707,
+"ns_per_saved_block": 18294,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6112,
-"routed_cpu_ns_total": 3520768,
+"routed_cpu_ns_per_page": 1651,
+"routed_cpu_ns_total": 951296,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -736,14 +652,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 67707,
+"ns_per_saved_block": 18294,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6112,
-"routed_cpu_ns_total": 3520768,
+"routed_cpu_ns_per_page": 1651,
+"routed_cpu_ns_total": 951296,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -759,93 +675,58 @@
 "candidate_blocks": 192,
 "candidate_extents": 84,
 "cliff_2024": 160,
-"inverse_backend": "sse2",
-"inverse_ns_per_page": 1042,
+"inverse_backend": "avx512",
+"inverse_ns_per_page": 89,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1594,
-"scalar_transform_ns_per_page": 1617,
-"second_lz4_ns_per_page": 11866,
-"transform_backend": "sse2",
-"transform_ns_per_page": 847
+"scalar_inverse_ns_per_page": 186,
+"scalar_transform_ns_per_page": 248,
+"second_lz4_ns_per_page": 3491,
+"transform_backend": "avx512",
+"transform_ns_per_page": 71
 }
 ]
 }
 },
 "host_identity": {
 "architecture": "x86_64",
-"id_sha256": "a1bff0d86667b9d4b97445e376e25078035d882f3edbbf6a126b6c092bb16fe5",
+"id_sha256": "3a7ef946a48960a4b2860e78c654e09ec5a34ec2d641cdd45e4f43794d2ef071",
 "schema": "swapz-host-v1"
 },
 "kernel_release": "7.0.0-42-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "b00aae5991002969b022f497158509f3f37176d3da437463481553b4c785ec58",
-"module_sha256": "5f06c1d02d29e5af269cefd80db62b08dec13ebe0cc3c9b28bdcfd9945f30431",
+"formatter_sha256": "e164296cbd0b585a801de82acff05f2213a11b80728fecad693e357f3e77cf0d",
+"module_sha256": "1f5421f54124ebbd6d9604ab9be2936add4992d22cd91703c0954ca262fad222",
 "oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "cf65e63864beac9c5e888e782aeec28023bcc3fb",
+"source_sha": "a588bded7a49b5331d0f7a24e5027414ad66f5e6",
 "stages": [
 {
-"elapsed_s": 17.191,
+"elapsed_s": 3.467,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 2280.508,
-"exit_code": 0,
-"name": "Native and rootless contracts",
-"status": "PASS"
-},
-{
-"elapsed_s": 18.202,
-"exit_code": 0,
-"name": "Kernel warnings W=1",
-"status": "PASS"
-},
-{
-"elapsed_s": 14.734,
-"exit_code": 0,
-"name": "Kernel warnings W=2",
-"status": "PASS"
-},
-{
-"diagnostic": "FAIL_PRIMARY_NULLBLK_LIFECYCLE: coordinator preparation phase=qualification-report-read errno=22 error=Invalid argument",
-"elapsed_s": 37.697,
+"diagnostic": "Unit test failed: test_all_compressed_dkms_candidates_and_mixed_image_refusal; child_exit=1 reason=unittest_assertion subtest=unavailable test=test_all_compressed_dkms_candidates_and_mixed_image_refusal log=build/tests/rootless-failure.9TFSLpKp/diagnostic.log",
+"elapsed_s": 1512.189,
 "exit_code": 1,
-"failed_phase": "owned RAM primary lifecycle prepare",
-"name": "Owned RAM smoke + mixed/QD pilot",
+"failed_phase": "package-dkms-test.py",
+"name": "Native and rootless contracts",
 "signals": [
-"PASS_DEFAULT_DELTA64_RESCUE",
-"PASS_WINDOW_CLOSE_REASONS",
-"PASS_WINDOW_OPEN_AGE",
-"PASS_ZERO_WRITE_LOWER_IO",
-"PASS_ORACLE_LOWER_READ",
-"PASS_LOADED_DELTA64_POSITIVE",
-"PASS_LOADED_ORACLE_PROFILE",
-"PASS_LOADED_COMPOUND_BIO",
-"PASS_LOADED_LIVE_GC",
-"PASS_LOADED_GC_PRESSURE",
-"PASS_LOADED_DISCARD_TRIM",
-"PASS_LOADED_SUSPEND_DRAIN",
-"PASS_RETAINED_SYNTHETIC_WRITE_FAULT",
-"PASS_LOADED_SYNTHETIC_READ_FAULT",
-"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT",
-"PASS_LOADED_CODEC_ERROR_PATHS",
-"PASS_LOADED_PACKED_PLACEMENT",
-"PASS_LOADED_COMPLETION_HANDOFF",
-"PASS_LOADED_OWNED_NULLBLK_SMOKE",
-"FAIL_PRIMARY_NULLBLK_LIFECYCLE"
+"PASS",
+"BLOCKED",
+"FAIL"
 ],
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "cf65e63864beac9c5e888e782aeec28023bcc3fb"
+"tested_commit_sha": "a588bded7a49b5331d0f7a24e5027414ad66f5e6"
 }
