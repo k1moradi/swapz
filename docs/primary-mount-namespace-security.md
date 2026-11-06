@@ -96,7 +96,8 @@ alone proves the required refusal-before-mutation contract.
 | Leader namespace marker absent while visible worker task holds selected partition or parent | Busy or BLOCKED; never admit from leader disappearance alone |
 | Opened PID mountinfo has an I/O error | Refuse |
 | `EINVAL`, `ENOENT`, `ESRCH` opening PID mountinfo, namespace still present | Refuse |
-| Same errors, namespace proven absent | Admit if every other check is clean |
+| Same errors opening a leader table, leader namespace marker proven absent | Skip only the leader table; inspect visible tasks or remain BLOCKED |
+| Same errors opening a non-leader task table, that task namespace proven absent | Skip that vanished task if every remaining check is clean |
 | Mountinfo missing while PID mount namespace remains | Refuse |
 | Namespace stat itself permission denied or uncertain | Refuse |
 | Active regular swapfile with filesystem `st_dev` equal to selected partition or parent | Refuse; unrelated swapfiles remain permitted |
