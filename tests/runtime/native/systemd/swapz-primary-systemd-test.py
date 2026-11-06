@@ -1959,9 +1959,15 @@ class BootVerifierTests(unittest.TestCase):
                 "evidence_retained=unknown action=inspect_cold_boot_report_before_rearming",
                 stderr,
             )
+            # GNU timeout can return 124 or 143 after TERM; the observer
+            # must retain 143 and revoke the one-use authorization either way.
+            self.assertRegex(
+                stderr,
+                r"signal=TERM process_ownership=owned_timeout_child "
+                r"child_status=(?:124|143) token_disposition=revoked",
+            )
             self.assertIn(
-                "signal=TERM process_ownership=owned_timeout_child "
-                "child_status=124 token_disposition=revoked",
+                "token_cleanup_phase=none token_cleanup_exit_status=0",
                 stderr,
             )
             self.assertFalse(Path(f"/proc/{timeout_pid}").exists())
