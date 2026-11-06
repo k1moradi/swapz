@@ -756,10 +756,17 @@ or signal-killed workers, and inconsistent full page/byte mismatch totals or
 capped mismatch samples before aggregation. A timeout or unexpected SIGKILL
 must report incomplete terminal evidence rather than successful readback. Successful child exit is terminal evidence only after EOF proves
 that no unconsumed oracle output remains. Short reads, interruption and failed
-unmapping must not produce a complete-looking record. Failure-only diagnostics
-identify the first failure phase, fully compared versus allocated pages/bytes,
-expected-zero versus observed page/byte mismatch totals, original errno when
-present, and whether cleanup finished. If a child exits before VERIFIED, the
+unmapping must not produce a complete-looking record. Parent record-pipe wait
+and read failures must preserve their original errno in the bounded terminal
+FAIL and chain the private exception without exposing its raw text. Failure-only
+diagnostics identify the first failure phase, fully compared versus allocated
+pages/bytes, expected-zero versus observed page/byte mismatch totals, original
+errno when present, and whether cleanup finished. If per-round child termination
+succeeds but pipe closure fails, retain that worker in outer cleanup ownership
+so bounded termination/pipe cleanup is retried before cgroup removal; the first
+cleanup failure remains non-PASS even if the retry completes. Missing or
+duplicate `pswpin`/`pswpout` counters are BLOCKED independent evidence,
+never an implicit zero-delta observation. If a child exits before VERIFIED, the
 parent may surface only a complete bounded structured oracle failure record;
 partial stderr and traceback/path text remain private, while the parent still
 reports the child exit and incomplete-evidence disposition. An interrupt while waiting for FILL or

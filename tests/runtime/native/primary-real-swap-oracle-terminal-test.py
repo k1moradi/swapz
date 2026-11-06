@@ -503,6 +503,30 @@ class TerminalEvidenceContracts(unittest.TestCase):
         finally:
             os.close(write_descriptor)
 
+    def test_parent_pipe_wait_failure_preserves_errno_without_raw_error(self):
+        read_descriptor, write_descriptor = os.pipe()
+        try:
+            with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                process = mock.Mock(stdout=output, stderr=io.StringIO())
+                process.poll.return_value = None
+                wait_error = OSError(errno.EIO, "synthetic pipe wait failure")
+                with mock.patch.object(
+                        qualify.select, "select", side_effect=wait_error), \
+                        self.assertRaisesRegex(
+                            qualify.QualificationFailure,
+                            "phase=terminal child_exit=running "
+                            "evidence_complete=false: cannot wait for "
+                            "ORACLE_VERIFIED= errno=5") as caught:
+                    qualify._oracle_event(
+                        process, "ORACLE_VERIFIED=",
+                        qualify.time.monotonic() + 1,
+                        lambda: None, bytearray())
+            self.assertIs(caught.exception.__cause__, wait_error)
+            self.assertNotIn(
+                "synthetic pipe wait failure", str(caught.exception))
+        finally:
+            os.close(write_descriptor)
+
     def test_interrupt_before_fill_returns_bounded_failure_without_allocating(self):
         stderr = io.StringIO()
         mmap_call = mock.Mock()

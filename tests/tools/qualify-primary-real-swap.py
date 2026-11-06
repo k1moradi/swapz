@@ -2903,7 +2903,18 @@ def _oracle_event(process: subprocess.Popen, prefix: str, deadline: float,
             raise QualificationFailure(
                 "real-swap oracle phase=terminal child_exit=running "
                 f"evidence_complete=false: timed out waiting for {prefix}")
-        readable, _, _ = select.select([fd], [], [], min(0.1, remaining))
+        try:
+            readable, _, _ = select.select(
+                [fd], [], [], min(0.1, remaining))
+        except (OSError, ValueError) as exc:
+            return_code = process.poll()
+            child_exit = return_code if return_code is not None else "running"
+            original_errno = getattr(exc, "errno", None)
+            raise QualificationFailure(
+                f"real-swap oracle phase=terminal child_exit={child_exit} "
+                f"evidence_complete=false: cannot wait for {prefix} "
+                f"errno={original_errno if original_errno is not None else 'none'}"
+            ) from exc
         if not readable:
             return_code = process.poll()
             if return_code is not None:
