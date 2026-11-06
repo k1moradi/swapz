@@ -4889,9 +4889,9 @@ The status-3 launcher must use its directly tracked external Python parent
 rather than infer creator identity from nested-shell `$`; the fixture heredoc
 is that parent's source stdin and must not be overridden by another stdin
 redirection. Failure to capture the parent identity is a bounded fixture
-precondition failure, not evidence for status 3. The status-7 signal attempt must refuse before
-SIGCONT and prove the exact child remains stopped; neither mismatch may be
-treated as cleanup authority.
+precondition failure, not evidence for status 3.
+The status-7 signal attempt must refuse before SIGCONT and prove the exact child
+remains stopped; neither mismatch may be treated as cleanup authority.
 Keep the status-3 and status-7 controls in separate bounded fixture invocations
 so one identity boundary cannot consume another control's subprocess deadline.
 A stopped-child fixture must publish its own shell PID with `$$` verbatim
