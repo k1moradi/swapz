@@ -314,13 +314,15 @@ claim_runtime_authorization()
 # child instead of killing the timeout supervisor as part of the child group.
 stop_journal_observation()
 {
-	journal_child_status=none
+	journal_timeout_wait_status=none
 	[ -n "$journal_timeout_pid" ] || return 0
 	kill -TERM "$journal_timeout_pid" 2>/dev/null || :
 	if wait "$journal_timeout_pid" 2>/dev/null; then
-		journal_child_status=0
+		journal_timeout_wait_status=0
 	else
-		journal_child_status=$?
+		# This is GNU timeout's status, not journalctl's. In particular, 124
+		# can follow either its own deadline or an externally delivered TERM.
+		journal_timeout_wait_status=$?
 	fi
 	journal_timeout_pid=
 }
@@ -365,8 +367,8 @@ interrupted_observation()
 	fi
 	# Report the original signal before any EXIT fallback diagnostic. Never
 	# promote an interrupted attempt or a failed cleanup to PASS.
-	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=INCOMPLETE phase=observe_signal observed=interrupted exit_status=%s evidence_retained=unknown action=inspect_cold_boot_report_before_rearming signal=%s process_ownership=%s child_status=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s\n' \
-		"$observation_signal_exit_status" "$observation_signal_name" "$observation_child_ownership" "$journal_child_status" "$observation_token_disposition" "$observation_token_cleanup_phase" "$observation_token_cleanup_exit_status" >&2 || :
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=INCOMPLETE phase=observe_signal observed=interrupted exit_status=%s evidence_retained=unknown action=inspect_cold_boot_report_before_rearming signal=%s process_ownership=%s timeout_wait_status=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s\n' \
+		"$observation_signal_exit_status" "$observation_signal_name" "$observation_child_ownership" "$journal_timeout_wait_status" "$observation_token_disposition" "$observation_token_cleanup_phase" "$observation_token_cleanup_exit_status" >&2 || :
 	exit "$observation_signal_exit_status"
 }
 

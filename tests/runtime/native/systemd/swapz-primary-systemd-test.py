@@ -1702,6 +1702,25 @@ class BootVerifierTests(unittest.TestCase):
             ),
         )
 
+    def install_extended_observation_timeout(self) -> tuple[Path, str]:
+        timeout_binary = shutil.which("timeout", path="/usr/bin:/bin")
+        if timeout_binary is None:
+            self.fail("GNU timeout is required for the observer signal regression")
+        requested_timeout = self.root / "observe-timeout-requested"
+        write_executable(
+            self.bin / "timeout",
+            "#!/bin/sh\n"
+            '[ "$1" = "--foreground" ] &&\n'
+            '[ "$2" = "--signal=TERM" ] &&\n'
+            '[ "$3" = "--kill-after=1s" ] &&\n'
+            '[ "$4" = "5s" ] || exit 91\n'
+            'printf "%s\\n" "$4" > "$MOCK_OBSERVE_TIMEOUT_REQUESTED" || exit 92\n'
+            'shift 4\n'
+            f'exec {shlex.quote(timeout_binary)} --foreground --signal=TERM '
+            '--kill-after=1s 60s "$@"\n',
+        )
+        return requested_timeout, timeout_binary
+
     def write_boot_id(self, boot_id: str) -> None:
         (self.proc / "sys" / "kernel" / "random" / "boot_id").write_text(boot_id + "\n", encoding="ascii")
 
@@ -1914,6 +1933,7 @@ class BootVerifierTests(unittest.TestCase):
         authorization = self.report / "runtime" / "primary-execution.env"
         journal_started = self.root / "observe-journal-started"
         journal_pid_file = self.root / "observe-journal-pid"
+        timeout_requested, timeout_binary = self.install_extended_observation_timeout()
         write_executable(
             self.bin / "journalctl",
             "#!/bin/sh\n"
@@ -1924,6 +1944,7 @@ class BootVerifierTests(unittest.TestCase):
             "exec sleep 15\n",
         )
         env = self.env.copy()
+        env["MOCK_OBSERVE_TIMEOUT_REQUESTED"] = str(timeout_requested)
         env["MOCK_OBSERVE_JOURNAL_STARTED"] = str(journal_started)
         env["MOCK_OBSERVE_JOURNAL_PID"] = str(journal_pid_file)
         verifier = subprocess.Popen(
@@ -1949,6 +1970,10 @@ class BootVerifierTests(unittest.TestCase):
             self.assertEqual(os.getpgid(verifier.pid), verifier.pid)
             self.assertEqual(os.getpgid(timeout_pid), verifier.pid)
             self.assertEqual(os.getpgid(journal_pid), verifier.pid)
+            self.assertEqual(
+                Path(f"/proc/{timeout_pid}/exe").resolve(),
+                Path(timeout_binary).resolve(),
+            )
             self.assertTrue(os.readlink(f"/proc/{verifier.pid}/fd/1").startswith("pipe:["))
             self.assertTrue(os.readlink(f"/proc/{verifier.pid}/fd/2").startswith("pipe:["))
             self.assertIn("/.kernel-journal.", os.readlink(f"/proc/{journal_pid}/fd/1"))
@@ -1966,13 +1991,16 @@ class BootVerifierTests(unittest.TestCase):
                 stderr,
             )
             # A direct TERM to the observer makes its trap terminate the
-            # still-live timeout supervisor. Status 124 would mean the
-            # watchdog deadline won the race and would not prove this path.
+            # still-live timeout supervisor. GNU timeout can return 124 both
+            # for its own deadline and after externally forwarded TERM, so the
+            # status is accepted only with live PID/PPID/PGID proof, the
+            # observer's own 143 signal status, and post-signal child cleanup.
             self.assertIn(
                 "signal=TERM process_ownership=owned_timeout_child "
-                "child_status=143 token_disposition=revoked",
+                "timeout_wait_status=124 token_disposition=revoked",
                 stderr,
             )
+            self.assertEqual(timeout_requested.read_text(encoding="ascii"), "5s\n")
             self.assertIn(
                 "token_cleanup_phase=none token_cleanup_exit_status=0",
                 stderr,
@@ -2004,6 +2032,7 @@ class BootVerifierTests(unittest.TestCase):
         consumed = self.report / "runtime" / ".primary-execution.observed.env"
         journal_started = self.root / "failed-cleanup-journal-started"
         journal_pid_file = self.root / "failed-cleanup-journal-pid"
+        timeout_requested, timeout_binary = self.install_extended_observation_timeout()
         write_executable(
             self.bin / "journalctl",
             "#!/bin/sh\n"
@@ -2019,6 +2048,7 @@ class BootVerifierTests(unittest.TestCase):
             'exec /usr/bin/rm "$@"\n',
         )
         env = self.env.copy()
+        env["MOCK_OBSERVE_TIMEOUT_REQUESTED"] = str(timeout_requested)
         env["MOCK_OBSERVE_JOURNAL_STARTED"] = str(journal_started)
         env["MOCK_OBSERVE_JOURNAL_PID"] = str(journal_pid_file)
         verifier = subprocess.Popen(
@@ -2039,6 +2069,10 @@ class BootVerifierTests(unittest.TestCase):
                 line.split()[1] for line in journal_status.splitlines()
                 if line.startswith("PPid:")
             ))
+            self.assertEqual(
+                Path(f"/proc/{timeout_pid}/exe").resolve(),
+                Path(timeout_binary).resolve(),
+            )
             self.assertEqual(os.getpgid(timeout_pid), verifier.pid)
             self.assertEqual(os.getpgid(journal_pid), verifier.pid)
             # Signal only the observer so its trap owns the timeout TERM and
@@ -2052,9 +2086,10 @@ class BootVerifierTests(unittest.TestCase):
             )
             self.assertIn(
                 "signal=TERM process_ownership=owned_timeout_child "
-                "child_status=137",
+                "timeout_wait_status=137",
                 stderr,
             )
+            self.assertEqual(timeout_requested.read_text(encoding="ascii"), "5s\n")
             self.assertIn(
                 "token_disposition=unknown "
                 "token_cleanup_phase=token_revoke_consumed_unlink "

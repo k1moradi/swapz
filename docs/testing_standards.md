@@ -8801,20 +8801,25 @@ kill-after escalation; do not put the supervisor in the child process group
 that escalation may kill. A signal received between asynchronous launch and
 capturing `$!` must be deferred until the timeout PID is owned, preserving the
 first signal reason. On interruption signal only that owned timeout supervisor,
-wait for its direct child status, then revoke authorization. Rootless signal
+wait for the supervisor's status, then revoke authorization. Rootless signal
 fixtures must signal the observer process directly so the observer's handler,
 not a process-group broadcast, owns supervisor termination. The reported
-`child_status` is the observer's direct GNU `timeout` child status, not the
-raw `journalctl` result. In the ordinary direct-TERM regression, the confirmed
-live timeout supervisor must report 143: status 124 means its configured
-watchdog deadline won the race and is not valid evidence that the observer's
-signal path terminated the child. The TERM-resistant journal control must
-report 137 after the owned timeout performs its bounded KILL escalation. In
-both cases retain the observer's original 128+signal exit status (143 for
-TERM), prove that timeout and journal processes are gone, and prove the one-use
-token is revoked. The fail-only
-signal diagnostic must retain the original 128+signal status even if token
-cleanup and its EXIT retry fail, and identify signal, process ownership, child
+`timeout_wait_status` is the wait status of the observer's direct GNU `timeout`
+supervisor, not the raw `journalctl` result. GNU `timeout` can return 124 both
+when its watchdog expires and when an external TERM is forwarded to its
+command; status 124 alone proves neither cause. For the ordinary direct-TERM
+regression, a test-only wrapper must verify that production requested its
+fixed `5s` deadline, then run the real GNU `timeout` with an extended test
+deadline so the watchdog cannot win the fixture race. Before signaling, prove
+that the timeout process is live, directly owns the journal process, and both
+remain in the observer's process group. Require the observer's original
+128+signal exit status (143 for TERM), the explicit `signal=TERM` and
+`process_ownership=owned_timeout_child` record, `timeout_wait_status=124`,
+no PASS, complete timeout/journal cleanup, and revoked one-use token. The
+TERM-resistant journal control must report `timeout_wait_status=137` after
+the owned timeout performs its bounded KILL escalation. The fail-only signal
+diagnostic must retain the original 128+signal status even if token cleanup
+and its EXIT retry fail, and identify signal, process ownership, timeout wait
 status, token disposition, cleanup phase/status and retained evidence without
 runtime token paths. Rootless regression must trace parent/PGID and output FD
 ownership, assert prompt exit and no surviving timeout/journal process for both
