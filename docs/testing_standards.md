@@ -5860,6 +5860,10 @@ The run path must reject a missing or contradictory swap-activity field in
 both production and development modes; it must never synthesize that admission
 fact to repair an incomplete fixture. Rootless fixtures must reread the durable terminal result
 after finalization, rather than testing the earlier teardown snapshot.
+The final argv binding must compare the same string representation that was
+persisted to JSON, including snapshotted executable paths returned as
+`pathlib.Path`; rootless coverage must exercise that real path-like return
+type while preserving exact executable, mapper, phase, and option checks.
 A development-only result must retain its exact development
 schema/scope and false production-qualification, physical-media-acceptance and
 Linux-swap-activation flags even if its mapper oracle succeeds.

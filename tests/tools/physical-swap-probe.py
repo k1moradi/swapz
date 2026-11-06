@@ -2492,8 +2492,11 @@ def _final_physical_oracle_evidence_error(results, state, target,
     for index, ((phase, options), entry) in enumerate(zip(phases, entries)):
         if not isinstance(entry, dict):
             return f"phase_{index}_nonobject"
+        # argv is persisted as JSON strings, while artifact snapshots may be
+        # pathlib.Path objects. Compare the canonical serialized arguments.
+        expected_argv = [str(value) for value in (oracle, mapper, *options)]
         if (entry.get("phase") != phase or
-                entry.get("argv") != [oracle, mapper, *options]):
+                entry.get("argv") != expected_argv):
             return f"phase_{index}_identity_or_arguments_mismatch"
         if (entry.get("status") != "PASS" or
                 type(entry.get("return_code")) is not int or

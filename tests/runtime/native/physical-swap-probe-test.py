@@ -1831,7 +1831,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             events.append(("command", arguments))
             if command[:2] == ["/reviewed/swapzctl", "format"]:
                 observed_block_zero = bytes(formatted)
-            if command[0] == "/reviewed/device-roundtrip":
+            if arguments[0] == "/reviewed/device-roundtrip":
                 oracle_invocations += 1
                 if oracle_invocations == oracle_failure_at:
                     return subprocess.CompletedProcess(
@@ -2137,7 +2137,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   return_value={
                                       "formatter_sha256": "/reviewed/swapzctl",
                                       "module_sha256": "/reviewed/dm-swapz.ko",
-                                      "oracle_sha256": "/reviewed/device-roundtrip",
+                                      "oracle_sha256": Path(
+                                          "/reviewed/device-roundtrip"),
                                   }),
                 mock.patch.object(probe, "_verify_target_identity",
                                   side_effect=verify_target),
