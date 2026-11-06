@@ -331,6 +331,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
             (state_dir / probe.RESULTS_NAME).write_text(json.dumps({
                 "start_timestamp": "2026-11-06T00:00:00Z",
+                "oracle_suite": "PHASES_PASS_RECOVERY_PENDING",
             }))
 
             target = {
@@ -338,16 +339,21 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "minor": state["minor"], "size_bytes": state["size_bytes"],
                 "partuuid": state["partuuid"],
             }
+            cleanup_samples = 0
 
             def final_observations(results, saved_state_dir, saved_state,
                                    observed_target):
+                nonlocal cleanup_samples
                 self.assertEqual(observed_target, target)
-                results["final_swap_error"] = "malformed final swap inventory"
+                cleanup_samples += 1
+                if cleanup_samples == 1:
+                    results["final_swap_error"] = "malformed final swap inventory"
                 probe._save_results(saved_state_dir, results)
                 return {
-                    "errors": ["final_swap_inventory_unverifiable"],
+                    "errors": (["final_swap_inventory_unverifiable"]
+                               if cleanup_samples == 1 else []),
                     "original_header_matches_final": True,
-                    "restored_swap_verified": False,
+                    "restored_swap_verified": cleanup_samples > 1,
                     "mapper_removal_succeeded": True,
                     "module_cleanup_succeeded": True,
                     "unrelated_mapper_inventory_unchanged": True,
@@ -355,6 +361,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "run_claim_consumed": True,
                 }
 
+            # A successful retry may release the marker, but cannot rewrite
+            # the historical failed observation into a physical-run PASS.
+            real_release = probe._release_partition_ownership
+            owner_marker = (
+                self.recovery_base / f"partition-{state['partuuid']}.active")
+            consumed_claim = (
+                self.recovery_base / f"consumed-{state['run_id']}.json")
             with mock.patch.object(probe, "_validate_state_dir"), \
                     mock.patch.object(
                         probe, "inspect_target_identity_for_recovery",
@@ -371,23 +384,39 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     mock.patch.object(probe, "_final_observations",
                                       side_effect=final_observations), \
                     mock.patch.object(
-                        probe, "_release_partition_ownership") as release:
+                        probe, "_release_partition_ownership",
+                        side_effect=real_release) as release:
                 with self.assertRaisesRegex(
                         probe.ProbeError, "final cleanup evidence"):
                     probe.recover(
                         state_dir, state["device_arg"], state["device_arg"])
 
-            release.assert_not_called()
-            persisted = json.loads(
-                (state_dir / probe.STATE_NAME).read_text())
-            self.assertEqual(persisted["stage"], "RECOVERY_REQUIRED")
-            self.assertEqual(persisted["stage_before_recovery"], "ORACLE_PASS")
-            self.assertTrue(
-                (self.recovery_base /
-                 f"partition-{state['partuuid']}.active").is_file())
-            self.assertTrue(
-                (self.recovery_base /
-                 f"consumed-{state['run_id']}.json").is_file())
+                release.assert_not_called()
+                first_state = json.loads(
+                    (state_dir / probe.STATE_NAME).read_text())
+                self.assertEqual(first_state["stage"], "RECOVERY_REQUIRED")
+                self.assertEqual(first_state["stage_before_recovery"],
+                                 "ORACLE_PASS")
+                self.assertTrue(owner_marker.is_file())
+                self.assertTrue(consumed_claim.is_file())
+
+                recovered = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"])
+                self.assertEqual(recovered["stage"], "COMPLETE")
+                release.assert_called_once()
+
+            self.assertEqual(cleanup_samples, 2)
+            self.assertFalse(owner_marker.exists())
+            self.assertTrue(consumed_claim.is_file())
+            persisted = json.loads((state_dir / probe.STATE_NAME).read_text())
+            self.assertEqual(persisted["stage"], "COMPLETE")
+            results = json.loads((state_dir / probe.RESULTS_NAME).read_text())
+            self.assertEqual(results["final_recovery_state"], "COMPLETE")
+            self.assertEqual(results["oracle_suite"],
+                             "PHASES_PASS_RECOVERY_PENDING")
+            self.assertIn("final_swap_error", results)
+            self.assertIn("final_swap_inventory_unverifiable",
+                          results["recovery_error"])
 
     def test_development_recovery_rejects_noncanonical_inactive_state(self):
         cases = (
@@ -1320,6 +1349,92 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(record["return_code"], 1)
         self.assertFalse(record["time_filter_applied"])
         self.assertIn("unsupported option", record["journalctl_error"])
+
+    def test_live_host_identity_uses_canonical_v2_digest_and_fails_closed(self):
+        product_uuid = "A1B2C3D4-E5F6-1234-ABCD-ABCDEF123456"
+        machine_id = "ABCDEF0123456789ABCDEF0123456789"
+
+        def calculate_identity(dmi_value, machine_value):
+            values = {
+                "/sys/class/dmi/id/product_uuid": dmi_value,
+                "/etc/machine-id": machine_value,
+            }
+
+            def read_text(path, *args, **kwargs):
+                del args, kwargs
+                value = values[str(path)]
+                if isinstance(value, Exception):
+                    raise value
+                return value
+
+            with mock.patch.object(probe.Path, "read_text", autospec=True,
+                                   side_effect=read_text), \
+                    mock.patch.object(probe.platform, "machine",
+                                      return_value="x86_64"):
+                return probe.live_host_identity()
+
+        identity = calculate_identity(product_uuid + "\n", machine_id + "\n")
+        canonical_bytes = (
+            b"swapz-host-v2\0" + product_uuid.lower().encode("ascii") +
+            machine_id.lower().encode("ascii"))
+        self.assertEqual(identity, {
+            # The report importer still requires this existing schema label.
+            "schema": "swapz-host-v1",
+            "architecture": "x86_64",
+            "id_sha256": hashlib.sha256(canonical_bytes).hexdigest(),
+        })
+        self.assertNotEqual(identity["id_sha256"], hashlib.sha256(
+            b"swapz-host\0" + machine_id.lower().encode("ascii")).hexdigest())
+        self.assertEqual(identity, calculate_identity(
+            product_uuid.lower(), machine_id.lower()))
+        self.assertNotIn(product_uuid, json.dumps(identity))
+        self.assertNotIn(machine_id, json.dumps(identity))
+
+        other_product = calculate_identity(
+            "B1B2C3D4-E5F6-1234-ABCD-ABCDEF123456", machine_id)
+        other_installation = calculate_identity(
+            product_uuid, "BBCDEF0123456789ABCDEF0123456789")
+        self.assertNotEqual(identity["id_sha256"], other_product["id_sha256"])
+        self.assertNotEqual(identity["id_sha256"],
+                            other_installation["id_sha256"])
+        report = {
+            "overall": "PASS", "source_sha": "a" * 40,
+            "tested_commit_sha": "a" * 40,
+            "stages": [
+                {"name": name, "status": "PASS", "exit_code": 0}
+                for name in probe.QUALIFICATION_STAGE_NAMES
+            ],
+            "qualified_artifacts": {
+                "status": "AVAILABLE",
+                **{key: "a" * 64 for key, _, _ in probe.PHYSICAL_ARTIFACTS},
+            },
+            "host_identity": identity,
+        }
+        self.assertTrue(probe._report_is_owner_pass(report, identity))
+        self.assertFalse(probe._report_is_owner_pass(report, other_product))
+        self.assertFalse(probe._report_is_owner_pass(
+            report, other_installation))
+
+        for name, dmi_value, machine_value in (
+                ("malformed_dmi", "not-a-uuid", machine_id),
+                ("zero_dmi", "00000000-0000-0000-0000-000000000000",
+                 machine_id),
+                ("missing_dmi", OSError("private hardware identifier"),
+                 machine_id),
+                ("bad_encoding", UnicodeError("private hardware identifier"),
+                 machine_id),
+                ("malformed_machine", product_uuid, "not-a-machine-id"),
+                ("zero_machine", product_uuid, "0" * 32),
+                ("missing_machine", product_uuid,
+                 OSError("private installation identifier"))):
+            with self.subTest(name=name):
+                with self.assertRaises(probe.ProbeError) as rejected:
+                    calculate_identity(dmi_value, machine_value)
+                self.assertEqual(
+                    str(rejected.exception),
+                    "cannot identify the current host for physical smoke")
+                self.assertTrue(rejected.exception.__suppress_context__)
+                self.assertNotIn("private", str(rejected.exception))
 
     def test_live_host_gate_and_identical_artifact_history(self):
         source = "a" * 40

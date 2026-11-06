@@ -311,20 +311,28 @@ def _partition_identity(device):
 
 
 def live_host_identity():
-    """Mirror the canonical make-test machine-id digest, not report metadata."""
+    """Mirror the production DMI UUID + machine-ID digest, not report metadata."""
     try:
+        product_uuid = Path("/sys/class/dmi/id/product_uuid").read_text().strip()
         machine_id = Path("/etc/machine-id").read_text().strip()
+        if (not re.fullmatch(
+                r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
+                product_uuid) or int(product_uuid.replace("-", ""), 16) == 0):
+            raise ValueError("invalid DMI UUID")
         if not re.fullmatch(r"[0-9a-fA-F]{32}", machine_id) or (
                 int(machine_id, 16) == 0):
             raise ValueError("invalid machine-id")
         return {
+            # The importer requires the existing JSON schema label.
             "schema": "swapz-host-v1",
             "architecture": platform.machine(),
             "id_sha256": hashlib.sha256(
-                b"swapz-host\0" + machine_id.lower().encode()).hexdigest(),
+                b"swapz-host-v2\0" + product_uuid.lower().encode("ascii")
+                + machine_id.lower().encode("ascii")).hexdigest(),
         }
-    except (OSError, ValueError) as exc:
-        raise ProbeError("cannot identify the current host for physical smoke") from exc
+    except (OSError, UnicodeError, ValueError):
+        # Raw hardware/installation identifiers must never enter diagnostics.
+        raise ProbeError("cannot identify the current host for physical smoke") from None
 
 
 def _require_physical_host():
