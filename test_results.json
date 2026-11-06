@@ -249,46 +249,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 6621,
-"legacy_dead_probe_ns": 930135,
-"legacy_score_scan_ns": 7153675,
+"incremental_select_ns": 6368,
+"legacy_dead_probe_ns": 826849,
+"legacy_score_scan_ns": 7358784,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 3782,
-"relocation_list_ns": 2198,
-"relocation_scan_ns": 1869733,
+"mapped_dead_probe_ns": 3765,
+"relocation_list_ns": 2605,
+"relocation_scan_ns": 1982323,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 24884,
-"legacy_dead_probe_ns": 3523090,
-"legacy_score_scan_ns": 28362339,
+"incremental_select_ns": 25204,
+"legacy_dead_probe_ns": 3398712,
+"legacy_score_scan_ns": 29663281,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 12592,
-"relocation_list_ns": 2432,
-"relocation_scan_ns": 6993676,
+"mapped_dead_probe_ns": 12771,
+"relocation_list_ns": 3180,
+"relocation_scan_ns": 7395299,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 55935,
-"legacy_dead_probe_ns": 6836565,
-"legacy_score_scan_ns": 100073396,
+"incremental_select_ns": 60549,
+"legacy_dead_probe_ns": 7249540,
+"legacy_score_scan_ns": 112017404,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 27685,
-"relocation_list_ns": 1914,
-"relocation_scan_ns": 17741728,
+"mapped_dead_probe_ns": 31239,
+"relocation_list_ns": 2252,
+"relocation_scan_ns": 17897262,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 659462,
-"legacy_dead_probe_ns": 73592036,
-"legacy_score_scan_ns": 957254857,
+"incremental_select_ns": 484211,
+"legacy_dead_probe_ns": 52684871,
+"legacy_score_scan_ns": 731981032,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 309380,
-"relocation_list_ns": 2262,
-"relocation_scan_ns": 158318079,
+"mapped_dead_probe_ns": 209012,
+"relocation_list_ns": 2327,
+"relocation_scan_ns": 109127125,
 "segments": 105782,
 "victim_records": 256
 }
@@ -298,14 +298,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 1593,
+"inverse_ns_per_page": 1650,
 "name": "scalar",
-"transform_ns_per_page": 1681
+"transform_ns_per_page": 1679
 },
 {
-"inverse_ns_per_page": 1371,
+"inverse_ns_per_page": 1172,
 "name": "sse2",
-"transform_ns_per_page": 1169
+"transform_ns_per_page": 1064
 }
 ],
 "classifier": {
@@ -315,9 +315,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 942,
+"ns_per_page": 516,
 "sample_pairs": 32,
-"scalar_ns_per_page": 942,
+"scalar_ns_per_page": 516,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -332,7 +332,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 11649
+"wall_ns_per_page": 11435
 },
 {
 "acceleration": 2,
@@ -340,7 +340,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 10544
+"wall_ns_per_page": 10606
 },
 {
 "acceleration": 3,
@@ -348,7 +348,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10259
+"wall_ns_per_page": 10254
 },
 {
 "acceleration": 4,
@@ -356,7 +356,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 10023
+"wall_ns_per_page": 10078
 }
 ],
 "negative_pages": 256,
@@ -373,9 +373,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 6597,
-"modeled_wall_ns_total": 3800064,
-"ns_per_saved_block": 73078,
+"modeled_wall_ns_per_page": 6259,
+"modeled_wall_ns_total": 3605504,
+"ns_per_saved_block": 69336,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -400,29 +400,29 @@
 "pages": 576,
 "pairs": [
 {
-"baseline_ns_per_page": 1231,
+"baseline_ns_per_page": 1122,
 "order": "baseline_first",
-"unrolled_ns_per_page": 1154
+"unrolled_ns_per_page": 1091
 },
 {
-"baseline_ns_per_page": 713,
+"baseline_ns_per_page": 1066,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 774
+"unrolled_ns_per_page": 992
 },
 {
-"baseline_ns_per_page": 739,
+"baseline_ns_per_page": 1061,
 "order": "baseline_first",
-"unrolled_ns_per_page": 665
+"unrolled_ns_per_page": 986
 },
 {
-"baseline_ns_per_page": 705,
+"baseline_ns_per_page": 843,
 "order": "unrolled_first",
-"unrolled_ns_per_page": 680
+"unrolled_ns_per_page": 748
 },
 {
-"baseline_ns_per_page": 789,
+"baseline_ns_per_page": 850,
 "order": "baseline_first",
-"unrolled_ns_per_page": 527
+"unrolled_ns_per_page": 724
 }
 ],
 "repeats_per_arm": 64,
@@ -471,14 +471,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74170,
+"ns_per_saved_block": 70810,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 7339,
-"routed_cpu_ns_total": 4227744,
+"routed_cpu_ns_per_page": 7007,
+"routed_cpu_ns_total": 4036220,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -526,14 +526,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 74747,
+"ns_per_saved_block": 71250,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 7137,
-"routed_cpu_ns_total": 4111104,
+"routed_cpu_ns_per_page": 6803,
+"routed_cpu_ns_total": 3918752,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -581,14 +581,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 73078,
+"ns_per_saved_block": 69336,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6597,
-"routed_cpu_ns_total": 3800064,
+"routed_cpu_ns_per_page": 6259,
+"routed_cpu_ns_total": 3605504,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -636,14 +636,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 73078,
+"ns_per_saved_block": 69336,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6597,
-"routed_cpu_ns_total": 3800064,
+"routed_cpu_ns_per_page": 6259,
+"routed_cpu_ns_total": 3605504,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -691,14 +691,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 73078,
+"ns_per_saved_block": 69336,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 6597,
-"routed_cpu_ns_total": 3800064,
+"routed_cpu_ns_per_page": 6259,
+"routed_cpu_ns_total": 3605504,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -715,17 +715,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "sse2",
-"inverse_ns_per_page": 1371,
+"inverse_ns_per_page": 1172,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 1593,
-"scalar_transform_ns_per_page": 1681,
-"second_lz4_ns_per_page": 11791,
+"scalar_inverse_ns_per_page": 1650,
+"scalar_transform_ns_per_page": 1679,
+"second_lz4_ns_per_page": 11988,
 "transform_backend": "sse2",
-"transform_ns_per_page": 1169
+"transform_ns_per_page": 1064
 }
 ]
 }
@@ -739,25 +739,25 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "29f6d8b5b2002ac8464a53888aacc5230c8cdd671a0301ad39ed26e9648a744a",
-"module_sha256": "798c9c1e0b0421b9b489e58fbb41fcf8177af53f632613b43662eea55285245c",
+"formatter_sha256": "29592ac203f89a5e23803a7f9af7134062a8aa5bf241331f2b68e40c5c0d5e0d",
+"module_sha256": "8b3ec8c7550e38f4f4ba1e522dbfd82fbd758f810d40996fc9f377590986ce48",
 "oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "569f4856562704cf7e17f593ee5a78c15ee8472e",
+"source_sha": "87990e0f6f4bfb3ae6627467fe321cbdfe1c8b44",
 "stages": [
 {
-"elapsed_s": 13.913,
+"elapsed_s": 14.907,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_worker_migration_failure_reaps_child_and_closes_every_pipe; child_exit=1 reason=unittest_assertion subtest=unavailable test=test_worker_migration_failure_reaps_child_and_closes_every_pipe log=build/tests/rootless-failure.AZ6MqCWq/diagnostic.log",
-"elapsed_s": 284.266,
+"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.z0RPOSZv/diagnostic.log",
+"elapsed_s": 415.258,
 "exit_code": 1,
-"failed_phase": "primary-real-swap-test.py",
+"failed_phase": "test-report-test.py",
 "name": "Native and rootless contracts",
 "signals": [
 "PASS",
@@ -767,5 +767,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "569f4856562704cf7e17f593ee5a78c15ee8472e"
+"tested_commit_sha": "87990e0f6f4bfb3ae6627467fe321cbdfe1c8b44"
 }
