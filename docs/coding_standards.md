@@ -1620,6 +1620,10 @@ negative, missing, malformed or out-of-range prerequisite named.
 
 An observed native replay/byte-exact read-write failure, OOM, signal death
 or unreaped owned child remains FAIL even if later evidence is unavailable.
+Owned child cleanup authority remains retained until termination and every
+parent-owned pipe descriptor have closed successfully; a pipe-close failure
+after termination must keep the child in outer cleanup ownership for a bounded
+retry without replacing the original failure.
 Before post-pair telemetry, only an explicitly recognized prerequisite may
 defer nonzero-child classification; an unclassified nonzero exit is already
 FAIL and cannot be masked by a later BLOCKED sample.

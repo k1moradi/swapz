@@ -2429,6 +2429,22 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify.QualificationFailure):
                 qualify.parse_status(malformed)
 
+    def test_vmstat_requires_both_kernel_swap_counters(self):
+        with mock.patch.object(
+                Path, "read_text",
+                return_value="pswpin 7\npswpout 11\n"):
+            self.assertEqual(
+                qualify.read_vmstat(), {"pswpin": 7, "pswpout": 11})
+
+        for payload in (
+                "pswpin 7\n",
+                "pswpout 11\n",
+                "pswpin 7\npswpout 11\npswpout 12\n"):
+            with self.subTest(payload=payload), \
+                    mock.patch.object(Path, "read_text", return_value=payload), \
+                    self.assertRaises(qualify.Blocked):
+                qualify.read_vmstat()
+
     def test_block_geometry_preserves_ioctl_failure_when_close_also_fails(self):
         real_close = os.close
 
@@ -3296,6 +3312,57 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             remove.assert_called_once_with(cgroup)
             self.assertTrue(all(pipe.closed for pipe in
                                 (child.stdin, child.stdout, child.stderr)))
+
+    def test_worker_pipe_cleanup_failure_retains_outer_cleanup_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cgroup = Path(directory)
+            child = mock.Mock(pid=322)
+            original_write_text = Path.write_text
+
+            def deny_migration(path, *args, **kwargs):
+                if path.name == "cgroup.procs":
+                    raise OSError("synthetic migration refusal")
+                return original_write_text(path, *args, **kwargs)
+
+            expected = qualify.SwapRow(
+                "/dev/dm-1", "partition", 512000, 0, 5, (252, 1))
+            terminate = mock.Mock()
+            close_pipes = mock.Mock(side_effect=[
+                qualify.QualificationFailure("synthetic pipe close failure"),
+                None,
+            ])
+            with mock.patch.object(qualify, "_cgroup_create", return_value=cgroup), \
+                    mock.patch.object(
+                        qualify, "_memory_events",
+                        return_value={"oom": 0, "oom_kill": 0}), \
+                    mock.patch.object(qualify, "_psi_total", return_value=0), \
+                    mock.patch.object(qualify, "_write_control"), \
+                    mock.patch.object(
+                        qualify, "read_swap_rows", return_value=[expected]), \
+                    mock.patch.object(
+                        qualify.subprocess, "Popen", return_value=child), \
+                    mock.patch.object(
+                        qualify, "_terminate_child", terminate), \
+                    mock.patch.object(
+                        qualify, "_close_oracle_pipes", close_pipes), \
+                    mock.patch.object(qualify, "_remove_cgroup") as remove, \
+                    mock.patch.object(Path, "write_text", deny_migration):
+                with self.assertRaisesRegex(
+                        qualify.QualificationFailure,
+                        "cannot move admitted oracle into dedicated cgroup "
+                        "errno=none; cleanup also failed: oracle pid 322 pipes: "
+                        "synthetic pipe close failure"):
+                    qualify._run_workload(
+                        {"run_id": "a" * 32}, {"mapper_device": (252, 1)},
+                        ORACLE, 384, 128, 384, 60)
+
+            self.assertEqual(
+                terminate.call_args_list,
+                [mock.call(child, cgroup), mock.call(child, cgroup)])
+            self.assertEqual(
+                close_pipes.call_args_list,
+                [mock.call(child), mock.call(child)])
+            remove.assert_called_once_with(cgroup)
 
     def test_partial_cgroup_configuration_reports_cleanup_failure(self):
         with tempfile.TemporaryDirectory() as directory:

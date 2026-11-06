@@ -3474,19 +3474,20 @@ def _run_workload(manifest: dict, active: dict, oracle_path: Path,
                 original_error = sys.exc_info()[1]
                 cleanup_errors = []
                 for process in round_processes:
+                    process_cleanup_failed = False
                     try:
                         _terminate_child(process, cgroup)
                     except Exception as cleanup_error:
+                        process_cleanup_failed = True
                         cleanup_errors.append(
                             f"oracle pid {process.pid} termination: {cleanup_error}")
                     try:
                         _close_oracle_pipes(process)
                     except Exception as cleanup_error:
+                        process_cleanup_failed = True
                         cleanup_errors.append(
                             f"oracle pid {process.pid} pipes: {cleanup_error}")
-                    if process in active_processes and not any(
-                            error.startswith(f"oracle pid {process.pid} termination:")
-                            for error in cleanup_errors):
+                    if process in active_processes and not process_cleanup_failed:
                         active_processes.remove(process)
                 _raise_cleanup_errors(original_error, cleanup_errors)
 

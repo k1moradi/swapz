@@ -478,6 +478,31 @@ class TerminalEvidenceContracts(unittest.TestCase):
                     killed, "ORACLE_VERIFIED=",
                     qualify.time.monotonic() + 1, lambda: None, bytearray())
 
+    def test_parent_pipe_read_failure_preserves_errno_without_raw_error(self):
+        read_descriptor, write_descriptor = os.pipe()
+        try:
+            os.write(write_descriptor, b"x")
+            with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                process = mock.Mock(stdout=output, stderr=io.StringIO())
+                process.poll.return_value = None
+                read_error = OSError(errno.EIO, "synthetic pipe read failure")
+                with mock.patch.object(
+                        qualify.os, "read", side_effect=read_error), \
+                        self.assertRaisesRegex(
+                            qualify.QualificationFailure,
+                            "phase=terminal child_exit=running "
+                            "evidence_complete=false: cannot read real-swap "
+                            "oracle record errno=5") as caught:
+                    qualify._oracle_event(
+                        process, "ORACLE_VERIFIED=",
+                        qualify.time.monotonic() + 1,
+                        lambda: None, bytearray())
+            self.assertIs(caught.exception.__cause__, read_error)
+            self.assertNotIn(
+                "synthetic pipe read failure", str(caught.exception))
+        finally:
+            os.close(write_descriptor)
+
     def test_interrupt_before_fill_returns_bounded_failure_without_allocating(self):
         stderr = io.StringIO()
         mmap_call = mock.Mock()
