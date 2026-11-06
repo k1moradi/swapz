@@ -388,7 +388,11 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "truncated": False, "messages": "",
         }
         with mock.patch.object(probe, "_read_block0", return_value=header), \
-                mock.patch.object(probe, "_active_swap_for", return_value=None), \
+                mock.patch.object(probe, "_active_swap_for",
+                                  side_effect=[None,
+                                               probe.ProbeError(
+                                                   "malformed final swap inventory"),
+                                               None]), \
                 mock.patch.object(probe, "_block_stat_snapshot",
                                   return_value={"available": False}), \
                 mock.patch.object(probe, "_kernel_swapz_messages",
@@ -400,9 +404,18 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "_save_results"):
             probe._final_observations(
                 results, self.recovery_base, state, target)
+            self.assertTrue(results["restored_swap_verified"])
+            self.assertTrue(results["target_remains_inactive"])
+            probe._final_observations(
+                results, self.recovery_base, state, target)
+            self.assertFalse(results["restored_swap_verified"])
+            self.assertFalse(results["target_remains_inactive"])
+            probe._final_observations(
+                results, self.recovery_base, state, target)
 
-        self.assertTrue(results["restored_swap_verified"])
-        self.assertTrue(results["target_remains_inactive"])
+        self.assertFalse(results["restored_swap_verified"])
+        self.assertFalse(results["target_remains_inactive"])
+        self.assertIn("malformed final swap inventory", results["final_swap_error"])
         self.assertTrue(results["run_claim_consumed"])
         self.assertIsNone(results["approval_consumed"])
         self.assertFalse(results["active_partition_marker_present"])
@@ -2021,6 +2034,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 saved_results["approval_consumed"] = False
             elif teardown_oracle_metadata == "missing_cleanup":
                 saved_results["final_mapper_present"] = True
+            elif teardown_oracle_metadata == "final_swap_inventory_error":
+                # Contradictory raw error must defeat a forged true summary.
+                saved_results["final_swap_error"] = "malformed /proc/swaps"
             elif teardown_oracle_metadata == "invalid_phase_count":
                 saved_results["physical_oracle_phases"][0]["stdout"] = (
                     "PASS: owned V3 DM 0-page direct I/O, flush, "
@@ -2375,6 +2391,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "matching", "not_applicable"),
             ("stale_approval", False, "matching", "matching", "stale"),
             ("missing_cleanup", True, "matching", "matching", "not_applicable"),
+            ("final_swap_inventory_error", True, "matching",
+             "matching", "not_applicable"),
             ("invalid_phase_count", True, "matching", "matching", "not_applicable"),
             ("development_promotion", True, "matching", "matching", "not_applicable"),
             ("development_scope", True, "matching", "matching", "not_applicable"),

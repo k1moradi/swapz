@@ -5869,7 +5869,10 @@ schema/scope and false production-qualification, physical-media-acceptance and
 Linux-swap-activation flags even if its mapper oracle succeeds.
 The development result requires an executed successful byte-oracle phase, durable
 `COMPLETE`, the exact original header, an inactive target, and a consumed
-one-use claim with no outstanding ownership marker. `oracle_suite=PASS`
+one-use claim with no outstanding ownership marker. A failed final `/proc/swaps`
+inventory observation is not proof of inactivity: retain the first error across
+cleanup retries, reject a contradictory serialized inactivity summary and do
+not publish an oracle PASS. `oracle_suite=PASS`
 must denote a final evidence decision, not just a worker's zero exit code:
 require all exact expected phases complete, source/helper/artifact and target
 bindings consistent with the durable run state, normal recovery, and independent

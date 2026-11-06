@@ -1704,11 +1704,15 @@ def _final_observations(results, state_dir, state, target):
         results["kernel_diagnostics_gate"] = "BLOCKED"
         results.setdefault("kernel_diagnostics_error", diagnostics_error)
     row = results.get("final_swap_row")
+    # A failed final swap inventory read is not proof of inactivity. Preserve
+    # that uncertainty even if a later cleanup observation reads successfully.
+    final_swap_inventory_verified = "final_swap_error" not in results
     # The identity-only recovery target omits original swap parameters.
     # Compare with the durable saved state, including after standalone recovery.
     if state.get("swap_was_active") is True:
         results["restored_swap_verified"] = (
-            isinstance(row, dict)
+            final_swap_inventory_verified
+            and isinstance(row, dict)
             and row.get("kind") == "partition"
             and type(state.get("swap_size_kib")) is int
             and type(state.get("swap_priority")) is int
@@ -1718,7 +1722,8 @@ def _final_observations(results, state_dir, state, target):
         # Development-only physical backing smoke preserves an originally
         # inactive target. Absence from /proc/swaps is the required post-state.
         results["restored_swap_verified"] = (
-            state.get("development_only") is True
+            final_swap_inventory_verified
+            and state.get("development_only") is True
             and state.get("swap_was_active") is False
             and row is None)
     try:
@@ -1734,7 +1739,8 @@ def _final_observations(results, state_dir, state, target):
     results["approval_consumed"] = (
         consumed.is_file() if state.get("development_only") is not True else None)
     results["target_remains_inactive"] = (
-        state.get("development_only") is True
+        final_swap_inventory_verified
+        and state.get("development_only") is True
         and state.get("swap_was_active") is False and row is None)
     results["final_recovery_state"] = state.get("stage")
     results["mapper_removal_succeeded"] = (
@@ -2532,6 +2538,8 @@ def _final_physical_oracle_evidence_error(results, state, target,
             results.get("run_claim_consumed") is not True):
         return "incomplete_cleanup_or_ownership"
     row = results.get("final_swap_row")
+    if "final_swap_error" in results:
+        return "final_swap_inventory_unverifiable"
     if development_only:
         if row is not None or results.get("target_remains_inactive") is not True:
             return "development_backing_not_inactive"
