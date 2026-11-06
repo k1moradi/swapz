@@ -321,11 +321,20 @@ def _source_parent_pidfd_alive(descriptor: int, phase: str) -> None:
 class SourceAdmissionClient:
     """Authenticated channel to the unprivileged source-verification parent."""
 
-    def __init__(self, socket_path: str, parent_uid: int, validated_source: str):
+    def __init__(self, socket_path: str, parent_uid: int,
+                 expected_parent_process_id: int,
+                 expected_parent_start_ticks: int,
+                 validated_source: str):
         if not re.fullmatch(r"[0-9a-f]{40}", validated_source):
             raise Blocked("validated source must be one full lowercase SHA")
         if parent_uid <= 0:
             raise Blocked("source admission parent must be unprivileged")
+        if type(expected_parent_process_id) is not int or \
+                expected_parent_process_id <= 1:
+            raise Blocked("source admission parent process ID is invalid")
+        if type(expected_parent_start_ticks) is not int or \
+                expected_parent_start_ticks <= 0:
+            raise Blocked("source admission parent start time is invalid")
         path = Path(socket_path)
         if not path.is_absolute():
             raise Blocked("source admission socket path must be absolute")
@@ -347,6 +356,21 @@ class SourceAdmissionClient:
             # Capture ancestry before connecting: a replaced pathname must
             # not choose its own authority merely by matching our UID.
             ancestors = _source_parent_ancestors("connect", parent_uid)
+            (authorized_parent_pid, _upstream_pid,
+             authorized_parent_start_ticks) = ancestors[-1]
+            if (authorized_parent_pid != expected_parent_process_id or
+                    authorized_parent_start_ticks != expected_parent_start_ticks):
+                raise _source_parent_refusal(
+                    "connect", "parent_ancestry", "stale_or_replaced_parent")
+            if not hasattr(os, "pidfd_open"):
+                raise _source_parent_refusal(
+                    "connect", "parent_liveness", "pidfd_unavailable")
+            parent_pidfd = os.pidfd_open(authorized_parent_pid)
+            _source_parent_pidfd_alive(parent_pidfd, "connect")
+            if not _source_parent_lineage_matches(
+                    ancestors, _source_parent_ancestors("connect", parent_uid)):
+                raise _source_parent_refusal(
+                    "connect", "parent_ancestry", "changed_parent_process")
             channel.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
             channel.connect(os.fspath(path))
             credentials = channel.getsockopt(
@@ -368,18 +392,9 @@ class SourceAdmissionClient:
             # sudo may insert root-owned monitors, but the listener creator
             # must terminate the child-to-parent lineage at the nearest
             # ancestor with the source parent's effective UID.
-            authorized_parent_pid = ancestors[-1][0]
             if peer_pid != authorized_parent_pid:
                 raise _source_parent_refusal(
                     "connect", "parent_ancestry", "unrelated_peer_run")
-            if not hasattr(os, "pidfd_open"):
-                raise _source_parent_refusal(
-                    "connect", "parent_liveness", "pidfd_unavailable")
-            parent_pidfd = os.pidfd_open(peer_pid)
-            if not _source_parent_lineage_matches(
-                    ancestors, _source_parent_ancestors("connect", parent_uid)):
-                raise _source_parent_refusal(
-                    "connect", "parent_ancestry", "changed_parent_process")
             _source_parent_pidfd_alive(parent_pidfd, "connect")
         except Blocked as exc:
             if parent_pidfd is not None:
@@ -4551,10 +4566,16 @@ def execute(arguments: argparse.Namespace,
     if admission is None:
         socket_path = getattr(arguments, "source_admission_socket", None)
         parent_uid = getattr(arguments, "source_admission_parent_uid", None)
-        if not socket_path or parent_uid is None:
+        parent_process_id = getattr(
+            arguments, "source_admission_parent_process_id", None)
+        parent_start_ticks = getattr(
+            arguments, "source_admission_parent_start_ticks", None)
+        if (not socket_path or parent_uid is None or
+                parent_process_id is None or parent_start_ticks is None):
             raise Blocked("unprivileged source admission channel is required")
         admission = SourceAdmissionClient(
-            socket_path, parent_uid, arguments.validated_source)
+            socket_path, parent_uid, parent_process_id, parent_start_ticks,
+            arguments.validated_source)
 
     admission_closed = False
 
@@ -4604,6 +4625,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--source-admission-socket", default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--source-admission-parent-uid", type=int, default=None,
+        help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--source-admission-parent-process-id", type=int, default=None,
+        help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--source-admission-parent-start-ticks", type=int, default=None,
         help=argparse.SUPPRESS)
     return parser
 

@@ -100,8 +100,11 @@ def probe() -> bool:
                 # of its UID/path/response predicates.
                 rejection = None
                 try:
+                    expected_parent = helper._source_parent_ancestors(
+                        "connect", os.geteuid())[-1]
                     client = helper.SourceAdmissionClient(
-                        os.fspath(socket_path), os.geteuid(), SOURCE)
+                        os.fspath(socket_path), os.geteuid(),
+                        expected_parent[0], expected_parent[2], SOURCE)
                 except helper.Blocked as error:
                     rejection = str(error)
                 if client is not None:

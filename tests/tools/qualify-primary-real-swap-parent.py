@@ -763,9 +763,33 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _current_process_start_ticks() -> int:
+    """Read this live source parent's kernel start time without exposing its PID."""
+    try:
+        process_stat = Path("/proc/self/stat").read_text(encoding="ascii")
+    except (OSError, UnicodeError) as exc:
+        raise Blocked(
+            "cannot bind source admission parent process identity") from exc
+    closing_parenthesis = process_stat.rfind(") ")
+    fields = (process_stat[closing_parenthesis + 2:].split()
+              if closing_parenthesis >= 0 else [])
+    try:
+        if len(fields) < 20:
+            raise ValueError("truncated process stat")
+        start_ticks = int(fields[19])
+    except ValueError as exc:
+        raise Blocked(
+            "cannot bind source admission parent process identity") from exc
+    if fields[0] in {"Z", "X", "x"} or start_ticks <= 0:
+        raise Blocked("cannot bind source admission parent process identity")
+    return start_ticks
+
+
 def _child_arguments(arguments: argparse.Namespace,
                      socket_path: Path,
                      parent_uid: int,
+                     parent_process_id: int,
+                     parent_start_ticks: int,
                      helper_sha256: str) -> list[str]:
     return [
         os.fspath(PRIVILEGED_HELPER),
@@ -782,18 +806,22 @@ def _child_arguments(arguments: argparse.Namespace,
         "--timeout-seconds", str(arguments.timeout_seconds),
         "--source-admission-socket", os.fspath(socket_path),
         "--source-admission-parent-uid", str(parent_uid),
+        "--source-admission-parent-process-id", str(parent_process_id),
+        "--source-admission-parent-start-ticks", str(parent_start_ticks),
     ]
 
 
 def _start_privileged_child(
         sudo: str, python3: str, arguments: argparse.Namespace,
         socket_path: Path, parent_uid: int,
+        parent_process_id: int, parent_start_ticks: int,
         helper_payload: bytes, helper_sha256: str) -> subprocess.Popen:
     command = [
         sudo, "-n", "--", python3, "-I", "-B", "-c",
         PRIVILEGED_HELPER_BOOTSTRAP,
         *_child_arguments(
-            arguments, socket_path, parent_uid, helper_sha256),
+            arguments, socket_path, parent_uid,
+            parent_process_id, parent_start_ticks, helper_sha256),
     ]
     try:
         child = subprocess.Popen(
@@ -904,6 +932,10 @@ def main() -> int:
         with tempfile.TemporaryDirectory(
                 prefix="swapz-real-swap-admission-") as directory:
             parent_uid = os.geteuid()
+            parent_process_id = os.getpid()
+            if parent_process_id <= 1:
+                raise Blocked("source admission parent process identity is invalid")
+            parent_start_ticks = _current_process_start_ticks()
             admission_directory = Path(directory)
             os.chmod(admission_directory, 0o700)
             socket_path = admission_directory / "source-admission.sock"
@@ -913,6 +945,7 @@ def main() -> int:
                 server.listen(1)
                 child = _start_privileged_child(
                     sudo, python3, arguments, socket_path, parent_uid,
+                    parent_process_id, parent_start_ticks,
                     helper_payload, helper_sha256)
                 return _serve_admission(
                     server, child, arguments.validated_source,

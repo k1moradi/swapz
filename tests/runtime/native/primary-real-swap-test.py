@@ -4062,6 +4062,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 observed = parent._start_privileged_child(
                     "/usr/bin/sudo", "/usr/bin/python3", arguments,
                     Path("/tmp/admission.sock"), 1000,
+                    os.getpid(), 123456,
                     helper_payload, helper_digest)
             self.assertIs(observed, child)
             self.assertEqual(
@@ -4080,6 +4081,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         self.assertIn(os.fspath(parent.ROOT), command)
         self.assertIn("--executed-helper-sha256", command)
         self.assertIn(helper_digest, command)
+        parent_pid_index = command.index("--source-admission-parent-process-id")
+        self.assertEqual(command[parent_pid_index + 1], str(os.getpid()))
+        parent_start_index = command.index("--source-admission-parent-start-ticks")
+        self.assertEqual(command[parent_start_index + 1], "123456")
 
 
     def test_parent_reads_privileged_helper_from_validated_commit_object(self):
@@ -4142,6 +4147,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 parent._start_privileged_child(
                     "/usr/bin/sudo", "/usr/bin/python3", arguments,
                     Path("/tmp/admission.sock"), 1000,
+                    os.getpid(), 123456,
                     b"x" * 32, "8" * 64)
         stop.assert_called_once()
         os.close(read_descriptor)
@@ -4165,7 +4171,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     "errno=32:child_exit=running:owned_cleanup=complete") as failure:
             parent._start_privileged_child(
                 "/usr/bin/sudo", "/usr/bin/python3", arguments,
-                Path("/tmp/admission.sock"), 1000, b"private helper bytes", "8" * 64)
+                Path("/tmp/admission.sock"), 1000,
+                os.getpid(), 123456, b"private helper bytes", "8" * 64)
         self.assertTrue(source_pipe.closed)
         child.terminate.assert_called_once_with()
         child.wait.assert_called_once_with(timeout=10)

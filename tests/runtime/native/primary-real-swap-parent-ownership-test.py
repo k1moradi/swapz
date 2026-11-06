@@ -445,6 +445,7 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
                 observed = parent._start_privileged_child(
                     "/usr/bin/sudo", "/usr/bin/python3", arguments,
                     Path("/tmp/admission.sock"), 1000,
+                    os.getpid(), 123456,
                     b"x", self.HELPER_DIGEST)
             self.assertIs(observed, child)
             self.assertTrue(popen.call_args.kwargs["start_new_session"])
@@ -485,7 +486,8 @@ spec.loader.exec_module(helper)
 client = None
 try:
     client = helper.SourceAdmissionClient(
-        sys.argv[1], os.geteuid(), "a" * 40)
+        sys.argv[1], os.geteuid(), int(sys.argv[4]), int(sys.argv[5]),
+        "a" * 40)
     print("CONNECTED", flush=True)
     if sys.stdin.readline() != "GO\n":
         raise RuntimeError("missing synthetic gate")
@@ -513,6 +515,17 @@ finally:
         client.close()
 """
 
+    @staticmethod
+    def _process_start_ticks(process_id):
+        process_stat = (
+            Path("/proc") / str(process_id) / "stat"
+        ).read_text(encoding="ascii")
+        closing_parenthesis = process_stat.rfind(") ")
+        fields = process_stat[closing_parenthesis + 2:].split()
+        if len(fields) < 20:
+            raise AssertionError("truncated test process identity")
+        return int(fields[19])
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="swapz-parent-peer-")
         self.addCleanup(temporary.cleanup)
@@ -534,9 +547,12 @@ finally:
                 stream.close()
 
     def _start_client(self, mode="normal"):
+        parent_process_id = os.getpid()
+        parent_start_ticks = self._process_start_ticks(parent_process_id)
         child = subprocess.Popen(
             [sys.executable, "-I", "-B", "-c", self.CLIENT,
-             os.fspath(self.socket_path), os.fspath(CLIENT_HELPER), mode],
+             os.fspath(self.socket_path), os.fspath(CLIENT_HELPER), mode,
+             str(parent_process_id), str(parent_start_ticks)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, bufsize=1)
         self.addCleanup(self._reap, child)
@@ -599,12 +615,15 @@ finally:
         # This test process owns the listener, but an intermediary launches
         # the client. Our PID appears in its ancestry, yet we did not create it.
         intermediary_script = r"""
+import os
 import subprocess
 import sys
 
+process_stat = open("/proc/self/stat", encoding="ascii").read()
+fields = process_stat[process_stat.rfind(") ") + 2:].split()
 result = subprocess.run(
     [sys.executable, "-I", "-B", "-c", sys.argv[1],
-     sys.argv[2], sys.argv[3], "normal"],
+     sys.argv[2], sys.argv[3], "normal", str(os.getpid()), fields[19]],
     input="GO\n", text=True, capture_output=True, timeout=5)
 if result.returncode:
     raise SystemExit(result.stderr or "nested client fixture failed")
@@ -629,6 +648,38 @@ print(result.stdout.strip(), flush=True)
                 self._assert_refusal(
                     stdout.strip(), "connect",
                     "parent_ancestry", "unrelated_peer_run")
+
+    def test_stale_expected_parent_cannot_rebind_before_connect(self):
+        stale_parent = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        try:
+            stale_start_ticks = self._process_start_ticks(stale_parent.pid)
+            stale_process_id = stale_parent.pid
+            stale_parent.terminate()
+            stale_parent.wait(timeout=5)
+
+            child = subprocess.Popen(
+                [sys.executable, "-I", "-B", "-c", self.CLIENT,
+                 os.fspath(self.socket_path), os.fspath(CLIENT_HELPER),
+                 "normal", str(stale_process_id), str(stale_start_ticks)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, bufsize=1)
+            self.addCleanup(self._reap, child)
+            self.assertTrue(select.select([child.stdout], [], [], 5)[0])
+            result = child.stdout.readline().strip()
+            self._assert_refusal(
+                result, "connect", "parent_ancestry",
+                "stale_or_replaced_parent")
+            self.assertEqual(child.wait(timeout=5), 0)
+            self.server.settimeout(0.1)
+            with self.assertRaises(socket.timeout):
+                self.server.accept()
+        finally:
+            if stale_parent.poll() is None:
+                stale_parent.kill()
+            stale_parent.wait(timeout=5)
 
     def test_parent_lineage_stops_at_authorized_parent(self):
         parent_process_id = 32101
@@ -730,10 +781,13 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
     os.chmod(socket_path, 0o600)
     listener.listen(1)
     listener.settimeout(5)
+    process_stat = open("/proc/self/stat", encoding="ascii").read()
+    fields = process_stat[process_stat.rfind(") ") + 2:].split()
     client = subprocess.Popen(
         [sys.executable, "-I", "-B", "-c",
          bytes.fromhex(client_hex).decode("ascii"),
-         socket_path, helper_path, "normal"],
+         socket_path, helper_path, "normal",
+         str(os.getpid()), fields[19]],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, bufsize=1)
     try:
@@ -912,10 +966,13 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as source_listener:
     print("READY", flush=True)
     if sys.stdin.readline() != "REPLACED\n":
         raise RuntimeError("missing substitution gate")
+    process_stat = open("/proc/self/stat", encoding="ascii").read()
+    fields = process_stat[process_stat.rfind(") ") + 2:].split()
     client = subprocess.Popen(
         [sys.executable, "-I", "-B", "-c",
          bytes.fromhex(client_hex).decode("ascii"),
-         socket_path, helper_path, "normal"],
+         socket_path, helper_path, "normal",
+         str(os.getpid()), fields[19]],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, bufsize=1)
     try:

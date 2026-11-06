@@ -537,13 +537,20 @@ and each approval boundary, require exact `(PID, PPID, start_ticks)` equality
 for every intermediate ancestry entry. For only the terminal authorized
 parent, require exact `(PID, start_ticks)` equality while freshly validating
 its parseable /proc identity, effective UID, live pidfd, unchanged socket inode
-and kernel-credentialed reply sender. An upstream PPID change does not excuse
+and kernel-credentialed reply sender. The unprivileged launcher must bind its
+own PID and start ticks into the commit-bound child arguments before launch;
+the client must require that launch-bound identity to be the terminal
+authorized ancestor and pin its pidfd before connecting, so creator exit
+cannot transfer
+authority to a higher same-UID ancestor or replacement listener before the
+first capture. An upstream PPID change does not excuse
 PID reuse, a changed intermediate link, unavailable /proc identity, listener
 handoff, unauthorized child, stale session or incomplete proof. The rootless
 three-process reparent regression must observe the intermediary exiting,
 the terminal parent's PPID changing with stable start ticks, and a genuine
-nonce-bound synthetic approval; a separate missing-/proc negative control
-must still refuse. Neither result authorizes physical admission. The rootless
+nonce-bound synthetic approval. Separate negative controls must reject a stale
+launch-bound creator before any socket connection and reject missing /proc
+identity. Neither result authorizes physical admission. The rootless
 AF_UNIX regression must reject that higher-ancestor listener, including after
 it replaces a real nearest parent's socket, while preserving a direct parent's
 synthetic approval. Recheck the selected effective UID at every approval
