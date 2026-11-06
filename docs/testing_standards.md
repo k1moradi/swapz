@@ -970,17 +970,25 @@ sole holder, a benchmark-looking mapper name/UUID, and absence of active
 swap **do not establish exclusive creation authority**, individually or in
 combination. A new preflight process cannot inherit the prior creator's
 descriptors or exclusive claim. Neither a user-supplied token, stale session
-record, nor module refcount grants that claim. `unclaimed_null_blk` must
-remain BLOCKED even for two complete-looking simultaneous objects. Only the
-original creator, acting under independently proven creation authority and
-revalidated live identity, can undertake bounded recovery; the preflight
-must never adopt, power off, unlink or remove those pre-existing objects.
-The legitimate cleanup path is creator-local: a helper such as
-`deploy-nullblk.sh` may act on its own same-process creation flags only after
-revalidating the exact live mapper/lower identity. A later preflight process
-does not inherit those flags. If the original creator is gone and no
-independent creator proof survives, recovery remains read-only and BLOCKED.
-No owner is instructed to delete ambiguous objects merely to unblock tests.
+record, nor module refcount grants that claim. Each such object remains
+unclaimed and is BLOCKED for any attempt to open it as test backing, adopt it,
+power it off, unlink it or remove it. However, when `dm_swapz` is absent, a
+read-only preflight may count token-shaped configfs names and continue toward
+a separate test-owned target. This is coexistence, not ownership: preflight
+must not read those objects' block nodes or attributes, and must not mutate
+them. The later loaded test must create a fresh random configfs object through
+`deploy-nullblk.sh`, set its same-process ownership flag only after successful
+creation, and bind all mapper I/O and cleanup to that exact newly created
+object. Two complete-looking unclaimed objects remain unusable as backing;
+their presence alone must not prevent a separate, positively owned object
+from being qualified. An unreadable or substituted configfs inventory remains
+BLOCKED. The legitimate cleanup path for an unclaimed object is creator-local:
+only its original creator, acting under independently proven creation
+authority and revalidated live identity, can undertake bounded recovery. A
+later preflight process does not inherit those flags. If the original creator
+is gone and no independent creator proof survives, recovery remains
+read-only and BLOCKED. No owner is instructed to delete ambiguous objects
+merely to unblock tests.
 
 For diagnostics, read-only checks may evaluate the single-mapper inventory,
 canonical major:minor, benchmark versus primary UUID namespace, dependency
@@ -1008,11 +1016,15 @@ Configfs numeric identity attributes must also be read as bounded canonical
 single records; extra blank records, missing final newlines, leading zeroes or
 oversized values are malformed evidence rather than values that command
 substitution may normalize.
-When the mapper is absent, token-shaped configfs names refuse with
-`check=unclaimed_null_blk expected_proof=creation_authority
-observed_proof=token_name_only`. Unrelated foreign index-named devices and
-noncanonical matching-prefix decoys are retained without a false ownership
-claim. An idle loaded module remains BLOCKED rather than being unloaded.
+When the mapper is absent and token-shaped configfs names are present, the
+preflight may report only their redacted count as
+`LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed`; it does not claim them and
+continues only to let the official harness create a separate same-run-owned
+RAM target. No unclaimed object may be opened, selected for mapper backing,
+powered off or removed. An unreadable configfs listing remains BLOCKED.
+Unrelated foreign index-named devices and noncanonical matching-prefix
+decoys are retained without a false ownership claim. An idle loaded module
+remains BLOCKED rather than being unloaded.
 
 Every BLOCKED diagnostic must identify the failing `check`, expected and
 observed proof classes, `original_errno_or_exit` (or `unavailable`),

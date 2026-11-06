@@ -6565,7 +6565,8 @@ int main(void)
         self.assertNotIn("BASH_COMMAND", preflight)
         self.assertLess(
             preflight.index("trap 'rc=$?; preflight_internal_error"),
-            preflight.index("clean_orphaned_nullb()"))
+            preflight.index("count_retained_unclaimed_nullb()"))
+        self.assertIn("LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed", preflight)
         self.assertIn('mapper_node="$(readlink -f "$mapper"', recovery)
         self.assertIn('mapper_dev="$(stat -Lc', recovery)
         self.assertIn('canonical_dev="$(stat -Lc', recovery)

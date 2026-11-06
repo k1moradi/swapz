@@ -177,25 +177,48 @@ if [[ -e $package_journal || -L $package_journal ]]; then
         refuse BLOCKED package_journal unavailable "recover the retained package transaction under its own lock; never delete it to retry"
 fi
 
-# A token-shaped configfs name alone does not prove that this run owns it.
-# Never power off or remove another session's RAM device on speculation.
-clean_orphaned_nullb() {
+# Token-shaped configfs names are never adopted or cleaned by preflight.
+# The loaded test creates its own random target later in deploy-nullblk.sh;
+# unrelated pre-existing RAM devices can coexist because this pass only counts
+# their names and never opens, powers off, or removes them.
+retained_unclaimed_nullb_count=0
+count_retained_unclaimed_nullb() {
     local cfgbase=/sys/kernel/config/nullb
-    local cfg name orphan_token
-    [[ -d $cfgbase ]] || return 0
-    for cfg in "$cfgbase"/nullb-swapz-*; do
-        [[ -d $cfg ]] || continue
-        name="${cfg##*/}"
-        orphan_token="${name#nullb-swapz-}"
-        is_hex16 "$orphan_token" || continue
-        refuse BLOCKED unclaimed_null_blk unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk safe_next_action=original_creator_revalidate_then_cleanup_or_read_only_reconcile"
-    done
+    local count_status
+    [[ -e $cfgbase || -L $cfgbase ]] || return 0
+    [[ -d $cfgbase && ! -L $cfgbase && -r $cfgbase && -x $cfgbase ]] ||
+        refuse BLOCKED null_blk_configfs unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=readable_configfs_inventory observed_proof=missing_or_substituted original_errno_or_exit=unavailable retained_state_action=retain_all_null_blk safe_next_action=inspect_read_only"
+    if retained_unclaimed_nullb_count="$(python3 - "$cfgbase" <<'PY'
+import os
+import re
+import sys
+
+token_name = re.compile(r"nullb-swapz-[0-9a-f]{16}")
+try:
+    with os.scandir(sys.argv[1]) as entries:
+        count = sum(token_name.fullmatch(entry.name) is not None
+                    for entry in entries)
+except OSError:
+    raise SystemExit(1)
+print(count)
+PY
+)"; then
+        :
+    else
+        count_status=$?
+        refuse BLOCKED null_blk_configfs unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=enumerable_configfs_names observed_proof=read_failed original_errno_or_exit=$count_status retained_state_action=retain_all_null_blk safe_next_action=inspect_read_only"
+    fi
+    is_uint "$retained_unclaimed_nullb_count" ||
+        refuse BLOCKED null_blk_configfs unavailable "phase=orphan_scan resource_kind=null_blk expected_proof=canonical_retained_count observed_proof=malformed original_errno_or_exit=unavailable retained_state_action=retain_all_null_blk safe_next_action=inspect_read_only"
 }
 
 if [[ ! -d /sys/module/dm_swapz ]]; then
-    # Resolve ambiguous null_blk ownership before touching completed scratch.
-    # A BLOCKED resource gate must not perform even unrelated preflight cleanup.
-    clean_orphaned_nullb
+    # Do not interpret retained names as ownership. The later deployment helper
+    # creates and uses a separate target under its same-process OWN_NULL claim.
+    count_retained_unclaimed_nullb
+    if [[ $retained_unclaimed_nullb_count != 0 ]]; then
+        note "LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed count=$retained_unclaimed_nullb_count"
+    fi
 if swapz_clear_tmp_before_memory_check; then
     :
 else

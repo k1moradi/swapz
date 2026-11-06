@@ -674,8 +674,13 @@ run_case() {
     # Exact proof classes, not just exit codes; no host/fixture IDs in a refusal.
     case "$case_name" in
         unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|stale_owner_record)
-            [[ "$output" == *"check=unclaimed_null_blk errno=unavailable remedy=phase=orphan_scan resource_kind=null_blk expected_proof=creation_authority observed_proof=token_name_only original_errno_or_exit=unavailable retained_state_action=retain_unclaimed_null_blk safe_next_action=original_creator_revalidate_then_cleanup_or_read_only_reconcile"* ]] ||
-                die "$case_name omitted creation-authority refusal"
+            [[ "$output" == *"LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed"* &&
+               "$output" != *"$FIXTURE/"* &&
+               "$output" != *"nullb-swapz-"* &&
+               "$output" != *"$TOKEN"* &&
+               "$output" != *"$OTHER_TOKEN"* &&
+               "$output" != *"$LOWER_TOKEN"* ]] ||
+                die "$case_name did not report retained unclaimed resources safely"
             ;;
         ambiguous_index_owner)
             [[ "$output" == *"check=null_blk_owner errno=unavailable remedy=phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=multiple_matching_owners original_errno_or_exit=unavailable retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"* ]] ||
@@ -719,7 +724,7 @@ run_case() {
             ;;
     esac
     case "$case_name" in
-        unclaimed_nullb|unclaimed_nullb_pair|unclaimed_full_proof|unclaimed_pair_foreign|stale_owner_record|ambiguous_index_owner|unknown_index_owner|partial_config_proof|malformed_config_index|mismatched_major|foreign_active_swap|reused_index_alias|empty_index_alias|malformed_sysfs_dev|dangling_index_dev|malformed_proc_nullb_major|duplicate_proc_block_header|extra_foreign_holder|changed_holder_target)
+        ambiguous_index_owner|unknown_index_owner|partial_config_proof|malformed_config_index|mismatched_major|foreign_active_swap|reused_index_alias|empty_index_alias|malformed_sysfs_dev|dangling_index_dev|malformed_proc_nullb_major|duplicate_proc_block_header|extra_foreign_holder|changed_holder_target)
             assert_private_safe_refusal "$case_name" "$output"
             ;;
     esac
@@ -759,11 +764,10 @@ run_case() {
            -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN" &&
            "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$TOKEN/memory_backed")" == 1 &&
            "$(cat "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-$OTHER_TOKEN/memory_backed")" == 1 &&
-           "$output" == *"observed_proof=token_name_only"* &&
-           "$output" == *"retained_state_action=retain_unclaimed_null_blk"* &&
+           "$output" == *"LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed count=2"* &&
            "$output" != *"$FIXTURE/"* &&
            "$output" != *"nullb-swapz-"* ]] ||
-            die "ambiguous null_blk devices were admitted, changed or disclosed"
+            die "ambiguous null_blk devices were changed, claimed or disclosed"
         if [[ "$case_name" == unclaimed_pair_foreign ]]; then
             [[ -d "$FIXTURE/sys/kernel/config/nullb/foreign-device" &&
                -d "$FIXTURE/sys/kernel/config/nullb/nullb-swapz-${OTHER_TOKEN}-foreign" &&
@@ -949,11 +953,11 @@ run_case foreign_dependency owned_resource_proof BLOCKED unavailable
 run_case replaced_inode owned_resource_proof BLOCKED unavailable
 run_case cleanup_failure owned_resource_proof BLOCKED unavailable
 run_case owned_cleanup owned_resource_proof BLOCKED unavailable
-run_case unclaimed_nullb unclaimed_null_blk BLOCKED unavailable
-run_case unclaimed_nullb_pair unclaimed_null_blk BLOCKED unavailable
-run_case unclaimed_full_proof unclaimed_null_blk BLOCKED unavailable
-run_case stale_owner_record unclaimed_null_blk BLOCKED unavailable
-run_case unclaimed_pair_foreign unclaimed_null_blk BLOCKED unavailable
+run_case unclaimed_nullb LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed\ count=1 PASS unavailable
+run_case unclaimed_nullb_pair LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed\ count=2 PASS unavailable
+run_case unclaimed_full_proof LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed\ count=1 PASS unavailable
+run_case stale_owner_record LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed\ count=1 PASS unavailable
+run_case unclaimed_pair_foreign LOADED_PREFLIGHT_NULL_BLK=retained_unclaimed\ count=2 PASS unavailable
 run_case foreign_nullb LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
