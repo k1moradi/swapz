@@ -36,6 +36,19 @@ intentionally overwriteable and versioned so
 the latest completed PASS/FAIL/BLOCKED/INCOMPLETE result is directly readable from
 GitHub; no second report copy is generated.
 
+The generated `build/source-build-info.h` stamps the module and userspace
+build with `SWAPZ_BUILD_SOURCE_SHA` and the numeric/string
+`SWAPZ_BUILD_SOURCE_CLEAN` flags. At the root of a tracked checkout, the
+source SHA selects the latest commit touching any path other than the root
+`test_results.json`. Publishing a report-only descendant therefore does not
+relabel the source or previously qualified artifacts; a later real source
+commit advances the identity. The clean flag is 1 only with a resolved source
+SHA and no modified or untracked inputs in the checked kernel, userspace,
+Makefile and packaging paths. Unknown source history yields `unknown` and 0;
+an isolated mock inside ignored `build/` must not claim clean source provenance.
+The report's `source_sha` and `tested_commit_sha` remain the official runner's
+exact tested-source identifiers, not the SHA of its report-publication commit.
+
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the release-metadata source. Kbuild generates the version header; DKMS and userspace resolve the same value.
 
 ### Kernel-version compatibility evidence

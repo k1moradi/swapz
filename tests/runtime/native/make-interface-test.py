@@ -34,12 +34,33 @@ class PublicMakeContract(unittest.TestCase):
             git("init", "--initial-branch=main")
             git("config", "user.name", "swapz fixture")
             git("config", "user.email", "swapz-fixture@example.invalid")
+
+            def check_make_provenance(expected_sha, expected_clean, phase):
+                # Query the real Makefile without running install or sudo.
+                queried = subprocess.run(
+                    ["make", "-qp", "install"], cwd=repository,
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(
+                    queried.returncode, 1,
+                    f"phase={phase} first_error=make query failed "
+                    f"reason={queried.stderr.strip()}")
+                for variable, expected in (
+                        ("SWAPZ_BUILD_SOURCE_SHA", expected_sha),
+                        ("SWAPZ_BUILD_SOURCE_CLEAN", expected_clean)):
+                    self.assertRegex(
+                        queried.stdout,
+                        rf"(?m)^{variable} := {re.escape(expected)}$",
+                        f"phase={phase} first_error={variable} mismatch "
+                        "reason=unexpected generated-source contract")
+
             source = repository / "src/kernel/dm-target.c"
             source.parent.mkdir(parents=True)
             source.write_text("int source_revision = 1;\n")
-            git("add", "src/kernel/dm-target.c")
+            (repository / "Makefile").write_text(MAKE)
+            git("add", "Makefile", "src/kernel/dm-target.c")
             git("commit", "-m", "source: synthetic candidate")
             source_sha = git("rev-parse", "HEAD").stdout.strip()
+            check_make_provenance(source_sha, "1", "initial-source")
 
             report = repository / "test_results.json"
             report.write_text("{\"overall\":\"FAIL\"}\n")
@@ -53,8 +74,10 @@ class PublicMakeContract(unittest.TestCase):
                 "log", "-1", "--format=%H", "HEAD", "--", ".",
                 ":(exclude)test_results.json").stdout.strip()
             self.assertEqual(resolved_sha, source_sha)
+            check_make_provenance(source_sha, "1", "report-only-descendant")
 
             source.write_text("int source_revision = 2;\n")
+            check_make_provenance(source_sha, "0", "dirty-source")
             git("add", "src/kernel/dm-target.c")
             git("commit", "-m", "source: next synthetic candidate")
             next_source_sha = git("rev-parse", "HEAD").stdout.strip()
@@ -63,6 +86,7 @@ class PublicMakeContract(unittest.TestCase):
                 "log", "-1", "--format=%H", "HEAD", "--", ".",
                 ":(exclude)test_results.json").stdout.strip()
             self.assertEqual(resolved_after_source_change, next_source_sha)
+            check_make_provenance(next_source_sha, "1", "next-source")
 
     def test_exact_five_root_goals(self):
         targets = set()
@@ -1335,10 +1359,19 @@ class PublicMakeContract(unittest.TestCase):
                     r"independent compilation uses automatic -j[1-9][0-9]*[.]",
                 )
                 build_info = (fixture / "build/source-build-info.h").read_text()
+                # The isolated mock lives under ignored build/, so the
+                # source-history pathspec must not claim it is clean source.
                 self.assertIn(
-                    '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "1"',
+                    '#define SWAPZ_BUILD_SOURCE_SHA "unknown"',
                     build_info,
-                    "generated provenance must provide the module metadata string",
+                    "phase=incremental-fixture first_error=unexpected source "
+                    "reason=ignored mock has no tracked source history",
+                )
+                self.assertIn(
+                    '#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "0"',
+                    build_info,
+                    "phase=incremental-fixture first_error=unexpected clean state "
+                    "reason=unknown source cannot claim clean provenance",
                 )
                 order = (fixture / "build/order.log").read_text().splitlines()
                 self.assertEqual(order[-5:],

@@ -3648,7 +3648,11 @@ report publication would stamp artifacts with a report commit while the
 runner correctly records its source parent. The Make-interface regression
 must exercise a synthetic main-only history containing a report-only commit,
 prove both identifiers resolve to the source commit, and prove a later source
-commit becomes the new identity.
+commit becomes the new identity. It must query the parsed root Makefile at
+each committed source identity and after a dirty source edit, preserving
+the clean-state distinction. Its separate incremental-build mock runs under
+ignored `build/`, with no tracked source at that relative path: generated
+provenance there is `unknown`, clean 0, not a false clean-source claim.
 
 After writing the file, `make test` automatically publishes only that report
 to `main` using Git plumbing. `tested_commit_sha` names the nearest
