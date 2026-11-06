@@ -897,6 +897,14 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 	const swapz_u32 second_destination = FOREGROUND_SEGMENTS + 1U;
 	struct swapz_map authoritative_last;
 	struct swapz_tx transaction;
+	/* Serialized authority snapshot: failed retries may change probe telemetry,
+	 * but must not change mappings, physical ownership or policy state. */
+	swapz_u8 retained_roles[PHYSICAL_SEGMENTS];
+	swapz_u32 retained_segment_maps[PHYSICAL_SEGMENTS];
+	swapz_u32 retained_program_counts[PHYSICAL_SEGMENTS];
+	swapz_u32 retained_next_block, retained_next_probe;
+	swapz_u32 retained_open_segment, retained_forbidden_open;
+	swapz_u32 retained_committed, retained_abandoned;
 	swapz_u32 logical, uncertain_block = 0U;
 	unsigned int attempt;
 
@@ -980,16 +988,83 @@ static int test_uncertain_recovery_exhausts_reserves(void)
 	CHECK(swapz_gc_commit_rotation(&a, victim) == -ENOSPC);
 	CHECK(swapz_gc_roll_forward_rotation(
 		      &a, second_destination) == -EUCLEAN);
-	CHECK(swapz_gc_advance_rotation_destination(
-		      &a, second_destination) == -ENOSPC);
 	CHECK(a.gc_allocation && a.gc_destination == second_destination &&
 	      a.gc_forbidden_victim == victim &&
 	      roles[victim] && roles[first_destination] &&
 	      !roles[second_destination]);
-	CHECK(swapz_stage(&a, &last_logical, 1U, 1U, &transaction) == -ENOSPC);
-	CHECK(!a.in_flight && !a.batch_pending);
-	CHECK(maps[last_logical].generation == authoritative_last.generation);
-	CHECK(verify_all_pages() == 0);
+	memcpy(retained_roles, roles, sizeof(retained_roles));
+	memcpy(retained_segment_maps, segment_maps, sizeof(retained_segment_maps));
+	memcpy(retained_program_counts, program_counts,
+	       sizeof(retained_program_counts));
+	retained_next_block = a.next_block;
+	retained_next_probe = a.next_segment_probe;
+	retained_open_segment = a.open_segment;
+	retained_forbidden_open = a.gc_forbidden_open;
+	retained_committed = a.committed_blocks;
+	retained_abandoned = a.abandoned_blocks;
+
+	/*
+	 * All reserve roles except the already-owned full destination have
+	 * been consumed. Repeated refusals must not roll back a quarantine,
+	 * recycle the still-live victim or invent one block of GC progress.
+	 */
+	for (attempt = 0U; attempt < 3U; ++attempt) {
+		const int advance_error = swapz_gc_advance_rotation_destination(
+			&a, second_destination);
+		const int stage_error = swapz_stage(
+			&a, &last_logical, 1U, 1U, &transaction);
+		const unsigned int observed_reserves = reserve_segments();
+		const int state_retained =
+			a.gc_allocation && a.gc_destination == second_destination &&
+			a.gc_forbidden_victim == victim &&
+			a.gc_forbidden_open == retained_forbidden_open &&
+			a.open_segment == retained_open_segment &&
+			a.next_block == retained_next_block &&
+			a.next_segment_probe == retained_next_probe &&
+			a.committed_blocks == retained_committed &&
+			a.abandoned_blocks == retained_abandoned &&
+			!a.in_flight && !a.batch_pending &&
+			!memcmp(roles, retained_roles, sizeof(retained_roles)) &&
+			!memcmp(segment_maps, retained_segment_maps,
+				sizeof(retained_segment_maps)) &&
+			!memcmp(program_counts, retained_program_counts,
+				sizeof(retained_program_counts)) &&
+			!memcmp(&maps[last_logical], &authoritative_last,
+				sizeof(authoritative_last)) &&
+			live[authoritative_last.start_block] == 1U &&
+			classes[authoritative_last.start_block] == 1U &&
+			!live[uncertain_block] && !classes[uncertain_block] &&
+			observed_reserves == 1U;
+
+		if (advance_error != -ENOSPC || stage_error != -ENOSPC ||
+		    !state_retained) {
+			fprintf(stderr,
+				"GC_RESERVE_EXHAUSTION_FAIL phase=terminal_retry "
+				"attempt=%u victim=%u victim_recycle_eligible=0 "
+				"destination=%u expected_victim_live=1 "
+				"observed_victim_live=%u expected_victim_mapped=1 "
+				"observed_victim_mapped=%u "
+				"expected_reserve_roles=1 observed_reserve_roles=%u "
+				"expected_available_spares=0 "
+				"expected_cursor=%u observed_cursor=%u "
+				"expected_probe=%u observed_probe=%u "
+				"expected_committed=%u observed_committed=%u "
+				"expected_abandoned=%u observed_abandoned=%u "
+				"original_lower_errno=%d advance_errno=%d "
+				"stage_errno=%d state_retained=%d "
+				"recovery_possible=0\n",
+				attempt, victim, second_destination,
+				(unsigned int)live[authoritative_last.start_block],
+				segment_maps[victim], observed_reserves,
+				retained_next_block, a.next_block,
+				retained_next_probe, a.next_segment_probe,
+				retained_committed, a.committed_blocks,
+				retained_abandoned, a.abandoned_blocks,
+				-EIO, advance_error, stage_error, state_retained);
+			return 1;
+		}
+		CHECK(verify_all_pages() == 0);
+	}
 	return 0;
 }
 
