@@ -553,6 +553,13 @@ races explicitly UNPROVEN: no rootless read-only recheck demonstrates atomic
 exclusion or binds a physical reader across device-number reuse.
 The source-extracted coordinator must intercept both admission-time and
 failure-classification target-inspection calls with the same private fixture.
+Source-extracted target-parent and root-parent drift controls must compare
+the production's full bounded identity-class diagnostic. Prewrite refusals
+after persisted STARTING require the preserved first `ESTALE`, an explicit
+changed-parent class, `STARTING_PENDING_RECOVERY_UPDATE` diagnostic state,
+and zero intercepted mutations; initial READY refusals must still retain
+`READY` in their diagnostic. Distinguish changed root-parent identity from
+changed root/target-parent relationship without weakening either check.
 A missing inspection shim is a harness linking failure, never positive
 production safety evidence. Require an actual post-admission geometry change
 and at least one observed last-use inspection, but not an incidental fixed

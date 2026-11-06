@@ -1499,6 +1499,7 @@ static int check_case(enum fixture_scenario candidate)
             phase = "prewrite-target-parent-identity";
             break;
         case FIXTURE_ROOT_SUBSTITUTED:
+        case FIXTURE_ROOT_ON_SELECTED_PARENT:
             phase = "prewrite-root-parent-identity";
             break;
         case FIXTURE_DM_INITIAL:
@@ -1529,7 +1530,8 @@ static int check_case(enum fixture_scenario candidate)
         expected_diagnostic_length = (size_t)expected_length;
         if (candidate == FIXTURE_ROOT_INITIAL ||
             candidate == FIXTURE_PARENT_SUBSTITUTED ||
-            candidate == FIXTURE_ROOT_SUBSTITUTED) {
+            candidate == FIXTURE_ROOT_SUBSTITUTED ||
+            candidate == FIXTURE_ROOT_ON_SELECTED_PARENT) {
             const char *expected_class =
                 candidate == FIXTURE_ROOT_INITIAL ?
                     "exact-host-root-target-parent-layout-record" :
@@ -1548,11 +1550,11 @@ static int check_case(enum fixture_scenario candidate)
                 "PRIMARY_START=ADMISSION_DETAIL phase=%s expected=%s "
                 "observed=%s errno=%d original_errno=%d "
                 "persistence_boundary=none durable=OBSERVED "
-                "mapper=UNOBSERVED swap=UNOBSERVED retained_state=READY "
+                "mapper=UNOBSERVED swap=UNOBSERVED retained_state=%s "
                 "target_unchanged=true\n",
                 phase, expected_class,
-                observed_class, expected_error,
-                expected_error);
+                observed_class, expected_error, expected_error,
+                late ? "STARTING_PENDING_RECOVERY_UPDATE" : "READY");
 
             assert(detail_length > 0 &&
                    (size_t)detail_length <
