@@ -2247,7 +2247,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 lambda campaign: campaign["qualification_target_binding"][
                     "observed"].update(
                         physical_device_bytes=float(TARGET["size_bytes"])),
-                "qualification target observations disagree"),
+                ("phase=qualification_target_binding "
+                 "failed_evidence_field=qualification_target_binding "
+                 "expected_schema_class=current_physical_target_parent_exact "
+                 "observed_schema_class=invalid_incomplete_or_mismatched")),
         }
         for name, (damage, expected) in changes.items():
             with self.subTest(case=name):
@@ -2645,7 +2648,10 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             ("pair-target-binding",
              lambda value: value["qualification_target_binding"].__setitem__(
                  "consistent", False),
-             "qualification target binding is not MATCH"),
+             ("phase=qualification_target_binding "
+              "failed_evidence_field=qualification_target_binding "
+              "expected_schema_class=current_physical_target_parent_exact "
+              "observed_schema_class=invalid_incomplete_or_mismatched")),
         )
         for name, mutate, expected in mutations:
             with self.subTest(name=name):
