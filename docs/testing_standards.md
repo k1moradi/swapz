@@ -3692,7 +3692,9 @@ must exercise a synthetic main-only history containing a report-only commit,
 prove both identifiers resolve to the source commit, and prove a later source
 commit becomes the new identity. It must query the parsed root Makefile at
 each committed source identity and after a dirty source edit, preserving
-the clean-state distinction. Its separate incremental-build mock runs under
+the clean-state distinction, and require the official reporter's `git_sha()`
+to resolve the same synthetic repository revision in every phase rather than
+validating only a duplicated Git expression. Its separate incremental-build mock runs under
 ignored `build/`, with no tracked source at that relative path: generated
 provenance there is `unknown`, clean 0, not a false clean-source claim.
 

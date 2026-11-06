@@ -20,11 +20,17 @@ class PublicMakeContract(unittest.TestCase):
             "':(exclude)test_results.json'",
             MAKE)
 
+        runner_spec = importlib.util.spec_from_file_location(
+            "swapz_provenance_runner", ROOT / "tests/tools/run-tests.py")
+        runner_contract = importlib.util.module_from_spec(runner_spec)
+        runner_spec.loader.exec_module(runner_contract)
+
         build_tests = ROOT / "build/tests"
         build_tests.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="report-source-sha-",
                                          dir=build_tests) as directory:
             repository = pathlib.Path(directory)
+            runner_contract.ROOT = repository
 
             def git(*arguments):
                 return subprocess.run(
@@ -52,6 +58,10 @@ class PublicMakeContract(unittest.TestCase):
                         rf"(?m)^{variable} := {re.escape(expected)}$",
                         f"phase={phase} first_error={variable} mismatch "
                         "reason=unexpected generated-source contract")
+                self.assertEqual(
+                    runner_contract.git_sha(), expected_sha,
+                    f"phase={phase} first_error=reporter source mismatch "
+                    "reason=Makefile and official runner disagree")
 
             source = repository / "src/kernel/dm-target.c"
             source.parent.mkdir(parents=True)
