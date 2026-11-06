@@ -178,6 +178,17 @@ completion may quarantine its reserved destination, but must preserve
 all pre-existing authoritative maps and sidecars. Use deterministic rootless
 fault injection to exercise this invariant without lower-device I/O.
 
+For compressed extents published with more than one record, every sibling map
+must retain an in-map shared-extent witness. Before direct DISCARD, RAW COW,
+compressed COW or GC relocation would reduce that extent's physical reference
+count to zero, authority must independently prove that no sibling survives.
+Production uses the preallocated per-segment intrusive page list and verifies
+its complete mapped-page traversal; callers without that reverse index use the
+full logical map. Multi-page DISCARD instead folds this condition into its
+single post-model full-map preflight, before the first generation changes. A
+stale-low liveness sidecar must therefore fail closed without invalidating a
+sibling mapping or publishing a replacement.
+
 Range DISCARD must preflight every requested mapping before the first
 logical generation or liveness mutation. A valid extent start index alone is
 insufficient: the entire 1/2/4-block extent must fit physical capacity and

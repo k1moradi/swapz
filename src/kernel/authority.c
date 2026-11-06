@@ -655,6 +655,161 @@ static int swapz_map_proof_refuse(const char *transition,
 }
 
 /*
+ * A shared compressed extent is physically releasable only after its current
+ * authoritative siblings are independently accounted. Production traverses
+ * the bounded per-segment page list; research callers without that index use
+ * the legacy full logical-map fallback. This runs only when a shared extent's
+ * physical reference count is about to reach zero.
+ */
+static int swapz_verify_shared_extent_release(
+	const struct swapz_authority *a, const struct swapz_map *target,
+	swapz_u32 expected_references, const char *transition)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	const swapz_u32 maximum_segment_pages =
+		SWAPZ_SEGMENT_BLOCKS * SWAPZ_MAX_RECORDS;
+	const swapz_u32 target_start = target ? target->start_block : 0U;
+	swapz_u32 target_end, target_segment, found = 0;
+	swapz_u64 record_mask = 0;
+
+	if (!a || !a->maps || !target || !target->valid || target->raw ||
+	    !target->shared_extent || !expected_references ||
+	    target_start >= a->physical_blocks ||
+	    !swapz_legal_class(target->extent_blocks) ||
+	    target->extent_blocks > a->physical_blocks - target_start ||
+	    target_start % SWAPZ_SEGMENT_BLOCKS + target->extent_blocks >
+		    SWAPZ_SEGMENT_BLOCKS)
+		return swapz_map_proof_refuse(
+			transition, "invalid_extent_release_request", -EINVAL);
+
+	target_end = target_start + target->extent_blocks;
+	target_segment = target_start / SWAPZ_SEGMENT_BLOCKS;
+
+	if (swapz_segment_page_lists_enabled(a)) {
+		swapz_u32 current, last = none, visited = 0;
+		swapz_u32 mapped_pages;
+
+		if (!swapz_segment_page_lists_complete(a) ||
+		    target_segment >= a->segment_count ||
+		    swapz_page_list_validate_segment(a, target_segment))
+			return swapz_map_proof_refuse(
+				transition, "extent_release_page_list", -EUCLEAN);
+		mapped_pages = a->segment_mapped_pages[target_segment];
+		if (!mapped_pages || mapped_pages > maximum_segment_pages)
+			return swapz_map_proof_refuse(
+				transition, "extent_release_page_list", -EUCLEAN);
+
+		current = a->segment_first_page[target_segment];
+		while (current != none) {
+			const struct swapz_map *map;
+			swapz_u32 map_end;
+			swapz_u64 record_bit;
+
+			if (current >= a->logical_pages ||
+			    visited >= mapped_pages ||
+			    swapz_page_list_validate_entry_cached(a, current, 1))
+				return swapz_map_proof_refuse(
+					transition, "extent_release_page_list",
+					-EUCLEAN);
+			map = &a->maps[current];
+			if (!map->valid ||
+			    map->start_block >= a->physical_blocks ||
+			    !swapz_legal_class(map->extent_blocks) ||
+			    (map->raw &&
+			     (map->extent_blocks != 1U || map->shared_extent)) ||
+			    (!map->raw && swapz_map_record_index(map) &&
+			     !map->shared_extent) ||
+			    map->extent_blocks >
+				    a->physical_blocks - map->start_block ||
+			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+				    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+			    map->start_block / SWAPZ_SEGMENT_BLOCKS !=
+				    target_segment)
+				return swapz_map_proof_refuse(
+					transition, "extent_geometry", -EUCLEAN);
+			map_end = map->start_block + map->extent_blocks;
+			if (map->start_block < target_end &&
+			    map_end > target_start) {
+				if (map->start_block != target_start ||
+				    map->extent_blocks != target->extent_blocks ||
+				    map->raw || !map->shared_extent)
+					return swapz_map_proof_refuse(
+						transition, "overlapping_extent",
+						-EUCLEAN);
+				record_bit = (swapz_u64)1U <<
+					swapz_map_record_index(map);
+				if (record_mask & record_bit)
+					return swapz_map_proof_refuse(
+						transition, "duplicate_record",
+						-EUCLEAN);
+				record_mask |= record_bit;
+				found++;
+				if (found > expected_references)
+					return swapz_map_proof_refuse(
+						transition, "unexpected_reference",
+						-EUCLEAN);
+			}
+			last = current;
+			current = a->page_next_in_segment[current];
+			visited++;
+		}
+		if (visited != mapped_pages ||
+		    last != a->segment_last_page[target_segment])
+			return swapz_map_proof_refuse(
+				transition, "extent_release_page_list", -EUCLEAN);
+	} else {
+		swapz_u32 logical;
+
+		for (logical = 0; logical < a->logical_pages; ++logical) {
+			const struct swapz_map *map = &a->maps[logical];
+			swapz_u32 map_end;
+			swapz_u64 record_bit;
+
+			swapz_map_proof_resched(logical);
+			if (!map->valid)
+				continue;
+			if (map->start_block >= a->physical_blocks ||
+			    !swapz_legal_class(map->extent_blocks) ||
+			    (map->raw &&
+			     (map->extent_blocks != 1U || map->shared_extent)) ||
+			    (!map->raw && swapz_map_record_index(map) &&
+			     !map->shared_extent) ||
+			    map->extent_blocks >
+				    a->physical_blocks - map->start_block ||
+			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+				    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
+				return swapz_map_proof_refuse(
+					transition, "extent_geometry", -EUCLEAN);
+			map_end = map->start_block + map->extent_blocks;
+			if (map->start_block >= target_end ||
+			    map_end <= target_start)
+				continue;
+			if (map->start_block != target_start ||
+			    map->extent_blocks != target->extent_blocks ||
+			    map->raw || !map->shared_extent)
+				return swapz_map_proof_refuse(
+					transition, "overlapping_extent",
+					-EUCLEAN);
+			record_bit = (swapz_u64)1U <<
+				swapz_map_record_index(map);
+			if (record_mask & record_bit)
+				return swapz_map_proof_refuse(
+					transition, "duplicate_record", -EUCLEAN);
+			record_mask |= record_bit;
+			found++;
+			if (found > expected_references)
+				return swapz_map_proof_refuse(
+					transition, "unexpected_reference",
+					-EUCLEAN);
+		}
+	}
+	if (found != expected_references)
+		return swapz_map_proof_refuse(
+			transition, "reference_count", -EUCLEAN);
+	return 0;
+}
+
+/*
  * The safe, strictly limited first swapz GC step: reuse only wholly-dead
  * 1MiB segments. A live object is NEVER copied or overwritten here.
  *
@@ -692,6 +847,10 @@ static int swapz_verify_segment_authoritative_maps(
 			continue;
 		if (map->start_block >= a->physical_blocks ||
 		    !swapz_legal_class(map->extent_blocks) ||
+		    (map->raw &&
+		     (map->extent_blocks != 1U || map->shared_extent)) ||
+		    (!map->raw && swapz_map_record_index(map) &&
+		     !map->shared_extent) ||
 		    map->extent_blocks > a->physical_blocks - map->start_block ||
 		    map->start_block % SWAPZ_SEGMENT_BLOCKS +
 			    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS)
@@ -796,6 +955,10 @@ static int swapz_claim_dead_segment(struct swapz_authority *a,
 			 */
 			if (map->start_block >= a->physical_blocks ||
 			    !swapz_legal_class(map->extent_blocks) ||
+			    (map->raw &&
+			     (map->extent_blocks != 1U || map->shared_extent)) ||
+			    (!map->raw && swapz_map_record_index(map) &&
+			     !map->shared_extent) ||
 			    map->extent_blocks >
 				    a->physical_blocks - map->start_block ||
 			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
@@ -1862,7 +2025,10 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
 	     !swapz_legal_class(old->extent_blocks) ||
-	     (old->raw && old->extent_blocks != 1U) ||
+	     (old->raw &&
+	      (old->extent_blocks != 1U || old->shared_extent)) ||
+	     (!old->raw && swapz_map_record_index(old) &&
+	      !old->shared_extent) ||
 	     old->extent_blocks > a->physical_blocks - old->start_block ||
 	     old->start_block % SWAPZ_SEGMENT_BLOCKS +
 	         old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
@@ -1914,6 +2080,15 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	 * early-TRIM to the caller. A false-one mapped count must not make an
 	 * unmentioned surviving logical map disappear from physical storage.
 	 */
+	if (old->valid && old->shared_extent &&
+	    a->live_records[old->start_block] == 1U) {
+		error = swapz_verify_shared_extent_release(
+			a, old, 1U,
+			a->gc_allocation ? "gc_raw_extent_release" :
+			"raw_extent_release");
+		if (error)
+			goto fail;
+	}
 	if (a->segment_mapped_pages && old->valid &&
 	    old_segment != new_segment &&
 	    a->segment_mapped_pages[old_segment] == 1U &&
@@ -2018,7 +2193,10 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 		if (map->valid) {
 			if (map->start_block >= a->physical_blocks ||
 			    !swapz_legal_class(map->extent_blocks) ||
-			    (map->raw && map->extent_blocks != 1U) ||
+			    (map->raw &&
+			     (map->extent_blocks != 1U || map->shared_extent)) ||
+			    (!map->raw && swapz_map_record_index(map) &&
+			     !map->shared_extent) ||
 			    map->extent_blocks >
 				    a->physical_blocks - map->start_block ||
 			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
@@ -2073,6 +2251,8 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 		 * be zero. Prove that now, before any generation can advance.
 		 */
 		a->live_records[map->start_block]--;
+		if (!a->live_records[map->start_block] && map->shared_extent)
+			needs_full_map_proof = 1;
 		if (a->segment_mapped_pages)
 			a->segment_mapped_pages[segment]--;
 		if (gc_enabled) {
@@ -2127,7 +2307,10 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 				continue;
 			if (map->start_block >= a->physical_blocks ||
 			    !swapz_legal_class(map->extent_blocks) ||
-			    (map->raw && map->extent_blocks != 1U) ||
+			    (map->raw &&
+			     (map->extent_blocks != 1U || map->shared_extent)) ||
+			    (!map->raw && swapz_map_record_index(map) &&
+			     !map->shared_extent) ||
 			    map->extent_blocks >
 				    a->physical_blocks - map->start_block ||
 			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
@@ -2141,6 +2324,14 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 			if (segment >= a->segment_count) {
 				error = swapz_map_proof_refuse(
 					"discard_range", "segment_index",
+					-EUCLEAN);
+				break;
+			}
+			if (!a->live_records[map->start_block] &&
+			    (logical < first_logical ||
+			     logical - first_logical >= page_count)) {
+				error = swapz_map_proof_refuse(
+					"discard_range", "hidden_extent_reference",
 					-EUCLEAN);
 				break;
 			}
@@ -2196,7 +2387,10 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
 	     !swapz_legal_class(old->extent_blocks) ||
-	     (old->raw && old->extent_blocks != 1U) ||
+	     (old->raw &&
+	      (old->extent_blocks != 1U || old->shared_extent)) ||
+	     (!old->raw && swapz_map_record_index(old) &&
+	      !old->shared_extent) ||
 	     old->extent_blocks > a->physical_blocks - old->start_block ||
 	     old->start_block % SWAPZ_SEGMENT_BLOCKS +
 	         old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
@@ -2228,6 +2422,16 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 	if (old->valid && swapz_segment_page_lists_enabled(a) &&
 	    swapz_page_list_validate_membership(a, logical_page, old_segment))
 		return -EUCLEAN;
+	if (old->valid && old->shared_extent &&
+	    a->live_records[old->start_block] == 1U) {
+		int reference_error = swapz_verify_shared_extent_release(
+			a, old, 1U,
+			a->gc_allocation ? "gc_discard_extent_release" :
+			"discard_extent_release");
+
+		if (reference_error)
+			return reference_error;
+	}
 	if (old->valid) {
 		int score_error =
 			swapz_gc_account_transition_commit(a, old, NULL);
@@ -2434,7 +2638,10 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		}
 		if (old->start_block >= a->physical_blocks ||
 		    !swapz_legal_class(old->extent_blocks) ||
-		    (old->raw && old->extent_blocks != 1U) ||
+		    (old->raw &&
+		     (old->extent_blocks != 1U || old->shared_extent)) ||
+		    (!old->raw && swapz_map_record_index(old) &&
+		     !old->shared_extent) ||
 		    old->extent_blocks > a->physical_blocks - old->start_block ||
 		    old->start_block % SWAPZ_SEGMENT_BLOCKS +
 		        old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
@@ -2533,6 +2740,38 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	    swapz_page_list_validate_segment(a, new_segment)) {
 		error = -EUCLEAN;
 		goto fail;
+	}
+	/*
+	 * A stale-low physical reference count must not let COW publication
+	 * release a shared compressed extent while an authoritative sibling
+	 * survives. Only the would-be final physical release needs this proof.
+	 */
+	for (index = 0; index < extent_delta_count; ++index) {
+		const struct swapz_finish_extent_delta *delta =
+			&a->finish_extent_deltas[index];
+		const struct swapz_map *release_map = NULL;
+		swapz_u8 record_index;
+
+		if (a->live_records[delta->start_block] != delta->references)
+			continue;
+		for (record_index = 0; record_index < tx->count; ++record_index) {
+			const struct swapz_map *candidate =
+				&a->maps[tx->records[record_index].logical_page];
+
+			if (candidate->valid && candidate->shared_extent &&
+			    candidate->start_block == delta->start_block) {
+				release_map = candidate;
+				break;
+			}
+		}
+		if (!release_map)
+			continue;
+		error = swapz_verify_shared_extent_release(
+			a, release_map, delta->references,
+			a->gc_allocation ? "gc_batch_extent_release" :
+			"batch_extent_release");
+		if (error)
+			goto fail;
 	}
 	/*
 	 * Publishing a batch can zero several cached source-segment counts.
@@ -2655,6 +2894,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			.payload_length = payload_lengths[index],
 			.payload_offset = payload_offsets[index],
 			.extent_blocks = tx->extent_blocks,
+			.shared_extent = tx->count > 1U,
 			.record_index = swapz_map_pack_record_index(
 				index, payload_encodings[index]),
 			.valid = 1,
@@ -2694,6 +2934,7 @@ static int swapz_read_observed_authority(
 	    current_map->generation != observed->generation ||
 	    current_map->extent_blocks != observed->extent_blocks ||
 	    current_map->raw != observed->raw ||
+	    current_map->shared_extent != observed->shared_extent ||
 	    current_map->record_index != observed->record_index ||
 	    current_map->payload_length != observed->payload_length)
 		return -ESTALE;

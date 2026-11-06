@@ -1836,6 +1836,36 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 	CHECK(test_first_page[0] == 0U && test_last_page[0] == 1U &&
 	      test_prev_page[0] == none && test_next_page[0] == 1U &&
 	      test_prev_page[1] == 0U && test_next_page[1] == none);
+
+	/* Production page-list path: stale-low liveness must preserve siblings. */
+	test_live[0] = 1U;
+	{
+		int prevalidate_error = swapz_prevalidate_discard_range(
+			&test_authority, 0U, 1U);
+		int discard_error = swapz_discard_page(&test_authority, 0U);
+		int invalidation_prevented =
+			prevalidate_error == -EUCLEAN &&
+			discard_error == -EUCLEAN &&
+			test_live[0] == 1U &&
+			test_maps[0].valid && test_maps[1].valid &&
+			test_maps[0].generation == 1U &&
+			test_maps[1].generation == 1U;
+
+		if (!invalidation_prevented) {
+			fprintf(stderr,
+				"%s:%d: FAIL range=[0,1) expected_generation=1 "
+				"expected_references=2 observed_references=%u "
+				"conflict=shared_extent_stale_low_page_list "
+				"original_errnos=prevalidate:%d,discard:%d "
+				"invalidation_prevented=%s\n",
+				__FILE__, __LINE__, (unsigned int)test_live[0],
+				prevalidate_error, discard_error,
+				invalidation_prevented ? "yes" : "no");
+			return 1;
+		}
+	}
+	test_live[0] = 2U;
+
 	first_live_bytes = test_maps[0].payload_length +
 			   sizeof(struct swapz_record);
 	second_live_bytes = test_maps[1].payload_length +
@@ -1962,6 +1992,83 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 	return 0;
 }
 
+static int test_shared_extent_stale_low_reference_fails_closed(void)
+{
+	const swapz_u32 shared_pages[] = { 0U, 1U };
+	const swapz_u32 replacement_page = 0U;
+	struct swapz_tx shared_tx, replacement_tx;
+	struct swapz_map shared_before[2];
+	swapz_u32 shared_start;
+	int scenario;
+
+	for (scenario = 0; scenario < 3; ++scenario) {
+		int error, prevalidate_error = 0;
+		int invalidation_prevented;
+
+		CHECK(init() == 0);
+		CHECK(swapz_stage(&authority, shared_pages, 2U, 2U,
+				  &shared_tx) == 0);
+		CHECK(encode(&shared_tx) == 0);
+		CHECK(swapz_finish(&authority, &shared_tx, extent,
+				   2U * SWAPZ_BLOCK_BYTES, 2U, 0) == 0);
+		shared_start = maps[0].start_block;
+		CHECK(shared_start == maps[1].start_block &&
+		      maps[0].shared_extent && maps[1].shared_extent &&
+		      live[shared_start] == 2U);
+		shared_before[0] = maps[0];
+		shared_before[1] = maps[1];
+
+		/* Fault injection: two authoritative siblings, one cached reference. */
+		live[shared_start] = 1U;
+		if (scenario == 0) {
+			prevalidate_error = swapz_prevalidate_discard_range(
+				&authority, 0U, 1U);
+			error = swapz_discard_page(&authority, 0U);
+		} else {
+			CHECK(swapz_stage(&authority, &replacement_page, 1U, 1U,
+					  &replacement_tx) == 0);
+			if (scenario == 1) {
+				CHECK(encode(&replacement_tx) == 0);
+				error = swapz_finish(
+					&authority, &replacement_tx, extent,
+					SWAPZ_BLOCK_BYTES, 1U, 0);
+			} else {
+				memset(extent, 0x6d, SWAPZ_BLOCK_BYTES);
+				error = swapz_finish_raw(
+					&authority, &replacement_tx, extent,
+					1U, 0);
+			}
+		}
+		invalidation_prevented =
+			(scenario != 0 || prevalidate_error == -EUCLEAN) &&
+			error == -EUCLEAN &&
+			!memcmp(&maps[0], &shared_before[0], sizeof(maps[0])) &&
+			!memcmp(&maps[1], &shared_before[1], sizeof(maps[1])) &&
+			live[shared_start] == 1U &&
+			classes[shared_start] == shared_before[0].extent_blocks &&
+			(scenario == 0 ||
+			 (!authority.in_flight &&
+			  !live[replacement_tx.start_block] &&
+			  !classes[replacement_tx.start_block]));
+		if (!invalidation_prevented) {
+			fprintf(stderr,
+				"%s:%d: FAIL range=[0,1) "
+				"expected_generation=%u expected_references=2 "
+				"observed_references=%u "
+				"conflict=shared_extent_stale_low_reference "
+				"operation=%s original_errnos=prevalidate:%d,"
+				"operation:%d invalidation_prevented=%s\n",
+				__FILE__, __LINE__, shared_before[0].generation,
+				(unsigned int)live[shared_start],
+				scenario == 0 ? "discard" :
+				scenario == 1 ? "compressed_cow" : "raw_cow",
+				prevalidate_error, error,
+				invalidation_prevented ? "yes" : "no");
+			return 1;
+		}
+	}
+	return 0;
+}
 
 /*
  * Model a multi-page DISCARD whose first page is healthy, the second is
@@ -2125,6 +2232,7 @@ int main(void)
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_rejects_detached_page_list_cycle() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_blocks_late_sidecar_corruption() == 0); passed++;
+	CHECK(test_shared_extent_stale_low_reference_fails_closed() == 0); passed++;
 	CHECK(test_discard_range_bad_tail_keeps_unrelated_authority() == 0); passed++;
 	CHECK(test_compressed_finish_rejects_corrupt_source_geometry() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_restores_shared_compressed_gc_underflow() == 0); passed++;

@@ -69,14 +69,16 @@ struct swapz_map {
 	 * real live-byte GC victim selection without reading every extent. */
 	swapz_u16 payload_length;
 	swapz_u8 record_index;
-	/* One byte stores legal extent size plus raw/valid state. */
+	/* One byte stores legal extent size plus raw/valid/shared state. */
 	union {
 		swapz_u8 state;
 		struct {
 			swapz_u8 extent_blocks:3;
 			swapz_u8 raw:1;
 			swapz_u8 valid:1;
-			swapz_u8 reserved:3;
+			/* Multi-record compressed extents retain this on every sibling. */
+			swapz_u8 shared_extent:1;
+			swapz_u8 reserved:2;
 		};
 	};
 };
