@@ -7756,6 +7756,11 @@ independently and prove refusal; marker text alone is never signature proof.
 Embedded CMS signer certificates must be excluded from signer resolution
 (OpenSSL `-nointern`): `-certfile` alone does not force verification against
 that exact configured and enrolled certificate.
+OpenSSL CMS verification can also accept an attached CMS whose embedded
+content matches the supplied payload. Reject such non-detached CMS content
+before declaring signature validity: Linux module verification requires
+absent encapsulated eContent. A real-CMS rootless control must prove a valid
+detached signature passes while a same-payload attached signature refuses.
 Certificate identity, `mokutil --ignore-keyring --test-key` firmware-MOK
 enrollment, embedded signer/key metadata, cryptographic signature validity,
 kernel-keyring visibility, and target-kernel acceptance are separate facts.
@@ -7813,6 +7818,9 @@ admit the valid final value, prove the installed package and DKMS log remain
 unchanged, and then prove that correcting only the report restores ordinary
 upgrade admission.
 
+Package and Secure Boot refusals must identify `phase=signature_generation`,
+`phase=ownership_restore`, `phase=cms_verification`, or
+`phase=installed_artifact_provenance` when the corresponding boundary fails.
 Package and Secure Boot refusals must emit bounded, fail-only diagnostics
 that name the artifact or status check, its expected versus observed digest or
 provenance/status class, any known command exit status, retained-state

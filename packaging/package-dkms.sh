@@ -282,6 +282,8 @@ hash_path_key() {
 report_qualified_digest() {
   local artifact_name="$1" expected_hash="$2" artifact_path="$3" provenance="$4"
   local observed_hash=missing_or_unsafe command_status=not_run
+  local failure_phase=qualified_artifact_provenance
+  [[ "$artifact_name" != installed_* ]] || failure_phase=installed_artifact_provenance
   if [[ -f "$artifact_path" && ! -L "$artifact_path" ]]; then
     command_status=0
     observed_hash="$(hash_file "$artifact_path" 2>/dev/null)" ||
@@ -291,8 +293,8 @@ report_qualified_digest() {
     fi
   fi
   [[ "$command_status" == 0 && "$observed_hash" == "$expected_hash" ]] && return 0
-  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=%s check=sha256 provenance=%s expected_sha256=%s observed_sha256=%s command_status=%s next=inspect_qualification_and_artifact_bytes_read_only retained_state=unchanged\n' \
-    "$artifact_name" "$provenance" "$expected_hash" "$observed_hash" "$command_status" >&2
+  printf 'SWAPZ_PACKAGE_DIAGNOSTIC artifact=%s check=sha256 provenance=%s phase=%s expected_sha256=%s observed_sha256=%s command_status=%s next=inspect_qualification_and_artifact_bytes_read_only retained_state=unchanged\n' \
+    "$artifact_name" "$provenance" "$failure_phase" "$expected_hash" "$observed_hash" "$command_status" >&2
   return 1
 }
 

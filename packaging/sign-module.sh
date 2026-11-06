@@ -21,6 +21,10 @@ blocked_phase() {
             expected_state=readable_configured_public_certificate
             observed_state=certificate_unavailable
             next_action=inspect_public_certificate_permissions_read_only ;;
+        cms_verification)
+            expected_state=detached_cms_signed_by_configured_certificate
+            observed_state=encapsulated_or_unverifiable_cms
+            next_action=inspect_qualified_module_signature_read_only ;;
         detached_signature)
             expected_state=valid_signature_from_enrolled_certificate
             observed_state=unsigned_malformed_or_unverified
@@ -33,7 +37,7 @@ blocked_phase() {
             expected_state=regular_module_file
             observed_state=missing_or_unsafe
             next_action=inspect_module_artifact_metadata_read_only ;;
-        artifact_ownership)
+        ownership_restore)
             expected_state=invoking_build_user_owned_module
             observed_state=ownership_restore_failed
             next_action=inspect_module_artifact_metadata_read_only ;;
@@ -173,6 +177,8 @@ command -v python3 >/dev/null 2>&1 ||
     blocked_phase detached_signature 127 "python3 is required"
 command -v mktemp >/dev/null 2>&1 ||
     blocked_phase detached_signature 127 "mktemp is required"
+command -v awk >/dev/null 2>&1 ||
+    blocked_phase cms_verification 127 "awk is required"
 if [[ "$mode" == sign ]]; then
     command -v kmodsign >/dev/null 2>&1 ||
         blocked_phase signature_generation 127 "kmodsign is required"
@@ -201,8 +207,8 @@ else
     fi
     need_sudo ||
         blocked "sudo is required to read protected MOK material"
-    "${sudo_command[@]}" test -f "$cert" &&
-        "${sudo_command[@]}" test ! -L "$cert" ||
+    "${sudo_command[@]}" test -f "$cert" 2>/dev/null &&
+        "${sudo_command[@]}" test ! -L "$cert" 2>/dev/null ||
         blocked "MOK certificate is missing, unsafe, or sudo authorization is unavailable"
     cert_requires_sudo=1
 fi
@@ -265,7 +271,7 @@ restore_build_module_owner() {
         module_owner_restore_observed=stat_unavailable
         return 127
     fi
-    if current_owner="$(stat -c '%u:%g' -- "$module")"; then
+    if current_owner="$(stat -c '%u:%g' -- "$module" 2>/dev/null)"; then
         :
     else
         command_status=$?
@@ -309,7 +315,7 @@ restore_build_module_owner() {
         module_owner_restore_observed=sudo_unavailable
         return "$command_status"
     fi
-    if "${sudo_command[@]}" chown -- "$expected_owner" "$module"; then
+    if "${sudo_command[@]}" chown -- "$expected_owner" "$module" >/dev/null 2>&1; then
         :
     else
         command_status=$?
@@ -317,7 +323,7 @@ restore_build_module_owner() {
         module_owner_restore_observed=chown_failed
         return "$command_status"
     fi
-    if current_owner="$(stat -c '%u:%g' -- "$module")"; then
+    if current_owner="$(stat -c '%u:%g' -- "$module" 2>/dev/null)"; then
         :
     else
         command_status=$?
@@ -338,13 +344,13 @@ require_build_module_owner() {
     if restore_build_module_owner; then
         return 0
     fi
-    blocked_phase artifact_ownership "$module_owner_restore_status" \
+    blocked_phase ownership_restore "$module_owner_restore_status" \
         "cannot restore build-module ownership for unprivileged signature verification"
 }
 
 report_build_module_owner_cleanup_failure() {
     local primary_status="$1"
-    printf 'SWAPZ_SIGNING_DIAGNOSTIC artifact=dm-swapz.ko check=build_module_ownership_restore expected=invoking_build_user observed=%s command_status=%s primary_phase=signature_generation primary_command_status=%s next=inspect_module_artifact_metadata_read_only\n' \
+    printf 'SWAPZ_SIGNING_DIAGNOSTIC artifact=dm-swapz.ko phase=ownership_restore check=build_module_ownership_restore expected=invoking_build_user observed=%s command_status=%s primary_phase=signature_generation primary_command_status=%s next=inspect_module_artifact_metadata_read_only\n' \
         "$module_owner_restore_observed" "$module_owner_restore_status" \
         "$primary_status" >&2
 }
@@ -402,26 +408,26 @@ verify_module_signature() {
     local extract_rc=0 command_rc=0
     signature_command_status=0
 
-    temp_dir="$(mktemp -d)" || command_rc=$?
+    temp_dir="$(mktemp -d 2>/dev/null)" || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
         return 20
     fi
-    chmod 0700 "$temp_dir" || command_rc=$?
+    chmod 0700 "$temp_dir" 2>/dev/null || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir"
+        rm -rf -- "$temp_dir" 2>/dev/null
         return 20
     fi
     payload_path="$temp_dir/module.payload"
     signature_path="$temp_dir/module.p7s"
     certificate_pem="$temp_dir/certificate.pem"
 
-    extract_module_signature "$payload_path" "$signature_path" ||
+    extract_module_signature "$payload_path" "$signature_path" 2>/dev/null ||
         extract_rc=$?
     if (( extract_rc != 0 )); then
         signature_command_status="$extract_rc"
-        rm -rf -- "$temp_dir"
+        rm -rf -- "$temp_dir" 2>/dev/null
         return "$extract_rc"
     fi
 
@@ -429,8 +435,30 @@ verify_module_signature() {
     write_public_certificate_pem "$certificate_pem" || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir"
+        rm -rf -- "$temp_dir" 2>/dev/null
         return 20
+    fi
+
+    # OpenSSL accepts encapsulated CMS if its eContent matches -content.
+    # Linux module verification requires detached content even in that case.
+    command_rc=0
+    openssl cms -cmsout -print -inform DER -in "$signature_path" 2>/dev/null |
+        awk '
+            /^[[:space:]]*encapContentInfo:[[:space:]]*$/ {
+                in_content = 1
+                next
+            }
+            in_content && /^[[:space:]]*eContent:/ {
+                if ($0 ~ /^[[:space:]]*eContent:[[:space:]]*<ABSENT>[[:space:]]*$/)
+                    detached = 1
+                in_content = 0
+            }
+            END { exit detached ? 0 : 1 }
+        ' >/dev/null 2>&1 || command_rc=$?
+    if (( command_rc != 0 )); then
+        signature_command_status="$command_rc"
+        rm -rf -- "$temp_dir" 2>/dev/null
+        return 13
     fi
 
     # CMS may contain a foreign signer certificate. Ignore embedded certs:
@@ -441,11 +469,11 @@ verify_module_signature() {
         -out /dev/null >/dev/null 2>&1 || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir"
+        rm -rf -- "$temp_dir" 2>/dev/null
         return 12
     fi
 
-    rm -rf -- "$temp_dir"
+    rm -rf -- "$temp_dir" 2>/dev/null
     return 0
 }
 signature_command_status=0
@@ -480,6 +508,10 @@ if [[ "$mode" == verify ]]; then
             blocked_phase detached_signature "$signature_command_status" \
                 "qualified module signature is not cryptographically valid for the configured MOK certificate"
             ;;
+        13)
+            blocked_phase cms_verification "$signature_command_status" \
+                "qualified module CMS content is not demonstrably detached"
+            ;;
         *)
             blocked_phase detached_signature "$signature_command_status" \
                 "qualified module signature verification failed"
@@ -491,6 +523,10 @@ if (( signature_status == 0 )); then
     printf '%s\n' \
         "Secure Boot: dm-swapz.ko already has a cryptographically valid signature from the enrolled configured MOK"
     exit 0
+fi
+if (( signature_status == 13 )); then
+    blocked_phase cms_verification "$signature_command_status" \
+        "existing module CMS content is not demonstrably detached; refusing to append another signature"
 fi
 (( signature_status == 10 )) ||
     blocked_phase detached_signature "$signature_command_status" \
@@ -507,8 +543,8 @@ if [[ -r "$key" ]]; then
 else
     need_sudo ||
         blocked "sudo is required to read protected MOK material"
-    "${sudo_command[@]}" test -f "$key" &&
-        "${sudo_command[@]}" test ! -L "$key" ||
+    "${sudo_command[@]}" test -f "$key" 2>/dev/null &&
+        "${sudo_command[@]}" test ! -L "$key" 2>/dev/null ||
         blocked_phase signature_generation 1 \
             "MOK private key is missing, unsafe, or sudo authorization is unavailable"
     signature_generation_failure="sudo kmodsign failed or authorization is unavailable"
@@ -528,11 +564,18 @@ if (( signature_generation_status != 0 )); then
         "$signature_generation_failure"
 fi
 if (( module_owner_restore_failed != 0 )); then
-    blocked_phase artifact_ownership "$module_owner_restore_status" \
+    blocked_phase ownership_restore "$module_owner_restore_status" \
         "cannot restore build-module ownership for unprivileged signature verification"
 fi
 
-if ! verify_module_signature; then
+if verify_module_signature; then
+    :
+else
+    signature_status=$?
+    if (( signature_status == 13 )); then
+        blocked_phase cms_verification "$signature_command_status" \
+            "new module CMS content is not demonstrably detached"
+    fi
     blocked_phase detached_signature "$signature_command_status" \
         "new module signature failed cryptographic verification against the enrolled configured MOK"
 fi

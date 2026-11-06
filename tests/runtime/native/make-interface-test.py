@@ -143,7 +143,10 @@ class PublicMakeContract(unittest.TestCase):
                     "      printf '%s\\n' fixture-certificate\n"
                     "    fi\n"
                     "    ;;\n"
-                    "  cms) exit 0;;\n"
+                    "  cms)\n"
+                    "    [ \"\${2:-}\" = -cmsout ] &&\n"
+                    "      printf '%s\\n' '    encapContentInfo:' '      eContent: <ABSENT>'\n"
+                    "    exit 0;;\n"
                     "  *) exit 2;;\n"
                     "esac\n"
                 ),
@@ -255,6 +258,93 @@ class PublicMakeContract(unittest.TestCase):
                 capture_output=True, text=True, timeout=5)
             self.assertEqual(unsigned.returncode, 2)
             self.assertIn("qualified module is unsigned", unsigned.stderr)
+
+
+    def test_secure_boot_requires_detached_real_cms(self):
+        # OpenSSL can verify matching attached CMS, but the kernel rejects
+        # encapsulated content in a module-signature trailer.
+        if os.geteuid() == 0:
+            self.skipTest("rootless signing regression requires nonroot")
+        openssl = shutil.which("openssl")
+        self.assertIsNotNone(openssl)
+        build_tests = ROOT / "build/tests"
+        build_tests.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="module-cms-detached-",
+                                         dir=build_tests) as directory:
+            fixture = pathlib.Path(directory)
+            fake_bin = fixture / "bin"
+            fake_bin.mkdir()
+            mokutil = fake_bin / "mokutil"
+            mokutil.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$#\" -eq 1 ] && [ \"$1\" = --sb-state ]; then\n"
+                "  printf '%s\\n' 'SecureBoot enabled'; exit 0\n"
+                "fi\n"
+                "if [ \"$#\" -eq 3 ] && [ \"$1\" = --ignore-keyring ] &&\n"
+                "   [ \"$2\" = --test-key ]; then\n"
+                "  printf '%s\\n' \"$3 is already enrolled\"; exit 1\n"
+                "fi\n"
+                "exit 92\n")
+            mokutil.chmod(0o755)
+            key = fixture / "MOK.priv"
+            certificate = fixture / "MOK.pem"
+            certificate_der = fixture / "MOK.der"
+            payload = fixture / "module.payload"
+            signature = fixture / "module.p7s"
+            module = fixture / "dm-swapz.ko"
+            payload_bytes = b"module bytes cryptographically covered by CMS\n"
+            payload.write_bytes(payload_bytes)
+            subprocess.run(
+                [openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                 "-keyout", str(key), "-out", str(certificate),
+                 "-subj", "/CN=swapz-detached-test", "-days", "1"],
+                check=True, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            subprocess.run(
+                [openssl, "x509", "-in", str(certificate), "-outform", "DER",
+                 "-out", str(certificate_der)],
+                check=True, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            env = dict(
+                os.environ,
+                PATH=str(fake_bin) + os.pathsep + os.path.dirname(openssl) +
+                     os.pathsep + "/usr/bin:/bin",
+                SWAPZ_SIGN_TEST_ROOT=str(fixture),
+                SWAPZ_MOK_CERT=str(certificate_der),
+            )
+            for detached in (True, False):
+                with self.subTest(detached=detached):
+                    args = [openssl, "cms", "-sign", "-binary", "-in",
+                            str(payload), "-signer", str(certificate),
+                            "-inkey", str(key), "-outform", "DER", "-out",
+                            str(signature), "-nocerts", "-noattr", "-md",
+                            "sha512"]
+                    if not detached:
+                        args.append("-nodetach")
+                    subprocess.run(
+                        args, check=True, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
+                    signature_bytes = signature.read_bytes()
+                    header = bytes((0, 0, 2, 0, 0, 0, 0, 0))
+                    header += len(signature_bytes).to_bytes(4, "big")
+                    module.write_bytes(
+                        payload_bytes + signature_bytes + header +
+                        b"~Module signature appended~\n")
+                    result = subprocess.run(
+                        ["bash", str(ROOT / "packaging/sign-module.sh"),
+                         "--verify", str(module)],
+                        cwd=ROOT, env=env, capture_output=True,
+                        text=True, timeout=10)
+                    if detached:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn(
+                            "kernel acceptance is not claimed", result.stdout)
+                    else:
+                        self.assertEqual(result.returncode, 2, result.stdout)
+                        self.assertIn("phase=cms_verification", result.stderr)
+                        self.assertIn("not demonstrably detached", result.stderr)
+                        self.assertNotIn(str(key), result.stderr)
+                        self.assertNotIn(str(certificate_der), result.stderr)
 
     def test_make_test_is_only_official_documented_test_command(self):
         canonical = ("docs/README.md", "docs/VISION.md",
