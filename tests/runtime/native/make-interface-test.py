@@ -144,7 +144,7 @@ class PublicMakeContract(unittest.TestCase):
                     "    fi\n"
                     "    ;;\n"
                     "  cms)\n"
-                    "    [ \"\${2:-}\" = -cmsout ] &&\n"
+                    "    [ \"${2:-}\" = -cmsout ] &&\n"
                     "      printf '%s\\n' '    encapContentInfo:' '      eContent: <ABSENT>'\n"
                     "    exit 0;;\n"
                     "  *) exit 2;;\n"
