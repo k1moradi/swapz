@@ -78,6 +78,19 @@ read the timestamp and source SHA in [production status](../production-status.js
 - [Alpha.29 observability](alpha29-loaded-qualification-observability.md)
 - [ID73 CPU/cache](id73-cpu-cache-qualification-batch.md)
 
+## Historical debugging and ownership audits
+
+- [Agent 10 source-admission and child-ownership audit](agent10-codex-handoff.md):
+  historical same-UID socket-substitution and interrupted-child investigation.
+  Its original `BLOCKED` disposition is not a current-main verdict: the
+  current helper validates parent PID/start identity, peer credentials and
+  pidfd liveness. Neither the old synthetic probe nor this fix qualifies real
+  swap; interruption cleanup requires separate source-bound review.
+- [Agent 17 DISCARD debugging archive](agent17-discard-debugging/README.md):
+  original standalone pre/post-fix models and full-map scan investigation;
+  their hashes and historical observations are preserved, not a production-C
+  or loaded-device qualification.
+
 ## Superseded or rejected work
 
 - [Rejected optimization pilots](historical-rejected-optimization-pilots.md)
