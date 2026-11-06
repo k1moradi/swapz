@@ -7415,13 +7415,18 @@ that exact configured and enrolled certificate.
 Certificate identity, `mokutil --ignore-keyring --test-key` firmware-MOK
 enrollment, embedded signer/key metadata, cryptographic signature validity,
 kernel-keyring visibility, and target-kernel acceptance are separate facts.
-The signing-hook regression must accept mokutil 0.7.2 status 1 only with the
-exact certificate-bound `<path> is already enrolled` response; status 0 is
-the producer's negative `not enrolled` result. Cover positive enrollment,
-absence, wrong certificate/path, malformed and inaccessible certificate
-material, ambiguous or extra diagnostics, locale normalization, missing
-`mokutil`, permission failures, and unexpected statuses. No substring match,
-empty success output, or arbitrary nonzero status may qualify enrollment.
+The signing-hook regression must bind enrollment to the exact certificate
+response rather than to a status code alone. Upstream mokutil 0.7.2 returns
+status 1 for the exact certificate-bound `<path> is already enrolled`
+response and status 0 for `not enrolled`; newer upstream reverses those two
+statuses. Accept only status 0 or 1 paired with the exact positive
+certificate-bound response, reject either status paired with `not enrolled`,
+and reject every other status/output combination. Cover positive enrollment
+under both conventions, absence, wrong certificate/path, malformed and
+inaccessible certificate material, ambiguous or extra diagnostics, locale
+normalization, missing `mokutil`, permission failures, and unexpected
+statuses. No substring match, empty success output, or status value by itself
+may qualify enrollment.
 The rootless signing regression must also model `sudo kmodsign` replacing the
 module inode with a root-owned output, require restoration to the invoking
 build user's uid/gid after cryptographic verification (including a later

@@ -218,10 +218,10 @@ mokutil_reports_enrolled() {
 
     mokutil_enrollment_status="$status"
 
-    # mokutil 0.7.2 returns 1 when the key is already enrolled and prints this
-    # exact path-bound message. Its status 0 says "not enrolled"; silence or
-    # any other status/output is not enrollment evidence.
-    if (( status == 1 )) &&
+    # mokutil 0.7.2 returns 1 for the exact positive enrollment message,
+    # while newer upstream returns 0. The certificate-bound response, not the
+    # status value by itself, is the enrollment evidence.
+    if (( status == 0 || status == 1 )) &&
        [[ "$output" == "$cert is already enrolled" ]]; then
         return 0
     fi

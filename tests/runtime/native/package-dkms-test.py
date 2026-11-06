@@ -1234,8 +1234,29 @@ exec "{flock_binary}" "$@"
             (self.home / "mokutil-call.log").read_text().split("|", 1)[0],
             "C")
 
-        positive_wrong_status = verify_with_mokutil(status="0")
-        self.assertEqual(positive_wrong_status.returncode, 2)
+        modern_positive_status = verify_with_mokutil(status="0")
+        self.assertEqual(
+            modern_positive_status.returncode, 0,
+            modern_positive_status.stderr,
+        )
+        self.assertIn(
+            "cryptographic signature verified",
+            modern_positive_status.stdout,
+        )
+
+        modern_not_enrolled = verify_with_mokutil(
+            status="1", stdout=f"{certificate_der} is not enrolled")
+        self.assertEqual(modern_not_enrolled.returncode, 2)
+        self.assertIn("phase=certificate_enrollment",
+                      modern_not_enrolled.stderr)
+        self.assertIn("command_status=1", modern_not_enrolled.stderr)
+
+        unexpected_positive_status = verify_with_mokutil(
+            status="2", stdout=f"{certificate_der} is already enrolled")
+        self.assertEqual(unexpected_positive_status.returncode, 2)
+        self.assertIn("phase=certificate_enrollment",
+                      unexpected_positive_status.stderr)
+        self.assertIn("command_status=2", unexpected_positive_status.stderr)
 
         # The affirmative enrollment response is not a signature check: a
         # different valid certificate cannot verify this module's CMS bytes.
