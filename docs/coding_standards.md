@@ -645,17 +645,27 @@ require their existing last-use target and authorization checks.
 The production primary-start transaction must pin its root-owned, no-follow
 configuration-directory and selector-file descriptors *before* obtaining the
 selected target, and retain both until the last pre-header mutation boundary.
-The independent selector reader must still validate record contents. Before
-writing the header, require that the admitted pinned directory/file metadata
-still matches both live names; reread and compare the current normalized
-selector to the manifest; revalidate the inspected partition major:minor,
-PARTUUID and geometry; and check opened identities again after rereading.
-Any mismatch must fail closed before header write, mapper creation, formatter
-or swapon, report a redacted phase/mismatch class and first errno, and preserve
-STARTING recovery ownership and close-error precedence. Close both retained
-pins successfully before destructive work. This is last-use validation, not
-a kernel-atomic exclusion guarantee against later privileged replacement or
-same-device-number physical reader substitution.
+The independent selector reader still validates the initial record, but it is
+not a valid final transaction binding: each pathname reader establishes its own
+inode baseline, so two individually safe reads can be bridged by an ancestor,
+mount, or rename ABA that is restored between the caller's identity snapshots.
+Before writing the header, require that the admitted pinned directory/file
+metadata still matches both live names; bounded-read and parse the normalized
+selector from the **retained selector descriptor** without changing its file
+offset; compare those identity-bound bytes to the manifest; revalidate both live
+names again; then revalidate the inspected partition major:minor, PARTUUID and
+geometry. Any mismatch must fail closed before header write, mapper creation,
+formatter or swapon, report a redacted phase/mismatch class and first errno, and
+preserve STARTING recovery ownership and close-error precedence. Close both
+retained pins successfully before destructive work. A diagnostic target
+reinspection that now exactly matches the admitted target after an earlier
+`ESTALE` must be classified as raced-or-restored, not falsely as a current
+partition mismatch. This is last-use validation, not a kernel-atomic exclusion
+guarantee against later privileged replacement or same-device-number physical
+reader substitution. A privileged transient pathname replacement that begins
+and ends entirely between live-name snapshots may remain unobserved, but it must
+not be able to supply the selector bytes accepted for mutation because those
+bytes come from the retained descriptor.
 Coordinator-only admission helpers must be excluded from standalone whole-file
 rootless builds whose mutating coordinator is compiled out, avoiding unused
 static definitions under `-Werror`. Source-extracted rootless coordinator

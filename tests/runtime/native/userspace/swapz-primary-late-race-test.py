@@ -68,10 +68,12 @@ SELECTOR_FUNCTIONS = (
     "swapz_primary_partuuid_normalize", "swapz_primary_partuuid_valid",
     "swapz_primary_target_config_parse",
     "swapz_primary_selector_metadata_matches",
+    "swapz_primary_selector_read_stable_fd",
     "swapz_primary_selector_identity_still_live",
     "swapz_primary_selector_admission_open",
     "swapz_primary_selector_admission_close",
     "swapz_primary_selector_admission_still_live",
+    "swapz_primary_selector_admission_read_partuuid",
     "swapz_primary_target_config_read",
 )
 
@@ -98,6 +100,17 @@ def omit_final_revalidation(function: str) -> str:
     if 'swapz_primary_write_header_checked_fd' not in masked[closing:]:
         raise AssertionError('No destructive boundary after final check')
     return function[:opening] + '(void)0; /* negative-control omission */' + function[closing:]
+
+
+def restore_independent_selector_reread(function: str) -> str:
+    """Negative control: regress the final pinned-FD content proof to a pathname reread."""
+    original = (
+        "swapz_primary_selector_admission_read_partuuid(\n"
+        "\t\t    &selector_admission, prewrite_partuuid)")
+    if function.count(original) != 1:
+        raise AssertionError("Expected one pinned selector-content read")
+    return function.replace(
+        original, "swapz_primary_target_config_read(prewrite_partuuid)")
 
 
 # The fixture never calls any privileged system operation. Production start
@@ -188,6 +201,8 @@ enum fixture_scenario {
     FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION,
     FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION,
     FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION,
+    FIXTURE_SELECTOR_CROSS_READ_ABA,
+    FIXTURE_TARGET_IDENTITY_RACED_RESTORED,
     FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
@@ -221,7 +236,9 @@ static const char *const scenario_names[] = {
     "protected selected PARTUUID changes after initial admission",
     "protected selector inode changes after initial admission",
     "protected configuration-directory inode changes after initial admission",
-    "selected target geometry changes after initial admission"
+    "selected target geometry changes after initial admission",
+    "transient ancestor path selects different target then original tree returns",
+    "target identity changes at last-use inspection then is restored"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -247,7 +264,9 @@ static ino_t namespace_identity_initial_inode;
 static ino_t namespace_identity_late_inode;
 static int post_snapshot_injected;
 static unsigned int fixture_selector_reads;
+static unsigned int fixture_selector_aba_windows;
 static unsigned int fixture_geometry_last_use_checks;
+static unsigned int fixture_target_identity_last_use_checks;
 static struct stat fixture_initial_selector_info;
 static struct stat fixture_initial_config_info;
 static struct swapz_primary_target selected_target;
@@ -728,7 +747,8 @@ static int fixture_selector_race(enum fixture_scenario candidate)
 {
     return candidate == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION ||
            candidate == FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION ||
-           candidate == FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION;
+           candidate == FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION ||
+           candidate == FIXTURE_SELECTOR_CROSS_READ_ABA;
 }
 
 static void fixture_selector_path(char path[PATH_MAX], const char *name)
@@ -779,6 +799,69 @@ static void fixture_replace_selector(const char *partuuid)
     assert(stat(selector_path, &current) == 0);
     assert(current.st_dev != fixture_initial_selector_info.st_dev ||
            current.st_ino != fixture_initial_selector_info.st_ino);
+}
+
+static void fixture_selector_aba_path(char path[PATH_MAX], const char *suffix)
+{
+    int length = snprintf(path, PATH_MAX, "%s.%s", fixture_proc_root, suffix);
+
+    assert(length > 0 && length < PATH_MAX);
+}
+
+static void fixture_selector_aba_prepare_root(const char *root)
+{
+    char config_path[PATH_MAX];
+    char selector_path[PATH_MAX];
+    FILE *stream;
+    int length;
+
+    assert(mkdir(root, 0700) == 0);
+    length = snprintf(config_path, sizeof(config_path), "%s/config-%u", root,
+                      (unsigned int)scenario);
+    assert(length > 0 && (size_t)length < sizeof(config_path));
+    assert(mkdir(config_path, 0700) == 0);
+    length = snprintf(selector_path, sizeof(selector_path), "%s/primary-target",
+                      config_path);
+    assert(length > 0 && (size_t)length < sizeof(selector_path));
+    stream = fopen(selector_path, "wb");
+    assert(stream != NULL);
+    assert(fputs("PARTUUID=f13428f6-02\n", stream) >= 0);
+    assert(fclose(stream) == 0);
+    assert(chmod(selector_path, 0600) == 0);
+}
+
+static void fixture_selector_aba_enter(
+    char retained_root[PATH_MAX], char substitute_root[PATH_MAX])
+{
+    fixture_selector_aba_path(retained_root, "selector-aba-retained");
+    fixture_selector_aba_path(substitute_root, "selector-aba-substitute");
+    fixture_selector_aba_prepare_root(substitute_root);
+    /*
+     * Swap only an ancestor pathname. The admitted config directory and file
+     * inodes are untouched, so their ctime/mtime cannot reveal this ABA.
+     */
+    assert(rename(fixture_proc_root, retained_root) == 0);
+    assert(rename(substitute_root, fixture_proc_root) == 0);
+}
+
+static void fixture_selector_aba_leave(
+    const char retained_root[PATH_MAX],
+    const char substitute_root[PATH_MAX])
+{
+    char selector_path[PATH_MAX];
+    struct stat current;
+
+    assert(rename(fixture_proc_root, substitute_root) == 0);
+    assert(rename(retained_root, fixture_proc_root) == 0);
+    assert(stat(fixture_config_base, &current) == 0);
+    assert(current.st_dev == fixture_initial_config_info.st_dev &&
+           current.st_ino == fixture_initial_config_info.st_ino);
+    fixture_selector_path(selector_path, "primary-target");
+    assert(stat(selector_path, &current) == 0);
+    assert(current.st_dev == fixture_initial_selector_info.st_dev &&
+           current.st_ino == fixture_initial_selector_info.st_ino);
+    assert(nftw(substitute_root, fixture_remove_proc_entry, 16,
+                FTW_DEPTH | FTW_PHYS) == 0);
 }
 
 static void fixture_replace_config_directory(void)
@@ -905,8 +988,30 @@ static int fixture_observed_swap_device_active(dev_t device)
 static int fixture_selector_read(
     char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
 {
+    char retained_root[PATH_MAX];
+    char substitute_root[PATH_MAX];
+    int result;
+    int saved_errno;
+
     ++fixture_selector_reads;
-    return swapz_primary_target_config_read(partuuid);
+    if (scenario != FIXTURE_SELECTOR_CROSS_READ_ABA)
+        return swapz_primary_target_config_read(partuuid);
+
+    /*
+     * Present a different valid selector for exactly the independent reader by
+     * replacing an ancestor pathname, then restore the original tree before the
+     * coordinator's outer identity check. The pinned config/file metadata stays
+     * unchanged, which reproduces the cross-read ABA the final FD read closes.
+     */
+    fixture_selector_aba_enter(retained_root, substitute_root);
+    ++fixture_selector_aba_windows;
+    result = swapz_primary_target_config_read(partuuid);
+    saved_errno = errno;
+    fixture_selector_aba_leave(retained_root, substitute_root);
+    if (late)
+        post_snapshot_injected = 1;
+    errno = saved_errno;
+    return result;
 }
 
 static int fixture_target(struct swapz_primary_target *target)
@@ -973,6 +1078,11 @@ static int fixture_target_inspect(const char *partuuid,
     if (scenario == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION && late) {
         ++fixture_geometry_last_use_checks;
         target->device_bytes += 4096U;
+    }
+    if (scenario == FIXTURE_TARGET_IDENTITY_RACED_RESTORED && late) {
+        ++fixture_target_identity_last_use_checks;
+        if (fixture_target_identity_last_use_checks == 1U)
+            target->device_minor = 2U;
     }
     if (scenario == FIXTURE_STALE_PARTUUID)
         strcpy(target->partuuid, "f13428f6-02");
@@ -1042,6 +1152,12 @@ static int fixture_intent(void)
     } else if (scenario == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION) {
         /* The inspected target changes size only after initial admission. */
         post_snapshot_injected = 1;
+    } else if (scenario == FIXTURE_TARGET_IDENTITY_RACED_RESTORED) {
+        /*
+         * The first final inspection observes a different dev_t; the diagnostic
+         * inspection observes the admitted target again.
+         */
+        post_snapshot_injected = 1;
     }
     return 0;
 }
@@ -1069,21 +1185,28 @@ static int fixture_header_write(void)
         post_snapshot_injected = 1;
         assert(swapz_primary_swap_device_active(makedev(8U, 1U)) == 1);
     } else if (fixture_selector_race(scenario)) {
-        char current_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+        if (scenario == FIXTURE_SELECTOR_CROSS_READ_ABA) {
+            /*
+             * A vulnerable coordinator reaches mutation after the second
+             * transient independent-reader window has already restored the
+             * admitted pathname. Do not create a third diagnostic ABA window.
+             */
+            assert(fixture_selector_aba_windows >= 1U);
+        } else {
+            char current_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
 
-        /*
-         * The mutation occurred after one successful production selector read.
-         * The coordinator reaches this boundary without a second read today.
-         * Perform a diagnostic production reread only after that observation:
-         * changed bytes become visible, while same-byte inode replacement is
-         * fresh current state and therefore cannot prove continuity by itself.
-         */
-        assert(post_snapshot_injected && fixture_selector_reads == 1U);
-        assert(swapz_primary_target_config_read(current_partuuid) == 0);
-        if (scenario == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION)
-            assert(strcmp(current_partuuid, selected_target.partuuid) != 0);
-        else
-            assert(!strcmp(current_partuuid, selected_target.partuuid));
+            /*
+             * The mutation occurred after one successful production selector
+             * read. Perform a diagnostic production reread only after that
+             * observation; it never counts as coordinator prevention.
+             */
+            assert(post_snapshot_injected && fixture_selector_reads == 1U);
+            assert(swapz_primary_target_config_read(current_partuuid) == 0);
+            if (scenario == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION)
+                assert(strcmp(current_partuuid, selected_target.partuuid) != 0);
+            else
+                assert(!strcmp(current_partuuid, selected_target.partuuid));
+        }
     } else if (scenario == FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES) {
         struct swapz_primary_mount_facts facts = {0};
 
@@ -1251,7 +1374,8 @@ static int check_case(enum fixture_scenario candidate)
     namespace_identity_initial_device = namespace_identity_late_device = 0;
     namespace_identity_initial_inode = namespace_identity_late_inode = 0;
     post_snapshot_injected = 0;
-    fixture_selector_reads = fixture_geometry_last_use_checks = 0U;
+    fixture_selector_reads = fixture_selector_aba_windows = 0U;
+    fixture_geometry_last_use_checks = fixture_target_identity_last_use_checks = 0U;
     fixture_prepare_selector(candidate);
     fixture_reset_mount_inventory();
     if (candidate == FIXTURE_FOREIGN_SELECTED_INITIAL)
@@ -1370,7 +1494,9 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION:
     case FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION:
     case FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION:
-        /* These mutation controls have their own explicit post-admission verdict. */
+    case FIXTURE_SELECTOR_CROSS_READ_ABA:
+    case FIXTURE_TARGET_IDENTITY_RACED_RESTORED:
+        /* These mutation controls have their own explicit last-use verdict. */
         break;
     default:
         assert(expected_safe || gap_probe);
@@ -1388,37 +1514,56 @@ static int check_case(enum fixture_scenario candidate)
     }
 
     if (fixture_selector_race(candidate) ||
-        candidate == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION) {
+        candidate == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION ||
+        candidate == FIXTURE_TARGET_IDENTITY_RACED_RESTORED) {
         /*
          * These mutation-sensitive controls never label a successful stale
-         * selector snapshot SAFE. A refusal is valid only after production's
-         * identity check and before any intercepted mutation.
-         * Fail-first production control: a stale admitted identity must not
-         * reach any mutation. The original source reached all four actions.
+         * selector or target snapshot SAFE. A refusal is valid only after the
+         * source-extracted production last-use check and before mutation.
          */
         int geometry_drift =
             candidate == FIXTURE_TARGET_GEOMETRY_CHANGED_AFTER_ADMISSION;
-        const char *expected_phase = geometry_drift ?
+        int selector_aba = candidate == FIXTURE_SELECTOR_CROSS_READ_ABA;
+        int target_restored =
+            candidate == FIXTURE_TARGET_IDENTITY_RACED_RESTORED;
+        const char *expected_phase = geometry_drift || target_restored ?
             "phase=prewrite-target-identity" :
             "phase=prewrite-protected-selector-identity";
         const char *expected_mismatch = geometry_drift ?
             "observed=target-geometry-changed" :
+            target_restored ?
+                "observed=target-identity-raced-or-restored" :
+            selector_aba ?
+                "observed=selected-target-not-bound-to-admitted-selector" :
             candidate == FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION ?
                 "observed=configuration-directory-identity-changed" :
                 "observed=selector-file-identity-changed";
+        const char *expected_detail = geometry_drift || target_restored ?
+            "expected=unchanged-admitted-target-partition-and-geometry" :
+            selector_aba ?
+                "expected=manifest-target-matches-admitted-selector-content" :
+                "expected=unchanged-admitted-selector-directory-and-file";
         char expected_errno[48];
         int expected_length = snprintf(expected_errno, sizeof(expected_errno),
                                        "original_errno=%d", ESTALE);
+        int race_evidence = selector_aba ?
+            fixture_selector_reads == 1U && fixture_selector_aba_windows == 1U :
+            target_restored ?
+                post_snapshot_injected == 1 &&
+                fixture_target_identity_last_use_checks >= 2U :
+            geometry_drift ?
+                post_snapshot_injected == 1 &&
+                fixture_geometry_last_use_checks >= 1U :
+                post_snapshot_injected == 1 && fixture_selector_reads >= 1U;
         int refusal = result < 0 && result_errno == ESTALE &&
-            post_snapshot_injected == 1 &&
-            (geometry_drift ? fixture_geometry_last_use_checks >= 1U :
-             fixture_selector_reads >= 1U) &&
+            race_evidence &&
             header_writes == 0U && mapper_mutations == 0U &&
             mkswap_calls == 0U && swapon_calls == 0U &&
             module_loads == 0U && starting_state_writes == 1U &&
             active_state_writes == 0U && recovery_marks == 1U &&
             owner_release_calls == 0U &&
             strstr(diagnostic, expected_phase) != NULL &&
+            strstr(diagnostic, expected_detail) != NULL &&
             strstr(diagnostic, expected_mismatch) != NULL &&
             expected_length > 0 && (size_t)expected_length < sizeof(expected_errno) &&
             strstr(diagnostic, expected_errno) != NULL &&
@@ -1429,11 +1574,14 @@ static int check_case(enum fixture_scenario candidate)
             fprintf(stderr, "FAIL: phase=post-admission-last-use "
                     "expected=ESTALE-and-zero-mutation "
                     "observed=%s first_errno=%d mutations=%u "
-                    "selector_reads=%u geometry_rechecks=%u case=%d\n",
+                    "selector_reads=%u selector_aba=%u geometry_rechecks=%u "
+                    "target_identity_rechecks=%u case=%d\n",
                     result == 0 ? "stale-selection-reached-mutation" :
                                   "incorrect-refusal",
                     result_errno, writes, fixture_selector_reads,
-                    fixture_geometry_last_use_checks, candidate);
+                    fixture_selector_aba_windows,
+                    fixture_geometry_last_use_checks,
+                    fixture_target_identity_last_use_checks, candidate);
             return 1;
         }
         printf("DENY: phase=post-admission-last-use case=%d "
@@ -1630,12 +1778,20 @@ int main(int argc, char **argv)
 {
     int failures = 0;
     int candidate;
-    (void)argv;
+    int selected_case = -1;
+
+    if (argc > 1) {
+        if (!strcmp(argv[1], "negative-control"))
+            selected_case = FIXTURE_FOREIGN_SELECTED;
+        else if (!strcmp(argv[1], "selector-aba-negative-control"))
+            selected_case = FIXTURE_SELECTOR_CROSS_READ_ABA;
+        else
+            return 2;
+    }
     fixture_create_proc_root();
     for (candidate = FIXTURE_CLEAN; candidate < FIXTURE_SCENARIO_COUNT;
          ++candidate) {
-        /* Negative control needs a late-mount case that must reject writes. */
-        if (argc > 1 && candidate != FIXTURE_FOREIGN_SELECTED)
+        if (selected_case >= 0 && candidate != selected_case)
             continue;
         failures += check_case((enum fixture_scenario)candidate);
     }
@@ -1645,7 +1801,7 @@ int main(int argc, char **argv)
         return 1;
     printf("PASS: production primary-start visible admission checks (%d cases; "
            "post-snapshot probes are explicitly UNPROVEN)\n",
-           argc > 1 ? 1 : FIXTURE_SCENARIO_COUNT);
+           selected_case >= 0 ? 1 : FIXTURE_SCENARIO_COUNT);
     return 0;
 }
 '''
@@ -1997,7 +2153,10 @@ def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.Completed
             "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"})
 
 
-def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.CompletedProcess[str]:
+def compile_and_run(
+    source: str, workdir: Path, *, mutant: bool,
+    selector_aba_mutant: bool = False,
+) -> subprocess.CompletedProcess[str]:
     helpers = (
         "swapz_primary_parse_u64", "swapz_primary_parse_priority",
         "swapz_primary_parse_dev_number", "swapz_primary_split_fields",
@@ -2040,8 +2199,12 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
     recovery_failure_helper = production_function(
         source, "swapz_primary_require_recovery_preserving_errno")
     coordinator = production_function(source, "swapz_primary_start_prepared")
+    if mutant and selector_aba_mutant:
+        raise AssertionError("Negative-control mutations are mutually exclusive")
     if mutant:
         coordinator = omit_final_revalidation(coordinator)
+    elif selector_aba_mutant:
+        coordinator = restore_independent_selector_reread(coordinator)
     unit = HARNESS.replace('@@PRODUCTION_DEFINES@@', production_defines).replace(
         '@@PARSERS@@', parser_source).replace(
         '@@SELECTOR_ADMISSION_TYPE@@',
@@ -2055,8 +2218,14 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         '@@START_FUNCTION@@', coordinator)
     if "@@" in unit:
         raise AssertionError("Unexpanded harness placeholder")
-    c_path = workdir / ("mutant.c" if mutant else "production.c")
-    binary = workdir / ("mutant" if mutant else "production")
+    if mutant:
+        unit_name = "mutant"
+    elif selector_aba_mutant:
+        unit_name = "selector-aba-mutant"
+    else:
+        unit_name = "production"
+    c_path = workdir / f"{unit_name}.c"
+    binary = workdir / unit_name
     c_path.write_text(unit)
     compilation = subprocess.run(
         ["cc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Wpedantic",
@@ -2073,9 +2242,13 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         os.environ,
         ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1",
         UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
+    arguments = [str(binary)]
+    if mutant:
+        arguments.append("negative-control")
+    elif selector_aba_mutant:
+        arguments.append("selector-aba-negative-control")
     return subprocess.run(
-        [str(binary), "negative-control"] if mutant else [str(binary)],
-        text=True, capture_output=True, env=sanitizer_environment,
+        arguments, text=True, capture_output=True, env=sanitizer_environment,
         timeout=10, check=False)
 
 
@@ -2217,6 +2390,20 @@ def main() -> int:
             print(mutant.stdout + mutant.stderr, file=sys.stderr, end="")
             return 1
         print("PASS: negative control exposes all intercepted destructive boundaries")
+        selector_aba_mutant = compile_and_run(
+            source, workdir, mutant=False, selector_aba_mutant=True)
+        if (selector_aba_mutant.returncode != 1 or
+                "observed=stale-selection-reached-mutation" not in
+                    selector_aba_mutant.stderr or
+                "mutations=4" not in selector_aba_mutant.stderr or
+                "selector_reads=2 selector_aba=2" not in
+                    selector_aba_mutant.stderr):
+            print("FAIL: independent final selector reread did not expose cross-read ABA",
+                  file=sys.stderr)
+            print(selector_aba_mutant.stdout + selector_aba_mutant.stderr,
+                  file=sys.stderr, end="")
+            return 1
+        print("PASS: cross-read ABA negative control reaches all intercepted mutations")
         last_use = compile_and_run_last_use(source, workdir)
         if last_use.returncode:
             print(last_use.stdout, end="")

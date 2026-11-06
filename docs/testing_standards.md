@@ -550,17 +550,35 @@ zero header writes, zero mapper actions, zero formatter calls and zero swapon
 calls, plus a phase/mismatch-class/first-errno diagnostic with no protected
 identity bytes. The STARTING recovery marker must remain owner-controlled.
 The independent control with an unchanged selector must still complete all
-four synthetic actions successfully. The first selector read and prewrite
-reread must use the actual source-extracted production reader, and the pinned
-directory/file identities must come from source-extracted production helpers,
-not hand-written models. A diagnostic reread in the intercepted header seam
-cannot count as prevention; an unrelated rejection or race never injected is
-also a failure. Add a post-admission, prewrite target-geometry drift control;
-the existing selected-parent and root-parent substitution controls must
-refuse before any mutation. The unsafe baseline has successful initial/final
-mount reads, four independent swap-inventory observations and no false
-mount conflicts. Keep the separate post-final-snapshot mount/swap/inventory
-races explicitly UNPROVEN: no rootless read-only recheck demonstrates atomic
+four synthetic actions successfully. The initial configured-target selection
+must use the actual source-extracted production pathname reader. The final
+selector decision must instead execute the source-extracted production helper
+that bounded-reads the **retained admission selector descriptor** and compares
+those bytes to the transaction manifest; a second independent pathname reader
+is not equivalent identity evidence. The pinned directory/file identities must
+also come from source-extracted production helpers, not hand-written models.
+Include a cross-read ABA negative control that changes only an **ancestor
+pathname**: while the independent reader is active, make the protected config
+path resolve to a private substitute directory containing a different valid
+selector, then restore the original ancestor before the outer identity check.
+The admitted directory/file inodes and their metadata must remain unchanged,
+so the test proves the unfixed two-reader sequence can select a transient target
+without relying on ctime/mtime changes of the pinned objects. The corrected
+coordinator must observe only one such initial window, then refuse the
+manifest/pinned-selector mismatch with original `ESTALE`, a redacted
+`selected-target-not-bound-to-admitted-selector` class, and zero
+header/mapper/formatter/swapon mutations. A diagnostic reread in the
+intercepted header seam cannot count as prevention; an unrelated rejection or
+race never injected is also a failure. Add a post-admission, prewrite
+target-geometry drift control and a target-identity race/restoration diagnostic
+control: if the first final inspection mismatches but the classification
+inspection sees the admitted target again, require
+`target-identity-raced-or-restored`, not a fabricated partition mismatch.
+The existing selected-parent and root-parent substitution controls must refuse
+before any mutation. The unsafe baseline has successful initial/final mount
+reads, four independent swap-inventory observations and no false mount
+conflicts. Keep the separate post-final-snapshot mount/swap/inventory races
+explicitly UNPROVEN: no rootless read-only recheck demonstrates atomic
 exclusion or binds a physical reader across device-number reuse.
 The source-extracted coordinator must intercept both admission-time and
 failure-classification target-inspection calls with the same private fixture.

@@ -902,6 +902,85 @@ static int swapz_primary_selector_metadata_matches(
 	       before->st_ctim.tv_nsec == after->st_ctim.tv_nsec;
 }
 
+
+/*
+ * Read and parse one already-opened protected selector without following the
+ * pathname again. The expected stat is the transaction's pinned admission
+ * identity; pread keeps descriptor offset irrelevant to repeated last-use
+ * checks, and output is published only after metadata remains unchanged.
+ */
+static int swapz_primary_selector_read_stable_fd(
+	int fd, const struct stat *expected_info,
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
+{
+	char record[SWAPZ_PRIMARY_PARTUUID_LENGTH + sizeof("PARTUUID=\n") + 1U];
+	char parsed_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	struct stat before;
+	struct stat after;
+	size_t completed = 0;
+	size_t length;
+	ssize_t count;
+	int flags;
+
+	if (fd < 0 || !expected_info || !partuuid ||
+	    expected_info->st_size <= 0 ||
+	    (uint64_t)expected_info->st_size >
+		(sizeof("PARTUUID=") - 1U + SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U)) {
+		errno = EINVAL;
+		return -1;
+	}
+	partuuid[0] = '\0';
+	flags = fcntl(fd, F_GETFL);
+	if (flags < 0)
+		return -1;
+	if ((flags & O_ACCMODE) != O_RDONLY) {
+		errno = EBADF;
+		return -1;
+	}
+	if (fstat(fd, &before) < 0)
+		return -1;
+	if (!swapz_primary_selector_metadata_matches(expected_info, &before)) {
+		errno = ESTALE;
+		return -1;
+	}
+	length = (size_t)expected_info->st_size;
+	while (completed < length) {
+		count = pread(fd, record + completed, length - completed,
+			      (off_t)completed);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count < 0)
+			return -1;
+		if (!count) {
+			errno = ESTALE;
+			return -1;
+		}
+		completed += (size_t)count;
+	}
+	do {
+		unsigned char extra;
+
+		count = pread(fd, &extra, sizeof(extra), (off_t)length);
+	} while (count < 0 && errno == EINTR);
+	if (count != 0) {
+		if (count > 0)
+			errno = ESTALE;
+		return -1;
+	}
+	if (fstat(fd, &after) < 0)
+		return -1;
+	if (!swapz_primary_selector_metadata_matches(expected_info, &after) ||
+	    !swapz_primary_selector_metadata_matches(&before, &after)) {
+		errno = ESTALE;
+		return -1;
+	}
+	if (swapz_primary_target_config_parse(
+		    record, length, parsed_partuuid) < 0)
+		return -1;
+	memcpy(partuuid, parsed_partuuid, strlen(parsed_partuuid) + 1U);
+	return 0;
+}
+
 /*
  * Start retains opened protected-selector identities through the final
  * non-mutating check. Only its coordinator owns these two descriptors.
@@ -1166,17 +1245,30 @@ static int swapz_primary_selector_admission_still_live(
 	return 0;
 }
 
+/*
+ * Bind selector bytes to the inode pinned by this start transaction. Live-name
+ * continuity is checked separately immediately before and after this read.
+ */
+static int swapz_primary_selector_admission_read_partuuid(
+	const struct swapz_primary_selector_admission *admission,
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
+{
+	if (!admission || !partuuid) {
+		errno = EINVAL;
+		return -1;
+	}
+	return swapz_primary_selector_read_stable_fd(
+		admission->selector_fd, &admission->selector_info, partuuid);
+}
+
 #endif
 
 int swapz_primary_target_config_read(
 	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
 {
-	char record[SWAPZ_PRIMARY_PARTUUID_LENGTH + sizeof("PARTUUID=\n") + 1U];
 	char parsed_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
 	struct stat directory_info;
 	struct stat info;
-	struct stat after;
-	size_t used = 0;
 	int directory_fd = -1;
 	int fd = -1;
 	int saved_errno;
@@ -1216,31 +1308,9 @@ int swapz_primary_target_config_read(
 		errno = EPERM;
 		goto out;
 	}
-	while (used < sizeof(record)) {
-		ssize_t count = read(fd, record + used, sizeof(record) - used);
-
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count < 0)
-			goto out;
-		if (!count)
-			break;
-		used += (size_t)count;
-	}
-	if (fstat(fd, &after) < 0)
-		goto out;
-	if (used == sizeof(record)) {
-		errno = EOVERFLOW;
-		goto out;
-	}
-	if (!swapz_primary_selector_metadata_matches(&info, &after) ||
-	    used != (size_t)info.st_size) {
-		errno = ESTALE;
-		goto out;
-	}
 	/* Parse locally; stale named paths must never publish a selected target. */
-	if (swapz_primary_target_config_parse(
-		    record, used, parsed_partuuid) < 0)
+	if (swapz_primary_selector_read_stable_fd(
+		    fd, &info, parsed_partuuid) < 0)
 		goto out;
 #ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
 	if (swapz_primary_rootless_selector_before_revalidation)
@@ -12602,15 +12672,20 @@ static int swapz_primary_start_prepared(void)
 	if (swapz_primary_selector_admission_still_live(
 		&selector_admission, &failure_observed) < 0)
 		goto out;
-	if (swapz_primary_target_config_read(prewrite_partuuid) < 0) {
-		failure_observed = "protected-selector-content-unverifiable";
+	failure_expected = "manifest-target-matches-admitted-selector-content";
+	if (swapz_primary_selector_admission_read_partuuid(
+		    &selector_admission, prewrite_partuuid) < 0) {
+		failure_observed = errno == ESTALE ?
+			"admitted-selector-content-or-metadata-changed" :
+			"admitted-selector-content-unverifiable";
 		goto out;
 	}
 	if (strcmp(prewrite_partuuid, manifest.target.partuuid)) {
-		failure_observed = "protected-selector-content-changed";
+		failure_observed = "selected-target-not-bound-to-admitted-selector";
 		errno = ESTALE;
 		goto out;
 	}
+	failure_expected = "unchanged-admitted-selector-directory-and-file";
 	if (swapz_primary_selector_admission_still_live(
 		&selector_admission, &failure_observed) < 0)
 		goto out;
@@ -12624,10 +12699,17 @@ static int swapz_primary_start_prepared(void)
 		if (first_errno == ESTALE &&
 		    swapz_primary_target_inspect(
 			    manifest.target.partuuid, &observed_target) == 0) {
-			failure_observed =
-			    observed_target.device_bytes != manifest.target.device_bytes ?
-				"target-geometry-changed" :
-				"target-partition-identity-changed";
+			if (observed_target.device_bytes != manifest.target.device_bytes)
+				failure_observed = "target-geometry-changed";
+			else if (observed_target.device_major !=
+				 manifest.target.device_major ||
+				 observed_target.device_minor !=
+				 manifest.target.device_minor ||
+				 strcmp(observed_target.partuuid,
+					manifest.target.partuuid))
+				failure_observed = "target-partition-identity-changed";
+			else
+				failure_observed = "target-identity-raced-or-restored";
 		}
 		errno = first_errno;
 		goto out;
@@ -12737,6 +12819,7 @@ out:
 	memset(original_header, 0, sizeof(original_header));
 	memset(observed_header, 0, sizeof(observed_header));
 	memset(swapz_header, 0, sizeof(swapz_header));
+	memset(prewrite_partuuid, 0, sizeof(prewrite_partuuid));
 	if (result == 0)
 		printf("PRIMARY_START=ACTIVE run_id=%s mapper=/dev/mapper/swapz-primary "
 		       "swapon=true\n", state.run_id);
