@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -136,6 +137,9 @@ class GeneratorPublicationTest(unittest.TestCase):
         )
         self.assertRegex(result.stderr, r"observed_graph=(not-evaluated|unverified)\b")
         self.assertIn(f"original_status={result.returncode}", result.stderr)
+        self.assertIn("unit=swapz-primary-mapper.service", result.stderr)
+        self.assertIn("expected_owner=swapzctl-primary-start-stop", result.stderr)
+        self.assertIn("observed_mask=verified", result.stderr)
         self.assertRegex(
             result.stderr,
             r"action=(inspect-generator-invocation-and-output-directories-read-only-before-retry|"
@@ -1326,6 +1330,64 @@ class GeneratorPublicationTest(unittest.TestCase):
                     self.assertTrue(self.mapper_dropin().exists())
                     self.assertFalse(self.mask().exists())
                     candidate.unlink()
+
+    def test_rootless_systemd_analyze_resolves_generated_graph_and_early_mask(self) -> None:
+        analyzer = shutil.which("systemd-analyze")
+        if analyzer is None:
+            self.skipTest("systemd-analyze unavailable")
+
+        # Layer the actual fake generator directories over unmodified unit
+        # contracts. No host manager, device, swap or systemctl is touched.
+        unit_directory = self.root / "unit-files"
+        unit_directory.mkdir()
+        service = MAPPER_SERVICE.read_text(encoding="utf-8")
+        for helper in ("swapzctl", "swapz-primary-boot-verify",
+                       "swapz-primary-runtime-health"):
+            service = service.replace(f"@SWAPZ_SBINDIR@/{helper}", "/usr/bin/true")
+        (unit_directory / MAPPER_SERVICE.name).write_text(service, encoding="utf-8")
+        (unit_directory / PASSIVE_SWAP_UNIT).write_text(
+            PASSIVE_SWAP.read_text(encoding="utf-8"), encoding="utf-8",
+        )
+        # A normal-priority fstab generator can shadow the packaged swap.
+        # The early passive guard must still prevent native .swap ownership.
+        (self.normal / PASSIVE_SWAP_UNIT).write_text(
+            "[Unit]\nDescription=Generated swap shadow\n"
+            "[Swap]\nWhat=/dev/mapper/swapz-primary\n", encoding="utf-8",
+        )
+        analyzer_environment = self.environment.copy()
+        analyzer_environment["SYSTEMD_UNIT_PATH"] = (
+            f"{self.early}:{self.normal}:{unit_directory}:"
+            "/usr/lib/systemd/system:/lib/systemd/system"
+        )
+
+        def verify_units() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [analyzer, "verify", MAPPER_SERVICE.name, PASSIVE_SWAP_UNIT],
+                env=analyzer_environment, text=True, capture_output=True,
+                check=False, timeout=30,
+            )
+
+        generated = self.run_generator()
+        self.assertEqual(generated.returncode, 0, generated.stderr)
+        self.assertEqual(generated.stderr, "")
+        self.assertEqual(
+            self.passive_guard().read_text(encoding="utf-8"),
+            "[Unit]\nDefaultDependencies=no\nRefuseManualStart=yes\n"
+            "RefuseManualStop=yes\nConditionPathExists=!/\n",
+        )
+        accepted = verify_units()
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+        # A refused selector after an authorized run retires target-specific
+        # dependencies and leaves a real generator.early unit mask.
+        refused = self.run_generator(MOCK_UNITS="garbage")
+        self.assert_blocked(refused, "selection")
+        self.assertFalse(self.device_dropin(SELECTED).exists())
+        blocked = verify_units()
+        self.assertNotEqual(blocked.returncode, 0)
+        self.assertIn("masked", blocked.stderr.lower())
+        self.assertNotIn(SELECTED, refused.stderr)
+
 
     def test_hibernation_guards_survive_refused_selector(self) -> None:
         result = self.run_generator(MOCK_UNITS="garbage")

@@ -874,7 +874,11 @@ complete selected graph before releasing the mask; any validation, command,
 publication or rollback failure must leave the mapper blocked rather than
 fall back to a device path or reveal a partially active job. Diagnostics must
 identify phase, selected-source category, check, original status and withheld
-output, without printing protected configuration. Preserve independent
+output, without printing protected configuration. Each fail-only generator
+summary must also name the fixed mapper unit, its expected native
+`swapzctl primary start`/`stop` owner and the verified or unverified early
+mask state (or `not-evaluated` before directory admission). A mask inspection
+is not evidence of live swap state. Preserve independent
 pre-hibernation refusal on failed selector admission. This dependency only names the PARTUUID
 alias; the deployment gate must also prevent the same partition from being
 started as raw swap through a by-UUID or other alias. Static units stay

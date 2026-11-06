@@ -7091,6 +7091,14 @@ inventory inspection as well after canonical response validation. Rootless
 tests must exercise all three identity-class states with controlled
 failure exits. Never reveal the private PARTUUID, selector text, or host device
 path, and never log this failure envelope on successful publication.
+The final failure envelope must include the fixed mapper unit, the expected
+native start/stop owner, actual verified/unverified early mask state, and
+original command status. The transaction fixture must run rootless
+`systemd-analyze verify` against its existing fake early/normal generator
+directories and a normal-priority passive swap shadow: a valid graph must be
+accepted, while an invalid selector after a valid run must produce a masked
+mapper unit without retaining target-specific dependencies. This proves
+configuration precedence, not real occupied-swap shutdown behavior.
 
 These dependencies are not a
 complete activation policy: a raw swap entry may be named by UUID or another

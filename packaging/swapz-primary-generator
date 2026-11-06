@@ -14,10 +14,21 @@ fail()
 	failure_source=$3
 	failure_validation=$4
 	failure_withheld=$5
-	printf 'swapz-primary-generator: phase=%s source=%s validation=%s status=%s withheld=%s identity_class=%s expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap observed_graph=%s original_status=%s action=%s\n' \
+	# Report the verified publication barrier, not inferred kernel swap state.
+	observed_early_mask_state=not-evaluated
+	if [ "${mask_evaluation_enabled:-0}" -eq 1 ]; then
+		if [ ! -x "$early_dir" ] || [ -L "$early_dir" ]; then
+			observed_early_mask_state=directory-unverifiable
+		elif mapper_mask_is_active; then
+			observed_early_mask_state=verified
+		else
+			observed_early_mask_state=missing-or-substituted
+		fi
+	fi
+	printf 'swapz-primary-generator: phase=%s source=%s validation=%s status=%s withheld=%s identity_class=%s expected_graph=mapper-requires-selected-partuuid-device-and-conflicts-matching-raw-swap observed_graph=%s original_status=%s unit=swapz-primary-mapper.service expected_owner=swapzctl-primary-start-stop observed_mask=%s action=%s\n' \
 		"$failure_phase" "$failure_source" "$failure_validation" \
 		"$failure_status" "$failure_withheld" "$selected_identity_class" \
-		"$observed_graph_state" "$failure_status" "$failure_action" >&2
+		"$observed_graph_state" "$failure_status" "$observed_early_mask_state" "$failure_action" >&2
 	exit "$failure_status"
 }
 
@@ -73,6 +84,7 @@ mapper_mask_is_active()
 		return 1
 	fi
 }
+mask_evaluation_enabled=1
 replace_with_verified_mask()
 {
 	# The early-priority mapper name is reserved for the safety barrier.
