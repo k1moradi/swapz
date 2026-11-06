@@ -1862,6 +1862,7 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
 	     !swapz_legal_class(old->extent_blocks) ||
+	     (old->raw && old->extent_blocks != 1U) ||
 	     old->extent_blocks > a->physical_blocks - old->start_block ||
 	     old->start_block % SWAPZ_SEGMENT_BLOCKS +
 	         old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
@@ -2017,6 +2018,7 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 		if (map->valid) {
 			if (map->start_block >= a->physical_blocks ||
 			    !swapz_legal_class(map->extent_blocks) ||
+			    (map->raw && map->extent_blocks != 1U) ||
 			    map->extent_blocks >
 				    a->physical_blocks - map->start_block ||
 			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
@@ -2125,6 +2127,7 @@ int swapz_prevalidate_discard_range(struct swapz_authority *a,
 				continue;
 			if (map->start_block >= a->physical_blocks ||
 			    !swapz_legal_class(map->extent_blocks) ||
+			    (map->raw && map->extent_blocks != 1U) ||
 			    map->extent_blocks >
 				    a->physical_blocks - map->start_block ||
 			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
@@ -2193,6 +2196,7 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
 	     !swapz_legal_class(old->extent_blocks) ||
+	     (old->raw && old->extent_blocks != 1U) ||
 	     old->extent_blocks > a->physical_blocks - old->start_block ||
 	     old->start_block % SWAPZ_SEGMENT_BLOCKS +
 	         old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
@@ -2430,6 +2434,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		}
 		if (old->start_block >= a->physical_blocks ||
 		    !swapz_legal_class(old->extent_blocks) ||
+		    (old->raw && old->extent_blocks != 1U) ||
 		    old->extent_blocks > a->physical_blocks - old->start_block ||
 		    old->start_block % SWAPZ_SEGMENT_BLOCKS +
 		        old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||

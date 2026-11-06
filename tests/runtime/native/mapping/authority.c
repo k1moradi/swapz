@@ -1983,8 +1983,8 @@ static int test_discard_range_bad_tail_keeps_unrelated_authority(void)
 	swapz_u8 classes_before[physical_blocks];
 	int fault;
 
-	for (fault = 0; fault < 3; ++fault) {
-		swapz_u32 invalid_start = fault == 2 ?
+	for (fault = 0; fault < 4; ++fault) {
+		swapz_u32 invalid_start = fault == 3 ? 1U : fault == 2 ?
 			physical_blocks - 1U :
 			fault == 1 ? 1U : SWAPZ_SEGMENT_BLOCKS - 1U;
 		swapz_u8 invalid_blocks = fault == 1 ? 1U : 2U;
@@ -2001,8 +2001,9 @@ static int test_discard_range_bad_tail_keeps_unrelated_authority(void)
 		test_maps[1] = (struct swapz_map) {
 			.start_block = invalid_start,
 			.generation = fault == 1 ? ~(swapz_u32)0 : 1U,
-			.payload_length = 128U,
-			.extent_blocks = invalid_blocks, .valid = 1U,
+			.payload_length = fault == 3 ? SWAPZ_BLOCK_BYTES : 128U,
+			.extent_blocks = invalid_blocks,
+			.raw = fault == 3, .valid = 1U,
 		};
 		test_maps[2] = (struct swapz_map) {
 			.start_block = SWAPZ_SEGMENT_BLOCKS,
@@ -2036,6 +2037,7 @@ static int test_discard_range_bad_tail_keeps_unrelated_authority(void)
 				__FILE__, __LINE__,
 				fault == 1 ? "generation_overflow" :
 				fault == 2 ? "physical_capacity_overrun" :
+				fault == 3 ? "raw_multiblock_extent" :
 					     "cross_segment_extent",
 				error, invalidation_prevented ? "yes" : "no");
 			return 1;

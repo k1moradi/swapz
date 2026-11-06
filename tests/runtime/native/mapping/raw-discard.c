@@ -130,9 +130,10 @@ static int test_corrupt_source_geometry_preserves_discard_authority(void)
 	const swapz_u32 logical_page = 9U;
 	int fault;
 
-	for (fault = 0; fault < 2; ++fault) {
+	for (fault = 0; fault < 3; ++fault) {
 		const swapz_u32 invalid_start =
-			fault ? NPHYS - 1U : SWAPZ_SEGMENT_BLOCKS - 1U;
+			fault == 2 ? 4U : fault ? NPHYS - 1U :
+			SWAPZ_SEGMENT_BLOCKS - 1U;
 		struct swapz_tx transaction;
 		struct swapz_map original;
 		int range_error, discard_error, finish_error;
@@ -142,8 +143,9 @@ static int test_corrupt_source_geometry_preserves_discard_authority(void)
 		maps[logical_page] = (struct swapz_map) {
 			.start_block = invalid_start,
 			.generation = 7U,
-			.payload_length = 128U,
+			.payload_length = fault == 2 ? SWAPZ_BLOCK_BYTES : 128U,
 			.extent_blocks = 2U,
+			.raw = fault == 2,
 			.valid = 1U,
 		};
 		live[invalid_start] = 1U;
@@ -170,6 +172,7 @@ static int test_corrupt_source_geometry_preserves_discard_authority(void)
 				"original_errnos=range:%d,discard:%d,finish:%d "
 				"invalidation_prevented=%s\n",
 				__FILE__, __LINE__,
+				fault == 2 ? "raw_multiblock_extent" :
 				fault ? "physical_capacity_overrun" :
 					"cross_segment_extent",
 				range_error, discard_error, finish_error,

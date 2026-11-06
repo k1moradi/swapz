@@ -168,6 +168,16 @@ For Device Mapper `dm_io`, both ordinary error bits and separate unsupported
 bits are failures; asynchronous callback compatibility must not duplicate
 completion ownership or publication logic.
 
+A RAW authoritative mapping occupies exactly one 4KiB physical block.
+Validate this representation at the range-prevalidation, direct page-DISCARD,
+RAW finish and compressed finish boundaries, even when the cached extent
+class, start liveness and segment geometry are mutually consistent.
+A malformed multi-block RAW source must not release any old reference,
+advance a logical generation or expose a new mapping. A failed staged
+completion may quarantine its reserved destination, but must preserve
+all pre-existing authoritative maps and sidecars. Use deterministic rootless
+fault injection to exercise this invariant without lower-device I/O.
+
 Range DISCARD must preflight every requested mapping before the first
 logical generation or liveness mutation. A valid extent start index alone is
 insufficient: the entire 1/2/4-block extent must fit physical capacity and
