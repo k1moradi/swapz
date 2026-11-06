@@ -1702,10 +1702,17 @@ class BootVerifierTests(unittest.TestCase):
             ),
         )
 
-    def install_extended_observation_timeout(self) -> tuple[Path, str]:
+    def install_observation_timeout(self, test_deadline: str) -> tuple[Path, str]:
         timeout_binary = shutil.which("timeout", path="/usr/bin:/bin")
         if timeout_binary is None:
-            self.fail("GNU timeout is required for the observer signal regression")
+            self.fail("GNU timeout is required for the observer timeout regression")
+        timeout_version = subprocess.run(
+            [timeout_binary, "--version"],
+            check=False, text=True, capture_output=True,
+        )
+        if (timeout_version.returncode != 0
+                or "GNU coreutils" not in timeout_version.stdout):
+            self.fail("GNU coreutils timeout is required for the observer timeout regression")
         requested_timeout = self.root / "observe-timeout-requested"
         write_executable(
             self.bin / "timeout",
@@ -1717,9 +1724,20 @@ class BootVerifierTests(unittest.TestCase):
             'printf "%s\\n" "$4" > "$MOCK_OBSERVE_TIMEOUT_REQUESTED" || exit 92\n'
             'shift 4\n'
             f'exec {shlex.quote(timeout_binary)} --foreground --signal=TERM '
-            '--kill-after=1s 60s "$@"\n',
+            f'--kill-after=1s {shlex.quote(test_deadline)} "$@"\n',
         )
         return requested_timeout, timeout_binary
+
+    def install_extended_observation_timeout(self) -> tuple[Path, str]:
+        return self.install_observation_timeout("60s")
+
+    @staticmethod
+    def read_process_parent_pid(process_id: int) -> int:
+        process_status = Path(f"/proc/{process_id}/status").read_text(encoding="ascii")
+        return int(next(
+            line.split()[1] for line in process_status.splitlines()
+            if line.startswith("PPid:")
+        ))
 
     def write_boot_id(self, boot_id: str) -> None:
         (self.proc / "sys" / "kernel" / "random" / "boot_id").write_text(boot_id + "\n", encoding="ascii")
@@ -1960,14 +1978,11 @@ class BootVerifierTests(unittest.TestCase):
                 time.sleep(0.02)
             self.assertTrue(journal_started.exists(), "fixture did not enter observe")
             journal_pid = int(journal_pid_file.read_text(encoding="ascii"))
-            journal_status = Path(f"/proc/{journal_pid}/status").read_text(encoding="ascii")
-            timeout_pid = int(next(
-                line.split()[1] for line in journal_status.splitlines()
-                if line.startswith("PPid:")
-            ))
+            timeout_pid = self.read_process_parent_pid(journal_pid)
             # Timeout remains in the verifier process group and directly owns
             # the journal child. Only the verifier holds the capture-pipe writers.
             self.assertEqual(os.getpgid(verifier.pid), verifier.pid)
+            self.assertEqual(self.read_process_parent_pid(timeout_pid), verifier.pid)
             self.assertEqual(os.getpgid(timeout_pid), verifier.pid)
             self.assertEqual(os.getpgid(journal_pid), verifier.pid)
             self.assertEqual(
@@ -1998,7 +2013,8 @@ class BootVerifierTests(unittest.TestCase):
             self.assertRegex(
                 stderr,
                 r"signal=TERM process_ownership=owned_timeout_child "
-                r"timeout_wait_status=(?:124|143) token_disposition=revoked",
+                r"timeout_wait_status=(?:124|143) deadline_proof=not_established "
+                r"child_disposition=timeout_supervisor_reaped token_disposition=revoked",
             )
             self.assertEqual(timeout_requested.read_text(encoding="ascii"), "5s\n")
             self.assertIn(
@@ -2064,15 +2080,13 @@ class BootVerifierTests(unittest.TestCase):
                 time.sleep(0.02)
             self.assertTrue(journal_started.exists(), "fixture did not enter observe")
             journal_pid = int(journal_pid_file.read_text(encoding="ascii"))
-            journal_status = Path(f"/proc/{journal_pid}/status").read_text(encoding="ascii")
-            timeout_pid = int(next(
-                line.split()[1] for line in journal_status.splitlines()
-                if line.startswith("PPid:")
-            ))
+            timeout_pid = self.read_process_parent_pid(journal_pid)
             self.assertEqual(
                 Path(f"/proc/{timeout_pid}/exe").resolve(),
                 Path(timeout_binary).resolve(),
             )
+            self.assertEqual(os.getpgid(verifier.pid), verifier.pid)
+            self.assertEqual(self.read_process_parent_pid(timeout_pid), verifier.pid)
             self.assertEqual(os.getpgid(timeout_pid), verifier.pid)
             self.assertEqual(os.getpgid(journal_pid), verifier.pid)
             # Signal only the observer so its trap owns the timeout TERM and
@@ -2086,7 +2100,8 @@ class BootVerifierTests(unittest.TestCase):
             )
             self.assertIn(
                 "signal=TERM process_ownership=owned_timeout_child "
-                "timeout_wait_status=137",
+                "timeout_wait_status=137 deadline_proof=not_established "
+                "child_disposition=timeout_supervisor_reaped",
                 stderr,
             )
             self.assertEqual(timeout_requested.read_text(encoding="ascii"), "5s\n")
@@ -2686,6 +2701,47 @@ class BootVerifierTests(unittest.TestCase):
         self.assertIn("COLD_BOOT_OBSERVATION=INCOMPLETE", observed.stdout)
         report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
         self.assertIn("kernel_log_unavailable", report)
+
+    def test_kernel_log_watchdog_expiry_is_incomplete_and_revokes_authority(self) -> None:
+        self.arm_then_reboot()
+        journal_pid_file = self.root / "watchdog-journal-pid"
+        timeout_pid_file = self.root / "watchdog-timeout-pid"
+        timeout_requested, _timeout_binary = self.install_observation_timeout("1s")
+        write_executable(
+            self.bin / "journalctl",
+            "#!/bin/sh\n"
+            'printf "%s\\n" "$$" > "$MOCK_OBSERVE_JOURNAL_PID"\n'
+            'printf "%s\\n" "$PPID" > "$MOCK_OBSERVE_TIMEOUT_PID"\n'
+            "exec sleep 15\n",
+        )
+        env = self.env.copy()
+        env["MOCK_OBSERVE_TIMEOUT_REQUESTED"] = str(timeout_requested)
+        env["MOCK_OBSERVE_JOURNAL_PID"] = str(journal_pid_file)
+        env["MOCK_OBSERVE_TIMEOUT_PID"] = str(timeout_pid_file)
+
+        # Do not signal the observer or its process group. The test-only
+        # one-second deadline is the sole controlled termination source.
+        observed = self.run_verifier("observe", env=env)
+        self.assertEqual(observed.returncode, 2, observed.stderr)
+        self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", observed.stdout)
+        self.assertIn("COLD_BOOT_OBSERVATION=INCOMPLETE", observed.stdout)
+        self.assertNotIn("phase=observe_signal", observed.stderr)
+        self.assertIn(
+            "COLD_BOOT_OBSERVATION=INCOMPLETE phase=kernel_journal "
+            "observed=unavailable observer_exit_status=2 timeout_wait_status=124 "
+            "deadline_proof=not_established "
+            "child_disposition=timeout_supervisor_reaped token_disposition=revoked "
+            "token_cleanup_phase=none token_cleanup_exit_status=0",
+            observed.stderr,
+        )
+        self.assertEqual(timeout_requested.read_text(encoding="ascii"), "5s\n")
+        report = (self.report / f"report-{BOOT_B}.env").read_text(encoding="utf-8")
+        self.assertIn("kernel_log_unavailable", report)
+        self.assert_activation_revoked()
+        journal_pid = int(journal_pid_file.read_text(encoding="ascii"))
+        timeout_pid = int(timeout_pid_file.read_text(encoding="ascii"))
+        self.assertFalse(Path(f"/proc/{timeout_pid}").exists())
+        self.assertFalse(Path(f"/proc/{journal_pid}").exists())
 
 
     def test_hibernation_resume_configuration_blocks_arm_and_preflight(self) -> None:

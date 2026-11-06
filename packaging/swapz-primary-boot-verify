@@ -315,6 +315,7 @@ claim_runtime_authorization()
 stop_journal_observation()
 {
 	journal_timeout_wait_status=none
+	journal_child_disposition=not_started
 	[ -n "$journal_timeout_pid" ] || return 0
 	kill -TERM "$journal_timeout_pid" 2>/dev/null || :
 	if wait "$journal_timeout_pid" 2>/dev/null; then
@@ -325,6 +326,7 @@ stop_journal_observation()
 		journal_timeout_wait_status=$?
 	fi
 	journal_timeout_pid=
+	journal_child_disposition=timeout_supervisor_reaped
 }
 
 handle_observation_signal()
@@ -366,9 +368,10 @@ interrupted_observation()
 		observation_token_cleanup_exit_status=$authorization_revoke_exit_status
 	fi
 	# Report the original signal before any EXIT fallback diagnostic. Never
-	# promote an interrupted attempt or a failed cleanup to PASS.
-	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=INCOMPLETE phase=observe_signal observed=interrupted exit_status=%s evidence_retained=unknown action=inspect_cold_boot_report_before_rearming signal=%s process_ownership=%s timeout_wait_status=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s\n' \
-		"$observation_signal_exit_status" "$observation_signal_name" "$observation_child_ownership" "$journal_timeout_wait_status" "$observation_token_disposition" "$observation_token_cleanup_phase" "$observation_token_cleanup_exit_status" >&2 || :
+	# promote an interrupted attempt or a failed cleanup to PASS. The timeout
+	# wait status is diagnostic only and never proves that its deadline expired.
+	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=INCOMPLETE phase=observe_signal observed=interrupted exit_status=%s evidence_retained=unknown action=inspect_cold_boot_report_before_rearming signal=%s process_ownership=%s timeout_wait_status=%s deadline_proof=not_established child_disposition=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s\n' \
+		"$observation_signal_exit_status" "$observation_signal_name" "$observation_child_ownership" "$journal_timeout_wait_status" "$journal_child_disposition" "$observation_token_disposition" "$observation_token_cleanup_phase" "$observation_token_cleanup_exit_status" >&2 || :
 	exit "$observation_signal_exit_status"
 }
 
@@ -1677,6 +1680,8 @@ SWAPS
 		fail "cannot create kernel-error temporary"
 	}
 	journal_command_status=1
+	journal_timeout_wait_status=none
+	journal_child_disposition=not_started
 	if valid_boot_id "$boot_id" 2>/dev/null && command -v journalctl >/dev/null 2>&1 &&
 	   command -v timeout >/dev/null 2>&1; then
 		# A foreground external command delays POSIX shell TERM traps until
@@ -1698,7 +1703,9 @@ SWAPS
 		else
 			journal_command_status=$?
 		fi
+		journal_timeout_wait_status=$journal_command_status
 		journal_timeout_pid=
+		journal_child_disposition=timeout_supervisor_reaped
 	fi
 	if [ "$journal_command_status" -eq 0 ]; then
 		grep -Ei 'swapz|device-mapper|dm-[0-9]+|I/O error|blk_update_request|Buffer I/O' \
@@ -1717,9 +1724,15 @@ SWAPS
 	# The canonical activation pathname was consumed before evidence collection.
 	# Final cleanup removes the non-authoritative claimed token and rechecks that
 	# no canonical token appeared while observation was in progress.
+	observation_token_disposition=unknown
+	observation_token_cleanup_phase=none
+	observation_token_cleanup_exit_status=0
 	if revoke_runtime_authorization; then
 		observation_runtime_authorization_cleaned=1
+		observation_token_disposition=revoked
 	else
+		observation_token_cleanup_phase=$authorization_revoke_phase
+		observation_token_cleanup_exit_status=$authorization_revoke_exit_status
 		append_failure runtime_preflight_authorization_cleanup_failed
 		report_observation_revocation_failure
 	fi
@@ -1804,6 +1817,15 @@ REPORT
 	latest_temporary=$(mktemp "$report_base/.latest.XXXXXX") || fail "cannot create latest report"
 	cat -- "$report" > "$latest_temporary"
 	commit_file "$latest_temporary" "$report_base/latest.env"
+	if [ "$journal_timeout_wait_status" != none ] && [ "$journal_timeout_wait_status" -ne 0 ]; then
+		case "$status" in
+		FAIL) observer_exit_status=1 ;;
+		INCOMPLETE) observer_exit_status=2 ;;
+		*) observer_exit_status=0 ;;
+		esac
+		printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=%s phase=kernel_journal observed=unavailable observer_exit_status=%s timeout_wait_status=%s deadline_proof=not_established child_disposition=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s\n' \
+			"$status" "$observer_exit_status" "$journal_timeout_wait_status" "$journal_child_disposition" "$observation_token_disposition" "$observation_token_cleanup_phase" "$observation_token_cleanup_exit_status" >&2 || :
+	fi
 	if [ "$status" != PASS ]; then
 		printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=%s failure_reasons=%s incomplete_reasons=%s action=inspect_cold_boot_report_before_rearming\n' \
 			"$status" "${failure_reasons:-none}" "${incomplete_reasons:-none}" >&2
