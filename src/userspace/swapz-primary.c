@@ -92,7 +92,14 @@ static void swapz_primary_selected_target_clear(void)
 #define SWAPZ_PRIMARY_MUTATION_LOCK_DIRECTORY "/run/lock/swapz"
 #define SWAPZ_PRIMARY_EXECUTION_ENABLED 1
 #else
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+/* The rootless policy fixture substitutes only its private test directory. */
+static const char *swapz_primary_rootless_config_base = "/etc/swapz";
+static void (*swapz_primary_rootless_selector_before_revalidation)(void);
+#define SWAPZ_PRIMARY_CONFIG_BASE swapz_primary_rootless_config_base
+#else
 #define SWAPZ_PRIMARY_CONFIG_BASE "/etc/swapz"
+#endif
 #define SWAPZ_PRIMARY_RECOVERY_BASE "/var/lib/swapz/physical-recovery"
 #define SWAPZ_PRIMARY_QUALIFICATION_REPORT \
 	"/var/lib/swapz/physical-recovery/primary-qualification.json"
@@ -875,101 +882,191 @@ int swapz_primary_target_config_parse(
 	return 0;
 }
 
+/*
+ * Compare the opened inode and its immutable admission metadata. A matching
+ * PARTUUID string is not sufficient if either protected path was replaced.
+ */
+static int swapz_primary_selector_metadata_matches(
+	const struct stat *before, const struct stat *after)
+{
+	return before->st_dev == after->st_dev &&
+	       before->st_ino == after->st_ino &&
+	       before->st_mode == after->st_mode &&
+	       before->st_uid == after->st_uid &&
+	       before->st_gid == after->st_gid &&
+	       before->st_nlink == after->st_nlink &&
+	       before->st_size == after->st_size &&
+	       before->st_mtim.tv_sec == after->st_mtim.tv_sec &&
+	       before->st_mtim.tv_nsec == after->st_mtim.tv_nsec &&
+	       before->st_ctim.tv_sec == after->st_ctim.tv_sec &&
+	       before->st_ctim.tv_nsec == after->st_ctim.tv_nsec;
+}
+
+/*
+ * The caller retains both descriptors through this final admission check.
+ * Reopen the live config pathname, not merely the pinned old directory: an
+ * administrator may have renamed the complete protected directory away.
+ * Rootless tests invoke this production check with private directory paths.
+ */
+static int swapz_primary_selector_identity_still_live(
+	const char *config_base, int directory_fd, int selector_fd,
+	const struct stat *directory_before, const struct stat *selector_before)
+{
+	struct stat directory_after;
+	struct stat selector_after;
+	struct stat live_directory;
+	struct stat live_selector;
+	struct stat named_directory;
+	int live_directory_fd;
+	int saved_errno;
+
+	if (!config_base || directory_fd < 0 || selector_fd < 0 ||
+	    !directory_before || !selector_before) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (fstat(directory_fd, &directory_after) < 0 ||
+	    fstat(selector_fd, &selector_after) < 0)
+		return -1;
+	if (!swapz_primary_selector_metadata_matches(
+		    directory_before, &directory_after) ||
+	    !swapz_primary_selector_metadata_matches(
+		    selector_before, &selector_after)) {
+		errno = ESTALE;
+		return -1;
+	}
+	live_directory_fd = open(config_base,
+				 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (live_directory_fd < 0) {
+		if (errno == ENOENT || errno == ENOTDIR || errno == ELOOP)
+			errno = ESTALE;
+		return -1;
+	}
+	if (fstat(live_directory_fd, &live_directory) < 0 ||
+	    fstatat(live_directory_fd, "primary-target", &live_selector,
+		    AT_SYMLINK_NOFOLLOW) < 0 ||
+	    fstatat(AT_FDCWD, config_base, &named_directory,
+		    AT_SYMLINK_NOFOLLOW) < 0) {
+		saved_errno = errno;
+		(void)close(live_directory_fd);
+		errno = saved_errno == ENOENT || saved_errno == ENOTDIR ||
+			saved_errno == ELOOP ? ESTALE : saved_errno;
+		return -1;
+	}
+	if (!swapz_primary_selector_metadata_matches(
+		    directory_before, &live_directory) ||
+	    !swapz_primary_selector_metadata_matches(
+		    directory_before, &named_directory) ||
+	    !swapz_primary_selector_metadata_matches(
+		    selector_before, &live_selector)) {
+		(void)close(live_directory_fd);
+		errno = ESTALE;
+		return -1;
+	}
+	if (close(live_directory_fd) < 0)
+		return -1;
+	return 0;
+}
+
 int swapz_primary_target_config_read(
 	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
 {
 	char record[SWAPZ_PRIMARY_PARTUUID_LENGTH + sizeof("PARTUUID=\n") + 1U];
+	char parsed_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	struct stat directory_info;
 	struct stat info;
 	struct stat after;
 	size_t used = 0;
-	int fd;
+	int directory_fd = -1;
+	int fd = -1;
+	int saved_errno;
+	int result = -1;
+	uid_t expected_owner = 0;
 
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	expected_owner = geteuid();
+#endif
 	if (!partuuid) {
 		errno = EINVAL;
 		return -1;
 	}
 	partuuid[0] = '\0';
-	{
-		struct stat directory_info;
-		int directory_fd = open(SWAPZ_PRIMARY_CONFIG_BASE,
-					 O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-
-		if (directory_fd < 0)
-			return -1;
-		if (fstat(directory_fd, &directory_info) < 0 ||
-		    !S_ISDIR(directory_info.st_mode) || directory_info.st_uid != 0 ||
-		    (directory_info.st_mode & 0022U)) {
-			int saved_errno = errno ? errno : EPERM;
-
-			close(directory_fd);
-			errno = saved_errno;
-			return -1;
-		}
-		fd = openat(directory_fd, "primary-target",
-			    O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-		{
-			int saved_errno = errno;
-
-			if (close(directory_fd) < 0 && fd >= 0) {
-				close(fd);
-				return -1;
-			}
-			errno = saved_errno;
-		}
-	}
-	if (fd < 0)
+	directory_fd = open(SWAPZ_PRIMARY_CONFIG_BASE,
+			    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (directory_fd < 0)
 		return -1;
-	if (fstat(fd, &info) < 0 || !S_ISREG(info.st_mode) ||
-	    info.st_uid != 0 || (info.st_mode & 0022U) || info.st_nlink != 1 ||
+	if (fstat(directory_fd, &directory_info) < 0)
+		goto out;
+	if (!S_ISDIR(directory_info.st_mode) || directory_info.st_uid != expected_owner ||
+	    (directory_info.st_mode & 0022U)) {
+		errno = EPERM;
+		goto out;
+	}
+	fd = openat(directory_fd, "primary-target",
+		    O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0)
+		goto out;
+	if (fstat(fd, &info) < 0)
+		goto out;
+	if (!S_ISREG(info.st_mode) || info.st_uid != expected_owner ||
+	    (info.st_mode & 0022U) || info.st_nlink != 1 ||
 	    info.st_size <= 0 ||
 	    (size_t)info.st_size > sizeof("PARTUUID=") - 1U +
 			   SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U) {
-		int saved_errno = errno ? errno : EPERM;
-
-		close(fd);
-		errno = saved_errno;
-		return -1;
+		errno = EPERM;
+		goto out;
 	}
 	while (used < sizeof(record)) {
 		ssize_t count = read(fd, record + used, sizeof(record) - used);
 
 		if (count < 0 && errno == EINTR)
 			continue;
-		if (count < 0) {
-			int saved_errno = errno;
-
-			close(fd);
-			errno = saved_errno;
-			return -1;
-		}
+		if (count < 0)
+			goto out;
 		if (!count)
 			break;
 		used += (size_t)count;
 	}
-	if (fstat(fd, &after) < 0) {
-		int saved_errno = errno;
-
-		close(fd);
-		errno = saved_errno;
-		return -1;
-	}
-	if (close(fd) < 0)
-		return -1;
+	if (fstat(fd, &after) < 0)
+		goto out;
 	if (used == sizeof(record)) {
 		errno = EOVERFLOW;
-		return -1;
+		goto out;
 	}
-	if (info.st_dev != after.st_dev || info.st_ino != after.st_ino ||
-	    info.st_size != after.st_size || info.st_mtim.tv_sec != after.st_mtim.tv_sec ||
-	    info.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
-	    info.st_ctim.tv_sec != after.st_ctim.tv_sec ||
-	    info.st_ctim.tv_nsec != after.st_ctim.tv_nsec ||
-	    info.st_uid != after.st_uid || info.st_mode != after.st_mode ||
+	if (!swapz_primary_selector_metadata_matches(&info, &after) ||
 	    used != (size_t)info.st_size) {
 		errno = ESTALE;
-		return -1;
+		goto out;
 	}
-	return swapz_primary_target_config_parse(record, used, partuuid);
+	/* Parse locally; stale named paths must never publish a selected target. */
+	if (swapz_primary_target_config_parse(
+		    record, used, parsed_partuuid) < 0)
+		goto out;
+#ifdef SWAPZ_PRIMARY_ROOTLESS_TEST
+	if (swapz_primary_rootless_selector_before_revalidation)
+		swapz_primary_rootless_selector_before_revalidation();
+#endif
+	if (swapz_primary_selector_identity_still_live(
+		    SWAPZ_PRIMARY_CONFIG_BASE, directory_fd, fd,
+		    &directory_info, &info) < 0)
+		goto out;
+	memcpy(partuuid, parsed_partuuid, strlen(parsed_partuuid) + 1U);
+	result = 0;
+out:
+	saved_errno = errno;
+	if (fd >= 0 && close(fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (close(directory_fd) < 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (result < 0) {
+		partuuid[0] = '\0';
+		errno = saved_errno;
+	}
+	return result;
 }
 
 int swapz_primary_systemd_target_units(

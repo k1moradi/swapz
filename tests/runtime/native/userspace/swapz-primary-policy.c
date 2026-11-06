@@ -984,6 +984,140 @@ static void test_target_identity_and_header_policy(void)
 						     TEST_DEVICE_BYTES));
 }
 
+
+/*
+ * A rootless read hook forces replacement exactly after the real reader has
+ * parsed its opened descriptor but before its final live-name identity check.
+ */
+static const char selector_race_record[] = "PARTUUID=7fb9401d-04\n";
+static char selector_race_config_directory[PATH_MAX];
+static char selector_race_old_directory[PATH_MAX];
+static struct stat selector_race_before;
+static struct stat selector_race_after;
+static int selector_race_directory_fd = -1;
+static int selector_race_kind;
+
+static void test_selector_write_file(int directory_fd)
+{
+	int fd = openat(directory_fd, "primary-target",
+			O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+
+	assert(fd >= 0);
+	assert(write(fd, selector_race_record,
+		     sizeof(selector_race_record) - 1U) ==
+	       (ssize_t)(sizeof(selector_race_record) - 1U));
+	assert(close(fd) == 0);
+}
+
+static void test_selector_replace_before_revalidation(void)
+{
+	if (selector_race_kind == 1) {
+		assert(fstatat(selector_race_directory_fd, "primary-target",
+			       &selector_race_before, AT_SYMLINK_NOFOLLOW) == 0);
+		assert(renameat(selector_race_directory_fd, "primary-target",
+				selector_race_directory_fd,
+				"primary-original") == 0);
+		test_selector_write_file(selector_race_directory_fd);
+		assert(fstatat(selector_race_directory_fd, "primary-target",
+			       &selector_race_after, AT_SYMLINK_NOFOLLOW) == 0);
+	} else if (selector_race_kind == 2) {
+		int new_directory_fd;
+
+		assert(stat(selector_race_config_directory,
+			    &selector_race_before) == 0);
+		assert(rename(selector_race_config_directory,
+			      selector_race_old_directory) == 0);
+		assert(mkdir(selector_race_config_directory, 0700) == 0);
+		new_directory_fd = open(selector_race_config_directory,
+					O_RDONLY | O_DIRECTORY |
+					O_NOFOLLOW | O_CLOEXEC);
+		assert(new_directory_fd >= 0);
+		test_selector_write_file(new_directory_fd);
+		assert(stat(selector_race_config_directory,
+			    &selector_race_after) == 0);
+		assert(close(new_directory_fd) == 0);
+	} else {
+		assert(!"unexpected selector replacement case");
+	}
+}
+
+static void test_selector_rejects_replaced_file_and_directory(void)
+{
+	char template_directory[] = "/tmp/swapz-selector-identity-XXXXXX";
+	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+	struct swapz_primary_target selected_before =
+		swapz_primary_selected_target;
+	int replacement_directory_fd;
+	int length;
+
+	assert(mkdtemp(template_directory));
+	length = snprintf(selector_race_config_directory,
+			  sizeof(selector_race_config_directory),
+			  "%s", template_directory);
+	assert(length > 0 &&
+	       (size_t)length < sizeof(selector_race_config_directory));
+	length = snprintf(selector_race_old_directory,
+			  sizeof(selector_race_old_directory),
+			  "%s-old", template_directory);
+	assert(length > 0 &&
+	       (size_t)length < sizeof(selector_race_old_directory));
+	selector_race_directory_fd = open(template_directory,
+		O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	assert(selector_race_directory_fd >= 0);
+	test_selector_write_file(selector_race_directory_fd);
+	swapz_primary_rootless_config_base = selector_race_config_directory;
+	assert(swapz_primary_target_config_read(partuuid) == 0);
+	assert(!strcmp(partuuid, "7fb9401d-04"));
+
+	/* Replace the regular file with identical bytes after its read. */
+	selector_race_kind = 1;
+	swapz_primary_rootless_selector_before_revalidation =
+		test_selector_replace_before_revalidation;
+	strcpy(partuuid, "stale");
+	errno = 0;
+	assert(swapz_primary_target_config_read(partuuid) < 0);
+	assert(errno == ESTALE);
+	assert(partuuid[0] == '\0');
+	assert(selector_race_before.st_dev == selector_race_after.st_dev);
+	assert(selector_race_before.st_ino != selector_race_after.st_ino);
+	swapz_primary_rootless_selector_before_revalidation = NULL;
+	assert(unlinkat(selector_race_directory_fd,
+			"primary-original", 0) == 0);
+	assert(swapz_primary_target_config_read(partuuid) == 0);
+	assert(!strcmp(partuuid, "7fb9401d-04"));
+
+	/* Replace the entire directory path with a second valid directory. */
+	selector_race_kind = 2;
+	swapz_primary_rootless_selector_before_revalidation =
+		test_selector_replace_before_revalidation;
+	strcpy(partuuid, "stale");
+	errno = 0;
+	assert(swapz_primary_target_config_read(partuuid) < 0);
+	assert(errno == ESTALE);
+	assert(partuuid[0] == '\0');
+	assert(selector_race_before.st_dev == selector_race_after.st_dev);
+	assert(selector_race_before.st_ino != selector_race_after.st_ino);
+	swapz_primary_rootless_selector_before_revalidation = NULL;
+	assert(swapz_primary_target_config_read(partuuid) == 0);
+	assert(!strcmp(partuuid, "7fb9401d-04"));
+	assert(!memcmp(&swapz_primary_selected_target, &selected_before,
+		       sizeof(selected_before)));
+
+	/* Only private test files were touched; no mapper/service path is used. */
+	replacement_directory_fd = open(selector_race_config_directory,
+		O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	assert(replacement_directory_fd >= 0);
+	assert(unlinkat(replacement_directory_fd, "primary-target", 0) == 0);
+	assert(close(replacement_directory_fd) == 0);
+	assert(rmdir(selector_race_config_directory) == 0);
+	assert(unlinkat(selector_race_directory_fd, "primary-target", 0) == 0);
+	assert(close(selector_race_directory_fd) == 0);
+	selector_race_directory_fd = -1;
+	assert(rmdir(selector_race_old_directory) == 0);
+	swapz_primary_rootless_config_base = "/etc/swapz";
+	selector_race_kind = 0;
+}
+
 static void test_target_config_and_dynamic_geometry(void)
 {
 	static const char target_one[] = "PARTUUID=1A2B3C4D-01\n";
@@ -3373,6 +3507,7 @@ int main(void)
 	test_selected_target_swap_quiescence();
 	test_target_identity_and_header_policy();
 	test_target_config_and_dynamic_geometry();
+	test_selector_rejects_replaced_file_and_directory();
 	test_target_preflight_snapshots_aliased_partuuid();
 	test_primary_linux_swap_header();
 	test_primary_run_id_and_header_builder();
