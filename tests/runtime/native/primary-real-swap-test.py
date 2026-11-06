@@ -3283,10 +3283,15 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     mock.patch.object(qualify, "_remove_cgroup") as remove, \
                     mock.patch.object(Path, "write_text", deny_migration):
                 with self.assertRaisesRegex(
-                        qualify.QualificationFailure, "synthetic migration refusal"):
+                        qualify.QualificationFailure,
+                        "cannot move admitted oracle into dedicated cgroup errno=none") as caught:
                     qualify._run_workload(
                         {"run_id": "a" * 32}, {"mapper_device": (252, 1)},
                         ORACLE, 384, 128, 384, 60)
+            self.assertIsInstance(caught.exception.__cause__, OSError)
+            self.assertEqual(str(caught.exception.__cause__),
+                             "synthetic migration refusal")
+            self.assertIsNone(caught.exception.__cause__.errno)
             terminate.assert_called_once_with(child, cgroup)
             remove.assert_called_once_with(cgroup)
             self.assertTrue(all(pipe.closed for pipe in

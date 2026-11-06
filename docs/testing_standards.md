@@ -599,6 +599,11 @@ initial `cgroup.procs` migration, only Linux `ESRCH` plus that same structured
 exit-2 preflight record may retain BLOCKED; unrelated migration errors remain
 fatal and their raw error text is not exposed. Rootless terminal tests inject
 both resource-limit failures and exercise both parent race boundaries.
+The worker-migration failure regression asserts the helper's stable contextual
+`QualificationFailure` separately from its chained original exception. It must
+verify the cause type, synthetic cause text and actual `errno` value without
+requiring raw cause text in the outer diagnostic; child termination, cgroup
+cleanup and closure of every worker pipe remain required assertions.
 
 The helper must treat the installed `<prefix>/sbin/swapzctl` as the qualified
 artifact identity, derive the same
