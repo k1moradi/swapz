@@ -8579,11 +8579,14 @@ wait for its direct child status, then revoke authorization. Rootless signal
 fixtures must signal the observer process directly so the observer's handler,
 not a process-group broadcast, owns supervisor termination. The reported
 `child_status` is the observer's direct GNU `timeout` child status, not the
-raw `journalctl` result; GNU `timeout` may report 124 or 143 after a TERM
-interruption. Neither supervisor status certifies success: assert that the
-status is one of those two, retain the observer's original 128+signal exit
-status (143 for TERM), and prove that the timeout and journal processes are
-gone and the one-use token is revoked. The fail-only
+raw `journalctl` result. In the ordinary direct-TERM regression, the confirmed
+live timeout supervisor must report 143: status 124 means its configured
+watchdog deadline won the race and is not valid evidence that the observer's
+signal path terminated the child. The TERM-resistant journal control must
+report 137 after the owned timeout performs its bounded KILL escalation. In
+both cases retain the observer's original 128+signal exit status (143 for
+TERM), prove that timeout and journal processes are gone, and prove the one-use
+token is revoked. The fail-only
 signal diagnostic must retain the original 128+signal status even if token
 cleanup and its EXIT retry fail, and identify signal, process ownership, child
 status, token disposition, cleanup phase/status and retained evidence without
@@ -8611,8 +8614,10 @@ verify canonical and claimed token paths are absent. All controls are
 private and rootless; none starts or stops swap. If `systemctl is-enabled`
 returns an unrecognized state, its raw output must not be echoed into public
 diagnostics: report `observed=untrusted`, retain the exit status, and classify
-the result as INCOMPLETE. The fixture must assert that sanitization while
-preserving the refusal to certify PASS.
+the result as INCOMPLETE. The fixture must cover command statuses 0, 1, 2 and 3,
+an unexpected status, contradictory state/status pairs and empty output. An
+arbitrary private sentinel must be absent from diagnostics while being
+classified as `observed=untrusted`; none of these controls may certify PASS.
 
 Boot-verifier contracts must prove that a retained package transaction is
 detected by both preflight and post-boot observation after selector parsing.

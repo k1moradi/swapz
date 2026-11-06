@@ -1959,12 +1959,13 @@ class BootVerifierTests(unittest.TestCase):
                 "evidence_retained=unknown action=inspect_cold_boot_report_before_rearming",
                 stderr,
             )
-            # GNU timeout can return 124 or 143 after TERM; the observer
-            # must retain 143 and revoke the one-use authorization either way.
-            self.assertRegex(
+            # A direct TERM to the observer makes its trap terminate the
+            # still-live timeout supervisor. Status 124 would mean the
+            # watchdog deadline won the race and would not prove this path.
+            self.assertIn(
+                "signal=TERM process_ownership=owned_timeout_child "
+                "child_status=143 token_disposition=revoked",
                 stderr,
-                r"signal=TERM process_ownership=owned_timeout_child "
-                r"child_status=(?:124|143) token_disposition=revoked",
             )
             self.assertIn(
                 "token_cleanup_phase=none token_cleanup_exit_status=0",
@@ -2034,7 +2035,9 @@ class BootVerifierTests(unittest.TestCase):
             ))
             self.assertEqual(os.getpgid(timeout_pid), verifier.pid)
             self.assertEqual(os.getpgid(journal_pid), verifier.pid)
-            os.killpg(verifier.pid, signal.SIGTERM)
+            # Signal only the observer so its trap owns the timeout TERM and
+            # the subsequent bounded KILL escalation for the resistant child.
+            os.kill(verifier.pid, signal.SIGTERM)
             stdout, stderr = verifier.communicate(timeout=4)
             self.assertEqual(verifier.returncode, 143, stderr)
             self.assertNotIn("COLD_BOOT_OBSERVATION=PASS", stdout)
@@ -3072,15 +3075,19 @@ class BootVerifierTests(unittest.TestCase):
         safe_env["MOCK_PASSIVE_ENABLEMENT_EXIT"] = "0"
         safe_env["MOCK_SYSTEMCTL_ORIGINAL"] = str(original_systemctl)
 
-        # Safe-state contradictions, failed unsafe-looking probes, and unknown
-        # output are all incomplete telemetry. None can certify PASS or a
-        # definite enabled-state FAIL.
+        # Safe-state contradictions, failed unsafe-looking probes, unknown or
+        # unavailable output are all incomplete telemetry. None can certify
+        # PASS or a definite enabled-state FAIL.
+        untrusted_state_marker = "host-identity-sentinel"
         for state, exit_status in (
             ("static", "41"),
+            ("static", "2"),
             ("disabled", "0"),
             ("enabled", "124"),
             ("linked", "0"),
             ("unknown", "3"),
+            ("", "3"),
+            (untrusted_state_marker, "3"),
         ):
             with self.subTest(state=state, exit_status=exit_status):
                 env = self.env.copy()
@@ -3092,6 +3099,8 @@ class BootVerifierTests(unittest.TestCase):
                 self.assertIn("PRIMARY_BOOT_PREFLIGHT=BLOCKED", blocked.stderr)
                 self.assertIn("phase=passive_swap_enablement", blocked.stderr)
                 self.assertIn(f"exit_status={exit_status}", blocked.stderr)
+                if state == untrusted_state_marker:
+                    self.assertNotIn(untrusted_state_marker, blocked.stderr)
                 self.assertFalse(
                     (self.report / "runtime" / "primary-execution.env").exists()
                 )
@@ -3108,12 +3117,17 @@ class BootVerifierTests(unittest.TestCase):
                 )
                 self.assertIn("phase=passive_swap_enablement", observed.stderr)
                 expected_observed_state = (
-                    "untrusted" if state == "unknown" else state
+                    state
+                    if state in ("static", "disabled", "enabled", "linked")
+                    else "untrusted"
                 )
                 self.assertIn(
                     f"observed={expected_observed_state}", observed.stderr
                 )
                 self.assertIn(f"exit_status={exit_status}", observed.stderr)
+                if state == untrusted_state_marker:
+                    self.assertNotIn(untrusted_state_marker, observed.stderr)
+                    self.assertNotIn(untrusted_state_marker, latest)
                 self.assertIn(
                     "token_consumption_state=claimed_non_authoritative",
                     observed.stderr,
