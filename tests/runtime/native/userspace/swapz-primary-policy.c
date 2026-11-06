@@ -2679,6 +2679,24 @@ static void test_build_source_provenance_policy(void)
 	assert(!swapz_primary_build_sources_match("invalid", 1, same_sha, 1));
 }
 
+/* The production parser must refuse before publishing any parsed evidence. */
+static void assert_primary_qualification_report_refused(
+	const char *json, size_t json_length, const char *expected_source_sha,
+	const char *expected_host_sha256)
+{
+	struct swapz_primary_qualification qualification;
+	struct swapz_primary_qualification original;
+
+	memset(&qualification, 0xa5, sizeof(qualification));
+	original = qualification;
+	errno = 0;
+	assert(swapz_primary_qualification_parse_json(
+		(const unsigned char *)json, json_length, expected_source_sha,
+		expected_host_sha256, &qualification) < 0);
+	assert(errno == EINVAL);
+	assert(!memcmp(&qualification, &original, sizeof(qualification)));
+}
+
 static void test_primary_qualification_report_parser(void)
 {
 	static const char report_template[] =
@@ -2698,8 +2716,16 @@ static void test_primary_qualification_report_parser(void)
 		"\"qualified_artifacts\":{\"status\":\"AVAILABLE\","
 		"\"formatter_sha256\":\"%s\",\"module_sha256\":\"%s\","
 		"\"oracle_sha256\":\"%s\"}}\n";
+	static const unsigned char hardware_bound_host_identity[] =
+		"swapz-host-v2\0"
+		"00112233-4455-6677-8899-aabbccddeeff"
+		"0123456789abcdef0123456789abcdef";
+	static const unsigned char legacy_host_identity[] =
+		"swapz-host\0"
+		"0123456789abcdef0123456789abcdef";
 	const char *source = "0123456789abcdef0123456789abcdef01234567";
 	char host_sha[65];
+	char legacy_host_sha[65];
 	char formatter_sha[65];
 	char module_sha[65];
 	char oracle_sha[65];
@@ -2707,8 +2733,14 @@ static void test_primary_qualification_report_parser(void)
 	struct swapz_primary_qualification qualification;
 	int length;
 
-	memset(host_sha, 'a', 64U);
-	host_sha[64] = '\0';
+	/* The JSON envelope is v1; its digest binds today's v2 hardware input. */
+	assert(swapz_primary_sha256(
+		hardware_bound_host_identity,
+		sizeof(hardware_bound_host_identity) - 1U, host_sha) == 0);
+	assert(swapz_primary_sha256(
+		legacy_host_identity, sizeof(legacy_host_identity) - 1U,
+		legacy_host_sha) == 0);
+	assert(strcmp(host_sha, legacy_host_sha));
 	memset(formatter_sha, 'b', 64U);
 	formatter_sha[64] = '\0';
 	memset(module_sha, 'c', 64U);
@@ -2734,6 +2766,58 @@ static void test_primary_qualification_report_parser(void)
 		&qualification, module_sha, module_sha, oracle_sha));
 	assert(!swapz_primary_qualification_artifacts_match(
 		&qualification, formatter_sha, "invalid", oracle_sha));
+	/* The report contents, not only the caller's expected value, are bound. */
+	{
+		char *digest = strstr(json, "\"id_sha256\":\"");
+		char original;
+
+		assert(digest);
+		digest += strlen("\"id_sha256\":\"");
+		original = *digest;
+		*digest = original == '0' ? '1' : '0';
+		assert_primary_qualification_report_refused(
+			json, (size_t)length, source, host_sha);
+		*digest = original;
+		memcpy(digest, legacy_host_sha, SWAPZ_PRIMARY_SHA256_LENGTH);
+		assert_primary_qualification_report_refused(
+			json, (size_t)length, source, host_sha);
+		memcpy(digest, host_sha, SWAPZ_PRIMARY_SHA256_LENGTH);
+	}
+	{
+		char *report_source = strstr(json, "\"source_sha\":\"");
+		char original;
+
+		assert(report_source);
+		report_source += strlen("\"source_sha\":\"");
+		original = *report_source;
+		*report_source = original == '0' ? '1' : '0';
+		assert_primary_qualification_report_refused(
+			json, (size_t)length, source, host_sha);
+		*report_source = original;
+	}
+	{
+		char *tested_commit = strstr(json, "\"tested_commit_sha\":\"");
+		char original;
+
+		assert(tested_commit);
+		tested_commit += strlen("\"tested_commit_sha\":\"");
+		original = *tested_commit;
+		*tested_commit = original == '0' ? '1' : '0';
+		assert_primary_qualification_report_refused(
+			json, (size_t)length, source, host_sha);
+		*tested_commit = original;
+	}
+	{
+		char *artifact_name = strstr(json, "\"oracle_sha256\":\"");
+
+		assert(artifact_name);
+		/* This valid unknown field cannot replace the required oracle. */
+		memcpy(artifact_name + 1, "unused", 6U);
+		assert_primary_qualification_report_refused(
+			json, (size_t)length, source, host_sha);
+		memcpy(artifact_name + 1, "oracle", 6U);
+	}
+
 	assert(swapz_primary_qualification_parse_json(
 		(const unsigned char *)json, (size_t)length, source, module_sha,
 		&qualification) < 0);
@@ -2816,7 +2900,7 @@ static void test_primary_qualification_report_parser(void)
 	json[length - 1] = '\n';
 	{
 		char duplicate[4096];
-		static const char duplicate_field[] = "\"overall\":\"PASS\",";
+		static const char duplicate_field[] = "\"overall\":\"FAIL\",";
 		size_t duplicate_length = sizeof(duplicate_field) - 1U;
 		char *needle;
 
@@ -2829,6 +2913,33 @@ static void test_primary_qualification_report_parser(void)
 		assert(swapz_primary_qualification_parse_json(
 			(const unsigned char *)duplicate, strlen(duplicate), source,
 			host_sha, &qualification) < 0);
+	}
+	{
+		char malformed[sizeof(json)];
+		char *closing;
+
+		assert((size_t)length + 2U <= sizeof(malformed));
+		memcpy(malformed, json, (size_t)length + 1U);
+		closing = strrchr(malformed, '}');
+		assert(closing && closing[1] == '\n');
+		memmove(closing + 1, closing, strlen(closing) + 1U);
+		*closing = ',';
+		assert_primary_qualification_report_refused(
+			malformed, (size_t)length + 1U, source, host_sha);
+	}
+	{
+		char malformed[sizeof(json)];
+		char *stage_array_end;
+
+		assert((size_t)length + 2U <= sizeof(malformed));
+		memcpy(malformed, json, (size_t)length + 1U);
+		stage_array_end = strstr(malformed, "],\"qualified_artifacts\"");
+		assert(stage_array_end && stage_array_end > malformed);
+		memmove(stage_array_end + 1, stage_array_end,
+			strlen(stage_array_end) + 1U);
+		*stage_array_end = ',';
+		assert_primary_qualification_report_refused(
+			malformed, (size_t)length + 1U, source, host_sha);
 	}
 }
 

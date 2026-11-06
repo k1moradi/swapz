@@ -8002,6 +8002,21 @@ This command does not prepare the partition, load the module, create a mapper
 or enable swap. Rootless tests must exercise atomic store, repeat store,
 prior-report preservation and refusal while an active marker exists.
 
+The production-C rootless qualification-import contract must feed synthetic
+five-stage PASS reports directly through
+`swapz_primary_qualification_parse_json()`, with exact source and tested-commit
+SHAs, matching three-artifact hashes, the public `swapz-host-v1` report schema,
+and a deterministic digest of the current `swapz-host-v2` hardware-bound
+identity layout. The v1 machine-id-only digest must be refused; the fixture
+must never read or print private machine IDs or hardware UUIDs. Reject a changed
+reported host digest, wrong source, stale tested commit, duplicate conflicting
+key, missing artifact, non-PASS stage, wrong qualification kind, invalid syntax,
+and trailing commas in objects or stage arrays. Each refusal must return
+`EINVAL` without modifying the parser output; rootless import and lifecycle
+entry points remain disabled, not simulated privileged success. Publication
+of a report-only `[skip ci]` descendant does not turn a historical FAIL into
+PASS or count as a fresh executable-source test.
+
 Primary module admission opens `libexec/swapz/dm-swapz.ko` relative to the
 installed control executable using descriptor-relative traversal. Focused
 rootless tests must accept the exact stable read-only file and reject a

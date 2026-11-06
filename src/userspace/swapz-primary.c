@@ -7173,6 +7173,18 @@ static void swapz_primary_json_space(struct swapz_primary_json_cursor *json)
 		++json->cursor;
 }
 
+/* A delimiter must be followed by another member, never a closing token. */
+static int swapz_primary_json_comma(
+	struct swapz_primary_json_cursor *json, unsigned char closing_token)
+{
+	if (json->cursor >= json->end || *json->cursor++ != ',')
+		return -1;
+	swapz_primary_json_space(json);
+	if (json->cursor >= json->end || *json->cursor == closing_token)
+		return -1;
+	return 0;
+}
+
 static int swapz_primary_json_string_span(
 	struct swapz_primary_json_cursor *json,
 	const unsigned char **value, size_t *length, int allow_escapes)
@@ -7306,7 +7318,7 @@ static int swapz_primary_json_skip_value(
 				++json->cursor;
 				return 0;
 			}
-			if (*json->cursor++ != ',')
+			if (swapz_primary_json_comma(json, close) < 0)
 				return -1;
 			swapz_primary_json_space(json);
 		}
@@ -7416,7 +7428,7 @@ static int swapz_primary_qualification_host_parse(
 			++json->cursor;
 			break;
 		}
-		if (*json->cursor++ != ',')
+		if (swapz_primary_json_comma(json, '}') < 0)
 			return -1;
 	}
 	if (seen == 7U && !strcmp(schema, "swapz-host-v1") &&
@@ -7482,7 +7494,7 @@ static int swapz_primary_qualification_stage_parse(
 			++json->cursor;
 			break;
 		}
-		if (*json->cursor++ != ',')
+		if (swapz_primary_json_comma(json, '}') < 0)
 			return -1;
 	}
 	if (seen == 7U && stage_index < 5U &&
@@ -7517,7 +7529,7 @@ static int swapz_primary_qualification_stages_parse(
 			++json->cursor;
 			break;
 		}
-		if (*json->cursor++ != ',')
+		if (swapz_primary_json_comma(json, ']') < 0)
 			return -1;
 	}
 	return count == 5U ? 0 : -1;
@@ -7582,7 +7594,7 @@ static int swapz_primary_qualification_artifacts_parse(
 			++json->cursor;
 			break;
 		}
-		if (*json->cursor++ != ',')
+		if (swapz_primary_json_comma(json, '}') < 0)
 			return -1;
 	}
 	if (seen == 15U && !strcmp(status, "AVAILABLE") &&
@@ -7698,7 +7710,7 @@ int swapz_primary_qualification_parse_json(
 			++json.cursor;
 			break;
 		}
-		if (*json.cursor++ != ',')
+		if (swapz_primary_json_comma(&json, '}') < 0)
 			goto invalid;
 	}
 	swapz_primary_json_space(&json);
