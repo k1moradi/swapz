@@ -3768,6 +3768,44 @@ static void format_report_admission_refusal(
 				      original_errno, next_action);
 }
 
+/*
+ * Check the mode on the returned descriptor, including the read-only
+ * idempotent path. This cannot prove that O_EXCL was honored by the kernel.
+ */
+static int format_descriptor_access_verify(
+	const struct format_runtime_ops *ops, int fd, const char *operation,
+	struct format_admission_problem *problem)
+{
+	int descriptor_flags;
+	int original_errno;
+
+	format_admission_problem_set(
+		problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
+		"fcntl(F_GETFL) succeeds and reports O_RDWR");
+	descriptor_flags = ops->get_descriptor_flags(ops->context, fd);
+	if (descriptor_flags < 0) {
+		original_errno = errno;
+		format_admission_problem_observed(
+			problem, "descriptor-flags-unavailable");
+		format_report_admission_refusal(
+			"descriptor mode query failed", operation, problem,
+			original_errno);
+		return -1;
+	}
+	if ((descriptor_flags & O_ACCMODE) != O_RDWR) {
+		errno = EBADF;
+		format_admission_problem_set(
+			problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
+			"fcntl(F_GETFL) & O_ACCMODE == O_RDWR");
+		format_admission_problem_observed(
+			problem, "returned-descriptor-access-mode-not-read-write");
+		format_report_admission_refusal(
+			"descriptor mode is not O_RDWR", operation, problem, EBADF);
+		return -1;
+	}
+	return 0;
+}
+
 static void format_report_admission_failure(
 	const char *summary, const char *operation,
 	const struct format_admission_problem *problem, int original_errno)
@@ -3899,6 +3937,12 @@ static int format_device_with_ops(
 			result = 2;
 			goto close_error;
 		}
+		if (format_descriptor_access_verify(
+			    ops, fd, "existing-header recognition",
+			    &admission_problem) < 0) {
+			result = 2;
+			goto close_error;
+		}
 		goto close_success;
 	}
 	if (!block_is_zero(block)) {
@@ -3958,37 +4002,10 @@ static int format_device_with_ops(
 	 * Final returned-FD access check after identity/topology/inventory.
 	 * F_GETFL validates access mode, never kernel O_EXCL/holder exclusion.
 	 */
-	{
-		int descriptor_flags;
-
-		format_admission_problem_set(
-			&admission_problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
-			"fcntl(F_GETFL) succeeds and reports O_RDWR");
-		descriptor_flags = ops->get_descriptor_flags(ops->context, fd);
-		if (descriptor_flags < 0) {
-			saved_errno = errno;
-			format_admission_problem_observed(
-				&admission_problem, "descriptor-flags-unavailable");
-			format_report_admission_refusal(
-				"descriptor mode query failed", "header publication",
-				&admission_problem, saved_errno);
-			result = 2;
-			goto close_error;
-		}
-		if ((descriptor_flags & O_ACCMODE) != O_RDWR) {
-			errno = EBADF;
-			format_admission_problem_set(
-				&admission_problem, FORMAT_ADMISSION_DESCRIPTOR_MODE,
-				"fcntl(F_GETFL) & O_ACCMODE == O_RDWR");
-			format_admission_problem_observed(
-				&admission_problem,
-				"returned-descriptor-access-mode-not-read-write");
-			format_report_admission_refusal(
-				"descriptor mode is not O_RDWR", "header publication",
-				&admission_problem, errno);
-			result = 2;
-			goto close_error;
-		}
+	if (format_descriptor_access_verify(
+		    ops, fd, "header publication", &admission_problem) < 0) {
+		result = 2;
+		goto close_error;
 	}
 	publication_attempted = 1;
 	if (ops->write_header(ops->context, fd, block) < 0) {

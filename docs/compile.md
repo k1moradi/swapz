@@ -96,6 +96,20 @@ level; they never admit a production target. Use the
 [host-scoped authority](AGENT_CONTEXT.md#standing-owner-authorization) before
 interpreting any PASS or proceeding to a device operation.
 
+### Formatter descriptor admission evidence
+
+Even when a valid existing SWZ authorization header makes formatting
+idempotent, successful formatter admission requires a fresh returned-descriptor
+`fcntl(F_GETFL)` access-mode check reporting `O_RDWR` after its final
+opened-target identity revalidation. Its refusal is a read-only diagnosis:
+`O_RDONLY` or `O_WRONLY` returns `EBADF`, a failed query retains the
+originating errno, and neither case writes, syncs, or replaces the header.
+The independent final prewrite check for new headers remains mandatory.
+Rootless tests with fake block descriptors establish these control-flow
+conditions and the `O_EXCL` flags requested by the opener; they cannot
+establish loaded-kernel block holder/mount/swapon exclusion or distinguish
+a physically substituted card in the same reader.
+
 ## Direct-main CI standards co-changes
 
 When a push triggers project-goals, the repository-policy job checks **every

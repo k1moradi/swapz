@@ -3406,11 +3406,89 @@ static void test_repeat_format_is_idempotent_and_non_destructive(void)
 	assert(context.verify_calls == 2U);
 	assert(context.authorization_calls == 3U);
 	assert(context.read_calls == 1U);
+	assert(context.descriptor_query_calls == 1U);
 	assert(context.random_calls == 0U);
 	assert(context.write_calls == 0U);
 	assert(context.sync_calls == 0U);
 	assert(context.close_calls == 1U);
 	assert(!memcmp(context.media, original, sizeof(original)));
+}
+
+/*
+ * A fake open can return a non-read-write descriptor even after receiving
+ * the correct O_EXCL request. An existing header must not skip F_GETFL.
+ * This mock cannot establish actual Linux block-device exclusivity.
+ */
+static void test_real_cli_existing_header_descriptor_modes_refuse(void)
+{
+	static const struct {
+		int descriptor_mode;
+		int descriptor_error;
+		int expected_errno;
+		const char *observed;
+	} cases[] = {
+		{ O_RDONLY, 0, EBADF,
+		  "returned-descriptor-access-mode-not-read-write" },
+		{ O_WRONLY, 0, EBADF,
+		  "returned-descriptor-access-mode-not-read-write" },
+		{ O_RDWR, ENODEV, ENODEV, "descriptor-flags-unavailable" },
+	};
+
+	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
+	     ++index) {
+		unsigned char original_header[SWAPZ_SUPERBLOCK_BYTES];
+		char report[ADMISSION_DIAGNOSTIC_BYTES] = {0};
+		char errno_field[64];
+		unsigned int previous_pwrite_calls;
+		int observed_errno, status;
+		int length;
+
+		length = snprintf(errno_field, sizeof(errno_field), "errno=%d (",
+				  cases[index].expected_errno);
+		assert(length > 0 && (size_t)length < sizeof(errno_field));
+		admission_start(ADMISSION_UNCHANGED);
+		make_valid_header(admission_fixture.block_zero,
+				  admission_fixture.geometry_bytes);
+		memcpy(original_header, admission_fixture.block_zero,
+		       sizeof(original_header));
+		previous_pwrite_calls = test_pwrite_calls;
+		admission_fixture.descriptor_mode = cases[index].descriptor_mode;
+		admission_fixture.descriptor_error = cases[index].descriptor_error;
+		test_diagnostic_errno_clobber = ECHILD;
+		status = admission_capture_cli(report, &observed_errno);
+		test_diagnostic_errno_clobber = 0;
+		if (status != 2 ||
+		    observed_errno != cases[index].expected_errno ||
+		    !strstr(report, "stage=descriptor mode") ||
+		    !strstr(report,
+			    "proof=opened descriptor access and read-only state") ||
+		    !strstr(report, "expected=fcntl(F_GETFL)") ||
+		    !strstr(report, cases[index].observed) ||
+		    !strstr(report, "operation=existing-header recognition") ||
+		    !strstr(report, errno_field) ||
+		    !strstr(report, "action=inspect the failed stage read-only") ||
+		    strstr(report, ADMISSION_DEVICE) ||
+		    admission_fixture.observed_open_flags !=
+			    (O_RDWR | O_EXCL | O_CLOEXEC | O_NOFOLLOW) ||
+		    admission_fixture.opens != 1U ||
+		    admission_fixture.reads != 1U ||
+		    admission_fixture.descriptor_queries != 1U ||
+		    admission_fixture.writes != 0U ||
+		    admission_fixture.syncs != 0U ||
+		    admission_fixture.closes != 1U ||
+		    test_pwrite_calls != previous_pwrite_calls ||
+		    memcmp(original_header, admission_fixture.block_zero,
+			   sizeof(original_header))) {
+			fprintf(stderr, "FAIL: phase=existing-header-descriptor "
+				"case=%zu original_errno=%d expected_errno=%d "
+				"status=%d queries=%u writes=%u syncs=%u\n",
+				index, observed_errno, cases[index].expected_errno,
+				status, admission_fixture.descriptor_queries,
+				admission_fixture.writes, admission_fixture.syncs);
+			abort();
+		}
+		admission_stop();
+	}
 }
 
 static void test_disappearance_after_write_is_never_success(void)
@@ -3491,6 +3569,7 @@ int main(void)
 	test_publication_failures_are_explicitly_uncertain();
 	test_zero_header_format_and_readback();
 	test_repeat_format_is_idempotent_and_non_destructive();
+	test_real_cli_existing_header_descriptor_modes_refuse();
 	test_disappearance_after_write_is_never_success();
 	test_truncated_read_and_close_failure_are_not_success();
 	test_real_cli_exclusive_open_permission_refuses_without_io();
