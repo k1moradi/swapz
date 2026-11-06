@@ -18,6 +18,19 @@
 #include <unistd.h>
 
 /*
+ * Ubuntu 24.04 userspace headers predate the syscall-name macros. The native
+ * fixture intercepts these calls entirely; define the architecture-common
+ * Linux syscall numbers only so the synthetic 6.18+ namespace ABI path is
+ * compiled and exercised on x86_64 and arm64 CI.
+ */
+#ifndef SYS_statmount
+#define SYS_statmount 457
+#endif
+#ifndef SYS_listmount
+#define SYS_listmount 458
+#endif
+
+/*
  * Compile the actual production manager, without SWAPZ_PRIMARY_ROOTLESS_TEST:
  * that macro intentionally disables the production mount reader. Redirect only
  * procfs input to owned regular files; never create a mount, open a block
