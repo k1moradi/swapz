@@ -665,14 +665,57 @@ static int injected_fsync(int fd)
 
     if (fstat(fd, &info) < 0)
         return -1;
-    if ((failure_mode == 1 && S_ISREG(info.st_mode)) ||
+    if (((failure_mode == 1 || failure_mode == 6) &&
+         S_ISREG(info.st_mode)) ||
         (failure_mode == 2 && S_ISDIR(info.st_mode))) {
-        errno = failure_mode == 1 ? ENOSPC : EIO;
+        errno = failure_mode == 2 ? EIO : ENOSPC;
         return -1;
     }
     return fsync(fd);
 }
+/* Simulate a late close error after the descriptor has been released. */
+static int injected_close(int fd)
+{
+    struct stat info;
+    int is_temporary_file = fstat(fd, &info) == 0 &&
+                            S_ISREG(info.st_mode);
+    int close_result = close(fd);
+
+    if (failure_mode == 3 && is_temporary_file && close_result == 0) {
+        errno = EIO;
+        return -1;
+    }
+    return close_result;
+}
+static int injected_renameat(int source_fd, const char *source_name,
+                             int destination_fd, const char *destination_name)
+{
+    if (failure_mode == 4) {
+        errno = EXDEV;
+        return -1;
+    }
+    if (renameat(source_fd, source_name, destination_fd,
+                 destination_name) < 0)
+        return -1;
+    /* The rename side effect may be visible despite a reported error. */
+    if (failure_mode == 5) {
+        errno = EIO;
+        return -1;
+    }
+    return 0;
+}
+static int injected_unlinkat(int directory_fd, const char *name, int flags)
+{
+    if (failure_mode == 6) {
+        errno = EACCES;
+        return -1;
+    }
+    return unlinkat(directory_fd, name, flags);
+}
 #define fsync injected_fsync
+#define close injected_close
+#define renameat injected_renameat
+#define unlinkat injected_unlinkat
 """
         suffix = r"""
 int main(int argc, char **argv)
@@ -708,15 +751,26 @@ int main(int argc, char **argv)
                 "-Wpedantic", str(source), "-o", str(binary),
             ]
             subprocess.run(compiler, check=True, cwd=ROOT)
-            for scenario, mode, expected_bytes, expected_result in (
+            for scenario, mode, expected_bytes, expected_result, temp_left in (
                 ("before-rename", 1, "original\n",
-                 f"result=-1 errno={errno.ENOSPC}\n"),
+                 f"result=-1 errno={errno.ENOSPC}\n", False),
                 ("after-rename-before-directory-fsync", 2, "replacement\n",
-                 f"result=-1 errno={errno.EIO}\n"),
-                ("durable-replacement", 0, "replacement\n", None),
+                 f"result=-1 errno={errno.EIO}\n", False),
+                ("close-failed-after-release", 3, "original\n",
+                 f"result=-1 errno={errno.EIO}\n", False),
+                ("rename-before-mutation", 4, "original\n",
+                 f"result=-1 errno={errno.EXDEV}\n", False),
+                ("rename-after-mutation", 5, "replacement\n",
+                 f"result=-1 errno={errno.EIO}\n", False),
+                ("cleanup-error-retains-first-errno", 6, "original\n",
+                 f"result=-1 errno={errno.ENOSPC}\n", True),
+                ("durable-replacement", 0, "replacement\n", None, False),
             ):
                 with self.subTest(scenario=scenario):
                     state = fixture / "primary-state.json"
+                    temporary = fixture / (
+                        ".primary-state.json." + "a" * 32 + ".tmp")
+                    temporary.unlink(missing_ok=True)
                     state.write_text("original\n", encoding="ascii")
                     state.chmod(0o600)
                     result = subprocess.run(
@@ -727,11 +781,18 @@ int main(int argc, char **argv)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(state.read_text(encoding="ascii"),
                                      expected_bytes)
+                    self.assertEqual(temporary.exists(), temp_left)
                     if expected_result is None:
                         self.assertTrue(result.stdout.startswith("result=0 "))
                     else:
                         self.assertEqual(result.stdout, expected_result)
                     self.assertEqual(result.stderr, "")
+
+            # Reject a close failure before the canonical name is replaced;
+            # a close-after-rename implementation fails the synthetic case.
+            self.assertLess(
+                writer.index("if (close(fd) < 0) {"),
+                writer.index("if (renameat(recovery_fd, temporary_name"))
 
             # A writer that publishes success before its directory fsync must
             # fail this fixture even when the renamed bytes are already visible.

@@ -5047,16 +5047,25 @@ int swapz_primary_replace_record_at(int recovery_fd, const char *name,
 			goto failed;
 		}
 	}
+	/*
+	 * close() may report an error after releasing the descriptor. Complete
+	 * that boundary before rename so a failed close cannot publish a stage.
+	 * Only recovery_fd remains borrowed; this temporary fd is owned here.
+	 */
+	if (close(fd) < 0) {
+		saved_errno = errno;
+		fd = -1;
+		goto failed;
+	}
+	fd = -1;
 	if (renameat(recovery_fd, temporary_name, recovery_fd, name) < 0) {
 		saved_errno = errno;
 		goto failed;
 	}
-	if (close(fd) < 0)
-		return -1;
 	return fsync(recovery_fd);
 
 failed:
-	if (fd >= 0) {
+	{
 		struct stat named_info;
 
 		if (temporary_identity_valid &&
@@ -5065,8 +5074,9 @@ failed:
 		    named_info.st_dev == temporary_info.st_dev &&
 		    named_info.st_ino == temporary_info.st_ino)
 			(void)unlinkat(recovery_fd, temporary_name, 0);
-		(void)close(fd);
 	}
+	if (fd >= 0)
+		(void)close(fd);
 	errno = saved_errno;
 	return -1;
 }

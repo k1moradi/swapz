@@ -73,13 +73,20 @@ exits. Exercise a synthetic failure before state mutation, a failure after
 RECOVERY_REQUIRED becomes observable, and a successful write. The pre-write
 failure leaves the interrupted bytes observable; the post-write failure may
 already expose RECOVERY_REQUIRED even though persistence still reports failure.
-This mirrors the production replace-record ordering where rename precedes close
-and recovery-directory fsync, so failed persistence leaves durable state
-uncertain and no particular observed stage is proof of durability. In all
+This mirrors the production replace-record ordering where temporary-file
+fsync and close precede rename, followed by recovery-directory fsync. An
+injected post-mutation rename or directory-sync failure can expose new bytes
+while publication remains failed and durability UNCERTAIN. No observed stage
+alone establishes durable success. In all
 cases preserve the original numeric errno, report the secondary recovery errno
 for failed persistence, and reject failure-path ACTIVE/COMPLETE reporting.
 Synthetic file fsync does not establish production directory durability,
-mapper state or kernel swap state.
+mapper state or kernel swap state. A source-extracted record-writer fixture
+must also simulate close failing after descriptor release, rename failing both
+before and after a visible replacement, and temporary-unlink cleanup failing
+after file fsync. A failed close must not publish a new canonical state, and
+any cleanup errno must leave the first writer errno unchanged. Only verified
+successful rename and recovery-directory fsync permit durable publication.
 
 A failed owner-marker unlink or release-directory fsync never qualifies STOP or
 RECOVER as COMPLETE, even when an in-process directory read finds no active
