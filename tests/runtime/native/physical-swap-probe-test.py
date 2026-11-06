@@ -2065,6 +2065,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "SWAPZ-TEST-PHYSICAL-ffffffffffffffff")
             elif teardown_oracle_metadata == "state_host_report_count":
                 saved_state["host_report_count"] = 999
+            elif teardown_oracle_metadata == "mapper_inventory_raw":
+                saved_results["dm_inventory_after"] = {
+                    **saved_results["dm_inventory_after"],
+                    "other_mapper_sha256": "f" * 64,
+                }
+                # Deliberately retain the old summary to prove the terminal
+                # decision revalidates raw evidence instead of trusting it.
+                saved_results["unrelated_mapper_inventory_unchanged"] = True
+            elif teardown_oracle_metadata == "lower_parent_identity":
+                saved_results["lower_io_source"] = (
+                    "/sys/dev/block/8:99/stat")
+                for field in ("block_stats_before", "block_stats_after"):
+                    saved_results[field] = {
+                        **saved_results[field],
+                        "device_major_minor": "8:99",
+                    }
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -2383,6 +2399,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "saved_mapper_mismatch", "not_applicable"),
             ("state_host_report_count", False, "matching",
              "saved_report_count_mismatch", "not_applicable"),
+            ("mapper_inventory_raw", True, "matching",
+             "mapper_inventory_mismatch", "not_applicable"),
+            ("lower_parent_identity", True, "lower_parent_mismatch",
+             "matching", "not_applicable"),
         )
         for (damaged_field, development_only, target_identity_proof,
              source_helper_artifact_binding, approval_proof) in cases:

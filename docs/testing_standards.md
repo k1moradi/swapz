@@ -5872,8 +5872,11 @@ bindings consistent with the durable run state, normal recovery, and independent
 final observations. Revalidate duplicate qualified-source/artifact and live
 artifact snapshots, the selected UUID path and original swap row, development
 fast-test evidence, saved parent-card/swap identity, exact mapper name/UUID,
-and the saved qualification-report count. Contradictory copies
-are blockers, not optional telemetry. A COMPLETE stage and matching 4096-byte header alone
+and the saved qualification-report count. Recompute the raw before/after
+non-owned mapper inventory comparison and bind every lower-I/O snapshot plus
+its declared source to the reviewed physical parent; a retained PASS summary
+cannot override contradictory raw evidence. Contradictory copies are blockers,
+not optional telemetry. A COMPLETE stage and matching 4096-byte header alone
 cannot prove I/O. Never retain an oracle-suite PASS on RECOVERY_REQUIRED.
 Rootless tests must corrupt a synthetic COMPLETE/header-matched result with
 missing or RUNNING phases, stale consumed approval, mismatched source/helper/

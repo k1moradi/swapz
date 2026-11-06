@@ -1625,6 +1625,28 @@ def _module_loaded_from_sysfs():
         ) from exc
 
 
+def _mapper_inventory_unchanged(before, after):
+    """Validate and compare the two bounded non-owned mapper inventories."""
+    expected_fields = {"other_mapper_count", "other_mapper_sha256"}
+    for label, snapshot in (("before", before), ("after", after)):
+        if not isinstance(snapshot, dict) or set(snapshot) != expected_fields:
+            raise ProbeError(
+                f"dm_inventory_{label} expected=exact_bounded_inventory "
+                f"observed={type(snapshot).__name__}")
+        count = snapshot.get("other_mapper_count")
+        digest = snapshot.get("other_mapper_sha256")
+        if type(count) is not int or count < 0:
+            raise ProbeError(
+                f"dm_inventory_{label}.other_mapper_count "
+                "expected=nonnegative_integer observed=invalid")
+        if not isinstance(digest, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", digest):
+            raise ProbeError(
+                f"dm_inventory_{label}.other_mapper_sha256 "
+                "expected=lowercase_sha256 observed=invalid")
+    return before == after
+
+
 def _module_mapper_preflight():
     """Prove a clean swapz module baseline and readable DM inventory."""
     if _module_loaded_from_sysfs():
@@ -1722,12 +1744,10 @@ def _final_observations(results, state_dir, state, target):
     try:
         results["dm_inventory_after"] = _dm_inventory_snapshot(
             state.get("dm_name"), state.get("dm_uuid"))
-        before = results.get("dm_inventory_before")
-        after = results["dm_inventory_after"]
         results["unrelated_mapper_inventory_unchanged"] = (
-            isinstance(before, dict)
-            and before.get("other_mapper_count") == after["other_mapper_count"]
-            and before.get("other_mapper_sha256") == after["other_mapper_sha256"])
+            _mapper_inventory_unchanged(
+                results.get("dm_inventory_before"),
+                results["dm_inventory_after"]))
     except ProbeError as exc:
         results["dm_inventory_after"] = None
         results["unrelated_mapper_inventory_unchanged"] = None
@@ -2445,6 +2465,25 @@ def _final_physical_oracle_evidence_error(results, state, target,
     for field, expected in saved_bindings.items():
         if state.get(field) != expected:
             return f"saved_{field}_mismatch"
+    expected_lower_parent = target["parent_major_minor"]
+    expected_lower_source = (
+        f"/sys/dev/block/{expected_lower_parent}/stat")
+    if results.get("lower_io_source") != expected_lower_source:
+        return "lower_io_source_mismatch"
+    for field in ("block_stats_before", "block_stats_after"):
+        snapshot = results.get(field)
+        if (not isinstance(snapshot, dict) or
+                snapshot.get("device_major_minor") != expected_lower_parent):
+            return f"{field}_parent_mismatch"
+    try:
+        if not _mapper_inventory_unchanged(
+                results.get("dm_inventory_before"),
+                results.get("dm_inventory_after")):
+            return "unrelated_mapper_inventory_changed"
+    except ProbeError:
+        return "invalid_mapper_inventory_evidence"
+    if results.get("unrelated_mapper_inventory_unchanged") is not True:
+        return "mapper_inventory_summary_mismatch"
     if results.get("oracle_suite") != "PHASES_PASS_RECOVERY_PENDING":
         return "unexpected_provisional_oracle_status"
     entries = results.get("physical_oracle_phases")
@@ -2469,9 +2508,15 @@ def _final_physical_oracle_evidence_error(results, state, target,
         if (not _swapz_status_healthy(entry.get("dmsetup_status_before")) or
                 not _swapz_status_healthy(entry.get("dmsetup_status_after"))):
             return f"phase_{index}_invalid_mapper_health"
+        before_stats = entry.get("block_stats_before")
+        after_stats = entry.get("block_stats_after")
+        if (not isinstance(before_stats, dict) or
+                not isinstance(after_stats, dict) or
+                before_stats.get("device_major_minor") != expected_lower_parent or
+                after_stats.get("device_major_minor") != expected_lower_parent):
+            return f"phase_{index}_lower_parent_mismatch"
         try:
-            lower_io_delta = _lower_io_delta(
-                entry.get("block_stats_before"), entry.get("block_stats_after"))
+            lower_io_delta = _lower_io_delta(before_stats, after_stats)
         except ProbeError:
             return f"phase_{index}_invalid_lower_counters"
         if entry.get("lower_io_delta") != lower_io_delta:
