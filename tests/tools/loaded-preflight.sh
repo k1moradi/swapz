@@ -613,16 +613,21 @@ read_owned_lower_proof() {
     [[ $node_devno == "$sysfs_devno" ]] || return 1
     block_major="${sysfs_devno%%:*}"
     if system_major="$(awk '
-        $0 == "Block devices:" { section = 1; next }
-        section && $2 == "nullb" {
-            if (NF != 2 || $1 !~ /^(0|[1-9][0-9]*)$/ ||
+        $0 == "Block devices:" {
+            if (++block_sections != 1)
+                invalid = 1
+            section = 1
+            next
+        }
+        $2 == "nullb" {
+            if (!section || NF != 2 || $1 !~ /^(0|[1-9][0-9]*)$/ ||
                 length($1) > 10 || ++matches != 1)
                 invalid = 1
             else
                 major = $1
         }
         END {
-            if (invalid || matches != 1) exit 2
+            if (invalid || block_sections != 1 || matches != 1) exit 2
             print major
         }
     ' /proc/devices 2>/dev/null)"; then
