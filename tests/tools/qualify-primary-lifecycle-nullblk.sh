@@ -604,7 +604,10 @@ prepare_interruption_run() {
 	if ! output="$(timeout --signal=TERM --kill-after=10s 90s \
 		"$CONTROL" primary prepare 2>&1)"; then
 		verify_prepare_failure_diagnostic "$output"
-		fail "interruption prepare failed"
+		if [[ "$output" != *" claim=retained target_unchanged=true"* ]]; then
+			blocked "interruption prepare refused before owner claim"
+		fi
+		fail "interruption prepare failed after owner claim"
 	fi
 	printf '%s\n' "$output"
 	RUN_ID="$(printf '%s\n' "$output" |
@@ -1454,7 +1457,10 @@ PY
 	fi
 
 	if (( OWN_NULL )) && (( ! QUARANTINE )); then
-		udevadm settle --timeout=10 >/dev/null 2>&1 || QUARANTINE=1
+		if ! udevadm settle --timeout=10 >/dev/null 2>&1; then
+			QUARANTINE=1
+			note "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE=udev_settle_failed_after_device_removal"
+		fi
 		if [[ -n "$BY_PARTUUID" &&
 		      ( -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ) ]]; then
 			QUARANTINE=1
@@ -1616,7 +1622,7 @@ fi
 
 CONFIGNAME="nullb-swapz-$TOKEN"
 CONFIG="$CONFIGFS/$CONFIGNAME"
-mkdir -- "$CONFIG" || blocked "cannot allocate owned null_blk config"
+mkdir -- "$CONFIG" 2>/dev/null || blocked "cannot allocate owned null_blk config"
 OWN_NULL=1
 CONFIG_IDENTITY="$(stat -c '%d:%i:%u' -- "$CONFIG" 2>/dev/null)" ||
 	fail "cannot capture created null_blk configfs identity"
@@ -1832,7 +1838,10 @@ if ! prepare_output="$(timeout --signal=TERM --kill-after=10s 90s \
 	else
 		note "PRIMARY_PREPARE_DIAGNOSTIC_PLAN=unavailable"
 	fi
-	fail "production coordinator prepare failed on owned null_blk"
+	if [[ "$prepare_output" != *" claim=retained target_unchanged=true"* ]]; then
+		blocked "production coordinator prepare refused before owner claim"
+	fi
+	fail "production coordinator prepare failed after owner claim"
 fi
 printf '%s\n' "$prepare_output"
 RUN_ID="$(printf '%s\n' "$prepare_output" |

@@ -2395,6 +2395,247 @@ int main(int argc, char **argv)
             'static const unsigned char prefix[] = "swapz-host-v2";',
             self.primary)
 
+
+    def test_rootless_private_report_host_digest_and_encoding(self):
+        import hashlib
+        import json
+
+        host_marker = 'HOST_SHA="$(python3 - <<\'PY\'\n'
+        host_start = self.script.index(host_marker) + len(host_marker)
+        host_source = self.script[
+            host_start:self.script.index('\nPY\n)" || blocked', host_start)]
+        report_marker = (
+            'export SOURCE_HEAD FORMATTER_SHA MODULE_SHA ORACLE_SHA HOST_SHA REPORT\n'
+            "python3 - <<'PY'\n")
+        report_start = self.script.index(report_marker) + len(report_marker)
+        report_source = self.script[
+            report_start:self.script.index("\nPY\n", report_start)]
+
+        # Match the production C byte layout, including the prefix's NUL.
+        self.assertIn('static const unsigned char prefix[] = "swapz-host-v2";',
+                      self.primary)
+        self.assertIn('memcpy(identity, prefix, sizeof(prefix));', self.primary)
+        self.assertIn('memcpy(identity + sizeof(prefix), product_uuid, 36U);',
+                      self.primary)
+        self.assertIn('identity[sizeof(prefix) + 36U + i]', self.primary)
+        self.assertIn('strcmp(parsed.host_identity_sha256,', self.primary)
+        self.assertIn('expected_host_identity_sha256) ||', self.primary)
+
+        with TemporaryDirectory(prefix="swapz-host-contract-") as directory:
+            fixture = Path(directory)
+            machine_path = fixture / "machine-id"
+            dmi_path = fixture / "product_uuid"
+            report_path = fixture / "qualification.json"
+            host_source = host_source.replace(
+                'Path("/etc/machine-id")', f'Path({str(machine_path)!r})')
+            host_source = host_source.replace(
+                'Path("/sys/class/dmi/id/product_uuid")',
+                f'Path({str(dmi_path)!r})')
+            machine_id = "ABCDEF0123456789ABCDEF0123456789"
+            product_uuid = "ABCDEF12-3456-7890-ABCD-EF1234567890"
+            expected_digest = hashlib.sha256(
+                b"swapz-host-v2\0" + product_uuid.lower().encode("ascii") +
+                machine_id.lower().encode("ascii")).hexdigest()
+
+            def run_host_source(machine_record, dmi_record):
+                machine_path.write_text(machine_record, encoding="ascii")
+                dmi_path.write_text(dmi_record, encoding="ascii")
+                return subprocess.run(
+                    ["python3", "-"], input=host_source,
+                    capture_output=True, text=True, timeout=5, check=False)
+
+            for machine_record, dmi_record in (
+                    (machine_id, product_uuid),
+                    (machine_id + "\n", product_uuid + "\n"),
+                    (machine_id.lower() + "\n", product_uuid.lower() + "\n")):
+                with self.subTest(valid=(machine_record, dmi_record)):
+                    result = run_host_source(machine_record, dmi_record)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), expected_digest)
+
+            for name, machine_record, dmi_record in (
+                    ("zero-machine", "0" * 32, product_uuid),
+                    ("short-machine", machine_id[:-1], product_uuid),
+                    ("bad-machine-hex", "G" + machine_id[1:], product_uuid),
+                    ("double-machine-newline", machine_id + "\n\n", product_uuid),
+                    ("zero-dmi", machine_id, "00000000-0000-0000-0000-000000000000"),
+                    ("bad-dmi-hex", machine_id, "G" + product_uuid[1:]),
+                    ("bad-dmi-hyphens", machine_id, product_uuid.replace("-", "")),
+                    ("double-dmi-newline", machine_id, product_uuid + "\n\n")):
+                with self.subTest(malformed=name):
+                    result = run_host_source(machine_record, dmi_record)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+
+            source_sha = "1" * 40
+            environment = os.environ.copy()
+            environment.update({
+                "SOURCE_HEAD": source_sha,
+                "FORMATTER_SHA": "2" * 64,
+                "MODULE_SHA": "3" * 64,
+                "ORACLE_SHA": "4" * 64,
+                "HOST_SHA": expected_digest,
+                "REPORT": str(report_path),
+            })
+            generated = subprocess.run(
+                ["python3", "-"], input=report_source, env=environment,
+                capture_output=True, text=True, timeout=5, check=False)
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            payload = report_path.read_bytes()
+            report = json.loads(payload)
+            self.assertEqual(
+                payload,
+                (json.dumps(report, sort_keys=True, separators=(",", ":")) +
+                 "\n").encode("utf-8"))
+            self.assertEqual(report["schema"], "swapz-test-results-v1")
+            self.assertEqual(report["host_identity"], {
+                "schema": "swapz-host-v1",
+                "architecture": "x86_64",
+                "id_sha256": expected_digest,
+            })
+            self.assertEqual(report["kernel_release"], os.uname().release)
+            self.assertEqual(report["source_sha"], source_sha)
+            self.assertEqual(report["tested_commit_sha"], source_sha)
+            self.assertEqual(report["overall"], "PASS")
+            self.assertEqual(report["qualification"], "RAM_BACKED_NULL_BLK_ONLY")
+            self.assertEqual(len(report["stages"]), 5)
+            self.assertTrue(all(stage["status"] == "PASS" and
+                                stage["exit_code"] == 0
+                                for stage in report["stages"]))
+            self.assertEqual(report["qualified_artifacts"]["status"], "AVAILABLE")
+            self.assertNotIn(machine_id.lower(), payload.decode("ascii"))
+            self.assertNotIn(product_uuid.lower(), payload.decode("ascii"))
+            different_host_digest = hashlib.sha256(
+                b"swapz-host-v2\0" + product_uuid.lower().encode("ascii") +
+                ("b" * 32).encode("ascii")).hexdigest()
+            self.assertEqual(report["host_identity"]["id_sha256"],
+                             expected_digest)
+            self.assertNotEqual(report["host_identity"]["id_sha256"],
+                                different_host_digest)
+
+    def test_rootless_prepare_refusal_keeps_blocked_and_fail_distinct(self):
+        verifier_start = self.script.index("verify_prepare_failure_diagnostic() {")
+        verifier = self.script[
+            verifier_start:self.script.index("\n}", verifier_start) + 2]
+        prepare_start = self.script.index(
+            'note "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare"')
+        prepare_path = self.script[
+            prepare_start:self.script.index(
+                'printf \'%s\\n\' "$prepare_output"', prepare_start)]
+        fake_commands = r'''
+set -Eeuo pipefail
+fail() { printf 'FAIL_PRIMARY_NULLBLK_LIFECYCLE: %s\n' "$*" >&2; exit 1; }
+blocked() { printf 'BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\n' "$*" >&2; exit 2; }
+note() { printf '%s\n' "$*"; }
+timeout() {
+    if [[ "$*" == *" primary prepare" ]]; then
+        printf '%s\n' "$INJECTED_PREPARE_OUTPUT"
+        return 2
+    fi
+    if [[ "$*" == *" primary plan" ]]; then
+        printf '%s\n' '{"plan":"read-only"}'
+        return 0
+    fi
+    return 1
+}
+CONTROL=/private-mock-only
+'''
+        for phase, error_number, claim, expected_status, marker in (
+                ("qualification-report-read", errno.EINVAL, "claim=none", 2,
+                 "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:"),
+                ("global-mutation-lock", errno.EBUSY, "", 2,
+                 "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:"),
+                ("manifest-write", errno.EIO,
+                 "claim=retained target_unchanged=true", 1,
+                 "FAIL_PRIMARY_NULLBLK_LIFECYCLE:")):
+            with self.subTest(phase=phase):
+                description = os.strerror(error_number)
+                diagnostic = (
+                    f"PRIMARY_PREPARE=FAILED phase={phase} "
+                    f"errno={error_number} error={description}" +
+                    (f" {claim}" if claim else ""))
+                environment = os.environ.copy()
+                environment["INJECTED_PREPARE_OUTPUT"] = (
+                    diagnostic + "\nBLOCKED: primary-swap preparation failed: " +
+                    description)
+                result = subprocess.run(
+                    ["bash", "-c",
+                     fake_commands + verifier + "\n" + prepare_path],
+                    env=environment, cwd=ROOT, capture_output=True,
+                    text=True, timeout=10, check=False)
+                self.assertEqual(result.returncode, expected_status,
+                                 result.stdout + result.stderr)
+                self.assertIn(diagnostic, result.stderr)
+                self.assertIn(marker, result.stderr)
+                self.assertIn("PRIMARY_PREPARE_DIAGNOSTIC_PLAN=available",
+                              result.stdout)
+                self.assertNotIn("PASS_", result.stdout + result.stderr)
+
+    def test_rootless_fresh_config_does_not_adopt_foreign_and_missing_alias_blocks(self):
+        creation_start = self.script.index(
+            'CONFIGNAME="nullb-swapz-$TOKEN"')
+        creation = self.script[
+            creation_start:self.script.index(
+                'CONFIG_IDENTITY="$(stat -c', creation_start)]
+        self.assertIn('mkdir -- "$CONFIG" 2>/dev/null || blocked', creation)
+        self.assertNotIn("rmdir", creation)
+        self.assertNotIn("power", creation)
+        with TemporaryDirectory(prefix="swapz-foreign-nullblk-") as directory:
+            configfs = Path(directory)
+            foreign_name = "nullb-swapz-" + "f" * 16
+            foreign = configfs / foreign_name
+            foreign.mkdir()
+            sentinel = foreign / "foreign"
+            sentinel.write_text("do-not-touch\n", encoding="ascii")
+            original_inode = foreign.stat().st_ino
+
+            def attempt_create(token):
+                program = (
+                    "set -Eeuo pipefail\n"
+                    'blocked() { printf "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 2; }\n'
+                    f"CONFIGFS={shlex.quote(str(configfs))}\n"
+                    f"TOKEN={token}\n" + creation)
+                return subprocess.run(
+                    ["bash", "-c", program], capture_output=True,
+                    text=True, timeout=5, check=False)
+
+            fresh = attempt_create("a" * 16)
+            self.assertEqual(fresh.returncode, 0, fresh.stderr)
+            self.assertTrue((configfs / ("nullb-swapz-" + "a" * 16)).is_dir())
+            conflict = attempt_create("f" * 16)
+            self.assertEqual(conflict.returncode, 2, conflict.stderr)
+            self.assertIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:", conflict.stderr)
+            self.assertNotIn(str(foreign), conflict.stderr)
+            self.assertEqual(foreign.stat().st_ino, original_inode)
+            self.assertEqual(sentinel.read_text(encoding="ascii"),
+                             "do-not-touch\n")
+
+            alias_start = self.script.index(
+                'if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then',
+                self.script.index("udev_alias_verified() {"))
+            alias_check = self.script[
+                alias_start:self.script.index('\nmkswap "$PARTITION"', alias_start)]
+            missing_alias = configfs / "missing-by-partuuid"
+            program = (
+                "set -Eeuo pipefail\n"
+                'blocked() { printf "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 2; }\n'
+                'note() { printf "%s\\n" "$*"; }\n'
+                'udevadm() { return 1; }\n'
+                f"BY_PARTUUID={shlex.quote(str(missing_alias))}\n"
+                f"PART_SYSFS={shlex.quote(str(configfs))}\n"
+                "PARTUUID=7fb9401d-04\nUDEV_DEVPATH=/mock-only\n"
+                "UDEV_RULE=\n" + alias_check)
+            denied = subprocess.run(
+                ["bash", "-c", program], capture_output=True,
+                text=True, timeout=5, check=False)
+            self.assertEqual(denied.returncode, 2, denied.stderr)
+            self.assertIn(
+                "udev did not publish the owned partition by-PARTUUID node",
+                denied.stderr)
+            self.assertFalse(missing_alias.exists())
+            self.assertEqual(sentinel.read_text(encoding="ascii"),
+                             "do-not-touch\n")
+
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)
         self.assertIn("SWAPZ_PRIMARY_TEST_FAULT_HIT", self.shim)
@@ -2936,6 +3177,11 @@ exit 0
                     for attribute, value in attributes.items():
                         (config / attribute).write_text(value, encoding="ascii")
                     self.assertNotEqual(config.stat().st_ino, identity.st_ino)
+                elif scenario == "changed_power_inode":
+                    (config / "power").rename(config / "retained-original-power")
+                    (config / "power").write_text("1\n", encoding="ascii")
+                    self.assertNotEqual(
+                        (config / "power").stat().st_ino, power_identity.st_ino)
                 elif scenario == "missing_index":
                     (config / "index").unlink()
                 elif scenario == "wrong_index":
@@ -2950,6 +3196,16 @@ exit 0
                     (config / "size").write_text("128\n", encoding="ascii")
                 elif scenario == "foreign_memory":
                     (config / "memory_backed").write_text("0\n", encoding="ascii")
+                elif scenario == "stale_state":
+                    recovery = fixture / "private-evidence"
+                    recovery.mkdir()
+                    state_file = recovery / "primary-state.json"
+                    state_file.write_text(
+                        '{"schema":"swapz-primary-state-v1","run_id":"' +
+                        "c" * 32 + '","stage":"COMPLETE",'
+                        '"recovery_previous_stage":null}\n',
+                        encoding="ascii")
+                    state_file.chmod(0o600)
 
                 replacements = (
                     ("/sys/dev/block", str(sysdev)),
@@ -2997,6 +3253,9 @@ exit 0
                     "TEST_BASE": fixture / "private-evidence",
                     "BY_PARTUUID": "",
                     "RMDIR_FAIL": "1" if scenario == "rmdir_failure" else "0",
+                    "STALE_STATE": "1" if scenario == "stale_state" else "0",
+                    "UDEV_SETTLE_FAIL": (
+                        "1" if scenario == "udev_settle_failure" else "0"),
                     "MAPPER_FOREIGN": "1" if scenario == "foreign_mapper" else "0",
                 }
                 setup = "\n".join(
@@ -3004,11 +3263,13 @@ exit 0
                     for key, value in settings.items())
                 fake_commands = r'''
 note() { printf '%s\n' "$*"; }
-state_stage() { return 0; }
+state_stage() {
+    [[ "$STALE_STATE" != 1 ]] || printf 'COMPLETE\n'
+}
 swapz_swap_inventory_identity() { printf 'unchanged\n'; }
 mapper_absence_proven() { return 0; }
 findmnt() { return 1; }
-udevadm() { return 0; }
+udevadm() { [[ "$1" != settle || "$UDEV_SETTLE_FAIL" != 1 ]]; }
 swapz_resolve_owned_disk() {
     [[ "$1" == "$CONFIGNAME" && "$2" == "$INDEX" &&
        -f "$3/$DISK/dev" ]] || return 1
@@ -3067,7 +3328,8 @@ rmdir() {
         self.assertFalse(exists)
         self.assertEqual(actions, ["rmdir"])
 
-        for scenario in ("replacement", "missing_index", "wrong_index",
+        for scenario in ("replacement", "changed_power_inode", "missing_index",
+                         "wrong_index",
                          "wrong_sysfs_devno", "wrong_block_devno",
                          "wrong_partition_devno", "wrong_size",
                          "foreign_memory", "foreign_mapper"):
@@ -3081,6 +3343,18 @@ rmdir() {
                 self.assertIn(
                     "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE="
                     "config_or_mapper_identity_uncertain", result.stdout)
+
+        stale_state, power, exists, actions = run_fixture("stale_state")
+        self.assertEqual(stale_state.returncode, 1)
+        self.assertEqual(power, "1")
+        self.assertTrue(exists)
+        self.assertEqual(actions, [])
+        self.assertIn(
+            "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE="
+            "unfinished_or_ambiguous_durable_state", stale_state.stdout)
+        self.assertIn(
+            "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private",
+            stale_state.stdout)
 
         original_failure, power, exists, actions = run_fixture(
             "replacement", original_status=73)
@@ -3096,6 +3370,27 @@ rmdir() {
         self.assertTrue(exists)
         self.assertEqual(actions, ["rmdir"])
         self.assertIn("nullblk_cleanup_failed", cleanup_failure.stdout)
+
+
+        refused_blocked, power, exists, actions = run_fixture(
+            "replacement", original_status=2)
+        self.assertEqual(refused_blocked.returncode, 2)
+        self.assertEqual(power, "1")
+        self.assertTrue(exists)
+        self.assertEqual(actions, [])
+
+        settle_failure, power, exists, actions = run_fixture(
+            "udev_settle_failure")
+        self.assertEqual(settle_failure.returncode, 1)
+        self.assertIsNone(power)
+        self.assertFalse(exists)
+        self.assertEqual(actions, ["rmdir"])
+        self.assertIn(
+            "QUARANTINED_PRIMARY_NULLBLK_LIFECYCLE="
+            "udev_settle_failed_after_device_removal", settle_failure.stdout)
+        self.assertIn(
+            "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private",
+            settle_failure.stdout)
 
     def test_cleanup_quarantines_unfinished_durable_state(self):
         self.assertIn("unfinished_or_ambiguous_durable_state", self.script)

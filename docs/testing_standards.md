@@ -7452,7 +7452,12 @@ removal. This private credential is never an owner qualification and must never
 be imported into production recovery storage. If initial metadata preparation
 refuses, capture the read-only `primary plan` output before cleanup even when
 the command exits with its expected BLOCKED status, so the exact failed target,
-recovery, mount, swap or artifact gate remains visible in the owner report. The
+recovery, mount, swap or artifact gate remains visible in the owner report.
+A validated preclaim preparation refusal (including report-import and global
+lock admission) remains BLOCKED; a validated postclaim operation failure with
+canonical retained-owner evidence is FAIL. Cleanup cannot promote either to
+PASS, and a failed post-removal UDEV settle retains private evidence with an
+explicit phase-specific quarantine diagnostic. The
 owned-null_blk build may
 also expose deterministic process-death points through
 `SWAPZ_PRIMARY_TEST_INTERRUPT_AFTER`; the production build must compile every
