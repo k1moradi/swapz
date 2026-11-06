@@ -378,6 +378,10 @@ preserve the first parser status in the refusal. Configfs numeric identity
 attributes must likewise be bounded,
 single-record, newline-terminated canonical unsigned values; command
 substitution must not normalize malformed attributes into identity proof.
+Index-based ownership must not skip a token-shaped configfs candidate whose
+index is missing, unreadable or malformed: inability to prove that candidate
+different is ownership ambiguity. Shared identity readers must bound input
+before validation rather than reading an arbitrarily large malformed record.
 No telemetry, token, or stale mapper snapshot grants creation authority.
 
 

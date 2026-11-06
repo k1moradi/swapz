@@ -488,16 +488,28 @@ case "$lower_name" in
         is_uint "$lower_index" ||
             refuse BLOCKED null_blk_owner unavailable "pre-existing harness dm_swapz lower is not null_blk"
         matches=()
+        index_owner_ambiguous=0
+        index_owner_status=unavailable
         for config in "$cfgbase"/nullb-swapz-*; do
-            [[ -d $config && -r $config/index ]] || continue
             config_name="${config##*/}"
             config_token="${config_name#nullb-swapz-}"
             is_hex16 "$config_token" || continue
-            [[ "$(cat "$config/index" 2>/dev/null)" == "$lower_index" ]] &&
-                matches+=("$config")
+            if [[ ! -d $config || -L $config ]]; then
+                index_owner_ambiguous=1
+                continue
+            fi
+            if config_index="$(swapz_read_canonical_uint "$config/index")"; then
+                [[ $config_index == "$lower_index" ]] &&
+                    matches+=("$config")
+            else
+                config_index_status=$?
+                index_owner_ambiguous=1
+                [[ $index_owner_status != unavailable ]] ||
+                    index_owner_status="$config_index_status"
+            fi
         done
-        [[ ${#matches[@]} == 1 ]] ||
-            refuse BLOCKED null_blk_owner unavailable "dependency index has no unique token-shaped configfs owner"
+        [[ $index_owner_ambiguous == 0 && ${#matches[@]} == 1 ]] ||
+            refuse BLOCKED null_blk_owner unavailable "phase=dependency_owner resource_kind=null_blk expected_proof=unique_canonical_configfs_index_owner observed_proof=ambiguous_or_unreadable original_errno_or_exit=$index_owner_status retained_state_action=retain_unproven_resources safe_next_action=inspect_read_only"
         owned_config="${matches[0]}"
         ;;
     *)
@@ -523,24 +535,10 @@ ownership_refuse() {
     refuse BLOCKED owned_resource_proof unavailable "phase=$phase resource_kind=$resource_kind expected_proof=$expected observed_proof=$observed original_errno_or_exit=$status retained_state_action=$retained_action safe_next_action=original_creator_revalidate_then_cleanup_or_read_only_reconcile"
 }
 
-read_canonical_uint_file() {
-    local path="$1" value='' extra_byte=''
-    [[ -f $path && ! -L $path ]] || return 1
-    {
-        IFS= read -r -n 21 value || return 1
-        [[ ${#value} -le 20 ]] || return 1
-        if IFS= read -r -n 1 extra_byte || [[ -n $extra_byte ]]; then
-            return 1
-        fi
-    } < "$path"
-    is_uint "$value" || return 1
-    printf '%s\n' "$value"
-}
-
 read_owned_config_uint() {
     local result_variable="$1" phase="$2" attribute="$3"
     local value attribute_status
-    if value="$(read_canonical_uint_file "$owned_config/$attribute")"; then
+    if value="$(swapz_read_canonical_uint "$owned_config/$attribute")"; then
         printf -v "$result_variable" '%s' "$value"
     else
         attribute_status=$?

@@ -3,17 +3,32 @@
 # driver major, index/minor, sysfs devno, node rdev, size and ownership.
 # Reject missing final newlines, extra records, symlinks and oversized devnos.
 # This read-only telemetry parser cannot establish creation authority.
-swapz_read_canonical_devno() {
-    local device_record_path="$1" device_number='' extra_record=''
-    [[ -f "$device_record_path" && ! -L "$device_record_path" ]] || return 1
+swapz_read_bounded_record() {
+    local result_variable="$1" record_path="$2" max_characters="$3"
+    local record='' extra_byte=''
+    [[ "$max_characters" =~ ^([1-9]|[1-5][0-9]|6[0-4])$ ]] || return 2
+    [[ -f "$record_path" && ! -L "$record_path" ]] || return 1
     {
-        IFS= read -r device_number || return 1
-        if IFS= read -r extra_record || [[ -n $extra_record ]]; then
+        IFS= read -r -n "$((max_characters + 1))" record || return 1
+        [[ ${#record} -le max_characters ]] || return 1
+        if IFS= read -r -n 1 extra_byte || [[ -n $extra_byte ]]; then
             return 1
         fi
-    } < "$device_record_path"
-    [[ ${#device_number} -le 21 &&
-       "$device_number" =~ ^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$ ]] || return 1
+    } < "$record_path"
+    printf -v "$result_variable" '%s' "$record"
+}
+
+swapz_read_canonical_uint() {
+    local record_path="$1" max_digits="${2:-20}" value=''
+    swapz_read_bounded_record value "$record_path" "$max_digits" || return $?
+    [[ "$value" =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+    printf '%s\n' "$value"
+}
+
+swapz_read_canonical_devno() {
+    local device_record_path="$1" device_number=''
+    swapz_read_bounded_record device_number "$device_record_path" 21 || return $?
+    [[ "$device_number" =~ ^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$ ]] || return 1
     printf '%s\n' "$device_number"
 }
 
