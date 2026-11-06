@@ -33,6 +33,10 @@ blocked_phase() {
             expected_state=regular_module_file
             observed_state=missing_or_unsafe
             next_action=inspect_module_artifact_metadata_read_only ;;
+        artifact_ownership)
+            expected_state=invoking_build_user_owned_module
+            observed_state=ownership_restore_failed
+            next_action=inspect_module_artifact_metadata_read_only ;;
         secure_boot_state)
             expected_state=authoritative_enabled_or_disabled_state
             if [[ "$command_status" == 0 ]]; then
@@ -177,13 +181,13 @@ fi
 sudo_command=()
 need_sudo() {
     if (( ${#sudo_command[@]} == 0 )); then
-        command -v sudo >/dev/null 2>&1 ||
-            blocked "sudo is required to read protected MOK material"
+        command -v sudo >/dev/null 2>&1 || return 127
         sudo_command=(sudo)
         if [[ ${SWAPZ_SIGN_NONINTERACTIVE:-0} == 1 ]]; then
             sudo_command+=(-n)
         fi
     fi
+    return 0
 }
 
 cert_requires_sudo=0
@@ -195,7 +199,8 @@ else
         blocked_phase certificate_material 1 \
             "MOK certificate is unavailable for signature verification"
     fi
-    need_sudo
+    need_sudo ||
+        blocked "sudo is required to read protected MOK material"
     "${sudo_command[@]}" test -f "$cert" &&
         "${sudo_command[@]}" test ! -L "$cert" ||
         blocked "MOK certificate is missing, unsafe, or sudo authorization is unavailable"
@@ -245,30 +250,103 @@ if ! mokutil_reports_enrolled; then
         "configured MOK certificate is not enrolled or enrollment could not be verified"
 fi
 
+module_owner_restore_status=0
+module_owner_restore_observed=not_needed
+
 restore_build_module_owner() {
+    module_owner_restore_status=0
+    module_owner_restore_observed=not_needed
     [[ "$mode" == sign ]] || return 0
     (( EUID != 0 )) || return 0
-    command -v stat >/dev/null 2>&1 ||
-        blocked "stat is required to preserve build-module ownership"
 
-    local current_owner expected_owner
-    current_owner="$(stat -c '%u:%g' -- "$module")" ||
-        blocked "cannot inspect build-module ownership after signing"
-    [[ "$current_owner" =~ ^[0-9]+:[0-9]+$ ]] ||
-        blocked "build-module ownership result is malformed"
-    expected_owner="$(id -u):$(id -g)" ||
-        blocked "cannot determine build user ownership"
+    local current_owner expected_uid expected_gid expected_owner command_status
+    if ! command -v stat >/dev/null 2>&1; then
+        module_owner_restore_status=127
+        module_owner_restore_observed=stat_unavailable
+        return 127
+    fi
+    if current_owner="$(stat -c '%u:%g' -- "$module")"; then
+        :
+    else
+        command_status=$?
+        module_owner_restore_status="$command_status"
+        module_owner_restore_observed=metadata_unavailable
+        return "$command_status"
+    fi
+    if [[ ! "$current_owner" =~ ^[0-9]+:[0-9]+$ ]]; then
+        module_owner_restore_status=1
+        module_owner_restore_observed=metadata_malformed
+        return 1
+    fi
+    if expected_uid="$(id -u)"; then
+        :
+    else
+        command_status=$?
+        module_owner_restore_status="$command_status"
+        module_owner_restore_observed=build_user_identity_unavailable
+        return "$command_status"
+    fi
+    if expected_gid="$(id -g)"; then
+        :
+    else
+        command_status=$?
+        module_owner_restore_status="$command_status"
+        module_owner_restore_observed=build_user_identity_unavailable
+        return "$command_status"
+    fi
+    expected_owner="$expected_uid:$expected_gid"
     [[ "$current_owner" == "$expected_owner" ]] && return 0
 
-    # sudo kmodsign can replace the output inode with a root-owned file. The
-    # surrounding Makefile must be able to set the final mode and rebuild it.
-    need_sudo
-    "${sudo_command[@]}" chown -- "$expected_owner" "$module" ||
-        blocked "cannot restore build-module ownership after signing"
-    current_owner="$(stat -c '%u:%g' -- "$module")" ||
-        blocked "cannot verify build-module ownership after signing"
-    [[ "$current_owner" == "$expected_owner" ]] ||
-        blocked "build-module ownership was not restored after signing"
+    # sudo kmodsign can replace the output inode with a root-owned mode-0600
+    # file. Restore only ownership here: the restrictive mode remains intact
+    # for verification, and the root Make target normalizes mode 0644 only
+    # after the complete module recipe succeeds.
+    if need_sudo; then
+        :
+    else
+        command_status=$?
+        module_owner_restore_status="$command_status"
+        module_owner_restore_observed=sudo_unavailable
+        return "$command_status"
+    fi
+    if "${sudo_command[@]}" chown -- "$expected_owner" "$module"; then
+        :
+    else
+        command_status=$?
+        module_owner_restore_status="$command_status"
+        module_owner_restore_observed=chown_failed
+        return "$command_status"
+    fi
+    if current_owner="$(stat -c '%u:%g' -- "$module")"; then
+        :
+    else
+        command_status=$?
+        module_owner_restore_status="$command_status"
+        module_owner_restore_observed=metadata_unavailable
+        return "$command_status"
+    fi
+    if [[ "$current_owner" != "$expected_owner" ]]; then
+        module_owner_restore_status=1
+        module_owner_restore_observed=ownership_mismatch
+        return 1
+    fi
+    module_owner_restore_observed=restored
+    return 0
+}
+
+require_build_module_owner() {
+    if restore_build_module_owner; then
+        return 0
+    fi
+    blocked_phase artifact_ownership "$module_owner_restore_status" \
+        "cannot restore build-module ownership for unprivileged signature verification"
+}
+
+report_build_module_owner_cleanup_failure() {
+    local primary_status="$1"
+    printf 'SWAPZ_SIGNING_DIAGNOSTIC artifact=dm-swapz.ko check=build_module_ownership_restore expected=invoking_build_user observed=%s command_status=%s primary_phase=signature_generation primary_command_status=%s next=inspect_module_artifact_metadata_read_only\n' \
+        "$module_owner_restore_observed" "$module_owner_restore_status" \
+        "$primary_status" >&2
 }
 
 extract_module_signature() {
@@ -372,6 +450,11 @@ verify_module_signature() {
 }
 signature_command_status=0
 signature_status=0
+if [[ "$mode" == sign ]]; then
+    # A prior interrupted sudo signing attempt can leave the module unreadable
+    # by the build user. Restore access before any unprivileged verification.
+    require_build_module_owner
+fi
 if verify_module_signature; then
     signature_status=0
 else
@@ -405,7 +488,6 @@ if [[ "$mode" == verify ]]; then
 fi
 
 if (( signature_status == 0 )); then
-    restore_build_module_owner
     printf '%s\n' \
         "Secure Boot: dm-swapz.ko already has a cryptographically valid signature from the enrolled configured MOK"
     exit 0
@@ -416,33 +498,43 @@ fi
 
 sign=(kmodsign sha512 "$key" "$cert" "$module")
 signature_generation_status=0
+signature_generation_failure="kmodsign failed"
 if [[ -r "$key" ]]; then
     [[ -f "$key" && ! -L "$key" ]] ||
         blocked_phase signature_generation 1 \
             "MOK private key is not a regular file"
     "${sign[@]}" >/dev/null 2>&1 || signature_generation_status=$?
-    if (( signature_generation_status != 0 )); then
-        blocked_phase signature_generation "$signature_generation_status" \
-            "kmodsign failed"
-    fi
 else
-    need_sudo
+    need_sudo ||
+        blocked "sudo is required to read protected MOK material"
     "${sudo_command[@]}" test -f "$key" &&
         "${sudo_command[@]}" test ! -L "$key" ||
         blocked_phase signature_generation 1 \
             "MOK private key is missing, unsafe, or sudo authorization is unavailable"
+    signature_generation_failure="sudo kmodsign failed or authorization is unavailable"
     "${sudo_command[@]}" "${sign[@]}" >/dev/null 2>&1 ||
         signature_generation_status=$?
-    if (( signature_generation_status != 0 )); then
-        blocked_phase signature_generation "$signature_generation_status" \
-            "sudo kmodsign failed or authorization is unavailable"
+fi
+
+module_owner_restore_failed=0
+if ! restore_build_module_owner; then
+    module_owner_restore_failed=1
+fi
+if (( signature_generation_status != 0 )); then
+    if (( module_owner_restore_failed != 0 )); then
+        report_build_module_owner_cleanup_failure "$signature_generation_status"
     fi
+    blocked_phase signature_generation "$signature_generation_status" \
+        "$signature_generation_failure"
+fi
+if (( module_owner_restore_failed != 0 )); then
+    blocked_phase artifact_ownership "$module_owner_restore_status" \
+        "cannot restore build-module ownership for unprivileged signature verification"
 fi
 
 if ! verify_module_signature; then
     blocked_phase detached_signature "$signature_command_status" \
         "new module signature failed cryptographic verification against the enrolled configured MOK"
 fi
-restore_build_module_owner
 printf '%s\n' \
     "Secure Boot: signed dm-swapz.ko and cryptographically verified it against the enrolled configured MOK"

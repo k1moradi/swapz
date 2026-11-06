@@ -705,6 +705,43 @@ exec "{flock_binary}" "$@"
                       missing_state_uninstall.stderr)
         self.assert_installed_exact()
 
+    def test_duplicate_nested_qualification_key_refuses_upgrade_before_mutation(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        installed_before = self.installed_package_state()
+        dkms_log_before = self.dkms_log.read_bytes()
+
+        self.module.write_bytes(b"replacement-qualified-module\n")
+        self.write_report()
+        canonical_report = self.report.read_text()
+        module_digest = sha256(self.module)
+        module_field = f'"module_sha256": "{module_digest}"'
+        self.assertEqual(canonical_report.count(module_field), 1)
+        conflicting_digest = "0" * 64
+        self.report.write_text(canonical_report.replace(
+            module_field,
+            f'"module_sha256": "{conflicting_digest}", {module_field}',
+            1))
+        self.report.chmod(0o600)
+
+        refused = self.invoke("install")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("field=duplicate_json_key", refused.stderr)
+        self.assertIn(
+            "expected=unique-key-per-object observed=module_sha256",
+            refused.stderr)
+        self.assertNotIn(str(self.home), refused.stderr)
+        self.assertEqual(self.installed_package_state(), installed_before)
+        self.assertEqual(self.dkms_log.read_bytes(), dkms_log_before)
+        self.assertFalse(list(
+            (self.home / "transactions").glob("swapz-package.*")))
+
+        # Correcting only the invalid report restores ordinary upgrade admission.
+        self.report.write_text(canonical_report)
+        self.report.chmod(0o600)
+        restored = self.invoke("install")
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assert_installed_exact()
+
     def test_mismatched_compiled_source_provenance_is_attributed(self):
         foreign_source = "f" * 40
         self.build_info.write_text(
@@ -1106,6 +1143,12 @@ exec "{flock_binary}" "$@"
             "  [ \"$#\" -eq 4 ] && [ \"$2\" = -- ] &&\n"
             "    [ \"$3\" = \"$SWAPZ_TEST_RESTORED_OWNER\" ] &&\n"
             "    [ \"$4\" = \"$SWAPZ_TEST_OWNER_MODULE\" ] || exit 95\n"
+            "  status=\"${SWAPZ_TEST_CHOWN_STATUS:-0}\"\n"
+            "  [ \"$status\" -eq 0 ] || exit \"$status\"\n"
+            "  # Mode 000 models a root-owned 0600 inode from the nonroot\n"
+            "  # fixture's perspective. Successful chown restores equivalent\n"
+            "  # owner access without relaxing production file modes.\n"
+            "  chmod 0600 -- \"$SWAPZ_TEST_OWNER_MODULE\" || exit 94\n"
             "  : > \"$SWAPZ_TEST_CHOWN_DONE\"\n"
             "  exit 0\n"
             "fi\n"
@@ -1117,11 +1160,20 @@ exec "{flock_binary}" "$@"
             "[ \"$#\" -eq 4 ] && [ \"$1\" = sha512 ] || exit 96\n"
             "printf '%s\\n' called >> \"$SWAPZ_TEST_KMODSIGN_LOG\"\n"
             "status=\"${SWAPZ_TEST_KMODSIGN_STATUS:-0}\"\n"
+            "restrict=\"${SWAPZ_TEST_KMODSIGN_RESTRICT_OUTPUT:-0}\"\n"
             "if [ \"$status\" -ne 0 ]; then\n"
+            "  if [ \"$restrict\" = 1 ]; then\n"
+            "    rm -f -- \"$SWAPZ_TEST_CHOWN_DONE\"\n"
+            "    chmod 000 -- \"$4\"\n"
+            "  fi\n"
             "  printf '%s\\n' \"$SWAPZ_TEST_KMODSIGN_PRIVATE_DIAGNOSTIC\" >&2\n"
             "  exit \"$status\"\n"
             "fi\n"
-            "cp -- \"$SWAPZ_TEST_SIGNED_TEMPLATE\" \"$4\"\n")
+            "cp -- \"$SWAPZ_TEST_SIGNED_TEMPLATE\" \"$4\"\n"
+            "if [ \"$restrict\" = 1 ]; then\n"
+            "  rm -f -- \"$SWAPZ_TEST_CHOWN_DONE\"\n"
+            "  chmod 000 -- \"$4\"\n"
+            "fi\n")
         kmodsign_mock.chmod(0o755)
 
         unsigned_build_module = self.home / "unsigned-build-module.ko"
@@ -1145,7 +1197,10 @@ exec "{flock_binary}" "$@"
             SWAPZ_TEST_SUDO_LOG=str(sudo_log),
             SWAPZ_TEST_KMODSIGN_LOG=str(kmodsign_log),
             SWAPZ_TEST_SIGNED_TEMPLATE=str(signed_module),
+            SWAPZ_TEST_KMODSIGN_RESTRICT_OUTPUT="1",
+            SWAPZ_TEST_CHOWN_STATUS="0",
         )
+        chown_done.touch()
         private_key.chmod(0)
         try:
             signed = subprocess.run(
@@ -1162,9 +1217,13 @@ exec "{flock_binary}" "$@"
                       sudo_log.read_text())
         self.assertEqual(kmodsign_log.read_text().splitlines(), ["called"])
 
-        # A valid signature is a no-op for signing, but a root-owned artifact
-        # left by an interrupted earlier build still has to regain its owner.
+        # A valid signature is a no-op for signing, but a root-owned mode-0600
+        # artifact left by an interrupted earlier build must regain build-user
+        # access before the helper performs unprivileged CMS verification.
         chown_done.unlink()
+        unsigned_build_module.chmod(0)
+        with self.assertRaises(PermissionError):
+            unsigned_build_module.read_bytes()
         sudo_log.write_text("")
         already_signed = subprocess.run(
             ["bash", str(ROOT / "packaging/sign-module.sh"),
@@ -1179,9 +1238,11 @@ exec "{flock_binary}" "$@"
 
         failed_build_module = self.home / "failed-signature-module.ko"
         failed_build_module.write_bytes(payload.read_bytes())
+        chown_done.touch()
         private_diagnostic_sentinel = "PRIVATE_KEY_PATH_SENTINEL"
         failed_sign_env = dict(
             sign_env, SWAPZ_TEST_KMODSIGN_STATUS="73",
+            SWAPZ_TEST_OWNER_MODULE=str(failed_build_module),
             SWAPZ_TEST_KMODSIGN_PRIVATE_DIAGNOSTIC=(
                 private_diagnostic_sentinel))
         signature_generation_failed = subprocess.run(
@@ -1194,6 +1255,8 @@ exec "{flock_binary}" "$@"
             "phase=signature_generation producer_status=73 command_status="
             f"{signature_generation_failed.returncode}")
         self.assertEqual(failed_build_module.read_bytes(), payload.read_bytes())
+        self.assertEqual(stat.S_IMODE(failed_build_module.stat().st_mode),
+                         0o600)
         self.assertEqual(
             kmodsign_log.read_text().splitlines(), ["called", "called"])
         self.assertIn("kmodsign failed", signature_generation_failed.stderr)
@@ -1210,6 +1273,37 @@ exec "{flock_binary}" "$@"
                 signature_generation_failed.stderr)
             self.assertIn(
                 "command_status=73", signature_generation_failed.stderr)
+
+        # Ownership cleanup is secondary to a signer failure. If both fail,
+        # retain the signer status as the first cause and report cleanup
+        # separately without exposing signer diagnostics.
+        cleanup_failed_module = self.home / "cleanup-failed-signature-module.ko"
+        cleanup_failed_module.write_bytes(payload.read_bytes())
+        chown_done.touch()
+        cleanup_failed_env = dict(
+            failed_sign_env,
+            SWAPZ_TEST_OWNER_MODULE=str(cleanup_failed_module),
+            SWAPZ_TEST_CHOWN_STATUS="74",
+        )
+        cleanup_failed = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             str(cleanup_failed_module)],
+            cwd=ROOT, env=cleanup_failed_env,
+            capture_output=True, text=True)
+        self.assertEqual(cleanup_failed.returncode, 2)
+        self.assertIn("phase=signature_generation", cleanup_failed.stderr)
+        self.assertIn("command_status=73", cleanup_failed.stderr)
+        self.assertIn(
+            "check=build_module_ownership_restore", cleanup_failed.stderr)
+        self.assertIn(
+            "command_status=74 primary_phase=signature_generation "
+            "primary_command_status=73",
+            cleanup_failed.stderr)
+        self.assertNotIn(private_diagnostic_sentinel, cleanup_failed.stderr)
+        self.assertNotIn(str(private_key), cleanup_failed.stderr)
+        cleanup_failed_module.chmod(0o600)
+        self.assertEqual(cleanup_failed_module.read_bytes(),
+                         payload.read_bytes())
 
         def verify_with_mokutil(*, cert=certificate_der, status="1",
                                 stdout=None, stderr="", path=crypto_bin,

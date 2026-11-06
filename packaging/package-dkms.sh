@@ -2042,6 +2042,20 @@ from pathlib import Path
 report = None
 
 
+class DuplicateQualificationKeyError(ValueError):
+    def __init__(self, key):
+        self.key = key
+
+
+def reject_duplicate_qualification_keys(pairs):
+    record = {}
+    for key, value in pairs:
+        if key in record:
+            raise DuplicateQualificationKeyError(key)
+        record[key] = value
+    return record
+
+
 def safe_observed(value):
     """Return a bounded non-path representation for public diagnostics."""
     if value is None:
@@ -2073,7 +2087,12 @@ def reject(field, expected, observed, next_step):
 
 
 try:
-    report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    report = json.loads(
+        Path(sys.argv[1]).read_text(encoding="utf-8"),
+        object_pairs_hook=reject_duplicate_qualification_keys)
+except DuplicateQualificationKeyError as error:
+    reject("duplicate_json_key", "unique-key-per-object", error.key,
+           "rerun-make-test-for-exact-clean-source")
 except (OSError, UnicodeError, ValueError, RecursionError):
     raise SystemExit(
         "qualification report invalid: field=document "

@@ -7709,12 +7709,17 @@ stub and record its calls; it must not invoke the host MOK, private key,
 `mokutil`, `kmodsign`, or `sudo`. The separate signing-hook fixture exercises
 the real helper with hermetic command mocks and a bounded test root.
 The rootless signing regression must also model `sudo kmodsign` replacing the
-module inode with a root-owned output, require restoration to the invoking
-build user's uid/gid after cryptographic verification (including a later
-already-signed invocation), verify that `--verify` remains ownership-read-
-only, and inject a failed signature-generation command while proving the
-unsigned module bytes remain unchanged and no private-key path/content reaches
-diagnostics. Raw signing-command stdout/stderr must not be replayed on failure;
+module inode with a root-owned mode-0600 output. Signing mode must restore the
+invoking build user's uid/gid before every unprivileged cryptographic
+verification, including a pre-existing signed inode from an interrupted build
+and the new inode produced by the current signer. Ownership restoration must
+not widen the production file mode; the root Make target normalizes the final
+0644 artifact only after the module recipe succeeds. `--verify` remains
+ownership-read-only. Inject a failed signature-generation command while proving
+the unsigned module bytes remain unchanged; if ownership cleanup also fails,
+retain the signer command status as the primary failure and report the bounded
+cleanup status separately. No private-key path/content may reach diagnostics.
+Raw signing-command stdout/stderr must not be replayed on failure;
 report only bounded phase/status context. Failure diagnostics must identify the true phase (including
 `phase=certificate_enrollment`, `phase=detached_signature`,
 `phase=module_vermagic`, or `phase=signature_generation` as applicable) and
@@ -7726,6 +7731,15 @@ validity plus enrollment, but it must not claim that the target kernel
 accepted the module under its configured enforcement policy until the same
 exact installed bytes have been safely and authoritatively loaded by that
 kernel.
+
+The package qualification JSON parser must reject duplicate keys in every
+object, including nested stage and qualified-artifact records, before any
+package mutation. Its refusal names only the sanitized duplicate key and never
+prints report contents or paths. The rootless package regression must use a
+conflicting nested digest where permissive last-wins decoding would otherwise
+admit the valid final value, prove the installed package and DKMS log remain
+unchanged, and then prove that correcting only the report restores ordinary
+upgrade admission.
 
 Package and Secure Boot refusals must emit bounded, fail-only diagnostics
 that name the artifact or status check, its expected versus observed digest or
