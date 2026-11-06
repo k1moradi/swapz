@@ -54,6 +54,7 @@ class CleanupOwnershipFixtures(unittest.TestCase):
             "direct_owned_child_running", "capture_direct_child_identity",
             "signal_direct_owned_child", "signal_owned_child_if_running",
             "stop_direct_owned_child", "nested_pair_identity_action",
+            "nested_pair_identity_status_category",
             "capture_nested_child_identity", "wait_nested_child_stopped",
             "signal_nested_owned_child", "classify_cleanup_cgroup_membership",
             "classify_cleanup_session_entries", "report_cleanup_refusal",
@@ -272,6 +273,23 @@ os._exit(0)
                     Path(parent_start))
                 self.assertEqual(before.returncode, 0, before.stderr)
                 self.assertEqual(before.stdout.strip(), nested_start)
+                self.assertIn("pidfd_exited(parent_fd)", action)
+                self.assertIn("pidfd_exited(child_fd)", action)
+
+                changed_parent = self.run_simple_shell(
+                    action + "\nnested_pair_identity_action capture "
+                    '"$1" "$2" "$3" "$4"\n',
+                    Path(str(nested_pid)), Path(str(parent.pid)),
+                    Path(str(int(parent_start) + 1)), Path(nested_start))
+                self.assertEqual(changed_parent.returncode, 6,
+                                 changed_parent.stderr)
+                changed_child = self.run_simple_shell(
+                    action + "\nnested_pair_identity_action capture "
+                    '"$1" "$2" "$3" "$4"\n',
+                    Path(str(nested_pid)), Path(str(parent.pid)),
+                    Path(parent_start), Path(str(int(nested_start) + 1)))
+                self.assertEqual(changed_child.returncode, 8,
+                                 changed_child.stderr)
 
                 # Deterministically lose only the recorded timeout's stat
                 # AFTER both pidfds open. The old common FileNotFoundError
@@ -315,21 +333,36 @@ os._exit(0)
                     f"PAIR_CGROUP_PROCESS_IDENTITY={nested_start}\n"
                     'stop_direct_owned_child() { : > "$SESSION/../unexpected-parent-stop"; return 0; }\n'
                 )
-                result = self.execute(preamble=preamble, status=143)
-                self.assertEqual(result.returncode, 143, result.stderr)
-                self.assertEqual(result.stderr.count("phase:"), 1, result.stderr)
-                self.assertIn("phase:pair-resume", result.stderr)
-                self.assertIn("observed:attempted-barrier-status-4", result.stderr)
-                self.assertIn("original_exit:143", result.stderr)
-                self.assertIn("nested_resume:attempted", result.stderr)
-                self.assertIn("retained_cleanup:child-cgroup-and-private-session",
-                              result.stderr)
-                self.assertTrue(self.cgroup.exists())
-                self.assertTrue(self.session.exists())
-                self.assertFalse((self.root / "unexpected-parent-stop").exists())
-                self.assertEqual(
-                    self.cgroup_kill.read_text(encoding="ascii"), "untouched\n")
-                self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
+                for original_status, expected_status, severity in (
+                        (0, 2, "BLOCKED:"), (143, 143, "FAIL:")):
+                    result = self.execute(
+                        preamble=preamble, status=original_status)
+                    self.assertEqual(
+                        result.returncode, expected_status, result.stderr)
+                    self.assertEqual(
+                        result.stderr.count("phase:"), 1, result.stderr)
+                    self.assertTrue(result.stderr.startswith(severity),
+                                    result.stderr)
+                    self.assertIn("phase:pair-resume", result.stderr)
+                    self.assertRegex(
+                        result.stderr,
+                        r"observed:attempted-barrier-timeout-parent-"
+                        r"(gone|start-changed)")
+                    self.assertIn(
+                        f"original_exit:{original_status}", result.stderr)
+                    self.assertIn("nested_resume:attempted", result.stderr)
+                    self.assertIn(
+                        "retained_cleanup:child-cgroup-and-private-session",
+                        result.stderr)
+                    self.assertTrue(self.cgroup.exists())
+                    self.assertTrue(self.session.exists())
+                    self.assertFalse(
+                        (self.root / "unexpected-parent-stop").exists())
+                    self.assertEqual(
+                        self.cgroup_kill.read_text(encoding="ascii"),
+                        "untouched\n")
+                    self.assertNotIn(
+                        "PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
             finally:
                 # The only grandchild release is EOF on the original pipe;
                 # never signal a reparented numeric PID, even for test cleanup.
@@ -340,8 +373,8 @@ os._exit(0)
                     parent.terminate()  # exact owned Popen, not guessed PID
                 parent.wait(timeout=4)
 
-    def test_ram_only_swap_charge_guard_rejects_false_swap_evidence(self):
-        guard = shell_function("require_ram_only_swap_state")
+    def test_zero_cgroup_swap_charge_guard_rejects_false_swap_evidence(self):
+        guard = shell_function("require_zero_id36_cgroup_swap_charge")
         self.assertIn("memory.swap.max memory.swap.current", self.source)
         for maximum, charge, status, category in (
                 ("0", "0", 0, ""),
@@ -361,7 +394,7 @@ os._exit(0)
                         file_path.write_text(value + "\n", encoding="ascii")
                 result = self.run_simple_shell(
                     'CGROUP=$1\n' + guard +
-                    '\nrequire_ram_only_swap_state preflight\n',
+                    '\nrequire_zero_id36_cgroup_swap_charge preflight\n',
                     self.cgroup)
                 self.assertEqual(result.returncode, status, result.stderr)
                 self.assertNotIn("PASS_ID36_RESOURCE_PRESSURE=", result.stdout)
@@ -462,8 +495,10 @@ stop_direct_owned_child() { : > "$SESSION/../unexpected-stop"; return 0; }
         # Faults are injected into the exact production cleanup entry points;
         # no PID or cgroup is touched by these failure-path stubs.
         for failure, original_status, expected_observation in (
-                ("wait", 143, "attempted-barrier-status-2"),
-                ("signal", 1, "attempted-pidfd-status-2")):
+                ("wait", 143,
+                 "attempted-barrier-telemetry-unavailable-or-malformed"),
+                ("signal", 1,
+                 "attempted-pidfd-telemetry-unavailable-or-malformed")):
             with self.subTest(failure=failure):
                 preamble = r'''
 PAIR_PID=111

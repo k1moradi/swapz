@@ -4717,27 +4717,37 @@ no path text, require a successful grouped open to retain its descriptor, and
 require stderr to be restored for the following bounded diagnostic.
 
 Rootless ID36 process-identity negative controls must distinguish a missing
-readiness child (only after the captured timeout parent is still observable)
-from a missing timeout parent, a reparented child, or changed start times.
-An exited timeout with a live reparented pipe-held readiness child is
-**ambiguous ownership**, not a child-exited success: preserve the first
-failure/status, do not send PID-number signals, retain both created resources,
-and record `nested_resume:attempted` with the observed identity status.
-Release the fixture grandchild by closing its owned pipe, not by signaling
-an orphan. Successful synthetic cleanup prints only a
+readiness child from `timeout-parent-gone`,
+`timeout-parent-start-changed`, `readiness-child-reparented`, and
+`readiness-child-start-changed`. The production identity helper must use
+both exact pidfds as liveness proof around numeric `/proc/<pid>/stat` reads;
+start time and PPID text alone are insufficient PID-reuse authority. An exited
+timeout with a live reparented pipe-held readiness child is **ambiguous
+ownership**, not child-exited success: preserve the first failure/status, do
+not send PID-number signals, retain both created resources, and report the
+bounded identity category rather than an opaque numeric helper status. The
+same real rootless probe must reject changed parent and child start times.
+Release its grandchild by closing the owned pipe, not by signaling an orphan.
+Successful synthetic cleanup prints only a
 `ROOTLESS_FIXTURE_ID36_CLEANUP` marker, never an actual
 `PASS_ID36_RESOURCE_PRESSURE` token.
 
-ID36's bounded memory.high/CPU-PSI pair is **RAM-only**: require
-`memory.swap.max=0` and a canonical zero `memory.swap.current` before
-pressure and after the pair. Missing swap controls, a changed limit, malformed
-charge or nonzero charge forbid PASS. `memory.events high` is reclaim
-pressure, not swap; host `/proc/vmstat` pswpin/pswpout is global activity,
-not attributable swap-charge evidence. A loaded anonymous-swap claim requires
-a separately owned workload cgroup with actual positive
-`memory.swap.current` delta, corroborating activity and host-memory safety
-samples, no OOM or unexpected termination, successful process exit and
-byte-exact oracle; none may be replaced by fixture output.
+ID36 sets its child cgroup's `memory.swap.max=0` and requires canonical
+zero `memory.swap.current` before pressure and after the pair. That proves
+only zero sampled swap charge for memory owned by that child cgroup under a
+zero swap limit. It is **not** a host-wide no-swap or "RAM-only" proof: Linux
+keeps existing memory charged to the cgroup that instantiated it when a
+process later migrates, and host `/proc/vmstat` pswpin/pswpout includes
+unrelated activity. `memory.events high` is reclaim pressure, not swap.
+Therefore `PASS_ID36_RESOURCE_PRESSURE` remains memory.high/CPU-PSI pressure
+evidence only. A loaded anonymous-swap claim instead requires a fresh owned
+workload cgroup with a validated zero baseline, positive
+`memory.swap.current` at the swap-out evidence point and non-regressing
+`memory.swap.peak`, exact mapper `/proc/swaps` usage attributable to that
+charge, swapz/lower WRITE and READ activity, vmstat pswpout/pswpin only as
+corroboration, host-memory safety samples, no cgroup OOM or unexpected
+termination, successful terminal worker exits and the byte-exact oracle.
+Synthetic fixture output cannot replace any of those observations.
 
 **Codex agent A and Codex agent B: mandatory loaded anonymous-swap cgroup
 setup/teardown handoff (neither is authorized by rootless ID36 fixtures).**
@@ -4756,8 +4766,12 @@ validated effective parent headroom;
 (5) Popen/direct-child or equivalent durable owner handles with captured
 PID, PPID, start time and pidfd binding **before migration**, then exactly
 the admitted workers and no foreign members before FILL;
-(6) bounded pressure/PSI, memory-available, OOM and swap-charge monitoring,
-with a fail-closed admission watchdog and a byte-exact oracle.
+(6) bounded pressure/PSI, memory-available and OOM monitoring plus a
+zero workload-cgroup swap baseline; at FILL require positive
+`memory.swap.current`, non-regressing `memory.swap.peak`, and exact mapper
+`/proc/swaps` usage attributable to the cgroup charge; require target/lower
+WRITE then READ activity, use vmstat pswpout/pswpin only as corroboration, and
+finish with terminal worker exits plus the byte-exact oracle.
 During teardown, each agent must (7) cooperatively stop and boundedly reap
 the same proved workers, using TERM/KILL only through revalidated pidfds for
 positively identified processes; never signal guessed/reparented/reused PIDs

@@ -614,6 +614,7 @@ nested_pair_identity_action() {
         "$parent_start" "$child_start" "$signal_number" <<'PY'
 import os
 from pathlib import Path
+import select
 import signal
 import sys
 import time
@@ -624,7 +625,9 @@ try:
     parent_pid = int(parent_text)
     signal_number = int(signal_text)
     if (child_pid <= 0 or parent_pid <= 0 or
-            not parent_start.isdecimal() or parent_start == "0"):
+            not parent_start.isdecimal() or parent_start == "0" or
+            (child_start and
+             (not child_start.isdecimal() or child_start == "0"))):
         raise ValueError
 except ValueError:
     raise SystemExit(2)
@@ -638,6 +641,11 @@ def read_stat(pid):
     if len(fields) < 20:
         raise ValueError
     return fields[0], int(fields[1]), fields[19].decode("ascii")
+
+def pidfd_exited(process_fd):
+    poller = select.poll()
+    poller.register(process_fd, select.POLLIN | select.POLLHUP | select.POLLERR)
+    return bool(poller.poll(0))
 
 try:
     parent_fd = os.pidfd_open(parent_pid)
@@ -655,9 +663,13 @@ try:
     try:
         deadline = time.monotonic() + 2.0
         while True:
-            # A lost timeout parent is *not* proof the readiness child exited.
-            # The child may have been reparented while retaining its pidfd.
-            # Only a missing child after an observed parent may return 3.
+            # Pidfds are the exact-process liveness proof. Numeric /proc paths
+            # can be recycled, so check both pidfds before and after reading
+            # start times and lineage. A lost timeout is never child-exit proof.
+            if pidfd_exited(parent_fd):
+                raise SystemExit(4)
+            if pidfd_exited(child_fd):
+                raise SystemExit(3)
             try:
                 _, _, observed_parent_start = read_stat(parent_pid)
             except FileNotFoundError:
@@ -670,10 +682,16 @@ try:
                 raise SystemExit(3)
             except (OSError, ValueError, UnicodeError):
                 raise SystemExit(2)
-            if (observed_parent_start != parent_start or
-                    observed_parent != parent_pid or
-                    (child_start and observed_child_start != child_start)):
+            if observed_parent_start != parent_start:
+                raise SystemExit(6)
+            if child_start and observed_child_start != child_start:
+                raise SystemExit(8)
+            if observed_parent != parent_pid:
+                raise SystemExit(7)
+            if pidfd_exited(parent_fd):
                 raise SystemExit(4)
+            if pidfd_exited(child_fd):
+                raise SystemExit(3)
             if action == "capture":
                 print(observed_child_start)
                 raise SystemExit(0)
@@ -701,6 +719,20 @@ finally:
     os.close(parent_fd)
 PY
 }
+
+nested_pair_identity_status_category() {
+    case "$1" in
+        2) printf '%s\n' telemetry-unavailable-or-malformed ;;
+        3) printf '%s\n' readiness-child-gone ;;
+        4) printf '%s\n' timeout-parent-gone ;;
+        5) printf '%s\n' readiness-child-not-stopped ;;
+        6) printf '%s\n' timeout-parent-start-changed ;;
+        7) printf '%s\n' readiness-child-reparented ;;
+        8) printf '%s\n' readiness-child-start-changed ;;
+        *) printf 'unknown-status-%s\n' "$1" ;;
+    esac
+}
+
 
 capture_nested_child_identity() {
     nested_pair_identity_action capture "$1" "$2" "$3"
@@ -1002,6 +1034,7 @@ cleanup() {
     local result="${1:-$?}" original_result observed initially_retained
     local current_identity child_cleanup_status session_fd_path
     local session_entry_snapshot session_entry nested_resume_disposition
+    local nested_identity_category
     local cleanup_diagnostic_reported cleanup_refusal_severity cleanup_signal_status=0
     local cleanup_signal_refusal=none cleanup_signal_retained=none
     original_result=$result
@@ -1119,8 +1152,10 @@ cleanup() {
                 # case, the tracked outer timeout still owns normal cleanup.
                 if (( child_cleanup_status != 3 && child_cleanup_status != 5 )); then
                     PAIR_RESUME_UNCERTAIN=1
+                    nested_identity_category="$(nested_pair_identity_status_category \
+                        "$child_cleanup_status")"
                     report_cleanup_refusal pair-resume \
-                        "attempted-pidfd-status-$child_cleanup_status" "$original_result"
+                        "attempted-pidfd-$nested_identity_category" "$original_result"
                 fi
             fi
         else
@@ -1130,8 +1165,10 @@ cleanup() {
             # is still a directly tracked child and can use normal cleanup.
             if (( child_cleanup_status != 3 && child_cleanup_status != 5 )); then
                 PAIR_RESUME_UNCERTAIN=1
+                nested_identity_category="$(nested_pair_identity_status_category \
+                    "$child_cleanup_status")"
                 report_cleanup_refusal pair-resume \
-                    "attempted-barrier-status-$child_cleanup_status" "$original_result"
+                    "attempted-barrier-$nested_identity_category" "$original_result"
             fi
         fi
     elif [[ $nested_resume_disposition == prohibited-unproved &&
@@ -1323,33 +1360,34 @@ write_cgroup_control memory.max "$MEMORY_MAX_BYTES" || exit 2
 # Establish the resident helper baseline before applying the real high
 # watermark. The workload-scoped boundary is installed just before release.
 write_cgroup_control memory.high "$MEMORY_MAX_BYTES" || exit 2
-# ID36 is an owned-RAM memory.high exercise, not an anonymous swap test.
-# Never silently run with an absent swap controller or treat global vmstat
-# activity as charge to this private cgroup. The distinct real-swap oracle
-# has its own positive swap-charge and byte-exact proof requirements.
-require_ram_only_swap_state() {
+# ID36 prohibits swap charge for memory owned by this child cgroup. This is
+# not a host-wide "no swap" proof: Linux keeps existing memory charged to the
+# cgroup that instantiated it when a process later migrates here. Global
+# vmstat activity is likewise not attributable to this private cgroup.
+# The distinct real-swap oracle has positive cgroup charge and byte-exact proof.
+require_zero_id36_cgroup_swap_charge() {
     local phase="$1" swap_max swap_current
     if ! swap_max="$(cat "$CGROUP/memory.swap.max" 2>/dev/null)" ||
        ! swap_current="$(cat "$CGROUP/memory.swap.current" 2>/dev/null)"; then
-        printf 'BLOCKED: ID36 RAM-only swap telemetry unavailable; phase:%s required:memory.swap.max=0 and canonical memory.swap.current=0 observed:unreadable original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        printf 'BLOCKED: ID36 cgroup swap telemetry unavailable; phase:%s required:memory.swap.max=0 and canonical memory.swap.current=0 observed:unreadable original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
         return 2
     fi
     if [[ $swap_max != 0 ]]; then
-        printf 'BLOCKED: ID36 RAM-only swap isolation unproven; phase:%s required:memory.swap.max=0 observed:not-zero original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        printf 'BLOCKED: ID36 zero cgroup-swap isolation unproven; phase:%s required:memory.swap.max=0 observed:not-zero original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
         return 2
     fi
     if [[ ! $swap_current =~ ^(0|[1-9][0-9]*)$ ||
           ${#swap_current} -gt 18 ]]; then
-        printf 'BLOCKED: ID36 RAM-only swap charge malformed; phase:%s required:canonical memory.swap.current byte counter observed:invalid original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        printf 'BLOCKED: ID36 cgroup swap charge malformed; phase:%s required:canonical memory.swap.current byte counter observed:invalid original_exit:2 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
         return 2
     fi
     if [[ $swap_current != 0 ]]; then
-        printf 'FAIL: ID36 unexpected swap charge inside RAM-only cgroup; phase:%s required:memory.swap.current=0 observed:nonzero-charge original_exit:1 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
+        printf 'FAIL: ID36 unexpected swap charge in zero-swap cgroup; phase:%s required:memory.swap.current=0 observed:nonzero-charge original_exit:1 cleanup:deferred-to-owned-EXIT\n' "$phase" >&2
         return 1
     fi
 }
 write_cgroup_control memory.swap.max 0 || exit 2
-require_ram_only_swap_state preflight || exit $?
+require_zero_id36_cgroup_swap_charge preflight || exit $?
 
 if ! online_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null)"; then
     printf '%s\n' 'BLOCKED: ID36 online CPU count unavailable; restore working getconf _NPROCESSORS_ONLN telemetry' >&2
@@ -1598,10 +1636,12 @@ if PAIR_CGROUP_PROCESS_IDENTITY="$(capture_nested_child_identity \
     :
 else
     nested_identity_status=$?
+    nested_identity_category="$(nested_pair_identity_status_category \
+        "$nested_identity_status")"
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
     PAIR_RESUME_UNCERTAIN=1
-    printf 'BLOCKED: ID36 readiness process identity unavailable before pressure: observed:identity-status-%s required:pidfd-bound child of the exact pair timeout; retained cleanup: private child cgroup and scratch retained for read-only investigation\n' \
-        "$nested_identity_status" >&2
+    printf 'BLOCKED: ID36 readiness process identity unavailable before pressure; cause:pair-identity required:exact live timeout pidfd, unchanged timeout/child start times and direct child lineage observed:%s original_exit:2 cleanup_attempted:deferred-to-EXIT retained_cleanup:child-cgroup-and-private-session\n' \
+        "$nested_identity_category" >&2
     exit 2
 fi
 if wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
@@ -1609,10 +1649,12 @@ if wait_nested_child_stopped "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
     :
 else
     nested_stop_status=$?
+    nested_identity_category="$(nested_pair_identity_status_category \
+        "$nested_stop_status")"
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
     PAIR_RESUME_UNCERTAIN=1
-    printf 'BLOCKED: ID36 readiness process did not reach its private stop barrier: observed:state-status-%s required:stopped exact child before pressure; retained cleanup: private child cgroup and scratch retained for read-only investigation\n' \
-        "$nested_stop_status" >&2
+    printf 'BLOCKED: ID36 readiness process did not reach its private stop barrier; cause:pair-stop required:exact live timeout/child pidfds with unchanged lineage and stopped readiness child observed:%s original_exit:2 cleanup_attempted:deferred-to-EXIT retained_cleanup:child-cgroup-and-private-session\n' \
+        "$nested_identity_category" >&2
     exit 2
 fi
 verify_pair_cgroup_membership "$pair_cgroup_pid" || exit $?
@@ -1785,14 +1827,17 @@ if signal_nested_owned_child "$PAIR_CGROUP_PROCESS_PID" "$PAIR_PID" \
     :
 else
     nested_resume_status=$?
+    nested_identity_category="$(nested_pair_identity_status_category \
+        "$nested_resume_status")"
     if (( nested_resume_status == 3 )); then
-        printf '%s\n' 'FAIL: ID36 owned pair exited before its exact stopped readiness process could be resumed' >&2
+        printf 'FAIL: ID36 exact readiness process disappeared before resume; cause:pair-resume required:exact stopped readiness child bound to the live timeout observed:%s original_exit:1 cleanup_attempted:deferred-to-EXIT\n' \
+            "$nested_identity_category" >&2
         exit 1
     fi
     RETAIN_CGROUP_AND_SESSION_FOR_INVESTIGATION=1
     PAIR_RESUME_UNCERTAIN=1
-    printf 'BLOCKED: ID36 exact readiness process could not be resumed: observed:identity-status-%s required:pidfd-bound SIGCONT after pressure activation; retained cleanup: private child cgroup and scratch retained for read-only investigation\n' \
-        "$nested_resume_status" >&2
+    printf 'BLOCKED: ID36 exact readiness process could not be resumed; cause:pair-resume required:exact live timeout/child pidfds with unchanged lineage and pidfd SIGCONT authority observed:%s original_exit:2 cleanup_attempted:deferred-to-EXIT retained_cleanup:child-cgroup-and-private-session\n' \
+        "$nested_identity_category" >&2
     exit 2
 fi
 set +e
@@ -1892,7 +1937,7 @@ if (( pair_rc != 0 )); then
     exit 1
 fi
 
-require_ram_only_swap_state after-pair || exit $?
+require_zero_id36_cgroup_swap_charge after-pair || exit $?
 (( high_delta > 0 )) || {
     printf '%s\n' 'FAIL: ID36 memory.high reclaim/throttle pressure was not observed' >&2
     exit 1
