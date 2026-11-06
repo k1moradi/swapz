@@ -786,6 +786,7 @@ valid_encoded_partuuid()
 valid_encoded_partuuid "$encoded_device" ||
 	fail 1 selection manager-output invalid-escaped-partuuid mapper-active-job
 selected_identity_class=validated-manager-partuuid
+failure_action=inspect-early-mask-protected-selector-and-generated-unit-inventory-read-only-before-retry
 
 # The mapper job spans bounded mapper start and, on shutdown, can include
 # swapoff followed by mapper teardown. Allow both 120s phases plus slack.

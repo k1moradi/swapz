@@ -139,7 +139,8 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertRegex(
             result.stderr,
             r"action=(inspect-generator-invocation-and-output-directories-read-only-before-retry|"
-            r"inspect-early-mask-and-protected-selector-read-only-before-retry)\b",
+            r"inspect-early-mask-and-protected-selector-read-only-before-retry|"
+            r"inspect-early-mask-protected-selector-and-generated-unit-inventory-read-only-before-retry)\b",
         )
         self.assertNotIn("PARTUUID=", result.stderr)
         self.assertFalse(list(self.normal.glob(".swapz-primary-generator.*")))
@@ -235,6 +236,10 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assert_blocked(result, "publication")
         self.assertIn("validation=passive-guard-not-retained", result.stderr)
         self.assertIn("identity_class=validated-manager-partuuid", result.stderr)
+        self.assertIn(
+            "action=inspect-early-mask-protected-selector-and-generated-unit-inventory-read-only-before-retry",
+            result.stderr,
+        )
         self.assertEqual(self.passive_guard().read_text(encoding="ascii"), "[Unit]\n")
 
     def test_changed_partuuid_removes_old_ordering_and_new_failure_masks_it(self) -> None:
@@ -250,6 +255,10 @@ class GeneratorPublicationTest(unittest.TestCase):
         self.assertIn("status=39", result.stderr)
         self.assertIn("identity_class=protected-partuuid-unverified", result.stderr)
         self.assertIn("observed_graph=unverified", result.stderr)
+        self.assertIn(
+            "action=inspect-early-mask-and-protected-selector-read-only-before-retry",
+            result.stderr,
+        )
         self.assertFalse(self.device_dropin(CHANGED).exists())
 
     def test_missing_ambiguous_or_unsafe_selector_refuses_any_mapper(self) -> None:

@@ -6897,8 +6897,9 @@ validation. The expected mapper-to-device/raw-swap conflict graph remains
 redacted; its observed state is `not-evaluated` before selection and
 `unverified` until successful publication. Remediation must stay read-only
 and match the phase: invocation/output-directory inspection before selection,
-then mask, selector and unit-inventory inspection after selection begins.
-Rootless tests must exercise all three identity-class states with controlled
+mask and selector inspection while selection is unresolved, then generated-unit
+inventory inspection as well after canonical response validation. Rootless
+tests must exercise all three identity-class states with controlled
 failure exits. Never reveal the private PARTUUID, selector text, or host device
 path, and never log this failure envelope on successful publication.
 
