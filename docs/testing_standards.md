@@ -7504,15 +7504,18 @@ unverified. Missing installed `swapzctl`, mismatched installed module bytes,
 wrong module vermagic, stale/missing DKMS registration and Secure Boot
 signature/enrollment failure must all remain BLOCKED. A verified detached
 signature plus an enrolled MOK must never imply kernel load acceptance.
-Secure Boot state admission requires a successful
-`mokutil --sb-state` probe with a complete recognized state form, or the
-existing direct EFI-variable fallback when `mokutil` is absent. Recognized
-forms include the standard single-line enabled/disabled results, disabled plus
-the Setup Mode annotation, and enabled plus shim-validation-disabled; the last
-case still requires the exact module signature verification because firmware
-Secure Boot is enabled. Nonzero `mokutil` status, contradictory state lines,
-or any other unrecognized output is indeterminate and must BLOCK rather than
-trusting plausible stdout. Nonzero `modinfo` exit status invalidates
+Secure Boot state admission requires a complete recognized state from a
+successful `mokutil --sb-state` probe, or the existing direct EFI-variable
+fallback when `mokutil` is absent. If `mokutil` fails and `/sys/firmware/efi`
+is absent, that independent runtime fact identifies a non-EFI host, where the
+module is not signed; if EFI runtime exists, the failed probe is indeterminate
+and must BLOCK with its original status. A successful but contradictory or
+unrecognized `mokutil` result also remains indeterminate and must BLOCK rather
+than trusting plausible stdout. Recognized forms include the standard
+single-line enabled/disabled results, disabled plus the Setup Mode annotation,
+and enabled plus shim-validation-disabled; the last case still requires the
+exact module signature verification because firmware Secure Boot is enabled.
+Nonzero `modinfo` exit status invalidates
 module vermagic and installed module-path resolution even if stdout appears to
 match; synthetic negative controls must prove both refusals before package
 mutation. Installed-module lookup refusals must report a bounded path-status

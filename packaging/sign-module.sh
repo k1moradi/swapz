@@ -67,6 +67,7 @@ esac
 project_root="$(CDPATH= cd -- "$helper_dir/.." && pwd -P)"
 
 sign_test_root="${SWAPZ_SIGN_TEST_ROOT:-}"
+efi_runtime_dir=/sys/firmware/efi
 if [[ -n "$sign_test_root" ]]; then
     [[ $(id -u) != 0 ]] || blocked "root test mode forbidden"
     sign_test_root="$(realpath -m -- "$sign_test_root")"
@@ -77,6 +78,12 @@ if [[ -n "$sign_test_root" ]]; then
     case "$module_real" in "$sign_test_root"/*) ;; *)
         blocked "test module is outside the signing sandbox" ;;
     esac
+    if [[ -n "${SWAPZ_TEST_EFI_RUNTIME_DIR:-}" ]]; then
+        efi_runtime_dir="$(realpath -m -- "$SWAPZ_TEST_EFI_RUNTIME_DIR")"
+        case "$efi_runtime_dir" in "$sign_test_root"/*) ;; *)
+            blocked "test EFI runtime path is outside the signing sandbox" ;;
+        esac
+    fi
 else
     PATH=/usr/sbin:/usr/bin:/sbin:/bin
     export PATH
@@ -89,14 +96,19 @@ secure_boot_state() {
     local output status value
     local -a variables
 
-    # A failed producer cannot prove either enabled or disabled state from
-    # plausible stdout. Only exact, successful mokutil output is authoritative.
+    # A failed producer cannot prove either state from plausible stdout. The
+    # absence of EFI runtime sysfs is independently sufficient to identify a
+    # non-EFI host; a failed probe on an EFI host remains indeterminate.
     if command -v mokutil >/dev/null 2>&1; then
         status=0
         if output="$(LC_ALL=C mokutil --sb-state 2>/dev/null)"; then
             :
         else
             status=$?
+            if [[ ! -d "$efi_runtime_dir" ]]; then
+                printf '%s\n' 'disabled|0'
+                return
+            fi
             printf 'unknown|%s\n' "$status"
             return
         fi
@@ -109,13 +121,13 @@ secure_boot_state() {
         esac
     fi
 
-    if [[ ! -d /sys/firmware/efi ]]; then
+    if [[ ! -d "$efi_runtime_dir" ]]; then
         printf '%s\n' 'disabled|0'
         return
     fi
 
     shopt -s nullglob
-    variables=(/sys/firmware/efi/efivars/SecureBoot-*)
+    variables=("$efi_runtime_dir"/efivars/SecureBoot-*)
     shopt -u nullglob
     if (( ${#variables[@]} == 1 )) && [[ -r ${variables[0]} ]]; then
         command -v od >/dev/null 2>&1 || {

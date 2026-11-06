@@ -339,6 +339,8 @@ case "${1:-}" in
       disabled) echo 'SecureBoot disabled';;
       setup-mode) printf '%s\n' 'SecureBoot disabled' 'Platform is in Setup Mode';;
       ambiguous) printf '%s\n' 'SecureBoot disabled' 'SecureBoot enabled';;
+      efi-variables-unavailable)
+        echo 'EFI variables are not supported on this system' >&2;;
       *) echo 'unknown';;
     esac
     exit "${SWAPZ_FAKE_SECURE_BOOT_STATUS:-0}"
@@ -750,10 +752,13 @@ exec "{flock_binary}" "$@"
         self.assert_absent()
         self.cert.write_text("certificate")
 
+        efi_runtime = self.home / "efi-runtime-failed-probe"
+        efi_runtime.mkdir()
         failed_state_probe = self.invoke(
             "install", {
                 "SWAPZ_FAKE_SECURE_BOOT": "disabled",
                 "SWAPZ_FAKE_SECURE_BOOT_STATUS": "61",
+                "SWAPZ_TEST_EFI_RUNTIME_DIR": str(efi_runtime),
             })
         self.assertNotEqual(failed_state_probe.returncode, 0)
         self.assertIn("artifact=dm-swapz.ko phase=secure_boot_state",
@@ -847,6 +852,40 @@ exec "{flock_binary}" "$@"
             self.assertIn("next=inspect_modinfo_vermagic_read_only", result.stderr)
             self.assertIn("phase=module_vermagic", result.stderr)
             self.assertIn("command_status=0", result.stderr)
+        self.assert_absent()
+
+    def test_mokutil_failure_is_non_efi_only_without_efi_runtime(self):
+        unavailable = {
+            "SWAPZ_FAKE_SECURE_BOOT": "efi-variables-unavailable",
+            "SWAPZ_FAKE_SECURE_BOOT_STATUS": "1",
+        }
+        non_efi_runtime = self.home / "no-efi-runtime"
+        self.assertFalse(non_efi_runtime.exists())
+        non_efi = self.invoke(
+            "install",
+            {**unavailable,
+             "SWAPZ_TEST_EFI_RUNTIME_DIR": str(non_efi_runtime)},
+        )
+        self.assertEqual(non_efi.returncode, 0, non_efi.stderr)
+        self.assertNotIn("cryptographic signature verified", non_efi.stdout)
+        self.assert_installed_exact()
+        self.assertEqual(self.invoke("uninstall").returncode, 0)
+
+        efi_runtime = self.home / "efi-runtime"
+        efi_runtime.mkdir()
+        efi = self.invoke(
+            "install",
+            {**unavailable,
+             "SWAPZ_TEST_EFI_RUNTIME_DIR": str(efi_runtime)},
+        )
+        self.assertNotEqual(efi.returncode, 0)
+        self.assertIn("artifact=dm-swapz.ko phase=secure_boot_state",
+                      efi.stderr)
+        self.assertIn(
+            "expected=authoritative_enabled_or_disabled_state "
+            "observed=probe_failed command_status=1",
+            efi.stderr,
+        )
         self.assert_absent()
 
     def test_modinfo_nonzero_with_matching_stdout_never_qualifies(self):
