@@ -1141,10 +1141,19 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 diagnostics = "\n".join(result["cold_boot_blockers"])
                 self.assertIn("first_failed_phase=active_swap", diagnostics)
                 self.assertIn(expected_observation, diagnostics)
-                self.assertIn("required_source_sha=" + SOURCE, diagnostics)
                 self.assertIn(
-                    "required_module_sha256=" + ARTIFACTS["module_sha256"],
+                    "expected_source_identity_class=release_source",
                     diagnostics)
+                self.assertIn(
+                    "observed_source_identity_class=match", diagnostics)
+                self.assertIn(
+                    "expected_module_digest_class=owner_qualified_artifact",
+                    diagnostics)
+                self.assertIn(
+                    "observed_module_digest_binding_class=match",
+                    diagnostics)
+                self.assertNotIn(SOURCE, diagnostics)
+                self.assertNotIn(ARTIFACTS["module_sha256"], diagnostics)
                 self.assertIn("verdict=BLOCKED", diagnostics)
 
     def test_cold_boot_evidence_parser_rejects_duplicate_keys(self):
@@ -4223,6 +4232,124 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(incomplete["CODE_PRODUCTION_READY"], "BLOCKED")
         self.assertEqual(incomplete["release_verdict"], "BLOCKED")
 
+
+    def test_exact_release_binding_diagnostics_redact_forged_identifiers(self):
+        policy = acceptance_policy()
+        report = owner_report()
+        forged_source = "b" * 40
+        forged_module = "7" * 64
+        report["source_sha"] = forged_source
+        report["tested_commit_sha"] = forged_source
+        report["qualified_artifacts"]["module_sha256"] = forged_module
+        owner_result = evaluate(report=report, policy=policy)
+        self.assertEqual(owner_result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(owner_result["release_verdict"], "BLOCKED")
+        owner_diagnostics = "\n".join(owner_result["code_blockers"])
+        self.assertIn("observed_report_source_identity_class=mismatch",
+                      owner_diagnostics)
+        self.assertIn("observed_tested_commit_identity_class=mismatch",
+                      owner_diagnostics)
+        self.assertIn("observed_artifact_binding_class=mismatch",
+                      owner_diagnostics)
+
+        physical = real_swap_evidence(
+            encoded(owner_report()), encoded(policy))
+        physical["source_sha"] = forged_source
+        real_swap_result = evaluate(physical=physical)
+        self.assertEqual(real_swap_result["CODE_PRODUCTION_READY"], "BLOCKED")
+        real_swap_diagnostics = "\n".join(real_swap_result["code_blockers"])
+        self.assertIn("evidence_class=persistent_real_swap",
+                      real_swap_diagnostics)
+        self.assertIn("observed_source_identity_class=mismatch",
+                      real_swap_diagnostics)
+        self.assertIn("observed_artifact_binding_class=match",
+                      real_swap_diagnostics)
+
+        for diagnostics in (owner_diagnostics, real_swap_diagnostics):
+            for protected_value in (
+                    SOURCE, forged_source, ARTIFACTS["module_sha256"],
+                    forged_module, HOST_ID, TARGET["partuuid"]):
+                self.assertNotIn(protected_value, diagnostics)
+
+    def test_cold_boot_refusals_classify_target_and_module_without_raw_values(self):
+        report = owner_report()
+        policy = acceptance_policy()
+        report_raw, policy_raw = encoded(report), encoded(policy)
+        forged_source = "b" * 40
+        forged_module = "7" * 64
+        forged_target = "ffffffff-01"
+        private_mapper = "private_mapper_identity"
+        for cold_boot_status in ("PASS", "FAIL"):
+            with self.subTest(status=cold_boot_status):
+                raw = cold_boot_evidence_raw(
+                    status=cold_boot_status,
+                    failure_reasons=(
+                        "swapz_target_error"
+                        if cold_boot_status == "FAIL" else ""),
+                    loaded_module_build_source_sha=forged_source,
+                    module_artifact_sha256=forged_module,
+                    selected_partuuid=forged_target,
+                    mapper_sysfs_dm_name=private_mapper)
+                evidence = current_evidence(report_raw, policy_raw)
+                evidence["release_evidence"]["owner_observed_reboot"].update(
+                    status=cold_boot_status, observed=True,
+                    overall=cold_boot_status,
+                    evidence_sha256=hashlib.sha256(raw).hexdigest())
+                result = evaluate(
+                    report, evidence, policy, cold_boot_raw=raw)
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                self.assertEqual(result["COLD_BOOT_OBSERVED"], "NO")
+                diagnostics = "\n".join(result["cold_boot_blockers"])
+                self.assertIn(
+                    "expected_target_identity_class=authorized_target"
+                    if cold_boot_status == "FAIL" else
+                    "authorized target identity", diagnostics)
+                if cold_boot_status == "FAIL":
+                    self.assertIn("observed_module_digest_binding_class=mismatch",
+                                  diagnostics)
+                else:
+                    self.assertIn("observed_mapper_sysfs_identity_class=mismatch",
+                                  diagnostics)
+                for protected_value in (
+                        SOURCE, forged_source, ARTIFACTS["module_sha256"],
+                        forged_module, TARGET["partuuid"], forged_target,
+                        private_mapper, HOST_ID):
+                    self.assertNotIn(protected_value, diagnostics)
+
+    def test_physical_audit_negative_overflow_and_bool_counts_are_blocked(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        for campaign_factory in (
+                physical_campaign_evidence,
+                physical_campaign_failure_evidence,
+                physical_campaign_decision_failure_evidence):
+            for field, invalid_count in (
+                    ("required_pairs", True),
+                    ("attempted_pairs", False),
+                    ("accepted_pairs", -1),
+                    ("accepted_pairs", 2 ** 64)):
+                with self.subTest(campaign=campaign_factory.__name__,
+                                  field=field, count=invalid_count):
+                    campaign = campaign_factory(policy_raw)
+                    campaign["physical_evidence_audit"]["cohort_pair_counts"][
+                        "sd-service-balanced"][field] = invalid_count
+                    result = evaluate(policy=policy, campaign=campaign)
+                    self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                    self.assertEqual(result["release_verdict"], "BLOCKED")
+                    diagnostics = "\n".join(result["code_blockers"])
+                    self.assertNotIn(TARGET["partuuid"], diagnostics)
+                    self.assertNotIn(SOURCE, diagnostics)
+                    if invalid_count == 2 ** 64:
+                        self.assertIn("JSON integer exceeds evidence bound",
+                                      diagnostics)
+                    else:
+                        self.assertIn("physical_evidence_audit", diagnostics)
+                    if type(invalid_count) is bool:
+                        self.assertIn(
+                            "failed_evidence_field=physical_evidence_audit."
+                            f"cohort_pair_counts[].{field}", diagnostics)
+                        self.assertIn("expected_type=int", diagnostics)
+
     def _failed_owner_diagnostics(self, private_marker):
         report = owner_report()
         policy = acceptance_policy()
@@ -4286,6 +4413,7 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         # Known diagnostic gap: the first authoritative failed phase and the
         # required/observed source and artifact identities are currently lost.
         # Retain their exact bindings without exposing raw evidence.
+        # Identity classes now replace exposed protected SHA/digest values.
         diagnostics, observed_source_sha, observed_module_sha256 = (
             self._failed_owner_diagnostics("synthetic-private-marker"))
         required_markers = (
@@ -4293,18 +4421,22 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             "FAIL",
             "owner qualification",
             "mandatory owner qualification stages",
-            "required",
-            "observed",
-            SOURCE,
-            observed_source_sha,
-            ARTIFACTS["module_sha256"],
-            observed_module_sha256,
+            "expected_source_identity_class=release_source",
+            "observed_report_source_identity_class=mismatch",
+            "observed_tested_commit_identity_class=mismatch",
+            "metric=module_sha256",
+            "expected_artifact_digest_class=qualified_release_artifact",
+            "observed_artifact_binding_class=mismatch",
         )
         missing = [
             marker for marker in required_markers
             if marker not in diagnostics
         ]
         self.assertEqual(missing, [], diagnostics)
+        for protected_value in (
+                SOURCE, observed_source_sha, ARTIFACTS["module_sha256"],
+                observed_module_sha256, TARGET["partuuid"], HOST_ID):
+            self.assertNotIn(protected_value, diagnostics)
 
 if __name__ == "__main__":
     unittest.main()

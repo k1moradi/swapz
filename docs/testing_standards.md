@@ -9570,5 +9570,15 @@ path, or sealed
 artifact SHA-256 fingerprint. The earlier failed-phase attribution still takes
 precedence. An authenticated measurement FAIL remains FAIL when an unrelated
 cohort is missing records; completeness still blocks release readiness.
+Owner, real-swap and cold-boot release refusals must likewise report the
+failing source, tested-commit, qualified-artifact, target or mapper-identity
+gate by bounded match/mismatch/invalid binding classes. They must not echo
+required or forged source SHAs, module or evidence digests, target PARTUUIDs,
+host identifiers or attacker-controlled mapper names. Rootless synthetic
+regressions must include mismatched valid identities, wrong signed artifact
+digests, malformed or overflowing counts, and both PASS- and FAIL-claimed
+boot evidence. An invalid class is not permission to authenticate a producer
+FAIL or promote a stale PASS; preserve the original failure phase and the
+frozen source/target/workload/pair/measurement requirements.
 These are rootless verdict-logic controls only, never physical acceptance
 evidence.

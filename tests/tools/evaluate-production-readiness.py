@@ -394,6 +394,18 @@ def _valid_source(value: Any) -> bool:
     return isinstance(value, str) and bool(GIT_SHA_RE.fullmatch(value))
 
 
+def _identity_binding_class(
+        required: Any, observed: Any, identity_pattern: re.Pattern[str]) -> str:
+    """Report protected source/artifact equality without exposing raw values."""
+    if (
+            not isinstance(required, str) or
+            identity_pattern.fullmatch(required) is None or
+            not isinstance(observed, str) or
+            identity_pattern.fullmatch(observed) is None):
+        return "invalid"
+    return "match" if required == observed else "mismatch"
+
+
 def _parse_utc_evidence_time(value: Any) -> int | None:
     """Parse canonical UTC evidence into exact integer nanoseconds."""
     if (
@@ -2513,10 +2525,12 @@ def validate_cold_boot_evidence(
     observed_source = cold_boot["loaded_module_build_source_sha"]
     observed_module = cold_boot["module_artifact_sha256"]
     evidence_identity_diagnostic = (
-        f"required_source_sha={source_sha} "
-        f"observed_source_sha={observed_source if _valid_source(observed_source) else 'invalid'} "
-        f"required_module_sha256={module_hash if isinstance(module_hash, str) and SHA256_RE.fullmatch(module_hash) else 'invalid'} "
-        f"observed_module_sha256={observed_module if SHA256_RE.fullmatch(observed_module) else 'invalid'} "
+        "expected_source_identity_class=release_source "
+        f"observed_source_identity_class="
+        f"{_identity_binding_class(source_sha, observed_source, GIT_SHA_RE)} "
+        "expected_module_digest_class=owner_qualified_artifact "
+        f"observed_module_digest_binding_class="
+        f"{_identity_binding_class(module_hash, observed_module, SHA256_RE)} "
     )
 
     run_id = cold_boot["active_transaction_run_id"]
@@ -2528,16 +2542,16 @@ def validate_cold_boot_evidence(
         reject("persistent cold-boot mapper transaction identity is invalid")
     mapper_sysfs_name = cold_boot["mapper_sysfs_dm_name"]
     if mapper_sysfs_name != "swapz-primary":
-        safe_mapper_sysfs_name = (
-            mapper_sysfs_name
+        mapper_identity_class = (
+            "mismatch"
             if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", mapper_sysfs_name)
             else "invalid")
         reject(
             "persistent cold-boot mapper sysfs identity is invalid: "
             "evidence_class=persistent_cold_boot "
             "first_failed_phase=mapper_identity "
-            "required_mapper_sysfs_dm_name=swapz-primary "
-            f"observed_mapper_sysfs_dm_name={safe_mapper_sysfs_name} "
+            "expected_mapper_sysfs_identity_class=swapz-primary "
+            f"observed_mapper_sysfs_identity_class={mapper_identity_class} "
             f"{evidence_identity_diagnostic}"
             "verdict=BLOCKED reason=wrong_mapper_sysfs_identity")
 
@@ -2747,8 +2761,9 @@ def validate_cold_boot_failure_evidence(
             "persistent cold-boot failure target identity is not exact: "
             "evidence_class=persistent_cold_boot "
             "first_failed_phase=failure_authentication "
-            f"required_target={target if target is not None else 'invalid'} "
-            "observed_target=invalid_or_mismatched "
+            "expected_target_identity_class=authorized_target "
+            f"observed_target_identity_class="
+            f"{'invalid' if target is None or selected_size is None else 'mismatch'} "
             "verdict=BLOCKED reason=wrong_target_identity")
 
     module_hash = (
@@ -2768,10 +2783,12 @@ def validate_cold_boot_failure_evidence(
             "persistent cold-boot failure source/artifact identity is not exact: "
             "evidence_class=persistent_cold_boot "
             "first_failed_phase=failure_authentication "
-            f"required_source_sha={source_sha} "
-            f"observed_source_sha={observed_source if _valid_source(observed_source) else 'invalid'} "
-            f"required_module_sha256={module_hash if isinstance(module_hash, str) and SHA256_RE.fullmatch(module_hash) else 'invalid'} "
-            f"observed_module_sha256={observed_module if SHA256_RE.fullmatch(observed_module) else 'invalid'} "
+            "expected_source_identity_class=release_source "
+            f"observed_source_identity_class="
+            f"{_identity_binding_class(source_sha, observed_source, GIT_SHA_RE)} "
+            "expected_module_digest_class=owner_qualified_artifact "
+            f"observed_module_digest_binding_class="
+            f"{_identity_binding_class(module_hash, observed_module, SHA256_RE)} "
             "verdict=BLOCKED reason=wrong_source_or_artifact_identity")
 
     failure_reasons = cold_boot["failure_reasons"]
@@ -2877,8 +2894,13 @@ def evaluate_release(
         observed_source = test_results.get("source_sha")
         block_code(
             "owner qualification: evidence_class=owner_make_test "
-            f"metric=source_sha required={source_sha} "
-            f"observed={observed_source if _valid_source(observed_source) else 'invalid'}")
+            "metric=source_sha,tested_commit_sha "
+            "expected_source_identity_class=release_source "
+            f"observed_report_source_identity_class="
+            f"{_identity_binding_class(source_sha, observed_source, GIT_SHA_RE)} "
+            f"observed_tested_commit_identity_class="
+            f"{_identity_binding_class(source_sha, test_results.get('tested_commit_sha'), GIT_SHA_RE)} "
+            "verdict=BLOCKED reason=wrong_source_identity")
     if test_results.get("qualification") != "RAM_BACKED_NULL_BLK_ONLY":
         block_code("owner qualification scope is unexpected")
     stages = test_results.get("stages")
@@ -3026,14 +3048,14 @@ def evaluate_release(
                 observed_hash = (
                     report_artifacts.get(artifact_key)
                     if isinstance(report_artifacts, dict) else None)
-                if (required_hash != observed_hash and
-                        all(isinstance(value, str) and
-                            SHA256_RE.fullmatch(value)
-                            for value in (required_hash, observed_hash))):
+                if required_hash != observed_hash:
                     block_code(
                         "owner qualification: evidence_class=qualified_artifacts "
-                        f"metric={artifact_key} required={required_hash} "
-                        f"observed={observed_hash}")
+                        f"metric={artifact_key} "
+                        "expected_artifact_digest_class=qualified_release_artifact "
+                        f"observed_artifact_binding_class="
+                        f"{_identity_binding_class(required_hash, observed_hash, SHA256_RE)} "
+                        "verdict=BLOCKED reason=wrong_artifact_digest")
 
     ci = pass_record("required_ci")
     if ci is not None:
@@ -3178,9 +3200,6 @@ def evaluate_release(
                 observed_source = (
                     real_swap_evidence.get("source_sha")
                     if isinstance(real_swap_evidence, dict) else None)
-                safe_observed_source = (
-                    observed_source if _valid_source(observed_source)
-                    else "invalid")
                 evidence_phase = (
                     real_swap_evidence.get("phase")
                     if isinstance(real_swap_evidence, dict) else None)
@@ -3198,10 +3217,13 @@ def evaluate_release(
                     "real_linux_swap: evidence_class=persistent_real_swap "
                     f"first_failed_phase={safe_phase} "
                     f"original_status={safe_status} "
-                    f"required_source_sha={source_sha} "
-                    f"observed_source_sha={safe_observed_source} "
-                    f"required_artifact_sha256={required_artifact} "
-                    f"observed_artifact_sha256={artifact_digest}")
+                    "expected_source_identity_class=release_source "
+                    f"observed_source_identity_class="
+                    f"{_identity_binding_class(source_sha, observed_source, GIT_SHA_RE)} "
+                    "expected_artifact_digest_class=release_receipt "
+                    f"observed_artifact_binding_class="
+                    f"{_identity_binding_class(required_artifact, artifact_digest, SHA256_RE)} "
+                    "verdict=BLOCKED reason=untrusted_real_swap_evidence")
             for issue in swap_issues:
                 block_code("real_linux_swap: " + issue)
 
