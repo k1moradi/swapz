@@ -2017,6 +2017,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 saved_results["physical_oracle_phases"][0]["stdout"] = (
                     "PASS: owned V3 DM 0-page direct I/O, flush, "
                     "full readback, overwrite\n")
+            elif teardown_oracle_metadata == "development_promotion":
+                saved_results["production_qualification"] = True
+            elif teardown_oracle_metadata == "development_scope":
+                saved_results["scope"] = probe.EXPECTED_SCOPE
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -2305,6 +2309,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             ("stale_approval", False, "matching", "matching", "stale"),
             ("missing_cleanup", True, "matching", "matching", "not_applicable"),
             ("invalid_phase_count", True, "matching", "matching", "not_applicable"),
+            ("development_promotion", True, "matching", "matching", "not_applicable"),
+            ("development_scope", True, "matching", "matching", "not_applicable"),
         )
         for (damaged_field, development_only, target_identity_proof,
              source_helper_artifact_binding, approval_proof) in cases:

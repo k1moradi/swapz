@@ -5791,7 +5791,9 @@ reviewed C oracle must emit its exact affirmative comparison line with the
 expected operation, page count and round; zero exit with empty output, a
 conflicting line, or a wrong count is not sufficient. Validate every persisted
 phase again after recovery, so rewritten durable metadata cannot inherit
-worker success.
+worker success. A development-only result must retain its exact development
+schema/scope and false production-qualification, physical-media-acceptance and
+Linux-swap-activation flags even if its mapper oracle succeeds.
 The development result requires an executed successful byte-oracle phase, durable
 `COMPLETE`, the exact original header, an inactive target, and a consumed
 one-use claim with no outstanding ownership marker. `oracle_suite=PASS`

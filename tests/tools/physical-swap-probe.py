@@ -1991,8 +1991,15 @@ def _run_positive_oracle_phase(oracle, mapper, state, target, state_dir,
     entry["status"] = "PASS" if passed else "FAIL"
     _save_results(state_dir, results)
     if not passed:
+        failure_detail = entry.get("oracle_output_error") or (
+            "operation=device_roundtrip phase=oracle_execution "
+            f"original_exit={entry['return_code']!r} "
+            "expected=healthy_mapper_verified_identity_and_complete_evidence "
+            "observed=failed_or_incomplete_oracle_phase "
+            "safe_next_step=inspect_results_read_only")
         raise ProbeError(
-            f"physical oracle phase {phase} failed; later phases stopped")
+            f"physical oracle phase {phase} failed; later phases stopped; "
+            + failure_detail)
 
 
 def _mapper_exists(state):
@@ -2358,6 +2365,14 @@ def _final_physical_oracle_evidence_error(results, state, target,
         "device_size_bytes": target["size_bytes"],
         "original_header_sha256": expected_header_sha256,
         "development_only": development_only,
+        "schema": ("swapz-physical-development-results-v1"
+                   if development_only else "swapz-physical-results-v1"),
+        "scope": DEVELOPMENT_SCOPE if development_only else EXPECTED_SCOPE,
+        "approval_mode": review["approval_mode"],
+        "reviewer": review["reviewer"],
+        "linux_swap_activation_tested": False if development_only else None,
+        "physical_media_acceptance": False if development_only else None,
+        "production_qualification": False if development_only else None,
         "evidence_class": ("DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION"
                            if development_only else "PHYSICAL_CORRECTNESS_SMOKE"),
     }
