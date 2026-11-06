@@ -793,6 +793,33 @@ class AdversarialPhysicalCampaign(unittest.TestCase):
         records[1]["pair_id"] = records[0]["pair_id"]
         self.assertIn("pair.pair_id", inspect(records)[1])
 
+    def test_run_identity_is_unique_across_cohorts(self):
+        first = pair(
+            1, 1100, run_id="reused-physical-run",
+            workload="sd-service-balanced")
+        second = pair(
+            1, 1800, run_id="reused-physical-run",
+            workload="sd-service-representative")
+        audit, metrics = inspect([first, second])
+        self.assertEqual(audit["status"], "BLOCKED", audit["diagnostics"])
+        self.assertIn("arm.workload_id", metrics)
+
+        # Reuse in another cohort also invalidates an earlier failure witness
+        # that depends on the same physical run identity.
+        first["status"] = "EXCLUDED"
+        first["excluded"] = True
+        first["analysis_usable"] = False
+        first["raw"]["verdict"] = "FAIL"
+        first["raw"]["stage"] = "measure"
+        first["raw"]["failure_reason"] = (
+            "synthetic terminal measurement failure")
+        blocked, _ = inspect(
+            [first, second], summary_status="FAIL_OR_INCOMPLETE")
+        self.assertEqual(blocked["status"], "BLOCKED", blocked["diagnostics"])
+        self.assertIsNone(blocked["first_failed_phase"])
+        self.assertFalse(any(
+            item["status"] == "FAIL" for item in blocked["diagnostics"]))
+
     def test_mismatched_paired_run_identity(self):
         record = pair(1, 1100)
         record["swapz"]["workload_id"] = "different-physical-run"

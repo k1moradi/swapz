@@ -9037,10 +9037,12 @@ from the clock shared by the arms. A PASS requires strict same-boot
 before/after coverage, globally nonoverlapping arm windows, ascending pair
 indices within each cohort, distinct physical run identifiers, exact source,
 module and parent-device bindings, immutable fixture hashes, and complete
-unscreened attempts. Each paired raw/swapz attempt must carry one matching,
-nonempty physical `workload_id`; a cross-arm mismatch is BLOCKED rather than
-eligible evidence. Synthetic file replay and stale/cached samples are not
-physical measurements. Diskstats index 8 is an in-flight gauge; every other
+unscreened attempts. Physical run identifiers are unique across the complete
+campaign, not merely within one workload; cross-cohort reuse is stale/duplicate
+evidence and invalidates every pair sharing that identity. Each paired raw/swapz
+attempt must carry one matching, nonempty physical `workload_id`; a cross-arm
+mismatch is BLOCKED rather than eligible evidence. Synthetic file replay and
+stale/cached samples are not physical measurements. Diskstats index 8 is an in-flight gauge; every other
 cumulative counter must not reverse, and 512-byte sector multiplication is
 checked against unsigned 64-bit bytes. The evaluator remains authoritative
 for useful read/write I/O, READ p95/p99 histogram tails, CPU per useful

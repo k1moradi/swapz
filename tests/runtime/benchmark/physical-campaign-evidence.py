@@ -1130,13 +1130,16 @@ def audit_physical_pairs(summary: dict, before: dict, after: dict) -> dict:
                     "BLOCKED", "arm.verdict", "PASS",
                     workload=workload, pair_index=index, arm=label,
                     reason="physical arm terminal verdict is missing or invalid")
-            run_identity = (workload, label, arm.get("workload_id"))
-            if not isinstance(run_identity[2], str) or not run_identity[2]:
-                diagnose("BLOCKED", "arm.workload_id", "unique per cohort/candidate",
+            run_id = arm.get("workload_id")
+            run_identity = (label, run_id)
+            if not isinstance(run_id, str) or not run_id:
+                diagnose("BLOCKED", "arm.workload_id",
+                         "unique per campaign/candidate",
                          workload=workload, pair_index=index, arm=label,
                          reason="reused or absent physical run identifier")
             elif run_identity in run_identifiers:
-                diagnose("BLOCKED", "arm.workload_id", "unique per cohort/candidate",
+                diagnose("BLOCKED", "arm.workload_id",
+                         "unique per campaign/candidate",
                          workload=workload, pair_index=index, arm=label,
                          reason="reused or absent physical run identifier")
                 first_identity = run_identifiers[run_identity]
