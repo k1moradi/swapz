@@ -2057,6 +2057,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 saved_state["swap_was_active"] = False
             elif teardown_oracle_metadata == "state_card_identity":
                 saved_state["card_identity_sha256"] = "f" * 64
+            elif teardown_oracle_metadata == "result_mapper_identity":
+                saved_results["dm_uuid"] = (
+                    "SWAPZ-TEST-PHYSICAL-ffffffffffffffff")
+            elif teardown_oracle_metadata == "state_mapper_identity":
+                saved_state["dm_uuid"] = (
+                    "SWAPZ-TEST-PHYSICAL-ffffffffffffffff")
+            elif teardown_oracle_metadata == "state_host_report_count":
+                saved_state["host_report_count"] = 999
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -2369,6 +2377,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "saved_swap_activity_mismatch", "not_applicable"),
             ("state_card_identity", True, "card_identity_mismatch",
              "matching", "not_applicable"),
+            ("result_mapper_identity", True, "matching",
+             "mapper_result_mismatch", "not_applicable"),
+            ("state_mapper_identity", True, "matching",
+             "saved_mapper_mismatch", "not_applicable"),
+            ("state_host_report_count", False, "matching",
+             "saved_report_count_mismatch", "not_applicable"),
         )
         for (damaged_field, development_only, target_identity_proof,
              source_helper_artifact_binding, approval_proof) in cases:

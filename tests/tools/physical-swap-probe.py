@@ -2352,6 +2352,12 @@ def _final_physical_oracle_evidence_error(results, state, target,
                                           mapper, development_only):
     """Fail closed on missing, rewritten, or unbound durable oracle evidence."""
     expected_header_sha256 = hashlib.sha256(target["header"]).hexdigest()
+    if (not isinstance(mapper, str) or not mapper.startswith("/dev/mapper/") or
+            not phases or len(phases[0][1]) != 2 or
+            phases[0][1][0] != "--expect-dm-uuid"):
+        return "internal_expected_mapper_identity_invalid"
+    expected_dm_name = Path(mapper).name
+    expected_dm_uuid = phases[0][1][1]
     expected_original_swap_row = ({
         "path": target["swap_path"],
         "kind": "partition",
@@ -2374,6 +2380,8 @@ def _final_physical_oracle_evidence_error(results, state, target,
         "device_size_bytes": target["size_bytes"],
         "original_header_sha256": expected_header_sha256,
         "original_swap_row": expected_original_swap_row,
+        "dm_name": expected_dm_name,
+        "dm_uuid": expected_dm_uuid,
         "development_only": development_only,
         "schema": ("swapz-physical-development-results-v1"
                    if development_only else "swapz-physical-results-v1"),
@@ -2428,6 +2436,9 @@ def _final_physical_oracle_evidence_error(results, state, target,
         "source_sha": evidence["source_sha"],
         "helper_git_sha": evidence["head"],
         "helper_sha256": evidence["helper_sha256"],
+        "host_report_count": evidence.get("pass_reports"),
+        "dm_name": expected_dm_name,
+        "dm_uuid": expected_dm_uuid,
         "reviewer": review["reviewer"],
         "run_id": review["run_id"],
     }
