@@ -339,6 +339,9 @@ permits destructive initialization, DISCARD/TRIM, benchmarking, `swapon`,
 SD card. Before every destructive phase, reprove the opened partition and parent
 identity; a pathname alone is never authority. A failed mapper `swapoff` or
 ambiguous ownership/state stops teardown rather than authorizing force.
+For RAM-backed null_blk, loaded preflight must share the native strict sysfs
+devno/alias parser and reject malformed or multiply reported /proc driver
+majors; no telemetry, token, or stale mapper snapshot grants creation authority.
 
 
 ### Physical formatter descriptor and SWZ header contract

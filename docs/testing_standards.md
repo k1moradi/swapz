@@ -883,6 +883,10 @@ snapshot is **live identity only** and still refuses with
 before the first removal. Missing, substituted, malformed, multiply aliased
 or unreadable evidence must refuse at its earlier specific check; a name
 reused after a snapshot or a foreign active swap cannot be cleaned up.
+Loaded preflight must use the native strict identity helper for sysfs devno
+records and dangling alternate index aliases, and must reject extra-field or
+duplicate nullb major records from /proc/devices; a successful cat substitution
+must not normalize malformed telemetry into a valid identity.
 When the mapper is absent, token-shaped configfs names refuse with
 `check=unclaimed_null_blk expected_proof=creation_authority
 observed_proof=token_name_only`. Unrelated foreign index-named devices and
@@ -918,7 +922,7 @@ refuses every case before destructive operations, and verifies zero
 attempted mapper removal, configfs power-off/rmdir, module unload or host
 swap mutation. It must preserve both the first numeric status and the
 retained fake inventory. Its final PASS marker must report the actual
-number of `run_case` invocations (currently 59). Synthetic PASS is not real host ownership,
+number of `run_case` invocations (currently 62). Synthetic PASS is not real host ownership,
 loaded qualification or permission to recover the first host's objects.
 
 ### Development decision loop

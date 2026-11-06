@@ -42,6 +42,13 @@ cleanup_helper="$SCRIPT_DIR/clear-tmp-before-memory-check.sh"
     refuse BLOCKED completed_owned_tmp_cleanup_helper unavailable "restore the readable checkout cleanup helper"
 source "$cleanup_helper" 2>/dev/null ||
     refuse BLOCKED completed_owned_tmp_cleanup_helper unavailable "cleanup helper could not be loaded safely"
+# Reuse the native null_blk identity parser; the helper is read-only and
+# grants neither inherited creation authority nor permission to clean up.
+identity_helper="$SCRIPT_DIR/nullblk-identity.sh"
+[[ -r $identity_helper ]] ||
+    refuse BLOCKED null_blk_identity_helper unavailable "restore the readable checkout identity helper"
+source "$identity_helper" 2>/dev/null ||
+    refuse BLOCKED null_blk_identity_helper unavailable "identity helper could not be loaded safely"
 note() { printf '%s\n' "$*"; }
 is_uint() {
     local value="$1"
@@ -550,20 +557,11 @@ read_owned_lower_proof() {
     [[ -f $owned_config/power && ! -L $owned_config/power &&
        "$(cat "$owned_config/power" 2>/dev/null)" == 1 ]] || return 1
     # The index name and configfs name are alternatives, not two devices.
-    if [[ -f /sys/block/${owned_config##*/}/dev &&
-          ! -e /sys/block/nullb$config_index/dev ]]; then
-        disk="${owned_config##*/}"
-    elif [[ -f /sys/block/nullb$config_index/dev &&
-            ! -e /sys/block/${owned_config##*/}/dev ]]; then
-        disk="nullb$config_index"
-    else
+    disk="$(swapz_resolve_owned_disk "${owned_config##*/}" "$config_index" /sys/block)" ||
         return 1
-    fi
-    [[ -f /sys/block/$disk/dev && ! -L /sys/block/$disk/dev &&
-       -b $lower ]] || return 1
-    sysfs_devno="$(cat "/sys/block/$disk/dev" 2>/dev/null)" || return 1
-    [[ $sysfs_devno == *:* ]] || return 1
-    is_uint "${sysfs_devno%%:*}" && is_uint "${sysfs_devno#*:}" || return 1
+    [[ -b $lower ]] || return 1
+    sysfs_devno="$(swapz_read_canonical_devno "/sys/block/$disk/dev")" ||
+        return 1
     [[ $sysfs_devno == "$lower_devno" ]] || return 1
     for partition_marker in /sys/block/$disk/*/partition; do
         [[ ! -e $partition_marker ]] || return 1
@@ -571,8 +569,19 @@ read_owned_lower_proof() {
     node_devno="$(stat -Lc '%Hr:%Lr' "$lower" 2>/dev/null)" || return 1
     [[ $node_devno == "$sysfs_devno" ]] || return 1
     block_major="${sysfs_devno%%:*}"
-    system_major="$(awk '$0 == "Block devices:" { section = 1; next }
-        section && $2 == "nullb" { if ($1 ~ /^(0|[1-9][0-9]*)$/) print $1 }
+    system_major="$(awk '
+        $0 == "Block devices:" { section = 1; next }
+        section && $2 == "nullb" {
+            if (NF != 2 || $1 !~ /^(0|[1-9][0-9]*)$/ ||
+                length($1) > 10 || ++matches != 1)
+                invalid = 1
+            else
+                major = $1
+        }
+        END {
+            if (invalid || matches != 1) exit 2
+            print major
+        }
     ' /proc/devices 2>/dev/null)" || return 1
     [[ -n $system_major && $system_major == "$block_major" ]] || return 1
     [[ $sysfs_devno == "$system_major:$config_index" ]] || return 1
