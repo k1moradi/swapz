@@ -15,9 +15,10 @@ static inline int swapz_gc_recovery_retryable_lower_write_error(
 }
 
 /*
- * Once that retryable lower error propagates above GC, outer WRITE owners must
- * not poison the target again. The token must still be active and no terminal
- * target failure may have been elected while the error was unwinding.
+ * Once that retryable lower error propagates above GC, every outer WRITE owner
+ * must use this predicate before target-failure election. The token must still
+ * be active and no terminal target failure may have been elected while the
+ * error was unwinding.
  */
 static inline int swapz_gc_recovery_retryable_propagated_write_error(
 	int recovery_active, int target_failed, int is_eio)
