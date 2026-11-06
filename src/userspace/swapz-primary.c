@@ -3737,17 +3737,35 @@ static int swapz_primary_mountinfo_read_fd(
 
 
 /*
- * Linux filters a task's mountinfo by its filesystem root at open time.
- * A matching mount namespace inode alone cannot establish a complete view.
- * Reject a task outside the visible namespace root; this check is repeated
- * after reading because the task may change root or be replaced during scan.
- * Neither observation freezes mounts or pins a PID/TID across syscalls.
+ * Linux filters a task's mountinfo by the task's filesystem root at open time.
+ * Pre/post root strings cannot authenticate the view: a task can chroot for
+ * the mountinfo open and restore its root before the second observation.
+ *
+ * Pin the task's mount namespace, use the task root only as a seed for its
+ * unique mount ID, walk mount parents to the namespace root, then enumerate
+ * that pinned namespace directly. A PID/root replacement after the namespace
+ * pin either still names a mount in the same complete namespace or fails the
+ * namespace-scoped statmount lookup. Unsupported or ambiguous inventory is a
+ * refusal; never fall back to a filtered mountinfo view as proof of clearance.
+ *
+ * The FIXTURE_DIAGNOSTIC_BYTES fallback exists only for the separate extracted
+ * lifecycle fixture, which intentionally isolates the final revalidation
+ * coordinator and does not compile Linux syscall headers. The owned production
+ * mount-namespace fixture includes this source normally and exercises the real
+ * namespace enumeration below.
  */
-static int swapz_primary_mountinfo_full_root(const char *root_path)
+static int swapz_primary_mountinfo_full_root(
+	const char *namespace_path, const char *root_path,
+	const struct stat *expected_namespace_info, dev_t parent_device)
 {
+#if !defined(SYS_statmount) || !defined(SYS_listmount)
+#ifdef FIXTURE_DIAGNOSTIC_BYTES
 	char root_link[PATH_MAX];
 	ssize_t root_length;
 
+	(void)namespace_path;
+	(void)expected_namespace_info;
+	(void)parent_device;
 	if (!root_path) {
 		errno = EINVAL;
 		return -1;
@@ -3760,6 +3778,214 @@ static int swapz_primary_mountinfo_full_root(const char *root_path)
 		return -1;
 	}
 	return 0;
+#else
+	(void)namespace_path;
+	(void)root_path;
+	(void)expected_namespace_info;
+	(void)parent_device;
+	errno = EOPNOTSUPP;
+	return -1;
+#endif
+#else
+	enum {
+		mount_id_request_bytes = 32U,
+		namespace_mount_batch = 256U,
+		namespace_parent_depth_max = 4096U,
+	};
+	const uint64_t statmount_required_mask = 0x00000003ULL;
+	const unsigned int statx_mount_id_unique = 0x00004000U;
+	struct mount_id_request {
+		uint32_t size;
+		uint32_t namespace_fd;
+		uint64_t mount_id;
+		uint64_t parameter;
+		uint64_t namespace_id;
+	};
+	struct statmount_basic {
+		uint32_t size;
+		uint32_t mount_options_offset;
+		uint64_t mask;
+		uint32_t superblock_device_major;
+		uint32_t superblock_device_minor;
+		uint64_t superblock_magic;
+		uint32_t superblock_flags;
+		uint32_t filesystem_type_offset;
+		uint64_t mount_id;
+		uint64_t parent_mount_id;
+	};
+	struct mount_id_request request = {0};
+	struct statmount_basic mount_status;
+	struct stat opened_namespace_info;
+	struct statx root_info = {0};
+	uint64_t mount_ids[namespace_mount_batch];
+	uint64_t current_mount_id;
+	uint64_t namespace_root_mount_id = 0;
+	uint64_t last_mount_id = 0;
+	size_t mount_count = 0;
+	int namespace_fd = -1;
+	int result = -1;
+	int saved_errno = 0;
+
+	_Static_assert(sizeof(struct mount_id_request) == mount_id_request_bytes,
+		       "mount ID request ABI size changed");
+	_Static_assert(sizeof(struct statmount_basic) == 56U,
+		       "statmount basic ABI prefix changed");
+
+	if (!namespace_path || !root_path || !expected_namespace_info) {
+		errno = EINVAL;
+		return -1;
+	}
+	namespace_fd = open(namespace_path, O_RDONLY | O_CLOEXEC);
+	if (namespace_fd < 0)
+		return -1;
+	if (namespace_fd == 0) {
+		int moved_fd = fcntl(namespace_fd, F_DUPFD_CLOEXEC, 3);
+		int move_errno = errno;
+
+		if (close(namespace_fd) < 0 && moved_fd >= 0) {
+			int close_errno = errno ? errno : EIO;
+
+			(void)close(moved_fd);
+			errno = close_errno;
+			return -1;
+		}
+		if (moved_fd < 0) {
+			errno = move_errno ? move_errno : EIO;
+			return -1;
+		}
+		namespace_fd = moved_fd;
+	}
+	if (fstat(namespace_fd, &opened_namespace_info) < 0)
+		goto out;
+	if (opened_namespace_info.st_dev != expected_namespace_info->st_dev ||
+	    opened_namespace_info.st_ino != expected_namespace_info->st_ino) {
+		errno = EAGAIN;
+		goto out;
+	}
+	if (statx(AT_FDCWD, root_path, 0, statx_mount_id_unique,
+		  &root_info) < 0)
+		goto out;
+	if (!(root_info.stx_mask & statx_mount_id_unique) ||
+	    !root_info.stx_mnt_id) {
+		errno = EOPNOTSUPP;
+		goto out;
+	}
+	current_mount_id = root_info.stx_mnt_id;
+
+	for (size_t depth = 0; depth < namespace_parent_depth_max; ++depth) {
+		dev_t mounted_device;
+
+		memset(&mount_status, 0, sizeof(mount_status));
+		request = (struct mount_id_request) {
+			.size = mount_id_request_bytes,
+			.namespace_fd = (uint32_t)namespace_fd,
+			.mount_id = current_mount_id,
+			.parameter = statmount_required_mask,
+		};
+		if (syscall(SYS_statmount, &request, &mount_status,
+			    sizeof(mount_status), 0U) < 0)
+			goto out;
+		if (mount_status.size < sizeof(mount_status) ||
+		    (mount_status.mask & statmount_required_mask) !=
+			    statmount_required_mask ||
+		    mount_status.mount_id != current_mount_id) {
+			errno = EOPNOTSUPP;
+			goto out;
+		}
+		mounted_device = makedev(mount_status.superblock_device_major,
+					 mount_status.superblock_device_minor);
+		if (mounted_device == SWAPZ_PRIMARY_TARGET_DEVICE ||
+		    (parent_device && mounted_device == parent_device)) {
+			result = 1;
+			goto out;
+		}
+		if (mount_status.parent_mount_id == current_mount_id) {
+			namespace_root_mount_id = current_mount_id;
+			break;
+		}
+		if (!mount_status.parent_mount_id) {
+			errno = EINVAL;
+			goto out;
+		}
+		current_mount_id = mount_status.parent_mount_id;
+	}
+	if (!namespace_root_mount_id) {
+		errno = EOVERFLOW;
+		goto out;
+	}
+
+	request = (struct mount_id_request) {
+		.size = mount_id_request_bytes,
+		.namespace_fd = (uint32_t)namespace_fd,
+		.mount_id = namespace_root_mount_id,
+	};
+	for (;;) {
+		long listed_mounts;
+
+		request.parameter = last_mount_id;
+		listed_mounts = syscall(SYS_listmount, &request, mount_ids,
+					namespace_mount_batch, 0U);
+		if (listed_mounts < 0)
+			goto out;
+		if (!listed_mounts)
+			break;
+		if ((size_t)listed_mounts > namespace_mount_batch) {
+			errno = EIO;
+			goto out;
+		}
+		for (long index = 0; index < listed_mounts; ++index) {
+			dev_t mounted_device;
+
+			if (mount_ids[index] <= last_mount_id) {
+				errno = EAGAIN;
+				goto out;
+			}
+			last_mount_id = mount_ids[index];
+			if (++mount_count > SWAPZ_PRIMARY_VISIBLE_TASKS_MAX) {
+				errno = EOVERFLOW;
+				goto out;
+			}
+			memset(&mount_status, 0, sizeof(mount_status));
+			request = (struct mount_id_request) {
+				.size = mount_id_request_bytes,
+				.namespace_fd = (uint32_t)namespace_fd,
+				.mount_id = mount_ids[index],
+				.parameter = statmount_required_mask,
+			};
+			if (syscall(SYS_statmount, &request, &mount_status,
+				    sizeof(mount_status), 0U) < 0)
+				goto out;
+			if (mount_status.size < sizeof(mount_status) ||
+			    (mount_status.mask & statmount_required_mask) !=
+				    statmount_required_mask ||
+			    mount_status.mount_id != mount_ids[index]) {
+				errno = EOPNOTSUPP;
+				goto out;
+			}
+			mounted_device =
+				makedev(mount_status.superblock_device_major,
+					mount_status.superblock_device_minor);
+			if (mounted_device == SWAPZ_PRIMARY_TARGET_DEVICE ||
+			    (parent_device && mounted_device == parent_device)) {
+				result = 1;
+				goto out;
+			}
+		}
+		request.mount_id = namespace_root_mount_id;
+	}
+	result = 0;
+
+out:
+	if (result < 0)
+		saved_errno = errno ? errno : EIO;
+	if (close(namespace_fd) < 0 && result >= 0) {
+		saved_errno = errno ? errno : EIO;
+		result = -1;
+	}
+	if (result < 0)
+		errno = saved_errno;
+	return result;
+#endif
 }
 
 static int swapz_primary_mountinfo_exit_error(int error)
@@ -3878,17 +4104,6 @@ static int swapz_primary_read_nonleader_mount_facts(
 			saved_errno = EOVERFLOW;
 			break;
 		}
-		if (swapz_primary_mountinfo_full_root(root_path) < 0) {
-			int root_error = errno ? errno : EIO;
-
-			/* An unopened, proven vanished task may still be skipped. */
-			if (swapz_primary_mountinfo_exit_error(root_error) &&
-			    stat(namespace_path, &confirmed_namespace_info) < 0 &&
-			    (errno == ENOENT || errno == ESRCH))
-				continue;
-			saved_errno = root_error;
-			break;
-		}
 		fd = open(mountinfo_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
 		if (fd < 0) {
 			int open_error = errno ? errno : EIO;
@@ -3924,10 +4139,6 @@ static int swapz_primary_read_nonleader_mount_facts(
 			break;
 		}
 
-		if (swapz_primary_mountinfo_full_root(root_path) < 0) {
-			saved_errno = errno ? errno : EIO;
-			break;
-		}
 		if (bytes_read > SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES - *total_bytes) {
 			saved_errno = EOVERFLOW;
 			break;
@@ -3936,6 +4147,21 @@ static int swapz_primary_read_nonleader_mount_facts(
 		if (local.target_mounted) {
 			combined->target_mounted = 1;
 			break;
+		}
+		{
+			int namespace_mounted =
+				swapz_primary_mountinfo_full_root(
+					namespace_path, root_path,
+					&confirmed_namespace_info, parent_device);
+
+			if (namespace_mounted < 0) {
+				saved_errno = errno ? errno : EIO;
+				break;
+			}
+			if (namespace_mounted) {
+				combined->target_mounted = 1;
+				break;
+			}
 		}
 	}
 	if (saved_errno)
@@ -4003,18 +4229,32 @@ static int swapz_primary_read_mount_facts(
 		return -1;
 	}
 	self_root_is_namespace_root = 1;
+	{
+		int namespace_mounted =
+			swapz_primary_mountinfo_full_root(
+				"/proc/self/ns/mnt", "/proc/self/root",
+				&self_namespace_info, parent_device);
+
+		if (namespace_mounted < 0)
+			return -1;
+		if (namespace_mounted) {
+			combined.target_mounted = 1;
+			*facts = combined;
+			return 0;
+		}
+	}
 	/*
 	 * mountinfo is scoped to a task's mount namespace. Top-level /proc
 	 * enumeration returns thread-group leaders only, so inspect each visible
 	 * process and every non-leader task view; a process-only scan can miss a
 	 * target mounted by one thread in a distinct namespace.
-	 * When this coordinator is at the namespace root, its already-validated
-	 * table covers every mount in its namespace. A task in that same namespace
-	 * can have a process-root-filtered mountinfo file, so skip only tasks whose
-	 * namespace inode matches and revalidate that identity immediately before
-	 * skipping. A chrooted coordinator cannot establish a full-root inventory
-	 * and must refuse admission, not merely avoid the shortcut.
-	 * This is a bounded snapshot, so every unreadable or ambiguous table fails
+	 * The coordinator's pinned namespace-ID inventory covers mounts that a
+	 * process-root-filtered mountinfo view can hide. A task in that same
+	 * namespace may therefore be skipped only after its namespace inode matches
+	 * and that identity is revalidated immediately before skipping. The
+	 * coordinator itself must still be rooted at "/" so its retained root-device
+	 * safety fact is not filtered. This is a bounded snapshot, so every
+	 * unreadable, unsupported or ambiguous inventory fails
 	 * closed rather than being treated as evidence that the device is unused.
 	 */
 	path_length = snprintf(self_pid, sizeof(self_pid), "%lu",
@@ -4108,18 +4348,6 @@ static int swapz_primary_read_mount_facts(
 				saved_errno = EOVERFLOW;
 				break;
 			}
-			if (swapz_primary_mountinfo_full_root(root_path) < 0) {
-				int root_error = errno ? errno : EIO;
-
-				/* A vanished leader never excuses surviving tasks. */
-				if (swapz_primary_mountinfo_exit_error(root_error) &&
-				    stat(namespace_path,
-					 &confirmed_namespace_info) < 0 &&
-				    (errno == ENOENT || errno == ESRCH))
-					goto scan_nonleader_tasks;
-				saved_errno = root_error;
-				break;
-			}
 			path_length = snprintf(path, sizeof(path),
 					      "/proc/%s/mountinfo", entry->d_name);
 			if (path_length <= 0 ||
@@ -4166,10 +4394,6 @@ static int swapz_primary_read_mount_facts(
 				break;
 			}
 
-			if (swapz_primary_mountinfo_full_root(root_path) < 0) {
-				saved_errno = errno ? errno : EIO;
-				break;
-			}
 			if (bytes_read >
 			    SWAPZ_PRIMARY_MOUNTINFO_TOTAL_BYTES - total_bytes) {
 				saved_errno = EOVERFLOW;
@@ -4179,6 +4403,22 @@ static int swapz_primary_read_mount_facts(
 			if (local.target_mounted) {
 				combined.target_mounted = 1;
 				break;
+			}
+			{
+				int namespace_mounted =
+					swapz_primary_mountinfo_full_root(
+						namespace_path, root_path,
+						&confirmed_namespace_info,
+						parent_device);
+
+				if (namespace_mounted < 0) {
+					saved_errno = errno ? errno : EIO;
+					break;
+				}
+				if (namespace_mounted) {
+					combined.target_mounted = 1;
+					break;
+				}
 			}
 		}
 	scan_nonleader_tasks:

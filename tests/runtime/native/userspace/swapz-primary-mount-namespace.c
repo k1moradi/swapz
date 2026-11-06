@@ -6,12 +6,14 @@
 #include <fcntl.h>
 #include <ftw.h>
 #include <limits.h>
+#include <linux/stat.h>
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
 
@@ -65,14 +67,30 @@ static unsigned int fixture_peer_mountinfo_completed_reads;
 static const char *fixture_regular_swap_path;
 static dev_t fixture_regular_swap_device;
 static char fixture_self_root[PATH_MAX] = "/";
-static char fixture_self_task_root[PATH_MAX] = "/";
-static char fixture_foreign_root[PATH_MAX] = "/";
-static char fixture_foreign_task_root[PATH_MAX] = "/";
-static int fixture_foreign_root_read_error;
-static int fixture_peer_root_changes_on_mountinfo_open;
-static int fixture_peer_root_change_injected;
-static unsigned int fixture_foreign_root_checks;
-static unsigned int fixture_foreign_task_root_checks;
+
+enum fixture_namespace_kind {
+	FIXTURE_NAMESPACE_NONE,
+	FIXTURE_NAMESPACE_SELF,
+	FIXTURE_NAMESPACE_SELF_TASK,
+	FIXTURE_NAMESPACE_FOREIGN_LEADER,
+	FIXTURE_NAMESPACE_FOREIGN_TASK,
+	FIXTURE_NAMESPACE_KIND_COUNT,
+};
+
+static int fixture_namespace_fd = -1;
+static enum fixture_namespace_kind fixture_namespace_fd_kind =
+	FIXTURE_NAMESPACE_NONE;
+static enum fixture_namespace_kind fixture_hidden_namespace_kind =
+	FIXTURE_NAMESPACE_NONE;
+static dev_t fixture_hidden_namespace_device;
+static enum fixture_namespace_kind fixture_namespace_inventory_error_kind =
+	FIXTURE_NAMESPACE_NONE;
+static int fixture_namespace_inventory_error;
+static enum fixture_namespace_kind fixture_root_statx_error_kind =
+	FIXTURE_NAMESPACE_NONE;
+static int fixture_root_statx_error;
+static unsigned int
+	fixture_namespace_inventory_scans[FIXTURE_NAMESPACE_KIND_COUNT];
 
 static void fixture_file(const char *relative, const char *contents);
 
@@ -132,6 +150,234 @@ static int fixture_other_mountinfo(const char *path)
 	return 0;
 }
 
+
+static enum fixture_namespace_kind fixture_namespace_kind_for_path(
+	const char *path)
+{
+	if (!path)
+		return FIXTURE_NAMESPACE_NONE;
+	if (strstr(path, "/3031/task/3032/"))
+		return FIXTURE_NAMESPACE_FOREIGN_TASK;
+	if (strstr(path, "/self/task/65536/"))
+		return FIXTURE_NAMESPACE_SELF_TASK;
+	if (strstr(path, "/3031/"))
+		return FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	if (strstr(path, "/self/"))
+		return FIXTURE_NAMESPACE_SELF;
+	return FIXTURE_NAMESPACE_NONE;
+}
+
+static const char *fixture_namespace_mountinfo_path(
+	enum fixture_namespace_kind kind)
+{
+	switch (kind) {
+	case FIXTURE_NAMESPACE_SELF:
+		return "/proc/self/mountinfo";
+	case FIXTURE_NAMESPACE_SELF_TASK:
+		return "/proc/self/task/65536/mountinfo";
+	case FIXTURE_NAMESPACE_FOREIGN_LEADER:
+		return "/proc/3031/mountinfo";
+	case FIXTURE_NAMESPACE_FOREIGN_TASK:
+		return "/proc/3031/task/3032/mountinfo";
+	default:
+		return NULL;
+	}
+}
+
+static dev_t fixture_namespace_default_root_device(
+	enum fixture_namespace_kind kind)
+{
+	switch (kind) {
+	case FIXTURE_NAMESPACE_SELF:
+		return makedev(259U, 0U);
+	case FIXTURE_NAMESPACE_SELF_TASK:
+	case FIXTURE_NAMESPACE_FOREIGN_TASK:
+		return makedev(259U, 10U);
+	case FIXTURE_NAMESPACE_FOREIGN_LEADER:
+		return makedev(259U, 9U);
+	default:
+		return 0;
+	}
+}
+
+static uint64_t fixture_namespace_mount_id_base(
+	enum fixture_namespace_kind kind)
+{
+	return 0x100000000ULL + ((uint64_t)kind << 20);
+}
+
+static size_t fixture_namespace_devices(
+	enum fixture_namespace_kind kind, dev_t *devices, size_t capacity)
+{
+	const char *proc_path = fixture_namespace_mountinfo_path(kind);
+	char converted[PATH_MAX];
+	char line[1024];
+	FILE *stream = NULL;
+	size_t count = 0;
+
+	assert(devices != NULL);
+	assert(capacity > 0U);
+	if (proc_path)
+		stream = fopen(fixture_path(proc_path, converted), "r");
+	if (stream) {
+		while (count < capacity && fgets(line, sizeof(line), stream)) {
+			unsigned int device_major;
+			unsigned int device_minor;
+
+			if (sscanf(line, "%*u %*u %u:%u",
+				   &device_major, &device_minor) == 2)
+				devices[count++] =
+					makedev(device_major, device_minor);
+		}
+		assert(fclose(stream) == 0);
+	}
+	if (!count)
+		devices[count++] = fixture_namespace_default_root_device(kind);
+	if (fixture_hidden_namespace_kind == kind &&
+	    fixture_hidden_namespace_device && count < capacity)
+		devices[count++] = fixture_hidden_namespace_device;
+	return count;
+}
+
+struct fixture_mount_id_request {
+	uint32_t size;
+	uint32_t namespace_fd;
+	uint64_t mount_id;
+	uint64_t parameter;
+	uint64_t namespace_id;
+};
+
+struct fixture_statmount_basic {
+	uint32_t size;
+	uint32_t mount_options_offset;
+	uint64_t mask;
+	uint32_t superblock_device_major;
+	uint32_t superblock_device_minor;
+	uint64_t superblock_magic;
+	uint32_t superblock_flags;
+	uint32_t filesystem_type_offset;
+	uint64_t mount_id;
+	uint64_t parent_mount_id;
+};
+
+static int fixture_statx(int directory_fd, const char *path, int flags,
+			 unsigned int mask, struct statx *info)
+{
+	enum fixture_namespace_kind kind =
+		fixture_namespace_kind_for_path(path);
+
+	if (kind != FIXTURE_NAMESPACE_NONE &&
+	    fixture_path_has_suffix(path, "root")) {
+		if (fixture_root_statx_error_kind == kind &&
+		    fixture_root_statx_error) {
+			errno = fixture_root_statx_error;
+			return -1;
+		}
+		memset(info, 0, sizeof(*info));
+		info->stx_mask = 0x00004000U;
+		info->stx_mnt_id = fixture_namespace_mount_id_base(kind) + 1U;
+		return 0;
+	}
+	return statx(directory_fd, path, flags, mask, info);
+}
+
+static long fixture_syscall(long number, ...)
+{
+	va_list arguments;
+	long result = -1;
+
+	va_start(arguments, number);
+	if (number == SYS_statmount) {
+		const struct fixture_mount_id_request *request =
+			va_arg(arguments, const struct fixture_mount_id_request *);
+		struct fixture_statmount_basic *status =
+			va_arg(arguments, struct fixture_statmount_basic *);
+		size_t status_size = va_arg(arguments, size_t);
+		unsigned int flags = va_arg(arguments, unsigned int);
+		enum fixture_namespace_kind kind = fixture_namespace_fd_kind;
+		dev_t devices[64];
+		size_t device_count;
+		uint64_t base;
+		uint64_t index;
+
+		(void)flags;
+		assert(request != NULL);
+		assert(status != NULL);
+		assert(status_size >= sizeof(*status));
+		assert(request->namespace_fd == (uint32_t)fixture_namespace_fd);
+		assert(kind != FIXTURE_NAMESPACE_NONE);
+		if (fixture_namespace_inventory_error_kind == kind &&
+		    fixture_namespace_inventory_error) {
+			errno = fixture_namespace_inventory_error;
+			goto out;
+		}
+		device_count =
+			fixture_namespace_devices(kind, devices,
+						 sizeof(devices) / sizeof(devices[0]));
+		base = fixture_namespace_mount_id_base(kind);
+		assert(request->mount_id >= base + 1U);
+		index = request->mount_id - base - 1U;
+		if (index >= device_count) {
+			errno = ENOENT;
+			goto out;
+		}
+		memset(status, 0, sizeof(*status));
+		status->size = (uint32_t)sizeof(*status);
+		status->mask = 0x00000003ULL;
+		status->mount_id = request->mount_id;
+		status->superblock_device_major = major(devices[index]);
+		status->superblock_device_minor = minor(devices[index]);
+		status->parent_mount_id =
+			index == 0U ? request->mount_id : base + 1U;
+		result = 0;
+	} else if (number == SYS_listmount) {
+		const struct fixture_mount_id_request *request =
+			va_arg(arguments, const struct fixture_mount_id_request *);
+		uint64_t *mount_ids = va_arg(arguments, uint64_t *);
+		size_t capacity = va_arg(arguments, size_t);
+		unsigned int flags = va_arg(arguments, unsigned int);
+		enum fixture_namespace_kind kind = fixture_namespace_fd_kind;
+		dev_t devices[64];
+		size_t device_count;
+		uint64_t base;
+		size_t start;
+		size_t written = 0;
+
+		(void)flags;
+		assert(request != NULL);
+		assert(mount_ids != NULL);
+		assert(request->namespace_fd == (uint32_t)fixture_namespace_fd);
+		assert(kind != FIXTURE_NAMESPACE_NONE);
+		if (fixture_namespace_inventory_error_kind == kind &&
+		    fixture_namespace_inventory_error) {
+			errno = fixture_namespace_inventory_error;
+			goto out;
+		}
+		device_count =
+			fixture_namespace_devices(kind, devices,
+						 sizeof(devices) / sizeof(devices[0]));
+		base = fixture_namespace_mount_id_base(kind);
+		assert(request->mount_id == base + 1U);
+		if (!request->parameter) {
+			++fixture_namespace_inventory_scans[kind];
+			start = 1U;
+		} else {
+			assert(request->parameter >= base + 2U);
+			start = (size_t)(request->parameter - base);
+		}
+		while (start < device_count && written < capacity) {
+			mount_ids[written++] = base + 1U + start;
+			++start;
+		}
+		result = (long)written;
+	} else {
+		errno = ENOSYS;
+	}
+out:
+	va_end(arguments);
+	return result;
+}
+
 static int fixture_open(const char *path, int flags, ...)
 {
 	char converted[PATH_MAX];
@@ -146,12 +392,6 @@ static int fixture_open(const char *path, int flags, ...)
 		va_end(arguments);
 	}
 
-	if (!strcmp(path, "/proc/3031/mountinfo") &&
-	    fixture_peer_root_changes_on_mountinfo_open) {
-		strcpy(fixture_foreign_root, "/changed-process-root");
-		fixture_peer_root_changes_on_mountinfo_open = 0;
-		fixture_peer_root_change_injected = 1;
-	}
 	if (fixture_path_has_suffix(path, "3031/mountinfo") &&
 	    fixture_peer_namespace_vanishes_on_mountinfo_open &&
 	    fixture_mount_open_error) {
@@ -189,6 +429,15 @@ static int fixture_open(const char *path, int flags, ...)
 		fixture_peer_mountinfo_read_eof = 0;
 	}
 	fixture_track_task_mountinfo_open(path, fd);
+	if (fd >= 0 && fixture_path_has_suffix(path, "ns/mnt")) {
+		enum fixture_namespace_kind kind =
+			fixture_namespace_kind_for_path(path);
+
+		assert(kind != FIXTURE_NAMESPACE_NONE);
+		assert(fixture_namespace_fd == -1);
+		fixture_namespace_fd = fd;
+		fixture_namespace_fd_kind = kind;
+	}
 	return fd;
 }
 
@@ -332,6 +581,7 @@ static int fixture_close(int fd)
 {
 	int is_remote = fd == fixture_mount_fd;
 	int is_coordinator_task = fd == fixture_coordinator_task_mount_fd;
+	int is_namespace = fd == fixture_namespace_fd;
 	int peer_leader_read_complete =
 		is_remote && fixture_mount_fd_is_peer_leader &&
 		fixture_peer_mountinfo_read_eof;
@@ -347,6 +597,10 @@ static int fixture_close(int fd)
 		return result;
 	if (is_coordinator_task)
 		fixture_coordinator_task_mount_fd = -1;
+	if (is_namespace) {
+		fixture_namespace_fd = -1;
+		fixture_namespace_fd_kind = FIXTURE_NAMESPACE_NONE;
+	}
 	if (is_remote && fixture_mount_close_error) {
 		errno = fixture_mount_close_error;
 		return -1;
@@ -487,30 +741,14 @@ static int fixture_lstat(const char *path, struct stat *info)
 
 static ssize_t fixture_readlink(const char *path, char *buffer, size_t size)
 {
-	const char *root_target;
 	size_t length;
 
-	if (!strcmp(path, "/proc/self/root"))
-		root_target = fixture_self_root;
-	else if (!strcmp(path, "/proc/self/task/65536/root"))
-		root_target = fixture_self_task_root;
-	else if (!strcmp(path, "/proc/3031/root")) {
-		++fixture_foreign_root_checks;
-		if (fixture_foreign_root_read_error) {
-			errno = fixture_foreign_root_read_error;
-			return -1;
-		}
-		root_target = fixture_foreign_root;
-	} else if (!strcmp(path, "/proc/3031/task/3032/root")) {
-		++fixture_foreign_task_root_checks;
-		root_target = fixture_foreign_task_root;
-	} else {
+	if (strcmp(path, "/proc/self/root"))
 		return readlink(path, buffer, size);
-	}
-	length = strlen(root_target);
+	length = strlen(fixture_self_root);
 	if (length > size)
 		length = size;
-	memcpy(buffer, root_target, length);
+	memcpy(buffer, fixture_self_root, length);
 	return (ssize_t)length;
 }
 
@@ -524,12 +762,16 @@ static ssize_t fixture_readlink(const char *path, char *buffer, size_t size)
 #define stat(...) fixture_stat(__VA_ARGS__)
 #define lstat(...) fixture_lstat(__VA_ARGS__)
 #define readlink(...) fixture_readlink(__VA_ARGS__)
+#define statx(...) fixture_statx(__VA_ARGS__)
+#define syscall(...) fixture_syscall(__VA_ARGS__)
 /* Keep the synthetic foreign PID distinct from the production reader's self. */
 #define getpid() ((pid_t)65535)
 #define main swapz_primary_program_main
 #include "../../../../src/userspace/swapz-primary.c"
 #undef main
 #undef getpid
+#undef syscall
+#undef statx
 #undef lstat
 #undef stat
 #undef readlink
@@ -672,14 +914,16 @@ static void fixture_reset(void)
 	fixture_regular_swap_path = NULL;
 	fixture_regular_swap_device = 0;
 	strcpy(fixture_self_root, "/");
-	strcpy(fixture_self_task_root, "/");
-	strcpy(fixture_foreign_root, "/");
-	strcpy(fixture_foreign_task_root, "/");
-	fixture_foreign_root_read_error = 0;
-	fixture_peer_root_changes_on_mountinfo_open = 0;
-	fixture_peer_root_change_injected = 0;
-	fixture_foreign_root_checks = 0U;
-	fixture_foreign_task_root_checks = 0U;
+	fixture_namespace_fd = -1;
+	fixture_namespace_fd_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_hidden_namespace_device = 0;
+	fixture_namespace_inventory_error_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_namespace_inventory_error = 0;
+	fixture_root_statx_error_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_root_statx_error = 0;
+	memset(fixture_namespace_inventory_scans, 0,
+	       sizeof(fixture_namespace_inventory_scans));
 	fixture_unlink_if_present("self/ns/mnt");
 	fixture_unlink_if_present("3031/ns/mnt");
 	fixture_file("self/ns/mnt", "coordinator mount namespace\n");
@@ -744,6 +988,20 @@ static void expect_mount_identity_admission(
 		++fixture_failures;
 		(void)close(fixture_mount_fd);
 		fixture_mount_fd = -1;
+	}
+	if (fixture_namespace_fd != -1) {
+		fprintf(stderr,
+			"FAIL: phase=descriptor-closure case=%s "
+			"expected=closed pinned namespace descriptor actual_fd=%d "
+			"observed_errno=%d header_write=NOT_INTERCEPTED "
+			"mapper=NOT_INTERCEPTED mkswap=NOT_INTERCEPTED "
+			"swapon=NOT_INTERCEPTED limitation=reader-only-procfs-snapshot "
+			"safe_action=retain_inactive_target gate=%s\n",
+			case_name, fixture_namespace_fd, errno, safety_gate);
+		++fixture_failures;
+		(void)close(fixture_namespace_fd);
+		fixture_namespace_fd = -1;
+		fixture_namespace_fd_kind = FIXTURE_NAMESPACE_NONE;
 	}
 	if (fixture_coordinator_task_mount_fd != -1) {
 		fprintf(stderr,
@@ -1565,48 +1823,49 @@ static void test_root_filtered_foreign_mountinfo(void)
 		     "37 36 8:1 / /selected rw - ext4 /dev/selected rw\n");
 	expect_mount_admission("complete foreign-root view detects selected", 0, 0);
 
-	fixture_reset();
-	strcpy(fixture_foreign_root, "/chroot-jail");
-	fixture_file("3031/mountinfo",
-		     "36 25 259:9 / / rw - ext4 /filtered-root rw\n");
-	expect_mount_admission("filtered foreign view hides selected", 0, EAGAIN);
-	if (fixture_foreign_root_checks == 0U) {
-		fprintf(stderr, "FAIL: case=foreign-filtered-selected "
-			"reason=peer-root-not-inspected expected=EAGAIN\n");
-		++fixture_failures;
-	}
-
-	fixture_reset();
-	strcpy(fixture_foreign_root, "/chroot-jail");
-	fixture_file("3031/mountinfo",
-		     "36 25 259:9 / / rw - ext4 /filtered-root rw\n");
-	expect_mount_admission("filtered foreign view hides selected parent", 0,
-			       EAGAIN);
-
 	/*
-	 * Changing a process root after the first check, but before mountinfo
-	 * open, preserves its PID and namespace stat identity in this fixture.
-	 * A second root check must reject the mismatched captured view.
+	 * The process-root-filtered table is syntactically clean and omits the
+	 * selected mount. The pinned namespace inventory retains that hidden row,
+	 * so admission must be busy rather than trusting pre/post root strings.
 	 */
 	fixture_reset();
-	fixture_peer_root_changes_on_mountinfo_open = 1;
-	expect_mount_admission("foreign root changes during mountinfo open", 0,
-			       EAGAIN);
-	if (!fixture_peer_root_change_injected) {
-		fprintf(stderr, "FAIL: case=foreign-root-change "
-			"reason=root-change-not-injected expected=EAGAIN\n");
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_hidden_namespace_device = makedev(8U, 1U);
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /filtered-root rw\n");
+	expect_mount_admission("namespace inventory catches filtered selected", 0, 0);
+	if (fixture_namespace_inventory_scans[
+		    FIXTURE_NAMESPACE_FOREIGN_LEADER] == 0U) {
+		fprintf(stderr,
+			"FAIL: case=foreign-filtered-selected "
+			"reason=pinned-namespace-inventory-not-run expected=busy\n");
 		++fixture_failures;
 	}
 
 	fixture_reset();
-	fixture_foreign_root_read_error = EACCES;
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_hidden_namespace_device = makedev(8U, 0U);
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /filtered-root rw\n");
+	expect_mount_admission("namespace inventory catches filtered parent", 0, 0);
+
+	/* Unsupported direct namespace inventory is ambiguity, never clearance. */
+	fixture_reset();
+	fixture_namespace_inventory_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_namespace_inventory_error = EOPNOTSUPP;
+	expect_mount_admission("unsupported foreign namespace inventory", 0,
+			       EOPNOTSUPP);
+
+	fixture_reset();
+	fixture_root_statx_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_root_statx_error = EACCES;
 	expect_mount_admission("unreadable foreign process root", 0, EACCES);
 
-	/* The coordinator's full-root table covers this same namespace. */
+	/* The already-scanned coordinator namespace safely covers this peer. */
 	fixture_reset();
 	fixture_share_mount_namespace();
-	strcpy(fixture_foreign_root, "/chroot-jail");
-	expect_mount_admission("same-namespace chroot shortcut remains safe", 1, 0);
+	expect_mount_admission("same-namespace filtered peer shortcut remains safe",
+			       1, 0);
 }
 
 int main(void)
@@ -1841,20 +2100,21 @@ int main(void)
 
 
 	/*
-	 * The leader's full-root table is clean, but a live foreign worker is
-	 * chrooted below a mounted selected partition. Its filtered mountinfo
-	 * omits that row; an unchanged namespace inode must not admit storage.
+	 * A non-leader can expose a filtered mountinfo while its pinned namespace
+	 * still contains selected storage. The namespace inventory must catch it.
 	 */
 	fixture_reset();
 	fixture_file("3031/task/3032/ns/mnt", "live worker mount namespace\n");
 	fixture_file("3031/task/3032/mountinfo",
 		     "36 25 259:10 / / rw - ext4 /filtered-worker-root rw\n");
-	strcpy(fixture_foreign_task_root, "/worker-jail");
-	expect_mount_admission("chroot-filtered foreign non-leader", 0, EAGAIN);
-	if (fixture_foreign_task_root_checks == 0U) {
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_TASK;
+	fixture_hidden_namespace_device = makedev(8U, 1U);
+	expect_mount_admission("filtered foreign non-leader namespace", 0, 0);
+	if (fixture_namespace_inventory_scans[
+		    FIXTURE_NAMESPACE_FOREIGN_TASK] == 0U) {
 		fprintf(stderr,
-			"FAIL: case=chroot-filtered-foreign-nonleader "
-			"reason=task-root-not-inspected expected=EAGAIN\n");
+			"FAIL: case=filtered-foreign-nonleader "
+			"reason=pinned-namespace-inventory-not-run expected=busy\n");
 		++fixture_failures;
 	}
 

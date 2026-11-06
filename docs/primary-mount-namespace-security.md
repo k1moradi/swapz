@@ -63,27 +63,48 @@ for existing. No mount scan substitutes for swap/DM/holder inspection.
 
 A foreign process or non-leader task can retain the same mount-namespace
 identity and numeric PID/start ticks while `chroot` restricts the mountinfo
-rows available to the coordinator. A rootless isolated 4 MiB tmpfs probe
-confirmed the defect: a mountinfo descriptor opened before chroot still shows
-the private mount, while a new `/proc/<pid>/mountinfo` descriptor opened after
-chroot omits it. This does not simulate a selected physical partition.
+rows available to the coordinator. The first production correction compared
+`/proc/<pid>/root` before and after each mountinfo read. Independent audit
+showed that was insufficient: a disposable rootless user/mount namespace with
+only tmpfs reproduced **root ABA** where both observations were `/`, but the
+mountinfo descriptor was opened during a temporary chroot and permanently
+omitted the private mount. The PID/start ticks and mount namespace stayed the
+same. No block device, mapper, format, mkswap or swapon operation was used.
 
-The reader now refuses an unreadable or non-`/` process root for every
-foreign namespace table, checks that root before opening and after reading
-mountinfo, and refuses a non-`/` coordinator root. An unchanged namespace
-inode is never substituted for root-completeness evidence; a vanished leader
-still requires its surviving tasks to be inspected. A matching local
-full-root namespace remains covered by the coordinator's validated table.
-The rootless fixture exercises hidden selected and selected-parent views,
-the non-leader path, a same-PID/root transition during open, and unreadable
-root evidence. Those checks are independent of root identity, selected
-device, parent and recovery-storage gates.
+Production therefore does not treat those root strings as completeness
+evidence for a foreign view. After a syntactically valid mountinfo read and
+namespace-identity revalidation, it pins the task's mount-namespace descriptor,
+uses `statx(STATX_MNT_ID_UNIQUE)` on the task root only to seed a unique mount
+ID, follows `statmount` parent IDs to the namespace-root mount, and enumerates
+that pinned namespace directly with `listmount`/`statmount`. The selected
+partition and physical parent are compared by exact kernel device numbers.
+This namespace walk is independent of later PID/root reuse: a replacement root
+in another namespace cannot resolve through the already pinned namespace, and
+a different root inside the same namespace still walks to the same namespace
+root.
 
-The observations are bounded and not atomic: a process can change its root
-and change back between checks, a PID can be reused, and mounts can arrive
-after the scan. This change is a fail-closed filter for the reproduced
-chroot condition, not an assertion of whole-host exhaustive exclusion or
-physical device acceptance.
+The coordinator retains its ordinary mountinfo separately because that table
+provides the current root-device safety fact. It must itself remain rooted at
+`/`, and it completes the direct inventory for its own pinned namespace
+before that full namespace can justify the same-namespace peer shortcut.
+Leader disappearance still authorizes skipping only the leader table; visible
+non-leader tasks retain their existing bounded scan and fail-closed rules.
+
+The current foreign-namespace descriptor form of statmount/listmount requires
+Linux 6.18 or newer. Missing syscall support, missing unique mount IDs,
+namespace mismatch, an unreadable listed mount, malformed direct results,
+descriptor-close failure or inventory overflow refuses admission. The focused
+production-C regression keeps the process-root-filtered leader/task table
+clean while the direct namespace seam contains a hidden selected or parent
+device, and requires busy rather than clearance; an injected direct-inventory
+error must remain BLOCKED.
+
+This remains a repeated snapshot, not an atomic whole-host mount barrier. A
+mount can arrive after the final namespace enumeration, and inaccessible PID
+namespaces, detached references, stacked-filesystem aliases and physical
+device-identity limits remain separate concerns. Those limits stay UNPROVEN;
+this correction closes the reproduced stable chroot/root-ABA completeness
+defect without claiming physical deployment acceptance.
 
 ## Final mutation boundary
 

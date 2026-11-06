@@ -372,20 +372,39 @@ A mount-namespace device/inode match also does not prove that a foreign
 filesystem root when opening mountinfo and omits mountpoints outside that root.
 An isolated rootless user/mount-namespace probe must therefore distinguish a
 full-root view from a chroot-filtered peer view: a private harmless mount may
-remain present in the namespace and visible through a mountinfo fd opened
-before chroot, while the coordinator's later `/proc/<pid>/mountinfo` read for
-that same live namespace omits the mount. A PID/TID replacement can likewise
-retain the same mount-namespace identity while changing the process root, so
-two equal namespace stats do not authenticate mountinfo completeness. A
-foreign leader or task mountinfo view in a different namespace whose process
-root is unreadable or is not exactly `/` must refuse inventory admission
-even when its syntactically valid table has no selected-storage row.
-Verify that observed root both before and after mountinfo, reject a root
-transition, and preserve selected/parent and surviving-worker gates.
-A chrooted coordinator must refuse because even its own table is filtered.
-These are non-atomic observations: PID reuse, namespace/root ABA and mounts
-arriving after the last snapshot remain UNPROVEN, not globally FIXED.
-This is separate from the same-namespace shortcut,
+remain present while a fresh process-root-filtered mountinfo omits it. A second
+probe must cover **root ABA**: the same live PID/start ticks can report `/`
+before and after a mountinfo open performed during a temporary chroot, while
+that opened descriptor remains filtered. Pre/post root strings are therefore
+not completeness proof.
+
+For any otherwise-clean mountinfo view in a distinct mount namespace, primary
+admission must pin that task's mount-namespace descriptor, obtain the task-root
+mount's unique ID with `statx(STATX_MNT_ID_UNIQUE)`, walk
+`statmount(STATMOUNT_MNT_BASIC)` parent IDs to the namespace-root mount, and
+enumerate that pinned namespace with `listmount` plus
+`statmount(STATMOUNT_SB_BASIC)`. Compare every returned superblock device
+number against the exact selected partition and physical parent. The focused
+production-C fixture must keep filtered leader and non-leader mountinfo
+syntactically clean while this direct namespace inventory contains a hidden
+selected partition or parent, and require busy or fail-closed rather than
+admission. It must also inject direct-inventory failure and prove the pinned
+namespace descriptor closes.
+
+If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
+or any listed mount cannot be proven, admission is BLOCKED; never fall back to
+the filtered table. The current foreign-namespace descriptor ABI requires
+Linux 6.18 or newer, so an older running kernel refuses this admission path.
+The coordinator may retain its mountinfo-derived root-device fact only while
+its own root is exactly `/`; before using the same-namespace shortcut it must
+also complete the pinned namespace inventory for its own namespace.
+
+The direct namespace walk is still a bounded snapshot, not a mount lock. PID
+reuse or root ABA after the namespace descriptor is pinned cannot hide an
+already-present mount in that pinned namespace, but a new mount after the
+final listmount completion, inaccessible PID namespaces and other
+post-snapshot changes remain UNPROVEN. This is separate from the
+same-namespace shortcut,
 which is permitted only after the coordinator proves its own root is exactly
 `/` and has already validated its full-root table.
 
