@@ -74,6 +74,8 @@ jobs:
           python3 -B tests/tools/product_goals.py ci-run --suite apt-prerequisites -- bash -c 'sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev'
       - name: Run synthetic CI diagnostics and Make interface regression
         run: python3 -B tests/tools/product_goals.py ci-run --suite make-interface -- python3 -B tests/runtime/native/make-interface-test.py -v
+      - name: Run standalone CI failure-attribution regression
+        run: python3 -B tests/tools/product_goals.py ci-run --suite ci-failure-diagnostics -- python3 -B tests/tools/ci-failure-diagnostics-test.py -v
       - name: Independently validate official qualification report boundaries
         run: python3 -B tests/tools/product_goals.py ci-run --suite test-report -- python3 -B tests/runtime/native/test-report-test.py -v
       - name: Enforce the Make API and mandatory test discovery

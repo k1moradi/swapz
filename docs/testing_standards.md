@@ -7913,6 +7913,11 @@ The project-goals current-attempt job census emits fail-only, bounded
 and a safe `corrective_procedure`. Keep the line at most 255 characters,
 never include an Actions token, raw API exception or private path, and
 never request a job manifest when checkout identity already mismatches.
+The existing Make-interface CI job must also execute
+`tests/tools/ci-failure-diagnostics-test.py` directly so its standalone
+first-cause, redaction, producer-exit and retention-failure contracts cannot
+silently diverge from the embedded Make-interface diagnostics. This is a
+regression check inside the existing job, not another qualification stage.
 
 Canonical CI release evidence contains exactly one row for each of the three
 mandatory workflows, with distinct canonical positive signed-64-bit GitHub

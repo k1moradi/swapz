@@ -1449,6 +1449,9 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("tests/runtime/native/package-dkms-test.py", (ROOT / "tests/tools/test-rootless.sh").read_text())
         ci = (ROOT / ".github/workflows/project-goals.yml").read_text()
         self.assertIn("bash tests/tools/test-rootless.sh", ci)
+        self.assertEqual(
+            ci.count("python3 -B tests/tools/ci-failure-diagnostics-test.py -v"),
+            1)
         self.assertNotIn("make verify", ci)
 
 
