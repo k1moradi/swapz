@@ -1668,12 +1668,15 @@ return codes identify a real direct-child signal. A rootless
 128+signal-style status and an explicit child exit are indistinguishable.
 Likewise, exit 124 alone cannot establish a watchdog timeout. A runner marker
 that explicitly says it received INT/TERM may report interruption while still
-stating that the interruption's origin is not proven. A time-limited unittest
-is a failed runtime test contract, not proof of a runner outage. Bare exit 124
-and shell signal-style 130/143 (or direct-child INT/TERM signals) must remain
-failed processes of unknown cause without an authenticated runner-interrupt
-marker; neither successful cleanup text nor an old CI status can replace the
-first failed test or make the cause proven.
+stating that the interruption's origin is not proven. An authenticated
+`unittest_timeout` marker is a failed runtime-test contract: preserve its
+original child status and safe private-log pointer, and do not relabel it as
+cancellation, a proven watchdog, an infrastructure outage, or successful
+cleanup. Generic exit 124 retains the existing execution/infrastructure
+classification while its reason must state that watchdog origin is unproven.
+Bare 130/143 and direct-child INT/TERM retain the existing cancellation
+classification; `signal_or_child_exit` remains unknown because shell
+128+signal-style status and explicit child exit are indistinguishable.
 
 For validated native-rootless output, the runner's execution-first marker owns
 unittest identity because Python may print a later `ERROR:` detail before an

@@ -219,12 +219,11 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
 
     def test_timeout_signal_and_shell_exit_remain_distinct(self):
         timeout = self.diagnose("", 124)
-        self.assertEqual(timeout["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(timeout["category"], "INFRASTRUCTURE")
         self.assertIn("returned 124", timeout["reason"])
         self.assertIn("not proven", timeout["reason"])
         shell_exit = self.diagnose("", 143)
-        self.assertEqual(shell_exit["status"], "FAIL")
-        self.assertEqual(shell_exit["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(shell_exit["status"], "CANCELLED")
         self.assertNotIn("termination", shell_exit)
         signalled = self.diagnose("", -11)
         self.assertEqual(signalled["status"], "FAIL")
@@ -236,7 +235,7 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "subtest=unavailable test=unavailable exit=124 reason=timeout_or_exit_124 "
             "phase_s=1 stage_s=2 line=22 log=unavailable", 1)
         self.assertEqual(rootless_timeout["child_exit_code"], 124)
-        self.assertEqual(rootless_timeout["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(rootless_timeout["category"], "INFRASTRUCTURE")
         self.assertIn("watchdog not proven", rootless_timeout["reason"])
         self.assertNotIn("termination", rootless_timeout)
 

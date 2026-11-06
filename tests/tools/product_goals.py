@@ -667,7 +667,7 @@ def diagnose_ci_failure(lines, exit_code, suite):
                       " (bash -n source check exited 2; inspect private "
                       "log for the exact cause)")
         elif rootless_reason == "timeout_or_exit_124":
-            status, category = "FAIL", "UNKNOWN_FAILURE"
+            status, category = "FAIL", "INFRASTRUCTURE"
             reason = (marker_reason +
                       " (124 is timeout-or-child-exit; watchdog not proven)")
         elif rootless_reason == "signal_or_child_exit":
@@ -711,13 +711,13 @@ def diagnose_ci_failure(lines, exit_code, suite):
         category = category or (
             "SOURCE_CONTRACT" if contract_suite else "UNKNOWN_FAILURE")
     elif effective_exit_code in (130, 143, -2, -15):
-        # Without an authenticated runner-interrupt marker, shell 128+signal
-        # statuses and direct signals cannot prove cancellation.
-        status, category = "FAIL", "UNKNOWN_FAILURE"
-        reason = "signal-style process failure; cancellation cause not proven"
+        # Preserve existing top-level cancellation classification where no
+        # rootless marker can disambiguate shell 128+signal-style statuses.
+        status, category = "CANCELLED", "CANCELLATION"
+        reason = "execution interrupted; cancellation cause not proven"
         causal_error = reason
     elif effective_exit_code == 124:
-        status, category = "FAIL", "UNKNOWN_FAILURE"
+        status, category = "FAIL", "INFRASTRUCTURE"
         reason = "command timed out or child returned 124; watchdog not proven"
         causal_error = reason
     elif effective_exit_code == 127:

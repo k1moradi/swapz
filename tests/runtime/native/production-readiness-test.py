@@ -2642,8 +2642,9 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         mutations = (
             ("source",
              lambda value: value.__setitem__("source_sha", "b" * 40),
-             "metric=source_sha observed=" + "b" * 40 +
-             " expected=" + SOURCE),
+             "metric=source_sha "
+             "expected_source_identity_class=release_source "
+             "observed_source_identity_class=mismatch"),
             ("target",
              lambda value: value["target"].__setitem__(
                  "device_bytes", TARGET["size_bytes"] + 4096),
