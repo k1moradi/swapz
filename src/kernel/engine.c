@@ -1411,9 +1411,16 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			}
 		}
 		phase_start = swapz_engine_now_ns();
-		error = swapz_finish(engine->authority, tx,
-				   engine->write_scratch, bytes,
-				   completed, error);
+		{
+			int finish_error = swapz_finish(engine->authority, tx,
+					engine->write_scratch, bytes,
+					completed, error);
+
+			/* Preserve a definitive lower error when authority cleanup
+			 * also fails. Its unresolved reservation forbids clean drain. */
+			if (error >= 0)
+				error = finish_error;
+		}
 		engine->publish_wall_ns += swapz_engine_elapsed_ns(
 			phase_start, swapz_engine_now_ns());
 		if (error)

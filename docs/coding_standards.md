@@ -2131,7 +2131,9 @@ must not replace a definitive nonzero lower errno with a synthetic integrity
 error. The synchronous per-extent path has the same first-error precedence:
 an impossible count earns zero lower-completion credit and quarantines the
 extent, but may select `-EUCLEAN` only when the lower callback reported no
-original error. This guards engine replay only:
+original error. A definitive per-extent lower errno must also survive a
+secondary authority-finish error such as `-ESTALE`: a damaged active handle
+remains outstanding and must not be reported as cleanly drained or released. This guards engine replay only:
 duplicate dm-io callbacks, upper BIO reference release, and the lifetime of
 a reused packed buffer still require separate loaded completion qualification.
 
