@@ -650,7 +650,7 @@ def physical_campaign_failure_evidence(policy_raw):
             "workload": workload,
             "pair_index": pair_index,
             "arm": arm,
-            "reason": "authenticated physical producer terminal failure",
+            "reason": "authenticated physical producer terminal measurement failure",
             "producer_status": "FAIL",
             "failure_phase": "measure",
         }],
