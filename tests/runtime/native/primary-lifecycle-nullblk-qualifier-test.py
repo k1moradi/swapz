@@ -2411,7 +2411,7 @@ int main(int argc, char **argv)
         report_source = self.script[
             report_start:self.script.index("\nPY\n", report_start)]
 
-        # Match the production C byte layout, including the prefix's NUL.
+        # Match the production C byte layout and trusted input policy.
         self.assertIn('static const unsigned char prefix[] = "swapz-host-v2";',
                       self.primary)
         self.assertIn('memcpy(identity, prefix, sizeof(prefix));', self.primary)
@@ -2420,6 +2420,18 @@ int main(int argc, char **argv)
         self.assertIn('identity[sizeof(prefix) + 36U + i]', self.primary)
         self.assertIn('strcmp(parsed.host_identity_sha256,', self.primary)
         self.assertIn('expected_host_identity_sha256) ||', self.primary)
+        for token in (
+                "expected_owner = 0",
+                "os.O_NOFOLLOW",
+                "os.O_NONBLOCK",
+                "stat.S_ISREG(before.st_mode)",
+                "before.st_nlink != 1",
+                "before.st_mode & 0o022",
+                '"st_mtime_ns", "st_ctime_ns"',
+                'record.endswith(b"\\n")'):
+            self.assertIn(token, host_source)
+        self.assertNotIn("read_text(", host_source)
+        self.assertNotIn(".strip(", host_source)
 
         with TemporaryDirectory(prefix="swapz-host-contract-") as directory:
             fixture = Path(directory)
@@ -2427,45 +2439,94 @@ int main(int argc, char **argv)
             dmi_path = fixture / "product_uuid"
             report_path = fixture / "qualification.json"
             host_source = host_source.replace(
-                'Path("/etc/machine-id")', f'Path({str(machine_path)!r})')
+                '"/etc/machine-id"', repr(str(machine_path)))
             host_source = host_source.replace(
-                'Path("/sys/class/dmi/id/product_uuid")',
-                f'Path({str(dmi_path)!r})')
-            machine_id = "ABCDEF0123456789ABCDEF0123456789"
-            product_uuid = "ABCDEF12-3456-7890-ABCD-EF1234567890"
+                '"/sys/class/dmi/id/product_uuid"', repr(str(dmi_path)))
+            host_source = host_source.replace(
+                "expected_owner = 0", "expected_owner = os.getuid()", 1)
+            machine_id = b"ABCDEF0123456789ABCDEF0123456789"
+            product_uuid = b"ABCDEF12-3456-7890-ABCD-EF1234567890"
             expected_digest = hashlib.sha256(
-                b"swapz-host-v2\0" + product_uuid.lower().encode("ascii") +
-                machine_id.lower().encode("ascii")).hexdigest()
+                b"swapz-host-v2\0" + product_uuid.lower() +
+                machine_id.lower()).hexdigest()
 
-            def run_host_source(machine_record, dmi_record):
-                machine_path.write_text(machine_record, encoding="ascii")
-                dmi_path.write_text(dmi_record, encoding="ascii")
+            def run_existing_records():
                 return subprocess.run(
                     ["python3", "-"], input=host_source,
                     capture_output=True, text=True, timeout=5, check=False)
 
+            def run_host_source(machine_record, dmi_record):
+                machine_path.unlink(missing_ok=True)
+                dmi_path.unlink(missing_ok=True)
+                machine_path.write_bytes(machine_record)
+                dmi_path.write_bytes(dmi_record)
+                machine_path.chmod(0o600)
+                dmi_path.chmod(0o600)
+                return run_existing_records()
+
             for machine_record, dmi_record in (
                     (machine_id, product_uuid),
-                    (machine_id + "\n", product_uuid + "\n"),
-                    (machine_id.lower() + "\n", product_uuid.lower() + "\n")):
+                    (machine_id + b"\n", product_uuid + b"\n"),
+                    (machine_id.lower() + b"\n",
+                     product_uuid.lower() + b"\n")):
                 with self.subTest(valid=(machine_record, dmi_record)):
                     result = run_host_source(machine_record, dmi_record)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout.strip(), expected_digest)
 
             for name, machine_record, dmi_record in (
-                    ("zero-machine", "0" * 32, product_uuid),
+                    ("zero-machine", b"0" * 32, product_uuid),
                     ("short-machine", machine_id[:-1], product_uuid),
-                    ("bad-machine-hex", "G" + machine_id[1:], product_uuid),
-                    ("double-machine-newline", machine_id + "\n\n", product_uuid),
-                    ("zero-dmi", machine_id, "00000000-0000-0000-0000-000000000000"),
-                    ("bad-dmi-hex", machine_id, "G" + product_uuid[1:]),
-                    ("bad-dmi-hyphens", machine_id, product_uuid.replace("-", "")),
-                    ("double-dmi-newline", machine_id, product_uuid + "\n\n")):
+                    ("bad-machine-hex", b"G" + machine_id[1:], product_uuid),
+                    ("machine-crlf", machine_id + b"\r\n", product_uuid),
+                    ("double-machine-newline", machine_id + b"\n\n",
+                     product_uuid),
+                    ("oversized-machine", machine_id + b"x" * 32,
+                     product_uuid),
+                    ("zero-dmi", machine_id,
+                     b"00000000-0000-0000-0000-000000000000"),
+                    ("bad-dmi-hex", machine_id, b"G" + product_uuid[1:]),
+                    ("bad-dmi-hyphens", machine_id,
+                     product_uuid.replace(b"-", b"")),
+                    ("dmi-crlf", machine_id, product_uuid + b"\r\n"),
+                    ("double-dmi-newline", machine_id,
+                     product_uuid + b"\n\n"),
+                    ("oversized-dmi", machine_id, product_uuid + b"xxxx")):
                 with self.subTest(malformed=name):
                     result = run_host_source(machine_record, dmi_record)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stdout, "")
+                    self.assertEqual(result.stderr, "")
+
+            run_host_source(machine_id, product_uuid)
+            real_machine = fixture / "real-machine-id"
+            machine_path.unlink()
+            real_machine.write_bytes(machine_id)
+            real_machine.chmod(0o600)
+            machine_path.symlink_to(real_machine)
+            symlinked = run_existing_records()
+            self.assertNotEqual(symlinked.returncode, 0)
+            self.assertEqual(symlinked.stdout + symlinked.stderr, "")
+            machine_path.unlink()
+            real_machine.unlink()
+            machine_path.write_bytes(machine_id)
+            machine_path.chmod(0o620)
+            writable = run_existing_records()
+            self.assertNotEqual(writable.returncode, 0)
+            self.assertEqual(writable.stdout + writable.stderr, "")
+            machine_path.chmod(0o600)
+            hardlink = fixture / "machine-id-hardlink"
+            os.link(machine_path, hardlink)
+            linked = run_existing_records()
+            self.assertNotEqual(linked.returncode, 0)
+            self.assertEqual(linked.stdout + linked.stderr, "")
+            hardlink.unlink()
+            machine_path.unlink()
+            os.mkfifo(machine_path, 0o600)
+            fifo = run_existing_records()
+            self.assertNotEqual(fifo.returncode, 0)
+            self.assertEqual(fifo.stdout + fifo.stderr, "")
+            machine_path.unlink()
 
             source_sha = "1" * 40
             environment = os.environ.copy()
@@ -2502,16 +2563,91 @@ int main(int argc, char **argv)
             self.assertTrue(all(stage["status"] == "PASS" and
                                 stage["exit_code"] == 0
                                 for stage in report["stages"]))
-            self.assertEqual(report["qualified_artifacts"]["status"], "AVAILABLE")
-            self.assertNotIn(machine_id.lower(), payload.decode("ascii"))
-            self.assertNotIn(product_uuid.lower(), payload.decode("ascii"))
-            different_host_digest = hashlib.sha256(
-                b"swapz-host-v2\0" + product_uuid.lower().encode("ascii") +
-                ("b" * 32).encode("ascii")).hexdigest()
-            self.assertEqual(report["host_identity"]["id_sha256"],
-                             expected_digest)
-            self.assertNotEqual(report["host_identity"]["id_sha256"],
-                                different_host_digest)
+            self.assertEqual(report["qualified_artifacts"]["status"],
+                             "AVAILABLE")
+            self.assertNotIn(machine_id.lower(), payload)
+            self.assertNotIn(product_uuid.lower(), payload)
+
+            parser_source = fixture / "qualification-parser.c"
+            parser_binary = fixture / "qualification-parser"
+            primary_path = str(PRIMARY).replace("\\", "\\\\").replace('"', '\\"')
+            parser_source.write_text(
+                f'''#define SWAPZ_PRIMARY_ROOTLESS_TEST 1
+#include "{primary_path}"
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char **argv)
+{{
+    FILE *stream;
+    unsigned char *bytes;
+    long file_size;
+    size_t length;
+    struct swapz_primary_qualification qualification;
+    int parse_result;
+    int parse_errno;
+
+    if (argc != 4)
+        return 64;
+    stream = fopen(argv[1], "rb");
+    if (!stream)
+        return 65;
+    if (fseek(stream, 0, SEEK_END) != 0 ||
+        (file_size = ftell(stream)) <= 0 ||
+        fseek(stream, 0, SEEK_SET) != 0) {{
+        (void)fclose(stream);
+        return 66;
+    }}
+    length = (size_t)file_size;
+    bytes = malloc(length);
+    if (!bytes) {{
+        (void)fclose(stream);
+        return 67;
+    }}
+    if (fread(bytes, 1, length, stream) != length) {{
+        free(bytes);
+        (void)fclose(stream);
+        return 68;
+    }}
+    if (fclose(stream) != 0) {{
+        free(bytes);
+        return 69;
+    }}
+    errno = 0;
+    parse_result = swapz_primary_qualification_parse_json(
+        bytes, length, argv[2], argv[3], &qualification);
+    parse_errno = errno;
+    free(bytes);
+    if (parse_result == 0) {{
+        puts("ACCEPT");
+        return 0;
+    }}
+    printf("REJECT errno=%d\\n", parse_errno);
+    return 1;
+}}
+''',
+                encoding="utf-8")
+            subprocess.run(
+                [
+                    "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra",
+                    "-Werror", str(parser_source), "-o", str(parser_binary),
+                ],
+                cwd=ROOT, check=True)
+            correct_host = subprocess.run(
+                [str(parser_binary), str(report_path), source_sha,
+                 expected_digest],
+                cwd=ROOT, capture_output=True, text=True, timeout=5,
+                check=False)
+            self.assertEqual(correct_host.returncode, 0, correct_host.stderr)
+            self.assertEqual(correct_host.stdout, "ACCEPT\n")
+            wrong_host = subprocess.run(
+                [str(parser_binary), str(report_path), source_sha, "f" * 64],
+                cwd=ROOT, capture_output=True, text=True, timeout=5,
+                check=False)
+            self.assertEqual(wrong_host.returncode, 1, wrong_host.stderr)
+            self.assertEqual(
+                wrong_host.stdout, f"REJECT errno={errno.EINVAL}\n")
 
     def test_rootless_prepare_refusal_keeps_blocked_and_fail_distinct(self):
         verifier_start = self.script.index("verify_prepare_failure_diagnostic() {")
@@ -3102,6 +3238,7 @@ rmdir() {
             "owned_nullblk_mapper_identity_unchanged",
             "owned_nullblk_power_off_pinned",
             "owned_nullblk_post_power_identity_unchanged",
+            "assert_owned_transaction_records",
         ))
         cleanup = shell_function("cleanup")
 
@@ -3206,6 +3343,14 @@ exit 0
                         '"recovery_previous_stage":null}\n',
                         encoding="ascii")
                     state_file.chmod(0o600)
+                    consumed_file = recovery / (
+                        "consumed-" + "b" * 32 + ".json")
+                    consumed_file.write_text(
+                        '{"major":240,"minor":8,'
+                        '"partuuid":"7fb9401d-04","run_id":"' +
+                        "b" * 32 + '"}\n',
+                        encoding="ascii")
+                    consumed_file.chmod(0o600)
 
                 replacements = (
                     ("/sys/dev/block", str(sysdev)),
@@ -3216,9 +3361,15 @@ exit 0
                 fixture_helpers = helpers
                 for before, after in replacements:
                     fixture_helpers = fixture_helpers.replace(before, after)
+                fixture_helpers = fixture_helpers.replace(
+                    "identity.st_uid != 0",
+                    f"identity.st_uid != {os.getuid()}")
                 fixture_cleanup = cleanup.replace(
                     "/sys/module/dm_swapz", str(fixture / "absent-module"))
                 fixture_cleanup = fixture_cleanup.replace("/sys/block", str(sysblock))
+                fixture_cleanup = fixture_cleanup.replace(
+                    "identity.st_uid == 0",
+                    f"identity.st_uid == {os.getuid()}")
 
                 settings = {
                     "CONFIGFS": configfs,
@@ -3232,6 +3383,7 @@ exit 0
                     "PART_NAME": "nullb7p1",
                     "PART_SYSFS": partition,
                     "PARTITION": devices / "nullb7p1",
+                    "PARTUUID": "7fb9401d-04",
                     "PART_DEVNO": "240:8",
                     "PARTITION_NODE_DEVNO": "240:8",
                     "LOWER": devices / "nullb7",
@@ -3355,6 +3507,9 @@ rmdir() {
         self.assertIn(
             "PRIMARY_NULLBLK_LIFECYCLE_EVIDENCE_RETAINED=private",
             stale_state.stdout)
+        self.assertNotIn(
+            "noncanonical_consumed_owner_record", stale_state.stdout)
+        self.assertNotIn("command not found", stale_state.stderr)
 
         original_failure, power, exists, actions = run_fixture(
             "replacement", original_status=73)

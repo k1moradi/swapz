@@ -2634,10 +2634,14 @@ child exit 0, the report must still classify the stage as FAIL, preserve
 sanitized diagnostic. Its regression must cover both the matching nonzero
 child exit and the contradictory zero exit. The private owned-null_blk qualification report must bind the same live host
 digest as production: `swapz-host-v2` with its terminating NUL, canonical
-lowercase 36-byte DMI product UUID, and lowercase 32-byte machine ID. A
-stale machine-ID-only digest must not be silently accepted; native regression
-must keep the private report fixture aligned with production host identity.
-Only the digest may appear in evidence, never either raw host identifier.
+lowercase 36-byte DMI product UUID, and lowercase 32-byte machine ID. Its two
+host-identity records must use the same trusted byte-input rules as production:
+root-owned single-link non-group/world-writable regular files, no symlink
+following, stable metadata, bounded reads, and exactly zero or one trailing LF.
+A stale machine-ID-only digest, CRLF-normalized record, or otherwise untrusted
+input must not be silently accepted; native regression must keep the private
+report fixture aligned with production host identity. Only the digest may appear
+in evidence, never either raw host identifier.
 Each owned-null_blk lifecycle
 rehearsal must allocate
 a fresh root-owned evidence directory bound to the same

@@ -1541,22 +1541,61 @@ FORMATTER_SHA="$(sha256sum "$CONTROL" | awk '{print $1}')"
 MODULE_SHA="$(sha256sum "$PREFIX/libexec/swapz/dm-swapz.ko" | awk '{print $1}')"
 ORACLE_SHA="$(sha256sum "$PREFIX/libexec/swapz/device-roundtrip" | awk '{print $1}')"
 HOST_SHA="$(python3 - <<'PY'
-from pathlib import Path
 import hashlib
-machine = Path("/etc/machine-id").read_text(encoding="ascii").removesuffix("\n").lower()
-product_uuid = Path("/sys/class/dmi/id/product_uuid").read_text(
-    encoding="ascii").removesuffix("\n").lower()
-hex_digits = "0123456789abcdef"
-if (len(machine) != 32 or any(byte not in hex_digits for byte in machine) or
-        not any(byte != "0" for byte in machine) or
-        len(product_uuid) != 36 or
-        any(product_uuid[index] != "-" for index in (8, 13, 18, 23)) or
-        any(byte not in hex_digits for index, byte in enumerate(product_uuid)
-            if index not in (8, 13, 18, 23)) or
-        not any(byte != "0" for byte in product_uuid if byte != "-")):
-    raise SystemExit(2)
-identity = (b"swapz-host-v2\0" + product_uuid.encode("ascii") +
-            machine.encode("ascii"))
+import os
+import re
+import stat
+
+expected_owner = 0
+
+def trusted_host_record(path, byte_limit, pattern):
+    file_descriptor = -1
+    payload = bytearray()
+    try:
+        file_descriptor = os.open(
+            path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        before = os.fstat(file_descriptor)
+        if (not stat.S_ISREG(before.st_mode) or
+                before.st_uid != expected_owner or before.st_nlink != 1 or
+                before.st_mode & 0o022):
+            raise ValueError("untrusted host identity metadata")
+        while len(payload) < byte_limit:
+            chunk = os.read(file_descriptor, byte_limit - len(payload))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        if len(payload) == byte_limit:
+            raise ValueError("oversized host identity record")
+        after = os.fstat(file_descriptor)
+        stable_fields = (
+            "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+            "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, field) != getattr(after, field)
+               for field in stable_fields):
+            raise ValueError("host identity changed during read")
+    except (OSError, ValueError):
+        raise SystemExit(2) from None
+    finally:
+        if file_descriptor >= 0:
+            try:
+                os.close(file_descriptor)
+            except OSError:
+                raise SystemExit(2) from None
+    record = bytes(payload)
+    if record.endswith(b"\n"):
+        record = record[:-1]
+    if (re.fullmatch(pattern, record) is None or
+            not any(byte not in (ord("0"), ord("-")) for byte in record)):
+        raise SystemExit(2)
+    return record.lower()
+
+product_uuid = trusted_host_record(
+    "/sys/class/dmi/id/product_uuid", 40,
+    rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+machine = trusted_host_record(
+    "/etc/machine-id", 64, rb"[0-9a-fA-F]{32}")
+identity = b"swapz-host-v2\0" + product_uuid + machine
 print(hashlib.sha256(identity).hexdigest())
 PY
 )" || blocked "cannot derive live host identity"
