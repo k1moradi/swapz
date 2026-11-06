@@ -503,7 +503,12 @@ and all four intercepted mutations execute, report UNPROVEN with
 rechecks and refuses the new identity with original `ESTALE` and zero
 intercepted header, mapper, formatter and swapon actions is accepted; an
 unrelated refusal or a missing identity mutation is not a valid negative
-control. This is distinct from an adversarial mount change after every
+control. Dispatch this scenario explicitly as a negative control before the
+generic safe-admission/default-case check; it is neither a safe-target case
+nor a normal post-mount snapshot probe. The unsafe witness must include a
+successful initial and final mount read, four independent swap-inventory
+observations, and zero falsely observed mount conflicts before synthetic
+mutation. This is distinct from an adversarial mount change after every
 read-only inventory snapshot, for which no atomic exclusion proof is implied.
 
 ### Primary real-swap native-host qualification

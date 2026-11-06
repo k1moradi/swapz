@@ -1200,9 +1200,11 @@ static int check_case(enum fixture_scenario candidate)
     case FIXTURE_SYMLINK_MOUNTINFO:
         expected_error = ELOOP;
         break;
+    case FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION:
+        /* This mutation control has its own explicit post-admission verdict. */
+        break;
     default:
-        assert(expected_safe || gap_probe ||
-               candidate == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION);
+        assert(expected_safe || gap_probe);
         break;
     }
     writes = header_writes + mapper_mutations + mkswap_calls + swapon_calls;
@@ -1230,7 +1232,10 @@ static int check_case(enum fixture_scenario candidate)
             fixture_selector_reads == 1U && writes == 4U &&
             starting_state_writes == 1U && active_state_writes == 1U &&
             recovery_marks == 0U && diagnostic_length == 0U &&
-            admission_reads == 2U && prewrite_reads == 1U;
+            admission_reads == 2U && prewrite_reads == 1U &&
+            active_inventory_reads == 4U &&
+            mount_conflict_observations == 0U &&
+            late_mount_conflict_observations == 0U;
 
         if (!refusal && !gap) {
             fprintf(stderr, "FAIL: phase=post-selector-admission "
