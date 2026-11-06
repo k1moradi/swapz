@@ -310,30 +310,50 @@ def _partition_identity(device):
         raise ProbeError("cannot verify stable partition identity") from exc
 
 
+def _trusted_host_identity_record(path, byte_limit, pattern):
+    """Match the official reporter's bounded, stable, root-owned byte input."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_CLOEXEC |
+                           os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+        before = os.fstat(source.fileno())
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or
+                before.st_nlink != 1 or (before.st_mode & 0o022)):
+            raise ValueError("untrusted host identity metadata")
+        record = source.read(byte_limit)
+        after = os.fstat(source.fileno())
+        stable_fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
+                         "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, field) != getattr(after, field)
+               for field in stable_fields):
+            raise ValueError("host identity changed during read")
+    if len(record) == byte_limit:
+        raise ValueError("oversized host identity record")
+    if record.endswith(b"\n"):
+        record = record[:-1]
+    if (re.fullmatch(pattern, record) is None or
+            not any(byte not in (ord("0"), ord("-")) for byte in record)):
+        raise ValueError("invalid host identity record")
+    return record.lower()
+
+
 def live_host_identity():
-    """Mirror the production DMI UUID + machine-ID digest, not report metadata."""
+    """Mirror production's trusted DMI UUID + machine-ID digest bytes."""
     try:
-        product_uuid = Path("/sys/class/dmi/id/product_uuid").read_text().strip()
-        machine_id = Path("/etc/machine-id").read_text().strip()
-        if (not re.fullmatch(
-                r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
-                product_uuid) or int(product_uuid.replace("-", ""), 16) == 0):
-            raise ValueError("invalid DMI UUID")
-        if not re.fullmatch(r"[0-9a-fA-F]{32}", machine_id) or (
-                int(machine_id, 16) == 0):
-            raise ValueError("invalid machine-id")
+        product_uuid = _trusted_host_identity_record(
+            "/sys/class/dmi/id/product_uuid", 40,
+            rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+        machine_id = _trusted_host_identity_record(
+            "/etc/machine-id", 64, rb"[0-9a-fA-F]{32}")
         return {
             # The importer requires the existing JSON schema label.
             "schema": "swapz-host-v1",
             "architecture": platform.machine(),
             "id_sha256": hashlib.sha256(
-                b"swapz-host-v2\0" + product_uuid.lower().encode("ascii")
-                + machine_id.lower().encode("ascii")).hexdigest(),
+                b"swapz-host-v2\0" + product_uuid + machine_id).hexdigest(),
         }
-    except (OSError, UnicodeError, ValueError):
+    except (OSError, ValueError):
         # Raw hardware/installation identifiers must never enter diagnostics.
         raise ProbeError("cannot identify the current host for physical smoke") from None
-
 
 def _require_physical_host():
     """Reject VM and container execution; unknown detection fails closed."""

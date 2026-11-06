@@ -1351,49 +1351,85 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertIn("unsupported option", record["journalctl_error"])
 
     def test_live_host_identity_uses_canonical_v2_digest_and_fails_closed(self):
-        product_uuid = "A1B2C3D4-E5F6-1234-ABCD-ABCDEF123456"
-        machine_id = "ABCDEF0123456789ABCDEF0123456789"
+        product_uuid = b"A1B2C3D4-E5F6-1234-ABCD-ABCDEF123456"
+        machine_id = b"ABCDEF0123456789ABCDEF0123456789"
+        fixture_dir = self.recovery_base / "host-records"
+        fixture_dir.mkdir()
+        dmi_file = fixture_dir / "product_uuid"
+        installation_file = fixture_dir / "machine-id"
+        file_paths = {
+            "/sys/class/dmi/id/product_uuid": dmi_file,
+            "/etc/machine-id": installation_file,
+        }
+        real_open = os.open
+        real_fstat = os.fstat
+        stable_fields = (
+            "st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+            "st_size", "st_mtime_ns", "st_ctime_ns",
+        )
 
-        def calculate_identity(dmi_value, machine_value):
-            values = {
-                "/sys/class/dmi/id/product_uuid": dmi_value,
-                "/etc/machine-id": machine_value,
-            }
+        def calculate_identity(dmi_value, machine_value, metadata_fault=None):
+            for path, value in ((dmi_file, dmi_value),
+                                (installation_file, machine_value)):
+                if value is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.write_bytes(value)
+            if metadata_fault == "symlink":
+                dmi_file.unlink()
+                dmi_file.symlink_to(installation_file)
+            metadata_reads = 0
 
-            def read_text(path, *args, **kwargs):
-                del args, kwargs
-                value = values[str(path)]
-                if isinstance(value, Exception):
-                    raise value
-                return value
+            def open_record(path, flags):
+                self.assertIn(path, file_paths)
+                self.assertTrue(flags & os.O_NOFOLLOW)
+                self.assertTrue(flags & os.O_CLOEXEC)
+                return real_open(file_paths[path], flags)
 
-            with mock.patch.object(probe.Path, "read_text", autospec=True,
-                                   side_effect=read_text), \
+            def stat_record(file_descriptor):
+                nonlocal metadata_reads
+                metadata_reads += 1
+                observed = real_fstat(file_descriptor)
+                trusted = {field: getattr(observed, field)
+                           for field in stable_fields}
+                # The private fixture is unprivileged; only its fstat owner is
+                # simulated as root. All actual descriptor I/O stays private.
+                trusted["st_uid"] = 0
+                if metadata_fault == "untrusted_owner":
+                    trusted["st_uid"] = 1000
+                elif metadata_fault == "group_writable":
+                    trusted["st_mode"] |= 0o020
+                elif metadata_fault == "changed_during_read" and metadata_reads == 2:
+                    trusted["st_size"] += 1
+                return SimpleNamespace(**trusted)
+
+            with mock.patch.object(probe.os, "open", side_effect=open_record), \
+                    mock.patch.object(probe.os, "fstat",
+                                      side_effect=stat_record), \
                     mock.patch.object(probe.platform, "machine",
                                       return_value="x86_64"):
                 return probe.live_host_identity()
 
-        identity = calculate_identity(product_uuid + "\n", machine_id + "\n")
-        canonical_bytes = (
-            b"swapz-host-v2\0" + product_uuid.lower().encode("ascii") +
-            machine_id.lower().encode("ascii"))
+        identity = calculate_identity(product_uuid + b"\n", machine_id + b"\n")
         self.assertEqual(identity, {
             # The report importer still requires this existing schema label.
             "schema": "swapz-host-v1",
             "architecture": "x86_64",
-            "id_sha256": hashlib.sha256(canonical_bytes).hexdigest(),
+            "id_sha256": hashlib.sha256(
+                b"swapz-host-v2\0" + product_uuid.lower() +
+                machine_id.lower()).hexdigest(),
         })
         self.assertNotEqual(identity["id_sha256"], hashlib.sha256(
-            b"swapz-host\0" + machine_id.lower().encode("ascii")).hexdigest())
+            b"swapz-host\0" + machine_id.lower()).hexdigest())
         self.assertEqual(identity, calculate_identity(
             product_uuid.lower(), machine_id.lower()))
-        self.assertNotIn(product_uuid, json.dumps(identity))
-        self.assertNotIn(machine_id, json.dumps(identity))
+        self.assertNotIn(product_uuid.decode(), json.dumps(identity))
+        self.assertNotIn(machine_id.decode(), json.dumps(identity))
 
         other_product = calculate_identity(
-            "B1B2C3D4-E5F6-1234-ABCD-ABCDEF123456", machine_id)
+            b"B1B2C3D4-E5F6-1234-ABCD-ABCDEF123456", machine_id)
         other_installation = calculate_identity(
-            product_uuid, "BBCDEF0123456789ABCDEF0123456789")
+            product_uuid, b"BBCDEF0123456789ABCDEF0123456789")
         self.assertNotEqual(identity["id_sha256"], other_product["id_sha256"])
         self.assertNotEqual(identity["id_sha256"],
                             other_installation["id_sha256"])
@@ -1415,26 +1451,31 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertFalse(probe._report_is_owner_pass(
             report, other_installation))
 
-        for name, dmi_value, machine_value in (
-                ("malformed_dmi", "not-a-uuid", machine_id),
-                ("zero_dmi", "00000000-0000-0000-0000-000000000000",
-                 machine_id),
-                ("missing_dmi", OSError("private hardware identifier"),
-                 machine_id),
-                ("bad_encoding", UnicodeError("private hardware identifier"),
-                 machine_id),
-                ("malformed_machine", product_uuid, "not-a-machine-id"),
-                ("zero_machine", product_uuid, "0" * 32),
-                ("missing_machine", product_uuid,
-                 OSError("private installation identifier"))):
+        for name, dmi_value, machine_value, metadata_fault in (
+                ("malformed_dmi", b"not-a-uuid", machine_id, None),
+                ("zero_dmi", b"00000000-0000-0000-0000-000000000000",
+                 machine_id, None),
+                ("missing_dmi", None, machine_id, None),
+                ("whitespace", product_uuid + b" ", machine_id, None),
+                ("extra_newline", product_uuid + b"\n\n", machine_id, None),
+                ("malformed_machine", product_uuid, b"not-a-machine-id", None),
+                ("zero_machine", product_uuid, b"0" * 32, None),
+                ("missing_machine", product_uuid, None, None),
+                ("untrusted_owner", product_uuid, machine_id,
+                 "untrusted_owner"),
+                ("group_writable", product_uuid, machine_id,
+                 "group_writable"),
+                ("changed_during_read", product_uuid, machine_id,
+                 "changed_during_read"),
+                ("symlink", product_uuid, machine_id, "symlink")):
             with self.subTest(name=name):
                 with self.assertRaises(probe.ProbeError) as rejected:
-                    calculate_identity(dmi_value, machine_value)
+                    calculate_identity(dmi_value, machine_value,
+                                       metadata_fault=metadata_fault)
                 self.assertEqual(
                     str(rejected.exception),
                     "cannot identify the current host for physical smoke")
                 self.assertTrue(rejected.exception.__suppress_context__)
-                self.assertNotIn("private", str(rejected.exception))
 
     def test_live_host_gate_and_identical_artifact_history(self):
         source = "a" * 40
