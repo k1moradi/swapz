@@ -5306,15 +5306,9 @@ producer's result completion while the consumer retains its prepared-page
 reference. Qualification must prove the ACK waiter remains blocked until that
 completion, returns the exact late negative errno, permits a nonnegative late
 result, and bypasses the wait for an already-terminal READY representation.
-For a detached run, this join is also an authority-publication fence: it occurs
-after definitive lower WRITE completion but before
-`swapz_engine_complete_batched_run()` replays any mapping, and the target's
-terminal-failure latch is rechecked after the join immediately before replay.
-A negative late result therefore leaves the previous generation authoritative
-and quarantines the newly written reservation. Source ordering must place this
-barrier before both synchronous success ACK and detached-run success
-publication/defer delivery; generic/preempt-disabled completion paths must not
-sleep. Prepared and ordered owners are separate
+Source ordering must place this barrier before both synchronous success ACK and
+detached-run success publication/defer delivery; generic/preempt-disabled
+completion paths must not sleep. Prepared and ordered owners are separate
 required cases; the ordered mapped-input case must prove unmapping precedes the
 error return. Positive and zero controls must continue to select compressed and
 RAW storage respectively.

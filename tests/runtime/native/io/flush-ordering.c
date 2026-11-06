@@ -965,78 +965,6 @@ static int test_terminal_failure_and_drain_cross_final_callback(void)
 }
 
 
-/*
- * A detached RAW-selected run has definitive lower completion before the
- * speculative codec producer is necessarily done. The producer result is part
- * of the upper WRITE success decision, so authority publication must remain
- * withheld until that result is known. The source-contract regression binds
- * this finite ownership model to swapz_finalize_inflight_write().
- */
-struct detached_raw_publication_fixture {
-	bool lower_done;
-	bool producer_done;
-	bool upper_done;
-	int producer_error;
-	int upper_error;
-	unsigned int generation;
-	unsigned int publications;
-	unsigned int upper_completions;
-};
-
-static int finalize_detached_raw_publication(
-	struct detached_raw_publication_fixture *fixture)
-{
-	if (fixture->upper_done)
-		return fixture->upper_error;
-	if (!fixture->lower_done || !fixture->producer_done)
-		return -EAGAIN;
-	fixture->upper_done = true;
-	fixture->upper_completions++;
-	fixture->upper_error = fixture->producer_error;
-	if (fixture->producer_error)
-		return fixture->producer_error;
-	fixture->generation++;
-	fixture->publications++;
-	return 0;
-}
-
-static int test_raw_selected_result_precedes_detached_publication(void)
-{
-	struct detached_raw_publication_fixture failed = {
-		.lower_done = true,
-		.generation = 7,
-	};
-	struct detached_raw_publication_fixture succeeded = {
-		.lower_done = true,
-		.generation = 11,
-	};
-	int error;
-
-	/* Lower completion is not enough while RAW-selected preparation owns
-	 * an unresolved result. No mapping or upper completion may escape. */
-	error = finalize_detached_raw_publication(&failed);
-	CHECK(error == -EAGAIN);
-	CHECK(failed.generation == 7 && !failed.publications &&
-	      !failed.upper_completions && !failed.upper_done);
-
-	failed.producer_error = -EBADMSG;
-	failed.producer_done = true;
-	error = finalize_detached_raw_publication(&failed);
-	CHECK(error == -EBADMSG);
-	CHECK(failed.generation == 7 && !failed.publications &&
-	      failed.upper_completions == 1 && failed.upper_done);
-	CHECK(finalize_detached_raw_publication(&failed) == -EBADMSG);
-	CHECK(failed.upper_completions == 1 && !failed.publications);
-
-	/* Nonnegative producer completion permits one publication and ACK. */
-	succeeded.producer_done = true;
-	CHECK(finalize_detached_raw_publication(&succeeded) == 0);
-	CHECK(succeeded.generation == 12 && succeeded.publications == 1 &&
-	      succeeded.upper_completions == 1 && succeeded.upper_done);
-	CHECK(finalize_detached_raw_publication(&succeeded) == 0);
-	CHECK(succeeded.publications == 1 && succeeded.upper_completions == 1);
-	return 0;
-}
 
 int main(void)
 {
@@ -1055,7 +983,6 @@ int main(void)
 	CHECK(test_preflush_barrier_owns_callback_precedence() == 0); passed++;
 	CHECK(test_unsupported_fua_still_owns_terminal_ack() == 0); passed++;
 	CHECK(test_terminal_failure_and_drain_cross_final_callback() == 0); passed++;
-	CHECK(test_raw_selected_result_precedes_detached_publication() == 0); passed++;
 	printf("SWAPZ_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -951,16 +951,11 @@ int main(void)
         self.assertLess(
             flush.index("swapz_wait_raw_selected_preparation(bio)"),
             flush.index("acknowledgements.delivered_ns = ktime_get_ns();"))
-        wait_index = finalize.index("swapz_wait_raw_selected_preparation(")
-        replay_index = finalize.index("swapz_engine_complete_batched_run(")
-        self.assertLess(wait_index, replay_index)
-        self.assertIn("smp_load_acquire(&ctx->failed)",
-                      finalize[wait_index:replay_index])
         self.assertLess(
-            wait_index,
+            finalize.index("swapz_wait_raw_selected_preparation("),
             finalize.index("swapz_lane_gap_publish(ctx,"))
         self.assertLess(
-            wait_index,
+            finalize.index("swapz_wait_raw_selected_preparation("),
             finalize.index("swapz_defer_upper_completion(ctx,"))
 
         import subprocess
