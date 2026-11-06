@@ -1266,9 +1266,12 @@ static swapz_u16 swapz_probe_set(
         self.assertNotIn('PACKAGE_VERSION="' + version + '"', dkms)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertNotIn('"swapz3"', DM)
-        for path in ("docs/README.md", "docs/VISION.md",
-                     "docs/coding_standards.md", "docs/testing_standards.md",
-                     "docs/compile.md", "docs/benchmark.md"):
+        # The compact README links to the canonical naming policy rather
+        # than duplicating its exact wording. Verify that link separately.
+        self.assertIn("[VISION.md](VISION.md)", README)
+        for path in ("docs/VISION.md", "docs/coding_standards.md",
+                     "docs/testing_standards.md", "docs/compile.md",
+                     "docs/benchmark.md"):
             with self.subTest(naming_policy=path):
                 document = (ROOT / path).read_text()
                 self.assertIn("Immutable naming policy (read before every prompt)",
