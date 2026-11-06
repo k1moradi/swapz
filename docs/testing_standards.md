@@ -6446,8 +6446,17 @@ into an `EACCES` failure before its own validation and cleanup can run.
 
 After report publication, `make test` refreshes plots for the computer that
 executed the run, on every architecture. Reports carry `host_identity` with a
-domain-separated SHA-256 of `/etc/machine-id` and the running architecture;
-raw machine IDs and hostnames are never published. Only committed reports with
+domain-separated SHA-256 of `b"swapz-host-v2\0"` (the prefix with
+its terminating NUL), the canonical lowercase 36-byte DMI product UUID and
+lowercase 32-byte machine ID in that order. UUID hyphens are required at
+positions 8, 13, 18 and 23; each identifier must contain a nonzero hex digit.
+The two root-owned, single-link, non-group/world-writable regular files are
+read without following symlinks, with stable metadata. Each allows exactly
+zero or one trailing LF, never whitespace trimming or any other trailing bytes.
+Missing, malformed, oversized or changing inputs yield `UNAVAILABLE` with
+redacted `phase=host_identity` refusal categories. The JSON schema label stays
+`swapz-host-v1` because the production parser requires it; that label is not
+the digest version. Raw machine IDs, DMI UUIDs and hostnames are never published. Only committed reports with
 that exact identity, overall PASS and all five stages PASS enter its history.
 Git report history preserves each computer's measurements even though the
 shared `test_results.json` is overwritten by the latest upload. The plotter

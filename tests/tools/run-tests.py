@@ -8591,17 +8591,69 @@ def publish(source_sha):
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
 
+def _read_host_identity_record(path, byte_limit):
+    """Read one trusted, stable host record without following a symlink."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_CLOEXEC |
+                           os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as source:
+        before = os.fstat(source.fileno())
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or
+                before.st_nlink != 1 or (before.st_mode & 0o022)):
+            raise ValueError("untrusted_metadata")
+        record = source.read(byte_limit)
+        after = os.fstat(source.fileno())
+        stable_fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
+                         "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if any(getattr(before, field) != getattr(after, field)
+               for field in stable_fields):
+            raise ValueError("changed_during_read")
+    if len(record) == byte_limit:
+        raise ValueError("oversized_file")
+    return record
+
+
 def report_host_identity():
     """Stable OS installation identity; never publish raw machine-id or hostname."""
-    try:
-        machine_id = Path("/etc/machine-id").read_text().strip()
-        if not re.fullmatch(r"[0-9a-fA-F]{32}", machine_id) or int(machine_id, 16) == 0:
-            raise ValueError("invalid machine-id")
-        return {"schema": "swapz-host-v1", "architecture": os.uname().machine,
-                "id_sha256": hashlib.sha256(
-                    b"swapz-host\0" + machine_id.lower().encode()).hexdigest()}
-    except (OSError, ValueError):
-        return {"schema": "swapz-host-v1", "status": "UNAVAILABLE"}
+    # The qualification JSON parser still requires v1; its digest is v2.
+    schema = "swapz-host-v1"
+    records = []
+    inputs = (
+        ("/sys/class/dmi/id/product_uuid", 40,
+         rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+         "root_owned_regular_dmi_uuid_36_hex_hyphens_optional_lf"),
+        ("/etc/machine-id", 64, rb"[0-9a-fA-F]{32}",
+         "root_owned_regular_machine_id_32_hex_optional_lf"),
+    )
+    for path, byte_limit, pattern, expected_class in inputs:
+        def refusal(observed_class, reason):
+            return {"schema": schema, "status": "UNAVAILABLE",
+                    "phase": "host_identity", "expected_input_class": expected_class,
+                    "observed_validity_class": observed_class,
+                    "refusal_reason": reason}
+
+        try:
+            record = _read_host_identity_record(path, byte_limit)
+        except FileNotFoundError:
+            return refusal("missing", "file_missing")
+        except OSError:
+            return refusal("unreadable", "read_failed")
+        except ValueError as error:
+            reason = str(error)
+            if reason not in ("untrusted_metadata", "changed_during_read",
+                              "oversized_file"):
+                reason = "invalid_file_state"
+            observed = {"untrusted_metadata": "untrusted",
+                        "changed_during_read": "changed",
+                        "oversized_file": "malformed"}.get(reason, "untrusted")
+            return refusal(observed, reason)
+        if record.endswith(b"\n"):
+            record = record[:-1]
+        if (re.fullmatch(pattern, record) is None or
+                not any(byte not in (ord("0"), ord("-")) for byte in record)):
+            return refusal("malformed", "invalid_format_or_zero")
+        records.append(record.lower())
+    return {"schema": schema, "architecture": os.uname().machine,
+            "id_sha256": hashlib.sha256(
+                b"swapz-host-v2\0" + b"".join(records)).hexdigest()}
 
 
 # Each refresh re-reads every committed report (~1.3 MB JSON per run, growing by

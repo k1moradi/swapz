@@ -1470,17 +1470,121 @@ class ReportContract(unittest.TestCase):
                          [f"{1:040x}", f"{5:040x}"])
         self.assertEqual(data["excluded"]["other or unproven host"], 3)
 
+    def test_host_identity_matches_production_sha256_vectors(self):
+        from unittest.mock import call, patch
+
+        dmi_path = "/sys/class/dmi/id/product_uuid"
+        machine_path = "/etc/machine-id"
+        # Literal digests pin the C prefix (including NUL), UUID layout,
+        # lowercase normalization, and both identifier lengths.
+        vectors = (
+            (b"00112233-4455-6677-8899-aabbccddeeff\n",
+             b"0123456789abcdef0123456789abcdef\n",
+             "43ff3a146c6a1c8eb61716358170b7d765f7db44f86fc38e18dd449dd2e36d1f"),
+            (b"ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB", b"A" * 32,
+             "5077d1acbef3f04e0452c028e378ab9baf65fc9c6f3b89e2a86aa9e9b76f6795"),
+            (b"00112233-4455-6677-8899-aabbccddeeff", b"f" * 32,
+             "154683b7b7fb6965af8954ac2f23cda3a220ae2a53ef295dc3935e15767568eb"),
+            (b"00000001-0000-0000-0000-000000000000",
+             b"0123456789abcdef0123456789abcdef",
+             "fc5848ac1b8a9297e969045c0f8c443a8be6de839ba99c649bb8b0a70b574516"),
+        )
+        identities = []
+        for product_uuid, machine_id, expected_digest in vectors:
+            with self.subTest(expected_digest=expected_digest):
+                records = {dmi_path: product_uuid, machine_path: machine_id}
+                with patch.object(runner, "_read_host_identity_record",
+                                  side_effect=lambda path, limit: records[path]) as reader:
+                    identity = runner.report_host_identity()
+                self.assertEqual(reader.call_args_list,
+                                 [call(dmi_path, 40), call(machine_path, 64)])
+                self.assertEqual(identity, {
+                    "schema": "swapz-host-v1",
+                    "architecture": runner.os.uname().machine,
+                    "id_sha256": expected_digest})
+                self.assertNotIn(product_uuid.decode("ascii"), json.dumps(identity))
+                self.assertNotIn(machine_id.decode("ascii"), json.dumps(identity))
+                identities.append(identity)
+        self.assertEqual(len({identity["id_sha256"] for identity in identities}), 4)
+        self.assertNotEqual(identities[0]["id_sha256"], hashlib.sha256(
+            b"swapz-host\0" + b"0123456789abcdef0123456789abcdef").hexdigest())
+
+        spec = importlib.util.spec_from_file_location(
+            "swapz_identity_history", ROOT / "tests/tools/plot-history.py")
+        history = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(history)
+        report = {"host_identity": identities[0], "overall": "PASS",
+                  "stages": [{"status": "PASS"}] * 5}
+        self.assertTrue(history.same_computer_report(report, identities[0]))
+        for different_host in identities[1:]:
+            self.assertFalse(history.same_computer_report(report, different_host))
+
     def test_host_identity_missing_or_invalid_fails_closed(self):
         from unittest.mock import patch
-        for value in ("", "0" * 32, "not-a-machine-id"):
-            with patch.object(Path, "read_text", return_value=value):
-                self.assertEqual(runner.report_host_identity()["status"], "UNAVAILABLE")
-        with patch.object(Path, "read_text", return_value="a" * 32):
-            identity = runner.report_host_identity()
-            self.assertEqual(len(identity["id_sha256"]), 64)
-            self.assertNotIn("a" * 32, json.dumps(identity))
-        with patch.object(Path, "read_text", side_effect=OSError):
-            self.assertEqual(runner.report_host_identity()["status"], "UNAVAILABLE")
+
+        dmi_path = "/sys/class/dmi/id/product_uuid"
+        machine_path = "/etc/machine-id"
+        records = {dmi_path: b"00112233-4455-6677-8899-aabbccddeeff\n",
+                   machine_path: b"0123456789abcdef0123456789abcdef\n"}
+        expected_classes = {
+            dmi_path: "root_owned_regular_dmi_uuid_36_hex_hyphens_optional_lf",
+            machine_path: "root_owned_regular_machine_id_32_hex_optional_lf",
+        }
+        malformed = (
+            (dmi_path, b""), (dmi_path, b"00000000-0000-0000-0000-000000000000"),
+            (dmi_path, b"00112233445566778899aabbccddeeff"),
+            (dmi_path, b"00112233-4455-6677-8899-aabbccddeezz"),
+            (dmi_path, records[dmi_path] + b"\n"),
+            (dmi_path, records[dmi_path].replace(b"\n", b"\r\n")),
+            (machine_path, b""), (machine_path, b"0" * 32),
+            (machine_path, b"not-a-machine-id"), (machine_path, b"\xff" * 32),
+            (machine_path, records[machine_path] + b"\n"),
+            (machine_path, records[machine_path].replace(b"\n", b"\r\n")),
+        )
+        for path, value in malformed:
+            with self.subTest(path=path, invalid_length=len(value)):
+                supplied = {**records, path: value}
+                with patch.object(runner, "_read_host_identity_record",
+                                  side_effect=lambda name, limit: supplied[name]):
+                    result = runner.report_host_identity()
+                self.assertEqual(result, {
+                    "schema": "swapz-host-v1", "status": "UNAVAILABLE",
+                    "phase": "host_identity", "expected_input_class": expected_classes[path],
+                    "observed_validity_class": "malformed",
+                    "refusal_reason": "invalid_format_or_zero"})
+                self.assertNotIn(records[dmi_path].decode().strip(), json.dumps(result))
+                self.assertNotIn(records[machine_path].decode().strip(), json.dumps(result))
+
+        errors = ((FileNotFoundError("private missing input"), "missing", "file_missing"),
+                  (PermissionError("private permission detail"), "unreadable", "read_failed"),
+                  (ValueError("untrusted_metadata"), "untrusted", "untrusted_metadata"),
+                  (ValueError("changed_during_read"), "changed", "changed_during_read"),
+                  (ValueError("oversized_file"), "malformed", "oversized_file"))
+        for path in (dmi_path, machine_path):
+            for error, observed, reason in errors:
+                with self.subTest(path=path, reason=reason):
+                    def read_selected(name, limit):
+                        if name == path:
+                            raise error
+                        return records[name]
+
+                    with patch.object(runner, "_read_host_identity_record",
+                                      side_effect=read_selected):
+                        result = runner.report_host_identity()
+                    self.assertEqual(result, {
+                        "schema": "swapz-host-v1", "status": "UNAVAILABLE",
+                        "phase": "host_identity", "expected_input_class": expected_classes[path],
+                        "observed_validity_class": observed, "refusal_reason": reason})
+                    self.assertNotIn("private", json.dumps(result))
+
+    def test_host_identity_reader_refuses_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            private_record = Path(directory) / "record"
+            private_record.write_bytes(b"0" * 32)
+            symlink = Path(directory) / "symlink"
+            symlink.symlink_to(private_record)
+            with self.assertRaises(OSError):
+                runner._read_host_identity_record(str(symlink), 64)
 
     def test_history_refresh_executes_after_publication_without_changing_verdicts(self):
         from unittest.mock import patch
