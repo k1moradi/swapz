@@ -6424,6 +6424,19 @@ never print page payload bytes. These finite C11 schedules remain supporting
 evidence, not loaded KCSAN, lockdep, or proof of kernel execution under
 suspend/drain.
 
+The shutdown-overlap continuation runs 32 deterministic rootless schedules with
+three simultaneously live owners: an in-flight lower callback, deferred
+completion work and a cancelled preparation producer. A fourth drainer closes
+admission and joins those three pthreads. The schedule separately exposes
+lower-callback return, completion_active clearing, the producer's final
+prepared-slot put and slot-63 reuse before allowing the completion and producer
+threads to return. The modeled allocation may become releasable only after all
+three joins and only with zero active owners, zero prepared references, an EMPTY
+slot and the free-mask bit restored. Late compressed, no-fit RAW and negative
+codec results all lose to CANCELLED. This test is lifetime-ordering evidence for
+the rootless model only; it does not model dm_io/workqueue internals and does
+not upgrade sanitizer results into loaded-kernel race freedom.
+
 The preparation-slot helper regression must not manufacture concurrent
 `swapz_preparation_retire()` and `swapz_preparation_consume_ready()` calls
 for one prepared page and describe that as a production ownership transition.

@@ -1064,6 +1064,312 @@ static int test_cancellation_terminal_drain_and_slot_reuse(void)
 	return 0;
 }
 
+
+
+/*
+ * Model the target's final lifetime joins with real pthread joins. The three
+ * workers represent an in-flight lower callback, already-published completion
+ * work and a cancelled preparation producer. Shutdown closes admission while
+ * all three are live. Clearing an active flag or returning slot 63 is not
+ * sufficient to authorize memory release: the corresponding worker must have
+ * actually returned and been joined.
+ *
+ * This is rootless C11/POSIX lifetime evidence only. It does not model dm_io,
+ * workqueue internals or prove loaded-kernel race freedom.
+ */
+#define SHUTDOWN_OVERLAP_ROUNDS 32U
+struct shutdown_overlap_handoff {
+	atomic_t state;
+	atomic64_t free_mask;
+	_Atomic unsigned int references;
+	_Atomic unsigned int accepting;
+	_Atomic unsigned int lower_active;
+	_Atomic unsigned int completion_active;
+	_Atomic unsigned int producer_active;
+	_Atomic unsigned int lower_entered;
+	_Atomic unsigned int completion_entered;
+	_Atomic unsigned int producer_entered;
+	_Atomic unsigned int drain_started;
+	_Atomic unsigned int allow_lower_return;
+	_Atomic unsigned int allow_completion_clear;
+	_Atomic unsigned int allow_completion_return;
+	_Atomic unsigned int allow_producer_put;
+	_Atomic unsigned int allow_producer_return;
+	_Atomic unsigned int lower_final_access_done;
+	_Atomic unsigned int completion_waiting_to_return;
+	_Atomic unsigned int producer_put_done;
+	_Atomic unsigned int memory_released;
+	_Atomic unsigned int failures;
+	pthread_t lower_thread;
+	pthread_t completion_thread;
+	pthread_t producer_thread;
+	int codec_result;
+	int observed_publish_state;
+	unsigned int lower_payload;
+	unsigned int completion_payload;
+	unsigned int producer_payload;
+};
+
+static void shutdown_overlap_fail(struct shutdown_overlap_handoff *handoff,
+				  unsigned int iteration, const char *phase,
+				  const char *condition)
+{
+	fprintf(stderr,
+		"preparation-lifetime shutdown-overlap iteration=%u phase=%s "
+		"lower_active=%u completion_active=%u producer_active=%u "
+		"refs=%u slot_mask=0x%llx state=%d memory_released=%u: %s\n",
+		iteration, phase,
+		atomic_load_explicit(&handoff->lower_active, memory_order_relaxed),
+		atomic_load_explicit(&handoff->completion_active,
+				     memory_order_relaxed),
+		atomic_load_explicit(&handoff->producer_active,
+				     memory_order_relaxed),
+		atomic_load_explicit(&handoff->references, memory_order_relaxed),
+		(unsigned long long)atomic64_read(&handoff->free_mask),
+		swapz_preparation_read_state(&handoff->state),
+		atomic_load_explicit(&handoff->memory_released,
+				     memory_order_relaxed),
+		condition);
+	atomic_fetch_add_explicit(&handoff->failures, 1, memory_order_relaxed);
+}
+
+#define SHUTDOWN_OVERLAP_CHECK(handoff, iteration, phase, condition) do { \
+	if (!(condition)) \
+		shutdown_overlap_fail((handoff), (iteration), (phase), #condition); \
+} while (0)
+
+static void shutdown_overlap_release_prepared(
+	struct shutdown_overlap_handoff *handoff)
+{
+	unsigned int references = atomic_fetch_sub_explicit(
+		&handoff->references, 1, memory_order_acq_rel);
+
+	if (references != 1U) {
+		atomic_fetch_add_explicit(&handoff->failures, 1,
+					 memory_order_relaxed);
+		atomic_store_explicit(&handoff->references, 0, memory_order_relaxed);
+	}
+	atomic_store_explicit(&handoff->state.value, SWAPZ_PREPARATION_EMPTY,
+			      memory_order_relaxed);
+	swapz_preparation_release_slot(&handoff->free_mask, 63);
+}
+
+static void *shutdown_overlap_lower_callback(void *opaque)
+{
+	struct shutdown_overlap_handoff *handoff = opaque;
+
+	atomic_store_explicit(&handoff->lower_entered, 1, memory_order_release);
+	while (!atomic_load_explicit(&handoff->allow_lower_return,
+				     memory_order_acquire))
+		sched_yield();
+	/* Final modeled target access occurs before lower ownership is released. */
+	handoff->lower_payload ^= 0x13579bdfU;
+	atomic_store_explicit(&handoff->lower_active, 0, memory_order_release);
+	atomic_store_explicit(&handoff->lower_final_access_done, 1,
+			      memory_order_release);
+	return NULL;
+}
+
+static void *shutdown_overlap_completion_work(void *opaque)
+{
+	struct shutdown_overlap_handoff *handoff = opaque;
+
+	atomic_store_explicit(&handoff->completion_entered, 1,
+			      memory_order_release);
+	while (!atomic_load_explicit(&handoff->allow_completion_clear,
+				     memory_order_acquire))
+		sched_yield();
+	/* completion_active clears only after the work item has stopped using data. */
+	handoff->completion_payload ^= 0x2468ace0U;
+	atomic_store_explicit(&handoff->completion_active, 0,
+			      memory_order_release);
+	atomic_store_explicit(&handoff->completion_waiting_to_return, 1,
+			      memory_order_release);
+	while (!atomic_load_explicit(&handoff->allow_completion_return,
+				     memory_order_acquire))
+		sched_yield();
+	return NULL;
+}
+
+static void *shutdown_overlap_preparation_producer(void *opaque)
+{
+	struct shutdown_overlap_handoff *handoff = opaque;
+
+	atomic_store_explicit(&handoff->producer_entered, 1, memory_order_release);
+	while (!atomic_load_explicit(&handoff->allow_producer_put,
+				     memory_order_acquire))
+		sched_yield();
+	handoff->producer_payload ^= 0x55aa55aaU;
+	handoff->observed_publish_state = swapz_preparation_publish_codec_result(
+		&handoff->state, handoff->codec_result);
+	shutdown_overlap_release_prepared(handoff);
+	atomic_store_explicit(&handoff->producer_active, 0, memory_order_release);
+	atomic_store_explicit(&handoff->producer_put_done, 1,
+			      memory_order_release);
+	while (!atomic_load_explicit(&handoff->allow_producer_return,
+				     memory_order_acquire))
+		sched_yield();
+	return NULL;
+}
+
+static void *shutdown_overlap_drainer(void *opaque)
+{
+	struct shutdown_overlap_handoff *handoff = opaque;
+
+	atomic_store_explicit(&handoff->accepting, 0, memory_order_release);
+	atomic_store_explicit(&handoff->drain_started, 1, memory_order_release);
+	if (pthread_join(handoff->lower_thread, NULL) != 0 ||
+	    pthread_join(handoff->completion_thread, NULL) != 0 ||
+	    pthread_join(handoff->producer_thread, NULL) != 0) {
+		atomic_fetch_add_explicit(&handoff->failures, 1,
+					 memory_order_relaxed);
+		return NULL;
+	}
+	if (atomic_load_explicit(&handoff->lower_active, memory_order_acquire) ||
+	    atomic_load_explicit(&handoff->completion_active,
+				 memory_order_acquire) ||
+	    atomic_load_explicit(&handoff->producer_active,
+				 memory_order_acquire) ||
+	    atomic_load_explicit(&handoff->references, memory_order_acquire) ||
+	    (uint64_t)atomic64_read(&handoff->free_mask) != (1ULL << 63) ||
+	    swapz_preparation_read_state(&handoff->state) !=
+		    SWAPZ_PREPARATION_EMPTY)
+		atomic_fetch_add_explicit(&handoff->failures, 1,
+					 memory_order_relaxed);
+	/* The modeled allocation may be released only after every owner joined. */
+	atomic_store_explicit(&handoff->memory_released, 1,
+			      memory_order_release);
+	return NULL;
+}
+
+static int test_shutdown_joins_callback_completion_and_preparation(void)
+{
+	static const int results[] = { 320, 0, -EIO };
+	unsigned int iteration;
+
+	for (iteration = 0; iteration < SHUTDOWN_OVERLAP_ROUNDS; ++iteration) {
+		struct shutdown_overlap_handoff handoff = { 0 };
+		pthread_t drainer;
+
+		atomic_init(&handoff.state.value, SWAPZ_PREPARATION_CANCELLED);
+		atomic_init(&handoff.free_mask.value, (s64)(1ULL << 63));
+		atomic_init(&handoff.references, 1);
+		atomic_init(&handoff.accepting, 1);
+		atomic_init(&handoff.lower_active, 1);
+		atomic_init(&handoff.completion_active, 1);
+		atomic_init(&handoff.producer_active, 1);
+		atomic_init(&handoff.lower_entered, 0);
+		atomic_init(&handoff.completion_entered, 0);
+		atomic_init(&handoff.producer_entered, 0);
+		atomic_init(&handoff.drain_started, 0);
+		atomic_init(&handoff.allow_lower_return, 0);
+		atomic_init(&handoff.allow_completion_clear, 0);
+		atomic_init(&handoff.allow_completion_return, 0);
+		atomic_init(&handoff.allow_producer_put, 0);
+		atomic_init(&handoff.allow_producer_return, 0);
+		atomic_init(&handoff.lower_final_access_done, 0);
+		atomic_init(&handoff.completion_waiting_to_return, 0);
+		atomic_init(&handoff.producer_put_done, 0);
+		atomic_init(&handoff.memory_released, 0);
+		atomic_init(&handoff.failures, 0);
+		handoff.codec_result =
+			results[iteration % (sizeof(results) / sizeof(results[0]))];
+		handoff.observed_publish_state = SWAPZ_PREPARATION_EMPTY;
+		handoff.lower_payload = iteration;
+		handoff.completion_payload = iteration;
+		handoff.producer_payload = iteration;
+
+		SHUTDOWN_OVERLAP_CHECK(&handoff, iteration, "claim-slot",
+			swapz_preparation_claim_slot(&handoff.free_mask) == 63);
+		CHECK(pthread_create(&handoff.lower_thread, NULL,
+				     shutdown_overlap_lower_callback, &handoff) == 0);
+		CHECK(pthread_create(&handoff.completion_thread, NULL,
+				     shutdown_overlap_completion_work, &handoff) == 0);
+		CHECK(pthread_create(&handoff.producer_thread, NULL,
+				     shutdown_overlap_preparation_producer,
+				     &handoff) == 0);
+		CHECK(pthread_create(&drainer, NULL, shutdown_overlap_drainer,
+				     &handoff) == 0);
+
+		while (!atomic_load_explicit(&handoff.lower_entered,
+					    memory_order_acquire) ||
+		       !atomic_load_explicit(&handoff.completion_entered,
+					    memory_order_acquire) ||
+		       !atomic_load_explicit(&handoff.producer_entered,
+					    memory_order_acquire) ||
+		       !atomic_load_explicit(&handoff.drain_started,
+					    memory_order_acquire))
+			sched_yield();
+		SHUTDOWN_OVERLAP_CHECK(&handoff, iteration, "shutdown-overlap",
+			!atomic_load_explicit(&handoff.accepting,
+					     memory_order_acquire) &&
+			!atomic_load_explicit(&handoff.memory_released,
+					     memory_order_acquire));
+
+		atomic_store_explicit(&handoff.allow_lower_return, 1,
+				      memory_order_release);
+		while (!atomic_load_explicit(&handoff.lower_final_access_done,
+					    memory_order_acquire))
+			sched_yield();
+		SHUTDOWN_OVERLAP_CHECK(&handoff, iteration, "lower-return",
+			!atomic_load_explicit(&handoff.lower_active,
+					     memory_order_acquire) &&
+			handoff.lower_payload == (iteration ^ 0x13579bdfU) &&
+			!atomic_load_explicit(&handoff.memory_released,
+					     memory_order_acquire));
+
+		atomic_store_explicit(&handoff.allow_completion_clear, 1,
+				      memory_order_release);
+		while (!atomic_load_explicit(&handoff.completion_waiting_to_return,
+					    memory_order_acquire))
+			sched_yield();
+		SHUTDOWN_OVERLAP_CHECK(&handoff, iteration, "completion-active-clear",
+			!atomic_load_explicit(&handoff.completion_active,
+					     memory_order_acquire) &&
+			handoff.completion_payload == (iteration ^ 0x2468ace0U) &&
+			!atomic_load_explicit(&handoff.memory_released,
+					     memory_order_acquire));
+
+		atomic_store_explicit(&handoff.allow_producer_put, 1,
+				      memory_order_release);
+		while (!atomic_load_explicit(&handoff.producer_put_done,
+					    memory_order_acquire))
+			sched_yield();
+		SHUTDOWN_OVERLAP_CHECK(&handoff, iteration, "prepared-slot-free",
+			handoff.observed_publish_state == SWAPZ_PREPARATION_CANCELLED &&
+			!atomic_load_explicit(&handoff.references,
+					     memory_order_acquire) &&
+			(uint64_t)atomic64_read(&handoff.free_mask) == (1ULL << 63) &&
+			swapz_preparation_read_state(&handoff.state) ==
+				SWAPZ_PREPARATION_EMPTY &&
+			!atomic_load_explicit(&handoff.producer_active,
+					     memory_order_acquire) &&
+			handoff.producer_payload == (iteration ^ 0x55aa55aaU) &&
+			!atomic_load_explicit(&handoff.memory_released,
+					     memory_order_acquire));
+
+		/* Clearing active flags and freeing the slot are insufficient while
+		 * work items are still blocked from returning. */
+		atomic_store_explicit(&handoff.allow_completion_return, 1,
+				      memory_order_release);
+		sched_yield();
+		SHUTDOWN_OVERLAP_CHECK(&handoff, iteration, "completion-return-only",
+			!atomic_load_explicit(&handoff.memory_released,
+					     memory_order_acquire));
+		atomic_store_explicit(&handoff.allow_producer_return, 1,
+				      memory_order_release);
+		CHECK(pthread_join(drainer, NULL) == 0);
+		SHUTDOWN_OVERLAP_CHECK(&handoff, iteration, "all-joined",
+			atomic_load_explicit(&handoff.memory_released,
+					    memory_order_acquire) &&
+			!atomic_load_explicit(&handoff.failures,
+					     memory_order_relaxed));
+		if (atomic_load_explicit(&handoff.failures, memory_order_relaxed))
+			return 1;
+	}
+	return 0;
+}
+
 int main(void)
 {
 	CHECK(!test_ordered_ack_and_refcount_lifetime());
@@ -1071,6 +1377,7 @@ int main(void)
 	CHECK(!test_closed_admission_suppresses_owner_wake());
 	CHECK(!test_submitter_active_gate_and_lane_drain());
 	CHECK(!test_cancellation_terminal_drain_and_slot_reuse());
-	puts("SWAPZ_PREPARATION_PUBLICATION_LIFETIME_PASS=5");
+	CHECK(!test_shutdown_joins_callback_completion_and_preparation());
+	puts("SWAPZ_PREPARATION_PUBLICATION_LIFETIME_PASS=6");
 	return 0;
 }
