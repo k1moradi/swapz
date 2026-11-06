@@ -5646,36 +5646,81 @@ class ProductionReadinessEvidenceTest(unittest.TestCase):
         self.assertEqual(verdict["evidence_statuses"]["required_ci"], "BLOCKED")
 
     def test_stale_ci_and_old_owner_report_cannot_qualify_new_build(self):
-        # Every old CI run still reports success; its source is nevertheless
-        # not the source of the current qualified/installed binary identities.
-        snapshot = self.passing_snapshot()
         old_source = "e" * 40
-        for run in snapshot["release_evidence"]["required_ci"]["runs"]:
+
+        # Old green CI is not current-source evidence even when every recorded
+        # workflow otherwise has the exact canonical completed-success shape.
+        stale_ci = self.passing_snapshot()
+        for run in stale_ci["release_evidence"]["required_ci"]["runs"]:
             run["head_sha"] = old_source
-        snapshot["release_evidence"]["exact_source_owner_make_test"][
-            "tested_source_sha"] = old_source
         verdict = runner.evaluate_production_readiness(
-            snapshot, self.SOURCE_SHA)
-        for evidence_name in ("required_ci", "exact_source_owner_make_test"):
-            self.assertEqual(
-                verdict["evidence_statuses"][evidence_name], "BLOCKED")
-        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED")
-        self.assertNotEqual(verdict["release_verdict"], "PASS")
+            stale_ci, self.SOURCE_SHA)
+        message = (
+            f"gate=required_ci expected_source={self.SOURCE_SHA} "
+            f"observed_source={old_source}; "
+            "next=run required CI for the exact current source")
+        self.assertEqual(
+            verdict["evidence_statuses"]["required_ci"], "BLOCKED", message)
+        self.assertNotEqual(verdict["release_verdict"], "PASS", message)
+
+        # Model an actually stale owner result: both the evidence record and
+        # the make-test payload identify the prior source. Do not manufacture a
+        # contradictory current wrapper around an old tested_commit_sha.
+        stale_owner = self.passing_snapshot()
+        owner = stale_owner["release_evidence"]["exact_source_owner_make_test"]
+        owner["source_sha"] = old_source
+        owner["tested_source_sha"] = old_source
+        verdict = runner.evaluate_production_readiness(
+            stale_owner, self.SOURCE_SHA)
+        message = (
+            f"gate=exact_source_owner_make_test "
+            f"expected_source={self.SOURCE_SHA} observed_source={old_source}; "
+            "next=recapture owner make test on the exact current source")
+        self.assertEqual(
+            verdict["evidence_statuses"]["exact_source_owner_make_test"],
+            "BLOCKED", message)
+        self.assertEqual(
+            verdict["reasons"]["exact_source_owner_make_test"],
+            "evidence is historical or source-unbound", message)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED", message)
+        self.assertNotEqual(verdict["release_verdict"], "PASS", message)
 
     def test_failed_owner_report_with_populated_hashes_stays_failed(self):
-        snapshot = self.passing_snapshot()
-        owner = snapshot["release_evidence"]["exact_source_owner_make_test"]
+        # A false PASS wrapper must not hide the inner make-test FAIL merely
+        # because all three qualified artifact hashes are populated and valid.
+        false_pass = self.passing_snapshot()
+        owner = false_pass["release_evidence"]["exact_source_owner_make_test"]
         self.assertTrue(runner._readiness_artifact_hashes_valid(
             owner["hashes"]))
         owner["overall"] = "FAIL"
-        owner["status"] = "FAIL"
         verdict = runner.evaluate_production_readiness(
-            snapshot, self.SOURCE_SHA)
+            false_pass, self.SOURCE_SHA)
+        message = (
+            "gate=exact_source_owner_make_test expected_overall=PASS "
+            "observed_overall=FAIL; next=inspect the first failed make-test "
+            "stage and recapture owner qualification")
         self.assertEqual(
             verdict["evidence_statuses"]["exact_source_owner_make_test"],
-            "FAIL")
-        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "FAIL")
-        self.assertEqual(verdict["release_verdict"], "FAIL")
+            "BLOCKED", message)
+        self.assertEqual(
+            verdict["reasons"]["exact_source_owner_make_test"],
+            "PASS payload is incomplete or unqualified", message)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "BLOCKED", message)
+        self.assertNotEqual(verdict["release_verdict"], "PASS", message)
+
+        # When the evidence status itself records the current failure, preserve
+        # FAIL rather than weakening the first failed gate into BLOCKED.
+        explicit_fail = self.passing_snapshot()
+        owner = explicit_fail["release_evidence"]["exact_source_owner_make_test"]
+        owner["overall"] = "FAIL"
+        owner["status"] = "FAIL"
+        verdict = runner.evaluate_production_readiness(
+            explicit_fail, self.SOURCE_SHA)
+        self.assertEqual(
+            verdict["evidence_statuses"]["exact_source_owner_make_test"],
+            "FAIL", message)
+        self.assertEqual(verdict["CODE_PRODUCTION_READY"], "FAIL", message)
+        self.assertEqual(verdict["release_verdict"], "FAIL", message)
 
     def test_required_ci_requires_completed_success_and_concrete_run_id(self):
         for field, value in (

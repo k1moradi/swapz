@@ -7897,8 +7897,14 @@ The package's actual digest gate must compare final formatter/module/oracle
 artifact bytes to the report, reject changed or absent bytes, and emit only
 bounded expected/observed hashes and a read-only recapture action. A successful
 old CI run or saved report for a prior source cannot become evidence for a
-new owner-host execution; these fixtures never write `test_results.json` or
-claim live device qualification.
+new owner-host execution. The stale-owner negative control must bind both the
+release evidence's `source_sha` and the saved make-test `tested_source_sha`
+to that prior source, while evaluation targets the new source. The
+`overall=FAIL` negative control must first leave the enclosing evidence status
+as `PASS` to prove payload validation rejects the false promotion even with
+all qualified hashes populated; a separate explicit-FAIL control preserves
+FAIL precedence. These fixtures never write `test_results.json` or claim live
+device qualification.
 
 The project-goals current-attempt job census emits fail-only, bounded
 `CI_NOT_QUALIFIED` diagnostics. Each refusal identifies the validated
