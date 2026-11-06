@@ -147,7 +147,14 @@ fixture wrapper and consume them in the fixture's assertion output. Original
 and mutated source-extracted fixtures must compile with the same `-Werror`
 flags: if a negative-control mutation removes the final reference to a static
 syscall adapter, give that test adapter deliberate external linkage or another
-safe reference instead of suppressing warnings.
+safe reference instead of suppressing warnings. The private owned-null_blk
+fault binary links the full production coordinator with `--wrap=syscall`, so
+its no-fault path must explicitly forward every production syscall reached on
+the lifecycle admission path. On x86_64 and arm64 this includes the
+`statmount` and `listmount` namespace-inventory syscalls (457 and 458); the
+standalone fake-kernel passthrough harness must execute both forwards. A
+synthetic `ENOSYS` from the test seam is fixture failure, not lifecycle
+refusal evidence. Unrecognized syscall numbers remain fail-closed.
 
 Observation labels are proof labels, not syscall-attempt labels. A successful
 idempotent helper that proves swap already inactive or a mapper already absent

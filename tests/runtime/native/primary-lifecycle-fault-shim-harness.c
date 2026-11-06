@@ -246,11 +246,21 @@ long __wrap_syscall(long number, ...);
 int __wrap_open(const char *path, int flags, ...);
 int __wrap_fsync(int fd);
 
+#if defined(__x86_64__) || defined(__aarch64__)
+enum {
+	primary_test_statmount_syscall_number = 457,
+	primary_test_listmount_syscall_number = 458,
+};
+#endif
+
 static int swap_is_active;
 static int swap_syscall_calls;
 static int normal_open_calls;
 static int normal_fsync_calls;
 static int module_syscall_calls;
+#if defined(__x86_64__) || defined(__aarch64__)
+static int namespace_inventory_syscall_calls;
+#endif
 
 long syscall(long number, ...)
 {
@@ -287,6 +297,26 @@ long syscall(long number, ...)
 		if (strcmp(name, "dm_swapz") || flags != O_NONBLOCK)
 			abort();
 		++module_syscall_calls;
+#if defined(__x86_64__) || defined(__aarch64__)
+	} else if (number == primary_test_statmount_syscall_number) {
+		void *request = va_arg(arguments, void *);
+		void *buffer = va_arg(arguments, void *);
+		size_t buffer_size = va_arg(arguments, size_t);
+		unsigned int flags = va_arg(arguments, unsigned int);
+
+		if (!request || !buffer || buffer_size != 56U || flags != 0U)
+			abort();
+		++namespace_inventory_syscall_calls;
+	} else if (number == primary_test_listmount_syscall_number) {
+		void *request = va_arg(arguments, void *);
+		void *mount_ids = va_arg(arguments, void *);
+		int mount_capacity = va_arg(arguments, int);
+		unsigned int flags = va_arg(arguments, unsigned int);
+
+		if (!request || !mount_ids || mount_capacity != 256 || flags != 0U)
+			abort();
+		++namespace_inventory_syscall_calls;
+#endif
 	} else {
 		abort();
 	}
@@ -350,6 +380,12 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	if (!strcmp(case_name, "passthrough")) {
+#if defined(__x86_64__) || defined(__aarch64__)
+		unsigned char namespace_request[32] = {0};
+		unsigned char statmount_buffer[56] = {0};
+		unsigned char mount_ids[256 * sizeof(unsigned long long)] = {0};
+#endif
+
 		require_condition(
 			__wrap_syscall(SYS_finit_module, 23, "", 0) == 0);
 		require_condition(
@@ -359,10 +395,22 @@ int main(int argc, char **argv)
 			__wrap_syscall(SYS_swapoff, "/test/owned-mapper") == 0);
 		require_condition(__wrap_syscall(
 			SYS_delete_module, "dm_swapz", O_NONBLOCK) == 0);
+#if defined(__x86_64__) || defined(__aarch64__)
+		require_condition(__wrap_syscall(
+			primary_test_statmount_syscall_number,
+			namespace_request, statmount_buffer,
+			sizeof(statmount_buffer), 0U) == 0);
+		require_condition(__wrap_syscall(
+			primary_test_listmount_syscall_number,
+			namespace_request, mount_ids, 256, 0U) == 0);
+#endif
 		require_condition(__wrap_fsync(25) == 0);
 		require_condition(!swap_is_active && swap_syscall_calls == 2);
 		require_condition(module_syscall_calls == 2 &&
 				  normal_fsync_calls == 1 && normal_open_calls == 1);
+#if defined(__x86_64__) || defined(__aarch64__)
+		require_condition(namespace_inventory_syscall_calls == 2);
+#endif
 		return 0;
 	}
 	stopping = !strncmp(case_name, "swapoff-", 8) ||

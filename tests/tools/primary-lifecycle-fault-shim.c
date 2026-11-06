@@ -23,6 +23,21 @@ int __real_fsync(int fd);
 static long last_swap_syscall;
 static unsigned long directory_fsync_calls;
 
+#if defined(__x86_64__) || defined(__aarch64__)
+enum {
+	primary_test_statmount_syscall_number = 457,
+	primary_test_listmount_syscall_number = 458,
+};
+#ifdef SYS_statmount
+_Static_assert(SYS_statmount == primary_test_statmount_syscall_number,
+	       "statmount syscall number changed");
+#endif
+#ifdef SYS_listmount
+_Static_assert(SYS_listmount == primary_test_listmount_syscall_number,
+	       "listmount syscall number changed");
+#endif
+#endif
+
 /* Stable test-only evidence: a generic coordinator error is not an injected
  * fault. Never print arbitrary environment values or test credentials. */
 static void report_fault_hit(const char *fault_name)
@@ -140,6 +155,33 @@ long __wrap_syscall(long number, ...)
 		va_end(arguments);
 		return __real_syscall(number, name, flags);
 	}
+#if defined(__x86_64__) || defined(__aarch64__)
+	/*
+	 * The full owned-null_blk qualifier wraps production syscall() calls.
+	 * Preserve namespace-inventory syscalls unchanged so this test seam cannot
+	 * synthesize ENOSYS before the requested lifecycle fault is reached.
+	 */
+	case primary_test_statmount_syscall_number: {
+		void *request = va_arg(arguments, void *);
+		void *buffer = va_arg(arguments, void *);
+		size_t buffer_size = va_arg(arguments, size_t);
+		unsigned int flags = va_arg(arguments, unsigned int);
+
+		va_end(arguments);
+		return __real_syscall(
+			number, request, buffer, buffer_size, flags);
+	}
+	case primary_test_listmount_syscall_number: {
+		void *request = va_arg(arguments, void *);
+		void *mount_ids = va_arg(arguments, void *);
+		int mount_capacity = va_arg(arguments, int);
+		unsigned int flags = va_arg(arguments, unsigned int);
+
+		va_end(arguments);
+		return __real_syscall(
+			number, request, mount_ids, mount_capacity, flags);
+	}
+#endif
 	default:
 		va_end(arguments);
 		errno = ENOSYS;
