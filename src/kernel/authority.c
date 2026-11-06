@@ -713,6 +713,9 @@ static int swapz_verify_shared_extent_release(
 	const struct swapz_authority *a, const struct swapz_map *target,
 	swapz_u32 expected_references, const char *transition)
 {
+	const swapz_u32 none = ~(swapz_u32)0;
+	const swapz_u32 maximum_segment_pages =
+		SWAPZ_SEGMENT_BLOCKS * SWAPZ_MAX_RECORDS;
 	const swapz_u32 target_start = target ? target->start_block : 0U;
 	swapz_u32 target_end, target_segment, found = 0;
 	swapz_u64 record_mask = 0;
@@ -730,10 +733,79 @@ static int swapz_verify_shared_extent_release(
 	target_end = target_start + target->extent_blocks;
 	target_segment = target_start / SWAPZ_SEGMENT_BLOCKS;
 
-	if (swapz_segment_page_lists_enabled(a) &&
-	    swapz_page_list_validate_segment_complete(a, target_segment))
-		return swapz_map_proof_refuse(
-			transition, "extent_release_page_list", -EUCLEAN);
+	if (swapz_segment_page_lists_enabled(a)) {
+		swapz_u32 current_logical, last_logical = none, visited_pages = 0;
+		swapz_u32 mapped_pages;
+
+		if (!swapz_segment_page_lists_complete(a) ||
+		    target_segment >= a->segment_count ||
+		    swapz_page_list_validate_segment(a, target_segment))
+			return swapz_map_proof_refuse(
+				transition, "extent_release_page_list", -EUCLEAN);
+		mapped_pages = a->segment_mapped_pages[target_segment];
+		if (!mapped_pages || mapped_pages > maximum_segment_pages)
+			return swapz_map_proof_refuse(
+				transition, "extent_release_page_list", -EUCLEAN);
+
+		current_logical = a->segment_first_page[target_segment];
+		while (current_logical != none) {
+			const struct swapz_map *map;
+			swapz_u32 map_end;
+			swapz_u64 record_bit;
+
+			if (current_logical >= a->logical_pages ||
+			    visited_pages >= mapped_pages ||
+			    swapz_page_list_validate_entry_cached(a, current_logical, 1))
+				return swapz_map_proof_refuse(
+					transition, "extent_release_page_list",
+					-EUCLEAN);
+			map = &a->maps[current_logical];
+			if (!map->valid ||
+			    map->start_block >= a->physical_blocks ||
+			    !swapz_legal_class(map->extent_blocks) ||
+			    (map->raw &&
+			     (map->extent_blocks != 1U || map->shared_extent)) ||
+			    (!map->raw && swapz_map_record_index(map) &&
+			     !map->shared_extent) ||
+			    map->extent_blocks >
+				    a->physical_blocks - map->start_block ||
+			    map->start_block % SWAPZ_SEGMENT_BLOCKS +
+				    map->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
+			    map->start_block / SWAPZ_SEGMENT_BLOCKS !=
+				    target_segment)
+				return swapz_map_proof_refuse(
+					transition, "extent_geometry", -EUCLEAN);
+			map_end = map->start_block + map->extent_blocks;
+			if (map->start_block < target_end &&
+			    map_end > target_start) {
+				if (map->start_block != target_start ||
+				    map->extent_blocks != target->extent_blocks ||
+				    map->raw || !map->shared_extent)
+					return swapz_map_proof_refuse(
+						transition, "overlapping_extent",
+						-EUCLEAN);
+				record_bit = (swapz_u64)1U <<
+					swapz_map_record_index(map);
+				if (record_mask & record_bit)
+					return swapz_map_proof_refuse(
+						transition, "duplicate_record",
+						-EUCLEAN);
+				record_mask |= record_bit;
+				found++;
+				if (found > expected_references)
+					return swapz_map_proof_refuse(
+						transition, "unexpected_reference",
+						-EUCLEAN);
+			}
+			last_logical = current_logical;
+			current_logical = a->page_next_in_segment[current_logical];
+			visited_pages++;
+		}
+		if (visited_pages != mapped_pages ||
+		    last_logical != a->segment_last_page[target_segment])
+			return swapz_map_proof_refuse(
+				transition, "extent_release_page_list", -EUCLEAN);
+	}
 
 	/*
 	 * The page list and mapped-page count are cached reverse indexes, not
