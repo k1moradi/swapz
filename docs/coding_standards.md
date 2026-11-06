@@ -656,6 +656,12 @@ STARTING recovery ownership and close-error precedence. Close both retained
 pins successfully before destructive work. This is last-use validation, not
 a kernel-atomic exclusion guarantee against later privileged replacement or
 same-device-number physical reader substitution.
+Coordinator-only admission helpers must be excluded from standalone whole-file
+rootless builds whose mutating coordinator is compiled out, avoiding unused
+static definitions under `-Werror`. Source-extracted rootless coordinator
+fixtures must still compile and execute those exact production definitions
+with synthetic temporary files; preprocessor exclusion in unrelated builds
+must never replace behavioral race coverage.
 
 The private real-swap qualification helper must bind the protected physical
 selector to one context-managed O_NOFOLLOW/O_CLOEXEC descriptor. Inspect the

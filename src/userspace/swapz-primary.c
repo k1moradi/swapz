@@ -905,13 +905,17 @@ static int swapz_primary_selector_metadata_matches(
 /*
  * Start retains opened protected-selector identities through the final
  * non-mutating check. Only its coordinator owns these two descriptors.
+ * The whole-file rootless build has no mutating coordinator, so only the
+ * extracted coordinator fixture compiles these production-only declarations.
  */
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 struct swapz_primary_selector_admission {
 	int directory_fd;
 	int selector_fd;
 	struct stat directory_info;
 	struct stat selector_info;
 };
+#endif
 
 /*
  * The caller retains both descriptors through this final admission check.
@@ -1004,6 +1008,7 @@ static int swapz_primary_selector_identity_still_live(
 }
 
 
+#ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 /*
  * Pin both protected named objects before the transaction reads its selector.
  * The ordinary reader validates content; the pinned identities reject later
@@ -1160,6 +1165,8 @@ static int swapz_primary_selector_admission_still_live(
 	*failure_observed = NULL;
 	return 0;
 }
+
+#endif
 
 int swapz_primary_target_config_read(
 	char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
