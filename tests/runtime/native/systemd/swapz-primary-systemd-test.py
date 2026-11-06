@@ -7,6 +7,7 @@ swapoff, a real mapper, or reboot.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import os
 import re
 import shlex
@@ -54,6 +55,20 @@ def write_executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def isolated_test_environment(
+    source_environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    environment = os.environ if source_environment is None else source_environment
+    # Harness controls are fixture-owned. Inheriting them from an operator shell
+    # can silently replace mocked command output or redirect synthetic roots.
+    return {
+        key: value
+        for key, value in environment.items()
+        if key != "SWAPZ_PRIMARY_SYSTEMD_TESTING"
+        and not key.startswith(("MOCK_", "SWAPZ_PRIMARY_TEST_"))
+    }
+
+
 class GeneratorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="swapz-systemd-generator-")
@@ -97,7 +112,7 @@ class GeneratorTests(unittest.TestCase):
         self.normal.mkdir()
         self.early.mkdir()
         self.late.mkdir()
-        self.env = os.environ.copy()
+        self.env = isolated_test_environment()
         self.env["MOCK_SELECTOR"] = str(self.selector)
 
     def tearDown(self) -> None:
@@ -330,6 +345,25 @@ class UnitContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "mock-ok\n")
 
+    def test_inherited_test_controls_are_removed_from_fixture_environment(self) -> None:
+        inherited = {
+            "PATH": "/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "TMPDIR": "/tmp/swapz-parent",
+            "MOCK_UNITS": "host-poisoned-output\n",
+            "MOCK_STATUS": "0",
+            "SWAPZ_PRIMARY_SYSTEMD_TESTING": "1",
+            "SWAPZ_PRIMARY_TEST_PROC_ROOT": "/host/proc",
+        }
+        self.assertEqual(
+            isolated_test_environment(inherited),
+            {
+                "PATH": "/usr/bin:/bin",
+                "LANG": "C.UTF-8",
+                "TMPDIR": "/tmp/swapz-parent",
+            },
+        )
+
     def test_systemd_analyze_accepts_static_units(self) -> None:
         analyzer = shutil.which("systemd-analyze")
         if analyzer is None:
@@ -350,7 +384,7 @@ class UnitContractTests(unittest.TestCase):
                 "@SWAPZ_SBINDIR@/swapz-primary-runtime-health", "/usr/bin/true"
             )
             (unit_dir / "swapz-primary-runtime-health.service").write_text(runtime, encoding="utf-8")
-            env = os.environ.copy()
+            env = isolated_test_environment()
             env["SYSTEMD_UNIT_PATH"] = f"{unit_dir}:/usr/lib/systemd/system:/lib/systemd/system"
             result = subprocess.run(
                 [
@@ -1236,7 +1270,7 @@ class EffectiveUnitContractTests(unittest.TestCase):
             device_dir.mkdir()
             for filename, contents in dropins["device"].items():
                 (device_dir / filename).write_text(contents, encoding="utf-8")
-            env = os.environ.copy()
+            env = isolated_test_environment()
             env["SYSTEMD_UNIT_PATH"] = f"{unit_dir}:/usr/lib/systemd/system:/lib/systemd/system"
             result = subprocess.run(
                 [analyzer, "verify", *units], check=False,
@@ -1270,7 +1304,7 @@ class EffectiveUnitContractTests(unittest.TestCase):
                 "[Unit]\nRequires=\nAfter=\n",
                 encoding="utf-8",
             )
-            env = os.environ.copy()
+            env = isolated_test_environment()
             env["SYSTEMD_UNIT_PATH"] = str(unit_dir)
             result = subprocess.run(
                 [analyzer, "verify", str(unit)],
@@ -1328,7 +1362,7 @@ class ControlledLifecycleTests(unittest.TestCase):
             ),
         )
         self.service = read_text(MAPPER_SERVICE).replace("@SWAPZ_SBINDIR@", str(self.sbin))
-        self.env = os.environ.copy()
+        self.env = isolated_test_environment()
         self.env["MOCK_LIFECYCLE_LOG"] = str(self.log)
 
     def tearDown(self) -> None:
@@ -1501,7 +1535,7 @@ class BootVerifierTests(unittest.TestCase):
         self.write_proc_swaps(active=True)
         (self.sys / "module" / "dm_swapz" / "parameters" / "build_source_sha").write_text(SOURCE_SHA + "\n", encoding="ascii")
         (self.sys / "module" / "dm_swapz" / "parameters" / "build_source_clean").write_text("1\n", encoding="ascii")
-        self.env = os.environ.copy()
+        self.env = isolated_test_environment()
         self.env.update(
             {
                 "PATH": f"{self.bin}:{self.env['PATH']}",
@@ -3498,7 +3532,7 @@ class RuntimeHealthTests(unittest.TestCase):
                 """
             ),
         )
-        self.env = os.environ.copy()
+        self.env = isolated_test_environment()
         self.env.update(
             {
                 "PATH": f"{self.bin}:{self.env['PATH']}",

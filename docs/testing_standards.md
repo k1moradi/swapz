@@ -9089,7 +9089,12 @@ runtime token paths. Rootless regression must trace parent/PGID and output FD
 ownership, assert prompt exit and no surviving timeout/journal process for both
 ordinary TERM and a TERM-resistant journal that requires bounded KILL escalation,
 inject cleanup failure, and reject a repeated observation without a new
-preflight. A failed canonical unlink may safely
+preflight. Rootless systemd fixtures must remove inherited `MOCK_*`,
+`SWAPZ_PRIMARY_TEST_*`, and `SWAPZ_PRIMARY_SYSTEMD_TESTING` controls before
+building child environments, then explicitly reintroduce only the controls
+owned by that fixture. Preserve unrelated host environment such as PATH,
+locale, and temporary-directory selection unless the fixture explicitly binds
+them. A failed canonical unlink may safely
 invalidate a still-owned regular 0600 single-link token without following
 substituted symlinks; preserve the original unlink error and refuse PASS even if
 invalidation is impossible. An active oneshot mapper requires SubState=exited
