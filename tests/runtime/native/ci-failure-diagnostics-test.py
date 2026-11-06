@@ -150,8 +150,12 @@ exec sleep 30
         self.assertNotIn("FORGED_CAMPAIGN", safe)
         self.assertNotIn("PRIVATE_DEVICE", safe)
         self.assertNotIn("FORGED_ARRAY", safe)
-        self.assertNotIn("123456", safe)
+        self.assertIn("observed=123456", safe)
         self.assertIn("<structured-evidence-redacted>", safe)
+        numeric = self.diagnostics._ci_safe_line(
+            "AssertionError: expected=4096 observed=8192")
+        self.assertEqual(
+            numeric, "AssertionError: expected=4096 observed=8192")
 
     def test_contract_classification_survives_private_root_redaction(self):
         failure = self.diagnostics.diagnose_ci_failure(

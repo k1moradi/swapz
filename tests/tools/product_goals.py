@@ -283,8 +283,14 @@ def _ci_safe_line(line):
     )
     line = re.sub(
         json_array_pattern, "<structured-evidence-redacted>", line)
+    # Expected/actual numeric counters are safe and diagnostically necessary.
+    # Redact structured or quoted identity-bearing values, plus all JSON-valued
+    # payload/response fields, without erasing ordinary numeric comparisons.
     line = re.sub(
-        r"(?i)\b((?:actual|observed|payload|response|json)\s*[:=]\s*)"
+        r'(?i)\b((?:actual|observed)\s*[:=]\s*)"(?:\\.|[^"\\])*"',
+        r"\1<structured-evidence-redacted>", line)
+    line = re.sub(
+        r"(?i)\b((?:payload|response|json)\s*[:=]\s*)"
         r"(?:" + json_scalar + r")",
         r"\1<structured-evidence-redacted>", line)
     # Preserve only the two source-controlled contract-suite basenames so

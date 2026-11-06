@@ -1824,7 +1824,9 @@ cleanup-failure labels but never assert successful child teardown. The existing
 `expected_contract` and `observed` fields remain the public expected/actual
 conditions. Redact structured child-supplied JSON, token paths, UUID/PARTUUID,
 serial/WWN, campaign identifiers, device IDs, and absolute host paths before
-promoting first-error text; do not infer protected identities. Keep
+promoting first-error text; do not infer protected identities. Preserve ordinary
+numeric expected/actual values because they are required causal diagnostics, not
+identity payloads. Keep
 only the allowlisted source-contract and make-interface script basenames
 visible after redacting their private containing root, so original source
 contract failures retain their existing classification.
