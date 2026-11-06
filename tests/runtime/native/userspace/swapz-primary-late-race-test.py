@@ -1215,7 +1215,11 @@ static int swapz_primary_shared_root_scope_record_live(
 
 /* The actual production coordinator function is inserted verbatim. */
 #define SWAPZ_PRIMARY_CONFIG_BASE fixture_config_base
+/* Also intercept the late failed-identity classification inspection. */
+#define swapz_primary_target_inspect(partuuid,target) \
+    fixture_target_inspect(partuuid,target)
 @@START_FUNCTION@@
+#undef swapz_primary_target_inspect
 #undef SWAPZ_PRIMARY_CONFIG_BASE
 #undef swapz_primary_target_config_read
 #undef close
@@ -1407,7 +1411,7 @@ static int check_case(enum fixture_scenario candidate)
                                        "original_errno=%d", ESTALE);
         int refusal = result < 0 && result_errno == ESTALE &&
             post_snapshot_injected == 1 &&
-            (geometry_drift ? fixture_geometry_last_use_checks == 1U :
+            (geometry_drift ? fixture_geometry_last_use_checks >= 1U :
              fixture_selector_reads >= 1U) &&
             header_writes == 0U && mapper_mutations == 0U &&
             mkswap_calls == 0U && swapon_calls == 0U &&

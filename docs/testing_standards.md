@@ -551,6 +551,13 @@ mount reads, four independent swap-inventory observations and no false
 mount conflicts. Keep the separate post-final-snapshot mount/swap/inventory
 races explicitly UNPROVEN: no rootless read-only recheck demonstrates atomic
 exclusion or binds a physical reader across device-number reuse.
+The source-extracted coordinator must intercept both admission-time and
+failure-classification target-inspection calls with the same private fixture.
+A missing inspection shim is a harness linking failure, never positive
+production safety evidence. Require an actual post-admission geometry change
+and at least one observed last-use inspection, but not an incidental fixed
+number of repeated inspections; the original `ESTALE` and zero-mutation
+contract remains mandatory.
 
 ### Primary real-swap native-host qualification
 
