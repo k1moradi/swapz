@@ -224,11 +224,17 @@ thread group exited. Inject absent leader namespace identity while a visible
 non-leader still has the selected partition mounted; independently repeat
 with the selected physical parent mounted. Production must observe the task
 as busy or fail closed as BLOCKED, never admit on leader disappearance alone.
-If the selected mount is reported busy, prove task-specific mountinfo was
-opened; preserve the coordinator's root identity, original errno on error,
-and closure of owned descriptors. Report the admission phase, missing/stale
-identity class, expected versus observed decision, and a safe read-only retry,
-without printing host task, namespace or selected-device identities.
+If the leader namespace marker is absent, production must still enumerate an
+available `/proc/<pid>/task` directory and inspect its visible non-leader
+namespace and mountinfo records; it may skip the leader table but must not
+skip the task inventory. Only a separately proven absent task inventory can
+establish that no visible worker remains. The fixture must include a live
+non-leader `ns/mnt` marker. If the selected mount is reported busy, prove
+task-specific mountinfo was opened; preserve the coordinator's root identity,
+original errno on error, and closure of owned descriptors. Report the
+admission phase, missing/stale identity class, expected versus observed
+decision, and a safe read-only retry, without printing host task, namespace
+or selected-device identities.
 Directly exercise the production non-leader helper at the shared visible-task
 ceiling and aggregate mountinfo-byte ceiling, requiring EOVERFLOW without
 constructing millions of synthetic proc entries.

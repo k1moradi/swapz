@@ -766,6 +766,8 @@ static void expect_surviving_task_with_missing_leader_namespace(
 	int first_errno;
 
 	fixture_reset();
+	fixture_file("3031/task/3032/ns/mnt",
+		     "surviving non-leader mount namespace\n");
 	fixture_file("3031/task/3032/mountinfo", task_mountinfo);
 	fixture_unlink("3031/ns/mnt");
 	errno = 0;

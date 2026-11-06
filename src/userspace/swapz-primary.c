@@ -3889,12 +3889,20 @@ static int swapz_primary_read_mount_facts(
 		}
 		if (stat(namespace_path, &namespace_info) < 0) {
 			namespace_error = errno ? errno : EIO;
-			if (namespace_error == ENOENT || namespace_error == ESRCH)
-				continue;
-			saved_errno = namespace_error;
-			break;
+			if (namespace_error == ENOENT || namespace_error == ESRCH) {
+				/*
+				 * The leader may have exited while a non-leader task
+				 * remains visible. Skip only its leader table; still
+				 * inspect the task directory before treating the PID as
+				 * gone.
+				 */
+				skip_leader_mountinfo = 1;
+			} else {
+				saved_errno = namespace_error;
+				break;
+			}
 		}
-		if (self_root_is_namespace_root &&
+		if (!skip_leader_mountinfo && self_root_is_namespace_root &&
 		    namespace_info.st_dev == self_namespace_info.st_dev &&
 		    namespace_info.st_ino == self_namespace_info.st_ino) {
 			if (stat(namespace_path, &confirmed_namespace_info) < 0) {
