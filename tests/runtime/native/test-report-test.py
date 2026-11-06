@@ -5254,9 +5254,9 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
         guard_line = next(
             line for line in admission.splitlines()
             if line.startswith(
-                '[[ "$build_source_sha" == "$qualified_source_sha"'))
-        self.assertTrue(guard_line.endswith(" ||"))
-        guard = guard_line[:-3]
+                'if [[ "$build_source_sha" != "$qualified_source_sha"'))
+        self.assertIn('|| "$build_source_clean" != 1 ]]; then', guard_line)
+        guard = f"{guard_line}\n  exit 1\nfi"
         script = "\n".join((source_extract, clean_extract, guard))
 
         for header_sha, clean_bit, expected in (

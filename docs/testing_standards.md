@@ -7458,6 +7458,12 @@ qualification, and an enabled host with unavailable certificate/signature
 verification must fail closed. Verification must parse the appended Linux
 module-signature trailer and cryptographically verify the detached PKCS#7/CMS
 signature over the exact module payload against the configured certificate.
+The rootless build-header regression must exercise the current package
+admission predicate: a source SHA mismatch or `SWAPZ_BUILD_SOURCE_CLEAN != 1`
+must reject, while an exact lowercase source SHA with a clean bit of `1` may
+pass. Keep malformed or uppercase source identities in the rejection cases;
+the test must follow the implemented conditional's semantics instead of
+depending on an obsolete source-text spelling.
 The trailer sanity check must match the kernel's `mod_check_sig()` contract:
 PKCS#7 id type, zero algorithm/hash/signer/key-id/reserved-pad parameter bytes,
 and a positive signature length strictly smaller than all bytes preceding the
