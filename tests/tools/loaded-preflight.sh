@@ -523,40 +523,71 @@ ownership_refuse() {
     refuse BLOCKED owned_resource_proof unavailable "phase=$phase resource_kind=$resource_kind expected_proof=$expected observed_proof=$observed original_errno_or_exit=$status retained_state_action=$retained_action safe_next_action=original_creator_revalidate_then_cleanup_or_read_only_reconcile"
 }
 
+read_canonical_uint_file() {
+    local path="$1" value='' extra_byte=''
+    [[ -f $path && ! -L $path ]] || return 1
+    {
+        IFS= read -r -n 21 value || return 1
+        [[ ${#value} -le 20 ]] || return 1
+        if IFS= read -r -n 1 extra_byte || [[ -n $extra_byte ]]; then
+            return 1
+        fi
+    } < "$path"
+    is_uint "$value" || return 1
+    printf '%s\n' "$value"
+}
+
+read_owned_config_uint() {
+    local result_variable="$1" phase="$2" attribute="$3"
+    local value attribute_status
+    if value="$(read_canonical_uint_file "$owned_config/$attribute")"; then
+        printf -v "$result_variable" '%s' "$value"
+    else
+        attribute_status=$?
+        ownership_refuse "$phase" null_blk "canonical_configfs_$attribute" \
+            malformed_or_unreadable "$attribute_status"
+    fi
+}
+
 read_owned_config_proof() {
-    local config_identity config_index memory_backed config_size blocksize queue_mode power_identity
+    local result_variable="$1" phase="$2" expected_power="$3"
+    local config_identity config_index memory_backed config_size blocksize queue_mode
+    local power_identity power_state
     [[ -d $owned_config && ! -L $owned_config ]] || return 1
     config_identity="$(stat -Lc '%d:%i' "$owned_config" 2>/dev/null)" || return 1
     [[ $config_identity == *:* && $config_identity != *[!0-9:]* ]] || return 1
     for attribute in index memory_backed size blocksize queue_mode power; do
         [[ -f $owned_config/$attribute && ! -L $owned_config/$attribute ]] || return 1
     done
-    config_index="$(cat "$owned_config/index" 2>/dev/null)" || return 1
-    memory_backed="$(cat "$owned_config/memory_backed" 2>/dev/null)" || return 1
-    config_size="$(cat "$owned_config/size" 2>/dev/null)" || return 1
-    blocksize="$(cat "$owned_config/blocksize" 2>/dev/null)" || return 1
-    queue_mode="$(cat "$owned_config/queue_mode" 2>/dev/null)" || return 1
+    read_owned_config_uint config_index "$phase" index
+    read_owned_config_uint memory_backed "$phase" memory_backed
+    read_owned_config_uint config_size "$phase" size
+    read_owned_config_uint blocksize "$phase" blocksize
+    read_owned_config_uint queue_mode "$phase" queue_mode
+    read_owned_config_uint power_state "$phase" power
     power_identity="$(stat -Lc '%d:%i' "$owned_config/power" 2>/dev/null)" || return 1
-    is_uint "$config_index" && is_uint "$config_size" &&
-        is_uint "$blocksize" && is_uint "$queue_mode" || return 1
     [[ $power_identity == *:* && $power_identity != *[!0-9:]* ]] || return 1
     [[ $memory_backed == 1 && $config_size != 0 && $blocksize == 4096 &&
        $queue_mode == 2 ]] || return 1
+    [[ $power_state == "$expected_power" ]] ||
+        ownership_refuse "$phase" null_blk expected_power_state changed_or_malformed
     [[ -z $lower_index || $lower_index == "$config_index" ]] || return 1
     [[ "$(stat -Lc '%d:%i' "$owned_config" 2>/dev/null)" == "$config_identity" ]] ||
         return 1
-    printf '%s|%s|%s|%s|%s|%s|%s\n' "$config_identity" "$config_index" \
-        "$memory_backed" "$config_size" "$blocksize" "$queue_mode" "$power_identity"
+    printf -v "$result_variable" '%s|%s|%s|%s|%s|%s|%s' \
+        "$config_identity" "$config_index" "$memory_backed" "$config_size" \
+        "$blocksize" "$queue_mode" "$power_identity"
 }
 
 read_owned_lower_proof() {
     local result_variable="$1" phase="$2"
-    local config_index disk sysfs_devno node_devno block_major system_major
+    local config_index current_power disk sysfs_devno node_devno block_major system_major
     local partition_marker disk_status devno_status major_status
     config_index="${owned_config_proof#*|}"
     config_index="${config_index%%|*}"
-    [[ -f $owned_config/power && ! -L $owned_config/power &&
-       "$(cat "$owned_config/power" 2>/dev/null)" == 1 ]] || return 1
+    read_owned_config_uint current_power "$phase" power
+    [[ $current_power == 1 ]] ||
+        ownership_refuse "$phase" null_blk expected_power_state changed_or_malformed
     # The index name and configfs name are alternatives, not two devices.
     if disk="$(swapz_resolve_owned_disk "${owned_config##*/}" "$config_index" /sys/block)"; then
         :
@@ -612,8 +643,9 @@ read_owned_lower_proof() {
 assert_owned_config_proof() {
     local phase="$1" expected_power="$2" current_proof
     local current_config_fd_identity current_power_fd_identity
-    current_proof="$(read_owned_config_proof)" ||
+    if ! read_owned_config_proof current_proof "$phase" "$expected_power"; then
         ownership_refuse "$phase" null_blk config_inode_index_attributes missing_or_changed
+    fi
     [[ $current_proof == "$owned_config_proof" ]] ||
         ownership_refuse "$phase" null_blk original_inode_index_attributes substituted
     current_config_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_config_fd" 2>/dev/null)" ||
@@ -624,9 +656,6 @@ assert_owned_config_proof() {
         ownership_refuse "$phase" null_blk pinned_config_inode substituted
     [[ $current_power_fd_identity == "$owned_power_identity" ]] ||
         ownership_refuse "$phase" null_blk pinned_power_inode substituted
-    [[ -f $owned_config/power && ! -L $owned_config/power &&
-       "$(cat "$owned_config/power" 2>/dev/null)" == "$expected_power" ]] ||
-        ownership_refuse "$phase" null_blk expected_power_state missing_or_changed
     if [[ $expected_power == 1 ]]; then
         if ! read_owned_lower_proof current_proof "$phase"; then
             ownership_refuse "$phase" null_blk sysfs_major_devno_node_rdev missing_or_changed
@@ -662,8 +691,9 @@ if ! { exec {owned_config_fd}< "$owned_config"; } 2>/dev/null; then
 fi
 owned_config_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_config_fd" 2>/dev/null)" ||
     ownership_refuse acquire null_blk pinned_config_inode fd_stat_failed
-owned_config_proof="$(read_owned_config_proof)" ||
+if ! read_owned_config_proof owned_config_proof acquire 1; then
     ownership_refuse acquire null_blk config_inode_index_attributes missing_or_incomplete
+fi
 owned_config_identity="${owned_config_proof%%|*}"
 owned_power_identity="${owned_config_proof##*|}"
 [[ $owned_config_fd_identity == "$owned_config_identity" ]] ||
