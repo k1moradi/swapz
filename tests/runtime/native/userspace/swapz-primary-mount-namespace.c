@@ -777,10 +777,30 @@ static void expect_surviving_task_with_missing_leader_namespace(
 			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
 			"identity_class=leader-marker-absent-live-worker "
 			"expected=BUSY-or-BLOCKED observed=ADMITTED "
-			"original_errno=none "
+			"observed_task_mountinfo_opens=%u original_errno=none "
 			"safe_retry=complete-fresh-task-inventory "
 			"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
 			"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED\n",
+			case_name, fixture_foreign_task_mountinfo_opens);
+		++fixture_failures;
+	}
+	if (result == 0 && facts.target_mounted &&
+	    fixture_foreign_task_mountinfo_opens == 0U) {
+		fprintf(stderr,
+			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
+			"identity_class=task-attribution-missing "
+			"expected=task-mountinfo-open observed=no-task-open "
+			"original_errno=none "
+			"safe_retry=complete-fresh-task-inventory\n",
+			case_name);
+		++fixture_failures;
+	}
+	if (result < 0 && first_errno == 0) {
+		fprintf(stderr,
+			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
+			"identity_class=unattributed-refusal "
+			"expected=preserved-error observed=missing-errno "
+			"original_errno=0 safe_retry=complete-fresh-task-inventory\n",
 			case_name);
 		++fixture_failures;
 	}

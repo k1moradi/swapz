@@ -212,6 +212,16 @@ require proof that the task-specific injection fired, so a leader access error
 cannot satisfy that case. Reject malformed non-leader task mountinfo, fail
 closed when a reused TID changes its mount-namespace identity between the initial and
 confirming stats, and permit a task already absent at namespace inspection.
+A missing foreign leader `ns/mnt` marker is not evidence that the whole
+thread group exited. Inject absent leader namespace identity while a visible
+non-leader still has the selected partition mounted; independently repeat
+with the selected physical parent mounted. Production must observe the task
+as busy or fail closed as BLOCKED, never admit on leader disappearance alone.
+If the selected mount is reported busy, prove task-specific mountinfo was
+opened; preserve the coordinator's root identity, original errno on error,
+and closure of owned descriptors. Report the admission phase, missing/stale
+identity class, expected versus observed decision, and a safe read-only retry,
+without printing host task, namespace or selected-device identities.
 Directly exercise the production non-leader helper at the shared visible-task
 ceiling and aggregate mountinfo-byte ceiling, requiring EOVERFLOW without
 constructing millions of synthetic proc entries.
