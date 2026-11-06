@@ -1247,8 +1247,11 @@ static int check_case(enum fixture_scenario candidate)
         }
         expected_length = snprintf(expected_diagnostic,
             sizeof(expected_diagnostic),
-            "PRIMARY_START=FAILED phase=%s errno=%d error=%s\n",
-            phase, expected_error, strerror(expected_error));
+            "PRIMARY_START=FAILED phase=%s errno=%d error=%s "
+            "original_errno=%d persistence_boundary=none "
+            "durable=%s mapper=UNOBSERVED swap=UNOBSERVED\n",
+            phase, expected_error, strerror(expected_error), expected_error,
+            late ? "OBSERVED" : "UNOBSERVED");
 
         assert(expected_length > 0 &&
                (size_t)expected_length < sizeof(expected_diagnostic));
