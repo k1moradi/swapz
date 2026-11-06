@@ -933,10 +933,6 @@ extra-field or duplicate nullb major records from /proc/devices; a successful
 cat substitution must not normalize malformed telemetry into a valid identity.
 The refusal must preserve the resolver/parser status and name the specific
 expected and observed proof classes before falling back to aggregate identity.
-Configfs numeric identity attributes must also be read as bounded canonical
-single records; extra blank records, missing final newlines, leading zeroes or
-oversized values are malformed evidence rather than values that command
-substitution may normalize.
 When the mapper is absent, token-shaped configfs names refuse with
 `check=unclaimed_null_blk expected_proof=creation_authority
 observed_proof=token_name_only`. Unrelated foreign index-named devices and
@@ -963,8 +959,8 @@ false-admission demonstration is **not** counted as a preflight case.
 It must cover two unclaimed token-shaped objects, a complete-looking
 unclaimed object, an untrusted old owner record and injected token hint, a
 foreign decoy, ambiguous name/index aliases (including an empty alternate disk
-directory and dangling alternate dev symlinks), malformed configfs numeric
-identity, wrong null_blk driver major, mismatched lower devno and index,
+directory and dangling alternate dev symlinks), wrong null_blk driver major,
+mismatched lower devno and index,
 malformed mapper/swap inventory, owned and unrelated foreign active swap,
 incomplete configfs attributes, foreign holders/dependencies, substituted
 configfs inode, failed dependency probes and uncertain cleanup.
@@ -973,7 +969,7 @@ refuses every case before destructive operations, and verifies zero
 attempted mapper removal, configfs power-off/rmdir, module unload or host
 swap mutation. It must preserve both the first numeric status and the
 retained fake inventory. Its final PASS marker must report the actual
-number of `run_case` invocations (currently 64). Synthetic PASS is not real host ownership,
+number of `run_case` invocations (currently 63). Synthetic PASS is not real host ownership,
 loaded qualification or permission to recover the first host's objects.
 
 ### Development decision loop
@@ -5848,9 +5844,10 @@ expected operation, page count and round; zero exit with empty output, a
 conflicting line, or a wrong count is not sufficient. Validate every persisted
 phase again after recovery, so rewritten durable metadata cannot inherit
 worker success. Production-mode synthetic physical fixtures must explicitly
-model the reviewed target as active swap before constructing durable state;
-do not rely on the later `run_probe()` compatibility default to repair an
-incomplete fixture. Rootless fixtures must reread the durable terminal result
+model the reviewed target as active swap before constructing durable state.
+The run path must reject a missing or contradictory swap-activity field in
+both production and development modes; it must never synthesize that admission
+fact to repair an incomplete fixture. Rootless fixtures must reread the durable terminal result
 after finalization, rather than testing the earlier teardown snapshot.
 A development-only result must retain its exact development
 schema/scope and false production-qualification, physical-media-acceptance and

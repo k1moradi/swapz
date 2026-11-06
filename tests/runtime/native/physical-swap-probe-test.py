@@ -2454,6 +2454,54 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             command[:2] == ("dmsetup", "create") for command in commands),
             f"physical command executed after source refusal: {commands}")
 
+    def test_run_probe_never_fabricates_missing_swap_activity(self):
+        target, evidence = self.physical_preparation_fixture()
+        del target["swap_was_active"]
+
+        with mock.patch.object(probe.os, "geteuid", return_value=0), \
+                mock.patch.object(probe, "current_source_evidence",
+                                  return_value=evidence), \
+                mock.patch.object(probe, "inspect_target",
+                                  return_value=target), \
+                mock.patch.object(probe, "_recovery_base") as recovery, \
+                mock.patch.object(probe, "_write_block0") as write:
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "operation=inspect_target phase=preflight .*"
+                    "expected=swap_was_active_true observed=missing .*"
+                    "safe_next_step=rerun_read_only_preflight"):
+                probe.run_probe(
+                    target["device_arg"], target["device_arg"],
+                    "/synthetic/recovery", "/synthetic/review.json")
+        recovery.assert_not_called()
+        write.assert_not_called()
+
+        development_evidence = {
+            **evidence,
+            "source_sha": evidence["head"],
+            "development_only": True,
+            "scope": probe.DEVELOPMENT_SCOPE,
+        }
+        with mock.patch.object(probe.os, "geteuid", return_value=0), \
+                mock.patch.object(
+                    probe, "require_development_formatter_inventory_clear"), \
+                mock.patch.object(probe, "current_development_evidence",
+                                  return_value=development_evidence), \
+                mock.patch.object(probe, "inspect_target",
+                                  return_value=target), \
+                mock.patch.object(probe, "_recovery_base") as recovery, \
+                mock.patch.object(probe, "_write_block0") as write:
+            with self.assertRaisesRegex(
+                    probe.ProbeError,
+                    "operation=inspect_target phase=preflight .*"
+                    "expected=swap_was_active_false observed=missing .*"
+                    "safe_next_step=rerun_read_only_preflight"):
+                probe.run_probe(
+                    target["device_arg"], target["device_arg"], None, None,
+                    development_only=True)
+        recovery.assert_not_called()
+        write.assert_not_called()
+
     def test_development_artifact_mismatch_blocks_before_recovery_or_write(self):
         # A fresh development PASS cannot authorize substituted build bytes.
         target, evidence = self.physical_preparation_fixture()

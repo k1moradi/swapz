@@ -2498,15 +2498,27 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
         evidence = current_development_evidence(None)
         target = inspect_target(
             device_arg, confirm_arg, allow_inactive_swap=True)
-        if target["swap_was_active"]:
+        if target.get("swap_was_active") is not False:
+            observed = ("missing" if "swap_was_active" not in target
+                        else "active_or_invalid")
             raise ProbeError(
-                "development smoke requires the selected target to already be inactive")
+                "operation=inspect_target phase=preflight "
+                "original_errno_or_exit=not_applicable "
+                "expected=swap_was_active_false "
+                f"observed={observed} "
+                "safe_next_step=rerun_read_only_preflight")
     else:
         evidence = current_source_evidence()
         target = inspect_target(device_arg, confirm_arg)
-        # Historical mocked normal-mode fixtures predate this explicit field;
-        # production inspect_target always supplies it from /proc/swaps.
-        target.setdefault("swap_was_active", True)
+        if target.get("swap_was_active") is not True:
+            observed = ("missing" if "swap_was_active" not in target
+                        else "inactive_or_invalid")
+            raise ProbeError(
+                "operation=inspect_target phase=preflight "
+                "original_errno_or_exit=not_applicable "
+                "expected=swap_was_active_true "
+                f"observed={observed} "
+                "safe_next_step=rerun_read_only_preflight")
     target["device_arg"] = device_arg
     _recovery_base(target)
     live_artifact_digests = _artifact_digests()
