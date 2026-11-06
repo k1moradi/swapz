@@ -268,6 +268,7 @@ class UnitContractTests(unittest.TestCase):
         self.assertIn("What=/dev/mapper/swapz-primary", swap)
         self.assertIn("Priority=-1", swap)
         self.assertRegex(swap, r"TimeoutSec=\d+s")
+        self.assertIn("DefaultDependencies=no", swap)
         self.assertIn("RefuseManualStart=yes", swap)
         self.assertIn("RefuseManualStop=yes", swap)
         self.assertNotIn("WantedBy=swap.target", swap)
@@ -489,6 +490,7 @@ class UnitSandboxContractTests(unittest.TestCase):
         require("health", "Unit", "ConditionPathExists", "/dev/mapper/swapz-primary")
         require("health", "Install", "WantedBy", "swap.target")
 
+        require("passive_swap", "Unit", "DefaultDependencies", "no")
         require("passive_swap", "Unit", "RefuseManualStart", "yes")
         require("passive_swap", "Unit", "RefuseManualStop", "yes")
         require("passive_swap", "Swap", "What", "/dev/mapper/swapz-primary")
@@ -595,6 +597,7 @@ class UnitSandboxContractTests(unittest.TestCase):
             ("health swap syscall allowed", "health", "SystemCallFilter=~@mount @swap", "SystemCallFilter=~@mount"),
             ("health can edit filesystem", "health", "ProtectSystem=strict", "ProtectSystem=full"),
             ("health starts mapper", "health", "After=swapz-primary-mapper.service", "Requires=swapz-primary-mapper.service\nAfter=swapz-primary-mapper.service"),
+            ("passive shutdown swapoff owner", "passive_swap", "DefaultDependencies=no", "DefaultDependencies=yes"),
             ("passive swap enabled", "passive_swap", "TimeoutSec=120s", "TimeoutSec=120s\n\n[Install]\nWantedBy=swap.target"),
             ("raw swap alias", "passive_swap", "TimeoutSec=120s", "TimeoutSec=120s\n\n[Install]\nAlias=dev-disk-by-partuuid-unsafe.swap"),
         )
@@ -872,6 +875,8 @@ class EffectiveUnitContractTests(unittest.TestCase):
         cls, unit: str, key: tuple[str, str]
     ) -> str:
         section, directive = key
+        if unit == "passive_swap" and key == ("Unit", "DefaultDependencies"):
+            return "systemd may issue a second shutdown swapoff outside the primary manager"
         if unit == "passive_swap" and section == "Install":
             return "passive swap may become independently enabled and issue a second swapon"
         if key in cls.COMMAND_KEYS:
@@ -1178,6 +1183,7 @@ class EffectiveUnitContractTests(unittest.TestCase):
             ("verifier", "[Service]\nExecStart=\nExecStart=@SWAPZ_SBINDIR@/swapzctl primary start\n", "Service.ExecStart"),
             ("verifier", "[Unit]\nRequires=swapz-primary-mapper.service\n", "Unit.Requires"),
             ("health", "[Unit]\nWants=swapz-primary-mapper.service\n", "Unit.Wants"),
+            ("passive_swap", "[Unit]\nDefaultDependencies=yes\n", "Unit.DefaultDependencies"),
             ("passive_swap", "[Install]\nWantedBy=swap.target\n", "Install.WantedBy"),
             ("passive_swap", "[Install]\nRequiredBy=swap.target\n", "Install.RequiredBy"),
             ("passive_swap", "[Unit]\nRefuseManualStart=no\n", "Unit.RefuseManualStart"),

@@ -234,23 +234,26 @@ passive_swap_guard_is_active()
 	if passive_guard_size=$(wc -c < "$passive_swap_dropin"); then :; else
 		return $?
 	fi
-	[ "$passive_guard_size" -eq 73 ] || return 1
+	[ "$passive_guard_size" -eq 96 ] || return 1
 	passive_guard_line_1=
 	passive_guard_line_2=
 	passive_guard_line_3=
 	passive_guard_line_4=
+	passive_guard_line_5=
 	passive_guard_extra=
 	{
 		IFS= read -r passive_guard_line_1 &&
 			IFS= read -r passive_guard_line_2 &&
 			IFS= read -r passive_guard_line_3 &&
 			IFS= read -r passive_guard_line_4 &&
+			IFS= read -r passive_guard_line_5 &&
 			! IFS= read -r passive_guard_extra
 	} < "$passive_swap_dropin" || return 1
 	[ "$passive_guard_line_1" = '[Unit]' ] &&
-		[ "$passive_guard_line_2" = 'RefuseManualStart=yes' ] &&
-		[ "$passive_guard_line_3" = 'RefuseManualStop=yes' ] &&
-		[ "$passive_guard_line_4" = 'ConditionPathExists=!/' ]
+		[ "$passive_guard_line_2" = 'DefaultDependencies=no' ] &&
+		[ "$passive_guard_line_3" = 'RefuseManualStart=yes' ] &&
+		[ "$passive_guard_line_4" = 'RefuseManualStop=yes' ] &&
+		[ "$passive_guard_line_5" = 'ConditionPathExists=!/' ]
 }
 cleanup()
 {
@@ -455,8 +458,9 @@ fi
 umask 022
 
 # A normal generator such as systemd-fstab-generator outranks the packaged
-# /usr unit. Mirror the passive lifecycle refusals and false start condition
-# in generator.early so stale fstab output cannot become a second owner.
+# /usr unit. Mirror the passive lifecycle refusals, disabled default shutdown
+# dependencies and false start condition in generator.early so stale fstab
+# output cannot become a second swapon or swapoff owner.
 if [ -L "$passive_swap_dropin_dir" ]; then
 	fail 1 passive-guard generator-output symlinked-passive-directory mapper-active-job
 fi
@@ -467,7 +471,7 @@ if [ ! -d "$passive_swap_dropin_dir" ] || [ -L "$passive_swap_dropin_dir" ]; the
 	fail 1 passive-guard generator-output unsafe-passive-directory mapper-active-job
 fi
 passive_swap_temporary=$stage_dir/passive-swap.conf
-if printf '[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/\n' > "$passive_swap_temporary"; then :; else
+if printf '[Unit]\nDefaultDependencies=no\nRefuseManualStart=yes\nRefuseManualStop=yes\nConditionPathExists=!/\n' > "$passive_swap_temporary"; then :; else
 	fail "$?" passive-guard generator-output write-passive-dropin mapper-active-job
 fi
 if chmod 0644 "$passive_swap_temporary"; then :; else

@@ -191,14 +191,15 @@ class GeneratorPublicationTest(unittest.TestCase):
                 "[Unit]\nJobTimeoutSec=30s\nJobTimeoutAction=none\n")
             self.assertEqual(
                 self.passive_guard().read_text(),
-                "[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\n"
-                "ConditionPathExists=!/\n",
+                "[Unit]\nDefaultDependencies=no\nRefuseManualStart=yes\n"
+                "RefuseManualStop=yes\nConditionPathExists=!/\n",
             )
         service = MAPPER_SERVICE.read_text()
         passive = PASSIVE_SWAP.read_text()
         self.assertIn("RequiresMountsFor=/var/lib/swapz/physical-recovery", service)
         self.assertNotIn("BindsTo=", service)
         self.assertIn("WantedBy=swap.target", service)
+        self.assertIn("DefaultDependencies=no", passive)
         self.assertIn("RefuseManualStart=yes", passive)
         # RefuseManualStart alone allows dependency-queued start jobs.
         self.assertIn("ConditionPathExists=!/", passive)

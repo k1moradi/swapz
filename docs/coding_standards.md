@@ -879,7 +879,12 @@ pre-hibernation refusal on failed selector admission. This dependency only names
 alias; the deployment gate must also prevent the same partition from being
 started as raw swap through a by-UUID or other alias. Static units stay
 disabled and manual start/stop remains refused until lifecycle and boot
-qualification passes.
+qualification passes. The passive mapper `.swap` view, including its
+`generator.early` shadow guard, must set `DefaultDependencies=no` so systemd
+does not add `Conflicts=umount.target` / `Before=umount.target` and become a
+second shutdown `swapoff` owner after a native manager stop failure. Preserve
+the false start condition and manual refusals when a normal generator shadows
+the packaged unit.
 
 ### Primary manager Device Mapper lifecycle primitives
 

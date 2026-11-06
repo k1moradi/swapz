@@ -43,9 +43,11 @@ not `BindsTo` removable media. `swapzctl primary start` already performs
 `swapon` and `primary stop` performs `swapoff` and safe owned mapper teardown.
 Therefore the mapper service alone is WantedBy=swap.target and MUST be enabled
 only after qualification; the `.swap` unit is a passive view of the active
-swap and MUST NOT be enabled or started independently. For shutdown/reboot,
-the mapper's normal stop precedes the observed `.swap` stop, so the manager
-remains the only swapoff owner. Clear any legacy enabled `.swap` wants symlink
+swap and MUST NOT be enabled or started independently. The passive `.swap`
+sets `DefaultDependencies=no`, including through the generator shadow guard,
+so systemd does not add its automatic `umount.target` shutdown stop; the
+manager remains the only swapoff owner even if its normal stop fails. Clear
+any legacy enabled `.swap` wants symlink
 before deployment. Units remain disabled and manual start/stop of the mapper
 and passive swap are refused until the lifecycle is qualified.
 

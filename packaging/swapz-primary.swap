@@ -1,6 +1,10 @@
 [Unit]
 Description=Primary Linux swap on swapz
-# Passive systemd view of the already-active swap. The manager performs both
+# Passive systemd view of the already-active swap. Disable the swap unit's
+# automatic umount.target shutdown stop so systemd cannot become a fallback
+# swapoff owner after a failed native manager stop.
+DefaultDependencies=no
+# The manager performs both
 # swapon and swapoff and owns the durable recovery state. This unit must never
 # be enabled in swap.target: that would queue a second swapon transaction.
 RefuseManualStart=yes
@@ -8,8 +12,9 @@ RefuseManualStop=yes
 # RefuseManualStart blocks explicit jobs, not starts pulled in as dependencies.
 # A stale swap.target.wants link or fstab request must not perform swapon;
 # keep this unit observational while the mapper service owns all activation.
-# The generator mirrors these lifecycle refusals and the false condition in
-# generator.early because normal generator output can otherwise outrank this
+# The generator mirrors these lifecycle refusals, disabled default dependencies,
+# and the false condition in generator.early because normal generator output can
+# otherwise outrank this
 # packaged /usr unit.
 ConditionPathExists=!/
 

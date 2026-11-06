@@ -135,6 +135,7 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
         passive = (WORKFLOW.parents[2] / "packaging/swapz-primary.swap").read_text(
             encoding="utf-8"
         )
+        self.assertIn("DefaultDependencies=no", passive)
         self.assertIn("RefuseManualStart=yes", passive)
         self.assertIn("RefuseManualStop=yes", passive)
         self.assertRegex(passive, r"(?m)^ConditionPathExists=!/$")
@@ -218,8 +219,8 @@ class SystemdPackageWorkflowContractTest(unittest.TestCase):
             guard = early / (unit_name + ".d") / "50-swapz-passive.conf"
             self.assertEqual(
                 guard.read_text(encoding="ascii"),
-                "[Unit]\nRefuseManualStart=yes\nRefuseManualStop=yes\n"
-                "ConditionPathExists=!/\n",
+                "[Unit]\nDefaultDependencies=no\nRefuseManualStart=yes\n"
+                "RefuseManualStop=yes\nConditionPathExists=!/\n",
             )
             environment["SYSTEMD_UNIT_PATH"] = f"{early}:{normal}:{vendor}"
             guarded = subprocess.run(

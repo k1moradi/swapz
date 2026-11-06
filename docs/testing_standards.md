@@ -8653,7 +8653,11 @@ observer @swap/@module denial, grant observer lifecycle commands, remove
 mapper DM/module/swap capability, reorder activation guard -> preflight ->
 recover -> prepare -> start, change the sole primary stop/swapoff owner,
 remove recovery-mount or selected-device requirements, weaken timeouts, or
-activate the passive swap alias. Report the effective directive, required
+activate the passive swap alias. Rootless vendor-unit and normal-generator
+shadow fixtures must require `DefaultDependencies=no` on the passive mapper
+`.swap` view and reject an effective override to `yes`, so systemd cannot add
+an `umount.target` shutdown stop and issue a second `swapoff` after a failed
+native manager stop. Report the effective directive, required
 value, observed override basename and safety consequence without host paths.
 If a whole-unit replacement removes a vendor contribution from an additive
 directive that a surviving generator fragment also augments, attribute the
