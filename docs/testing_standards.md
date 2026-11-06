@@ -518,21 +518,30 @@ report phase, expected/observed identity and original numeric errno without
 private target identifiers. They prove bounded last-use validation only;
 they do not freeze the configuration or kernel mount/swap inventory after
 the final read and cannot grant physical activation.
-A separate mutation-sensitive coordinator negative control must change the live
-selected PARTUUID *after* an initially valid selector read and *before* the
-coordinator's prewrite inventory check. If the original selection is reused
-and all four intercepted mutations execute, report UNPROVEN with
-`prevented=none`, never SAFE or a physical PASS. An implementation that
-rechecks and refuses the new identity with original `ESTALE` and zero
-intercepted header, mapper, formatter and swapon actions is accepted; an
-unrelated refusal or a missing identity mutation is not a valid negative
-control. Dispatch this scenario explicitly as a negative control before the
-generic safe-admission/default-case check; it is neither a safe-target case
-nor a normal post-mount snapshot probe. The unsafe witness must include a
-successful initial and final mount read, four independent swap-inventory
-observations, and zero falsely observed mount conflicts before synthetic
-mutation. This is distinct from an adversarial mount change after every
-read-only inventory snapshot, for which no atomic exclusion proof is implied.
+The mutation-sensitive coordinator controls must use the extracted production
+protected-selector reader for the **initial** successful configured-target
+selection; an in-memory PARTUUID variable is not sufficient evidence for this
+boundary. After that successful read and before the coordinator's prewrite
+inventory check, independently replace: (1) the selector inode with a different
+valid PARTUUID, (2) the selector inode with identical bytes, and (3) the
+protected configuration-directory inode with an equivalent selector. Each
+fixture must prove the inode or directory identity actually changed. If the
+coordinator reuses its earlier selection and all four intercepted mutations
+execute, report UNPROVEN with `prevented=none`, never SAFE or a physical PASS.
+At the header seam a **diagnostic** fresh production-reader call may prove that
+changed bytes are now visible, or that identical bytes alone cannot establish
+inode continuity; that diagnostic read occurs only after the unsafe boundary
+has already been observed and must not be counted as coordinator revalidation.
+An implementation that performs a fresh production selector revalidation and
+refuses the changed identity with original `ESTALE` and zero intercepted
+header, mapper, formatter and swapon actions is accepted; an unrelated refusal
+or a missing identity mutation is not a valid negative control. Dispatch these
+scenarios explicitly before the generic safe-admission/default-case check.
+The unsafe witness must include a successful initial and final mount read, four
+independent swap-inventory observations, and zero falsely observed mount
+conflicts before synthetic mutation. This is distinct from an adversarial
+mount change after every read-only inventory snapshot, for which no atomic
+exclusion proof is implied.
 
 ### Primary real-swap native-host qualification
 

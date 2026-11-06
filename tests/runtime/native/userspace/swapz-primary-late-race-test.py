@@ -54,6 +54,15 @@ def production_define(source: str, name: str) -> str:
     return matches[0]
 
 
+SELECTOR_FUNCTIONS = (
+    "swapz_primary_partuuid_normalize", "swapz_primary_partuuid_valid",
+    "swapz_primary_target_config_parse",
+    "swapz_primary_selector_metadata_matches",
+    "swapz_primary_selector_identity_still_live",
+    "swapz_primary_target_config_read",
+)
+
+
 def omit_final_revalidation(function: str) -> str:
     """Negative control: remove exactly the block between intent and header write."""
     masked = code_only(function)
@@ -124,6 +133,19 @@ struct swapz_primary_swap_entry {
 /* Directly extracted production parsers follow: no test-model parser. */
 @@PARSERS@@
 
+/*
+ * Exercise the actual protected-selector reader in this coordinator fixture,
+ * not a copied parser or an in-memory selector model. Rootless mode changes
+ * only the expected owner to this process and keeps every path private.
+ */
+static char fixture_config_base[PATH_MAX];
+static void (*swapz_primary_rootless_selector_before_revalidation)(void);
+#define SWAPZ_PRIMARY_ROOTLESS_TEST 1
+#define SWAPZ_PRIMARY_CONFIG_BASE fixture_config_base
+@@SELECTOR_FUNCTIONS@@
+#undef SWAPZ_PRIMARY_CONFIG_BASE
+#undef SWAPZ_PRIMARY_ROOTLESS_TEST
+
 enum fixture_scenario {
     FIXTURE_CLEAN, FIXTURE_SELECTED_MOUNT, FIXTURE_PARENT_MOUNT,
     FIXTURE_FOREIGN_SELECTED, FIXTURE_FOREIGN_PARENT,
@@ -149,6 +171,8 @@ enum fixture_scenario {
     FIXTURE_POST_SNAPSHOT_MOUNT, FIXTURE_POST_SNAPSHOT_SWAPON,
     FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES,
     FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION,
+    FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION,
+    FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION,
     FIXTURE_SCENARIO_COUNT
 };
 static const char *const scenario_names[] = {
@@ -179,7 +203,9 @@ static const char *const scenario_names[] = {
     "new mount immediately after final safe inventory",
     "new swap immediately after final safe inventory",
     "PID inventory becomes unreadable after final safe inventory",
-    "protected selected PARTUUID changes after initial admission"
+    "protected selected PARTUUID changes after initial admission",
+    "protected selector inode changes after initial admission",
+    "protected configuration-directory inode changes after initial admission"
 };
 static enum fixture_scenario scenario;
 static int late;
@@ -204,8 +230,9 @@ static dev_t namespace_identity_late_device;
 static ino_t namespace_identity_initial_inode;
 static ino_t namespace_identity_late_inode;
 static int post_snapshot_injected;
-static char fixture_live_selector_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
 static unsigned int fixture_selector_reads;
+static struct stat fixture_initial_selector_info;
+static struct stat fixture_initial_config_info;
 static struct swapz_primary_target selected_target;
 static struct swapz_primary_target swapz_primary_selected_target;
 
@@ -680,6 +707,82 @@ static int fixture_remove_proc_entry(const char *path, const struct stat *info,
     return remove(path);
 }
 
+static int fixture_selector_race(enum fixture_scenario candidate)
+{
+    return candidate == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION ||
+           candidate == FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION ||
+           candidate == FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION;
+}
+
+static void fixture_selector_path(char path[PATH_MAX], const char *name)
+{
+    int length = snprintf(path, PATH_MAX, "%s/%s", fixture_config_base, name);
+
+    assert(length > 0 && length < PATH_MAX);
+}
+
+static void fixture_write_selector(const char *partuuid)
+{
+    char path[PATH_MAX];
+    FILE *stream;
+
+    fixture_selector_path(path, "primary-target");
+    stream = fopen(path, "wb");
+    assert(stream != NULL);
+    assert(fprintf(stream, "PARTUUID=%s\n", partuuid) > 0);
+    assert(fclose(stream) == 0);
+    assert(chmod(path, 0600) == 0);
+}
+
+static void fixture_prepare_selector(enum fixture_scenario candidate)
+{
+    char selector_path[PATH_MAX];
+    int length = snprintf(fixture_config_base, sizeof(fixture_config_base),
+                          "%s/config-%u", fixture_proc_root,
+                          (unsigned int)candidate);
+
+    assert(length > 0 && (size_t)length < sizeof(fixture_config_base));
+    assert(mkdir(fixture_config_base, 0700) == 0);
+    fixture_write_selector("f13428f6-01");
+    fixture_selector_path(selector_path, "primary-target");
+    assert(stat(fixture_config_base, &fixture_initial_config_info) == 0);
+    assert(stat(selector_path, &fixture_initial_selector_info) == 0);
+}
+
+static void fixture_replace_selector(const char *partuuid)
+{
+    char selector_path[PATH_MAX];
+    char retained_path[PATH_MAX];
+    struct stat current;
+
+    fixture_selector_path(selector_path, "primary-target");
+    fixture_selector_path(retained_path, "primary-target.previous");
+    assert(rename(selector_path, retained_path) == 0);
+    fixture_write_selector(partuuid);
+    assert(stat(selector_path, &current) == 0);
+    assert(current.st_dev != fixture_initial_selector_info.st_dev ||
+           current.st_ino != fixture_initial_selector_info.st_ino);
+}
+
+static void fixture_replace_config_directory(void)
+{
+    char retained_path[PATH_MAX];
+    char selector_path[PATH_MAX];
+    struct stat current;
+    int length = snprintf(retained_path, sizeof(retained_path), "%s.previous",
+                          fixture_config_base);
+
+    assert(length > 0 && (size_t)length < sizeof(retained_path));
+    assert(rename(fixture_config_base, retained_path) == 0);
+    assert(mkdir(fixture_config_base, 0700) == 0);
+    fixture_write_selector("f13428f6-01");
+    fixture_selector_path(selector_path, "primary-target");
+    assert(stat(fixture_config_base, &current) == 0);
+    assert(current.st_dev != fixture_initial_config_info.st_dev ||
+           current.st_ino != fixture_initial_config_info.st_ino);
+    assert(stat(selector_path, &current) == 0);
+}
+
 static int fixture_source_chain(const char *sysfs_root, dev_t device,
                                 dev_t excluded, dev_t *parent)
 {
@@ -782,11 +885,21 @@ static int fixture_observed_swap_device_active(dev_t device)
     return active;
 }
 
-static int fixture_target(struct swapz_primary_target *target)
+static int fixture_selector_read(
+    char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U])
 {
     ++fixture_selector_reads;
+    return swapz_primary_target_config_read(partuuid);
+}
+
+static int fixture_target(struct swapz_primary_target *target)
+{
+    char partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+
+    if (fixture_selector_read(partuuid) < 0)
+        return -1;
     memset(target, 0, sizeof(*target));
-    strcpy(target->partuuid, fixture_live_selector_partuuid);
+    strcpy(target->partuuid, partuuid);
     target->device_major = 8U;
     target->device_minor = 1U;
     target->device_bytes = 17179869184ULL;
@@ -890,10 +1003,20 @@ static int fixture_intent(void)
     if (scenario == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION) {
         /*
          * A previously read selector is not an authorization for a later
-         * mutation. The coordinator must notice a new live PARTUUID without
-         * taking the test's original successful target snapshot on trust.
+         * mutation. Replace the actual protected selector with a different
+         * valid PARTUUID after production completed its successful read.
          */
-        strcpy(fixture_live_selector_partuuid, "f13428f6-02");
+        fixture_replace_selector("f13428f6-02");
+        post_snapshot_injected = 1;
+    } else if (scenario ==
+               FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION) {
+        /* Same bytes, different protected file identity. */
+        fixture_replace_selector("f13428f6-01");
+        post_snapshot_injected = 1;
+    } else if (scenario ==
+               FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION) {
+        /* Same selector bytes, different protected directory identity. */
+        fixture_replace_config_directory();
         post_snapshot_injected = 1;
     }
     return 0;
@@ -921,11 +1044,22 @@ static int fixture_header_write(void)
         assert(!post_snapshot_injected);
         post_snapshot_injected = 1;
         assert(swapz_primary_swap_device_active(makedev(8U, 1U)) == 1);
-    } else if (scenario == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION) {
-        /* A changed selected identity must not inherit an earlier safe read. */
+    } else if (fixture_selector_race(scenario)) {
+        char current_partuuid[SWAPZ_PRIMARY_PARTUUID_LENGTH + 1U];
+
+        /*
+         * The mutation occurred after one successful production selector read.
+         * The coordinator reaches this boundary without a second read today.
+         * Perform a diagnostic production reread only after that observation:
+         * changed bytes become visible, while same-byte inode replacement is
+         * fresh current state and therefore cannot prove continuity by itself.
+         */
         assert(post_snapshot_injected && fixture_selector_reads == 1U);
-        assert(strcmp(fixture_live_selector_partuuid,
-                      selected_target.partuuid) != 0);
+        assert(swapz_primary_target_config_read(current_partuuid) == 0);
+        if (scenario == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION)
+            assert(strcmp(current_partuuid, selected_target.partuuid) != 0);
+        else
+            assert(!strcmp(current_partuuid, selected_target.partuuid));
     } else if (scenario == FIXTURE_POST_SNAPSHOT_INVENTORY_EACCES) {
         struct swapz_primary_mount_facts facts = {0};
 
@@ -994,6 +1128,7 @@ static int fixture_hashes(char *control, char *module, char *oracle)
 #define geteuid() 0
 #define swapz_primary_valid_source_sha(...) 1
 #define swapz_primary_configured_target(target) fixture_target(target)
+#define swapz_primary_target_config_read(partuuid) fixture_selector_read(partuuid)
 #define swapz_primary_recovery_base_open(...) 3
 #define swapz_primary_partition_lock_at(...) 4
 #define swapz_primary_record_read_at(r, n, o, b, c, length, x) fixture_record_read(length)
@@ -1056,6 +1191,7 @@ static int swapz_primary_shared_root_scope_record_live(
 
 /* The actual production coordinator function is inserted verbatim. */
 @@START_FUNCTION@@
+#undef swapz_primary_target_config_read
 #undef close
 #undef swapz_primary_swap_device_active
 #undef swapz_primary_release_partition_owner_at
@@ -1086,7 +1222,7 @@ static int check_case(enum fixture_scenario candidate)
     namespace_identity_initial_inode = namespace_identity_late_inode = 0;
     post_snapshot_injected = 0;
     fixture_selector_reads = 0U;
-    strcpy(fixture_live_selector_partuuid, "f13428f6-01");
+    fixture_prepare_selector(candidate);
     fixture_reset_mount_inventory();
     if (candidate == FIXTURE_FOREIGN_SELECTED_INITIAL)
         fixture_inventory_file("3031/mountinfo",
@@ -1201,7 +1337,9 @@ static int check_case(enum fixture_scenario candidate)
         expected_error = ELOOP;
         break;
     case FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION:
-        /* This mutation control has its own explicit post-admission verdict. */
+    case FIXTURE_LIVE_SELECTOR_INODE_REPLACED_AFTER_ADMISSION:
+    case FIXTURE_LIVE_CONFIG_DIRECTORY_REPLACED_AFTER_ADMISSION:
+        /* These mutation controls have their own explicit post-admission verdict. */
         break;
     default:
         assert(expected_safe || gap_probe);
@@ -1217,11 +1355,11 @@ static int check_case(enum fixture_scenario candidate)
                 fixture_mount_read_count, admission_reads);
         return 1;
     }
-    if (candidate == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION) {
+    if (fixture_selector_race(candidate)) {
         /*
-         * This mutation-sensitive current-source negative control never
-         * labels a successful stale selection SAFE. Accept a future ESTALE
-         * refusal only with zero real intercepted mutation boundaries.
+         * These mutation-sensitive controls never label a successful stale
+         * selector snapshot SAFE. A future refusal is valid only after a fresh
+         * production selector read and before any intercepted mutation.
          */
         int refusal = result < 0 && result_errno == ESTALE &&
             post_snapshot_injected == 1 && fixture_selector_reads >= 2U &&
@@ -1241,14 +1379,14 @@ static int check_case(enum fixture_scenario candidate)
             fprintf(stderr, "FAIL: phase=post-selector-admission "
                     "expected=ESTALE-or-documented-gap "
                     "observed=unexpected-transition errno=%d "
-                    "mutations=%u selector_reads=%u\n",
-                    result_errno, writes, fixture_selector_reads);
+                    "mutations=%u selector_reads=%u case=%d\n",
+                    result_errno, writes, fixture_selector_reads, candidate);
             return 1;
         }
-        printf("%s: phase=post-selector-admission "
-               "expected=refuse-changed-selection "
+        printf("%s: phase=post-selector-admission case=%d "
+               "expected=refuse-changed-selector-identity "
                "observed=%s errno=%d prevented=%s mutations=%u\n",
-               refusal ? "DENY" : "UNPROVEN",
+               refusal ? "DENY" : "UNPROVEN", candidate,
                refusal ? "ESTALE" : "stale-selection-reached-mutation",
                refusal ? result_errno : 0, refusal ? "all" : "none", writes);
         return 0;
@@ -1742,13 +1880,6 @@ int main(void)
 
 
 def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.CompletedProcess[str]:
-    selector_functions = (
-        "swapz_primary_partuuid_normalize", "swapz_primary_partuuid_valid",
-        "swapz_primary_target_config_parse",
-        "swapz_primary_selector_metadata_matches",
-        "swapz_primary_selector_identity_still_live",
-        "swapz_primary_target_config_read",
-    )
     target_valid_functions = (
         "swapz_primary_target_valid", "swapz_primary_same_target_identity",
     )
@@ -1759,7 +1890,7 @@ def compile_and_run_last_use(source: str, workdir: Path) -> subprocess.Completed
     unit = LAST_USE_HARNESS.replace(
         "@@SELECTOR_FUNCTIONS@@",
         "\n\n".join(production_function(source, name)
-                    for name in selector_functions)).replace(
+                    for name in SELECTOR_FUNCTIONS)).replace(
         "@@TARGET_VALID_FUNCTIONS@@",
         "\n\n".join(production_function(source, name)
                     for name in target_valid_functions)).replace(
@@ -1813,6 +1944,8 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         "SWAPZ_PRIMARY_PARTUUID_PATH_FORMAT",
     ))
     swap_function = production_function(source, "swapz_primary_swap_device_active")
+    selector_source = "\n\n".join(
+        production_function(source, name) for name in SELECTOR_FUNCTIONS)
     target_helpers = '\n\n'.join(production_function(source, name) for name in (
         "swapz_primary_partuuid_normalize",
         "swapz_primary_target_valid",
@@ -1834,6 +1967,7 @@ def compile_and_run(source: str, workdir: Path, *, mutant: bool) -> subprocess.C
         coordinator = omit_final_revalidation(coordinator)
     unit = HARNESS.replace('@@PRODUCTION_DEFINES@@', production_defines).replace(
         '@@PARSERS@@', parser_source).replace(
+        '@@SELECTOR_FUNCTIONS@@', selector_source).replace(
         '@@MOUNT_READER@@', mount_reader).replace(
         '@@SWAP_FUNCTION@@', swap_function).replace(
         '@@TARGET_HELPERS@@', target_helpers).replace(
