@@ -5408,23 +5408,17 @@ static int swapz_primary_owner_claim_matches_at(int recovery_fd,
 	return 1;
 }
 
-static int swapz_primary_reconcile_state_temporary_at(
-	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
+static int swapz_primary_reconcile_state_temporary_file_at(
+	int recovery_fd, const char *run_id, uid_t expected_owner)
 {
 	struct stat info;
 	char temporary_name[256];
 	int length;
 
-	if (recovery_fd < 0 || lock_fd < 0 ||
-	    !swapz_primary_valid_run_id(run_id)) {
+	if (recovery_fd < 0 || !swapz_primary_valid_run_id(run_id)) {
 		errno = EINVAL;
 		return -1;
 	}
-	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
-					    expected_owner) ||
-	    !swapz_primary_owner_claim_matches_at(
-		    recovery_fd, run_id, expected_owner))
-		return -1;
 	length = snprintf(temporary_name, sizeof(temporary_name),
 			  ".primary-state.json.%s.tmp", run_id);
 	if (length < 0 || (size_t)length >= sizeof(temporary_name)) {
@@ -5458,6 +5452,23 @@ static int swapz_primary_reconcile_state_temporary_at(
 		return -1;
 	}
 	return 0;
+}
+
+static int swapz_primary_reconcile_state_temporary_at(
+	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
+{
+	if (recovery_fd < 0 || lock_fd < 0 ||
+	    !swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner) ||
+	    !swapz_primary_owner_claim_matches_at(
+		    recovery_fd, run_id, expected_owner))
+		return -1;
+	return swapz_primary_reconcile_state_temporary_file_at(
+		recovery_fd, run_id, expected_owner);
 }
 
 /*
@@ -5586,6 +5597,15 @@ static int swapz_primary_reconcile_metadata_claim_at(
 	 * only abort with one atomic state replacement: an intermediate DISABLING
 	 * record would be ambiguous with a real teardown after a crash.
 	 */
+	/*
+	 * READY may be durable before the active marker is created. The canonical
+	 * state and consumed record above already prove this run under the held
+	 * partition lock, so reconcile only its deterministic unpublished temp
+	 * without requiring an active-marker claim.
+	 */
+	if (swapz_primary_reconcile_state_temporary_file_at(
+		    recovery_fd, current.run_id, expected_owner) < 0)
+		return -1;
 	formatted_length = swapz_primary_state_format(
 		&next, state_record, sizeof(state_record));
 	if (formatted_length < 0 ||

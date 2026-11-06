@@ -829,7 +829,7 @@ int main(int argc, char **argv)
     def test_state_temporary_reconciliation_is_owner_bound_and_durable(self):
         """Recover unpublished same-run state temps without touching stale owners."""
         helper_start = self.primary.index(
-            "static int swapz_primary_reconcile_state_temporary_at(")
+            "static int swapz_primary_reconcile_state_temporary_file_at(")
         helper_end = self.primary.index(
             "\n/*\n * READY with an exact active marker", helper_start)
         helper = self.primary[helper_start:helper_end]
@@ -843,6 +843,17 @@ int main(int argc, char **argv)
         self.assertLess(
             state_write.index("swapz_primary_reconcile_state_temporary_at("),
             state_write.index("swapz_primary_replace_record_at("),
+        )
+
+        metadata_start = self.primary.index(
+            "static int swapz_primary_reconcile_metadata_claim_at(")
+        metadata_end = self.primary.index(
+            "\nstatic int swapz_primary_valid_sha256(", metadata_start)
+        metadata = self.primary[metadata_start:metadata_end]
+        self.assertLess(
+            metadata.index(
+                "swapz_primary_reconcile_state_temporary_file_at("),
+            metadata.index("swapz_primary_replace_record_at("),
         )
 
         prefix = r"""#define _GNU_SOURCE
@@ -970,8 +981,21 @@ int main(int argc, char **argv)
            result, saved_errno, temporary_exists(directory_fd, run_a),
            fsync_attempts);
 
-    if (create_temporary(directory_fd, run_b, "stale-B\n") < 0)
+    if (create_temporary(directory_fd, run_a, "metadata-A\n") < 0)
         return 67;
+    active_run = run_b;
+    injected_fsync_errno = 0;
+    errno = 0;
+    result = swapz_primary_reconcile_state_temporary_file_at(
+        directory_fd, run_a, getuid());
+    saved_errno = errno;
+    printf("metadata_no_active=%d/%d exists=%d syncs=%u\n",
+           result, saved_errno, temporary_exists(directory_fd, run_a),
+           fsync_attempts);
+    active_run = run_a;
+
+    if (create_temporary(directory_fd, run_b, "stale-B\n") < 0)
+        return 68;
     errno = 0;
     result = swapz_primary_reconcile_state_temporary_at(
         directory_fd, 7, run_b, getuid());
@@ -983,9 +1007,9 @@ int main(int argc, char **argv)
     length = snprintf(
         name, sizeof(name), ".primary-state.json.%s.tmp", run_a);
     if (length < 0 || (size_t)length >= sizeof(name))
-        return 68;
-    if (symlinkat("foreign-target", directory_fd, name) < 0)
         return 69;
+    if (symlinkat("foreign-target", directory_fd, name) < 0)
+        return 70;
     errno = 0;
     result = swapz_primary_reconcile_state_temporary_at(
         directory_fd, 7, run_a, getuid());
@@ -993,7 +1017,7 @@ int main(int argc, char **argv)
     printf("symlink=%d/%d exists=%d syncs=%u\n",
            result, saved_errno, temporary_exists(directory_fd, run_a),
            fsync_attempts);
-    return close(directory_fd) < 0 ? 70 : 0;
+    return close(directory_fd) < 0 ? 71 : 0;
 }
 """
         run_a = "a" * 32
@@ -1017,8 +1041,9 @@ int main(int argc, char **argv)
                 outcome.stdout,
                 f"unlink_sync=-1/{errno.EIO} exists=0 syncs=1\n"
                 f"retry_ready=0/{errno.ENOENT} exists=0 syncs=1\n"
-                f"stale_owner=-1/{errno.EPERM} exists=1 syncs=1\n"
-                f"symlink=-1/{errno.EPERM} exists=1 syncs=1\n",
+                f"metadata_no_active=0/{errno.ENOENT} exists=0 syncs=2\n"
+                f"stale_owner=-1/{errno.EPERM} exists=1 syncs=2\n"
+                f"symlink=-1/{errno.EPERM} exists=1 syncs=2\n",
             )
             self.assertNotIn(run_a, outcome.stdout + outcome.stderr)
             self.assertNotIn(run_b, outcome.stdout + outcome.stderr)

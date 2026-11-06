@@ -102,6 +102,14 @@ replacement's existing recovery-directory fsync completes, which also closes
 any prior ambiguous unlink. This keeps the normal no-temp fsync ordinal
 unchanged. A stale transaction must not unlink another run's temporary, and
 symlink or otherwise unsafe temporary identities must be preserved and refused.
+Metadata-only READY reconciliation is a distinct owner-proof path because READY
+may be durable before the active marker is created. After the held partition
+lock, canonical READY run ID and exact consumed record are verified (and the
+active marker too when present), it may reconcile only that run's deterministic
+unpublished state temporary before the READY-to-COMPLETE replacement. This path
+must not require an active marker, must never name or remove another run's
+temporary, and must retain the same unlink-plus-directory-fsync durability
+requirement before continuing.
 
 A failed owner-marker unlink or release-directory fsync never qualifies STOP or
 RECOVER as COMPLETE, even when an in-process directory read finds no active
