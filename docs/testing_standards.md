@@ -87,6 +87,21 @@ before and after a visible replacement, and temporary-unlink cleanup failing
 after file fsync. A failed close must not publish a new canonical state, and
 any cleanup errno must leave the first writer errno unchanged. Only verified
 successful rename and recovery-directory fsync permit durable publication.
+The canonical diagnostic name for this sequence is
+`state-file-fsync-close-rename-directory-fsync`; diagnostics must not retain
+the obsolete rename-before-close ordering.
+
+A same-run `.primary-state.json.<run>.tmp` left before rename is unpublished
+state, not a lifecycle stage. Before any later state replacement, the held
+partition lock and exact active/consumed owner claim must be revalidated, then
+a root-owned mode-0600 single-link regular temporary may be unlinked. That
+unlink must be followed by a recovery-directory fsync; failure blocks the
+current write. If a later retry observes the name already absent, it may
+continue to the normal replacement, but success is still impossible until the
+replacement's existing recovery-directory fsync completes, which also closes
+any prior ambiguous unlink. This keeps the normal no-temp fsync ordinal
+unchanged. A stale transaction must not unlink another run's temporary, and
+symlink or otherwise unsafe temporary identities must be preserved and refused.
 
 A failed owner-marker unlink or release-directory fsync never qualifies STOP or
 RECOVER as COMPLETE, even when an in-process directory read finds no active

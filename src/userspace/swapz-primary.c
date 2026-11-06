@@ -5408,6 +5408,58 @@ static int swapz_primary_owner_claim_matches_at(int recovery_fd,
 	return 1;
 }
 
+static int swapz_primary_reconcile_state_temporary_at(
+	int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
+{
+	struct stat info;
+	char temporary_name[256];
+	int length;
+
+	if (recovery_fd < 0 || lock_fd < 0 ||
+	    !swapz_primary_valid_run_id(run_id)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (!swapz_primary_state_lock_valid(recovery_fd, lock_fd,
+					    expected_owner) ||
+	    !swapz_primary_owner_claim_matches_at(
+		    recovery_fd, run_id, expected_owner))
+		return -1;
+	length = snprintf(temporary_name, sizeof(temporary_name),
+			  ".primary-state.json.%s.tmp", run_id);
+	if (length < 0 || (size_t)length >= sizeof(temporary_name)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (fstatat(recovery_fd, temporary_name, &info,
+		    AT_SYMLINK_NOFOLLOW) < 0) {
+		if (errno == ENOENT)
+			return 0;
+		return -1;
+	}
+	if (!S_ISREG(info.st_mode) || info.st_uid != expected_owner ||
+	    (info.st_mode & 0777U) != 0600U || info.st_nlink != 1) {
+		errno = EPERM;
+		return -1;
+	}
+	if (unlinkat(recovery_fd, temporary_name, 0) < 0)
+		return -1;
+	/*
+	 * This fsync is the proof that stale unpublished evidence was removed.
+	 * If it fails, this state write remains blocked. A later retry may see the
+	 * name absent, but cannot publish success until replace_record_at() reaches
+	 * its own recovery-directory fsync.
+	 */
+	if (fsync(recovery_fd) < 0)
+		return -1;
+	if (fstatat(recovery_fd, temporary_name, &info,
+		    AT_SYMLINK_NOFOLLOW) == 0 || errno != ENOENT) {
+		errno = EIO;
+		return -1;
+	}
+	return 0;
+}
+
 /*
  * READY with an exact active marker or with no active marker can only be left
  * by interruption during metadata-only preparation. STARTING must be durable
@@ -6399,6 +6451,9 @@ int swapz_primary_state_write_at(int recovery_fd, int lock_fd,
 					   sizeof(next_record));
 	if (length < 0)
 		return -1;
+	if (swapz_primary_reconcile_state_temporary_at(
+		    recovery_fd, lock_fd, next->run_id, expected_owner) < 0)
+		return -1;
 	if (swapz_primary_replace_record_at(recovery_fd, "primary-state.json",
 					   next->run_id, next_record,
 					   expected_owner) < 0)
@@ -6461,7 +6516,7 @@ static int swapz_primary_require_recovery_preserving_errno(
 			"retained_resource=transaction-evidence "
 			"disposition=BLOCKED "
 			"safe_next_action=read-only-inspect-recovery-state "
-			"persistence_boundary=state-rename-close-directory-fsync "
+			"persistence_boundary=state-file-fsync-close-rename-directory-fsync "
 			"durable=UNCERTAIN mapper=UNCERTAIN swap=UNCERTAIN\n",
 			operation, primary_errno, recovery_errno);
 	}
@@ -11746,7 +11801,7 @@ static int swapz_primary_start_prepared(void)
 	starting_state = state;
 	starting_state.stage = SWAPZ_PRIMARY_STAGE_STARTING;
 	failure_phase = "state-starting";
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &starting_state, 0) < 0)
@@ -11886,7 +11941,7 @@ static int swapz_primary_start_prepared(void)
 	failure_phase = "state-active";
 	active_state = starting_state;
 	active_state.stage = SWAPZ_PRIMARY_STAGE_ACTIVE;
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &active_state, 0) < 0)
@@ -12045,7 +12100,7 @@ static int swapz_primary_stop_active(void)
 	stopping_state = state;
 	stopping_state.stage = SWAPZ_PRIMARY_STAGE_STOPPING;
 	failure_phase = "state-stopping";
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &stopping_state, 0) < 0)
@@ -12097,7 +12152,7 @@ static int swapz_primary_stop_active(void)
 	failure_phase = "state-restored";
 	restored_state = stopping_state;
 	restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
@@ -12108,7 +12163,7 @@ static int swapz_primary_stop_active(void)
 	failure_phase = "state-complete";
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &complete_state, 0) < 0)
@@ -12268,7 +12323,7 @@ static int swapz_primary_recover(void)
 		if (swapz_primary_recovery_required_state(
 			    &state, &recovery_required_state) < 0)
 			goto out;
-		persistence_boundary = "state-rename-close-directory-fsync";
+		persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 		durable_observation = "UNCERTAIN";
 		if (swapz_primary_state_write_at(
 			    recovery_fd, lock_fd, &recovery_required_state, 0) < 0)
@@ -12286,7 +12341,7 @@ static int swapz_primary_recover(void)
 
 	recovering_state = state;
 	recovering_state.stage = SWAPZ_PRIMARY_STAGE_RECOVERING;
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &recovering_state, 0) < 0)
@@ -12340,7 +12395,7 @@ static int swapz_primary_recover(void)
 
 	restored_state = recovering_state;
 	restored_state.stage = SWAPZ_PRIMARY_STAGE_RESTORED;
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &restored_state, 0) < 0)
@@ -12351,7 +12406,7 @@ static int swapz_primary_recover(void)
 	failure_phase = "state-complete";
 	complete_state = restored_state;
 	complete_state.stage = SWAPZ_PRIMARY_STAGE_COMPLETE;
-	persistence_boundary = "state-rename-close-directory-fsync";
+	persistence_boundary = "state-file-fsync-close-rename-directory-fsync";
 	durable_observation = "UNCERTAIN";
 	if (swapz_primary_state_write_at(
 		    recovery_fd, lock_fd, &complete_state, 0) < 0)

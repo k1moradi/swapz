@@ -590,7 +590,7 @@ int main(int argc, char **argv)
                             result.stderr,
                         )
                         self.assertIn(
-                            "persistence_boundary=state-rename-close-directory-fsync "
+                            "persistence_boundary=state-file-fsync-close-rename-directory-fsync "
                             "durable=UNCERTAIN mapper=UNCERTAIN swap=UNCERTAIN",
                             result.stderr,
                         )
@@ -669,6 +669,13 @@ static int injected_fsync(int fd)
          S_ISREG(info.st_mode)) ||
         (failure_mode == 2 && S_ISDIR(info.st_mode))) {
         errno = failure_mode == 2 ? EIO : ENOSPC;
+        return -1;
+    }
+    if ((failure_mode == 7 && S_ISREG(info.st_mode)) ||
+        (failure_mode == 8 && S_ISDIR(info.st_mode))) {
+        if (fsync(fd) < 0)
+            return -1;
+        errno = EIO;
         return -1;
     }
     return fsync(fd);
@@ -764,6 +771,10 @@ int main(int argc, char **argv)
                  f"result=-1 errno={errno.EIO}\n", False),
                 ("cleanup-error-retains-first-errno", 6, "original\n",
                  f"result=-1 errno={errno.ENOSPC}\n", True),
+                ("file-fsync-after-effect", 7, "original\n",
+                 f"result=-1 errno={errno.EIO}\n", False),
+                ("directory-fsync-after-effect", 8, "replacement\n",
+                 f"result=-1 errno={errno.EIO}\n", False),
                 ("durable-replacement", 0, "replacement\n", None, False),
             ):
                 with self.subTest(scenario=scenario):
@@ -814,6 +825,227 @@ int main(int argc, char **argv)
             self.assertTrue(mutant.stdout.startswith("result=0 "))
             self.assertNotEqual(
                 mutant.stdout, f"result=-1 errno={errno.EIO}\n")
+
+    def test_state_temporary_reconciliation_is_owner_bound_and_durable(self):
+        """Recover unpublished same-run state temps without touching stale owners."""
+        helper_start = self.primary.index(
+            "static int swapz_primary_reconcile_state_temporary_at(")
+        helper_end = self.primary.index(
+            "\n/*\n * READY with an exact active marker", helper_start)
+        helper = self.primary[helper_start:helper_end]
+
+        state_write_start = self.primary.index(
+            "int swapz_primary_state_write_at(")
+        state_write_end = self.primary.index(
+            "\nint swapz_primary_state_require_recovery_at(",
+            state_write_start)
+        state_write = self.primary[state_write_start:state_write_end]
+        self.assertLess(
+            state_write.index("swapz_primary_reconcile_state_temporary_at("),
+            state_write.index("swapz_primary_replace_record_at("),
+        )
+
+        prefix = r"""#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define SWAPZ_PRIMARY_RUN_ID_LENGTH 32U
+static const char *active_run;
+static int injected_fsync_errno;
+static unsigned int fsync_attempts;
+
+static int swapz_primary_valid_run_id(const char *run_id)
+{
+    return run_id && strlen(run_id) == SWAPZ_PRIMARY_RUN_ID_LENGTH;
+}
+static int swapz_primary_state_lock_valid(
+    int recovery_fd, int lock_fd, uid_t expected_owner)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)expected_owner;
+    return 1;
+}
+static int swapz_primary_owner_claim_matches_at(
+    int recovery_fd, const char *run_id, uid_t expected_owner)
+{
+    (void)recovery_fd;
+    (void)expected_owner;
+    if (strcmp(run_id, active_run)) {
+        errno = EPERM;
+        return 0;
+    }
+    return 1;
+}
+static int injected_fsync(int fd)
+{
+    (void)fd;
+    ++fsync_attempts;
+    if (injected_fsync_errno) {
+        errno = injected_fsync_errno;
+        return -1;
+    }
+    return 0;
+}
+#define fsync injected_fsync
+"""
+        suffix = r"""
+#undef fsync
+
+static int create_temporary(
+    int directory_fd, const char *run_id, const char *payload)
+{
+    char name[256];
+    int length;
+    int fd;
+    ssize_t payload_length = (ssize_t)strlen(payload);
+
+    length = snprintf(
+        name, sizeof(name), ".primary-state.json.%s.tmp", run_id);
+    if (length < 0 || (size_t)length >= sizeof(name))
+        return -1;
+    fd = openat(directory_fd, name,
+                O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
+                0600);
+    if (fd < 0)
+        return -1;
+    if (write(fd, payload, (size_t)payload_length) != payload_length) {
+        int saved_errno = errno ? errno : EIO;
+        (void)close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+    return close(fd);
+}
+static int temporary_exists(int directory_fd, const char *run_id)
+{
+    char name[256];
+    struct stat info;
+    int length = snprintf(
+        name, sizeof(name), ".primary-state.json.%s.tmp", run_id);
+
+    if (length < 0 || (size_t)length >= sizeof(name))
+        return -1;
+    return fstatat(directory_fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0;
+}
+int main(int argc, char **argv)
+{
+    const char *run_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const char *run_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    int directory_fd;
+    int result;
+    int saved_errno;
+    int length;
+    char name[256];
+
+    if (argc != 2)
+        return 64;
+    directory_fd = open(argv[1], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (directory_fd < 0)
+        return 65;
+    active_run = run_a;
+    if (create_temporary(directory_fd, run_a, "stale-A\n") < 0)
+        return 66;
+
+    injected_fsync_errno = EIO;
+    errno = 0;
+    result = swapz_primary_reconcile_state_temporary_at(
+        directory_fd, 7, run_a, getuid());
+    saved_errno = errno;
+    printf("unlink_sync=%d/%d exists=%d syncs=%u\n",
+           result, saved_errno, temporary_exists(directory_fd, run_a),
+           fsync_attempts);
+
+    injected_fsync_errno = ENOSPC;
+    errno = 0;
+    result = swapz_primary_reconcile_state_temporary_at(
+        directory_fd, 7, run_a, getuid());
+    saved_errno = errno;
+    printf("retry_ready=%d/%d exists=%d syncs=%u\n",
+           result, saved_errno, temporary_exists(directory_fd, run_a),
+           fsync_attempts);
+
+    if (create_temporary(directory_fd, run_b, "stale-B\n") < 0)
+        return 67;
+    errno = 0;
+    result = swapz_primary_reconcile_state_temporary_at(
+        directory_fd, 7, run_b, getuid());
+    saved_errno = errno;
+    printf("stale_owner=%d/%d exists=%d syncs=%u\n",
+           result, saved_errno, temporary_exists(directory_fd, run_b),
+           fsync_attempts);
+
+    length = snprintf(
+        name, sizeof(name), ".primary-state.json.%s.tmp", run_a);
+    if (length < 0 || (size_t)length >= sizeof(name))
+        return 68;
+    if (symlinkat("foreign-target", directory_fd, name) < 0)
+        return 69;
+    errno = 0;
+    result = swapz_primary_reconcile_state_temporary_at(
+        directory_fd, 7, run_a, getuid());
+    saved_errno = errno;
+    printf("symlink=%d/%d exists=%d syncs=%u\n",
+           result, saved_errno, temporary_exists(directory_fd, run_a),
+           fsync_attempts);
+    return close(directory_fd) < 0 ? 70 : 0;
+}
+"""
+        run_a = "a" * 32
+        run_b = "b" * 32
+        with TemporaryDirectory(prefix="swapz-primary-state-temp-") as temp:
+            fixture = Path(temp)
+            source = fixture / "state-temp.c"
+            binary = fixture / "state-temp"
+            compiler = [
+                "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra",
+                "-Werror", "-Wpedantic", str(source), "-o", str(binary),
+            ]
+            source.write_text(prefix + helper + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            outcome = subprocess.run(
+                [str(binary), str(fixture)], cwd=ROOT,
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            self.assertEqual(outcome.returncode, 0, outcome.stderr)
+            self.assertEqual(
+                outcome.stdout,
+                f"unlink_sync=-1/{errno.EIO} exists=0 syncs=1\n"
+                f"retry_ready=0/{errno.ENOENT} exists=0 syncs=1\n"
+                f"stale_owner=-1/{errno.EPERM} exists=1 syncs=1\n"
+                f"symlink=-1/{errno.EPERM} exists=1 syncs=1\n",
+            )
+            self.assertNotIn(run_a, outcome.stdout + outcome.stderr)
+            self.assertNotIn(run_b, outcome.stdout + outcome.stderr)
+
+            sync_guard = (
+                "if (fsync(recovery_fd) < 0)\n"
+                "\t\treturn -1;"
+            )
+            self.assertIn(sync_guard, helper)
+            mutant_helper = helper.replace(
+                sync_guard, "(void)fsync(recovery_fd);", 1)
+            self.assertNotEqual(mutant_helper, helper)
+            source.write_text(
+                prefix + mutant_helper + suffix, encoding="utf-8")
+            subprocess.run(compiler, check=True, cwd=ROOT)
+            mutant_fixture = fixture / "mutant"
+            mutant_fixture.mkdir(mode=0o700)
+            mutant = subprocess.run(
+                [str(binary), str(mutant_fixture)],
+                cwd=ROOT, capture_output=True, text=True,
+                check=False, timeout=5,
+            )
+            self.assertEqual(mutant.returncode, 0, mutant.stderr)
+            self.assertIn(
+                f"unlink_sync=0/{errno.ENOENT} exists=0 syncs=1\n",
+                mutant.stdout,
+            )
 
     def test_completed_owner_release_retries_directory_durability(self):
         """A missing marker is not proof that the prior unlink was durable."""
@@ -1258,7 +1490,7 @@ int main(int argc, char **argv)
         active_window = start[swap_proof:active_write]
         self.assertIn('durable_observation = "UNCERTAIN";', active_window)
         self.assertIn(
-            'persistence_boundary = "state-rename-close-directory-fsync";',
+            'persistence_boundary = "state-file-fsync-close-rename-directory-fsync";',
             active_window)
         detail_begin = start.index('"PRIMARY_START=ADMISSION_DETAIL')
         detail_end = start.index(");", detail_begin)
@@ -1391,6 +1623,17 @@ static int swapz_primary_state_format(
     (void)state;
     (void)record;
     (void)capacity;
+    ++unexpected_state_path_calls;
+    errno = EFAULT;
+    return -1;
+}
+static int swapz_primary_reconcile_state_temporary_at(
+    int recovery_fd, int lock_fd, const char *run_id, uid_t expected_owner)
+{
+    (void)recovery_fd;
+    (void)lock_fd;
+    (void)run_id;
+    (void)expected_owner;
     ++unexpected_state_path_calls;
     errno = EFAULT;
     return -1;
@@ -1664,11 +1907,18 @@ static int swapz_primary_state_parse(
 }
 static int injected_unlinkat(int directory_fd, const char *name, int flags)
 {
+    int result;
+
     if (injected_failure_mode == 1) {
         errno = EACCES;
         return -1;
     }
-    return unlinkat(directory_fd, name, flags);
+    result = unlinkat(directory_fd, name, flags);
+    if (result == 0 && injected_failure_mode == 3) {
+        errno = EIO;
+        return -1;
+    }
+    return result;
 }
 static int injected_fsync(int fd)
 {
@@ -1721,6 +1971,7 @@ int main(int argc, char **argv)
             for scenario, failure_mode, owner_run, active_run, expected_errno, removed in (
                 ("unlink-failed", 1, run_a, run_a, errno.EACCES, False),
                 ("fsync-failed-after-unlink", 2, run_a, run_a, errno.EIO, True),
+                ("unlink-failed-after-effect", 3, run_a, run_a, errno.EIO, True),
                 ("stale-run-A-after-B", 0, run_a, run_b, errno.EPERM, False),
                 ("released", 0, run_a, run_a, None, True),
             ):
