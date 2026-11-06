@@ -3710,14 +3710,6 @@ static void format_report_error(const char *classification,
 	errno = original_errno;
 }
 
-static void format_report_refusal(const char *summary, const char *failed_stage,
-				  const char *expected, int original_errno)
-{
-	format_report_error("REFUSED: ", summary, failed_stage, expected,
-			    original_errno,
-			    "inspect the failed stage read-only; no header write");
-}
-
 static void format_report_uncertain(const char *summary,
 				    const char *failed_stage,
 				    const char *expected, int original_errno)

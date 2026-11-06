@@ -5561,6 +5561,9 @@ contain the single postpublication UNCERTAIN classification and must not also
 emit a context-free REFUSED classification. Exclusive-open denials and the
 final returned-descriptor F_GETFL gate must use the same structured admission
 fields, including a sanitized observed class and the attempted operation.
+After switching failure reporters, exact-C warning-clean builds must also reject
+unused leftover static diagnostic wrappers; dead helpers are removed without
+altering the errno or phase-specific refusal behavior.
 
 This establishes a rootless observed-snapshot safety invariant, not exclusive
 kernel ownership or a bound against swapon racing between the final inventory
