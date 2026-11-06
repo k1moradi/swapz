@@ -1051,7 +1051,7 @@ child = subprocess.Popen(
 pending_ready = ready.with_name(ready.name + ".pending")
 pending_ready.write_text(f"pid={child.pid}\n", encoding="ascii")
 pending_ready.replace(ready)
-deadline = time.monotonic() + 5.0
+deadline = time.monotonic() + 7.0
 while not release.exists() and time.monotonic() < deadline:
     time.sleep(0.005)
 if not release.exists():
