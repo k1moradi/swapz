@@ -180,6 +180,58 @@ static void assert_shared_root_record_rejects_scope(
 		record, record_length, digest));
 }
 
+static void test_shared_root_sysfs_layout_skips_attribute_files(void)
+{
+	char directory[] = "/tmp/swapz-scope-layout-XXXXXX";
+	char attribute_path[PATH_MAX];
+	char attribute_partition_path[PATH_MAX];
+	char partition_path[PATH_MAX];
+	char symlink_path[PATH_MAX];
+	char missing_path[PATH_MAX];
+	int attribute_fd;
+	int length;
+
+	assert(mkdtemp(directory));
+	length = snprintf(attribute_path, sizeof(attribute_path),
+			  "%s/uevent", directory);
+	assert(length > 0 && (size_t)length < sizeof(attribute_path));
+	length = snprintf(attribute_partition_path,
+			  sizeof(attribute_partition_path), "%s/partition",
+			  attribute_path);
+	assert(length > 0 &&
+	       (size_t)length < sizeof(attribute_partition_path));
+	length = snprintf(partition_path, sizeof(partition_path),
+			  "%s/sda4", directory);
+	assert(length > 0 && (size_t)length < sizeof(partition_path));
+	length = snprintf(symlink_path, sizeof(symlink_path),
+			  "%s/sda4-link", directory);
+	assert(length > 0 && (size_t)length < sizeof(symlink_path));
+	length = snprintf(missing_path, sizeof(missing_path),
+			  "%s/missing", directory);
+	assert(length > 0 && (size_t)length < sizeof(missing_path));
+
+	attribute_fd = open(attribute_path,
+			    O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	assert(attribute_fd >= 0);
+	assert(close(attribute_fd) == 0);
+	assert(swapz_primary_sysfs_entry_is_directory(attribute_path) == 0);
+	errno = 0;
+	assert(lstat(attribute_partition_path, &(struct stat){0}) < 0);
+	assert(errno == ENOTDIR);
+	assert(mkdir(partition_path, 0700) == 0);
+	assert(swapz_primary_sysfs_entry_is_directory(partition_path) == 1);
+	assert(symlink(partition_path, symlink_path) == 0);
+	assert(swapz_primary_sysfs_entry_is_directory(symlink_path) == 0);
+	errno = 0;
+	assert(swapz_primary_sysfs_entry_is_directory(missing_path) < 0);
+	assert(errno == ENOENT);
+
+	assert(unlink(symlink_path) == 0);
+	assert(rmdir(partition_path) == 0);
+	assert(unlink(attribute_path) == 0);
+	assert(rmdir(directory) == 0);
+}
+
 static void test_shared_root_scope_authorization_is_exact_and_recovery_separate(void)
 {
 	struct swapz_primary_shared_root_scope scope = make_shared_root_scope();
@@ -3564,6 +3616,7 @@ int main(void)
 	assert(swapz_primary_command(1, stop) == 2);
 	assert(swapz_primary_command(1, recover) == 2);
 	test_shared_root_scope_authorization_is_exact_and_recovery_separate();
+	test_shared_root_sysfs_layout_skips_attribute_files();
 	test_shared_root_scope_rejects_overlapping_partition_layout();
 	test_shared_root_scope_record_requires_private_regular_file();
 	puts("PASS: primary swap inventory, capacity, durable stage transitions, owner claims and disabled lifecycle gate");

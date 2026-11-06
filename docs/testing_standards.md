@@ -529,6 +529,12 @@ Rootless shared-root authorization controls must reject absent or malformed
 records; wrong host, root partition, target PARTUUID/partition number/device
 number/geometry, parent identity or partition-table layout; replaced devices;
 overlapping or out-of-parent partitions; and target/recovery-parent equality.
+A production scope-layout regression must also model ordinary sysfs parent
+entries such as regular uevent attributes and symlinks: classify each entry
+without following links before probing its partition attribute, skip only
+confirmed non-directory entries, and preserve failures for missing or
+unreadable parent evidence. A rootless fixture must reproduce the resulting
+ENOTDIR path without weakening partition-layout completeness.
 A positive exact record fixture may test the policy predicate only. It does
 not create a live authorization, waive source/artifact qualification, or
 permit physical mutation or production activation.

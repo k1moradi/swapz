@@ -7394,6 +7394,19 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 #endif
 }
 
+static inline int swapz_primary_sysfs_entry_is_directory(const char *path)
+{
+	struct stat info;
+
+	if (!path || !path[0]) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (lstat(path, &info) < 0)
+		return -1;
+	return S_ISDIR(info.st_mode);
+}
+
 #ifndef SWAPZ_PRIMARY_ROOTLESS_TEST
 static int swapz_primary_udev_scope_properties_read(
 	dev_t device, int partition,
@@ -7972,6 +7985,7 @@ static int swapz_primary_partition_layout_sha256(
 		char child_path[PATH_MAX];
 		char partition_path[PATH_MAX];
 		struct stat partition_info;
+		int child_is_directory;
 
 		errno = 0;
 		entry = readdir(directory);
@@ -7985,8 +7999,20 @@ static int swapz_primary_partition_layout_sha256(
 			continue;
 		if (swapz_primary_path_format(child_path, sizeof(child_path),
 					      "%s/%s", parent_sysfs_path,
-					      entry->d_name) < 0 ||
-		    swapz_primary_path_format(partition_path,
+					      entry->d_name) < 0)
+			goto out;
+		/*
+		 * Sysfs parent directories also contain regular attributes such as
+		 * uevent and symlinks. Only real child directories can be partitions;
+		 * probing an attribute/partition path would return ENOTDIR.
+		 */
+		child_is_directory =
+			swapz_primary_sysfs_entry_is_directory(child_path);
+		if (child_is_directory < 0)
+			goto out;
+		if (!child_is_directory)
+			continue;
+		if (swapz_primary_path_format(partition_path,
 					      sizeof(partition_path),
 					      "%s/partition", child_path) < 0)
 			goto out;
