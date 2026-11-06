@@ -258,6 +258,13 @@ static int swap_syscall_calls;
 static int normal_open_calls;
 static int normal_fsync_calls;
 static int module_syscall_calls;
+/* The fake kernel never performs the operation when this errno is set. */
+static int real_syscall_failure_errno;
+static const char primary_test_mapper_fd_path[] = "/proc/self/fd/23";
+enum {
+	/* These flags match the exact production native swapon call. */
+	primary_test_swapon_flags = 0x10000 | 0x40000,
+};
 #if defined(__x86_64__) || defined(__aarch64__)
 static int namespace_inventory_syscall_calls;
 #endif
@@ -271,23 +278,27 @@ long syscall(long number, ...)
 		const char *path = va_arg(arguments, const char *);
 		int flags = va_arg(arguments, int);
 
-		if (strcmp(path, "/test/owned-mapper") || flags != 0)
+		if (strcmp(path, primary_test_mapper_fd_path) ||
+		    flags != primary_test_swapon_flags)
 			abort();
-		swap_is_active = 1;
+		if (!real_syscall_failure_errno)
+			swap_is_active = 1;
 		++swap_syscall_calls;
 	} else if (number == SYS_swapoff) {
 		const char *path = va_arg(arguments, const char *);
 
-		if (strcmp(path, "/test/owned-mapper"))
+		if (strcmp(path, primary_test_mapper_fd_path))
 			abort();
-		swap_is_active = 0;
+		if (!real_syscall_failure_errno)
+			swap_is_active = 0;
 		++swap_syscall_calls;
 	} else if (number == SYS_finit_module) {
 		int module_fd = va_arg(arguments, int);
 		const char *parameters = va_arg(arguments, const char *);
 		int flags = va_arg(arguments, int);
 
-		if (module_fd != 23 || strcmp(parameters, "") || flags != 0)
+		if (module_fd != 23 ||
+		    strcmp(parameters, "allow_physical_backing=1") || flags != 0)
 			abort();
 		++module_syscall_calls;
 	} else if (number == SYS_delete_module) {
@@ -321,12 +332,17 @@ long syscall(long number, ...)
 		abort();
 	}
 	va_end(arguments);
+	if (real_syscall_failure_errno) {
+		errno = real_syscall_failure_errno;
+		return -1;
+	}
 	return 0;
 }
 
 int open(const char *path, int flags, ...)
 {
-	if (strcmp(path, "/proc/swaps") || flags != O_RDONLY)
+	if (strcmp(path, "/proc/swaps") ||
+	    flags != (O_RDONLY | O_CLOEXEC | O_NOFOLLOW))
 		abort();
 	++normal_open_calls;
 	return 47;
@@ -387,12 +403,15 @@ int main(int argc, char **argv)
 #endif
 
 		require_condition(
-			__wrap_syscall(SYS_finit_module, 23, "", 0) == 0);
+			__wrap_syscall(SYS_finit_module, 23,
+				"allow_physical_backing=1", 0) == 0);
 		require_condition(
-			__wrap_syscall(SYS_swapon, "/test/owned-mapper", 0) == 0);
-		require_condition(__wrap_open("/proc/swaps", O_RDONLY) == 47);
+			__wrap_syscall(SYS_swapon, primary_test_mapper_fd_path,
+				primary_test_swapon_flags) == 0);
+		require_condition(__wrap_open(
+			"/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW) == 47);
 		require_condition(
-			__wrap_syscall(SYS_swapoff, "/test/owned-mapper") == 0);
+			__wrap_syscall(SYS_swapoff, primary_test_mapper_fd_path) == 0);
 		require_condition(__wrap_syscall(
 			SYS_delete_module, "dm_swapz", O_NONBLOCK) == 0);
 #if defined(__x86_64__) || defined(__aarch64__)
@@ -411,6 +430,22 @@ int main(int argc, char **argv)
 #if defined(__x86_64__) || defined(__aarch64__)
 		require_condition(namespace_inventory_syscall_calls == 2);
 #endif
+		/* A real syscall error is not an injected error, and must not
+		 * mutate the fake swap inventory or replace its original errno. */
+		real_syscall_failure_errno = EACCES;
+		errno = 0;
+		require_condition(__wrap_syscall(
+			SYS_swapon, primary_test_mapper_fd_path,
+			primary_test_swapon_flags) == -1 &&
+			errno == EACCES && !swap_is_active &&
+			swap_syscall_calls == 3);
+		swap_is_active = 1;
+		errno = 0;
+		require_condition(__wrap_syscall(
+			SYS_swapoff, primary_test_mapper_fd_path) == -1 &&
+			errno == EACCES && swap_is_active &&
+			swap_syscall_calls == 4);
+		real_syscall_failure_errno = 0;
 		return 0;
 	}
 	stopping = !strncmp(case_name, "swapoff-", 8) ||
@@ -418,13 +453,26 @@ int main(int argc, char **argv)
 	swap_is_active = stopping;
 	errno = 0;
 	syscall_result = stopping ?
-		__wrap_syscall(SYS_swapoff, "/test/owned-mapper") :
-		__wrap_syscall(SYS_swapon, "/test/owned-mapper", 0);
+		__wrap_syscall(SYS_swapoff, primary_test_mapper_fd_path) :
+		__wrap_syscall(SYS_swapon, primary_test_mapper_fd_path,
+			       primary_test_swapon_flags);
 	if (!strcmp(case_name, "swapon-eintr-applied") ||
 	    !strcmp(case_name, "swapoff-eintr-applied")) {
 		require_condition(syscall_result == -1 && errno == EINTR &&
 				  swap_syscall_calls == 1);
 		require_condition(swap_is_active == !stopping);
+		/* Applied-EINTR injection must never overwrite a genuine
+		 * underlying failure or pretend that it changed kernel state. */
+		real_syscall_failure_errno = EACCES;
+		errno = 0;
+		syscall_result = stopping ?
+			__wrap_syscall(SYS_swapoff, primary_test_mapper_fd_path) :
+			__wrap_syscall(SYS_swapon, primary_test_mapper_fd_path,
+				       primary_test_swapon_flags);
+		require_condition(syscall_result == -1 && errno == EACCES &&
+				  swap_syscall_calls == 2 &&
+				  swap_is_active == !stopping);
+		real_syscall_failure_errno = 0;
 	} else if (!strcmp(case_name, "swapon-eintr-noeffect") ||
 		   !strcmp(case_name, "swapon-eio-noeffect") ||
 		   !strcmp(case_name, "swapoff-eintr-noeffect") ||
@@ -448,9 +496,11 @@ int main(int argc, char **argv)
 				  swap_syscall_calls == 1 &&
 				  swap_is_active == !stopping);
 		errno = 0;
-		require_condition(__wrap_open("/proc/swaps", O_RDONLY) == -1 &&
-				  errno == EIO);
-		require_condition(__wrap_open("/proc/swaps", O_RDONLY) == 47 &&
+		require_condition(__wrap_open(
+			"/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW) == -1 &&
+				errno == EIO);
+		require_condition(__wrap_open(
+			"/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW) == 47 &&
 				  normal_open_calls == 1);
 	} else {
 		return 2;

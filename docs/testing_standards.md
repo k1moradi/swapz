@@ -155,6 +155,10 @@ the lifecycle admission path. On x86_64 and arm64 this includes the
 standalone fake-kernel passthrough harness must execute both forwards. A
 synthetic `ENOSYS` from the test seam is fixture failure, not lifecycle
 refusal evidence. Unrecognized syscall numbers remain fail-closed.
+The fake-kernel calls must match production's `finit_module` options, discard
+flags and `/proc/self/fd/N` swap pathname, and `/proc/swaps` open flags.
+Underlying syscall failures must preserve their original errno and fake kernel
+state, including when an applied-`EINTR` injection is selected.
 
 The qualifier's report-host fixture must match the production
 `trusted_host_record` implementation: pin DMI product UUID and machine ID with
