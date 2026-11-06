@@ -507,6 +507,7 @@ def _owned_peer_process_lineage(
         raise _peer_identity_refusal(phase, child, "launched_child_exited")
     visited_pids: set[int] = set()
     lineage: list[tuple[int, int, int]] = []
+    session_ids: list[int] = []
     current_pid = peer_pid
     for _ in range(16):
         if current_pid in visited_pids:
@@ -530,17 +531,29 @@ def _owned_peer_process_lineage(
             if len(fields) < 20:
                 raise ValueError("truncated process identity")
             parent_pid = int(fields[1])
+            session_id = int(fields[3])
             start_ticks = int(fields[19])
         except ValueError as exc:
             raise _peer_identity_refusal(
                 phase, child, "malformed_process_identity") from exc
-        if parent_pid < 0 or start_ticks <= 0:
+        if parent_pid < 0 or session_id <= 0 or start_ticks <= 0:
             raise _peer_identity_refusal(
                 phase, child, "malformed_process_identity")
         lineage.append((current_pid, parent_pid, start_ticks))
+        session_ids.append(session_id)
         if current_pid == owned_pid:
             if _child_exit_status(child) is not None:
                 raise _peer_identity_refusal(phase, child, "launched_child_exited")
+            # start_new_session=True makes the launched Popen PID both the
+            # private session ID and process-group ID. Synthetic callers
+            # without that ownership marker still must remain in one session.
+            launch_session_id = _owned_process_group(child)
+            if launch_session_id is None:
+                launch_session_id = session_id
+            if any(observed_session_id != launch_session_id
+                   for observed_session_id in session_ids):
+                raise _peer_identity_refusal(
+                    phase, child, "wrong_session")
             return tuple(lineage)
         if parent_pid <= 1:
             break

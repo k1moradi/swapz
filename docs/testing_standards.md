@@ -636,8 +636,12 @@ impersonation or physical admission. The launched qualifier must start in a
 private session/process group so listener setup failure, malformed/duplicated
 private messages and exhausted termination grace can preserve the first refusal,
 use bounded group TERM/KILL plus direct-child wait, reap the Popen child, prove
-the controlled owned group empty, and never print private request bytes. A
-rootless descendant that ignores SIGTERM is a required negative control: direct-
+the controlled owned group empty, and never print private request bytes. The
+source-admission peer proof must also keep every peer-to-Popen ancestry entry in
+that launch-owned private session; a descendant that calls `setsid()` remains
+an ancestry descendant but is a wrong-session substitution and must BLOCK. A
+deterministic rootless negative control must exercise that detached descendant.
+A rootless descendant that ignores SIGTERM is a required negative control: direct-
 child-only cleanup must not be accepted as complete. Exit observation for a
 marked session leader must use a non-reaping wait boundary until group-wide
 termination has been issued, so PID/process-group reuse cannot precede cleanup.

@@ -217,6 +217,62 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
                 child.kill()
             child.wait(timeout=5)
 
+    @unittest.skipIf(os.geteuid() == 0, "rootless session proof requires non-root")
+    @unittest.skipUnless(
+        hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
+        "safe detached-peer cleanup requires Linux pidfd support")
+    def test_detached_descendant_session_cannot_authenticate_owned_run(self):
+        child_source = (
+            "import subprocess,sys,time\n"
+            "peer = subprocess.Popen([sys.executable, '-I', '-c', "
+            "\"import time; time.sleep(60)\"], start_new_session=True, "
+            "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+            "stderr=subprocess.DEVNULL)\n"
+            "print(peer.pid, flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-c", child_source],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True)
+        setattr(child, "_swapz_owned_process_group", child.pid)
+        peer_pidfd = None
+        try:
+            self.assertTrue(select.select([child.stdout], [], [], 5)[0])
+            peer_pid = int(child.stdout.readline().strip())
+            peer_pidfd = os.pidfd_open(peer_pid)
+            self.assertEqual(os.getsid(child.pid), child.pid)
+            self.assertEqual(os.getsid(peer_pid), peer_pid)
+            self.assertNotEqual(os.getsid(peer_pid), os.getsid(child.pid))
+            with self.assertRaises(parent.Blocked) as refusal:
+                parent._owned_peer_process_lineage(
+                    child, peer_pid, "initial")
+            for detail in (
+                    "phase=initial", "expected=owned_live_child_run",
+                    "observed=wrong_session", "errno=none",
+                    "authorization=BLOCKED",
+                    "next=inspect_child_ownership_read_only"):
+                self.assertIn(detail, str(refusal.exception))
+        finally:
+            if peer_pidfd is not None:
+                try:
+                    signal.pidfd_send_signal(
+                        peer_pidfd, signal.SIGKILL, None, 0)
+                except ProcessLookupError:
+                    pass
+                finally:
+                    os.close(peer_pidfd)
+            if child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+            child.stdout.close()
+
     @unittest.skipIf(os.geteuid() == 0, "rootless socket proof requires non-root")
     def test_shared_socket_descriptor_does_not_authenticate_message_writer(self):
         # This models an inherited/shared fd, not forged UID-0 credentials.
