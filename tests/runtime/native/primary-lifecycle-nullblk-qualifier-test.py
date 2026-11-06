@@ -2387,8 +2387,10 @@ int main(int argc, char **argv)
         self.assertIn('"kernel_release": os.uname().release', self.script)
 
     def test_private_qualification_report_uses_production_host_identity(self):
-        self.assertIn('Path("/sys/class/dmi/id/product_uuid")', self.script)
-        self.assertIn('Path("/etc/machine-id")', self.script)
+        self.assertIn("def trusted_host_record(path, byte_limit, pattern):",
+                      self.script)
+        self.assertIn('"/sys/class/dmi/id/product_uuid"', self.script)
+        self.assertIn('"/etc/machine-id"', self.script)
         self.assertIn('b"swapz-host-v2\\0"', self.script)
         self.assertNotIn('b"swapz-host\\0"', self.script)
         self.assertIn(
@@ -2628,10 +2630,14 @@ int main(int argc, char **argv)
 }}
 ''',
                 encoding="utf-8")
+            # This parser-only harness includes the production translation
+            # unit, so unrelated static lifecycle entrypoints are expected to
+            # be unused here. Keep every other warning fatal.
             subprocess.run(
                 [
                     "cc", "-std=c11", "-O2", "-g", "-Wall", "-Wextra",
-                    "-Werror", str(parser_source), "-o", str(parser_binary),
+                    "-Werror", "-Wno-unused-function", str(parser_source),
+                    "-o", str(parser_binary),
                 ],
                 cwd=ROOT, check=True)
             correct_host = subprocess.run(
@@ -2747,7 +2753,9 @@ CONTROL=/private-mock-only
                              "do-not-touch\n")
 
             alias_start = self.script.index(
-                'if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then',
+                'if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then\n'
+                '\tudev_alias_verified || fail "by-PARTUUID alias is not '
+                'udev-recorded for the owned partition"',
                 self.script.index("udev_alias_verified() {"))
             alias_check = self.script[
                 alias_start:self.script.index('\nmkswap "$PARTITION"', alias_start)]
@@ -3043,7 +3051,7 @@ rmdir() {
         current_start = cleanup.index(block_marker)
         current_end = cleanup.index(
             '\n\tif (( OWN_NULL )) && (( ! QUARANTINE )); then\n'
-            '\t\tudevadm settle',
+            '\t\tif ! udevadm settle',
             current_start,
         )
         current_power_step = cleanup[current_start:current_end]

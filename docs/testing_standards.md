@@ -156,6 +156,18 @@ standalone fake-kernel passthrough harness must execute both forwards. A
 synthetic `ENOSYS` from the test seam is fixture failure, not lifecycle
 refusal evidence. Unrecognized syscall numbers remain fail-closed.
 
+The qualifier's report-host fixture must match the production
+`trusted_host_record` implementation: pin DMI product UUID and machine ID with
+no-follow descriptors, validate their stable file identities, and hash the
+exact `swapz-host-v2` byte layout. Source-extracted shell regressions must
+retain complete compound-command boundaries. The missing-by-PARTUUID control
+must execute the final alias refusal outside its polling loop, and cleanup
+extraction must include the current post-removal udev-settle guard. A
+parser-only generated C harness that includes the complete production
+translation unit may suppress only unused-static-function warnings; all other
+warnings remain fatal, and the normal production C build continues to check
+the full file without that suppression.
+
 Observation labels are proof labels, not syscall-attempt labels. A successful
 idempotent helper that proves swap already inactive or a mapper already absent
 records OBSERVED even when its *_by_call output is false. Conversely, a
@@ -7866,6 +7878,13 @@ required tooling so it does not change earlier missing-tool/enrollment
 failure precedence. A real-CMS rootless control must prove a valid detached
 pkcs7-data signature passes while same-payload attached and wrong-content-type
 signatures refuse.
+The hermetic package-signing mock must model `openssl cms -cmsout -print`
+separately from `openssl cms -verify`: a well-formed detached pkcs7-data
+structure reaches cryptographic verification, where an invalid signature
+retains its original verifier status and `phase=detached_signature`; attached
+or wrong-content-type structure fails earlier with `phase=cms_verification`.
+Do not let an empty mock description accidentally turn valid CMS structure
+into a structural-parser failure.
 Certificate identity, `mokutil --ignore-keyring --test-key` firmware-MOK
 enrollment, embedded signer/key metadata, cryptographic signature validity,
 kernel-keyring visibility, and target-kernel acceptance are separate facts.

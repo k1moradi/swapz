@@ -434,7 +434,26 @@ case "${1:-}" in
     fi
     ;;
   cms)
-    [[ "${SWAPZ_FAKE_SIGNATURE_VALID:-0}" == 1 ]] || exit 47
+    mode=""
+    for argument in "$@"; do
+      case "$argument" in
+        -cmsout) mode=describe ;;
+        -verify) mode=verify ;;
+      esac
+    done
+    case "$mode" in
+      describe)
+        cat <<'CMS'
+encapContentInfo:
+  eContentType: pkcs7-data (1.2.840.113549.1.7.1)
+  eContent: <ABSENT>
+CMS
+        ;;
+      verify)
+        [[ "${SWAPZ_FAKE_SIGNATURE_VALID:-0}" == 1 ]] || exit 47
+        ;;
+      *) exit 2 ;;
+    esac
     ;;
   *) exit 2 ;;
 esac
