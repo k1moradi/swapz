@@ -2697,12 +2697,35 @@ static void assert_primary_qualification_report_refused(
 	assert(!memcmp(&qualification, &original, sizeof(qualification)));
 }
 
+static void assert_primary_qualification_trailing_comma_refused(
+	const char *json, size_t json_length, const char *closing_marker,
+	size_t closing_offset, const char *expected_source_sha,
+	const char *expected_host_sha256)
+{
+	char malformed[4096];
+	char *closing;
+
+	assert(json_length + 2U <= sizeof(malformed));
+	memcpy(malformed, json, json_length + 1U);
+	closing = strstr(malformed, closing_marker);
+	assert(closing);
+	closing += closing_offset;
+	assert(*closing == '}' || *closing == ']');
+	memmove(closing + 1, closing, strlen(closing) + 1U);
+	*closing = ',';
+	assert_primary_qualification_report_refused(
+		malformed, json_length + 1U, expected_source_sha,
+		expected_host_sha256);
+}
+
 static void test_primary_qualification_report_parser(void)
 {
 	static const char report_template[] =
 		"{\"schema\":\"swapz-test-results-v1\","
 		"\"host_identity\":{\"schema\":\"swapz-host-v1\","
 		"\"architecture\":\"x86_64\",\"id_sha256\":\"%s\"},"
+		"\"synthetic_metadata\":{\"note\":\"ignored\","
+		"\"values\":[0,true,false,null]},"
 		"\"source_sha\":\"%s\",\"tested_commit_sha\":\"%s\","
 		"\"kernel_release\":\"6.8.0-48-generic\","
 		"\"overall\":\"PASS\","
@@ -2737,6 +2760,9 @@ static void test_primary_qualification_report_parser(void)
 	assert(swapz_primary_sha256(
 		hardware_bound_host_identity,
 		sizeof(hardware_bound_host_identity) - 1U, host_sha) == 0);
+	assert(!strcmp(
+		host_sha,
+		"43ff3a146c6a1c8eb61716358170b7d765f7db44f86fc38e18dd449dd2e36d1f"));
 	assert(swapz_primary_sha256(
 		legacy_host_identity, sizeof(legacy_host_identity) - 1U,
 		legacy_host_sha) == 0);
@@ -2914,6 +2940,24 @@ static void test_primary_qualification_report_parser(void)
 			(const unsigned char *)duplicate, strlen(duplicate), source,
 			host_sha, &qualification) < 0);
 	}
+	assert_primary_qualification_trailing_comma_refused(
+		json, (size_t)length, "},\"synthetic_metadata\"", 0U,
+		source, host_sha);
+	assert_primary_qualification_trailing_comma_refused(
+		json, (size_t)length, "]},\"source_sha\"", 0U,
+		source, host_sha);
+	assert_primary_qualification_trailing_comma_refused(
+		json, (size_t)length, "]},\"source_sha\"", 1U,
+		source, host_sha);
+	assert_primary_qualification_trailing_comma_refused(
+		json, (size_t)length,
+		"},{\"name\":\"Native and rootless contracts\"", 0U,
+		source, host_sha);
+	assert_primary_qualification_trailing_comma_refused(
+		json, (size_t)length, "],\"qualified_artifacts\"", 0U,
+		source, host_sha);
+	assert_primary_qualification_trailing_comma_refused(
+		json, (size_t)length, "}}\n", 0U, source, host_sha);
 	{
 		char malformed[sizeof(json)];
 		char *closing;
@@ -2924,20 +2968,6 @@ static void test_primary_qualification_report_parser(void)
 		assert(closing && closing[1] == '\n');
 		memmove(closing + 1, closing, strlen(closing) + 1U);
 		*closing = ',';
-		assert_primary_qualification_report_refused(
-			malformed, (size_t)length + 1U, source, host_sha);
-	}
-	{
-		char malformed[sizeof(json)];
-		char *stage_array_end;
-
-		assert((size_t)length + 2U <= sizeof(malformed));
-		memcpy(malformed, json, (size_t)length + 1U);
-		stage_array_end = strstr(malformed, "],\"qualified_artifacts\"");
-		assert(stage_array_end && stage_array_end > malformed);
-		memmove(stage_array_end + 1, stage_array_end,
-			strlen(stage_array_end) + 1U);
-		*stage_array_end = ',';
 		assert_primary_qualification_report_refused(
 			malformed, (size_t)length + 1U, source, host_sha);
 	}
