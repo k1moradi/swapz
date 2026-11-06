@@ -894,7 +894,19 @@ sample_host_memory_admission
                 "signal_nested_owned_child",
             )
         )
-        script = functions + r'''
+        ppid_mismatch_action = shell_function(
+            QUALIFIER, "nested_pair_identity_action").replace(
+                "nested_pair_identity_action() {",
+                "nested_pair_identity_action_ppid_mismatch() {", 1)
+        child_stat_read = (
+            "                state, observed_parent, observed_child_start = "
+            "read_stat(child_pid)\n")
+        self.assertEqual(ppid_mismatch_action.count(child_stat_read), 1)
+        ppid_mismatch_action = ppid_mismatch_action.replace(
+            child_stat_read,
+            child_stat_read + "                observed_parent = parent_pid + 1\n",
+            1)
+        script = functions + ppid_mismatch_action + r'''
 tmp=$1
 ready=$tmp/ready
 go=$tmp/go
@@ -913,24 +925,135 @@ done
 child="$(awk -F= '$1 == "pid" && NF == 2 { print $2 }' "$ready")"
 child_start="$(capture_nested_child_identity "$child" "$parent" "$parent_start")" || exit 22
 wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 23
+if nested_pair_identity_action_ppid_mismatch signal "$child" "$parent" \
+        "$parent_start" "$child_start" 18; then
+    printf '%s\n' 'changed child parent was accepted for resume' >&2
+    exit 24
+else
+    status=$?
+    if [[ $status != 7 ]]; then
+        category="$(nested_pair_identity_status_category "$status")"
+        printf 'changed child parent status mismatch: expected=7(readiness-child-reparented) observed=%s(%s)\n' \
+            "$status" "$category" >&2
+        exit 25
+    fi
+fi
+# A refused PPID mismatch must leave the exact child stopped.
+wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 26
 # Keep the negative control syntactically valid so it reaches the identity
 # comparison rather than the earlier malformed-start-time refusal (status 2).
 wrong_child_start="$((child_start + 1))"
 if signal_nested_owned_child "$child" "$parent" "$parent_start" "$wrong_child_start" 18; then
     printf '%s\n' 'wrong child start time was accepted' >&2
-    exit 24
+    exit 27
 else
     status=$?
     if [[ $status != 8 ]]; then
         category="$(nested_pair_identity_status_category "$status")"
         printf 'wrong child start status mismatch: expected=8(readiness-child-start-changed) observed=%s(%s)\n' \
             "$status" "$category" >&2
-        exit 25
+        exit 28
     fi
 fi
-wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 26
+wait_nested_child_stopped "$child" "$parent" "$parent_start" "$child_start" || exit 29
 : > "$go"
-signal_nested_owned_child "$child" "$parent" "$parent_start" "$child_start" 18 || exit 27
+signal_nested_owned_child "$child" "$parent" "$parent_start" "$child_start" 18 || exit 30
+wait "$parent"
+'''
+        result = self.run_shell(script, self.root)
+        self.assertEqual(result.returncode, 0, (result.stdout, result.stderr))
+        self.assertEqual(result.stderr, "")
+
+    def test_nested_pair_identity_reports_unexpected_child_exit(self):
+        functions = "".join(
+            shell_function(QUALIFIER, name)
+            for name in (
+                "direct_owned_child_running",
+                "capture_direct_child_identity",
+                "nested_pair_identity_action",
+                "nested_pair_identity_status_category",
+                "capture_nested_child_identity",
+                "signal_nested_owned_child",
+            )
+        )
+        script = functions + r'''
+tmp=$1
+ready=$tmp/exited.ready
+go=$tmp/exited.go
+exited=$tmp/exited.marker
+release=$tmp/exited.release
+python3 -I -B - "$ready" "$go" "$exited" "$release" <<'PY' \
+        </dev/null >/dev/null 2>&1 &
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+ready, go, exited, release = map(Path, sys.argv[1:])
+
+def child_exited(_signal_number, _frame):
+    exited.touch()
+
+signal.signal(signal.SIGCHLD, child_exited)
+child_source = """
+from pathlib import Path
+import sys
+import time
+
+go = Path(sys.argv[1])
+while not go.exists():
+    time.sleep(0.005)
+raise SystemExit(23)
+"""
+child = subprocess.Popen(
+    [sys.executable, "-I", "-c", child_source, str(go)],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+pending_ready = ready.with_name(ready.name + ".pending")
+pending_ready.write_text(f"pid={child.pid}\n", encoding="ascii")
+pending_ready.replace(ready)
+deadline = time.monotonic() + 5.0
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.005)
+if not release.exists():
+    try:
+        child.terminate()
+    except ProcessLookupError:
+        pass
+    child.wait()
+    raise SystemExit(41)
+child.wait()
+PY
+parent=$!
+parent_start="$(capture_direct_child_identity "$parent")" || exit 40
+for _ in {1..200}; do
+    [[ -s $ready ]] && break
+    direct_owned_child_running "$parent" || exit 41
+    sleep 0.005
+done
+child="$(awk -F= '$1 == "pid" && NF == 2 { print $2 }' "$ready")"
+child_start="$(capture_nested_child_identity "$child" "$parent" "$parent_start")" || exit 42
+: > "$go"
+for _ in {1..200}; do
+    [[ -e $exited ]] && break
+    direct_owned_child_running "$parent" || exit 43
+    sleep 0.005
+done
+[[ -e $exited ]] || exit 44
+if signal_nested_owned_child "$child" "$parent" "$parent_start" "$child_start" 18; then
+    printf '%s\n' 'exited readiness child was accepted for resume' >&2
+    exit 45
+else
+    status=$?
+    if [[ $status != 3 ]]; then
+        category="$(nested_pair_identity_status_category "$status")"
+        printf 'exited child status mismatch: expected=3(readiness-child-gone) observed=%s(%s)\n' \
+            "$status" "$category" >&2
+        exit 46
+    fi
+fi
+direct_owned_child_running "$parent" || exit 47
+: > "$release"
 wait "$parent"
 '''
         result = self.run_shell(script, self.root)

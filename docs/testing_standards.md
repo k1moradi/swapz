@@ -4807,6 +4807,12 @@ filled the file. The reader must accept only a complete positive decimal PID
 within its bounded wait, and release the grandchild by closing the owned pipe,
 not by signaling an orphan or treating an empty/partial marker as process
 identity evidence.
+The focused negative controls must also exercise status 3 with an actually
+exited nested child while its captured parent remains live, and status 7 with
+a live stopped exact child whose observed PPID is synthetically changed after
+both exact pidfds have opened. The status-7 signal attempt must refuse before
+SIGCONT and prove the exact child remains stopped; neither mismatch may be
+treated as cleanup authority.
 Successful synthetic cleanup prints only a
 `ROOTLESS_FIXTURE_ID36_CLEANUP` marker, never an actual
 `PASS_ID36_RESOURCE_PRESSURE` token.
