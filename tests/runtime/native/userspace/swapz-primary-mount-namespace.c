@@ -98,6 +98,11 @@ static enum fixture_namespace_kind fixture_namespace_fd_kind =
 static enum fixture_namespace_kind fixture_hidden_namespace_kind =
 	FIXTURE_NAMESPACE_NONE;
 static dev_t fixture_hidden_namespace_device;
+static enum fixture_namespace_kind fixture_namespace_root_override_kind =
+	FIXTURE_NAMESPACE_NONE;
+static dev_t fixture_namespace_root_override_device;
+static enum fixture_namespace_kind fixture_nested_process_root_kind =
+	FIXTURE_NAMESPACE_NONE;
 static enum fixture_namespace_kind fixture_namespace_inventory_error_kind =
 	FIXTURE_NAMESPACE_NONE;
 static int fixture_namespace_inventory_error;
@@ -232,6 +237,9 @@ static size_t fixture_namespace_devices(
 
 	assert(devices != NULL);
 	assert(capacity > 0U);
+	if (fixture_namespace_root_override_kind == kind &&
+	    fixture_namespace_root_override_device)
+		devices[count++] = fixture_namespace_root_override_device;
 	if (proc_path)
 		stream = fopen(fixture_path(proc_path, converted), "r");
 	if (stream) {
@@ -290,7 +298,8 @@ static int fixture_statx(int directory_fd, const char *path, int flags,
 		}
 		memset(info, 0, sizeof(*info));
 		info->stx_mask = 0x00004000U;
-		info->stx_mnt_id = fixture_namespace_mount_id_base(kind) + 1U;
+		info->stx_mnt_id = fixture_namespace_mount_id_base(kind) +
+			(fixture_nested_process_root_kind == kind ? 2U : 1U);
 		return 0;
 	}
 	return statx(directory_fd, path, flags, mask, info);
@@ -933,6 +942,9 @@ static void fixture_reset(void)
 	fixture_namespace_fd_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_hidden_namespace_device = 0;
+	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_namespace_root_override_device = 0;
+	fixture_nested_process_root_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_namespace_inventory_error_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_namespace_inventory_error = 0;
 	fixture_root_statx_error_kind = FIXTURE_NAMESPACE_NONE;
@@ -1829,6 +1841,26 @@ static void test_independent_admission_gates(void)
 }
 
 
+/*
+ * Linux reports a same-process /proc/self/root link of "/" after chrooting to
+ * another mount root. A clean direct inventory is therefore insufficient if
+ * the retained root_device belongs to that nested mount rather than the pinned
+ * namespace root.
+ */
+static void test_nested_coordinator_root_identity(void)
+{
+	fixture_reset();
+	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_namespace_root_override_device = makedev(8U, 4U);
+	fixture_nested_process_root_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_file("self/mountinfo",
+		     "36 25 259:11 / / rw - ext4 /chroot-root rw\n");
+	expect_mount_identity_admission(
+		"coordinator child-mount chroot keeps self root link slash",
+		makedev(259U, 11U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator-root-namespace-identity");
+}
+
 /* A clean-looking foreign mountinfo view can omit selected or parent mounts. */
 static void test_root_filtered_foreign_mountinfo(void)
 {
@@ -2307,6 +2339,7 @@ int main(void)
 	fixture_unlink("3031/ns/mnt");
 	expect_mount_admission("missing table and vanished namespace", 1, 0);
 	test_shared_root_parent_mount_gates();
+	test_nested_coordinator_root_identity();
 	test_root_filtered_foreign_mountinfo();
 	probe_shared_root_parent_same_namespace_snapshot_gap();
 	test_controlled_mount_snapshot_timings();

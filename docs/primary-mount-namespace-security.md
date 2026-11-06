@@ -84,11 +84,18 @@ a different root inside the same namespace still walks to the same namespace
 root.
 
 The coordinator retains its ordinary mountinfo separately because that table
-provides the current root-device safety fact. It must itself remain rooted at
-`/`, and it completes the direct inventory for its own pinned namespace
-before that full namespace can justify the same-namespace peer shortcut.
-Leader disappearance still authorizes skipping only the leader table; visible
-non-leader tasks retain their existing bounded scan and fail-closed rules.
+provides the current root-device safety fact. A same-process
+`readlink("/proc/self/root") == "/"` is not proof that this is the mount
+namespace root: Linux still reports `/` after a process chroots to the root of
+a child mount. The coordinator therefore pins its own namespace, seeds the walk
+with `statx(STATX_MNT_ID_UNIQUE)`, follows `statmount` parents, and requires
+that seed mount ID to equal the resulting namespace-root mount ID before the
+mountinfo-derived root device can authorize anything. A nested coordinator
+root refuses with `EAGAIN`; the direct inventory being complete is not enough
+to retain the wrong root-device identity. Only after that check and the direct
+inventory can the same-namespace peer shortcut apply. Leader disappearance
+still authorizes skipping only the leader table; visible non-leader tasks retain
+their existing bounded scan and fail-closed rules.
 
 The current foreign-namespace descriptor form of statmount/listmount requires
 Linux 6.18 or newer. Missing syscall support, missing unique mount IDs,
@@ -136,6 +143,7 @@ alone proves the required refusal-before-mutation contract.
 | Synthetic observation | Expected result |
 | --- | --- |
 | Local root only; unrelated PID or sibling `8:2` | Admit; preserve root `259:0` |
+| Coordinator chrooted to a child mount while its self root link still reports `/` | Refuse with `EAGAIN`; do not retain the child mount as the host root |
 | Selected partition `8:1` only in PID `3031` | Refuse |
 | Selected parent `8:0` only in PID `3031` | Refuse |
 | Local or other PID mountinfo malformed, empty or missing while namespace lives | Refuse |

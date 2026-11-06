@@ -300,13 +300,17 @@ This is a stable inventory blind spot, not a post-snapshot TOCTOU observation
 and must not be labelled UNPROVEN.
 Also cover a chrooted peer whose mount-namespace device/inode matches the
 coordinator while its process-root-filtered mountinfo is empty. The coordinator
-may skip that redundant view only after its own mountinfo has a valid root row,
-`/proc/self/root` resolves exactly to `/`, and a second namespace identity
-check still matches. Its full-root table then covers every mount in that same
-namespace. An empty table in a foreign namespace remains ambiguous and must
-fail closed; a chrooted coordinator must not use the same-namespace shortcut.
-Include a regression proving the shortcut cannot hide a selected-device mount
-already present in the coordinator's table.
+may skip that redundant view only after its own mountinfo has a valid root row
+and its pinned direct namespace walk is complete. Do not treat
+`readlink("/proc/self/root") == "/"` as namespace-root proof: Linux reports
+that string after the same process chroots to the root of a child mount. The
+fixture must model that real semantic with a nested coordinator root whose
+`statx(STATX_MNT_ID_UNIQUE)` seed has a different `statmount` parent, and
+require fail-closed refusal before the mountinfo-derived child device can become
+the root safety identity. A second namespace identity check must still guard the
+same-namespace peer shortcut. An empty table in a foreign namespace remains
+ambiguous and must fail closed. Include a regression proving the shortcut
+cannot hide a selected-device mount already present in the coordinator's table.
 
 For the opt-in host-bound same-root-parent scope, keep the direct production-C
 mount-namespace controls independent from the scope-policy and late-race
@@ -408,9 +412,11 @@ If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
 the filtered table. The current foreign-namespace descriptor ABI requires
 Linux 6.18 or newer, so an older running kernel refuses this admission path.
-The coordinator may retain its mountinfo-derived root-device fact only while
-its own root is exactly `/`; before using the same-namespace shortcut it must
-also complete the pinned namespace inventory for its own namespace.
+The coordinator may retain its mountinfo-derived root-device fact only after
+the pinned self-namespace walk proves that the `statx` root seed is the
+namespace-root mount itself. A self root-link string of `/` is insufficient.
+Before using the same-namespace shortcut it must also complete the pinned
+namespace inventory for its own namespace.
 
 The direct namespace walk is still a bounded snapshot, not a mount lock. PID
 reuse or root ABA after the namespace descriptor is pinned cannot hide an

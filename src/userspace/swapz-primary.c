@@ -3757,7 +3757,8 @@ static int swapz_primary_mountinfo_read_fd(
  */
 static int swapz_primary_mountinfo_full_root(
 	const char *namespace_path, const char *root_path,
-	const struct stat *expected_namespace_info, dev_t parent_device)
+	const struct stat *expected_namespace_info, dev_t parent_device,
+	int require_root_mount_is_namespace_root)
 {
 #ifdef FIXTURE_DIAGNOSTIC_BYTES
 	char root_link[PATH_MAX];
@@ -3766,6 +3767,7 @@ static int swapz_primary_mountinfo_full_root(
 	(void)namespace_path;
 	(void)expected_namespace_info;
 	(void)parent_device;
+	(void)require_root_mount_is_namespace_root;
 	if (!root_path) {
 		errno = EINVAL;
 		return -1;
@@ -3784,6 +3786,7 @@ static int swapz_primary_mountinfo_full_root(
 	(void)root_path;
 	(void)expected_namespace_info;
 	(void)parent_device;
+	(void)require_root_mount_is_namespace_root;
 	errno = EOPNOTSUPP;
 	return -1;
 #else
@@ -3821,6 +3824,7 @@ static int swapz_primary_mountinfo_full_root(
 	struct statx root_info = {0};
 	uint64_t mount_ids[namespace_mount_batch];
 	uint64_t current_mount_id;
+	uint64_t root_mount_id;
 	uint64_t namespace_root_mount_id = 0;
 	uint64_t last_mount_id = 0;
 	size_t mount_count = 0;
@@ -3881,6 +3885,7 @@ static int swapz_primary_mountinfo_full_root(
 		goto out;
 	}
 	current_mount_id = root_info.stx_mnt_id;
+	root_mount_id = current_mount_id;
 
 	for (size_t depth = 0; depth < namespace_parent_depth_max; ++depth) {
 		dev_t mounted_device;
@@ -3921,6 +3926,11 @@ static int swapz_primary_mountinfo_full_root(
 	}
 	if (!namespace_root_mount_id) {
 		errno = EOVERFLOW;
+		goto out;
+	}
+	if (require_root_mount_is_namespace_root &&
+	    root_mount_id != namespace_root_mount_id) {
+		errno = EAGAIN;
 		goto out;
 	}
 
@@ -4163,7 +4173,7 @@ static int swapz_primary_read_nonleader_mount_facts(
 			int namespace_mounted =
 				swapz_primary_mountinfo_full_root(
 					namespace_path, root_path,
-					&confirmed_namespace_info, parent_device);
+					&confirmed_namespace_info, parent_device, 0);
 
 			if (namespace_mounted < 0) {
 				saved_errno = errno ? errno : EIO;
@@ -4244,7 +4254,7 @@ static int swapz_primary_read_mount_facts(
 		int namespace_mounted =
 			swapz_primary_mountinfo_full_root(
 				"/proc/self/ns/mnt", "/proc/self/root",
-				&self_namespace_info, parent_device);
+				&self_namespace_info, parent_device, 1);
 
 		if (namespace_mounted < 0)
 			return -1;
@@ -4253,6 +4263,7 @@ static int swapz_primary_read_mount_facts(
 			*facts = combined;
 			return 0;
 		}
+		self_root_is_namespace_root = 1;
 	}
 	/*
 	 * mountinfo is scoped to a task's mount namespace. Top-level /proc
@@ -4263,8 +4274,9 @@ static int swapz_primary_read_mount_facts(
 	 * process-root-filtered mountinfo view can hide. A task in that same
 	 * namespace may therefore be skipped only after its namespace inode matches
 	 * and that identity is revalidated immediately before skipping. The
-	 * coordinator itself must still be rooted at "/" so its retained root-device
-	 * safety fact is not filtered. This is a bounded snapshot, so every
+	 * coordinator's statx root seed must also be the pinned namespace root;
+	 * its self root-link spelling alone is not identity proof. This is a
+	 * bounded snapshot, so every
 	 * unreadable, unsupported or ambiguous inventory fails
 	 * closed rather than being treated as evidence that the device is unused.
 	 */
@@ -4420,7 +4432,7 @@ static int swapz_primary_read_mount_facts(
 					swapz_primary_mountinfo_full_root(
 						namespace_path, root_path,
 						&confirmed_namespace_info,
-						parent_device);
+						parent_device, 0);
 
 				if (namespace_mounted < 0) {
 					saved_errno = errno ? errno : EIO;
