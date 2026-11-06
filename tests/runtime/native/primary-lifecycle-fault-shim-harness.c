@@ -502,6 +502,25 @@ int main(int argc, char **argv)
 		require_condition(__wrap_open(
 			"/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW) == 47 &&
 				  normal_open_calls == 1);
+		/*
+		 * A definite underlying syscall error cannot arm this post-call
+		 * inventory fault. Otherwise a buggy coordinator could replace the
+		 * causal errno with the selected synthetic inventory EIO.
+		 */
+		real_syscall_failure_errno = EACCES;
+		errno = 0;
+		syscall_result = stopping ?
+			__wrap_syscall(SYS_swapoff, primary_test_mapper_fd_path) :
+			__wrap_syscall(SYS_swapon, primary_test_mapper_fd_path,
+				       primary_test_swapon_flags);
+		require_condition(syscall_result == -1 && errno == EACCES &&
+				  swap_syscall_calls == 2 &&
+				  swap_is_active == !stopping);
+		errno = 0;
+		require_condition(__wrap_open(
+			"/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW) == 47 &&
+				  errno == 0 && normal_open_calls == 2);
+		real_syscall_failure_errno = 0;
 	} else {
 		return 2;
 	}

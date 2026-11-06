@@ -158,7 +158,11 @@ refusal evidence. Unrecognized syscall numbers remain fail-closed.
 The fake-kernel calls must match production's `finit_module` options, discard
 flags and `/proc/self/fd/N` swap pathname, and `/proc/swaps` open flags.
 Underlying syscall failures must preserve their original errno and fake kernel
-state, including when an applied-`EINTR` injection is selected.
+state, including when an applied-`EINTR` injection is selected. A post-call
+inventory fault may be armed only after real swap success or ambiguous
+`EINTR`; a definite underlying failure must leave later inventory forwarding
+unchanged so the shim cannot manufacture selected-fault evidence after the
+causal syscall error.
 
 The qualifier's report-host fixture must match the production
 `trusted_host_record` implementation: pin DMI product UUID and machine ID with

@@ -101,7 +101,7 @@ long __wrap_syscall(long number, ...)
 		int flags = va_arg(arguments, int);
 
 		va_end(arguments);
-		last_swap_syscall = SYS_swapon;
+		last_swap_syscall = 0;
 		if (fault_is("swapon-eintr-noeffect")) {
 			report_fault_hit("swapon-eintr-noeffect");
 			errno = EINTR;
@@ -113,6 +113,8 @@ long __wrap_syscall(long number, ...)
 			return -1;
 		}
 		result = __real_syscall(number, path, flags);
+		if (result == 0 || (result < 0 && errno == EINTR))
+			last_swap_syscall = SYS_swapon;
 		if (result == 0 && fault_is("swapon-eintr-applied")) {
 			report_fault_hit("swapon-eintr-applied");
 			errno = EINTR;
@@ -124,7 +126,7 @@ long __wrap_syscall(long number, ...)
 		const char *path = va_arg(arguments, const char *);
 
 		va_end(arguments);
-		last_swap_syscall = SYS_swapoff;
+		last_swap_syscall = 0;
 		if (fault_is("swapoff-ebusy-noeffect")) {
 			report_fault_hit("swapoff-ebusy-noeffect");
 			errno = EBUSY;
@@ -141,6 +143,8 @@ long __wrap_syscall(long number, ...)
 			return -1;
 		}
 		result = __real_syscall(number, path);
+		if (result == 0 || (result < 0 && errno == EINTR))
+			last_swap_syscall = SYS_swapoff;
 		if (result == 0 && fault_is("swapoff-eintr-applied")) {
 			report_fault_hit("swapoff-eintr-applied");
 			errno = EINTR;
