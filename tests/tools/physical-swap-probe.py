@@ -2352,18 +2352,28 @@ def _final_physical_oracle_evidence_error(results, state, target,
                                           mapper, development_only):
     """Fail closed on missing, rewritten, or unbound durable oracle evidence."""
     expected_header_sha256 = hashlib.sha256(target["header"]).hexdigest()
+    expected_original_swap_row = ({
+        "path": target["swap_path"],
+        "kind": "partition",
+        "size_kib": target["swap_size_kib"],
+        "used_kib": target["swap_used_kib"],
+        "priority": target["swap_priority"],
+    } if not development_only else None)
     bindings = {
         "source_commit_sha": evidence["source_sha"],
         "current_git_head": evidence["head"],
         "helper_git_sha": evidence["head"],
         "helper_sha256": evidence["helper_sha256"],
         "artifact_sha256": evidence["artifact_digests"],
+        "live_artifact_sha256_before_run": evidence["artifact_digests"],
         "live_artifact_sha256_before_mutation": evidence["artifact_digests"],
         "run_id": review["run_id"],
+        "device_uuid_path": target["device_arg"],
         "partuuid": target["partuuid"],
         "major_minor": f"{target['major']}:{target['minor']}",
         "device_size_bytes": target["size_bytes"],
         "original_header_sha256": expected_header_sha256,
+        "original_swap_row": expected_original_swap_row,
         "development_only": development_only,
         "schema": ("swapz-physical-development-results-v1"
                    if development_only else "swapz-physical-results-v1"),
@@ -2376,20 +2386,50 @@ def _final_physical_oracle_evidence_error(results, state, target,
         "evidence_class": ("DEVELOPMENT_ONLY_NOT_PHYSICAL_QUALIFICATION"
                            if development_only else "PHYSICAL_CORRECTNESS_SMOKE"),
     }
+    if development_only:
+        bindings["development_test_evidence"] = evidence.get(
+            "development_evidence")
+    else:
+        bindings.update({
+            "qualified_production_source_sha": evidence["source_sha"],
+            "qualified_artifact_sha256": evidence["artifact_digests"],
+            "qualification_evidence": {
+                "latest_source_reports": evidence["latest_source_reports"],
+                "earlier_matching_artifact_reports": evidence[
+                    "prior_matching_reports"],
+                "total_distinct_matching_reports": evidence["pass_reports"],
+            },
+        })
     for field, expected in bindings.items():
         if results.get(field) != expected:
             return f"{field}_mismatch"
     saved_bindings = {
+        "device_arg": target["device_arg"],
+        "device": target["device"],
+        "major": target["major"],
+        "minor": target["minor"],
+        "parent_major_minor": target["parent_major_minor"],
+        "parent_model": target["parent_model"],
+        "parent_transport": target["parent_transport"],
+        "parent_size_bytes": target["parent_size_bytes"],
+        "parent_removable": target["parent_removable"],
+        "card_identity_sha256": target["card_identity_sha256"],
+        "size_bytes": target["size_bytes"],
+        "partuuid": target["partuuid"],
+        "header_sha256": expected_header_sha256,
+        "swap_was_active": not development_only,
+        "swap_path": target["swap_path"],
+        "swap_priority": target["swap_priority"],
+        "swap_size_kib": target["swap_size_kib"],
+        "swap_used_kib": target["swap_used_kib"],
+        "development_only": development_only,
+        "development_scope": (
+            DEVELOPMENT_SCOPE if development_only else None),
         "source_sha": evidence["source_sha"],
         "helper_git_sha": evidence["head"],
         "helper_sha256": evidence["helper_sha256"],
+        "reviewer": review["reviewer"],
         "run_id": review["run_id"],
-        "partuuid": target["partuuid"],
-        "major": target["major"],
-        "minor": target["minor"],
-        "size_bytes": target["size_bytes"],
-        "header_sha256": expected_header_sha256,
-        "development_only": development_only,
     }
     for field, expected in saved_bindings.items():
         if state.get(field) != expected:

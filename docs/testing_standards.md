@@ -5816,7 +5816,10 @@ one-use claim with no outstanding ownership marker. `oracle_suite=PASS`
 must denote a final evidence decision, not just a worker's zero exit code:
 require all exact expected phases complete, source/helper/artifact and target
 bindings consistent with the durable run state, normal recovery, and independent
-final observations. A COMPLETE stage and matching 4096-byte header alone
+final observations. Revalidate duplicate qualified-source/artifact and live
+artifact snapshots, the selected UUID path and original swap row, development
+fast-test evidence, and saved parent-card/swap identity. Contradictory copies
+are blockers, not optional telemetry. A COMPLETE stage and matching 4096-byte header alone
 cannot prove I/O. Never retain an oracle-suite PASS on RECOVERY_REQUIRED.
 Rootless tests must corrupt a synthetic COMPLETE/header-matched result with
 missing or RUNNING phases, stale consumed approval, mismatched source/helper/

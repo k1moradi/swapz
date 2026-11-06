@@ -1735,6 +1735,13 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "source_sha": evidence["head"],
                 "development_only": True,
                 "scope": probe.DEVELOPMENT_SCOPE,
+                "development_evidence": {
+                    "outcome": "FAST_TEST_PASS",
+                    "preflight": {
+                        "status": "PASS", "check": "complete"},
+                    "native_status": "PASS",
+                    "fast_test_status": "PASS",
+                },
             })
         if helper_sha_mismatch:
             evidence["helper_sha256"] = "f" * 64
@@ -2022,6 +2029,34 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 saved_results["production_qualification"] = True
             elif teardown_oracle_metadata == "development_scope":
                 saved_results["scope"] = probe.EXPECTED_SCOPE
+            elif teardown_oracle_metadata == "qualified_source_manifest":
+                saved_results["qualified_production_source_sha"] = "f" * 40
+            elif teardown_oracle_metadata == "qualified_artifact_binding":
+                saved_results["qualified_artifact_sha256"] = {
+                    **saved_results["qualified_artifact_sha256"],
+                    "oracle_sha256": "f" * 64,
+                }
+            elif teardown_oracle_metadata == "live_artifact_before_run":
+                saved_results["live_artifact_sha256_before_run"] = {
+                    **saved_results["live_artifact_sha256_before_run"],
+                    "oracle_sha256": "f" * 64,
+                }
+            elif teardown_oracle_metadata == "device_path":
+                saved_results["device_uuid_path"] = (
+                    "/dev/disk/by-uuid/synthetic-other")
+            elif teardown_oracle_metadata == "original_swap_row":
+                saved_results["original_swap_row"] = None
+            elif teardown_oracle_metadata == "development_evidence":
+                saved_results["development_test_evidence"] = {
+                    "outcome": "FAST_TEST_PASS",
+                    "preflight": {"status": "BLOCKED", "check": "complete"},
+                    "native_status": "PASS",
+                    "fast_test_status": "PASS",
+                }
+            elif teardown_oracle_metadata == "state_swap_activity":
+                saved_state["swap_was_active"] = False
+            elif teardown_oracle_metadata == "state_card_identity":
+                saved_state["card_identity_sha256"] = "f" * 64
             saved_state["_test_results"] = saved_results
             probe._save_results(saved_state_dir, saved_results)
             return saved_state
@@ -2318,6 +2353,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             ("invalid_phase_count", True, "matching", "matching", "not_applicable"),
             ("development_promotion", True, "matching", "matching", "not_applicable"),
             ("development_scope", True, "matching", "matching", "not_applicable"),
+            ("qualified_source_manifest", False, "matching",
+             "qualified_source_mismatch", "not_applicable"),
+            ("qualified_artifact_binding", False, "matching",
+             "qualified_artifact_mismatch", "not_applicable"),
+            ("live_artifact_before_run", True, "matching",
+             "live_artifact_mismatch", "not_applicable"),
+            ("device_path", True, "device_path_mismatch",
+             "matching", "not_applicable"),
+            ("original_swap_row", False, "matching",
+             "matching", "not_applicable"),
+            ("development_evidence", True, "matching",
+             "development_evidence_mismatch", "not_applicable"),
+            ("state_swap_activity", False, "matching",
+             "saved_swap_activity_mismatch", "not_applicable"),
+            ("state_card_identity", True, "card_identity_mismatch",
+             "matching", "not_applicable"),
         )
         for (damaged_field, development_only, target_identity_proof,
              source_helper_artifact_binding, approval_proof) in cases:
