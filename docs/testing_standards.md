@@ -535,10 +535,12 @@ At the header seam a **diagnostic** fresh production-reader call may prove that
 changed bytes are now visible, or that identical bytes alone cannot establish
 inode continuity; that diagnostic read occurs only after the unsafe boundary
 has already been observed and must not be counted as coordinator revalidation.
-An implementation that performs a fresh production selector revalidation and
-refuses the changed identity with original `ESTALE` and zero intercepted
-header, mapper, formatter and swapon actions is accepted; an unrelated refusal
-or a missing identity mutation is not a valid negative control. Dispatch these
+An implementation that revalidates the protected selector identity and refuses
+the changed identity with original `ESTALE` and zero intercepted header,
+mapper, formatter and swapon actions is accepted. Do not require a particular
+helper-call count: a fresh production reread and a retained-descriptor identity
+check are both valid implementations of this behavioral invariant. An unrelated
+refusal or a missing identity mutation is not a valid negative control. Dispatch these
 scenarios explicitly before the generic safe-admission/default-case check.
 The unsafe witness must include a successful initial and final mount read, four
 independent swap-inventory observations, and zero falsely observed mount

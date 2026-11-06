@@ -1362,7 +1362,7 @@ static int check_case(enum fixture_scenario candidate)
          * production selector read and before any intercepted mutation.
          */
         int refusal = result < 0 && result_errno == ESTALE &&
-            post_snapshot_injected == 1 && fixture_selector_reads >= 2U &&
+            post_snapshot_injected == 1 && fixture_selector_reads >= 1U &&
             header_writes == 0U && mapper_mutations == 0U &&
             mkswap_calls == 0U && swapon_calls == 0U &&
             active_state_writes == 0U;
