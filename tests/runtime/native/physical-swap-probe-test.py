@@ -1507,6 +1507,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "parent_size_bytes": 128 << 20,
             "parent_removable": True,
             "card_identity_sha256": "a" * 64,
+            "swap_was_active": True,
             "swap_path": target["device_arg"], "swap_priority": -1,
             "swap_size_kib": target["size_bytes"] // 1024,
             "swap_used_kib": 0,

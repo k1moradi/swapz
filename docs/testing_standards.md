@@ -5791,7 +5791,10 @@ reviewed C oracle must emit its exact affirmative comparison line with the
 expected operation, page count and round; zero exit with empty output, a
 conflicting line, or a wrong count is not sufficient. Validate every persisted
 phase again after recovery, so rewritten durable metadata cannot inherit
-worker success. Rootless fixtures must reread the durable terminal result
+worker success. Production-mode synthetic physical fixtures must explicitly
+model the reviewed target as active swap before constructing durable state;
+do not rely on the later `run_probe()` compatibility default to repair an
+incomplete fixture. Rootless fixtures must reread the durable terminal result
 after finalization, rather than testing the earlier teardown snapshot.
 A development-only result must retain its exact development
 schema/scope and false production-qualification, physical-media-acceptance and
