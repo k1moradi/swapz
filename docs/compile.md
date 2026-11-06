@@ -150,6 +150,26 @@ that perform the committed-diff check must fetch the parent needed for that
 comparison; a separate bare `git diff --check` may remain after tests to catch
 whitespace errors introduced into the workspace during execution.
 
+
+### Prepublication malformed-extent regression (rootless)
+
+The exact production-C `mapping-authority` and `raw-discard` fixtures
+fault-inject a formerly valid logical mapping whose old physical extent now
+crosses a 1MiB segment boundary or exceeds physical capacity. Range
+prevalidation, direct page DISCARD, RAW completion and compressed completion
+must return the original fail-closed errno before reducing old physical
+reference counts or changing authoritative generations. A multi-page range
+must retain its healthy first mapping and unrelated survivor when its later
+page is malformed or its generation overflows. The interrupted write's newly
+reserved physical span remains quarantined; rejection must not publish it.
+The tests must identify logical ranges, expected generations/references,
+corruption classes, returned errnos and whether invalidation was prevented,
+without printing physical identities. These are deterministic in-memory
+rootless checks, not evidence of loaded Linux swap or real-media DISCARD/GC
+correctness. Loaded high-occupancy qualification must additionally verify
+serialized lower-write completion, no shared-extent early release, and
+stable readback through DISCARD, segment reuse and GC churn.
+
 ## Incremental builds
 
 Kernel staging compares content before copying so unchanged source does not invalidate all object timestamps. W=1, W=2 and normal builds use separate output directories. Userspace/helper changes should not force unrelated kernel recompilation.

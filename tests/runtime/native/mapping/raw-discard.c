@@ -119,6 +119,67 @@ static int test_discard_generation_overflow_fails_without_mutation(void)
 	return 0;
 }
 
+
+/*
+ * Fault-inject a source extent that straddles a 1MiB segment or extends
+ * beyond capacity. A direct DISCARD and completed COW must refuse it before
+ * touching the old generation/reference or publishing the new raw mapping.
+ */
+static int test_corrupt_source_geometry_preserves_discard_authority(void)
+{
+	const swapz_u32 logical_page = 9U;
+	int fault;
+
+	for (fault = 0; fault < 2; ++fault) {
+		const swapz_u32 invalid_start =
+			fault ? NPHYS - 1U : SWAPZ_SEGMENT_BLOCKS - 1U;
+		struct swapz_tx transaction;
+		struct swapz_map original;
+		int range_error, discard_error, finish_error;
+		int invalidation_prevented;
+
+		CHECK(init() == 0);
+		maps[logical_page] = (struct swapz_map) {
+			.start_block = invalid_start,
+			.generation = 7U,
+			.payload_length = 128U,
+			.extent_blocks = 2U,
+			.valid = 1U,
+		};
+		live[invalid_start] = 1U;
+		classes[invalid_start] = 2U;
+		original = maps[logical_page];
+
+		range_error = swapz_prevalidate_discard_range(
+			&a, logical_page, 1U);
+		discard_error = swapz_discard_page(&a, logical_page);
+		CHECK(stage_raw(logical_page, &transaction) == 0);
+		finish_error = swapz_finish_raw(&a, &transaction, disk_page, 1U, 0);
+		invalidation_prevented =
+			!memcmp(&maps[logical_page], &original, sizeof(original)) &&
+			live[invalid_start] == 1U &&
+			classes[invalid_start] == 2U &&
+			!live[transaction.start_block] &&
+			!classes[transaction.start_block] &&
+			!a.in_flight && a.abandoned_blocks == 1U;
+		if (range_error != -EUCLEAN || discard_error != -EUCLEAN ||
+		    finish_error != -EUCLEAN || !invalidation_prevented) {
+			fprintf(stderr,
+				"%s:%d: FAIL range=[9,10) expected_generation=7 "
+				"expected_references=1 conflict=%s "
+				"original_errnos=range:%d,discard:%d,finish:%d "
+				"invalidation_prevented=%s\n",
+				__FILE__, __LINE__,
+				fault ? "physical_capacity_overrun" :
+					"cross_segment_extent",
+				range_error, discard_error, finish_error,
+				invalidation_prevented ? "yes" : "no");
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static int test_raw_page_crc_rejects_silent_corruption(void)
 {
 	struct swapz_tx tx;
@@ -216,6 +277,7 @@ int main(void)
 	CHECK(test_mutated_raw_token_does_not_publish() == 0); passed++;
 	CHECK(test_raw_descriptor_reads_fail_closed() == 0); passed++;
 	CHECK(test_discard_generation_overflow_fails_without_mutation() == 0); passed++;
+	CHECK(test_corrupt_source_geometry_preserves_discard_authority() == 0); passed++;
 	CHECK(test_raw_page_crc_rejects_silent_corruption() == 0); passed++;
 	CHECK(test_missing_raw_buffer_fails_closed() == 0); passed++;
 	CHECK(test_fua_failure_preserves_previous_raw_generation() == 0); passed++;

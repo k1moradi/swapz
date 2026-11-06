@@ -1962,6 +1962,139 @@ static int test_discard_range_prevalidation_restores_shared_compressed_gc_underf
 	return 0;
 }
 
+
+/*
+ * Model a multi-page DISCARD whose first page is healthy, the second is
+ * malformed, and a third authoritative map must survive outside the range.
+ * The preflight's speculative first-page refcount decrement must roll back.
+ */
+static int test_discard_range_bad_tail_keeps_unrelated_authority(void)
+{
+	enum {
+		logical_pages = 3U,
+		physical_blocks = 4U * SWAPZ_SEGMENT_BLOCKS,
+	};
+	struct swapz_authority test_authority;
+	struct swapz_map test_maps[logical_pages];
+	struct swapz_map maps_before[logical_pages];
+	swapz_u16 test_live[physical_blocks];
+	swapz_u16 live_before[physical_blocks];
+	swapz_u8 test_classes[physical_blocks];
+	swapz_u8 classes_before[physical_blocks];
+	int fault;
+
+	for (fault = 0; fault < 3; ++fault) {
+		swapz_u32 invalid_start = fault == 2 ?
+			physical_blocks - 1U :
+			fault == 1 ? 1U : SWAPZ_SEGMENT_BLOCKS - 1U;
+		swapz_u8 invalid_blocks = fault == 1 ? 1U : 2U;
+		int error, expected_error, invalidation_prevented;
+
+		CHECK(swapz_authority_init(&test_authority, test_maps,
+					   test_live, test_classes,
+					   logical_pages, physical_blocks) == 0);
+		test_maps[0] = (struct swapz_map) {
+			.start_block = 0U, .generation = 1U,
+			.payload_length = SWAPZ_BLOCK_BYTES,
+			.extent_blocks = 1U, .raw = 1U, .valid = 1U,
+		};
+		test_maps[1] = (struct swapz_map) {
+			.start_block = invalid_start,
+			.generation = fault == 1 ? ~(swapz_u32)0 : 1U,
+			.payload_length = 128U,
+			.extent_blocks = invalid_blocks, .valid = 1U,
+		};
+		test_maps[2] = (struct swapz_map) {
+			.start_block = SWAPZ_SEGMENT_BLOCKS,
+			.generation = 4U, .payload_length = SWAPZ_BLOCK_BYTES,
+			.extent_blocks = 1U, .raw = 1U, .valid = 1U,
+		};
+		test_live[0] = 1U;
+		test_classes[0] = 1U;
+		test_live[invalid_start] = 1U;
+		test_classes[invalid_start] = invalid_blocks;
+		test_live[SWAPZ_SEGMENT_BLOCKS] = 1U;
+		test_classes[SWAPZ_SEGMENT_BLOCKS] = 1U;
+
+		memcpy(maps_before, test_maps, sizeof(maps_before));
+		memcpy(live_before, test_live, sizeof(live_before));
+		memcpy(classes_before, test_classes, sizeof(classes_before));
+		error = swapz_prevalidate_discard_range(
+			&test_authority, 0U, 2U);
+		expected_error = fault == 1 ? -EOVERFLOW : -EUCLEAN;
+		invalidation_prevented =
+			!memcmp(maps_before, test_maps, sizeof(maps_before)) &&
+			!memcmp(live_before, test_live, sizeof(live_before)) &&
+			!memcmp(classes_before, test_classes,
+				sizeof(classes_before));
+		if (error != expected_error || !invalidation_prevented) {
+			fprintf(stderr,
+				"%s:%d: FAIL range=[0,2) survivor=outside_range "
+				"expected_generation=1 expected_references=1 "
+				"conflict=%s original_errno=%d "
+				"invalidation_prevented=%s\n",
+				__FILE__, __LINE__,
+				fault == 1 ? "generation_overflow" :
+				fault == 2 ? "physical_capacity_overrun" :
+					     "cross_segment_extent",
+				error, invalidation_prevented ? "yes" : "no");
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * An asynchronously completed compressed COW must not publish over an old
+ * map whose physical span was corrupted after its earlier publication.
+ */
+static int test_compressed_finish_rejects_corrupt_source_geometry(void)
+{
+	const swapz_u32 logical_page = 9U;
+	const swapz_u32 invalid_start = SWAPZ_SEGMENT_BLOCKS - 1U;
+	struct swapz_tx transaction;
+	struct swapz_map original;
+	int error, invalidation_prevented;
+
+	CHECK(init() == 0);
+	CHECK(swapz_stage(&authority, &logical_page, 1U, 1U,
+			  &transaction) == 0);
+	CHECK(encode(&transaction) == 0);
+	CHECK(swapz_finish(&authority, &transaction, extent,
+			   SWAPZ_BLOCK_BYTES, 1U, 0) == 0);
+	CHECK(maps[logical_page].valid && !maps[logical_page].raw);
+	live[maps[logical_page].start_block] = 0U;
+	classes[maps[logical_page].start_block] = 0U;
+	maps[logical_page].start_block = invalid_start;
+	maps[logical_page].extent_blocks = 2U;
+	live[invalid_start] = 1U;
+	classes[invalid_start] = 2U;
+	original = maps[logical_page];
+
+	CHECK(swapz_stage(&authority, &logical_page, 1U, 1U,
+			  &transaction) == 0);
+	CHECK(encode(&transaction) == 0);
+	error = swapz_finish(&authority, &transaction, extent,
+			     SWAPZ_BLOCK_BYTES, 1U, 0);
+	invalidation_prevented =
+		!memcmp(&maps[logical_page], &original, sizeof(original)) &&
+		live[invalid_start] == 1U && classes[invalid_start] == 2U &&
+		!live[transaction.start_block] &&
+		!classes[transaction.start_block] &&
+		!authority.in_flight && authority.abandoned_blocks == 1U;
+	if (error != -EUCLEAN || !invalidation_prevented) {
+		fprintf(stderr,
+			"%s:%d: FAIL range=[9,10) "
+			"expected_generation=%u expected_references=1 "
+			"conflict=compressed_old_extent_cross_segment "
+			"original_errno=%d invalidation_prevented=%s\n",
+			__FILE__, __LINE__, original.generation, error,
+			invalidation_prevented ? "yes" : "no");
+		return 1;
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -1990,6 +2123,8 @@ int main(void)
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_rejects_detached_page_list_cycle() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_blocks_late_sidecar_corruption() == 0); passed++;
+	CHECK(test_discard_range_bad_tail_keeps_unrelated_authority() == 0); passed++;
+	CHECK(test_compressed_finish_rejects_corrupt_source_geometry() == 0); passed++;
 	CHECK(test_discard_range_prevalidation_restores_shared_compressed_gc_underflow() == 0); passed++;
 	printf("SWAPZ_EXACT_AUTHORITY_TESTS_PASS=%d\n", passed);
 	return 0;

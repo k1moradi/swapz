@@ -1862,6 +1862,9 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
 	     !swapz_legal_class(old->extent_blocks) ||
+	     old->extent_blocks > a->physical_blocks - old->start_block ||
+	     old->start_block % SWAPZ_SEGMENT_BLOCKS +
+	         old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
 	     a->extent_classes[old->start_block] != old->extent_blocks ||
 	     !a->live_records[old->start_block])) {
 		error = -EUCLEAN;
@@ -2190,6 +2193,9 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
 	     !swapz_legal_class(old->extent_blocks) ||
+	     old->extent_blocks > a->physical_blocks - old->start_block ||
+	     old->start_block % SWAPZ_SEGMENT_BLOCKS +
+	         old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
 	     a->extent_classes[old->start_block] != old->extent_blocks ||
 	     !a->live_records[old->start_block]))
 		return -EUCLEAN;
@@ -2424,6 +2430,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		}
 		if (old->start_block >= a->physical_blocks ||
 		    !swapz_legal_class(old->extent_blocks) ||
+		    old->extent_blocks > a->physical_blocks - old->start_block ||
+		    old->start_block % SWAPZ_SEGMENT_BLOCKS +
+		        old->extent_blocks > SWAPZ_SEGMENT_BLOCKS ||
 		    a->extent_classes[old->start_block] != old->extent_blocks) {
 			error = -EUCLEAN;
 			goto fail;
