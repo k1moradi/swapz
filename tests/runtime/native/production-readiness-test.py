@@ -3577,9 +3577,11 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(stale_result["release_verdict"], "BLOCKED")
         self.assertTrue(any(
             "first_failed_phase=campaign_receipt_chronology" in blocker and
-            f"required_receipt_source_sha={SOURCE}" in blocker and
-            f"observed_receipt_source_sha={SOURCE}" in blocker and
-            "verdict=BLOCKED" in blocker
+            "observed_receipt_source_identity_class=match" in blocker and
+            "observed_receipt_target_identity_class=match" in blocker and
+            "artifact_binding_class=match" in blocker and
+            "verdict=BLOCKED" in blocker and
+            "safe_action=recapture_and_reseal_campaign" in blocker
             for blocker in stale_result["code_blockers"]),
             stale_result["code_blockers"])
 
@@ -3593,9 +3595,11 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(mismatched_result["release_verdict"], "BLOCKED")
         self.assertTrue(any(
             "first_failed_phase=campaign_receipt_binding" in blocker and
-            f"required_receipt_source_sha={SOURCE}" in blocker and
-            f"observed_receipt_source_sha={'b' * 40}" in blocker and
-            "verdict=BLOCKED" in blocker
+            "observed_receipt_source_identity_class=mismatch" in blocker and
+            "observed_receipt_target_identity_class=match" in blocker and
+            "artifact_binding_class=match" in blocker and
+            "verdict=BLOCKED" in blocker and
+            "safe_action=recapture_and_reseal_campaign" in blocker
             for blocker in mismatched_result["code_blockers"]),
             mismatched_result["code_blockers"])
 
