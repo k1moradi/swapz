@@ -350,8 +350,11 @@ SD card. Before every destructive phase, reprove the opened partition and parent
 identity; a pathname alone is never authority. A failed mapper `swapoff` or
 ambiguous ownership/state stops teardown rather than authorizing force.
 For RAM-backed null_blk, loaded preflight must share the native strict sysfs
-devno/alias parser and reject malformed or multiply reported /proc driver
-majors; no telemetry, token, or stale mapper snapshot grants creation authority.
+devno/alias parser: either the configfs-derived disk name or the index-derived
+disk name may exist, never both, and an alternate disk entry remains ambiguous
+even when its dev attribute is absent or dangling. Reject malformed or multiply
+reported /proc driver majors and preserve the first parser status in the
+refusal; no telemetry, token, or stale mapper snapshot grants creation authority.
 
 
 ### Physical formatter descriptor and SWZ header contract

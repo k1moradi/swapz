@@ -550,18 +550,30 @@ read_owned_config_proof() {
 }
 
 read_owned_lower_proof() {
+    local result_variable="$1" phase="$2"
     local config_index disk sysfs_devno node_devno block_major system_major
-    local partition_marker
+    local partition_marker disk_status devno_status major_status
     config_index="${owned_config_proof#*|}"
     config_index="${config_index%%|*}"
     [[ -f $owned_config/power && ! -L $owned_config/power &&
        "$(cat "$owned_config/power" 2>/dev/null)" == 1 ]] || return 1
     # The index name and configfs name are alternatives, not two devices.
-    disk="$(swapz_resolve_owned_disk "${owned_config##*/}" "$config_index" /sys/block)" ||
-        return 1
+    if disk="$(swapz_resolve_owned_disk "${owned_config##*/}" "$config_index" /sys/block)"; then
+        :
+    else
+        disk_status=$?
+        ownership_refuse "$phase" null_blk \
+            unique_sysfs_disk_alias_and_canonical_devno ambiguous_or_malformed \
+            "$disk_status"
+    fi
     [[ -b $lower ]] || return 1
-    sysfs_devno="$(swapz_read_canonical_devno "/sys/block/$disk/dev")" ||
-        return 1
+    if sysfs_devno="$(swapz_read_canonical_devno "/sys/block/$disk/dev")"; then
+        :
+    else
+        devno_status=$?
+        ownership_refuse "$phase" null_blk stable_canonical_sysfs_devno \
+            changed_or_malformed "$devno_status"
+    fi
     [[ $sysfs_devno == "$lower_devno" ]] || return 1
     for partition_marker in /sys/block/$disk/*/partition; do
         [[ ! -e $partition_marker ]] || return 1
@@ -569,7 +581,7 @@ read_owned_lower_proof() {
     node_devno="$(stat -Lc '%Hr:%Lr' "$lower" 2>/dev/null)" || return 1
     [[ $node_devno == "$sysfs_devno" ]] || return 1
     block_major="${sysfs_devno%%:*}"
-    system_major="$(awk '
+    if system_major="$(awk '
         $0 == "Block devices:" { section = 1; next }
         section && $2 == "nullb" {
             if (NF != 2 || $1 !~ /^(0|[1-9][0-9]*)$/ ||
@@ -582,13 +594,19 @@ read_owned_lower_proof() {
             if (invalid || matches != 1) exit 2
             print major
         }
-    ' /proc/devices 2>/dev/null)" || return 1
+    ' /proc/devices 2>/dev/null)"; then
+        :
+    else
+        major_status=$?
+        ownership_refuse "$phase" null_blk one_canonical_nullb_major_record \
+            malformed_or_unreadable "$major_status"
+    fi
     [[ -n $system_major && $system_major == "$block_major" ]] || return 1
     [[ $sysfs_devno == "$system_major:$config_index" ]] || return 1
     [[ -e /sys/dev/block/$sysfs_devno &&
        "$(readlink -f "/sys/dev/block/$sysfs_devno" 2>/dev/null)" == \
        "$(readlink -f "/sys/block/$disk" 2>/dev/null)" ]] || return 1
-    printf '%s|%s|%s\n' "$disk" "$sysfs_devno" "$node_devno"
+    printf -v "$result_variable" '%s|%s|%s' "$disk" "$sysfs_devno" "$node_devno"
 }
 
 assert_owned_config_proof() {
@@ -610,8 +628,9 @@ assert_owned_config_proof() {
        "$(cat "$owned_config/power" 2>/dev/null)" == "$expected_power" ]] ||
         ownership_refuse "$phase" null_blk expected_power_state missing_or_changed
     if [[ $expected_power == 1 ]]; then
-        current_proof="$(read_owned_lower_proof)" ||
+        if ! read_owned_lower_proof current_proof "$phase"; then
             ownership_refuse "$phase" null_blk sysfs_major_devno_node_rdev missing_or_changed
+        fi
         [[ $current_proof == "$owned_lower_proof" ]] ||
             ownership_refuse "$phase" null_blk original_sysfs_major_devno_node_rdev substituted
     fi
@@ -659,8 +678,9 @@ owned_power_fd_identity="$(stat -Lc '%d:%i' "/proc/$$/fd/$owned_power_fd" 2>/dev
     ownership_refuse acquire null_blk pinned_power_inode fd_stat_failed
 [[ $owned_power_fd_identity == "$owned_power_identity" ]] ||
     ownership_refuse acquire null_blk pinned_power_inode substituted
-owned_lower_proof="$(read_owned_lower_proof)" ||
+if ! read_owned_lower_proof owned_lower_proof acquire; then
     ownership_refuse acquire null_blk dependency_sysfs_major_index_devno_node_rdev missing_or_incomplete
+fi
 
 assert_not_mounted "$lower" mounted_owned_lower
 assert_not_active_swap "$lower"

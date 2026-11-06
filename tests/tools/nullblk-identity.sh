@@ -23,19 +23,20 @@ swapz_resolve_owned_disk() {
     [[ "$index" =~ ^(0|[1-9][0-9]*)$ ]] || return 2
     local selected_disk
     if [[ -r "$sysblock/$name/dev" &&
-          ! -e "$sysblock/nullb$index/dev" &&
-          ! -L "$sysblock/nullb$index/dev" ]]; then
+          ! -e "$sysblock/nullb$index" &&
+          ! -L "$sysblock/nullb$index" ]]; then
         selected_disk="$name"
     elif [[ -r "$sysblock/nullb$index/dev" &&
-            ! -e "$sysblock/$name/dev" &&
-            ! -L "$sysblock/$name/dev" ]]; then
+            ! -e "$sysblock/$name" &&
+            ! -L "$sysblock/$name" ]]; then
         selected_disk="nullb$index"
     else
         return 1
     fi
 
-    # A dangling alternate dev symlink is an ambiguous alias, not absence.
-    # A readable, uniquely named sysfs entry with malformed or symlinked dev
+    # Any alternate disk entry is an ambiguous alias, even when its dev
+    # attribute is absent or dangling. A readable, uniquely named sysfs entry
+    # with malformed or symlinked dev
     # telemetry is not usable device identity. The caller must still prove
     # actual null_blk major/minor, node rdev, index, geometry and ownership.
     swapz_read_canonical_devno "$sysblock/$selected_disk/dev" >/dev/null ||
