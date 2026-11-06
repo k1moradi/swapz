@@ -862,15 +862,19 @@ static void expect_surviving_task_with_missing_leader_namespace(
 			fixture_foreign_task_mountinfo_opens);
 		++fixture_failures;
 	}
-	if (result == 0 && facts.target_mounted &&
-	    fixture_foreign_task_mountinfo_opens == 0U) {
+	/*
+	 * These cases deliberately keep the worker namespace and mountinfo readable.
+	 * A generic early refusal at the vanished leader is safe but does not prove
+	 * the production scanner inspected the surviving task as required.
+	 */
+	if (fixture_foreign_task_mountinfo_opens != 1U) {
 		fprintf(stderr,
 			"FAIL: phase=foreign-leader-namespace-inventory case=%s "
 			"identity_class=task-attribution-missing "
-			"expected=task-mountinfo-open observed=no-task-open "
-			"original_errno=none "
-			"safe_retry=complete-fresh-task-inventory\n",
-			case_name);
+			"expected_task_mountinfo_opens=1 observed_task_mountinfo_opens=%u "
+			"original_errno=%d safe_retry=complete-fresh-task-inventory\n",
+			case_name, fixture_foreign_task_mountinfo_opens,
+			result < 0 ? first_errno : 0);
 		++fixture_failures;
 	}
 	if (result < 0 && first_errno == 0) {

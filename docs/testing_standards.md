@@ -245,7 +245,10 @@ closed as BLOCKED, never admit on leader disappearance alone.
 If the leader namespace marker is absent, production must still enumerate an
 available `/proc/<pid>/task` directory and inspect its visible non-leader
 namespace and mountinfo records; it may skip the leader table but must not
-skip the task inventory. Only a separately proven absent task inventory can
+skip the task inventory. For fixture cases that intentionally keep one worker
+namespace and mountinfo readable, require exactly one task-specific mountinfo
+open even if the reader ultimately returns a fail-closed error; an unrelated
+earlier refusal at the vanished leader does not satisfy the regression. Only a separately proven absent task inventory can
 establish that no visible worker remains. The fixture must recreate a live
 non-leader `ns/mnt` marker for every case so results cannot depend on prior
 test order. If the selected mount is reported busy, prove
