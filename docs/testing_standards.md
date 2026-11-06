@@ -3640,6 +3640,16 @@ A report-only advance of `main` may preserve the tested source, but cannot
 make a stale source, changed implementation, dirty input, missing stage or
 missing artifact current qualification.
 
+Build provenance and the qualification runner must resolve a report-only
+`main` descendant to the same nearest non-report source commit. The Makefile's
+generated `SWAPZ_BUILD_SOURCE_SHA` must exclude only the root `test_results.json`
+path when selecting the latest code revision; otherwise rebuilding after a
+report publication would stamp artifacts with a report commit while the
+runner correctly records its source parent. The Make-interface regression
+must exercise a synthetic main-only history containing a report-only commit,
+prove both identifiers resolve to the source commit, and prove a later source
+commit becomes the new identity.
+
 After writing the file, `make test` automatically publishes only that report
 to `main` using Git plumbing. `tested_commit_sha` names the nearest
 non-report code revision; generated report-only ancestors modify only

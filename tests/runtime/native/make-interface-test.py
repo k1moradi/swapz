@@ -14,6 +14,56 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 MAKE = (ROOT / "Makefile").read_text()
 
 class PublicMakeContract(unittest.TestCase):
+    def test_build_provenance_skips_report_only_commits(self):
+        self.assertIn(
+            "git log -1 --format=%H HEAD -- . "
+            "':(exclude)test_results.json'",
+            MAKE)
+
+        build_tests = ROOT / "build/tests"
+        build_tests.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="report-source-sha-",
+                                         dir=build_tests) as directory:
+            repository = pathlib.Path(directory)
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments], cwd=repository, check=True,
+                    capture_output=True, text=True, timeout=5)
+
+            git("init", "--initial-branch=main")
+            git("config", "user.name", "swapz fixture")
+            git("config", "user.email", "swapz-fixture@example.invalid")
+            source = repository / "src/kernel/dm-target.c"
+            source.parent.mkdir(parents=True)
+            source.write_text("int source_revision = 1;\n")
+            git("add", "src/kernel/dm-target.c")
+            git("commit", "-m", "source: synthetic candidate")
+            source_sha = git("rev-parse", "HEAD").stdout.strip()
+
+            report = repository / "test_results.json"
+            report.write_text("{\"overall\":\"FAIL\"}\n")
+            git("add", "test_results.json")
+            git("commit", "-m",
+                "test: latest run for 0123456789ab [skip ci]")
+            report_head = git("rev-parse", "HEAD").stdout.strip()
+            self.assertNotEqual(report_head, source_sha)
+
+            resolved_sha = git(
+                "log", "-1", "--format=%H", "HEAD", "--", ".",
+                ":(exclude)test_results.json").stdout.strip()
+            self.assertEqual(resolved_sha, source_sha)
+
+            source.write_text("int source_revision = 2;\n")
+            git("add", "src/kernel/dm-target.c")
+            git("commit", "-m", "source: next synthetic candidate")
+            next_source_sha = git("rev-parse", "HEAD").stdout.strip()
+            self.assertNotEqual(next_source_sha, report_head)
+            resolved_after_source_change = git(
+                "log", "-1", "--format=%H", "HEAD", "--", ".",
+                ":(exclude)test_results.json").stdout.strip()
+            self.assertEqual(resolved_after_source_change, next_source_sha)
+
     def test_exact_five_root_goals(self):
         targets = set()
         for line in MAKE.splitlines():

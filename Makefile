@@ -16,7 +16,7 @@ KDIR ?= /lib/modules/$(shell uname -r)/build
 PREFIX ?= /usr/local
 CC ?= cc
 
-SWAPZ_BUILD_SOURCE_SHA := $(shell git rev-parse --verify HEAD 2>/dev/null | grep -E '^[0-9a-f]{40}$$' | head -n 1)
+SWAPZ_BUILD_SOURCE_SHA := $(shell git log -1 --format=%H HEAD -- . ':(exclude)test_results.json' 2>/dev/null | grep -E '^[0-9a-f]{40}$$' | head -n 1)
 ifeq ($(strip $(SWAPZ_BUILD_SOURCE_SHA)),)
 SWAPZ_BUILD_SOURCE_SHA := unknown
 SWAPZ_BUILD_SOURCE_CLEAN := 0
