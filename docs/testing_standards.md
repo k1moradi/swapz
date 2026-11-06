@@ -9102,9 +9102,14 @@ invalid field and expected/observed types with bounded, redacted recapture
 guidance. Regression fixtures must locate an authenticating diagnostic by the
 failure-witness identity rather than retained-list position, and type-strict
 count controls cover `required_pairs`, `attempted_pairs` and
-`accepted_pairs`. When accepted counts contradict retained PASS/non-excluded
-pair dispositions, the release blocker must identify the audit count field,
-expected analyzer-usable bound, observed count, unauthenticated-proof reason,
+`accepted_pairs`. Valid-type count contradictions must identify the exact
+audit count field, its producer-policy, retained-manifest or analyzer-usable
+count class, expected count/range, observed count, unauthenticated-proof reason,
 and safe recapture/reseal action without disclosing private pair content.
-The earlier failed-phase attribution still takes precedence. These are
-rootless verdict-logic controls only, never physical acceptance evidence.
+Public release blockers report only source/target/artifact binding classes:
+they must not print a physical PARTUUID, pair content, host path, or sealed
+artifact SHA-256 fingerprint. The earlier failed-phase attribution still takes
+precedence. An authenticated measurement FAIL remains FAIL when an unrelated
+cohort is missing records; completeness still blocks release readiness.
+These are rootless verdict-logic controls only, never physical acceptance
+evidence.

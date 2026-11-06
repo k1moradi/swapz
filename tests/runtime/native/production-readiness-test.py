@@ -3518,14 +3518,13 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
                 self.assertTrue(any(
                     f"first_failed_phase={expected_phase}" in blocker and
-                    f"required_source_sha={SOURCE}" in blocker and
-                    f"required_target=('{TARGET['partuuid']}', {TARGET['size_bytes']})" in blocker and
-                    f"observed_source_sha={SOURCE}" in blocker and
-                    "observed_qualification_target=" in blocker and
-                    "required_artifact_sha256=" in blocker and
-                    "observed_artifact_sha256=" in blocker and
+                    "expected_source_identity_class=release_source" in blocker and
+                    "expected_target_identity_class=authorized_target" in blocker and
+                    "qualification_target_binding_class=" in blocker and
+                    "artifact_binding_class=match" in blocker and
                     "verdict=BLOCKED" in blocker and
-                    "reason=missing_or_contradictory_campaign_proof" in blocker
+                    "reason=missing_or_contradictory_campaign_proof" in blocker and
+                    "safe_action=recapture_and_reseal_campaign" in blocker
                     for blocker in result["code_blockers"]),
                     result["code_blockers"])
 
@@ -3652,16 +3651,20 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
             result["code_blockers"])
         self.assertTrue(any(
             "first_failed_phase=physical_evidence_audit" in blocker and
-            f"required_source_sha={SOURCE}" in blocker and
-            f"observed_source_sha={SOURCE}" in blocker and
-            f"required_artifact_sha256={artifact_digest}" in blocker and
-            f"observed_artifact_sha256={artifact_digest}" in blocker and
-            f"required_target=('{TARGET['partuuid']}', {TARGET['size_bytes']})"
-            in blocker and
+            "expected_source_identity_class=release_source" in blocker and
+            "observed_source_identity_class=match" in blocker and
+            "artifact_binding_class=match" in blocker and
+            "expected_target_identity_class=authorized_target" in blocker and
+            "qualification_target_binding_class=match" in blocker and
+            "observed_qualification_target_identity_class=match" in blocker and
             "verdict=BLOCKED" in blocker and
-            "reason=missing_or_contradictory_campaign_proof" in blocker
+            "reason=missing_or_contradictory_campaign_proof" in blocker and
+            "safe_action=recapture_and_reseal_campaign" in blocker
             for blocker in result["code_blockers"]),
             result["code_blockers"])
+        diagnostics = "\n".join(result["code_blockers"])
+        self.assertNotIn(artifact_digest, diagnostics)
+        self.assertNotIn(TARGET["partuuid"], diagnostics)
 
     def test_physical_fail_survives_unrelated_analyzer_exclusion(self):
         policy = acceptance_policy()
@@ -3714,16 +3717,79 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                 self.assertTrue(any(
                     "physical evidence audit is not a complete PASS"
                     in blocker and
-                    f"required_source_sha={SOURCE}" in blocker and
-                    f"required_target_partuuid={TARGET['partuuid']}" in blocker and
-                    "required_pair_count=" in blocker and
-                    "observed_pair_count=" in blocker
+                    "expected_schema_class=current_complete_PASS_audit"
+                    in blocker and
+                    "expected_source_identity_class=release_source"
+                    in blocker and
+                    "expected_target_identity_class=authorized_target"
+                    in blocker and
+                    "expected_pair_count=" in blocker and
+                    "observed_pair_count=" in blocker and
+                    "safe_action=recapture_and_reseal_campaign" in blocker
                     for blocker in result["code_blockers"]),
                     result["code_blockers"])
+                diagnostics = "\n".join(result["code_blockers"])
+                self.assertNotIn(TARGET["partuuid"], diagnostics)
                 self.assertTrue(any(
                     "first_failed_phase=physical_evidence_audit" in blocker
                     for blocker in result["code_blockers"]),
                     result["code_blockers"])
+
+    def test_physical_audit_numeric_count_contradictions_are_diagnostic(self):
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        workload = "sd-service-balanced"
+        cases = (
+            ("required_pairs", 4, "producer_policy_exact", "expected_count=5",
+             "required_count_cannot_authenticate_policy"),
+            ("attempted_pairs", 4, "retained_pair_manifest_exact",
+             "expected_count=5", "attempted_count_cannot_authenticate_manifest"),
+        )
+        for field, observed, expected_class, expected_value, reason in cases:
+            with self.subTest(field=field):
+                campaign = physical_campaign_evidence(policy_raw)
+                campaign["physical_evidence_audit"]["cohort_pair_counts"][
+                    workload][field] = observed
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                diagnostics = "\n".join(result["code_blockers"])
+                for expected in (
+                        "phase=physical_evidence_audit",
+                        "failed_evidence_field=physical_evidence_audit."
+                        f"cohort_pair_counts[].{field}",
+                        f"expected_count_class={expected_class}",
+                        expected_value,
+                        f"observed_count={observed}",
+                        f"reason={reason}",
+                        "safe_action=recapture_and_reseal_campaign"):
+                    self.assertIn(expected, diagnostics)
+                self.assertNotIn(TARGET["partuuid"], diagnostics)
+
+    def test_physical_fail_survives_unrelated_missing_pair_record(self):
+        policy = acceptance_policy()
+        campaign = physical_campaign_failure_evidence(encoded(policy))
+        unrelated = "sd-service-representative"
+        pairs = campaign["artifacts"]["pairs"]
+        removed = next(
+            pair for pair in pairs
+            if pair["workload"] == unrelated and pair["pair_index"] == 5)
+        pairs.remove(removed)
+        campaign["record_count"] = len(pairs)
+
+        # Missing unrelated evidence blocks completeness, but it cannot erase
+        # the independent authenticated measurement failure witness.
+        result = evaluate(policy=policy, campaign=campaign)
+        self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+        self.assertEqual(result["release_verdict"], "FAIL")
+        diagnostics = "\n".join(result["code_blockers"])
+        self.assertIn(
+            "failed_evidence_field=physical_evidence_audit."
+            "cohort_pair_counts[].attempted_pairs", diagnostics)
+        self.assertIn("expected_count=4 observed_count=5", diagnostics)
+        self.assertIn("safe_action=recapture_and_reseal_campaign", diagnostics)
+        self.assertIn(
+            "verdict=FAIL reason=authenticated_producer_failure", diagnostics)
+        self.assertNotIn(TARGET["partuuid"], diagnostics)
 
     def test_physical_audit_malformed_nested_types_are_blocked_nonthrowing(self):
         policy = acceptance_policy()

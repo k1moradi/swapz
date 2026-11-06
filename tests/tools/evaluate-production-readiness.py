@@ -1935,17 +1935,64 @@ def validate_physical_campaign_evidence(
             # artifact. Screening may lower accepted_pairs below retained PASS.
             if (isinstance(audit_counts, dict) and isinstance(pairs, list) and
                     len(pairs) <= producer_required_pairs):
-                for workload in producer_workloads:
+                for workload, specification in producer_workloads.items():
                     count = audit_counts.get(workload)
-                    if (not isinstance(count, dict) or
-                            type(count.get("accepted_pairs")) is not int):
+                    if not isinstance(count, dict):
                         continue
+                    if set(count) != PHYSICAL_AUDIT_COHORT_COUNT_KEYS:
+                        reject(
+                            "sealed campaign physical evidence audit count "
+                            "schema contradiction: phase=physical_evidence_audit "
+                            "failed_evidence_field=physical_evidence_audit."
+                            "cohort_pair_counts[] "
+                            f"workload={workload} "
+                            "expected_schema_class=required_attempted_accepted_exact "
+                            "observed_schema_class=missing_or_extra_fields "
+                            "original_error=unavailable verdict=BLOCKED "
+                            "reason=count_schema_cannot_authenticate_cohort "
+                            "safe_action=recapture_and_reseal_campaign")
+                    count_fields = (
+                        "required_pairs", "attempted_pairs", "accepted_pairs")
+                    if any(type(count.get(field)) is not int
+                           for field in count_fields):
+                        continue
+                    observed_pair_count = sum(
+                        isinstance(pair, dict) and
+                        pair.get("workload") == workload
+                        for pair in pairs)
                     retained_pass_count = sum(
                         isinstance(pair, dict) and
                         pair.get("workload") == workload and
                         pair.get("status") == "PASS" and
                         pair.get("excluded") is False
                         for pair in pairs)
+                    required_count = specification["pairs"]
+                    if count["required_pairs"] != required_count:
+                        reject(
+                            "sealed campaign physical evidence audit count "
+                            "contradiction: phase=physical_evidence_audit "
+                            "failed_evidence_field=physical_evidence_audit."
+                            "cohort_pair_counts[].required_pairs "
+                            f"workload={workload} "
+                            "expected_count_class=producer_policy_exact "
+                            f"expected_count={required_count} "
+                            f"observed_count={count['required_pairs']} "
+                            "original_error=unavailable verdict=BLOCKED "
+                            "reason=required_count_cannot_authenticate_policy "
+                            "safe_action=recapture_and_reseal_campaign")
+                    if count["attempted_pairs"] != observed_pair_count:
+                        reject(
+                            "sealed campaign physical evidence audit count "
+                            "contradiction: phase=physical_evidence_audit "
+                            "failed_evidence_field=physical_evidence_audit."
+                            "cohort_pair_counts[].attempted_pairs "
+                            f"workload={workload} "
+                            "expected_count_class=retained_pair_manifest_exact "
+                            f"expected_count={observed_pair_count} "
+                            f"observed_count={count['attempted_pairs']} "
+                            "original_error=unavailable verdict=BLOCKED "
+                            "reason=attempted_count_cannot_authenticate_manifest "
+                            "safe_action=recapture_and_reseal_campaign")
                     accepted_count = count["accepted_pairs"]
                     if not 0 <= accepted_count <= retained_pass_count:
                         reject(
@@ -1961,7 +2008,6 @@ def validate_physical_campaign_evidence(
                             "original_error=unavailable verdict=BLOCKED "
                             "reason=count_cannot_authenticate_retained_pairs "
                             "safe_action=recapture_and_reseal_campaign")
-                        break
             audit_pass_counts = (
                 isinstance(audit_counts, dict) and
                 all(
@@ -1986,25 +2032,37 @@ def validate_physical_campaign_evidence(
                     len(pairs) if isinstance(pairs, list) else "invalid")
                 observed_audit_source = (
                     physical_audit.get("admitted_source_sha")
-                    if isinstance(physical_audit, dict) and
-                    _valid_source(physical_audit.get("admitted_source_sha"))
-                    else "invalid")
+                    if isinstance(physical_audit, dict) else None)
+                observed_audit_source_class = (
+                    "match" if observed_audit_source == source_sha else
+                    "mismatch" if _valid_source(observed_audit_source) else
+                    "invalid")
                 observed_audit_target = (
                     physical_audit.get("admitted_target_partuuid")
-                    if isinstance(physical_audit, dict) and
-                    isinstance(
-                        physical_audit.get("admitted_target_partuuid"), str)
+                    if isinstance(physical_audit, dict) else None)
+                observed_audit_target_class = (
+                    "match"
+                    if target is not None and observed_audit_target == target[0]
+                    else "mismatch"
+                    if isinstance(observed_audit_target, str) and
+                    bool(observed_audit_target)
                     else "invalid")
                 reject(
                     "sealed campaign physical evidence audit is not a complete "
-                    "PASS: metric=physical_evidence_audit required=current_PASS "
-                    f"required_source_sha={source_sha} "
-                    f"observed_source_sha={observed_audit_source} "
-                    f"required_target_partuuid="
-                    f"{target[0] if target is not None else 'invalid'} "
-                    f"observed_target_partuuid={observed_audit_target} "
-                    f"required_pair_count={required_pairs} "
-                    f"observed_pair_count={observed_pairs}")
+                    "PASS: phase=physical_evidence_audit "
+                    "failed_evidence_field=physical_evidence_audit "
+                    "expected_schema_class=current_complete_PASS_audit "
+                    "observed_schema_class=incomplete_or_contradictory "
+                    "expected_source_identity_class=release_source "
+                    f"observed_source_identity_class="
+                    f"{observed_audit_source_class} "
+                    "expected_target_identity_class=authorized_target "
+                    f"observed_target_identity_class="
+                    f"{observed_audit_target_class} "
+                    f"expected_pair_count={required_pairs} "
+                    f"observed_pair_count={observed_pairs} "
+                    "verdict=BLOCKED reason=audit_cannot_authenticate_campaign "
+                    "safe_action=recapture_and_reseal_campaign")
 
             # A matching record_count only authenticates the supplied list. The
             # independent frozen workload plan defines the complete cohort.
@@ -3193,19 +3251,38 @@ def evaluate_release(
                 else "invalid")
             artifact_digest = (
                 sha256_bytes(physical_campaign_evidence_raw)
-                if isinstance(physical_campaign_evidence_raw, bytes) else "invalid")
+                if isinstance(physical_campaign_evidence_raw, bytes) else None)
+            required_artifact_digest = (
+                physical_campaign_receipt.get("evidence_sha256")
+                if isinstance(physical_campaign_receipt, dict) and
+                isinstance(
+                    physical_campaign_receipt.get("evidence_sha256"), str) and
+                SHA256_RE.fullmatch(
+                    physical_campaign_receipt["evidence_sha256"])
+                else None)
+            artifact_binding_class = (
+                "match"
+                if artifact_digest is not None and
+                required_artifact_digest == artifact_digest
+                else "mismatch"
+                if artifact_digest is not None and
+                required_artifact_digest is not None
+                else "invalid")
             observed_source = (
                 physical_campaign_evidence.get("source_sha")
                 if isinstance(physical_campaign_evidence, dict) else None)
-            safe_observed_source = (
-                observed_source if _valid_source(observed_source)
-                else "invalid")
+            observed_source_class = (
+                "match" if observed_source == source_sha else
+                "mismatch" if _valid_source(observed_source) else "invalid")
             audit = (
                 physical_campaign_evidence.get("physical_evidence_audit")
                 if isinstance(physical_campaign_evidence, dict) else None)
             target_binding = (
                 physical_campaign_evidence.get("qualification_target_binding")
                 if isinstance(physical_campaign_evidence, dict) else None)
+            expected_binding = (
+                target_binding.get("expected")
+                if isinstance(target_binding, dict) else None)
             observed_binding = (
                 target_binding.get("observed")
                 if isinstance(target_binding, dict) else None)
@@ -3214,6 +3291,31 @@ def evaluate_release(
                     "partuuid": observed_binding.get("physical_partuuid"),
                     "size_bytes": observed_binding.get("physical_device_bytes"),
                 }) if isinstance(observed_binding, dict) else None)
+            binding_objects_valid = (
+                isinstance(target_binding, dict) and
+                isinstance(expected_binding, dict) and
+                isinstance(observed_binding, dict))
+            qualification_binding_class = (
+                "invalid" if not binding_objects_valid else
+                "match"
+                if target_binding.get("status") == "MATCH" and
+                target_binding.get("consistent") is True and
+                _same_json_value(expected_binding, observed_binding)
+                else "mismatch")
+            qualification_target_identity_class = (
+                "match"
+                if target is not None and observed_binding_target == target
+                else "mismatch"
+                if observed_binding_target is not None else "invalid")
+            receipt_source_identity_class = (
+                "match" if receipt_source == source_sha else
+                "mismatch" if _valid_source(receipt_source) else "invalid")
+            receipt_target_identity_class = (
+                "match" if target is not None and receipt_target == target else
+                "mismatch" if receipt_target is not None else "invalid")
+            receipt_time_class = (
+                "valid" if _valid_observed_at_utc(receipt_observed_at)
+                else "invalid")
             failed_phase = (
                 physical_campaign_failure_receipt_issue
                 if physical_campaign_failure_receipt_issue is not None
@@ -3235,36 +3337,28 @@ def evaluate_release(
                         "sealed campaign physical evidence audit")
                         for issue in campaign_issues))
                 else "campaign_validation")
-            required_artifact = (
-                physical_campaign_receipt.get("evidence_sha256")
-                if isinstance(physical_campaign_receipt, dict) and
-                isinstance(
-                    physical_campaign_receipt.get("evidence_sha256"), str) and
-                SHA256_RE.fullmatch(
-                    physical_campaign_receipt["evidence_sha256"])
-                else "invalid")
             block_code(
                 "physical_campaign: evidence_class=sealed_physical_campaign "
                 f"first_failed_phase={failed_phase} "
                 f"original_status={safe_status} "
-                f"required_source_sha={source_sha} "
-                f"observed_source_sha={safe_observed_source} "
-                f"required_artifact_sha256={required_artifact} "
-                f"observed_artifact_sha256={artifact_digest} "
-                f"required_target={target if target is not None else 'invalid'} "
-                f"observed_qualification_target="
-                f"{observed_binding_target if observed_binding_target is not None else 'invalid'} "
-                f"required_receipt_source_sha={source_sha} "
-                f"observed_receipt_source_sha="
-                f"{receipt_source if _valid_source(receipt_source) else 'invalid'} "
-                f"required_receipt_target="
-                f"{target if target is not None else 'invalid'} "
-                f"observed_receipt_target="
-                f"{receipt_target if receipt_target is not None else 'invalid'} "
-                f"observed_receipt_at_utc="
-                f"{receipt_observed_at if _valid_observed_at_utc(receipt_observed_at) else 'invalid'} "
+                "expected_source_identity_class=release_source "
+                f"observed_source_identity_class={observed_source_class} "
+                f"artifact_binding_class={artifact_binding_class} "
+                "expected_target_identity_class=authorized_target "
+                f"qualification_target_binding_class="
+                f"{qualification_binding_class} "
+                f"observed_qualification_target_identity_class="
+                f"{qualification_target_identity_class} "
+                "expected_receipt_source_identity_class=release_source "
+                f"observed_receipt_source_identity_class="
+                f"{receipt_source_identity_class} "
+                "expected_receipt_target_identity_class=authorized_target "
+                f"observed_receipt_target_identity_class="
+                f"{receipt_target_identity_class} "
+                f"observed_receipt_time_class={receipt_time_class} "
                 f"verdict={'FAIL' if physical_campaign_failure_proven else 'BLOCKED'} "
-                f"reason={'authenticated_producer_failure' if physical_campaign_failure_proven else 'missing_or_contradictory_campaign_proof'}")
+                f"reason={'authenticated_producer_failure' if physical_campaign_failure_proven else 'missing_or_contradictory_campaign_proof'} "
+                "safe_action=recapture_and_reseal_campaign")
         if isinstance(physical_campaign_evidence, dict):
             campaign_sealed_at = physical_campaign_evidence.get(
                 "sealed_at_utc")
