@@ -846,7 +846,8 @@ int main(int argc, char **argv)
         )
 
         metadata_start = self.primary.index(
-            "static int swapz_primary_reconcile_metadata_claim_at(")
+            "\nstatic int swapz_primary_reconcile_metadata_claim_at(",
+            helper_start)
         metadata_end = self.primary.index(
             "\nstatic int swapz_primary_valid_sha256(", metadata_start)
         metadata = self.primary[metadata_start:metadata_end]
@@ -1675,7 +1676,8 @@ int main(int argc, char **argv)
         owner_start = self.primary.index(
             "static int swapz_primary_owner_claim_matches_at(")
         owner_end = self.primary.index(
-            "\n/*\n * READY with an exact active marker", owner_start)
+            "\nstatic int swapz_primary_reconcile_state_temporary_file_at(",
+            owner_start)
         owner_claim = self.primary[owner_start:owner_end]
 
         write_start = self.primary.index("int swapz_primary_state_write_at(")

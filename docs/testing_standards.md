@@ -2551,6 +2551,12 @@ remove an individual lifecycle timeout. Synthetic Make-interface and report
 fixtures that model a successful loaded stage must emit the same current ordered
 lifecycle phase set and aggregate case count as the real loaded parser; stale
 fixture markers must fail rather than silently weakening evidence validation.
+Source-extracted lifecycle C fixtures must select the concrete function
+definition rather than an earlier forward declaration, and must not include a
+production helper body when the fixture already supplies a stub for that
+helper. Each extracted or stubbed function must appear exactly once in the
+generated translation unit, which must compile with the production fixture's
+strict warning flags.
 The normal-stop matrix
 must include fresh-process death after durable STOPPING, after native swapoff,
 after exact mapper removal, after owned-module unload, and after durable
