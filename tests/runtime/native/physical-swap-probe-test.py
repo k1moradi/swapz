@@ -1397,8 +1397,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 trusted["st_uid"] = 0
                 if metadata_fault == "untrusted_owner":
                     trusted["st_uid"] = 1000
+                elif metadata_fault == "hard_link":
+                    trusted["st_nlink"] = 2
                 elif metadata_fault == "group_writable":
                     trusted["st_mode"] |= 0o020
+                elif metadata_fault == "world_writable":
+                    trusted["st_mode"] |= 0o002
                 elif metadata_fault == "changed_during_read" and metadata_reads == 2:
                     trusted["st_size"] += 1
                 return SimpleNamespace(**trusted)
@@ -1463,8 +1467,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 ("missing_machine", product_uuid, None, None),
                 ("untrusted_owner", product_uuid, machine_id,
                  "untrusted_owner"),
+                ("hard_link", product_uuid, machine_id, "hard_link"),
                 ("group_writable", product_uuid, machine_id,
                  "group_writable"),
+                ("world_writable", product_uuid, machine_id,
+                 "world_writable"),
+                ("oversized_dmi", product_uuid + b"ABCD", machine_id, None),
                 ("changed_during_read", product_uuid, machine_id,
                  "changed_during_read"),
                 ("symlink", product_uuid, machine_id, "symlink")):
@@ -1476,6 +1484,10 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     str(rejected.exception),
                     "cannot identify the current host for physical smoke")
                 self.assertTrue(rejected.exception.__suppress_context__)
+                self.assertNotIn(product_uuid.decode(),
+                                 str(rejected.exception))
+                self.assertNotIn(machine_id.decode(),
+                                 str(rejected.exception))
 
     def test_live_host_gate_and_identical_artifact_history(self):
         source = "a" * 40

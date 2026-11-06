@@ -6097,7 +6097,16 @@ ancestry from the canonical GitHub main, and at least one complete owner
 five-stage PASS report for the latest qualified production source. That report
 must identify the exact source in both source_sha and tested_commit_sha,
 match the live x86_64 host identity, show all five stages passed, and publish
-usable SHA-256 hashes for swapzctl, dm-swapz.ko and device-roundtrip.
+usable SHA-256 hashes for swapzctl, dm-swapz.ko and device-roundtrip. The
+physical helper must derive that live identity from the same trusted byte
+contract as the official report producer: bounded no-follow reads of the DMI
+product UUID and machine ID, each a stable root-owned single-link regular file
+without group/world write permission, with exactly zero or one trailing LF and
+no whitespace trimming. It hashes their canonical lowercase bytes in that
+order after the exact `b"swapz-host-v2\0"` domain separator while keeping
+the importer-required `swapz-host-v1` JSON schema label. Missing, malformed,
+oversized, symlinked, untrusted or changing inputs block admission with a
+sanitized diagnostic that never includes either raw identifier.
 
 Earlier successful owner x86_64 qualifications count as repeated evidence for
 the same production implementation only when all three artifact hashes are
