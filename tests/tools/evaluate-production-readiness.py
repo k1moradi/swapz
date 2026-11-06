@@ -705,6 +705,34 @@ def _physical_audit_binding_is_valid(
     return True
 
 
+def _physical_producer_failure_diagnostic_is_valid(
+        audit: dict[str, Any], first_failure: dict[str, Any]) -> bool:
+    """Bind an arm FAIL to the producer's bounded retained diagnostic."""
+    phase = audit.get("first_failed_phase")
+    if (
+            first_failure.get("metric") != "arm.verdict" or
+            not isinstance(phase, str) or
+            re.fullmatch(
+                r"(?:measure|steady|gc|"
+                r"round-[1-9][0-9]*(?:-verify)?)", phase) is None):
+        return False
+    return any(
+        isinstance(diagnostic, dict) and
+        diagnostic.get("status") == "FAIL" and
+        diagnostic.get("metric") == "arm.verdict" and
+        diagnostic.get("workload") == first_failure.get("workload") and
+        diagnostic.get("pair_index") == first_failure.get("pair_index") and
+        diagnostic.get("arm") == first_failure.get("arm") and
+        diagnostic.get("producer_status") == "FAIL" and
+        diagnostic.get("failure_phase") == phase and
+        diagnostic.get("expected") == "PASS" and
+        diagnostic.get("observed") is None and
+        diagnostic.get("reason") ==
+        "authenticated physical producer terminal measurement failure"
+        for diagnostic in audit.get("diagnostics", ())
+    )
+
+
 def _physical_audit_failure_witness_is_valid(
         audit: dict[str, Any],
         producer_workloads: dict[str, Any],
@@ -746,14 +774,8 @@ def _physical_audit_failure_witness_is_valid(
                 re.fullmatch(
                     r"(?:measure|steady|gc|"
                     r"round-[1-9][0-9]*(?:-verify)?)", phase) is None or
-                not any(
-                    diagnostic.get("producer_status") == "FAIL" and
-                    diagnostic.get("failure_phase") == phase and
-                    diagnostic.get("expected") == "PASS" and
-                    diagnostic.get("observed") is None and
-                    diagnostic.get("reason") ==
-                    "authenticated physical producer terminal measurement failure"
-                    for diagnostic in matching_diagnostics)):
+                not _physical_producer_failure_diagnostic_is_valid(
+                    audit, first_failure)):
             return False
         witnesses = [
             pair for pair in pairs
@@ -1726,6 +1748,23 @@ def validate_physical_campaign_evidence(
                             "physical_evidence_audit."
                             "first_failed_evidence.workload",
                             "str", failure_workload))
+                    elif (
+                            first_failure.get("metric") == "arm.verdict" and
+                            not _physical_producer_failure_diagnostic_is_valid(
+                                physical_audit, first_failure)):
+                        reject(
+                            "sealed campaign physical evidence producer FAIL "
+                            "diagnostic cannot authenticate the first failure: "
+                            "phase=physical_evidence_audit "
+                            "failed_evidence_field=physical_evidence_audit."
+                            "diagnostics[].producer_failure_binding "
+                            "expected_schema_class=current_authenticated_"
+                            "terminal_measurement_FAIL "
+                            "observed_schema_class=missing_or_contradictory "
+                            "verdict=BLOCKED "
+                            "reason=producer_diagnostic_cannot_authenticate_"
+                            "measurement_failure "
+                            "safe_action=recapture_and_reseal_campaign")
 
             audit_counts = physical_audit.get("cohort_pair_counts")
             if (

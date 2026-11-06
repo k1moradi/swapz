@@ -9150,7 +9150,9 @@ and transport); omitting parent fields is unverifiable rather than a weaker
 identity schema. An authenticated terminal arm FAIL must retain a bounded
 producer diagnostic whose expected PASS, producer FAIL status and failure phase
 agree with the first-failure witness; a missing or contradictory diagnostic
-phase cannot be promoted to measured FAIL. Report the
+phase cannot be promoted to measured FAIL. Its public blocker identifies the
+producer-failure binding field and expected/observed schema classes, not the
+private producer error text. Report the
 invalid field and expected/observed types with bounded, redacted recapture
 guidance. Regression fixtures must locate an authenticating diagnostic by the
 failure-witness identity rather than retained-list position, and type-strict

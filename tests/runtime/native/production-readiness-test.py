@@ -3470,6 +3470,19 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
                     unauthenticated_result["CODE_PRODUCTION_READY"], "BLOCKED")
                 self.assertEqual(
                     unauthenticated_result["release_verdict"], "BLOCKED")
+                diagnostics = "\n".join(
+                    unauthenticated_result["code_blockers"])
+                for expected in (
+                        "phase=physical_evidence_audit",
+                        "failed_evidence_field=physical_evidence_audit."
+                        "diagnostics[].producer_failure_binding",
+                        "expected_schema_class=current_authenticated_"
+                        "terminal_measurement_FAIL",
+                        "observed_schema_class=missing_or_contradictory",
+                        "reason=producer_diagnostic_cannot_authenticate_"
+                        "measurement_failure",
+                        "safe_action=recapture_and_reseal_campaign"):
+                    self.assertIn(expected, diagnostics)
 
         blocked = physical_campaign_failure_evidence(encoded(policy))
         blocked_audit = blocked["physical_evidence_audit"]
