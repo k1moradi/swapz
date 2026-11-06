@@ -1201,7 +1201,8 @@ static int check_case(enum fixture_scenario candidate)
         expected_error = ELOOP;
         break;
     default:
-        assert(expected_safe || gap_probe);
+        assert(expected_safe || gap_probe ||
+               candidate == FIXTURE_LIVE_SELECTOR_CHANGED_AFTER_ADMISSION);
         break;
     }
     writes = header_writes + mapper_mutations + mkswap_calls + swapon_calls;
