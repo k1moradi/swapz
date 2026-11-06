@@ -1871,7 +1871,7 @@ else
 		note "UDEV_PARTUUID_DIAGNOSTIC=unavailable"
 	fi
 	QUARANTINE=1
-	fail "phase=udev-alias-publication original_errno=unavailable expected=owned-recorded-alias observed=missing ownership=claimed next=inspect-private-evidence"
+	blocked "phase=udev-alias-publication original_errno=unavailable expected=owned-recorded-alias observed=publication-unproven ownership=claimed next=inspect-private-evidence"
 fi
 
 mkswap "$PARTITION" >/dev/null ||

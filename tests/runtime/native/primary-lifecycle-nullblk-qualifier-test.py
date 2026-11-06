@@ -2781,10 +2781,18 @@ CONTROL=/private-mock-only
             denied = subprocess.run(
                 ["bash", "-c", program], capture_output=True,
                 text=True, timeout=5, check=False)
-            self.assertEqual(denied.returncode, 1, denied.stderr)
-            self.assertIn("FAIL_PRIMARY_NULLBLK_LIFECYCLE:", denied.stderr)
+            self.assertEqual(denied.returncode, 2, denied.stderr)
+            self.assertIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE:", denied.stderr)
             self.assertIn("phase=udev-alias-publication", denied.stderr)
+            self.assertIn("observed=publication-unproven", denied.stderr)
+            self.assertIn("ownership=claimed", denied.stderr)
+            self.assertNotIn("FAIL_PRIMARY_NULLBLK_LIFECYCLE:", denied.stderr)
+            self.assertNotIn("PASS_", denied.stdout + denied.stderr)
             self.assertIn("UDEV_PARTUUID_DIAGNOSTIC=private", denied.stdout)
+            quarantine = alias_check.index("\tQUARANTINE=1")
+            refusal = alias_check.index(
+                '\tblocked "phase=udev-alias-publication')
+            self.assertLess(quarantine, refusal)
             for identifier in ("7fb9401d-04", "/mock-only", str(configfs),
                                str(private_rule)):
                 self.assertNotIn(identifier, denied.stdout + denied.stderr)
@@ -2795,7 +2803,9 @@ CONTROL=/private-mock-only
                              "do-not-touch\n")
 
     def test_rootless_failed_owned_partition_write_is_fail(self):
+        ownership_claim = self.script.index("OWN_NULL=1")
         start = self.script.index('if ! sfdisk --lock --wipe always "$LOWER"')
+        self.assertLess(ownership_claim, start)
         end = self.script.index("\nfi", start) + len("\nfi")
         helper_start = self.script.index("owned_setup_failed() {")
         helper_end = self.script.index("\n}", helper_start) + len("\n}")

@@ -7601,8 +7601,10 @@ rule, PARTUUID and DEVPATH remain in root-owned private failure evidence;
 public diagnostics carry only phase, original errno when observable (or
 `unavailable`), expected and observed identity classes, ownership status,
 and the next read-only inspection action. A definitely failed setup operation
-after fresh null_blk creation is FAIL, not preclaim BLOCKED; missing exact udev
-publication retains the owned resource in quarantine. Initialize only
+after fresh null_blk creation is FAIL, not preclaim BLOCKED. Missing exact udev
+publication after otherwise successful commands is not a proven owned-operation
+failure: it remains BLOCKED, quarantines the claimed resource and private
+evidence, and can never be promoted to PASS. Initialize only
 that RAM partition using the portable plain `mkswap <partition>` form; do not
 pass `--no-discard`, which is not an `mkswap` option.
 The primary-lifecycle fixture has a valid SWAPZ header before creating its
