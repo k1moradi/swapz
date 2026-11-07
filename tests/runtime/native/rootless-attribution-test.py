@@ -23,6 +23,7 @@ PACKAGE_PHASE = "tests/runtime/native/package-dkms-test.py"
 PRIMARY_PHASE = "tests/runtime/native/primary-real-swap-test.py"
 OWNERSHIP_PHASE = "tests/runtime/native/primary-real-swap-parent-ownership-test.py"
 GENERATOR_PHASE = "tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py"
+LIFECYCLE_PHASE = "tests/runtime/native/primary-lifecycle-audit-test.py"
 PRIVATE_SENTINEL = "PRIVATE_ONLY_TRACEBACK_PAYLOAD"
 GENERATOR_SUBTEST_SENTINEL = "PRIVATE_GENERATOR_SUBTEST_PAYLOAD"
 LATER_TEARDOWN_SENTINEL = "LATER_TEARDOWN_PRIVATE_PAYLOAD"
@@ -33,7 +34,7 @@ FIXTURE = r'''
 python3() {
   [[ $# == 3 && $1 == -B && $3 == -v ]] || return 89
   case "$2" in
-    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py|tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py) ;;
+    tests/runtime/native/package-dkms-test.py|tests/runtime/native/primary-real-swap-test.py|tests/runtime/native/primary-real-swap-parent-ownership-test.py|tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py|tests/runtime/native/primary-lifecycle-audit-test.py) ;;
     *) return 89 ;;
   esac
   printf 'SYNTHETIC_STDOUT\n'
@@ -70,6 +71,27 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 unittest.main(verbosity=2)
 PY
       return $? ;;
+    lifecycle_ordered)
+      # A foreign expected failure and a later cleanup ERROR cannot replace
+      # the active suite's first failing unittest identity or donate errno.
+      printf '%s\n' \
+        "test_expected (__main__.PackageLifecycle.test_expected) ... FAIL" \
+        "test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry) ... FAIL" \
+        "test_cleanup (__main__.PrimaryOwnerReleaseDurabilityTest.test_cleanup) ... ERROR" \
+        '======================================================================' \
+        "ERROR: test_cleanup (__main__.PrimaryOwnerReleaseDurabilityTest.test_cleanup)" \
+        'OSError: [Errno 13] LATER_TEARDOWN_PRIVATE_PAYLOAD' \
+        '======================================================================' \
+        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        '======================================================================' >&2
+      return 37 ;;
+    lifecycle_foreign_only)
+      printf '%s\n' \
+        "test_expected (__main__.PackageLifecycle.test_expected) ... FAIL" \
+        "FAIL: test_expected (__main__.PackageLifecycle.test_expected)" \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' >&2
+      return 39 ;;
     primary_ordered)
       printf '%s\n' \
         "FAIL: test_oracle_first (__main__.PrimaryRealSwapContracts.test_oracle_first)" \
@@ -373,6 +395,11 @@ class RootlessAttribution(unittest.TestCase):
             "rootless_phase='tests/runtime/native/primary-real-swap-oracle-terminal-test.py'",
             primary_end)
         cls.ownership_stage = source[primary_end:ownership_end]
+        lifecycle_begin = source.index(f"rootless_phase='{LIFECYCLE_PHASE}'")
+        lifecycle_end = source.index(
+            "rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'",
+            lifecycle_begin)
+        cls.lifecycle_stage = source[lifecycle_begin:lifecycle_end]
         generator_begin = source.index(f"rootless_phase='{GENERATOR_PHASE}'")
         generator_end = source.index(
             "rootless_phase='tests/runtime/native/physical-swap-probe-test.py'",
@@ -382,6 +409,8 @@ class RootlessAttribution(unittest.TestCase):
         assert cls.ownership_stage.count(
             f"python3 -B {OWNERSHIP_PHASE} -v") == 1
         assert source.count(f"python3 -B {GENERATOR_PHASE} -v") == 1
+        assert source.count(f"python3 -B {LIFECYCLE_PHASE} -v") == 1
+        assert cls.lifecycle_stage.count(f"python3 -B {LIFECYCLE_PHASE} -v") == 1
         assert cls.generator_stage.count(
             f"python3 -B {GENERATOR_PHASE} -v") == 1
         assert cls.primary_stage.count(
@@ -434,7 +463,8 @@ class RootlessAttribution(unittest.TestCase):
                PACKAGE_PHASE: self.package_stage,
                PRIMARY_PHASE: self.primary_stage,
                OWNERSHIP_PHASE: self.ownership_stage,
-               GENERATOR_PHASE: self.generator_stage}[stage]
+               GENERATOR_PHASE: self.generator_stage,
+               LIFECYCLE_PHASE: self.lifecycle_stage}[stage]
             + "printf 'AFTER_PACKAGE\\n'\n"
         )
         environment = dict(os.environ)
@@ -800,6 +830,33 @@ exec "$SWAPZ_REAL_RM" "$@"
         evidence = log.read_text()
         self.assertIn(GENERATOR_SUBTEST_SENTINEL, evidence)
         self.assertIn("unittest_kind=FAIL\n", evidence)
+
+    def test_lifecycle_audit_first_failure_survives_foreign_and_cleanup(self):
+        result = self.invoke("lifecycle_ordered", stage=LIFECYCLE_PHASE)
+        log = self.assert_report(
+            result, status=37, reason="unittest_assertion",
+            test="test_committed_journal_then_verified_package_recovery_allows_reentry",
+            stage=LIFECYCLE_PHASE)
+        evidence = log.read_text()
+        self.assertIn("unittest_kind=FAIL\\n", evidence)
+        self.assertIn("first_errno=unavailable\\n", evidence)
+        self.assertIn(PRIVATE_SENTINEL, evidence)
+        self.assertIn(LATER_TEARDOWN_SENTINEL, evidence)
+        self.assertNotIn("AFTER_PACKAGE", result.stdout)
+
+    def test_lifecycle_audit_foreign_unittest_cannot_claim_failure(self):
+        result = self.invoke("lifecycle_foreign_only", stage=LIFECYCLE_PHASE)
+        log = self.assert_report(
+            result, status=39, reason="nonzero_exit", stage=LIFECYCLE_PHASE)
+        self.assertIn(PRIVATE_SENTINEL, log.read_text())
+        self.assertIn("unittest_kind=unavailable\\n", log.read_text())
+
+    def test_lifecycle_audit_pass_preserves_streams(self):
+        result = self.invoke("pass", stage=LIFECYCLE_PHASE)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "SYNTHETIC_STDOUT\\nAFTER_PACKAGE\\n")
+        self.assertEqual(result.stderr, "SYNTHETIC_STDERR\\n")
+        self.assertEqual(list(self.root.glob("build/tests/rootless-failure.*")), [])
 
     def test_primary_pass_preserves_streams_and_removes_capture(self):
         result = self.invoke("pass", stage=PRIMARY_PHASE)

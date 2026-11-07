@@ -138,8 +138,8 @@ finish_rootless_private_stderr_capture() {
 classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
-  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\.(test_[A-Za-z0-9_]{1,96})\\)"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local simple_phase_context_regex="^ \\(phase='([a-z0-9_-]{1,64})'\\)$"
   # Other generator subtest keys identify a failed method, never public data.
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
@@ -151,7 +151,7 @@ classify_rootless_private_unittest_failure() {
   # first PackageLifecycle failure, never arbitrary child exception text.
   local package_timeout_regex='^PackageInvocationTimeout: SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant=(uncompressed|unknown|mixed|[.](zst|xz|gz)) operation=(install|uninstall|recover) elapsed_seconds=[0-9]{1,5}[.][0-9]{3} budget_seconds=[0-9]{1,5}([.][0-9]{1,3})? budget_reason=(ordinary_fixture_watchdog|compressed_dkms_durable_io|explicit_test_watchdog) final_process_disposition=(reaped_exit_-?[0-9]{1,3}|kill_sent_reap_timeout) first_cause=fixture_watchdog_expired$'
   local errno_candidate
-  local expected_unittest_class=
+  local expected_unittest_classes=
   local progress_context=
   local first_progress_kind=
   local first_progress_test=
@@ -170,13 +170,16 @@ classify_rootless_private_unittest_failure() {
   # Expected negative tests may relay stderr from a different unittest class.
   case $rootless_phase in
     'tests/runtime/native/package-dkms-test.py')
-      expected_unittest_class=PackageLifecycle ;;
+      expected_unittest_classes=PackageLifecycle ;;
+    'tests/runtime/native/primary-lifecycle-audit-test.py')
+      # This suite registers four source-controlled unittest classes.
+      expected_unittest_classes='PrimaryLifecycleBehaviorTest:PrimaryLifecycleSourceGuardTest:PackageCrashToPrimaryAdmissionTest:PrimaryOwnerReleaseDurabilityTest' ;;
     'tests/runtime/native/primary-real-swap-test.py')
-      expected_unittest_class=PrimaryRealSwapContracts ;;
+      expected_unittest_classes=PrimaryRealSwapContracts ;;
     'tests/runtime/native/primary-real-swap-parent-ownership-test.py')
-      expected_unittest_class=SourceAdmissionPeerOwnership ;;
+      expected_unittest_classes=SourceAdmissionPeerOwnership ;;
     'tests/runtime/native/systemd/swapz-primary-generator-transaction-test.py')
-      expected_unittest_class=GeneratorPublicationTest ;;
+      expected_unittest_classes=GeneratorPublicationTest ;;
     *) return 0 ;;
   esac
 
@@ -186,7 +189,7 @@ classify_rootless_private_unittest_failure() {
   # a later teardown error cannot replace the primary assertion.
   while IFS= read -r line || [[ -n $line ]]; do
     if [[ $line =~ $progress_regex ]]; then
-      [[ ${BASH_REMATCH[2]} == "$expected_unittest_class" &&
+      [[ ":$expected_unittest_classes:" == *":${BASH_REMATCH[2]}:"* &&
          ${BASH_REMATCH[3]} == "${BASH_REMATCH[1]}" ]] || continue
       first_progress_test=${BASH_REMATCH[1]}
       progress_context=${BASH_REMATCH[4]}
@@ -196,7 +199,7 @@ classify_rootless_private_unittest_failure() {
       if [[ $progress_context =~ $simple_phase_context_regex ]]; then
         first_progress_subtest=${BASH_REMATCH[1]}
       fi
-    elif [[ $expected_unittest_class == GeneratorPublicationTest &&
+    elif [[ $expected_unittest_classes == GeneratorPublicationTest &&
             $line =~ $generator_progress_regex ]]; then
       [[ ${BASH_REMATCH[2]} == "${BASH_REMATCH[1]}" ]] || continue
       # Report only the allowlisted method; arbitrary subtest details stay private.
@@ -215,7 +218,7 @@ classify_rootless_private_unittest_failure() {
       if [[ $line =~ $detailed_header_regex ]]; then
         header_kind=${BASH_REMATCH[1]}
         header_test=${BASH_REMATCH[2]}
-        [[ ${BASH_REMATCH[3]} == "$expected_unittest_class" &&
+        [[ ":$expected_unittest_classes:" == *":${BASH_REMATCH[3]}:"* &&
            ${BASH_REMATCH[4]} == "$header_test" ]] || continue
         header_subtest=unavailable
         if [[ $line =~ $subtest_regex ]]; then
@@ -254,7 +257,7 @@ classify_rootless_private_unittest_failure() {
     fi
     [[ $line == '======================================================================' ]] && break
     if [[ $line == *"subprocess.TimeoutExpired:"* ]] ||
-       [[ $expected_unittest_class == PackageLifecycle &&
+       [[ $expected_unittest_classes == PackageLifecycle &&
           $line =~ $package_timeout_regex ]]; then
       rootless_classified_reason=unittest_timeout
     elif [[ $rootless_classified_errno == unavailable &&
@@ -432,13 +435,13 @@ report_rootless_failure() {
              }
              if (target_test != "unavailable" &&
                  target_kind != "unavailable") {
-               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\." target_test "\\)"
+               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\." target_test "\\)"
                if (text !~ pattern) return 0
                if (target_subtest != "unavailable" &&
                    text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
                return 1
              }
-             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\.test_[A-Za-z0-9_]+\)/
+             return text ~ /^(FAIL|ERROR): test_[A-Za-z0-9_]+ \(__main__\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\.test_[A-Za-z0-9_]+\)/
            }
            function target_ends(text) {
              if (compile_mode) {
@@ -635,7 +638,17 @@ rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/resource-pressure-cleanup-ownership-test.py -v
 rootless_phase='tests/runtime/native/primary-lifecycle-audit-test.py'
 rootless_phase_started_seconds=$SECONDS
-python3 -B tests/runtime/native/primary-lifecycle-audit-test.py -v
+# Preserve the first failure across multiple unittest classes. Any traceback
+# and subtest payload remain confined to the mode-0600 private capture.
+begin_rootless_private_stderr_capture
+rootless_audit_command_line=$LINENO
+if python3 -B tests/runtime/native/primary-lifecycle-audit-test.py -v \
+    2>&"$rootless_capture_input_fd"; then
+  rootless_audit_exit_code=0
+else
+  rootless_audit_exit_code=$?
+fi
+finish_and_report_rootless_unittest "$rootless_audit_exit_code" "$rootless_audit_command_line"
 rootless_phase='tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py'
 rootless_phase_started_seconds=$SECONDS
 python3 -B tests/runtime/native/primary-lifecycle-nullblk-qualifier-test.py -v
