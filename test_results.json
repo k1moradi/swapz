@@ -291,45 +291,45 @@
 "rows": [
 {
 "incremental_select_ns": 625,
-"legacy_dead_probe_ns": 75916,
-"legacy_score_scan_ns": 503744,
+"legacy_dead_probe_ns": 74250,
+"legacy_score_scan_ns": 504335,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 709,
-"relocation_list_ns": 334,
-"relocation_scan_ns": 87124,
+"mapped_dead_probe_ns": 375,
+"relocation_list_ns": 292,
+"relocation_scan_ns": 86625,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2417,
-"legacy_dead_probe_ns": 288496,
-"legacy_score_scan_ns": 1935727,
+"incremental_select_ns": 2791,
+"legacy_dead_probe_ns": 299376,
+"legacy_score_scan_ns": 2064755,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 1208,
-"relocation_list_ns": 375,
-"relocation_scan_ns": 335996,
+"mapped_dead_probe_ns": 2042,
+"relocation_list_ns": 542,
+"relocation_scan_ns": 343959,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 15208,
-"legacy_dead_probe_ns": 1264319,
-"legacy_score_scan_ns": 9126101,
+"incremental_select_ns": 15417,
+"legacy_dead_probe_ns": 1308378,
+"legacy_score_scan_ns": 8326603,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 7959,
-"relocation_list_ns": 750,
-"relocation_scan_ns": 1481149,
+"mapped_dead_probe_ns": 4375,
+"relocation_list_ns": 709,
+"relocation_scan_ns": 1505087,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 62124,
-"legacy_dead_probe_ns": 7557537,
-"legacy_score_scan_ns": 57828670,
+"incremental_select_ns": 61334,
+"legacy_dead_probe_ns": 7812978,
+"legacy_score_scan_ns": 82597621,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 50250,
-"relocation_list_ns": 750,
-"relocation_scan_ns": 8849523,
+"mapped_dead_probe_ns": 50416,
+"relocation_list_ns": 834,
+"relocation_scan_ns": 9168439,
 "segments": 105782,
 "victim_records": 256
 }
@@ -345,12 +345,12 @@
 {
 "inverse_ns_per_page": 153,
 "name": "scalar",
-"transform_ns_per_page": 135
+"transform_ns_per_page": 145
 },
 {
-"inverse_ns_per_page": 75,
+"inverse_ns_per_page": 81,
 "name": "neon",
-"transform_ns_per_page": 83
+"transform_ns_per_page": 73
 }
 ],
 "classifier": {
@@ -360,9 +360,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 28,
+"ns_per_page": 30,
 "sample_pairs": 32,
-"scalar_ns_per_page": 28,
+"scalar_ns_per_page": 30,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -377,7 +377,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1948
+"wall_ns_per_page": 2030
 },
 {
 "acceleration": 2,
@@ -385,7 +385,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1914
+"wall_ns_per_page": 1885
 },
 {
 "acceleration": 3,
@@ -393,7 +393,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1777
+"wall_ns_per_page": 1810
 },
 {
 "acceleration": 4,
@@ -401,7 +401,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1660
+"wall_ns_per_page": 1789
 }
 ],
 "negative_pages": 256,
@@ -418,9 +418,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1416,
-"modeled_wall_ns_total": 816128,
-"ns_per_saved_block": 15694,
+"modeled_wall_ns_per_page": 1441,
+"modeled_wall_ns_total": 830464,
+"ns_per_saved_block": 15970,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -485,14 +485,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16131,
+"ns_per_saved_block": 16412,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1596,
-"routed_cpu_ns_total": 919484,
+"routed_cpu_ns_per_page": 1624,
+"routed_cpu_ns_total": 935536,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -540,14 +540,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16205,
+"ns_per_saved_block": 16488,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1547,
-"routed_cpu_ns_total": 891296,
+"routed_cpu_ns_per_page": 1574,
+"routed_cpu_ns_total": 906880,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -595,14 +595,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15694,
+"ns_per_saved_block": 15970,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1416,
-"routed_cpu_ns_total": 816128,
+"routed_cpu_ns_per_page": 1441,
+"routed_cpu_ns_total": 830464,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -650,14 +650,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15694,
+"ns_per_saved_block": 15970,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1416,
-"routed_cpu_ns_total": 816128,
+"routed_cpu_ns_per_page": 1441,
+"routed_cpu_ns_total": 830464,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -705,14 +705,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15694,
+"ns_per_saved_block": 15970,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1416,
-"routed_cpu_ns_total": 816128,
+"routed_cpu_ns_per_page": 1441,
+"routed_cpu_ns_total": 830464,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -729,17 +729,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 75,
+"inverse_ns_per_page": 81,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
 "scalar_inverse_ns_per_page": 153,
-"scalar_transform_ns_per_page": 135,
-"second_lz4_ns_per_page": 3049,
+"scalar_transform_ns_per_page": 145,
+"second_lz4_ns_per_page": 3111,
 "transform_backend": "neon",
-"transform_ns_per_page": 83
+"transform_ns_per_page": 73
 }
 ]
 }
@@ -753,31 +753,31 @@
 "status": "UNAVAILABLE"
 },
 "kernel_release": "7.0.0-43-generic",
-"overall": "FAIL",
+"overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "29bf266a60b1aa2e124919573381c0f19fca94569a2a6096ffb596b830fbd968",
-"module_sha256": "79f129d7453de2a40f480bd1b9ff9202eabac510afd7d77b48e3330291798b70",
+"formatter_sha256": "e591e81a19742742b9b3952bdd71b363e10600eaa85b8970b6c201fcefbd5bb6",
+"module_sha256": "c7fd85571cc81eccf178db15ef003a035729572e48e52e18d0d04a7fa8ff629b",
 "oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "fc36ebee08c1a087f338b1741202f2e62a313399",
+"source_sha": "98b6fd109896ffa64aa921e81ac621e494258e16",
 "stages": [
 {
-"elapsed_s": 2.055,
+"elapsed_s": 1.994,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 285.554,
+"elapsed_s": 275.453,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.199,
+"elapsed_s": 0.194,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
@@ -789,9 +789,9 @@
 "status": "PASS"
 },
 {
-"diagnostic": "FAIL_PRIMARY_NULLBLK_LIFECYCLE: prepare refusal emitted unexpected sideband diagnostics",
-"elapsed_s": 12.29,
-"exit_code": 1,
+"diagnostic": "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: coordinator preparation phase=cross-namespace-mount-inventory errno=11 error=Resource temporarily unavailable; mount_step=init-root",
+"elapsed_s": 12.336,
+"exit_code": 2,
 "failed_phase": "owned RAM primary lifecycle prepare",
 "name": "Owned RAM smoke + mixed/QD pilot",
 "signals": [
@@ -814,10 +814,10 @@
 "PASS_LOADED_PACKED_PLACEMENT",
 "PASS_LOADED_COMPLETION_HANDOFF",
 "PASS_LOADED_OWNED_NULLBLK_SMOKE",
-"FAIL_PRIMARY_NULLBLK_LIFECYCLE"
+"BLOCKED_PRIMARY_NULLBLK_LIFECYCLE"
 ],
-"status": "FAIL"
+"status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "fc36ebee08c1a087f338b1741202f2e62a313399"
+"tested_commit_sha": "98b6fd109896ffa64aa921e81ac621e494258e16"
 }
