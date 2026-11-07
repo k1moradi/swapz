@@ -183,10 +183,13 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
                         "page": page_index,
                         "byte": differences[0],
                     })
+            # The full 4 KiB comparison is complete before the writable probe
+            # below. Count it now so a later write fault cannot under-report
+            # compared page/byte totals or hide already-observed corruption.
+            verified_pages += 1
             # Store the expected value after reading the entire page: this
             # forces a writable fault after swap-in without hiding corruption.
             allocation[offset] = expected[0]
-            verified_pages += 1
         actual_digest = observed_digest.hexdigest()
         expected_hex = expected_digest.hexdigest()
         verification_record = {

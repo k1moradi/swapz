@@ -38,9 +38,9 @@ class TerminalEvidenceContracts(unittest.TestCase):
 
     def run_fixture(self, *, short_read=False, interrupted=False, corrupt=False,
                     corrupt_pages=(), corrupt_offsets=(), page_count=2,
-                    read_errno=None, report_errno=None, close_fails=False,
-                    closed_output_at=None, verify_command="VERIFY",
-                    verify_read_error=None):
+                    read_errno=None, write_errno=None, report_errno=None,
+                    close_fails=False, closed_output_at=None,
+                    verify_command="VERIFY", verify_read_error=None):
         class AnonymousMemoryFixture:
             def __init__(self):
                 self.contents = bytearray(page_count * oracle.PAGE_BYTES)
@@ -59,6 +59,9 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 return self.contents[key]
 
             def __setitem__(self, key, value):
+                if (self.verify_started and write_errno is not None and
+                        isinstance(key, int) and key == 0):
+                    raise OSError(write_errno, "synthetic page write error")
                 self.contents[key] = value
 
             def close(self):
@@ -250,6 +253,28 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 self.assertIn(subsequent_failure, stderr)
                 self.assertIn("[Errno 9] synthetic close error", stderr)
                 self.assertNotIn("ab" * 16, stderr)
+
+    def test_detected_corruption_counts_page_before_same_page_write_failure(self):
+        status, stdout, stderr, allocation = self.run_fixture(
+            corrupt=True, write_errno=errno.EIO, close_fails=True)
+        self.assertEqual(status, 1)
+        self.assertFalse(allocation.closed)
+        self.assertEqual(
+            [line.partition("=")[0] for line in stdout.splitlines()],
+            ["ORACLE_WAITING", "ORACLE_FILLED"])
+        self.assertIn(
+            "phase=verify verified_pages=1/2 verified_bytes=4096/8192",
+            stderr)
+        self.assertIn(
+            "expected_page_mismatches=0 observed_page_mismatches=1", stderr)
+        self.assertIn(
+            "expected_byte_mismatches=0 observed_byte_mismatches=1", stderr)
+        self.assertIn(
+            "error=byte_mismatch errno=none cleanup_complete=false", stderr)
+        self.assertIn("[Errno 5] synthetic page write error", stderr)
+        self.assertIn("[Errno 9] synthetic close error", stderr)
+        self.assertNotIn("ORACLE_VERIFIED=", stdout)
+        self.assertNotIn("ab" * 16, stderr)
 
     def test_integrity_mismatch_remains_primary_after_unmap_failure(self):
         status, stdout, stderr, allocation = self.run_fixture(
