@@ -3730,6 +3730,62 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("PRIVATE_SUBPROCESS_COMMAND",
                                  console.getvalue())
 
+    def test_failure_console_reports_source_bound_recovery_error(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        method = "test_claimed_pre_mutation_recovery_uses_immutable_pair_binding"
+        phase = "physical-swap-probe-test.py"
+        transcript = (
+            f"{method} (__main__.PhysicalSwapProbeTests.{method}) ... ERROR\n"
+            "======================================================================\n"
+            f"ERROR: {method} (__main__.PhysicalSwapProbeTests.{method})\n"
+            "Traceback (most recent call last):\n"
+            f'  File "/private/HOST/tests/runtime/native/{phase}", line 435, '
+            f'in {method}\n'
+            '  File "/private/HOST/tests/tools/physical-swap-probe.py", '
+            'line 2504, in recover\n'
+            '  File "/private/HOST/tests/tools/physical-swap-probe.py", '
+            'line 2368, in _require_recovery_results_binding\n'
+            "physical_swap_probe.ProbeError: saved physical results/state "
+            "binding mismatch: run_id; "
+            "safe_next_step=inspect_records_read_only\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 20 tests in 2s\n"
+            "FAILED (errors=1)\n"
+            f"FAIL: rootless phase={phase} subtest=unavailable "
+            "test=unavailable exit=1 reason=nonzero_exit phase_s=2 stage_s=8 "
+            "line=731 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        expected = [
+            f"First failing unittest: {method}",
+            f"Location: {phase}:435",
+            "Cause location: physical-swap-probe.py:2368",
+            "Exception: physical_swap_probe.ProbeError",
+            "Recovery binding mismatch: run_id; action=inspect_records_read_only",
+        ]
+        self.assertEqual(
+            runner.first_unittest_failure_details(transcript), expected)
+        console = io.StringIO()
+        with patch.object(
+                runner.subprocess, "run", return_value=SimpleNamespace(
+                    stdout=transcript, returncode=1)), \
+                patch.object(runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(console):
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"],
+                {"stages": []}), 1)
+        for fact in expected:
+            self.assertIn("        " + fact, console.getvalue())
+        self.assertNotIn("/private/HOST", console.getvalue())
+        hostile = transcript.replace(
+            "binding mismatch: run_id;",
+            "binding mismatch: secret_private_token;")
+        safe = runner.first_unittest_failure_details(hostile)
+        self.assertNotIn("secret_private_token", "\n".join(safe))
+        self.assertNotIn("Recovery binding mismatch:", "\n".join(safe))
+
     def test_failure_console_assertions_show_safe_expected_and_observed(self):
         # Reproduce the originally hidden nullblk fixture nounset failure.
         # The actual stderr may contain private paths and keys.

@@ -51,6 +51,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         results_path = state_dir / probe.RESULTS_NAME
         results = json.loads(results_path.read_text())
         for state_field, result_field in (
+                ("run_id", "run_id"),
                 ("source_sha", "source_commit_sha"),
                 ("helper_git_sha", "helper_git_sha"),
                 ("helper_sha256", "helper_sha256"),
@@ -408,6 +409,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     (state_dir / probe.RESULTS_NAME).read_text())
                 self.assertEqual(
                     results["ownership_phase"], ownership_phase)
+                self.assertEqual(results["run_id"], state["run_id"])
 
                 target = {
                     "device": state["device"], "major": state["major"],

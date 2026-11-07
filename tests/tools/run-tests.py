@@ -3026,13 +3026,46 @@ def first_unittest_failure_details(output):
         basename = Path(location.group(1)).name
         if re.fullmatch(r"[A-Za-z0-9_-]{1,100}\.py", basename):
             details.append(f"Location: {basename}:{location.group(2)}")
+    # An authenticated recovery-test traceback can reveal the exact internal
+    # source line without exposing the host checkout path or any device name.
+    if first_header.group(3) == "PhysicalSwapProbeTests":
+        recovery_frames = re.findall(
+            r'(?m)^[ \t]*File "[^"\r\n]{0,380}[/\\]tests[/\\]tools'
+            r'[/\\]physical-swap-probe[.]py", line ([1-9][0-9]{0,6}), '
+            r'in [A-Za-z_][A-Za-z0-9_]{0,95}$',
+            traceback)
+        if recovery_frames:
+            details.append(
+                f"Cause location: physical-swap-probe.py:{recovery_frames[-1]}")
     exception = re.search(
         r"(?m)^(AssertionError|PackageInvocationTimeout|"
+        r"physical_swap_probe[.]ProbeError|"
         r"subprocess[.]TimeoutExpired|TimeoutExpired|"
         r"[A-Za-z][A-Za-z0-9_]{0,60}"
         r"(?:Error|Exception|Failure))(?::|$)", traceback)
     if exception:
         details.append("Exception: " + exception.group(1))
+        # Field names are finite, source-controlled recovery binding keys.
+        # Never print actual values, host paths or unrecognized child fields.
+        if (first_header.group(3) == "PhysicalSwapProbeTests" and
+                exception.group(1) == "physical_swap_probe.ProbeError"):
+            binding_error = re.search(
+                r"(?m)^physical_swap_probe[.]ProbeError: "
+                r"saved physical results/state binding mismatch: "
+                r"([a-z_]{1,48}); "
+                r"safe_next_step=inspect_records_read_only$",
+                traceback)
+            if (binding_error and binding_error.group(1) in {
+                    "run_id", "source_commit_sha", "helper_git_sha",
+                    "helper_sha256", "device_uuid_path", "canonical_device",
+                    "partuuid", "device_size_bytes", "original_header_sha256",
+                    "dm_name", "dm_uuid", "parent_major_minor", "parent_model",
+                    "parent_transport", "parent_size_bytes",
+                    "parent_removable", "card_identity_sha256",
+                    "swap_was_active", "ownership_phase"}):
+                details.append(
+                    "Recovery binding mismatch: " + binding_error.group(1)
+                    + "; action=inspect_records_read_only")
     # Only derive assertion specifics from a recognized first error.
     # Raw expected/actual payloads remain in the existing private log.
     if exception and exception.group(1) == "AssertionError":

@@ -1959,6 +1959,13 @@ expectations (bounded phase/ownership/status markers, short values and fixed
 failure categories). Source-matched package crash subtests additionally
 report only the finite install/uninstall action and durable checkpoint phase,
 and name subprocess.TimeoutExpired by class without showing its command.
+Authenticated PhysicalSwapProbeTests recovery failures additionally show the
+deepest source-controlled physical-swap-probe.py frame (basename and line),
+physical_swap_probe.ProbeError class, and allowlisted immutable binding field.
+They never expose mismatching state values, private host paths or unrecognized
+field names. Synthetic recovery fixtures must populate the same immutable
+run_id in both the state and results records, without weakening the real
+recovery binding validator.
 Comparisons of two exact fixed sanitized markers (for example, a withheld
 unittest identity versus a private-exception omission marker) show both
 observed and expected fixed states without exposing arbitrary child text.
