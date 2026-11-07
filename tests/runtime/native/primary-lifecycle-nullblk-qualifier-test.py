@@ -2495,6 +2495,8 @@ int main(int argc, char **argv)
                     ("bad-dmi-hex", machine_id, b"G" + product_uuid[1:]),
                     ("bad-dmi-hyphens", machine_id,
                      product_uuid.replace(b"-", b"")),
+                    ("extra-dmi-group", machine_id,
+                     b"ABCDEF12-3456-7890-ABCD-1234-EF1234567890"),
                     ("dmi-crlf", machine_id, product_uuid + b"\r\n"),
                     ("double-dmi-newline", machine_id,
                      product_uuid + b"\n\n"),

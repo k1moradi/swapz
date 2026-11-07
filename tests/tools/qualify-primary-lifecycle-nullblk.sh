@@ -1617,7 +1617,7 @@ elif os.environ["HOST_ARCH"] == "x86_64":
     product_uuid = trusted_host_record(
         "/sys/class/dmi/id/product_uuid", 40,
         rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-        rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+        rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
     identity = b"swapz-host-v2\0" + product_uuid + machine
 else:
     raise SystemExit(2)
