@@ -249,46 +249,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 1208,
-"legacy_dead_probe_ns": 118126,
-"legacy_score_scan_ns": 1005256,
+"incremental_select_ns": 1083,
+"legacy_dead_probe_ns": 111876,
+"legacy_score_scan_ns": 946547,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 875,
-"relocation_list_ns": 541,
-"relocation_scan_ns": 152959,
+"mapped_dead_probe_ns": 834,
+"relocation_list_ns": 375,
+"relocation_scan_ns": 143584,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 4334,
-"legacy_dead_probe_ns": 467502,
-"legacy_score_scan_ns": 3939355,
+"incremental_select_ns": 4625,
+"legacy_dead_probe_ns": 448419,
+"legacy_score_scan_ns": 4549316,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2500,
-"relocation_list_ns": 875,
-"relocation_scan_ns": 626504,
+"mapped_dead_probe_ns": 2375,
+"relocation_list_ns": 709,
+"relocation_scan_ns": 582712,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 17334,
-"legacy_dead_probe_ns": 1752385,
-"legacy_score_scan_ns": 14301622,
+"incremental_select_ns": 16833,
+"legacy_dead_probe_ns": 1784343,
+"legacy_score_scan_ns": 17049216,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 11708,
-"relocation_list_ns": 916,
-"relocation_scan_ns": 2811016,
+"mapped_dead_probe_ns": 8250,
+"relocation_list_ns": 1084,
+"relocation_scan_ns": 2613306,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 112584,
-"legacy_dead_probe_ns": 11745399,
-"legacy_score_scan_ns": 98731763,
+"incremental_select_ns": 105959,
+"legacy_dead_probe_ns": 11212394,
+"legacy_score_scan_ns": 92724291,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 55376,
+"mapped_dead_probe_ns": 55209,
 "relocation_list_ns": 1083,
-"relocation_scan_ns": 15110085,
+"relocation_scan_ns": 14576620,
 "segments": 105782,
 "victim_records": 256
 }
@@ -298,14 +298,14 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 197,
+"inverse_ns_per_page": 218,
 "name": "scalar",
-"transform_ns_per_page": 199
+"transform_ns_per_page": 222
 },
 {
-"inverse_ns_per_page": 107,
+"inverse_ns_per_page": 191,
 "name": "neon",
-"transform_ns_per_page": 106
+"transform_ns_per_page": 177
 }
 ],
 "classifier": {
@@ -315,9 +315,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 51,
+"ns_per_page": 52,
 "sample_pairs": 32,
-"scalar_ns_per_page": 51,
+"scalar_ns_per_page": 52,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -332,7 +332,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 3110
+"wall_ns_per_page": 2255
 },
 {
 "acceleration": 2,
@@ -340,7 +340,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 3693
+"wall_ns_per_page": 2072
 },
 {
 "acceleration": 3,
@@ -348,7 +348,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 3196
+"wall_ns_per_page": 2247
 },
 {
 "acceleration": 4,
@@ -356,7 +356,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 2425
+"wall_ns_per_page": 2271
 }
 ],
 "negative_pages": 256,
@@ -373,9 +373,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1817,
-"modeled_wall_ns_total": 1046784,
-"ns_per_saved_block": 20130,
+"modeled_wall_ns_per_page": 1761,
+"modeled_wall_ns_total": 1014784,
+"ns_per_saved_block": 19515,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -440,14 +440,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20672,
+"ns_per_saved_block": 20037,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 2045,
-"routed_cpu_ns_total": 1178355,
+"routed_cpu_ns_per_page": 1982,
+"routed_cpu_ns_total": 1142164,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -495,14 +495,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20772,
+"ns_per_saved_block": 20134,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1983,
-"routed_cpu_ns_total": 1142472,
+"routed_cpu_ns_per_page": 1922,
+"routed_cpu_ns_total": 1107424,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -550,14 +550,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20130,
+"ns_per_saved_block": 19515,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1817,
-"routed_cpu_ns_total": 1046784,
+"routed_cpu_ns_per_page": 1761,
+"routed_cpu_ns_total": 1014784,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -605,14 +605,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20130,
+"ns_per_saved_block": 19515,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1817,
-"routed_cpu_ns_total": 1046784,
+"routed_cpu_ns_per_page": 1761,
+"routed_cpu_ns_total": 1014784,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -660,14 +660,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 20130,
+"ns_per_saved_block": 19515,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1817,
-"routed_cpu_ns_total": 1046784,
+"routed_cpu_ns_per_page": 1761,
+"routed_cpu_ns_total": 1014784,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -684,17 +684,17 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 107,
+"inverse_ns_per_page": 191,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 197,
-"scalar_transform_ns_per_page": 199,
-"second_lz4_ns_per_page": 3881,
+"scalar_inverse_ns_per_page": 218,
+"scalar_transform_ns_per_page": 222,
+"second_lz4_ns_per_page": 3683,
 "transform_backend": "neon",
-"transform_ns_per_page": 106
+"transform_ns_per_page": 177
 }
 ]
 }
@@ -711,23 +711,23 @@
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "94f537e8e58daa3ebc1afa014c3aea1d8f79b1c50220b33d0d2962230267762f",
-"module_sha256": "827e2abbffac0cadb3422c208d620ce66906bddf43c99e6ce2193cd434631a94",
+"formatter_sha256": "fce10ace2093b0a08db960592ae702c91cf2571dda661a5e70691c978a018085",
+"module_sha256": "e9e6aac853d9bd473680abe4ca7fe6d8147580d0e42de4a136b63e945af564c2",
 "oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "f419ec50d81c0de1a0bb7d67c8dab6fd0d7144f9",
+"source_sha": "b1452d7350f7591c0c92e59a1f005f39b59e3fbf",
 "stages": [
 {
-"elapsed_s": 3.574,
+"elapsed_s": 3.31,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Unit test failed: test_malformed_private_message_reaps_real_child_and_redacts_payload; child_exit=1 reason=unittest_error subtest=unavailable test=test_malformed_private_message_reaps_real_child_and_redacts_payload log=build/tests/rootless-failure.X9PCxUJ9/diagnostic.log",
-"elapsed_s": 80.216,
+"diagnostic": "Unit test failed: test_malformed_private_message_reaps_real_child_and_redacts_payload; child_exit=1 reason=unittest_error subtest=unavailable test=test_malformed_private_message_reaps_real_child_and_redacts_payload log=build/tests/rootless-failure.5WmEhj9V/diagnostic.log",
+"elapsed_s": 67.06,
 "exit_code": 1,
 "failed_phase": "primary-real-swap-parent-ownership-test.py",
 "name": "Native and rootless contracts",
@@ -739,5 +739,5 @@
 "status": "FAIL"
 }
 ],
-"tested_commit_sha": "f419ec50d81c0de1a0bb7d67c8dab6fd0d7144f9"
+"tested_commit_sha": "b1452d7350f7591c0c92e59a1f005f39b59e3fbf"
 }
