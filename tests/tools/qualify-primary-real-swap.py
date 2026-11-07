@@ -1542,11 +1542,12 @@ def _read_selector_evidence() -> SelectorEvidence:
 
     phase = "open"
     try:
-        with open(
-                SELECTOR, "rb", buffering=0,
-                opener=lambda path, flags: os.open(
-                    path, flags | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
-        ) as selector_file:
+        selector_file = open(
+            SELECTOR, "rb", buffering=0,
+            opener=lambda path, flags: os.open(
+                path, flags | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        )
+        try:
             phase = "fstat"
             opened = os.fstat(selector_file.fileno())
             _check_selector_info(opened, phase)
@@ -1579,7 +1580,17 @@ def _read_selector_evidence() -> SelectorEvidence:
             if _selector_identity(pathname_info) != inspected_identity:
                 _reject_selector(
                     phase, "unchanged-selector-metadata", "changed-path-metadata")
-            phase = "close"
+        finally:
+            # The stream owns its descriptor; do not mask the first mismatch
+            # or original errno if closing the descriptor also fails.
+            first_error = sys.exc_info()[1]
+            try:
+                selector_file.close()
+            except OSError as close_error:
+                if first_error is None:
+                    _reject_selector(
+                        "close", "descriptor-bound-selector",
+                        "io-error", close_error.errno)
     except OSError as exc:
         _reject_selector(phase, "descriptor-bound-selector", "io-error", exc.errno)
 
@@ -1615,6 +1626,11 @@ def _require_selector_at_policy_use(
     if current_target != target_device or current_parent != parent_device:
         _reject_selector("policy_use", "admitted-target-and-parent",
                          "changed-target-or-parent")
+    # Inspecting the live target can itself race a selector replacement.
+    # End last-use admission with the same opened selector identity.
+    if _read_selector_evidence() != expected:
+        _reject_selector("policy_use", "admitted-selector-identity",
+                         "changed-selector-after-target-inspection")
 
 
 
@@ -4448,6 +4464,10 @@ def _execute_admitted(
                 prior_swap_uuids=swap_uuids,
                 admission=admission,
             )
+            # Revalidate on completion before a later cycle or terminal PASS.
+            _require_selector_at_policy_use(
+                selector_evidence, plan, authorization_snapshot,
+                target_device, target_parent_device)
             run_ids.add(result["run_id"])
             swap_uuids.add(result["linux_swap_uuid"])
             cycles.append(result)
@@ -4516,6 +4536,9 @@ def _execute_admitted(
         # private snapshots. This final admission re-proves that exact source
         # commit is still canonical after the private workspace is removed.
         admission.require("final")
+        _require_selector_at_policy_use(
+            selector_evidence, plan, authorization_snapshot,
+            target_device, target_parent_device)
         if terminal_cleanup is not None:
             terminal_cleanup()
         evidence.finish("PASS", cycles=cycles, result=result)

@@ -334,6 +334,70 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                         qualify.Blocked, "phase=revalidate.*replaced-selector-path"):
                 qualify._read_selector()
 
+    def test_selector_directory_swap_and_first_close_errno(self):
+        for stage, expected in (
+                ("inspect", "phase=fstat.*substituted-inode"),
+                ("opened", "phase=revalidate.*replaced-selector-path")):
+            with self.subTest(stage=stage), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                selected, alternative = root / "selected", root / "alternative"
+                selected.mkdir()
+                alternative.mkdir()
+                selector = selected / "selector"
+                substitute = alternative / "selector"
+                selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+                substitute.write_bytes(b"PARTUUID=aaaaaaaa\n")
+                selector.chmod(0o600)
+                substitute.chmod(0o600)
+
+                def replace_directory():
+                    selected.rename(root / "retired")
+                    alternative.rename(selected)
+
+                injection = ({"after_inspection": replace_directory}
+                             if stage == "inspect" else
+                             {"after_open": replace_directory})
+                with self._selector_fixture(selector, **injection), \
+                        self.assertRaisesRegex(qualify.Blocked, expected):
+                    qualify._read_selector()
+
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o600)
+            normal_open = builtins.open
+            opened = []
+
+            class FailedReadAndClose:
+                def __init__(self, stream):
+                    self.stream = stream
+
+                def fileno(self):
+                    return self.stream.fileno()
+
+                def read(self, _limit):
+                    raise OSError(errno.EIO, "/private/read")
+
+                def close(self):
+                    self.stream.close()
+                    raise OSError(errno.EBADF, "/private/close")
+
+            def intercepted_open(*args, **kwargs):
+                file = FailedReadAndClose(normal_open(*args, **kwargs))
+                opened.append(file)
+                return file
+
+            with self._selector_fixture(selector), \
+                    mock.patch.object(
+                        qualify, "open", create=True,
+                        side_effect=intercepted_open), \
+                    self.assertRaisesRegex(
+                        qualify.Blocked, "phase=read.*errno=5") as refusal:
+                qualify._read_selector()
+            self.assertTrue(opened[0].stream.closed)
+            self.assertNotIn("/private", str(refusal.exception))
+
     def test_selector_malformed_truncated_non_ascii_and_oversized_block(self):
         with tempfile.TemporaryDirectory() as directory:
             selector = Path(directory) / "selector"
@@ -387,6 +451,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 def read(self, limit):
                     self.action()
                     return self.stream.read(limit)
+
+                def close(self):
+                    self.stream.close()
 
             for action, expected in (
                     (lambda: (_ for _ in ()).throw(
@@ -487,6 +554,73 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify.Blocked, "phase=policy_use.*changed-target-or-parent"):
                     qualify._require_selector_at_policy_use(
                         admitted, {}, contract, (8, 1), (8, 0))
+
+    def test_rootless_cycle_last_use_rejects_stale_target_without_primary_mutation(self):
+        for scenario in ("selector_during_target", "parent_replaced",
+                         "stale_geometry", "failed_identity_io",
+                         "failed_identity_command"):
+            with self.subTest(scenario=scenario), \
+                    tempfile.TemporaryDirectory() as directory:
+                selector = Path(directory) / "selector"
+                replacement = Path(directory) / "replacement"
+                selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+                replacement.write_bytes(b"PARTUUID=aaaaaaaa\n")
+                selector.chmod(0o600)
+                replacement.chmod(0o600)
+                with self._selector_fixture(selector):
+                    admitted = qualify._read_selector_evidence()
+
+                    def inspect_target(*_args):
+                        if scenario == "selector_during_target":
+                            os.replace(replacement, selector)
+                            return Path("/synthetic"), (8, 1), (8, 0)
+                        if scenario == "parent_replaced":
+                            return Path("/synthetic"), (8, 1), (8, 2)
+                        if scenario == "stale_geometry":
+                            raise qualify.Blocked("authorized partition size changed")
+                        if scenario == "failed_identity_io":
+                            raise OSError(errno.EIO, "/private/identity")
+                        raise qualify.QualificationFailure(
+                            "command failed rc=17: /private/identity")
+
+                    admission = mock.Mock()
+                    with mock.patch.object(
+                            qualify, "read_swap_rows", return_value=[]), \
+                            mock.patch.object(
+                                qualify, "_validate_precycle_state"), \
+                            mock.patch.object(
+                                qualify, "_kernel_log_snapshot", return_value=[]), \
+                            mock.patch.object(
+                                qualify, "verify_authorized_target",
+                                side_effect=inspect_target) as target_probe, \
+                            mock.patch.object(qualify, "_primary") as primary, \
+                            self.assertRaises(qualify.Blocked) as refused:
+                        qualify.run_cycle(
+                            1, swapzctl=Path("/synthetic/swapzctl"),
+                            oracle_path=Path("/synthetic/oracle"),
+                            validated_source="2" * 40, plan={},
+                            selector_partuuid="aaaaaaaa",
+                            selector_evidence=admitted,
+                            authorization_snapshot={},
+                            target_device=(8, 1), target_parent_device=(8, 0),
+                            workload_mib=384, resident_mib=128,
+                            swap_limit_mib=384, timeout_seconds=60,
+                            prior_run_ids=set(), prior_swap_uuids=set(),
+                            admission=admission)
+                    primary.assert_not_called()
+                    target_probe.assert_called_once()
+                    admission.require.assert_called_once_with("cycle-1")
+                    self.assertIn("phase=policy_use", str(refused.exception))
+                    self.assertIn("action=BLOCK-before-prepare", str(refused.exception))
+                    self.assertNotIn("/private", str(refused.exception))
+                    if scenario == "selector_during_target":
+                        self.assertIn(
+                            "changed-selector-after-target-inspection",
+                            str(refused.exception))
+                    if scenario == "failed_identity_io":
+                        self.assertIn("errno=5", str(refused.exception))
+                    if scenario == "failed_identity_command":
+                        self.assertIn("status=17", str(refused.exception))
 
     def test_swap_inventory_resolves_block_identity_and_preserves_used_as_volatile(self):
         contents = (
@@ -1337,6 +1471,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     if index == 2:
                         self.assertIn("1" * 32, kwargs["prior_run_ids"])
                     return next(cycle_results)
+                selector_gate = mock.Mock()
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(
                         mock.patch.object(
@@ -1441,6 +1576,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify, "run_cycle",
                             side_effect=fake_cycle))
                     stack.enter_context(
+                        mock.patch.object(
+                            qualify, "_require_selector_at_policy_use",
+                            selector_gate))
+                    stack.enter_context(
                         self.assertRaises(
                             qualify.Blocked if failure_point == "final source change"
                             else qualify.QualificationFailure))
@@ -1458,6 +1597,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertEqual(statuses[-1],
                                  "BLOCKED" if failure_point == "final source change"
                                  else "FAIL")
+                self.assertEqual(
+                    selector_gate.call_count,
+                    2 if failure_point in ("private workspace", "final source change")
+                    else 3)
                 if failure_point == "private workspace":
                     self.assertEqual(workspace_cleanup_calls, [True, True])
                     self.assertEqual(terminal_cleanup_calls, [])
