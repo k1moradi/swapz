@@ -157,7 +157,9 @@ exec sleep 30
         self.assertNotIn("FORGED_CAMPAIGN", safe)
         self.assertNotIn("PRIVATE_DEVICE", safe)
         self.assertNotIn("FORGED_ARRAY", safe)
-        self.assertIn("observed=123456", safe)
+        # Unsafe mixed exception operands are discarded; standalone bounded
+        # numerical assertions above remain available for diagnosis.
+        self.assertNotIn("observed=123456", safe)
         self.assertIn("[private exception detail omitted]", safe)
         numeric = self.diagnostics._ci_safe_line(
             "AssertionError: expected=4096 observed=8192")
