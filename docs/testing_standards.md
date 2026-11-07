@@ -1769,6 +1769,9 @@ and a genuine Python `subprocess.TimeoutExpired`. It must also cover
 first-failure ordering, oversized capture, no-log storage, cleanup failures,
 and privacy of public markers. Explicit shell exits and failing shell
 assertions remain part of the general rootless attribution contract.
+Shell snippets that extract and invoke the classifier must initialize
+`rootless_phase` to the registered suite matching their synthetic unittest
+class; this preserves the active-suite binding under `set -u`.
 These regressions are not substitutes for the single official `make test`.
 
 For direct rootless phases whose stderr was not pre-captured, the official

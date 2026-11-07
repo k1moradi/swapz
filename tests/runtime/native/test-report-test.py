@@ -5870,6 +5870,7 @@ class QualificationReportEvidenceBoundaryTest(unittest.TestCase):
         fixture_script = (
             "set -Eeuo pipefail\n"
             'ROOT="$1"\n'
+            "rootless_phase='tests/runtime/native/package-dkms-test.py'\n"
             "rootless_capture_directory=\nrootless_capture_path=\n"
             "rootless_capture_input_fd=2\nrootless_capture_pid=\n"
             "rootless_private_diagnostic_path=\n"
