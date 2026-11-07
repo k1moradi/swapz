@@ -290,46 +290,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 625,
-"legacy_dead_probe_ns": 74250,
-"legacy_score_scan_ns": 504335,
+"incremental_select_ns": 708,
+"legacy_dead_probe_ns": 76333,
+"legacy_score_scan_ns": 532711,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 375,
-"relocation_list_ns": 292,
-"relocation_scan_ns": 86625,
+"mapped_dead_probe_ns": 583,
+"relocation_list_ns": 417,
+"relocation_scan_ns": 87125,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2791,
-"legacy_dead_probe_ns": 299376,
-"legacy_score_scan_ns": 2064755,
+"incremental_select_ns": 2459,
+"legacy_dead_probe_ns": 289918,
+"legacy_score_scan_ns": 1941844,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 2042,
-"relocation_list_ns": 542,
-"relocation_scan_ns": 343959,
+"mapped_dead_probe_ns": 1208,
+"relocation_list_ns": 500,
+"relocation_scan_ns": 343293,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 15417,
-"legacy_dead_probe_ns": 1308378,
-"legacy_score_scan_ns": 8326603,
+"incremental_select_ns": 10166,
+"legacy_dead_probe_ns": 1180090,
+"legacy_score_scan_ns": 7832039,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 4375,
+"mapped_dead_probe_ns": 7959,
 "relocation_list_ns": 709,
-"relocation_scan_ns": 1505087,
+"relocation_scan_ns": 1377549,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 61334,
-"legacy_dead_probe_ns": 7812978,
-"legacy_score_scan_ns": 82597621,
+"incremental_select_ns": 62167,
+"legacy_dead_probe_ns": 7572372,
+"legacy_score_scan_ns": 50022042,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 50416,
-"relocation_list_ns": 834,
-"relocation_scan_ns": 9168439,
+"mapped_dead_probe_ns": 50500,
+"relocation_list_ns": 792,
+"relocation_scan_ns": 8759293,
 "segments": 105782,
 "victim_records": 256
 }
@@ -343,12 +343,12 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 153,
+"inverse_ns_per_page": 145,
 "name": "scalar",
-"transform_ns_per_page": 145
+"transform_ns_per_page": 136
 },
 {
-"inverse_ns_per_page": 81,
+"inverse_ns_per_page": 82,
 "name": "neon",
 "transform_ns_per_page": 73
 }
@@ -360,9 +360,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 30,
+"ns_per_page": 43,
 "sample_pairs": 32,
-"scalar_ns_per_page": 30,
+"scalar_ns_per_page": 43,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -377,7 +377,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 2030
+"wall_ns_per_page": 1829
 },
 {
 "acceleration": 2,
@@ -385,7 +385,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1885
+"wall_ns_per_page": 1735
 },
 {
 "acceleration": 3,
@@ -393,7 +393,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1810
+"wall_ns_per_page": 1671
 },
 {
 "acceleration": 4,
@@ -401,7 +401,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1789
+"wall_ns_per_page": 1811
 }
 ],
 "negative_pages": 256,
@@ -418,9 +418,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1441,
-"modeled_wall_ns_total": 830464,
-"ns_per_saved_block": 15970,
+"modeled_wall_ns_per_page": 1355,
+"modeled_wall_ns_total": 780544,
+"ns_per_saved_block": 15010,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -485,14 +485,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16412,
+"ns_per_saved_block": 15409,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1624,
-"routed_cpu_ns_total": 935536,
+"routed_cpu_ns_per_page": 1524,
+"routed_cpu_ns_total": 878323,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -540,14 +540,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 16488,
+"ns_per_saved_block": 15484,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1574,
-"routed_cpu_ns_total": 906880,
+"routed_cpu_ns_per_page": 1478,
+"routed_cpu_ns_total": 851656,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -595,14 +595,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15970,
+"ns_per_saved_block": 15010,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1441,
-"routed_cpu_ns_total": 830464,
+"routed_cpu_ns_per_page": 1355,
+"routed_cpu_ns_total": 780544,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -650,14 +650,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15970,
+"ns_per_saved_block": 15010,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1441,
-"routed_cpu_ns_total": 830464,
+"routed_cpu_ns_per_page": 1355,
+"routed_cpu_ns_total": 780544,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -705,14 +705,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15970,
+"ns_per_saved_block": 15010,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1441,
-"routed_cpu_ns_total": 830464,
+"routed_cpu_ns_per_page": 1355,
+"routed_cpu_ns_total": 780544,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -729,15 +729,15 @@
 "candidate_extents": 84,
 "cliff_2024": 160,
 "inverse_backend": "neon",
-"inverse_ns_per_page": 81,
+"inverse_ns_per_page": 82,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 153,
-"scalar_transform_ns_per_page": 145,
-"second_lz4_ns_per_page": 3111,
+"scalar_inverse_ns_per_page": 145,
+"scalar_transform_ns_per_page": 136,
+"second_lz4_ns_per_page": 2890,
 "transform_backend": "neon",
 "transform_ns_per_page": 73
 }
@@ -756,41 +756,41 @@
 "overall": "BLOCKED",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "e591e81a19742742b9b3952bdd71b363e10600eaa85b8970b6c201fcefbd5bb6",
-"module_sha256": "c7fd85571cc81eccf178db15ef003a035729572e48e52e18d0d04a7fa8ff629b",
+"formatter_sha256": "ea1cd0ad21d9b7cfbf24f5ca02d893c49538dc9bcad81a30975638acb39c53ee",
+"module_sha256": "334d773723562094d1758af4c661ca6897139e771aa1771492582a4e311b330d",
 "oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
-"source_sha": "98b6fd109896ffa64aa921e81ac621e494258e16",
+"source_sha": "d29b4b2f6bd112732f20e0d5935a33829e1ea532",
 "stages": [
 {
-"elapsed_s": 1.994,
+"elapsed_s": 2.02,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"elapsed_s": 275.453,
+"elapsed_s": 283.963,
 "exit_code": 0,
 "name": "Native and rootless contracts",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.194,
+"elapsed_s": 0.197,
 "exit_code": 0,
 "name": "Kernel warnings W=1",
 "status": "PASS"
 },
 {
-"elapsed_s": 0.218,
+"elapsed_s": 0.221,
 "exit_code": 0,
 "name": "Kernel warnings W=2",
 "status": "PASS"
 },
 {
-"diagnostic": "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: coordinator preparation phase=cross-namespace-mount-inventory errno=11 error=Resource temporarily unavailable; mount_step=init-root",
-"elapsed_s": 12.336,
+"diagnostic": "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: coordinator preparation phase=cross-namespace-mount-inventory errno=11 error=Resource temporarily unavailable; mount_step=init-root; mount_cause=process-root-device-mismatch",
+"elapsed_s": 12.176,
 "exit_code": 2,
 "failed_phase": "owned RAM primary lifecycle prepare",
 "name": "Owned RAM smoke + mixed/QD pilot",
@@ -819,5 +819,5 @@
 "status": "BLOCKED"
 }
 ],
-"tested_commit_sha": "98b6fd109896ffa64aa921e81ac621e494258e16"
+"tested_commit_sha": "d29b4b2f6bd112732f20e0d5935a33829e1ea532"
 }
