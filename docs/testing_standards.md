@@ -7698,6 +7698,19 @@ a public subtest value. The rootless attribution regression must execute the
 actual registered generator stage with a synthetic non-`phase=` subtest,
 retain the method and failure kind in the public marker, and keep that subtest's
 value confined to the private diagnostic.
+The primary lifecycle audit must use the same bounded, fail-only private
+stderr capture as the primary real-swap unittest stages. Its four registered
+classes (`PrimaryLifecycleBehaviorTest`, `PrimaryLifecycleSourceGuardTest`,
+`PackageCrashToPrimaryAdmissionTest`, and
+`PrimaryOwnerReleaseDurabilityTest`) form a phase-specific allowlist:
+only a matching first verbose failure and detailed FAIL/ERROR block may
+supply a public test name, failure kind, or genuine exception errno. Expected
+negative output from another class and later cleanup exceptions must never
+replace the first cause or exit code. Subtest values and exception payloads
+remain in the mode-0600 private log, never the public marker. The rootless
+attribution fixture must exercise this actual registered lifecycle stage with
+passing streams, a foreign-only failure, and reordered cleanup failures.
+
 The suite needs Python 3, Bash and GNU userspace commands, and operates only on
 private temporary directories with a stubbed manager. Generator subprocesses
 have a 30-second bound, and the official rootless stage keeps the original

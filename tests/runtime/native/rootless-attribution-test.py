@@ -850,6 +850,7 @@ exec "$SWAPZ_REAL_RM" "$@"
             result, status=39, reason="nonzero_exit", stage=LIFECYCLE_PHASE)
         self.assertIn(PRIVATE_SENTINEL, log.read_text())
         self.assertIn("unittest_kind=unavailable\n", log.read_text())
+        self.assertIn("first_errno=unavailable\n", log.read_text())
 
     def test_lifecycle_audit_pass_preserves_streams(self):
         result = self.invoke("pass", stage=LIFECYCLE_PHASE)
