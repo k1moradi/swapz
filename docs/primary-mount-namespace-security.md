@@ -101,6 +101,10 @@ observations, and the process root's unique mount ID and root object
 identities must remain stable across inventory. This still refuses a
 mismatched superblock, root change or distinct root object; no shortcut
 replaces the pinned namespace inventory or physical-parent safety gates.
+The `statmount(2)` inventory buffer is the complete 512-byte fixed UAPI
+structure, not only the 56-byte SB_BASIC/MNT_BASIC prefix. This keeps the
+namespace proof compatible with kernels that reject undersized fixed buffers
+with EOVERFLOW while requesting no variable-length string fields.
 This admits a stable switched-root layout only when the coordinator and PID 1
 use the same root object; a distinct chroot, inconsistent root mount views,
 or a root change during the scan refuses with `EAGAIN`. The process-root seed need not be

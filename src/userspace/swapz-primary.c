@@ -4053,6 +4053,7 @@ static int swapz_primary_mountinfo_full_root(
 		mount_id_request_bytes = 32U,
 		namespace_mount_batch = 256U,
 		namespace_parent_depth_max = 4096U,
+		statmount_fixed_bytes = 512U,
 	};
 	const uint64_t statmount_required_mask = 0x00000003ULL;
 	const unsigned int statx_mount_id_unique = 0x00004000U;
@@ -4079,6 +4080,9 @@ static int swapz_primary_mountinfo_full_root(
 		uint32_t filesystem_type_offset;
 		uint64_t mount_id;
 		uint64_t parent_mount_id;
+		/* Keep the complete fixed statmount UAPI buffer. */
+		uint64_t reserved[(statmount_fixed_bytes - 56U) /
+				  sizeof(uint64_t)];
 	};
 	struct mount_id_request request = {0};
 	struct statmount_basic mount_status;
@@ -4101,8 +4105,8 @@ static int swapz_primary_mountinfo_full_root(
 
 	_Static_assert(sizeof(struct mount_id_request) == mount_id_request_bytes,
 		       "mount ID request ABI size changed");
-	_Static_assert(sizeof(struct statmount_basic) == 56U,
-		       "statmount basic ABI prefix changed");
+	_Static_assert(sizeof(struct statmount_basic) == statmount_fixed_bytes,
+		       "statmount fixed ABI size changed");
 #ifdef SYS_statmount
 	_Static_assert(SYS_statmount == statmount_syscall_number,
 		       "statmount syscall number changed");
@@ -4201,8 +4205,11 @@ static int swapz_primary_mountinfo_full_root(
 			.parameter = statmount_required_mask,
 		};
 		if (syscall(statmount_syscall_number, &request, &mount_status,
-			    sizeof(mount_status), 0U) < 0)
+			    sizeof(mount_status), 0U) < 0) {
+			if (errno == EOVERFLOW)
+				failure_reason = "statmount-buffer-too-small";
 			goto out;
+		}
 		if (mount_status.size < sizeof(mount_status) ||
 		    (mount_status.mask & statmount_required_mask) !=
 			    statmount_required_mask ||
@@ -4240,6 +4247,7 @@ static int swapz_primary_mountinfo_full_root(
 		current_mount_id = mount_status.parent_mount_id;
 	}
 	if (!namespace_root_mount_id) {
+		failure_reason = "root-parent-depth-limit";
 		errno = EOVERFLOW;
 		goto out;
 	}
@@ -4255,8 +4263,11 @@ static int swapz_primary_mountinfo_full_root(
 		request.parameter = last_mount_id;
 		listed_mounts = syscall(listmount_syscall_number, &request, mount_ids,
 					namespace_mount_batch, 0U);
-		if (listed_mounts < 0)
+		if (listed_mounts < 0) {
+			if (errno == EOVERFLOW)
+				failure_reason = "listmount-overflow";
 			goto out;
+		}
 		if (!listed_mounts)
 			break;
 		if ((size_t)listed_mounts > namespace_mount_batch) {
@@ -4272,6 +4283,7 @@ static int swapz_primary_mountinfo_full_root(
 			}
 			last_mount_id = mount_ids[index];
 			if (++mount_count > SWAPZ_PRIMARY_VISIBLE_TASKS_MAX) {
+				failure_reason = "mount-count-limit";
 				errno = EOVERFLOW;
 				goto out;
 			}
@@ -4284,8 +4296,11 @@ static int swapz_primary_mountinfo_full_root(
 			};
 			failure_step = "listed-mount";
 			if (syscall(statmount_syscall_number, &request, &mount_status,
-				    sizeof(mount_status), 0U) < 0)
+				    sizeof(mount_status), 0U) < 0) {
+				if (errno == EOVERFLOW)
+					failure_reason = "statmount-buffer-too-small";
 				goto out;
+			}
 			if (mount_status.size < sizeof(mount_status) ||
 			    (mount_status.mask & statmount_required_mask) !=
 				    statmount_required_mask ||
@@ -4356,7 +4371,8 @@ out:
 		 * and errno, not mount, PID, namespace or device identities.
 		 * Restore the original errno after reporting the failure.
 		 */
-		if (saved_errno == EAGAIN)
+		if (saved_errno == EAGAIN ||
+		    (saved_errno == EOVERFLOW && failure_reason))
 			(void)fprintf(stderr,
 				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
 				      "step=%s errno=%d%s%s\n",

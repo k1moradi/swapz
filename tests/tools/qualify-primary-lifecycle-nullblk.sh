@@ -51,6 +51,7 @@ verify_prepare_failure_diagnostic() {
 	local mount_diagnostic=""
 	local mount_reason=""
 	local mount_step=""
+	local mount_errno=""
 	local mount_peer_root=""
 
 	while IFS= read -r line; do
@@ -116,22 +117,39 @@ verify_prepare_failure_diagnostic() {
 		if [[ "$line" == "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE"* ]]; then
 			mount_diagnostic_count=$((mount_diagnostic_count + 1))
 			# Source-controlled fields only: no PID, path, namespace or device.
-			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=11([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|root-device-mismatch|process-root-device-mismatch|init-root-device-mismatch|root-superblock-device-mismatch))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
+			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=(11|75)([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|root-device-mismatch|process-root-device-mismatch|init-root-device-mismatch|root-superblock-device-mismatch|statmount-buffer-too-small|root-parent-depth-limit|mount-count-limit|listmount-overflow))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
 				fail "prepare refusal has a malformed mount-inventory diagnostic"
 			fi
 			mount_step="${BASH_REMATCH[1]}"
-			mount_reason="${BASH_REMATCH[3]:-}"
-			mount_peer_root="${BASH_REMATCH[5]:-}"
-			# A root-object reason belongs to init-root; a superblock
-			# reason belongs only to the seeded statmount root-walk.
-			if [[ -n "$mount_reason" ]]; then
-				if [[ "$mount_reason" == root-superblock-device-mismatch ]]; then
-					[[ "$mount_step" == root-walk ]] ||
-						fail "prepare refusal mount-inventory reason does not match step"
-				else
-					[[ "$mount_step" == init-root ]] ||
-						fail "prepare refusal mount-inventory reason does not match step"
+			mount_errno="${BASH_REMATCH[2]}"
+			mount_reason="${BASH_REMATCH[4]:-}"
+			mount_peer_root="${BASH_REMATCH[6]:-}"
+			if [[ "$mount_errno" == 11 ]]; then
+				# Root-object reasons belong to init-root; the independent
+				# superblock reason belongs to the seeded statmount root-walk.
+				if [[ -n "$mount_reason" ]]; then
+					if [[ "$mount_reason" == root-superblock-device-mismatch ]]; then
+						[[ "$mount_step" == root-walk ]] ||
+							fail "prepare refusal mount-inventory reason does not match step"
+					else
+						[[ "$mount_step" == init-root ]] ||
+							fail "prepare refusal mount-inventory reason does not match step"
+					fi
 				fi
+			else
+				[[ -n "$mount_reason" && -z "$mount_peer_root" ]] ||
+					fail "prepare overflow diagnostic lacks a fixed cause"
+				case "$mount_reason:$mount_step" in
+				statmount-buffer-too-small:root-walk|\
+				statmount-buffer-too-small:listed-mount|\
+				root-parent-depth-limit:root-walk|\
+				mount-count-limit:mount-list|\
+				listmount-overflow:mount-list)
+					;;
+				*)
+					fail "prepare overflow diagnostic disagrees with scan step"
+					;;
+				esac
 			fi
 			if [[ -n "$mount_peer_root" &&
 			      ( "$mount_step" != init-root ||
@@ -157,9 +175,11 @@ verify_prepare_failure_diagnostic() {
 	(( mount_diagnostic_count <= 1 )) ||
 		fail "prepare refusal emitted duplicate mount-inventory diagnostics"
 	if (( mount_diagnostic_count == 1 )); then
-		# A scan marker belongs only to the original fail-closed EAGAIN gate.
-		[[ "$number" == 11 && ( "$phase" == cross-namespace-mount-inventory ||
-			"$phase" == repeated-cross-namespace-mount-inventory ) ]] ||
+		# A scan marker must agree with the canonical coordinator errno.
+		[[ "$number" == "$mount_errno" &&
+		   ( "$number" == 11 || "$number" == 75 ) &&
+		   ( "$phase" == cross-namespace-mount-inventory ||
+		     "$phase" == repeated-cross-namespace-mount-inventory ) ]] ||
 			fail "prepare refusal mount-inventory diagnostic disagrees with phase or errno"
 		printf '%s\n' "$mount_diagnostic" >&2
 	fi

@@ -36,6 +36,7 @@ _Static_assert(SYS_statmount == 457 && SYS_listmount == 458,
  * ceiling; excess fixture entries must fail rather than disappear.
  */
 #define FIXTURE_NAMESPACE_DEVICE_CAPACITY 1024U
+#define FIXTURE_STATMOUNT_FIXED_BYTES 512U
 
 /*
  * Compile the actual production manager, without SWAPZ_PRIMARY_ROOTLESS_TEST:
@@ -137,6 +138,7 @@ static uint64_t fixture_stale_listed_mount_id;
 static int fixture_stale_listed_mount_injected;
 static int fixture_hidden_namespace_device_observed;
 static int fixture_namespace_capacity_overflow_injected;
+static int fixture_statmount_short_buffer_injected;
 /* The first failing intercepted syscall is the causal inventory witness. */
 static long fixture_first_namespace_syscall_failure_number;
 static int fixture_first_namespace_syscall_failure_errno;
@@ -448,6 +450,11 @@ static long fixture_syscall(long number, ...)
 		assert(status != NULL);
 		assert(status_size >= sizeof(*status));
 		assert(request->namespace_fd == (uint32_t)fixture_namespace_fd);
+		if (status_size < FIXTURE_STATMOUNT_FIXED_BYTES) {
+			fixture_statmount_short_buffer_injected = 1;
+			errno = EOVERFLOW;
+			goto out;
+		}
 		assert(kind != FIXTURE_NAMESPACE_NONE);
 		/*
 		 * Model a mount that was returned by listmount and then vanished.
@@ -488,8 +495,8 @@ static long fixture_syscall(long number, ...)
 		    index + 1U == device_count &&
 		    devices[index] == fixture_hidden_namespace_device)
 			fixture_hidden_namespace_device_observed = 1;
-		memset(status, 0, sizeof(*status));
-		status->size = (uint32_t)sizeof(*status);
+		memset(status, 0, status_size);
+		status->size = (uint32_t)status_size;
 		status->mask = 0x00000003ULL;
 		status->mount_id = request->mount_id;
 		status->superblock_device_major = major(devices[index]);
@@ -1129,6 +1136,7 @@ static void fixture_reset(void)
 	fixture_stale_listed_mount_injected = 0;
 	fixture_hidden_namespace_device_observed = 0;
 	fixture_namespace_capacity_overflow_injected = 0;
+	fixture_statmount_short_buffer_injected = 0;
 	fixture_first_namespace_syscall_failure_number = 0;
 	fixture_first_namespace_syscall_failure_errno = 0;
 	fixture_first_namespace_syscall_failure_kind = FIXTURE_NAMESPACE_NONE;
@@ -2109,6 +2117,17 @@ static void test_nested_coordinator_root_identity(void)
 		fprintf(stderr,
 			"FAIL: phase=namespace-inventory case=switched-root "
 			"expected=complete-direct-inventory observed=no-listmount "
+			"safe_action=retain-inactive-target\n");
+		++fixture_failures;
+	}
+
+	/* The kernel's fixed statmount ABI requires the full 512-byte buffer. */
+	fixture_reset();
+	expect_mount_admission("statmount fixed ABI buffer is complete", 1, 0);
+	if (fixture_statmount_short_buffer_injected) {
+		fprintf(stderr,
+			"FAIL: phase=namespace-statmount-buffer "
+			"expected=fixed-512-byte-buffer observed=short-buffer "
 			"safe_action=retain-inactive-target\n");
 		++fixture_failures;
 	}

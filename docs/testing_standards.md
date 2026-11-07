@@ -301,6 +301,14 @@ A root superblock inconsistency emits only the fixed
 regressions must cover the Btrfs-style stable case and the negative cases of
 a hidden mounted target, mismatched root objects, mismatched superblock, and
 root changes after inventory.
+The production `statmount` caller must provide the complete 512-byte fixed
+Linux UAPI buffer even when requesting only SB_BASIC|MNT_BASIC; a 56-byte
+prefix is not a valid compatibility buffer on newer kernels. The production-C
+fixture models EOVERFLOW for a shorter buffer. Fail-only mount inventory
+diagnostics may classify errno 75 as `statmount-buffer-too-small` at
+`root-walk`/`listed-mount`, `root-parent-depth-limit` at `root-walk`,
+or `mount-count-limit`/`listmount-overflow` at `mount-list`; no host
+identities or raw mount IDs are emitted.
 
 
 

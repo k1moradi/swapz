@@ -4768,6 +4768,31 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("peer_root=", safe_reason)
                 self.assertNotIn("SECRET", safe_reason)
 
+    def test_mount_inventory_overflow_reports_fixed_operation_and_cause(self):
+        transcript = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-walk errno=75 reason=statmount-buffer-too-small\n"
+            "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
+            "errno=75 error=Value too large for defined data type\n"
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: preparation blocked\n"
+        )
+        phase, reason = runner.failure_context(transcript)
+        self.assertEqual(phase, "owned RAM primary lifecycle prepare")
+        self.assertIn("errno=75", reason)
+        self.assertIn("mount_step=root-walk", reason)
+        self.assertIn("mount_cause=statmount-buffer-too-small", reason)
+        for unsafe in (
+                transcript.replace("step=root-walk", "step=init-root"),
+                transcript.replace("reason=statmount-buffer-too-small",
+                                   "reason=PRIVATE"),
+                transcript.replace("errno=75 error=Value",
+                                   "errno=11 error=Value")):
+            with self.subTest(unsafe=unsafe[-100:]):
+                _, rejected = runner.failure_context(unsafe)
+                self.assertNotIn("mount_step=", rejected)
+                self.assertNotIn("mount_cause=", rejected)
+
     def test_root_superblock_mismatch_retains_first_fail_closed_diagnostic(self):
         transcript = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"

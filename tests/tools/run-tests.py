@@ -2567,27 +2567,38 @@ def failure_context(output, *, loaded=True, default_phase=None,
             mount_match = re.fullmatch(
                 r"SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
                 r"step=(namespace-fd|root-object|init-root|root-walk|"
-                r"mount-list|listed-mount|root-revalidation) errno=(11)"
+                r"mount-list|listed-mount|root-revalidation) errno=(11|75)"
                 r"(?: reason=(init-root-statx-race|"
                 r"process-root-not-directory|init-root-not-directory|"
                 r"root-inode-mismatch|root-device-mismatch|"
                 r"process-root-device-mismatch|init-root-device-mismatch|"
-                r"root-superblock-device-mismatch))?"
+                r"root-superblock-device-mismatch|"
+                r"statmount-buffer-too-small|root-parent-depth-limit|"
+                r"mount-count-limit|listmount-overflow))?"
                 r"(?: peer_root=(matches-process|differs-process))?",
                 line.strip())
-            if (mount_match and mount_inventory_failure is None and
-                    (mount_match.group(3) is None or
-                     (mount_match.group(1) == "init-root" and
-                      mount_match.group(3) !=
-                      "root-superblock-device-mismatch") or
-                     (mount_match.group(1) == "root-walk" and
-                      mount_match.group(3) ==
-                      "root-superblock-device-mismatch")) and
-                    (mount_match.group(4) is None or
-                     (mount_match.group(1) == "init-root" and
-                      mount_match.group(3) ==
-                      "process-root-device-mismatch"))):
-                mount_inventory_failure = mount_match.groups()
+            if mount_match and mount_inventory_failure is None:
+                step, marker_errno, cause, peer_root = mount_match.groups()
+                eagain_shape = (
+                    marker_errno == "11" and
+                    (cause is None or
+                     (step == "init-root" and
+                      cause != "root-superblock-device-mismatch") or
+                     (step == "root-walk" and
+                      cause == "root-superblock-device-mismatch")) and
+                    (peer_root is None or
+                     (step == "init-root" and
+                      cause == "process-root-device-mismatch")))
+                overflow_shape = (
+                    marker_errno == "75" and peer_root is None and
+                    ((cause == "statmount-buffer-too-small" and
+                      step in ("root-walk", "listed-mount")) or
+                     (cause == "root-parent-depth-limit" and
+                      step == "root-walk") or
+                     (cause in ("mount-count-limit", "listmount-overflow") and
+                      step == "mount-list")))
+                if eagain_shape or overflow_shape:
+                    mount_inventory_failure = mount_match.groups()
             prepare_match = re.fullmatch(
                 r"PRIMARY_PREPARE=FAILED phase=([a-z0-9-]{1,64}) "
                 r"errno=([0-9]{1,3}) error=([A-Za-z0-9 .()_-]{1,64})"

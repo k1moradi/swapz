@@ -2443,6 +2443,23 @@ int main(int argc, char **argv)
             "step=root-walk errno=11 reason=root-superblock-device-mismatch\n" +
             command_output(mount_initial, mount_eagain), True)
 
+        mount_overflow = "Value too large for defined data type"
+        overflow_initial = (
+            "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
+            f"errno=75 error={mount_overflow} claim=none"
+        )
+        for step, cause in (
+                ("root-walk", "statmount-buffer-too-small"),
+                ("listed-mount", "statmount-buffer-too-small"),
+                ("root-walk", "root-parent-depth-limit"),
+                ("mount-list", "mount-count-limit"),
+                ("mount-list", "listmount-overflow")):
+            check(
+                "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                f"step={step} errno=75 reason={cause}\n" +
+                command_output(overflow_initial, mount_overflow), True)
+
+
         for peer_root in ("matches-process", "differs-process"):
             check(
                 "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
@@ -2490,6 +2507,18 @@ int main(int argc, char **argv)
             mount_marker.replace("step=root-revalidation",
                                  "step=root-walk") +
             " reason=root-device-mismatch\n" +
+            command_output(mount_initial, mount_eagain),
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=init-root errno=75 reason=statmount-buffer-too-small\n" +
+            command_output(overflow_initial, mount_overflow),
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-walk errno=75 reason=mount-count-limit\n" +
+            command_output(overflow_initial, mount_overflow),
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-walk errno=75\n" +
+            command_output(overflow_initial, mount_overflow),
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-walk errno=75 reason=statmount-buffer-too-small\n" +
             command_output(mount_initial, mount_eagain),
             mount_marker.replace("step=root-revalidation",
                                  "step=init-root") +
