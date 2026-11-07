@@ -694,7 +694,12 @@ original command status when available. Diagnostics may report only phase,
 expected/observed identity category, original errno/status when present, and a
 safe BLOCK action; never payload or private pathname. This helper-level check
 does not establish a physical-card or reader identity lock across the
-coordinator's last-use boundary.
+coordinator's last-use boundary. The parent must also reject an exited/zombie
+process at every hop of a purported live privileged peer lineage; matching
+PID, start ticks, session and cached connection credentials are insufficient
+to authenticate a departed sender or a transferred descriptor. Classify this
+as process-ownership BLOCKED, distinct from source-provenance failure and the
+still-missing independent physical-card/reader proof.
 
 Primary userspace mapper sizing must exactly match kernel authority admission.
 After SWZ-header removal and 1MiB segment rounding, keep

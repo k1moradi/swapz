@@ -286,6 +286,51 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         self.assertNotIn(private_error, diagnostic)
         check.assert_not_called()
 
+    def test_exited_peer_lineage_is_rejected(self):
+        # A descriptor may survive its creator: cached SO_PEERCRED must not
+        # authenticate an exited process, even with unchanged start ticks.
+        launched_process_id = 32101
+        peer_process_id = 32102
+        launched_child = mock.Mock()
+        launched_child.pid = launched_process_id
+        launched_child.poll.return_value = None
+
+        def process_stat(process_id, parent_process_id, state):
+            stat_fields = (
+                [state, str(parent_process_id), "0", str(launched_process_id)] +
+                ["0"] * 15 + ["12345"])
+            return f"{process_id} (synthetic-process) " + " ".join(stat_fields)
+
+        launched_stat = process_stat(
+            launched_process_id, os.getpid(), "S")
+
+        def read_process_stat(path, encoding=None, errors=None):
+            self.assertEqual(encoding, "ascii")
+            self.assertIsNone(errors)
+            return (
+                launched_stat if path.parent.name == str(launched_process_id)
+                else process_stat(
+                    peer_process_id, launched_process_id, peer_state))
+
+        for peer_state in ("S", "Z", "X", "x"):
+            with self.subTest(peer_state=peer_state), mock.patch.object(
+                    parent.Path, "read_text", autospec=True,
+                    side_effect=read_process_stat):
+                if peer_state == "S":
+                    lineage = parent._owned_peer_process_lineage(
+                        launched_child, peer_process_id, "initial")
+                    self.assertEqual(
+                        [process_id for process_id, _, _ in lineage],
+                        [peer_process_id, launched_process_id])
+                else:
+                    with self.assertRaises(parent.Blocked) as refusal:
+                        parent._owned_peer_process_lineage(
+                            launched_child, peer_process_id, "initial")
+                    for detail in (
+                            "phase=initial", "observed=exited_peer_process",
+                            "errno=none", "authorization=BLOCKED"):
+                        self.assertIn(detail, str(refusal.exception))
+
     def test_source_change_precedes_identity_missing_refusal(self):
         result, responses, diagnostic, _child, check = self.run_exchange(
             os.getpid(), [self.request("initial")],

@@ -542,6 +542,9 @@ def _owned_peer_process_lineage(
         except ValueError as exc:
             raise _peer_identity_refusal(
                 phase, child, "malformed_process_identity") from exc
+        if fields[0] in {"Z", "X", "x"}:
+            raise _peer_identity_refusal(
+                phase, child, "exited_peer_process")
         if parent_pid < 0 or session_id <= 0 or start_ticks <= 0:
             raise _peer_identity_refusal(
                 phase, child, "malformed_process_identity")
