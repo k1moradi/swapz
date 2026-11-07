@@ -6357,6 +6357,12 @@ pre-restoration 4096 bytes, their SHA-256 and their prior recovery stage.
 A retry may accept only a single saved-header prefix plus authenticated-source
 suffix boundary (including either complete endpoint); any foreign byte remains
 manual-review recovery and receives no additional device write.
+The interrupted-restoration regression must read and validate the persisted
+partition-owner marker itself before retrying, then prove that retry releases
+it only after durable `COMPLETE`. If a fixture mocks `Path.exists()` to model
+kernel or sysfs state, it must not use that mocked method to assert filesystem
+ownership; read and parse the marker bytes so the assertion observes the real
+temporary recovery file.
 Descriptor close, temporary-file cleanup and ownership-marker release errors
 must not replace an earlier read/write/fsync errno. If the active ownership
 marker is unlinked but the recovery-directory fsync fails, the helper must

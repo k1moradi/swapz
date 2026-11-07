@@ -2763,7 +2763,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 self.assertEqual(
                     bytes.fromhex(pending["header_restore_source_hex"]),
                     bytes(probe.PAGE_BYTES))
-                self.assertTrue(owner_marker.exists())
+                self.assertEqual(
+                    probe._load_unique_json(owner_marker.read_bytes()),
+                    {
+                        "run_id": state["run_id"],
+                        "partuuid": state["partuuid"],
+                        "major": state["major"],
+                        "minor": state["minor"],
+                    })
                 self.assertEqual(
                     bytes(current_header),
                     backup[:257] + bytes(probe.PAGE_BYTES - 257))
