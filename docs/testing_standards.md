@@ -2096,6 +2096,16 @@ private local log contents, command strings, credentials, output payload bytes,
 or unvalidated paths. Passing commands emit no extra transcript, retain no log
 and incur no new subprocesses.
 
+The Make-interface synthetic CI attribution fixtures must use canonical
+fully-qualified Python unittest failure headings to authenticate a test
+identity, and expect only the exception class plus the fixed private-detail
+omission marker when a child supplies arbitrary assertion or setup text.
+Expected negative REFUSED/BLOCKED fixture output must never become the first
+cause of a later authenticated unittest failure. Synthetic Make Error 134
+attribution must use the current source-controlled recipe line in
+`tests/suites/Makefile`, not a hardcoded historical line number; an
+unverified recipe line must continue to be refused.
+
 The narrow synthetic `tests/tools/ci-failure-diagnostics-test.py` regression
 covers native assertions, nested unittest/cleanup precedence, compilation
 errors, timeout-or-exit-124 ambiguity, signal versus shell exit, rootless

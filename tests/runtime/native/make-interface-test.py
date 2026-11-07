@@ -2180,9 +2180,10 @@ class CiFailureDiagnosticContract(unittest.TestCase):
              "make: *** [test-all] Error 1\n",
              2, "NATIVE_COMPILE", "codec.c:42"),
             ("runtime",
-             "FAIL: test_range (NativeCase)\nTraceback\n"
+             "FAIL: test_range (__main__.NativeCase)\nTraceback\n"
              "AssertionError: expected safe offset\nFAILED (failures=1)\n",
-             1, "RUNTIME_ASSERTION", "AssertionError: expected safe offset"),
+             1, "RUNTIME_ASSERTION",
+             "AssertionError: [private exception detail omitted]"),
             ("rootless",
              "BLOCKED: Operation not permitted when opening device\n",
              1, "HOST_PERMISSION", "Operation not permitted"),
@@ -2205,11 +2206,13 @@ class CiFailureDiagnosticContract(unittest.TestCase):
                 self.assertIn(evidence, result["reason"])
                 self.assertIn("prerequisite", result)
         failed = self.diagnostics.diagnose_ci_failure(
-            ["FAIL: test_range (NativeCase)",
+            ["FAIL: test_range (__main__.NativeCase)",
              "AssertionError: expected safe offset",
              "FAILED (failures=1)"], 1, "runtime")
-        self.assertEqual(failed["test"], "NativeCase.test_range")
-        self.assertIn("AssertionError:", failed["first_error"])
+        self.assertEqual(failed["test"], "__main__.NativeCase.test_range")
+        self.assertEqual(failed["first_error"],
+                         "AssertionError: [private exception detail omitted]")
+        self.assertNotIn("expected safe offset", failed["reason"])
 
     def test_expected_negative_output_is_not_the_causal_failure(self):
         negative_fixture = [
@@ -2228,7 +2231,9 @@ class CiFailureDiagnosticContract(unittest.TestCase):
             result["test"],
             "__main__.NativeFixture.test_runtime_boundary")
         self.assertEqual(result["first_error"],
-                         "AssertionError: wrong tail guard")
+                         "AssertionError: [private exception detail omitted]")
+        self.assertNotIn("wrong tail guard", result["reason"])
+        self.assertNotIn("expected fixture import", result["reason"])
 
         source_contract = self.diagnostics.diagnose_ci_failure(
             [
@@ -2247,8 +2252,20 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertEqual(source_contract["first_error"],
                          "ValueError: substring not found")
 
+        # Authenticate the real source-controlled recipe, not a stale
+        # hardcoded line from a previous Makefile layout.
+        makefile_lines = (
+            ROOT / "tests/suites/Makefile").read_text().splitlines()
+        userspace_target_line = next(
+            index for index, line in enumerate(makefile_lines)
+            if line.startswith("test-userspace:"))
+        userspace_recipe_index = userspace_target_line + 1
+        self.assertTrue(
+            makefile_lines[userspace_recipe_index].startswith("\t"))
+        userspace_recipe_line = userspace_recipe_index + 1
         aborted = self.diagnostics.diagnose_ci_failure(
-            ["make[1]: *** [Makefile:156: test-userspace] Error 134"],
+            [f"make[1]: *** [Makefile:{userspace_recipe_line}: "
+             "test-userspace] Error 134"],
             2, "native-rootless")
         self.assertEqual(aborted["category"], "RUNTIME_ASSERTION")
         self.assertEqual(aborted["test"], "make:test-userspace")
@@ -2266,7 +2283,9 @@ class CiFailureDiagnosticContract(unittest.TestCase):
         self.assertEqual(
             fixture_error["test"], "__main__.NativeFixture.setUpClass")
         self.assertEqual(
-            fixture_error["first_error"], "KeyError: 'missing fixture key'")
+            fixture_error["first_error"],
+            "KeyError: [private exception detail omitted]")
+        self.assertNotIn("missing fixture key", fixture_error["reason"])
 
     def test_skips_and_cancellation_cannot_pass_workflow_aggregation(self):
         workflow = (ROOT / ".github/workflows/project-goals.yml").read_text()
