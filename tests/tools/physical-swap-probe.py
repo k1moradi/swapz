@@ -40,6 +40,8 @@ STATE_NAME = "state.json"
 BACKUP_NAME = "block0.bin"
 RESULTS_NAME = "results.json"
 RECOVERY_OWNERSHIP_PHASE = "ONE_USE_RECOVERY_BOUND"
+LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE = "ACTIVE_RECOVERY"
+LEGACY_PRECLAIM_RECOVERY_OWNERSHIP_PHASE = "RECOVERY_PREPARED"
 CANONICAL_MAIN_REMOTE = "https://github.com/k1moradi/swapz.git"
 VERBAL_REVIEWER = "openai-chatgpt-external-reviewer"
 VERBAL_APPROVAL_TEXT = (
@@ -2365,6 +2367,12 @@ def _require_recovery_results_binding(state, results):
             raise ProbeError(
                 "saved physical results/state binding mismatch: "
                 f"{result_field}; safe_next_step=inspect_records_read_only")
+    result_stage = results.get("final_recovery_state")
+    ownership_phase = state["ownership_phase"]
+    legacy_preclaim_recovery = (
+        ownership_phase == LEGACY_PRECLAIM_RECOVERY_OWNERSHIP_PHASE
+        and state.get("stage") == "BACKED_UP"
+        and result_stage == "BACKED_UP")
     if (type(state.get("major")) is not int or
             type(state.get("minor")) is not int or
             type(state["source_sha"]) is not str or
@@ -2377,11 +2385,13 @@ def _require_recovery_results_binding(state, results):
             f"{state['major']}:{state['minor']}" or
             results.get("development_only") is not (
                 state.get("development_only") is True) or
-            state["ownership_phase"] != RECOVERY_OWNERSHIP_PHASE):
+            (ownership_phase not in {
+                RECOVERY_OWNERSHIP_PHASE,
+                LEGACY_ACTIVE_RECOVERY_OWNERSHIP_PHASE,
+            } and not legacy_preclaim_recovery)):
         raise ProbeError(
             "saved physical results/state identity or ownership phase "
             "is incomplete; safe_next_step=inspect_records_read_only")
-    result_stage = results.get("final_recovery_state")
     if result_stage not in {"BACKED_UP", "ORACLE_PASS",
                             "RECOVERY_REQUIRED"} or (
             (state.get("stage") == "RECOVERY_REQUIRED") != (
