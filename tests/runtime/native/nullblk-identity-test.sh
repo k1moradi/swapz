@@ -1004,6 +1004,7 @@ _original_close = os.close
 _original_write = os.write
 _attribute_descriptors = {}
 _lookup_number = 0
+_replacement_triggered = False
 _attribute_names = frozenset((
     "index", "memory_backed", "size", "blocksize", "power"
 ))
@@ -1025,9 +1026,30 @@ def tracked_open(path, flags, mode=0o777, *, dir_fd=None):
     return descriptor
 
 
+def replace_config_after_pin(metadata):
+    global _replacement_triggered
+    if (_replacement_triggered or
+            os.environ.get("SWAPZ_REPLACE_AFTER_CONFIG_PIN") != "1" or
+            not stat.S_ISDIR(metadata.st_mode)):
+        return
+    configfs_path, config_name = sys.argv[1:3]
+    public_config = os.path.join(configfs_path, config_name)
+    retained_config = os.path.join(
+        os.path.dirname(configfs_path), "retained-pinned-directory")
+    os.rename(public_config, retained_config)
+    os.mkdir(public_config)
+    for attribute in _attribute_names:
+        with open(os.path.join(retained_config, attribute), "rb") as source:
+            value = source.read()
+        with open(os.path.join(public_config, attribute), "wb") as destination:
+            destination.write(value)
+    _replacement_triggered = True
+
+
 def volatile_fstat(descriptor):
     global _lookup_number
     metadata = _original_fstat(descriptor)
+    replace_config_after_pin(metadata)
     attribute = _attribute_descriptors.get(descriptor)
     if attribute is None or not stat.S_ISREG(metadata.st_mode):
         return metadata
@@ -1111,7 +1133,7 @@ def create_config(case):
     return case_root, configfs, config, identity
 
 
-def run_proof(case_root, configfs, identity, power_off):
+def run_proof(case_root, configfs, identity, power_off, replace_after_pin=False):
     inode_trace = case_root / "attribute-inodes"
     power_trace = case_root / "power-writes"
     environment = os.environ.copy()
@@ -1119,6 +1141,8 @@ def run_proof(case_root, configfs, identity, power_off):
     environment["SWAPZ_SHIM_PATH"] = str(shim_directory / "volatile_inode_shim.py")
     environment["SWAPZ_INODE_TRACE"] = str(inode_trace)
     environment["SWAPZ_POWER_TRACE"] = str(power_trace)
+    if replace_after_pin:
+        environment["SWAPZ_REPLACE_AFTER_CONFIG_PIN"] = "1"
     program = "\n".join((
         f"CONFIGFS={shlex.quote(str(configfs))}",
         f"CONFIGNAME={shlex.quote(config_name)}",
@@ -1187,6 +1211,30 @@ try:
                 encoding="ascii") == "1\n",
             "same_name_foreign_replacement", "creator_or_foreign_power_changed")
 
+    case_root, configfs, config, identity = create_config(
+        "same_name_replacement_after_pin")
+    status, _, power_trace = run_proof(
+        case_root, configfs, identity, 1, replace_after_pin=True)
+    retained_config = case_root / "retained-pinned-directory"
+    require(status == 1 and not power_trace.exists(),
+            "same_name_replacement_after_pin",
+            "post_pin_replacement_admitted_or_powered_off", status)
+    require(retained_config.is_dir() and config.is_dir(),
+            "same_name_replacement_after_pin",
+            "creator_or_replacement_directory_missing")
+    retained_metadata = retained_config.stat()
+    replacement_metadata = config.stat()
+    retained_identity = (
+        f"{retained_metadata.st_dev}:{retained_metadata.st_ino}:"
+        f"{retained_metadata.st_uid}"
+    )
+    require(retained_identity == identity and
+            retained_metadata.st_ino != replacement_metadata.st_ino and
+            (retained_config / "power").read_text(encoding="ascii") == "1\n" and
+            (config / "power").read_text(encoding="ascii") == "1\n",
+            "same_name_replacement_after_pin",
+            "creator_or_replacement_not_retained")
+
     def replace_with_foreign(case_root, configfs, config):
         original = case_root / "retained-created-directory"
         config.rename(original)
@@ -1228,10 +1276,13 @@ try:
     require((case_root / "foreign-power").read_text(encoding="ascii") == "1\n" and
             (linked_power / "power").is_symlink(),
             "linked_power", "foreign_power_target_changed")
-    _, _, absent = assert_refused(
+    case_root, _, absent = assert_refused(
         "identity_unavailable", lambda case_root, _base, config:
         config.rename(case_root / "retained-unobservable-directory"))
-    require(not absent.exists(), "identity_unavailable", "absence_treated_as_ownership")
+    retained_unobservable = case_root / "retained-unobservable-directory"
+    require(not absent.exists() and retained_unobservable.is_dir() and
+            (retained_unobservable / "power").read_text(encoding="ascii") == "1\n",
+            "identity_unavailable", "unobservable_object_not_retained")
 except AuditFailure as failure:
     print(f"FAIL: phase={failure.phase} "
           "expected_proof=pinned_creator_config_directory_and_canonical_attributes "
