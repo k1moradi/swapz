@@ -7761,6 +7761,9 @@ replace the first cause or exit code. Subtest values and exception payloads
 remain in the mode-0600 private log, never the public marker. The rootless
 attribution fixture must exercise this actual registered lifecycle stage with
 passing streams, a foreign-only failure, and reordered cleanup failures.
+Its raw-string Bash fixtures must emit real newline-delimited unittest records
+and use single shell-continuation backslashes; doubled escapes would test a
+malformed transcript rather than the first-failure contract.
 
 The suite needs Python 3, Bash and GNU userspace commands, and operates only on
 private temporary directories with a stubbed manager. Generator subprocesses

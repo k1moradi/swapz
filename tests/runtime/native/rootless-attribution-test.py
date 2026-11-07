@@ -90,30 +90,30 @@ PY
     lifecycle_same_method_wrong_class)
       # Another allowlisted class with the same method cannot authenticate the
       # first progress record or donate its errno.
-      printf '%s\\n' \\
-        "test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry) ... FAIL" \\
-        '======================================================================' \\
-        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PrimaryOwnerReleaseDurabilityTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \\
-        'OSError: [Errno 13] WRONG_CLASS_PRIVATE_PAYLOAD' \\
-        '======================================================================' \\
-        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \\
-        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \\
+      printf '%s\n' \
+        "test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry) ... FAIL" \
+        '======================================================================' \
+        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PrimaryOwnerReleaseDurabilityTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \
+        'OSError: [Errno 13] WRONG_CLASS_PRIVATE_PAYLOAD' \
+        '======================================================================' \
+        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
         '======================================================================' >&2
       return 41 ;;
     lifecycle_same_method_wrong_class_oversized)
-      printf '%s\\n' \\
-        "test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry) ... FAIL" \\
-        '======================================================================' \\
-        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PrimaryOwnerReleaseDurabilityTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \\
-        'OSError: [Errno 13] WRONG_CLASS_PRIVATE_PAYLOAD' \\
+      printf '%s\n' \
+        "test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry) ... FAIL" \
+        '======================================================================' \
+        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PrimaryOwnerReleaseDurabilityTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \
+        'OSError: [Errno 13] WRONG_CLASS_PRIVATE_PAYLOAD' \
         '======================================================================' >&2
-      head -c 307200 /dev/zero | tr '\\0' 'x' >&2
-      printf '\\n%s\\n' \\
-        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \\
-        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \\
+      head -c 307200 /dev/zero | tr '\0' 'x' >&2
+      printf '\n%s\n' \
+        "FAIL: test_committed_journal_then_verified_package_recovery_allows_reentry (__main__.PackageCrashToPrimaryAdmissionTest.test_committed_journal_then_verified_package_recovery_allows_reentry)" \
+        'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
         '======================================================================' >&2
-      head -c 307200 /dev/zero | tr '\\0' 'z' >&2
-      printf '\\n' >&2
+      head -c 307200 /dev/zero | tr '\0' 'z' >&2
+      printf '\n' >&2
       return 42 ;;
     lifecycle_foreign_only)
       printf '%s\n' \
@@ -883,7 +883,7 @@ exec "$SWAPZ_REAL_RM" "$@"
         evidence = log.read_text()
         self.assertIn(PRIVATE_SENTINEL, evidence)
         self.assertIn(WRONG_CLASS_SENTINEL, evidence)
-        self.assertIn("first_errno=unavailable\\n", evidence)
+        self.assertIn("first_errno=unavailable\n", evidence)
 
     def test_lifecycle_audit_oversized_log_retains_exact_class_failure(self):
         result = self.invoke(
@@ -895,7 +895,7 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assertLessEqual(log.stat().st_size, 262144)
         self.assertIn(PRIVATE_SENTINEL, evidence)
         self.assertNotIn(WRONG_CLASS_SENTINEL, evidence)
-        self.assertIn("first_errno=unavailable\\n", evidence)
+        self.assertIn("first_errno=unavailable\n", evidence)
 
     def test_lifecycle_audit_foreign_unittest_cannot_claim_failure(self):
         result = self.invoke("lifecycle_foreign_only", stage=LIFECYCLE_PHASE)
