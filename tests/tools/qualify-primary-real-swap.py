@@ -2122,24 +2122,10 @@ def _mem_available_mib() -> int:
     return observed_kib // 1024
 
 
-def _block_size(path: Path) -> int:
-    fd = -1
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOCTTY)
-        return struct.unpack(
-            "=Q", fcntl.ioctl(fd, BLKGETSIZE64, bytes(8)))[0]
-    except OSError as exc:
-        raise Blocked(f"cannot verify block geometry for {path}: {exc}") from exc
-    finally:
-        original_error = sys.exc_info()[1]
-        if fd >= 0:
-            try:
-                os.close(fd)
-            except OSError as cleanup_error:
-                _raise_cleanup_errors(
-                    original_error,
-                    [f"block-geometry descriptor: {cleanup_error}"],
-                    error_type=Blocked)
+def _block_size(file_descriptor: int) -> int:
+    """Read geometry from a caller-owned descriptor without reopening its path."""
+    return struct.unpack(
+        "=Q", fcntl.ioctl(file_descriptor, BLKGETSIZE64, bytes(8)))[0]
 
 
 def _flatten_lsblk(rows: list[dict]) -> list[dict]:
@@ -2341,51 +2327,115 @@ def verify_authorized_target(
                 f"primary plan {key} differs from independently derived capacity")
 
     by_partuuid = Path("/dev/disk/by-partuuid") / selector_partuuid
+    target_descriptor = -1
+    target_phase = "resolve"
     try:
         target = by_partuuid.resolve(strict=True)
-        info = target.stat()
+        target_phase = "open"
+        target_descriptor = os.open(
+            target,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOCTTY | os.O_NOFOLLOW)
+        target_phase = "fstat"
+        info = os.fstat(target_descriptor)
+        if not stat.S_ISBLK(info.st_mode) or \
+                (os.major(info.st_rdev), os.minor(info.st_rdev)) != (major, minor):
+            raise Blocked(
+                "authorized PARTUUID resolves to a different block device")
+
+        target_phase = "geometry"
+        if _block_size(target_descriptor) != size_bytes:
+            raise Blocked("authorized partition size changed")
+
+        target_phase = "topology"
+        result = _run([
+            "lsblk", "--json", "--bytes", "--output",
+            "PATH,TYPE,MAJ:MIN,SIZE,PARTUUID,PKNAME,RM,TRAN,MODEL",
+        ], timeout=15)
+        rows = parse_lsblk_topology(result.stdout)
+        target_rows = [
+            row for row in rows if row.get("maj:min") == f"{major}:{minor}"]
+        parent_rows = [
+            row for row in rows
+            if row.get("maj:min") == f"{parent_major}:{parent_minor}"]
+        if len(target_rows) != 1 or len(parent_rows) != 1:
+            raise Blocked(
+                "cannot identify unique target partition and physical parent")
+        target_row, parent_row = target_rows[0], parent_rows[0]
+        if target_row.get("type") != "part" or \
+                str(target_row.get("partuuid", "")).lower() != selector_partuuid or \
+                int(target_row.get("size", -1)) != size_bytes:
+            raise Blocked("lsblk target identity differs from selector/plan")
+        if parent_row.get("type") != "disk" or \
+                int(parent_row.get("rm", 0)) != 1 or \
+                str(parent_row.get("tran", "")).lower() != "usb":
+            raise Blocked(
+                "physical parent is not the authorized removable USB topology")
+        require_sole_partition_topology(
+            target_row, parent_row, f"{major}:{minor}")
+
+        target_phase = "authorization"
+        try:
+            if authorization_snapshot is None:
+                authorization_snapshot, _snapshot_digest = \
+                    _read_readiness_snapshot()
+            authorized = authorization_snapshot["authorized_target"]
+            expected_target = f"{major}:{minor}"
+            expected_parent = f"{parent_major}:{parent_minor}"
+            if str(authorized.get("partuuid", "")).lower() != selector_partuuid or \
+                    str(authorized.get("major_minor", "")) != expected_target or \
+                    int(authorized.get("size_bytes", -1)) != size_bytes or \
+                    str(authorized.get("parent_major_minor", "")) != expected_parent or \
+                    str(authorized.get("transport", "")).lower() != "usb" or \
+                    str(authorized.get("parent_model", "")).strip() != \
+                    str(parent_row.get("model", "")).strip():
+                raise Blocked(
+                    "live target differs from committed authorized-target snapshot")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise Blocked(
+                f"committed authorized-target snapshot is malformed: {exc}") from exc
+
+        # Keep the same target descriptor pinned through topology and policy
+        # inspection, then prove geometry and the live PARTUUID name again.
+        target_phase = "revalidate"
+        final_info = os.fstat(target_descriptor)
+        if not stat.S_ISBLK(final_info.st_mode) or \
+                (os.major(final_info.st_rdev), os.minor(final_info.st_rdev)) != \
+                (major, minor):
+            raise Blocked("authorized target descriptor identity changed")
+        if _block_size(target_descriptor) != size_bytes:
+            raise Blocked("authorized partition size changed")
+        final_target = by_partuuid.resolve(strict=True)
+        if final_target != target:
+            raise Blocked("authorized PARTUUID path changed")
+        final_named_info = final_target.lstat()
+        if not stat.S_ISBLK(final_named_info.st_mode) or \
+                (os.major(final_named_info.st_rdev),
+                 os.minor(final_named_info.st_rdev)) != (major, minor):
+            raise Blocked("authorized PARTUUID path changed")
+        return target, (major, minor), (parent_major, parent_minor)
     except OSError as exc:
-        raise Blocked(f"authorized PARTUUID path is unavailable: {exc}") from exc
-    if not stat.S_ISBLK(info.st_mode) or (os.major(info.st_rdev), os.minor(info.st_rdev)) != (major, minor):
-        raise Blocked("authorized PARTUUID resolves to a different block device")
-    if _block_size(target) != size_bytes:
-        raise Blocked("authorized partition size changed")
-
-    result = _run([
-        "lsblk", "--json", "--bytes", "--output",
-        "PATH,TYPE,MAJ:MIN,SIZE,PARTUUID,PKNAME,RM,TRAN,MODEL",
-    ], timeout=15)
-    rows = parse_lsblk_topology(result.stdout)
-    target_rows = [row for row in rows if row.get("maj:min") == f"{major}:{minor}"]
-    parent_rows = [row for row in rows if row.get("maj:min") == f"{parent_major}:{parent_minor}"]
-    if len(target_rows) != 1 or len(parent_rows) != 1:
-        raise Blocked("cannot identify unique target partition and physical parent")
-    target_row, parent_row = target_rows[0], parent_rows[0]
-    if target_row.get("type") != "part" or str(target_row.get("partuuid", "")).lower() != selector_partuuid or \
-            int(target_row.get("size", -1)) != size_bytes:
-        raise Blocked("lsblk target identity differs from selector/plan")
-    if parent_row.get("type") != "disk" or int(parent_row.get("rm", 0)) != 1 or \
-            str(parent_row.get("tran", "")).lower() != "usb":
-        raise Blocked("physical parent is not the authorized removable USB topology")
-    require_sole_partition_topology(target_row, parent_row, f"{major}:{minor}")
-
-    try:
-        if authorization_snapshot is None:
-            authorization_snapshot, _snapshot_digest = \
-                _read_readiness_snapshot()
-        authorized = authorization_snapshot["authorized_target"]
-        expected_target = f"{major}:{minor}"
-        expected_parent = f"{parent_major}:{parent_minor}"
-        if str(authorized.get("partuuid", "")).lower() != selector_partuuid or \
-                str(authorized.get("major_minor", "")) != expected_target or \
-                int(authorized.get("size_bytes", -1)) != size_bytes or \
-                str(authorized.get("parent_major_minor", "")) != expected_parent or \
-                str(authorized.get("transport", "")).lower() != "usb" or \
-                str(authorized.get("parent_model", "")).strip() != str(parent_row.get("model", "")).strip():
-            raise Blocked("live target differs from committed authorized-target snapshot")
-    except (KeyError, TypeError, ValueError) as exc:
-        raise Blocked(f"committed authorized-target snapshot is malformed: {exc}") from exc
-    return target, (major, minor), (parent_major, parent_minor)
+        error_number = exc.errno if exc.errno is not None else "none"
+        raise Blocked(
+            f"authorized target phase={target_phase} "
+            "expected=stable-opened-block-device observed=io-error "
+            f"errno={error_number}; "
+            "action=BLOCK-before-prepare-and-inspect-target") from exc
+    finally:
+        first_error = sys.exc_info()[1]
+        if target_descriptor >= 0:
+            try:
+                os.close(target_descriptor)
+            except OSError as close_error:
+                if first_error is None:
+                    error_number = (
+                        close_error.errno
+                        if close_error.errno is not None else "none")
+                    raise Blocked(
+                        "authorized target phase=close "
+                        "expected=closed-target-descriptor observed=io-error "
+                        f"errno={error_number}; "
+                        "action=BLOCK-before-prepare-and-inspect-target"
+                    ) from close_error
 
 
 def _kernel_log_snapshot() -> list[str]:

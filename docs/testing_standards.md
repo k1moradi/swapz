@@ -879,8 +879,15 @@ The source-bound partition comparison must include the committed target
 `major_minor` as well as PARTUUID and byte geometry; matching only the live
 plan, parent, PARTUUID and size is insufficient. A rootless injected-control
 fixture must execute the real target verifier and refuse a source/live target
-device mismatch, stale geometry and failed identity read before the simulated
-primary mutation; unchanged source/live identity remains the positive control.
+device mismatch, stale geometry, live-name replacement and failed identity read
+before the simulated primary mutation; unchanged source/live identity remains
+the positive control. The verifier must open the resolved target exactly once
+with `O_NOFOLLOW`, derive dev_t and geometry from that caller-owned descriptor,
+retain it across topology/source-policy inspection, then recheck descriptor
+geometry and the live PARTUUID resolution before close. A close failure must
+not replace an earlier identity/geometry errno. This remains snapshot-only
+protection: it does not make the final check-to-mutation interval atomic or
+distinguish device-number reuse by a different physical card/reader.
 A rootless two-cycle control must reject simulated post-cycle selector drift
 before the second prepare. The already completed first cycle is allowed to
 have performed its simulated prepare, but drift must permit no additional or

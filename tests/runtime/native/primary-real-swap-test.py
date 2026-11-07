@@ -558,6 +558,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     def test_real_target_verifier_binds_source_device_geometry_before_prepare(self):
         target_size_bytes = 124_787_884_032
         geometry = qualify.maximum_primary_geometry(target_size_bytes)
+        target_descriptor = 731
 
         def synthetic_inputs(live_minor, authorized_minor):
             plan = {
@@ -615,96 +616,117 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             }
             return plan, snapshot, json.dumps(topology)
 
-        for scenario, live_minor, authorized_minor, observed_size, stat_error in (
-                ("source_device_mismatch", 2, 1, target_size_bytes, None),
-                ("stale_geometry", 1, 1, target_size_bytes - 4096, None),
-                ("failed_identity_read", 1, 1, target_size_bytes,
-                 OSError(errno.EIO, "/private/target"))):
-            with self.subTest(scenario=scenario), \
-                    tempfile.TemporaryDirectory() as directory:
-                selector = Path(directory) / "selector"
-                selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
-                selector.chmod(0o600)
+        scenarios = (
+            ("source_device_mismatch", 2, 1,
+             (target_size_bytes,), 2, None, True),
+            ("stale_geometry", 1, 1,
+             (target_size_bytes, target_size_bytes - 4096), 1, None, True),
+            ("target_path_replaced", 1, 1,
+             (target_size_bytes, target_size_bytes), 2, None, True),
+            ("failed_identity_read", 1, 1, (), 1,
+             OSError(errno.EIO, "/private/target"), True),
+            ("unchanged", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, False),
+        )
+        for (scenario, live_minor, authorized_minor, sizes, final_minor,
+             identity_error, should_block) in scenarios:
+            with self.subTest(scenario=scenario):
                 plan, snapshot, topology = synthetic_inputs(
                     live_minor, authorized_minor)
-                with self._selector_fixture(selector):
-                    admitted = qualify._read_selector_evidence()
-                    admission = mock.Mock()
-                    stat_patch = (
-                        mock.patch.object(Path, "stat", side_effect=stat_error)
-                        if stat_error is not None else
-                        mock.patch.object(
-                            Path, "stat",
-                            return_value=FakeStat(8, live_minor)))
-                    with mock.patch.object(
-                            qualify, "read_swap_rows", return_value=[]), \
-                            mock.patch.object(
-                                qualify, "_validate_precycle_state"), \
-                            mock.patch.object(
-                                qualify, "_kernel_log_snapshot",
-                                return_value=[]), \
-                            mock.patch.object(
-                                Path, "resolve",
-                                return_value=Path("/dev/synthetic1")), \
-                            stat_patch, \
-                            mock.patch.object(
-                                qualify, "_block_size",
-                                return_value=observed_size), \
-                            mock.patch.object(
-                                qualify, "_run",
-                                return_value=subprocess.CompletedProcess(
-                                    args=[], returncode=0, stdout=topology,
-                                    stderr="")), \
-                            mock.patch.object(
-                                qualify, "_primary",
-                                side_effect=AssertionError(
-                                    "simulated primary mutation reached")
-                            ) as primary, \
-                            self.assertRaises(qualify.Blocked) as refused:
-                        qualify.run_cycle(
-                            1, swapzctl=Path("/synthetic/swapzctl"),
-                            oracle_path=Path("/synthetic/oracle"),
-                            validated_source="2" * 40, plan=plan,
-                            selector_partuuid="aaaaaaaa",
-                            selector_evidence=admitted,
-                            authorization_snapshot=snapshot,
-                            target_device=(8, live_minor),
-                            target_parent_device=(8, 0),
-                            workload_mib=384, resident_mib=128,
-                            swap_limit_mib=384, timeout_seconds=60,
-                            prior_run_ids=set(), prior_swap_uuids=set(),
-                            admission=admission)
-                    primary.assert_not_called()
-                    admission.require.assert_called_once_with("cycle-1")
-                    self.assertIn("phase=policy_use", str(refused.exception))
-                    self.assertIn(
-                        "action=BLOCK-before-prepare", str(refused.exception))
-                    self.assertNotIn("/private", str(refused.exception))
-                    if scenario == "failed_identity_read":
-                        self.assertIn("errno=5", str(refused.exception))
+                admitted = qualify.SelectorEvidence("aaaaaaaa", (1,))
+                size_reads = iter(sizes)
+                flags_seen = []
+                close_calls = []
 
-        plan, snapshot, topology = synthetic_inputs(1, 1)
-        with tempfile.TemporaryDirectory() as directory:
-            selector = Path(directory) / "selector"
-            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
-            selector.chmod(0o600)
-            with self._selector_fixture(selector):
-                admitted = qualify._read_selector_evidence()
+                def open_target(path, flags, *_args):
+                    self.assertEqual(Path(path), Path("/dev/synthetic1"))
+                    flags_seen.append(flags)
+                    return target_descriptor
+
+                def target_fstat(descriptor):
+                    self.assertEqual(descriptor, target_descriptor)
+                    if identity_error is not None:
+                        raise identity_error
+                    return FakeStat(8, live_minor)
+
+                def target_ioctl(descriptor, request, _argument):
+                    self.assertEqual(descriptor, target_descriptor)
+                    self.assertEqual(request, qualify.BLKGETSIZE64)
+                    return struct.pack("=Q", next(size_reads))
+
+                def close_target(descriptor):
+                    self.assertEqual(descriptor, target_descriptor)
+                    close_calls.append(descriptor)
+                    if scenario == "failed_identity_read":
+                        raise OSError(errno.EBADF, "/private/close")
+
+                admission = mock.Mock()
                 with mock.patch.object(
-                        Path, "resolve",
-                        return_value=Path("/dev/synthetic1")), \
+                        qualify, "_read_selector_evidence",
+                        return_value=admitted), \
                         mock.patch.object(
-                            Path, "stat", return_value=FakeStat(8, 1)), \
+                            qualify, "read_swap_rows", return_value=[]), \
                         mock.patch.object(
-                            qualify, "_block_size",
-                            return_value=target_size_bytes), \
+                            qualify, "_validate_precycle_state"), \
+                        mock.patch.object(
+                            qualify, "_kernel_log_snapshot",
+                            return_value=[]), \
+                        mock.patch.object(
+                            Path, "resolve",
+                            return_value=Path("/dev/synthetic1")), \
+                        mock.patch.object(
+                            Path, "lstat",
+                            return_value=FakeStat(8, final_minor)), \
+                        mock.patch.object(
+                            qualify.os, "open", side_effect=open_target), \
+                        mock.patch.object(
+                            qualify.os, "fstat", side_effect=target_fstat), \
+                        mock.patch.object(
+                            qualify.fcntl, "ioctl", side_effect=target_ioctl), \
+                        mock.patch.object(
+                            qualify.os, "close", side_effect=close_target), \
                         mock.patch.object(
                             qualify, "_run",
                             return_value=subprocess.CompletedProcess(
                                 args=[], returncode=0, stdout=topology,
-                                stderr="")):
-                    qualify._require_selector_at_policy_use(
-                        admitted, plan, snapshot, (8, 1), (8, 0))
+                                stderr="")), \
+                        mock.patch.object(
+                            qualify, "_primary",
+                            side_effect=AssertionError(
+                                "simulated primary mutation reached")
+                        ) as primary:
+                    if should_block:
+                        with self.assertRaises(qualify.Blocked) as refused:
+                            qualify.run_cycle(
+                                1, swapzctl=Path("/synthetic/swapzctl"),
+                                oracle_path=Path("/synthetic/oracle"),
+                                validated_source="2" * 40, plan=plan,
+                                selector_partuuid="aaaaaaaa",
+                                selector_evidence=admitted,
+                                authorization_snapshot=snapshot,
+                                target_device=(8, live_minor),
+                                target_parent_device=(8, 0),
+                                workload_mib=384, resident_mib=128,
+                                swap_limit_mib=384, timeout_seconds=60,
+                                prior_run_ids=set(), prior_swap_uuids=set(),
+                                admission=admission)
+                        primary.assert_not_called()
+                        admission.require.assert_called_once_with("cycle-1")
+                        message = str(refused.exception)
+                        self.assertIn("phase=policy_use", message)
+                        self.assertIn("action=BLOCK-before-prepare", message)
+                        self.assertNotIn("/private", message)
+                        if scenario == "failed_identity_read":
+                            self.assertIn("errno=5", message)
+                            self.assertNotIn("errno=9", message)
+                    else:
+                        qualify._require_selector_at_policy_use(
+                            admitted, plan, snapshot, (8, 1), (8, 0))
+                        primary.assert_not_called()
+                self.assertEqual(len(flags_seen), 1)
+                self.assertTrue(flags_seen[0] & os.O_NOFOLLOW)
+                self.assertTrue(flags_seen[0] & os.O_CLOEXEC)
+                self.assertEqual(close_calls, [target_descriptor])
 
     def test_rootless_cycle_last_use_rejects_stale_target_without_primary_mutation(self):
         for scenario in ("selector_during_target", "parent_replaced",
@@ -2777,24 +2799,15 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     self.assertRaises(qualify.Blocked):
                 qualify.read_vmstat()
 
-    def test_block_geometry_preserves_ioctl_failure_when_close_also_fails(self):
-        real_close = os.close
-
-        def close_then_fail(descriptor):
-            real_close(descriptor)
-            raise OSError("synthetic close failure")
-
-        with tempfile.NamedTemporaryFile() as temporary, \
-                mock.patch.object(
-                    qualify.fcntl, "ioctl",
-                    side_effect=OSError("synthetic ioctl failure")), \
-                mock.patch.object(
-                    qualify.os, "close", side_effect=close_then_fail), \
-                self.assertRaisesRegex(
-                    qualify.Blocked,
-                    "cannot verify block geometry.*synthetic ioctl failure; "
-                    "cleanup also failed: .*synthetic close failure"):
-            qualify._block_size(Path(temporary.name))
+    def test_block_geometry_uses_caller_owned_descriptor(self):
+        with mock.patch.object(
+                qualify.fcntl, "ioctl",
+                return_value=struct.pack("=Q", 123456)) as ioctl, \
+                mock.patch.object(qualify.os, "close") as close:
+            self.assertEqual(qualify._block_size(17), 123456)
+        ioctl.assert_called_once_with(
+            17, qualify.BLKGETSIZE64, bytes(8))
+        close.assert_not_called()
 
     def test_psi_and_memavailable_parsers_fail_closed_on_malformed_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
