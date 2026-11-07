@@ -2898,7 +2898,16 @@ following, stable metadata, bounded reads, and exactly zero or one trailing LF.
 A stale machine-ID-only digest, CRLF-normalized record, or otherwise untrusted
 input must not be silently accepted; native regression must keep the private
 report fixture aligned with production host identity. Only the digest may appear
-in evidence, never either raw host identifier.
+in evidence, never either raw host identifier. On Linux aarch64, the private
+owned-null_blk test build alone may use a trusted root-owned single-link
+`/etc/machine-id` under the same strict grammar, hashed as
+`b"swapz-nullblk-arm64-v1\0"` plus 32 lowercase bytes. Its report declares
+`aarch64`, and only the private owned-RAM parser and running-kernel check
+accept this machine-scoped digest. It is not a hardware identity: the
+installed/physical parser, DMI-bound production host digest, bare-metal
+x86_64 physical admission, and official history eligibility remain unchanged.
+The official ARM64 report with missing DMI stays `host_identity=UNAVAILABLE`
+and may not be treated as physical qualification.
 Each owned-null_blk lifecycle
 rehearsal must allocate
 a fresh root-owned evidence directory bound to the same

@@ -2392,6 +2392,9 @@ int main(int argc, char **argv)
         self.assertIn('"/sys/class/dmi/id/product_uuid"', self.script)
         self.assertIn('"/etc/machine-id"', self.script)
         self.assertIn('b"swapz-host-v2\\0"', self.script)
+        self.assertIn('b"swapz-nullblk-arm64-v1\\0"', self.script)
+        self.assertIn('defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && '
+                      'defined(__aarch64__)', self.primary)
         self.assertNotIn('b"swapz-host\\0"', self.script)
         self.assertIn(
             'static const unsigned char prefix[] = "swapz-host-v2";',
@@ -2453,8 +2456,10 @@ int main(int argc, char **argv)
                 machine_id.lower()).hexdigest()
 
             def run_existing_records():
+                environment = os.environ.copy()
+                environment["HOST_ARCH"] = "x86_64"
                 return subprocess.run(
-                    ["python3", "-"], input=host_source,
+                    ["python3", "-"], input=host_source, env=environment,
                     capture_output=True, text=True, timeout=5, check=False)
 
             def run_host_source(machine_record, dmi_record):
@@ -2538,6 +2543,7 @@ int main(int argc, char **argv)
                 "MODULE_SHA": "3" * 64,
                 "ORACLE_SHA": "4" * 64,
                 "HOST_SHA": expected_digest,
+                "HOST_ARCH": "x86_64",
                 "REPORT": str(report_path),
             })
             generated = subprocess.run(
@@ -2654,6 +2660,78 @@ int main(int argc, char **argv)
             self.assertEqual(wrong_host.returncode, 1, wrong_host.stderr)
             self.assertEqual(
                 wrong_host.stdout, f"REJECT errno={errno.EINVAL}\n")
+
+
+    def test_arm64_private_ram_host_identity_without_dmi(self):
+        """A machine-only ARM64 digest cannot become physical qualification."""
+        import hashlib
+        import json
+
+        host_marker = 'HOST_SHA="$(python3 - <<\'PY\'\n'
+        host_start = self.script.index(host_marker) + len(host_marker)
+        host_source = self.script[
+            host_start:self.script.index('\nPY\n)" || blocked', host_start)]
+        report_marker = (
+            'export SOURCE_HEAD FORMATTER_SHA MODULE_SHA ORACLE_SHA HOST_SHA REPORT\n'
+            "python3 - <<'PY'\n")
+        report_start = self.script.index(report_marker) + len(report_marker)
+        report_source = self.script[
+            report_start:self.script.index("\nPY\n", report_start)]
+        with TemporaryDirectory(prefix="swapz-arm64-private-host-") as directory:
+            fixture = Path(directory)
+            machine_path = fixture / "machine-id"
+            missing_dmi_path = fixture / "no-dmi"
+            report_path = fixture / "qualification.json"
+            host_source = host_source.replace(
+                '"/etc/machine-id"', repr(str(machine_path)))
+            host_source = host_source.replace(
+                '"/sys/class/dmi/id/product_uuid"',
+                repr(str(missing_dmi_path)))
+            host_source = host_source.replace(
+                "expected_owner = 0", "expected_owner = os.getuid()", 1)
+            machine = b"ABCDEF0123456789ABCDEF0123456789"
+            digest = hashlib.sha256(
+                b"swapz-nullblk-arm64-v1\0" + machine.lower()).hexdigest()
+            environment = os.environ.copy()
+            environment.update({
+                "HOST_ARCH": "aarch64", "SOURCE_HEAD": "1" * 40,
+                "FORMATTER_SHA": "2" * 64, "MODULE_SHA": "3" * 64,
+                "ORACLE_SHA": "4" * 64, "HOST_SHA": digest,
+                "REPORT": str(report_path),
+            })
+            machine_path.write_bytes(machine + b"\n")
+            machine_path.chmod(0o600)
+            def run_host_source():
+                return subprocess.run(
+                    ["python3", "-"], input=host_source, env=environment,
+                    capture_output=True, text=True, timeout=5, check=False)
+            accepted = run_host_source()
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            self.assertEqual(accepted.stdout, digest + "\n")
+            for invalid in (b"0" * 32, machine + b"\r\n",
+                            machine[:-1], machine + b"\n\n"):
+                machine_path.write_bytes(invalid)
+                refused = run_host_source()
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertEqual(refused.stdout + refused.stderr, "")
+            machine_path.write_bytes(machine)
+            result = subprocess.run(
+                ["python3", "-"], input=report_source, env=environment,
+                capture_output=True, text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(report_path.read_bytes())
+            self.assertEqual(report["host_identity"], {
+                "schema": "swapz-host-v1", "architecture": "aarch64",
+                "id_sha256": digest,
+            })
+            self.assertNotIn(machine.lower(), report_path.read_bytes())
+
+        # Production's host parser and DMI digest remain distinct.
+        self.assertIn("#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST\n"
+                      "\t/* An ARM64 report", self.primary)
+        self.assertIn('strcmp(system.machine, "x86_64")', self.primary)
+        self.assertIn('static const unsigned char prefix[] = "swapz-host-v2";',
+                      self.primary)
 
     def test_rootless_prepare_refusal_keeps_blocked_and_fail_distinct(self):
         verifier_start = self.script.index("verify_prepare_failure_diagnostic() {")

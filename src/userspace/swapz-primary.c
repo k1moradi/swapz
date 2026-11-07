@@ -7767,11 +7767,17 @@ static int swapz_primary_qualification_host_parse(
 		if (swapz_primary_json_comma(json, '}') < 0)
 			return -1;
 	}
-	if (seen == 7U && !strcmp(schema, "swapz-host-v1") &&
-	    !strcmp(architecture, "x86_64") &&
-	    swapz_primary_valid_sha256(
+	if (seen != 7U || strcmp(schema, "swapz-host-v1") ||
+	    !swapz_primary_valid_sha256(
 		    qualification->host_identity_sha256))
+		return -1;
+	if (!strcmp(architecture, "x86_64"))
 		return 0;
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	/* An ARM64 report is accepted only by the private RAM rehearsal. */
+	if (!strcmp(architecture, "aarch64"))
+		return 0;
+#endif
 	return -1;
 }
 
@@ -8082,10 +8088,17 @@ static int swapz_primary_running_kernel_matches_qualification(
 	}
 	if (uname(&system) < 0)
 		return -1;
+	#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__)
+	if (strcmp(system.sysname, "Linux") || strcmp(system.machine, "aarch64")) {
+		errno = ENOTSUP;
+		return -1;
+	}
+#else
 	if (strcmp(system.sysname, "Linux") || strcmp(system.machine, "x86_64")) {
 		errno = ENOTSUP;
 		return -1;
 	}
+#endif
 	if (!swapz_primary_valid_kernel_release(system.release) ||
 	    strcmp(system.release, qualification->kernel_release)) {
 		errno = ESTALE;
@@ -8107,22 +8120,38 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 	errno = ENODEV;
 	return -1;
 #else
+#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__)
+	/* RAM-only private rehearsal: machine identity, never hardware identity. */
+	static const unsigned char prefix[] = "swapz-nullblk-arm64-v1";
+	static const char required_architecture[] = "aarch64";
+	unsigned char identity[sizeof(prefix) + 32U];
+#else
 	static const unsigned char prefix[] = "swapz-host-v2";
+	static const char required_architecture[] = "x86_64";
 	unsigned char identity[sizeof(prefix) + 36U + 32U];
+#endif
 	char machine_id[64];
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
 	char product_uuid_record[40];
 	char product_uuid[37];
+#endif
 	struct stat before;
 	struct stat after;
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
 	struct stat dmi_before;
 	struct stat dmi_after;
+#endif
 	struct utsname system;
 	size_t length = 0;
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
 	size_t dmi_length = 0;
+#endif
 	size_t i;
 	int machine_id_nonzero = 0;
 	int fd = -1;
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
 	int dmi_fd = -1;
+#endif
 	int result;
 	int saved_errno;
 
@@ -8130,6 +8159,7 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 		errno = EINVAL;
 		return -1;
 	}
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
 	dmi_fd = open("/sys/class/dmi/id/product_uuid",
 		      O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
 	if (dmi_fd < 0)
@@ -8196,6 +8226,7 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 	if (swapz_primary_host_uuid_normalize(
 		    product_uuid_record, dmi_length, product_uuid) < 0)
 		return -1;
+#endif
 	fd = open("/etc/machine-id", O_RDONLY | O_CLOEXEC | O_NOFOLLOW |
 		  O_NONBLOCK);
 	if (fd < 0)
@@ -8256,7 +8287,7 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 		return -1;
 	}
 	if (uname(&system) < 0 || strcmp(system.sysname, "Linux") ||
-	    strcmp(system.machine, "x86_64")) {
+	    strcmp(system.machine, required_architecture)) {
 		errno = ENOTSUP;
 		return -1;
 	}
@@ -8267,7 +8298,9 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 		return -1;
 	}
 	memcpy(identity, prefix, sizeof(prefix));
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
 	memcpy(identity + sizeof(prefix), product_uuid, 36U);
+#endif
 	for (i = 0; i < 32U; ++i) {
 		unsigned char byte = (unsigned char)machine_id[i];
 
@@ -8277,8 +8310,13 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 		}
 		if (byte != '0')
 			machine_id_nonzero = 1;
+#if defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__)
+		identity[sizeof(prefix) + i] =
+			(unsigned char)tolower(byte);
+#else
 		identity[sizeof(prefix) + 36U + i] =
 			(unsigned char)tolower(byte);
+#endif
 	}
 	if (!machine_id_nonzero) {
 		errno = EINVAL;
@@ -8288,8 +8326,10 @@ static int swapz_primary_live_host_identity_sha256(char digest[65])
 	saved_errno = errno;
 	memset(identity, 0, sizeof(identity));
 	memset(machine_id, 0, sizeof(machine_id));
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
 	memset(product_uuid_record, 0, sizeof(product_uuid_record));
 	memset(product_uuid, 0, sizeof(product_uuid));
+#endif
 	errno = saved_errno;
 	return result;
 #endif

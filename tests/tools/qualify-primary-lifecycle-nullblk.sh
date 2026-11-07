@@ -329,8 +329,11 @@ SOURCE_HEAD="$2"
 [[ "$SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]] ||
 	blocked "validated source is malformed"
 (( EUID == 0 )) || blocked "owned-nullblk lifecycle rehearsal requires root"
-[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] ||
-	blocked "production primary lifecycle admission currently requires Linux x86_64"
+HOST_ARCH="$(uname -m)"
+[[ "$(uname -s)" == Linux && ( "$HOST_ARCH" == x86_64 || "$HOST_ARCH" == aarch64 ) ]] ||
+	blocked "owned RAM primary lifecycle requires Linux x86_64 or aarch64"
+# The installed production binary and physical-media admission stay x86_64-only.
+export HOST_ARCH
 
 for command in cc dmsetup modprobe mountpoint mount blockdev sfdisk udevadm \
 	blkid mkswap sha256sum python3 timeout stat findmnt awk sed grep install od \
@@ -1605,13 +1608,19 @@ def trusted_host_record(path, byte_limit, pattern):
         raise SystemExit(2)
     return record.lower()
 
-product_uuid = trusted_host_record(
-    "/sys/class/dmi/id/product_uuid", 40,
-    rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 machine = trusted_host_record(
     "/etc/machine-id", 64, rb"[0-9a-fA-F]{32}")
-identity = b"swapz-host-v2\0" + product_uuid + machine
+if os.environ["HOST_ARCH"] == "aarch64":
+    # Never hardware identity: scoped to the private owned RAM rehearsal.
+    identity = b"swapz-nullblk-arm64-v1\0" + machine
+elif os.environ["HOST_ARCH"] == "x86_64":
+    product_uuid = trusted_host_record(
+        "/sys/class/dmi/id/product_uuid", 40,
+        rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+    identity = b"swapz-host-v2\0" + product_uuid + machine
+else:
+    raise SystemExit(2)
 print(hashlib.sha256(identity).hexdigest())
 PY
 )" || blocked "cannot derive live host identity"
@@ -1625,7 +1634,7 @@ report = {
     "schema": "swapz-test-results-v1",
     "host_identity": {
         "schema": "swapz-host-v1",
-        "architecture": "x86_64",
+        "architecture": os.environ["HOST_ARCH"],
         "id_sha256": os.environ["HOST_SHA"],
     },
     "source_sha": os.environ["SOURCE_HEAD"],
