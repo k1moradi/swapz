@@ -385,7 +385,13 @@ ordinary 64 KiB stack read buffer: grow to no more than 1 MiB with allocation
 only when required, accept only a complete, strictly parsed table, and refuse
 larger tables with EOVERFLOW. An opened table at the old 64 KiB boundary
 must not be mistaken for an unsafe/empty table; fixtures must include valid
-tables above 64 KiB and oversized tables above 1 MiB. Preserve the 64 MiB
+tables above 64 KiB and oversized tables above 1 MiB. Keep generated valid
+large-table fixtures below their independent 1,024-mount synthetic-inventory
+capacity; use longer valid rows to exercise byte growth rather than mount-count
+exhaustion. Source-extracted direct-C late-race fixtures must import both
+`SWAPZ_PRIMARY_MOUNTINFO_INITIAL_BYTES` and
+`SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES` from production source when compiling
+the extracted mount reader. Preserve the 64 MiB
 aggregate gate and surface fixed, host-private-ID-free reasons
 `per-table-byte-limit`, `read-overflow` or `aggregate-byte-limit` with
 errno 75 on `mountinfo-read` or `mountinfo-aggregate` steps. Revalidate each task's namespace identity

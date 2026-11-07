@@ -2217,6 +2217,7 @@ def compile_and_run(
     )
     parser_source = '\n\n'.join(production_function(source, helper) for helper in helpers)
     production_defines = '\n'.join(production_define(source, name) for name in (
+        "SWAPZ_PRIMARY_MOUNTINFO_INITIAL_BYTES",
         "SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES",
         "SWAPZ_PRIMARY_SWAP_ROWS_MAX",
         "SWAPZ_PRIMARY_VISIBLE_TASKS_MAX",
