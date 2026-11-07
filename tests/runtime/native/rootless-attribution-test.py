@@ -137,7 +137,8 @@ PY
         'Traceback (most recent call last):' \
         'AssertionError: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
         '======================================================================' >&2
-      head -c 260000 /dev/zero | tr '\0' 'x' >&2
+      # 312-byte failure header plus 261831 bytes and newline = 256 KiB.
+      head -c 261831 /dev/zero | tr '\0' 'x' >&2
       printf '\n' >&2
       return 47 ;;
     primary_oversized)
