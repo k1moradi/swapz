@@ -230,11 +230,14 @@ def run_workload(seed_hex: str, memory_mib: int) -> int:
         print(f"FAIL: oracle evidence reporting failed: {report_error}",
               file=sys.stderr)
     if result != 0:
-        failure_phase = (phase if original_error is not None else
-                         "verify" if comparison_failed else
+        # A detected mismatch precedes any later read, writable fault or
+        # teardown error, even when the final digest was never computed.
+        integrity_failed = comparison_failed or page_mismatches != 0 or byte_mismatches != 0
+        failure_phase = ("verify" if integrity_failed else
+                         phase if original_error is not None else
                          "report" if report_error is not None else "cleanup")
-        failure_error = (original_error if original_error is not None else
-                         None if comparison_failed else
+        failure_error = (None if integrity_failed else
+                         original_error if original_error is not None else
                          report_error if report_error is not None else cleanup_error)
         original_errno = getattr(failure_error, "errno", None)
         failure_type = (type(failure_error).__name__ if failure_error is not None else

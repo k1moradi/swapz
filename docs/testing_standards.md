@@ -1078,7 +1078,11 @@ partial stderr and traceback/path text remain private, while the parent still
 reports the child exit and incomplete-evidence disposition. An interrupt while waiting for FILL or
 allocating must fail boundedly without a traceback or anonymous allocation.
 Later cleanup/reporting errors must not replace
-an earlier byte/digest mismatch or its counts. Standalone oracle entry points
+an earlier byte/digest mismatch or its counts. If a page mismatch is already
+observed before a later page-read, writable-fault or unmap failure, the first
+bounded terminal error remains `byte_mismatch` with exact compared-page/byte
+and mismatch totals; any later operational error is secondary, and incomplete
+readback must never publish `ORACLE_VERIFIED`. Standalone oracle entry points
 must reject non-integer memory sizes and page indices outside the unsigned
 64-bit range before allocation or hashing. Rootless terminal fixtures must
 reject duplicate-key, non-finite, non-object and non-ASCII JSON, boolean or

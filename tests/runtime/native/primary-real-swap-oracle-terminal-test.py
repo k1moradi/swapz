@@ -223,6 +223,34 @@ class TerminalEvidenceContracts(unittest.TestCase):
         self.assertIn("[Errno 9] synthetic close error", stderr)
         self.assertNotIn("ab" * 16, stderr)
 
+    def test_detected_corruption_precedes_later_read_and_cleanup_failures(self):
+        for options, subsequent_failure in (
+                ({"read_errno": errno.EIO}, "[Errno 5] synthetic page read error"),
+                ({"short_read": True}, "short oracle page read at page 1")):
+            with self.subTest(options=options):
+                status, stdout, stderr, allocation = self.run_fixture(
+                    corrupt=True, close_fails=True, **options)
+                self.assertEqual(status, 1)
+                self.assertFalse(allocation.closed)
+                self.assertEqual(
+                    [line.partition("=")[0] for line in stdout.splitlines()],
+                    ["ORACLE_WAITING", "ORACLE_FILLED"])
+                self.assertIn(
+                    "phase=verify verified_pages=1/2 verified_bytes=4096/8192",
+                    stderr)
+                self.assertIn(
+                    "expected_page_mismatches=0 observed_page_mismatches=1",
+                    stderr)
+                self.assertIn(
+                    "expected_byte_mismatches=0 observed_byte_mismatches=1",
+                    stderr)
+                self.assertIn(
+                    "error=byte_mismatch errno=none cleanup_complete=false",
+                    stderr)
+                self.assertIn(subsequent_failure, stderr)
+                self.assertIn("[Errno 9] synthetic close error", stderr)
+                self.assertNotIn("ab" * 16, stderr)
+
     def test_integrity_mismatch_remains_primary_after_unmap_failure(self):
         status, stdout, stderr, allocation = self.run_fixture(
             corrupt=True, close_fails=True)
