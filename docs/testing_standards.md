@@ -810,7 +810,11 @@ class, observed safe class, numeric original errno when present (otherwise
 `none`), BLOCKED authorization, and a read-only next action; no private
 socket path, PID, reply payload or source material is logged. Pidfd pins process
 lifetime against PID reuse, while /proc start-time/ancestry protects process
-identity; neither alone proves message authorship. The parent still lacks
+identity; neither alone proves message authorship. In-memory admission-sequencing
+fixtures that are not themselves testing pidfd acquisition must provide a real
+disposable descriptor as the synthetic connection peer pidfd and stub only the
+live-lineage proof; a generic `getsockopt` byte mock must not accidentally turn
+the fixture into a malformed-pidfd test. The parent still lacks
 independent authentication of the privileged **request** writer, and no
 rootless synthetic approval supplies selected-card/reader or last-use physical
 evidence. Physical source-only admission remains unconditionally BLOCKED.

@@ -55,11 +55,26 @@ class PrimaryRealSwapContracts(unittest.TestCase):
     @contextlib.contextmanager
     def _mock_owned_admission_peer(self):
         # These tests exercise admission sequencing with an in-memory child;
-        # the real /proc ancestry contract has dedicated live-process tests.
-        with mock.patch.object(
-                parent, "_owned_peer_process_lineage",
-                return_value=((123, 456, 789),)):
-            yield
+        # the real /proc ancestry and peer-pidfd contracts have dedicated tests.
+        peer_pidfd, peer_pidfd_writer = os.pipe()
+        try:
+            with mock.patch.object(
+                    parent, "_connection_peer_pidfd",
+                    return_value=peer_pidfd), \
+                    mock.patch.object(
+                        parent, "_owned_peer_process_lineage",
+                        return_value=((123, 456, 789),)), \
+                    mock.patch.object(
+                        parent, "_owned_live_connection_peer_lineage",
+                        return_value=((123, 456, 789),)):
+                yield
+        finally:
+            for descriptor in (peer_pidfd, peer_pidfd_writer):
+                try:
+                    os.close(descriptor)
+                except OSError as exc:
+                    if exc.errno != errno.EBADF:
+                        raise
 
     @staticmethod
     def physical_dependency_output(source_root: Path) -> str:
