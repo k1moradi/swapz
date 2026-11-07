@@ -139,13 +139,15 @@ classify_rootless_private_unittest_failure() {
   local diagnostic_path=$1
   local line
   local detailed_header_regex="^(FAIL|ERROR): (test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)"
-  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\(phase='([a-z0-9_-]{1,64})'\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership)\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,512}\\))? \\.\\.\\. (FAIL|ERROR)$"
+  local simple_phase_context_regex="^ \\(phase='([a-z0-9_-]{1,64})'\\)$"
   # Other generator subtest keys identify a failed method, never public data.
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9_-]{1,64})'\\)$"
   local errno_regex='^(OSError|PermissionError|FileNotFoundError): \[Errno ([1-9][0-9]{0,3})\]'
   local errno_candidate
   local expected_unittest_class=
+  local progress_context=
   local first_progress_kind=
   local first_progress_test=
   local first_progress_subtest=unavailable
@@ -182,9 +184,12 @@ classify_rootless_private_unittest_failure() {
       [[ ${BASH_REMATCH[2]} == "$expected_unittest_class" &&
          ${BASH_REMATCH[3]} == "${BASH_REMATCH[1]}" ]] || continue
       first_progress_test=${BASH_REMATCH[1]}
-      first_progress_kind=${BASH_REMATCH[6]}
-      if [[ -n ${BASH_REMATCH[5]} ]]; then
-        first_progress_subtest=${BASH_REMATCH[5]}
+      progress_context=${BASH_REMATCH[4]}
+      first_progress_kind=${BASH_REMATCH[5]}
+      # Arbitrary subtest keys remain private. Preserve the existing public
+      # subtest only when the context is exactly one allowlisted phase key.
+      if [[ $progress_context =~ $simple_phase_context_regex ]]; then
+        first_progress_subtest=${BASH_REMATCH[1]}
       fi
     elif [[ $expected_unittest_class == GeneratorPublicationTest &&
             $line =~ $generator_progress_regex ]]; then

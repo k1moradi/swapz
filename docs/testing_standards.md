@@ -1742,7 +1742,13 @@ so their execution-order record cannot be skipped in favor of a later ERROR.
 The existing public rootless-marker subtest grammar remains lowercase
 alphanumeric plus hyphen; an authenticated underscore-bearing phase therefore
 stays private and is reported publicly as `subtest=unavailable`, without
-losing the authenticated test name or failure kind. Synthetic controls without progress
+losing the authenticated test name or failure kind.
+ For PackageLifecycle, PrimaryRealSwapContracts and
+SourceAdmissionPeerOwnership, the private progress matcher must also accept a
+bounded arbitrary unittest subtest context so additional keys such as
+`case=` or `field=` cannot hide the execution-first record. Arbitrary
+context remains private; only an exact single `phase=` context may supply the
+existing public subtest token. Synthetic controls without progress
 records may use the first detailed block as a compatibility fallback. Retain the
 allowlisted execution-first unittest name and first assertion or exception
 privately. The official native-stage diagnostic binds unittest identity to the failing
