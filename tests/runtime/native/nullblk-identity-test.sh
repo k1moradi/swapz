@@ -1019,23 +1019,24 @@ class VolatileAttributeMetadata:
         return getattr(self.metadata, name)
 
 
-def tracked_open(path, flags, mode=0o777, *, dir_fd=None):
-    descriptor = _original_open(path, flags, mode, dir_fd=dir_fd)
-    if dir_fd is not None and path in _attribute_names:
-        _attribute_descriptors[descriptor] = path
-    return descriptor
-
-
-def replace_config_after_pin(metadata):
-    global _replacement_triggered
-    if (_replacement_triggered or
-            os.environ.get("SWAPZ_REPLACE_AFTER_CONFIG_PIN") != "1" or
-            not stat.S_ISDIR(metadata.st_mode)):
-        return
+def attribute_name(path, dir_fd):
+    path_text = os.fsdecode(path)
+    if dir_fd is not None and path_text in _attribute_names:
+        return path_text
     configfs_path, config_name = sys.argv[1:3]
+    for attribute in _attribute_names:
+        if os.path.normpath(path_text) == os.path.join(
+                configfs_path, config_name, attribute):
+            return attribute
+    return None
+
+
+def install_matching_replacement(retained_name):
+    global _replacement_triggered
+    configfs_path, config_name = sys.argv[1:3]
+    case_root = os.path.dirname(configfs_path)
     public_config = os.path.join(configfs_path, config_name)
-    retained_config = os.path.join(
-        os.path.dirname(configfs_path), "retained-pinned-directory")
+    retained_config = os.path.join(case_root, retained_name)
     os.rename(public_config, retained_config)
     os.mkdir(public_config)
     for attribute in _attribute_names:
@@ -1044,6 +1045,52 @@ def replace_config_after_pin(metadata):
         with open(os.path.join(public_config, attribute), "wb") as destination:
             destination.write(value)
     _replacement_triggered = True
+    return case_root, public_config, retained_config
+
+
+def power_write_open(path, flags):
+    if not flags & (os.O_WRONLY | os.O_RDWR):
+        return False
+    path_text = os.fsdecode(path)
+    if path_text == "power":
+        return True
+    configfs_path, config_name = sys.argv[1:3]
+    return os.path.normpath(path_text) == os.path.join(
+        configfs_path, config_name, "power")
+
+
+def tracked_open(path, flags, mode=0o777, *, dir_fd=None):
+    aba_paths = None
+    if (not _replacement_triggered and
+            os.environ.get("SWAPZ_ABA_DURING_POWER_OPEN") == "1" and
+            power_write_open(path, flags)):
+        # Put matching foreign state at the public name only while open(2)
+        # resolves power. A pinned config-directory fd must still select the
+        # creator-owned attribute; public-path lookup would select the foreign
+        # object even though the original name is restored before revalidation.
+        aba_paths = install_matching_replacement(
+            "retained-original-during-power-open")
+    try:
+        descriptor = _original_open(path, flags, mode, dir_fd=dir_fd)
+    finally:
+        if aba_paths is not None:
+            case_root, public_config, retained_config = aba_paths
+            foreign_config = os.path.join(
+                case_root, "retained-foreign-during-power-open")
+            os.rename(public_config, foreign_config)
+            os.rename(retained_config, public_config)
+    attribute = attribute_name(path, dir_fd)
+    if attribute is not None:
+        _attribute_descriptors[descriptor] = attribute
+    return descriptor
+
+
+def replace_config_after_pin(metadata):
+    if (_replacement_triggered or
+            os.environ.get("SWAPZ_REPLACE_AFTER_CONFIG_PIN") != "1" or
+            not stat.S_ISDIR(metadata.st_mode)):
+        return
+    install_matching_replacement("retained-pinned-directory")
 
 
 def volatile_fstat(descriptor):
@@ -1133,7 +1180,9 @@ def create_config(case):
     return case_root, configfs, config, identity
 
 
-def run_proof(case_root, configfs, identity, power_off, replace_after_pin=False):
+def run_proof(
+        case_root, configfs, identity, power_off, replace_after_pin=False,
+        aba_during_power_open=False):
     inode_trace = case_root / "attribute-inodes"
     power_trace = case_root / "power-writes"
     environment = os.environ.copy()
@@ -1143,6 +1192,8 @@ def run_proof(case_root, configfs, identity, power_off, replace_after_pin=False)
     environment["SWAPZ_POWER_TRACE"] = str(power_trace)
     if replace_after_pin:
         environment["SWAPZ_REPLACE_AFTER_CONFIG_PIN"] = "1"
+    if aba_during_power_open:
+        environment["SWAPZ_ABA_DURING_POWER_OPEN"] = "1"
     program = "\n".join((
         f"CONFIGFS={shlex.quote(str(configfs))}",
         f"CONFIGNAME={shlex.quote(config_name)}",
@@ -1235,6 +1286,26 @@ try:
             "same_name_replacement_after_pin",
             "creator_or_replacement_not_retained")
 
+    case_root, configfs, config, identity = create_config(
+        "same_name_aba_during_power_open")
+    status, _, power_trace = run_proof(
+        case_root, configfs, identity, 1, aba_during_power_open=True)
+    foreign_config = case_root / "retained-foreign-during-power-open"
+    restored_metadata = config.stat()
+    restored_identity = (
+        f"{restored_metadata.st_dev}:{restored_metadata.st_ino}:"
+        f"{restored_metadata.st_uid}"
+    )
+    require(status == 0 and
+            power_trace.read_text(encoding="ascii") == "power_write\n",
+            "same_name_aba_during_power_open",
+            "pinned_power_write_rejected_or_repeated", status)
+    require(restored_identity == identity and foreign_config.is_dir() and
+            (config / "power").read_text(encoding="ascii") == "0\n" and
+            (foreign_config / "power").read_text(encoding="ascii") == "1\n",
+            "same_name_aba_during_power_open",
+            "foreign_power_selected_by_public_name")
+
     def replace_with_foreign(case_root, configfs, config):
         original = case_root / "retained-created-directory"
         config.rename(original)
@@ -1300,4 +1371,4 @@ except Exception as failure:
     sys.exit(1)
 PY
 
-printf '%s\n' 'PASS: null_blk identity, legacy false admission and 66 isolated preflight fixtures (zero stale-resource cleanup)'
+printf '%s\n' 'PASS: null_blk identity, configfs race controls, legacy false admission and 66 isolated preflight fixtures (zero stale-resource cleanup)'
