@@ -657,6 +657,8 @@ def _physical_qualification_target_binding_is_valid(
             MAJOR_MINOR_RE.fullmatch(expected["lower_major_minor"]) is None or
             not isinstance(expected.get("parent_major_minor"), str) or
             MAJOR_MINOR_RE.fullmatch(expected["parent_major_minor"]) is None or
+            # A PARTUUID-selected partition cannot be its own physical parent.
+            expected["parent_major_minor"] == expected["lower_major_minor"] or
             not isinstance(expected.get("parent_model"), str) or
             not expected["parent_model"] or
             not isinstance(expected.get("parent_transport"), str) or
