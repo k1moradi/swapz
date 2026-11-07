@@ -2942,12 +2942,18 @@ staged Kbuild sources. It must define the SHA, numeric clean state, and string
 clean state from the same Make invocation. Stage 2's Make-interface regression
 checks the generated string form required by kernel module metadata, including
 the clean source fixture case. Direct compile-only Kbuild invocations without
-an explicitly supplied generated header stage the unknown/0 fallback and cannot
-qualify a clean module. An explicitly missing generated header, invalid VERSION,
-or failed Kbuild invalidates any previous candidate image. Rootless W=1/W=2
-and normal staging regressions must preserve unchanged source identity, observe
-tracked kernel-input and release changes, refuse dirty/unknown provenance,
-and retain original compiler diagnostics, failed build phase and exit.
+an explicitly supplied generated header must stage the checked-in unknown/0
+fallback even when a stale root build header exists, and therefore cannot
+qualify a clean module. Staging must also prune source C/header files that no
+longer exist while preserving Kbuild-generated files; otherwise a removed
+header can silently satisfy a later compile from stale staging. Any changed
+staged input invalidates the previous candidate before replacement. An
+explicitly missing generated header, missing or invalid VERSION, or failed
+Kbuild must leave no previous candidate image. Rootless W=1/W=2 and normal
+staging regressions must preserve unchanged source identity, independently
+observe tracked kernel-input and release changes, refuse dirty/unknown
+provenance, surface genuine missing-header diagnostics, and retain the original
+failed build phase and exit.
 
 ### Dedicated SD performance and sustained-workload qualification
 

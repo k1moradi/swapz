@@ -1579,6 +1579,10 @@ exit 0
             import sys
 
             stage = Path(sys.argv[1])
+            if not (stage / "dummy.h").exists():
+                print("dm-target.c:1:10: fatal error: dummy.h: No such file or directory",
+                      file=sys.stderr)
+                sys.exit(29)
             if Path(__file__).with_name("fail-compile").exists():
                 print("dm-target.c:7:5: warning: synthetic compiler diagnostic",
                       file=sys.stderr)
@@ -1699,19 +1703,44 @@ exit 0
             "symbols": "__asan_load8 __tsan_read8",
         })[0], "BLOCKED")
 
+        # Direct compile-only builds ignore even a present stale root header.
+        stamp("c" * 40, 1)
+        fallback_image = run_success("W=1", explicit=False)
+        self.assertIn(b'SWAPZ_BUILD_SOURCE_SHA "unknown"', fallback_image)
+        self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 0', fallback_image)
+        self.assertNotIn(("c" * 40).encode(), fallback_image)
+
         # An explicitly missing generated header must destroy stale candidates.
         generated.unlink()
         missing = build("W=1")
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn("BLOCKED_KERNEL_STAGE: missing generated source-build-info.h",
                       missing.stderr)
+        self.assertIn("FAIL_KERNEL_STAGE phase=build-info exit=1",
+                      missing.stderr)
         self.assertFalse(image("W=1").exists())
         fallback_image = run_success("W=1", explicit=False)
         self.assertIn(b'SWAPZ_BUILD_SOURCE_SHA "unknown"', fallback_image)
         self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 0', fallback_image)
 
-        # Report the compiler warning, Kbuild's failed phase and original exit.
+        # Deleted source headers cannot survive in staging and hide a real error.
         stamp(SOURCE_SHA, 1)
+        run_success("W=1")
+        included_header.unlink()
+        missing_header = build("W=1")
+        self.assertEqual(missing_header.returncode, 2,
+                         missing_header.stdout + missing_header.stderr)
+        self.assertIn("fatal error: dummy.h: No such file or directory",
+                      missing_header.stderr)
+        self.assertIn("Error 29", missing_header.stderr)
+        self.assertIn("FAIL_KERNEL_BUILD phase=Kbuild exit=2",
+                      missing_header.stderr)
+        self.assertFalse((image("W=1").parent / "dummy.h").exists())
+        self.assertFalse(image("W=1").exists())
+        included_header.write_text("#define DUMMY_REVISION 2\n",
+                                   encoding="utf-8")
+
+        # Report the compiler warning, Kbuild's failed phase and original exit.
         (fake_headers / "fail-compile").write_text("fail\n", encoding="utf-8")
         failed = build("W=2")
         self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
@@ -1727,6 +1756,20 @@ exit 0
         invalid = build("W=1")
         self.assertNotEqual(invalid.returncode, 0)
         self.assertIn("BLOCKED: invalid canonical VERSION", invalid.stderr)
+        self.assertIn("FAIL_KERNEL_STAGE phase=version-validate exit=1",
+                      invalid.stderr)
+        self.assertFalse(image("W=1").exists())
+
+        # A missing VERSION reports its source phase and cannot expose old .ko.
+        (kernel_source / "VERSION").write_text(next_version + "\n",
+                                                encoding="utf-8")
+        run_success("W=1")
+        (kernel_source / "VERSION").unlink()
+        missing_version = build("W=1")
+        self.assertNotEqual(missing_version.returncode, 0)
+        self.assertIn("VERSION", missing_version.stderr)
+        self.assertIn("FAIL_KERNEL_STAGE phase=version-read exit=1",
+                      missing_version.stderr)
         self.assertFalse(image("W=1").exists())
 
     def test_static_required_sources_follow_kernel_architecture(self) -> None:

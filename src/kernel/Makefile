@@ -43,35 +43,66 @@ endif
 .PHONY: all clean
 all:
 	@mkdir -p "$(SWAPZ_STAGE)"
-# Do not overwrite generated build provenance with the checked-in fallback.
-	@set -e; for src in "$(CURDIR)/Makefile" "$(CURDIR)"/*.c "$(CURDIR)"/*.h; do \
-		case "$${src##*/}" in swapz-build-info.h) continue ;; esac; \
-		dst="$(SWAPZ_STAGE)/$${src##*/}"; \
-		if ! cmp -s "$$src" "$$dst"; then cp -f "$$src" "$$dst"; fi; \
-	done
-	@set -eu; if test -f "$(SWAPZ_BUILD_INFO)"; then \
+# Keep the staged tree source-exact while preserving Kbuild-generated files.
+	@set -eu; \
+	fail_stage() { \
+		status="$$1"; phase="$$2"; \
+		rm -f "$(SWAPZ_STAGE)/dm-swapz.ko" || true; \
+		printf 'FAIL_KERNEL_STAGE phase=%s exit=%s\n' "$$phase" "$$status" >&2; \
+		exit "$$status"; \
+	}; \
+	invalidate_candidate() { \
+		rm -f "$(SWAPZ_STAGE)/dm-swapz.ko" || \
+			fail_stage "$$?" candidate-invalidate; \
+	}; \
+	for staged in "$(SWAPZ_STAGE)"/*.c "$(SWAPZ_STAGE)"/*.h; do \
+		test -e "$$staged" || continue; \
+		staged_name="$${staged##*/}"; \
+		case "$$staged_name" in \
+			*.mod.c|swapz-build-info.h|swapz-version.h) continue ;; \
+		esac; \
+		if ! test -f "$(CURDIR)/$$staged_name"; then \
+			invalidate_candidate; \
+			rm -f "$$staged" || fail_stage "$$?" source-prune; \
+		fi; \
+	done; \
+	for src in "$(CURDIR)/Makefile" "$(CURDIR)"/*.c "$(CURDIR)"/*.h; do \
+		staged_name="$${src##*/}"; \
+		case "$$staged_name" in swapz-build-info.h) continue ;; esac; \
+		dst="$(SWAPZ_STAGE)/$$staged_name"; \
+		if ! cmp -s "$$src" "$$dst"; then \
+			invalidate_candidate; \
+			cp -f "$$src" "$$dst" || fail_stage "$$?" source-copy; \
+		fi; \
+	done; \
+	if test "$(SWAPZ_EXPLICIT_BUILD_INFO)" = 1; then \
 		build_info_source="$(SWAPZ_BUILD_INFO)"; \
-	elif test "$(SWAPZ_EXPLICIT_BUILD_INFO)" = 1; then \
-		echo "BLOCKED_KERNEL_STAGE: missing generated source-build-info.h: $(SWAPZ_BUILD_INFO)" >&2; \
-		rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; exit 1; \
+		if ! test -f "$$build_info_source"; then \
+			echo "BLOCKED_KERNEL_STAGE: missing generated source-build-info.h: $$build_info_source" >&2; \
+			fail_stage 1 build-info; \
+		fi; \
 	else \
 		build_info_source="$(CURDIR)/swapz-build-info.h"; \
-	fi; \
-	if ! test -f "$$build_info_source"; then \
-		echo "BLOCKED_KERNEL_STAGE: missing build info header: $$build_info_source" >&2; \
-		rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; exit 1; \
+		if ! test -f "$$build_info_source"; then \
+			echo "BLOCKED_KERNEL_STAGE: missing build info header: $$build_info_source" >&2; \
+			fail_stage 1 build-info; \
+		fi; \
 	fi; \
 	if ! cmp -s "$$build_info_source" "$(SWAPZ_STAGE)/swapz-build-info.h"; then \
-		cp -f "$$build_info_source" "$(SWAPZ_STAGE)/swapz-build-info.h"; \
+		invalidate_candidate; \
+		cp -f "$$build_info_source" "$(SWAPZ_STAGE)/swapz-build-info.h" || \
+			fail_stage "$$?" build-info-copy; \
+	fi; \
+	version="$$(cat "$(CURDIR)/VERSION")" || fail_stage "$$?" version-read; \
+	printf '%s\n' "$$version" | grep -Eq '^3[.]0[.]0-alpha[.][0-9]+$$' || \
+		{ echo "BLOCKED: invalid canonical VERSION" >&2; \
+		  fail_stage 1 version-validate; }; \
+	header="$(SWAPZ_STAGE)/swapz-version.h"; \
+	if ! printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" | cmp -s - "$$header"; then \
+		invalidate_candidate; \
+		printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" > "$$header" || \
+			fail_stage "$$?" version-write; \
 	fi
-	@set -e; version="$$(cat "$(CURDIR)/VERSION")"; \
-	  printf '%s\n' "$$version" | grep -Eq '^3[.]0[.]0-alpha[.][0-9]+$$' || \
-	    { echo "BLOCKED: invalid canonical VERSION" >&2; \
-	      rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; exit 1; }; \
-	  header="$(SWAPZ_STAGE)/swapz-version.h"; \
-	  if ! printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" | cmp -s - "$$header"; then \
-	    printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" > "$$header"; \
-	  fi
 	@$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" modules || { \
 		status=$$?; rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; \
 		printf 'FAIL_KERNEL_BUILD phase=Kbuild exit=%s\n' "$$status" >&2; \
