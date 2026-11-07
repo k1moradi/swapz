@@ -1012,7 +1012,12 @@ mutable report pathname after the workload. Workspace cleanup and result-input
 preparation precede the final source-admission request so the last Git/remote
 proof is as close as possible to the terminal evidence commit. Rootless ordering
 coverage must distinguish this pre-PASS cleanup from the fallback retry in the
-function's finalizer. A cleanup failure
+function's finalizer. Mocked target verification in that coverage must append
+a stable synthetic target/parent identity to the real verifier's
+`observed_identity` output parameter (not merely return the device numbers),
+then assert that identical identity reaches every simulated cycle and subsequent
+selector policy-use check. An empty mock output list is a fixture error, not
+cleanup or recovery evidence. A cleanup failure
 must leave or write non-PASS evidence rather than a durable false PASS. Its
 SHA-256 must be recorded in persistent evidence whenever admission reaches
 durable evidence creation.

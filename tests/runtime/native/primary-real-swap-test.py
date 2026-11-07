@@ -1721,6 +1721,22 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
                 simulated_prepare = mock.Mock()
 
+                # Match the real verifier's return value and output identity.
+                # A return-only mock leaves observed_identity empty and masks
+                # the terminal cleanup behavior with an unrelated IndexError.
+                synthetic_target_identity = (
+                    Path("/synthetic"), (1, 2, 3, 4, 5),
+                    Path("/synthetic-parent"), (6, 7, 8, 9, 10),
+                    1024 * qualify.MIB, "synthetic-reader",
+                )
+
+                def verify_fixture_target(*_args, observed_identity=None,
+                                          **_kwargs):
+                    self.assertIsNotNone(observed_identity)
+                    self.assertEqual(observed_identity, [])
+                    observed_identity.append(synthetic_target_identity)
+                    return Path("/synthetic"), (8, 1), (8, 0)
+
                 def fake_cycle(index, **kwargs):
                     self.assertIn("0" * 32, kwargs["prior_run_ids"])
                     if index == 2:
@@ -1803,11 +1819,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             qualify, "_read_readiness_snapshot",
                             return_value=(
                                 {"authorized_target": {}}, "9" * 64)))
-                    stack.enter_context(
+                    target_probe = stack.enter_context(
                         mock.patch.object(
                             qualify, "verify_authorized_target",
-                            return_value=(
-                                Path("/synthetic"), (8, 1), (8, 0))))
+                            side_effect=verify_fixture_target))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "read_swap_rows", return_value=[]))
@@ -1847,6 +1862,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify._execute_admitted(
                         args, admission, terminal_cleanup=terminal_cleanup)
 
+                target_probe.assert_called_once()
+                self.assertEqual(
+                    target_probe.call_args.kwargs["observed_identity"],
+                    [synthetic_target_identity])
+                for policy_use in selector_gate.call_args_list:
+                    self.assertEqual(
+                        policy_use.kwargs["expected_identity"],
+                        synthetic_target_identity)
+                for cycle_use in cycle_runner.call_args_list:
+                    self.assertEqual(
+                        cycle_use.kwargs["expected_identity"],
+                        synthetic_target_identity)
                 self.assertEqual(len(evidence_instances), 1)
                 statuses = [
                     status for status, _reason
