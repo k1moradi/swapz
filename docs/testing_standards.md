@@ -1976,7 +1976,11 @@ native recipe emits a fixed `FAIL: native test-lower-io binary=... exit=...`
 marker. The official `make test` reporter authenticates it against the
 source target's prerequisites, its nested Make error and the final rootless
 phase before printing the executable and a source-bounded .c assertion
-location when present. Arbitrary C assertion operands, host paths and
+location when present. The recipe uses Make-escaped `$$native_test`,
+`$$native_exit_status` and `$$?` so its loop variables and original status
+reach the shell unchanged. A rootless regression runs the real recipe with
+disposable fake executables, verifies first-failure stop/order and original
+status, and catches lost Make dollar-sign escaping. Arbitrary C assertion operands, host paths and
 device data remain private. Keep nullblk-identity-test.sh executable in Git.
 Authenticated PhysicalSwapProbeTests recovery failures additionally show the
 deepest source-controlled physical-swap-probe.py frame (basename and line),

@@ -3959,6 +3959,46 @@ class ReportContract(unittest.TestCase):
             "Package watchdog:" in detail
             for detail in runner.first_unittest_failure_details(untrusted)))
 
+    def test_native_lower_io_make_recipe_preserves_shell_variables(self):
+        # Execute the real Makefile recipe against disposable fake binaries,
+        # not the native kernel fixtures or any real block device.
+        import subprocess
+
+        test_programs = (
+            "flush-ordering", "lower-write-aggregation", "window-policy",
+            "preparation-slots", "preparation-codec-result",
+            "preparation-publication-lifetime", "lane-gap",
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory)
+            for program_name in test_programs:
+                executable = output / program_name
+                return_code = 7 if program_name == "lower-write-aggregation" else 0
+                executable.write_text(
+                    "#!/bin/sh\n"
+                    f"printf 'invoked {program_name}\\n'\n"
+                    f"exit {return_code}\n",
+                    encoding="ascii")
+                executable.chmod(0o700)
+            result = subprocess.run(
+                ["make", "--no-print-directory", "-s",
+                 "-f", str(ROOT / "tests/suites/Makefile"),
+                 "test-lower-io", f"OUT={output}"],
+                cwd=ROOT / "tests/suites", capture_output=True, text=True,
+                check=False, timeout=10)
+            # Make itself exits 2, but the failure marker preserves the
+            # original binary's exit 7 and prevents later programs running.
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), [
+                "invoked flush-ordering",
+                "invoked lower-write-aggregation",
+            ])
+            self.assertIn(
+                "FAIL: native test-lower-io "
+                "binary=lower-write-aggregation exit=7", result.stderr)
+            self.assertNotIn("ative_test", result.stderr)
+            self.assertNotIn("Illegal number", result.stderr)
+
     def test_native_lower_io_console_reports_failing_binary_and_source(self):
         from types import SimpleNamespace
         from unittest.mock import patch
