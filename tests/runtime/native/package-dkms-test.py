@@ -317,6 +317,10 @@ case "$cmd" in
              "$SWAPZ_TEST_DKMS_VERSION" "$SWAPZ_FAKE_DKMS_OTHER_KERNEL" ;;
       esac
     fi
+    # Print the exact installed record, then fail the producer.
+    if [[ "${SWAPZ_FAKE_DKMS_STATUS_EXIT:-0}" != 0 ]]; then
+      exit "$SWAPZ_FAKE_DKMS_STATUS_EXIT"
+    fi
     ;;
   add) printf 'added\n' > "$SWAPZ_DKMS_STATE" ;;
   build)
@@ -892,6 +896,25 @@ exec "{flock_binary}" "$@"
         )
         self.assert_installed_exact()
         self.assertEqual(self.uninstall_transactions(), [])
+
+    def test_dkms_status_nonzero_with_matching_stdout_cannot_authenticate(self):
+        self.assertEqual(self.invoke("install").returncode, 0)
+        installed_before = self.installed_package_state()
+
+        # The status mock prints an exact record first, but exits nonzero.
+        # Neither operation may use that output as current-kernel evidence.
+        for action in ("install", "uninstall"):
+            with self.subTest(action=action):
+                rejected = self.invoke(
+                    action, {"SWAPZ_FAKE_DKMS_STATUS_EXIT": "65"})
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("artifact=current_kernel_dkms_registration",
+                              rejected.stderr)
+                self.assertIn("observed=probe_failed command_status=65",
+                              rejected.stderr)
+                self.assertEqual(self.installed_package_state(),
+                                 installed_before)
+                self.assertEqual(self.uninstall_transactions(), [])
 
     def test_missing_headers_signing_and_vermagic_refuse(self):
         self.headers_makefile.unlink()

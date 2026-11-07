@@ -8222,6 +8222,9 @@ than trusting plausible stdout. Recognized forms include the standard
 single-line enabled/disabled results, disabled plus the Setup Mode annotation,
 and enabled plus shim-validation-disabled; the last case still requires the
 exact module signature verification because firmware Secure Boot is enabled.
+A rootless `dkms status` mock must print the otherwise exact installed record
+and then exit nonzero. Both install and uninstall must reject the producer
+failure without authenticating stdout or modifying the installed package.
 Nonzero `modinfo` exit status invalidates
 module vermagic and installed module-path resolution even if stdout appears to
 match; synthetic negative controls must prove both refusals before package
