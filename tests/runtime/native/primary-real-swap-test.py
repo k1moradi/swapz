@@ -1589,6 +1589,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     def __init__(self, *_args, **_kwargs):
                         self.path = root / "evidence.json"
                         self.finish_calls = []
+                        self.finish_fields = []
                         evidence_instances.append(self)
 
                     def update(self, *_args, **_kwargs):
@@ -1596,6 +1597,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
 
                     def finish(self, status_value, reason=None, **_fields):
                         self.finish_calls.append((status_value, reason))
+                        self.finish_fields.append(_fields)
 
                 args = qualify.build_parser().parse_args([
                     "--validated-source", "a" * 40,
@@ -1773,6 +1775,11 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     self.assertEqual(terminal_cleanup_calls, [])
                     self.assertIn("phase=policy_use", failure_reason)
                     self.assertNotIn("/private", failure_reason)
+                    completed_cycles = evidence_instances[0].finish_fields[-1][
+                        "cycles"]
+                    self.assertEqual(
+                        [cycle["run_id"] for cycle in completed_cycles],
+                        ["1" * 32])
                 elif failure_point == "private workspace":
                     self.assertEqual(workspace_cleanup_calls, [True, True])
                     self.assertEqual(terminal_cleanup_calls, [])

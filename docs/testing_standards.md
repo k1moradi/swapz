@@ -884,7 +884,10 @@ primary mutation; unchanged source/live identity remains the positive control.
 A rootless two-cycle control must reject simulated post-cycle selector drift
 before the second prepare. The already completed first cycle is allowed to
 have performed its simulated prepare, but drift must permit no additional or
-resumed primary mutation and must produce BLOCKED evidence. Identical bytes at
+resumed primary mutation and must produce BLOCKED evidence. That BLOCKED
+evidence must retain the completed cycle result; a refusal after teardown must
+not erase an already-performed physical mutation from the audit record.
+Identical bytes at
 a substituted inode or protected-directory replacement are not identity proof. Two snapshots do not exclude a completely hidden selector
 ABA, make the last-use interval kernel-atomic, or identify a unique physical
 card and reader; physical admission stays BLOCKED without those guarantees.

@@ -4466,13 +4466,15 @@ def _execute_admitted(
                 prior_swap_uuids=swap_uuids,
                 admission=admission,
             )
+            # The completed cycle may already have mutated the target. Retain
+            # that fact even if post-cycle identity blocks every later use.
+            cycles.append(result)
             # Revalidate on completion before a later cycle or terminal PASS.
             _require_selector_at_policy_use(
                 selector_evidence, plan, authorization_snapshot,
                 target_device, target_parent_device)
             run_ids.add(result["run_id"])
             swap_uuids.add(result["linux_swap_uuid"])
-            cycles.append(result)
             evidence.update(
                 f"CYCLE_{cycle_index}_COMPLETE",
                 cycles=cycles,
