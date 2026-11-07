@@ -249,46 +249,46 @@
 "gc_scan_scale": {
 "rows": [
 {
-"incremental_select_ns": 709,
-"legacy_dead_probe_ns": 75994,
-"legacy_score_scan_ns": 498589,
+"incremental_select_ns": 1692,
+"legacy_dead_probe_ns": 179156,
+"legacy_score_scan_ns": 1678726,
 "logical_pages": 262144,
-"mapped_dead_probe_ns": 625,
-"relocation_list_ns": 541,
-"relocation_scan_ns": 87077,
+"mapped_dead_probe_ns": 860,
+"relocation_list_ns": 692,
+"relocation_scan_ns": 584256,
 "segments": 1024,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 2458,
-"legacy_dead_probe_ns": 295062,
-"legacy_score_scan_ns": 1943193,
+"incremental_select_ns": 5906,
+"legacy_dead_probe_ns": 744429,
+"legacy_score_scan_ns": 6781582,
 "logical_pages": 1048576,
-"mapped_dead_probe_ns": 1208,
-"relocation_list_ns": 542,
-"relocation_scan_ns": 338101,
+"mapped_dead_probe_ns": 3103,
+"relocation_list_ns": 835,
+"relocation_scan_ns": 1980667,
 "segments": 4096,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 10166,
-"legacy_dead_probe_ns": 1159249,
-"legacy_score_scan_ns": 9008637,
+"incremental_select_ns": 26934,
+"legacy_dead_probe_ns": 3466877,
+"legacy_score_scan_ns": 38010388,
 "logical_pages": 4194304,
-"mapped_dead_probe_ns": 7666,
-"relocation_list_ns": 500,
-"relocation_scan_ns": 1351527,
+"mapped_dead_probe_ns": 11156,
+"relocation_list_ns": 1182,
+"relocation_scan_ns": 10129342,
 "segments": 16384,
 "victim_records": 256
 },
 {
-"incremental_select_ns": 60828,
-"legacy_dead_probe_ns": 7618613,
-"legacy_score_scan_ns": 70630411,
+"incremental_select_ns": 85058,
+"legacy_dead_probe_ns": 13220309,
+"legacy_score_scan_ns": 106311143,
 "logical_pages": 27080192,
-"mapped_dead_probe_ns": 50329,
-"relocation_list_ns": 1000,
-"relocation_scan_ns": 8775071,
+"mapped_dead_probe_ns": 49134,
+"relocation_list_ns": 1170,
+"relocation_scan_ns": 34339901,
 "segments": 105782,
 "victim_records": 256
 }
@@ -298,14 +298,24 @@
 "predictor": {
 "backend_benchmarks": [
 {
-"inverse_ns_per_page": 146,
+"inverse_ns_per_page": 302,
 "name": "scalar",
-"transform_ns_per_page": 132
+"transform_ns_per_page": 442
 },
 {
-"inverse_ns_per_page": 93,
-"name": "neon",
-"transform_ns_per_page": 64
+"inverse_ns_per_page": 330,
+"name": "sse2",
+"transform_ns_per_page": 213
+},
+{
+"inverse_ns_per_page": 188,
+"name": "avx2",
+"transform_ns_per_page": 124
+},
+{
+"inverse_ns_per_page": 128,
+"name": "avx512",
+"transform_ns_per_page": 88
 }
 ],
 "classifier": {
@@ -315,9 +325,9 @@
 "candidate": "delta64",
 "early_abort_pages": 223,
 "eligible_pages": 512,
-"ns_per_page": 45,
+"ns_per_page": 117,
 "sample_pairs": 32,
-"scalar_ns_per_page": 45,
+"scalar_ns_per_page": 117,
 "stage1_min_score": 2,
 "stage1_pairs": 8
 },
@@ -332,7 +342,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1908
+"wall_ns_per_page": 3202
 },
 {
 "acceleration": 2,
@@ -340,7 +350,7 @@
 "planner_blocks": 384,
 "planner_extents": 273,
 "raw_pages": 192,
-"wall_ns_per_page": 1819
+"wall_ns_per_page": 2978
 },
 {
 "acceleration": 3,
@@ -348,7 +358,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1654
+"wall_ns_per_page": 2840
 },
 {
 "acceleration": 4,
@@ -356,7 +366,7 @@
 "planner_blocks": 384,
 "planner_extents": 272,
 "raw_pages": 192,
-"wall_ns_per_page": 1690
+"wall_ns_per_page": 2774
 }
 ],
 "negative_pages": 256,
@@ -373,9 +383,9 @@
 "extents_saved": 49,
 "general_threshold": 24,
 "lz4_rescues": 192,
-"modeled_wall_ns_per_page": 1350,
-"modeled_wall_ns_total": 777728,
-"ns_per_saved_block": 14956,
+"modeled_wall_ns_per_page": 1981,
+"modeled_wall_ns_total": 1141504,
+"ns_per_saved_block": 21952,
 "packing_adoptions": 0,
 "packing_eligible_pages": 51,
 "packing_threshold": 16,
@@ -396,7 +406,38 @@
 }
 ],
 "scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY",
-"sse2_forward_ab": null,
+"sse2_forward_ab": {
+"pages": 576,
+"pairs": [
+{
+"baseline_ns_per_page": 230,
+"order": "baseline_first",
+"unrolled_ns_per_page": 209
+},
+{
+"baseline_ns_per_page": 237,
+"order": "unrolled_first",
+"unrolled_ns_per_page": 211
+},
+{
+"baseline_ns_per_page": 236,
+"order": "baseline_first",
+"unrolled_ns_per_page": 216
+},
+{
+"baseline_ns_per_page": 237,
+"order": "unrolled_first",
+"unrolled_ns_per_page": 214
+},
+{
+"baseline_ns_per_page": 238,
+"order": "baseline_first",
+"unrolled_ns_per_page": 220
+}
+],
+"repeats_per_arm": 64,
+"scope": "SAME_HOST_NATIVE_BASELINE_VS_PROMOTED_PRODUCTION"
+},
 "structured_pages": 320,
 "thresholds": [
 {
@@ -440,14 +481,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15351,
+"ns_per_saved_block": 22472,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 57,
 "routed_candidate_blocks": 200,
 "routed_candidate_extents": 113,
-"routed_cpu_ns_per_page": 1519,
-"routed_cpu_ns_total": 875012,
+"routed_cpu_ns_per_page": 2223,
+"routed_cpu_ns_total": 1280929,
 "routed_extents_saved": 69,
 "structured_calls": 279,
 "structured_eligible": 320,
@@ -495,14 +536,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 15426,
+"ns_per_saved_block": 22598,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 55,
 "routed_candidate_blocks": 202,
 "routed_candidate_extents": 121,
-"routed_cpu_ns_per_page": 1473,
-"routed_cpu_ns_total": 848480,
+"routed_cpu_ns_per_page": 2157,
+"routed_cpu_ns_total": 1242904,
 "routed_extents_saved": 61,
 "structured_calls": 272,
 "structured_eligible": 320,
@@ -550,14 +591,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14956,
+"ns_per_saved_block": 21952,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1350,
-"routed_cpu_ns_total": 777728,
+"routed_cpu_ns_per_page": 1981,
+"routed_cpu_ns_total": 1141504,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -605,14 +646,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14956,
+"ns_per_saved_block": 21952,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1350,
-"routed_cpu_ns_total": 777728,
+"routed_cpu_ns_per_page": 1981,
+"routed_cpu_ns_total": 1141504,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -660,14 +701,14 @@
 }
 ],
 "negative_useful": 0,
-"ns_per_saved_block": 14956,
+"ns_per_saved_block": 21952,
 "routed_baseline_blocks": 257,
 "routed_baseline_extents": 182,
 "routed_blocks_saved": 52,
 "routed_candidate_blocks": 205,
 "routed_candidate_extents": 133,
-"routed_cpu_ns_per_page": 1350,
-"routed_cpu_ns_total": 777728,
+"routed_cpu_ns_per_page": 1981,
+"routed_cpu_ns_total": 1141504,
 "routed_extents_saved": 49,
 "structured_calls": 256,
 "structured_eligible": 320,
@@ -683,18 +724,18 @@
 "candidate_blocks": 192,
 "candidate_extents": 84,
 "cliff_2024": 160,
-"inverse_backend": "neon",
-"inverse_ns_per_page": 93,
+"inverse_backend": "avx512",
+"inverse_ns_per_page": 128,
 "name": "delta64",
 "planner_blocks_saved": 65,
 "planner_extents_saved": 98,
 "raw_rescued": 128,
 "saved_payload_bytes": 284772,
-"scalar_inverse_ns_per_page": 146,
-"scalar_transform_ns_per_page": 132,
-"second_lz4_ns_per_page": 2884,
-"transform_backend": "neon",
-"transform_ns_per_page": 64
+"scalar_inverse_ns_per_page": 302,
+"scalar_transform_ns_per_page": 442,
+"second_lz4_ns_per_page": 4137,
+"transform_backend": "avx512",
+"transform_ns_per_page": 88
 }
 ]
 }
@@ -707,27 +748,27 @@
 "schema": "swapz-host-v1",
 "status": "UNAVAILABLE"
 },
-"kernel_release": "7.0.0-43-generic",
+"kernel_release": "7.0.0-42-generic",
 "overall": "FAIL",
 "qualification": "RAM_BACKED_NULL_BLK_ONLY",
 "qualified_artifacts": {
-"formatter_sha256": "efad9e9cee81f5c377e4900412101661259027baa64827bf09321d65ca37badb",
-"module_sha256": "312113453b57b9e4fe6cac3fa7d4c39233588fd1cd3a059c683e94cef371551d",
-"oracle_sha256": "429ff40c94125cb8e8309537c17a32db28bf9a176567b8f0587bd8f5ae5e6c5b",
+"formatter_sha256": "7a7eb5b54657562aee9aac443906603357d7f40803c363d2cec9e3faa2d937f1",
+"module_sha256": "a1e320a7c4492f6e30cc6c8c01bccfdb2d54992d23688db6b282eb32c8eb76bd",
+"oracle_sha256": "871d809976361bcd2d30b91bd4f661da8c712c16e4f5fa584696140261b57f26",
 "status": "AVAILABLE"
 },
 "schema": "swapz-test-results-v1",
 "source_sha": "72ffb995cd8bd081a54fad4fcaab6c909e6f2ac7",
 "stages": [
 {
-"elapsed_s": 2.091,
+"elapsed_s": 3.814,
 "exit_code": 0,
 "name": "Build module and helpers",
 "status": "PASS"
 },
 {
-"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.dU4Ljw5V/diagnostic.log",
-"elapsed_s": 19.681,
+"diagnostic": "Rootless child failed; child_exit=1 reason=nonzero_exit subtest=unavailable test=unavailable log=build/tests/rootless-failure.qWnN49LQ/diagnostic.log",
+"elapsed_s": 49.634,
 "exit_code": 1,
 "failed_phase": "source-contract-test.py",
 "name": "Native and rootless contracts",
