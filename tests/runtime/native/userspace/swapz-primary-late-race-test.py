@@ -1709,17 +1709,34 @@ static int check_case(enum fixture_scenario candidate)
         default:
             break;
         }
+        /* Authenticate the bounded overflow marker before the coordinator
+         * refusal. All other negative scenarios must emit no scan marker.
+         */
+        expected_diagnostic_length = 0U;
+        if (candidate == FIXTURE_REMOTE_OVERSIZED ||
+            candidate == FIXTURE_LOCAL_OVERSIZED) {
+            static const char overflow_marker[] =
+                "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                "step=mountinfo-read errno=75 "
+                "reason=per-table-byte-limit\n";
+
+            memcpy(expected_diagnostic, overflow_marker,
+                   sizeof(overflow_marker) - 1U);
+            expected_diagnostic_length = sizeof(overflow_marker) - 1U;
+        }
         /* Every refusal case here follows READY state and manifest proof. */
-        expected_length = snprintf(expected_diagnostic,
-            sizeof(expected_diagnostic),
+        expected_length = snprintf(
+            expected_diagnostic + expected_diagnostic_length,
+            sizeof(expected_diagnostic) - expected_diagnostic_length,
             "PRIMARY_START=FAILED phase=%s errno=%d error=%s "
             "original_errno=%d persistence_boundary=none "
             "durable=OBSERVED mapper=UNOBSERVED swap=UNOBSERVED\n",
             phase, expected_error, strerror(expected_error), expected_error);
 
         assert(expected_length > 0 &&
-               (size_t)expected_length < sizeof(expected_diagnostic));
-        expected_diagnostic_length = (size_t)expected_length;
+               (size_t)expected_length <
+                   sizeof(expected_diagnostic) - expected_diagnostic_length);
+        expected_diagnostic_length += (size_t)expected_length;
         if (candidate == FIXTURE_ROOT_INITIAL ||
             candidate == FIXTURE_PARENT_SUBSTITUTED ||
             candidate == FIXTURE_ROOT_SUBSTITUTED ||

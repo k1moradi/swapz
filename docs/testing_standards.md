@@ -391,7 +391,11 @@ capacity; use longer valid rows to exercise byte growth rather than mount-count
 exhaustion. Source-extracted direct-C late-race fixtures must import both
 `SWAPZ_PRIMARY_MOUNTINFO_INITIAL_BYTES` and
 `SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES` from production source when compiling
-the extracted mount reader. Preserve the 64 MiB
+the extracted mount reader. Their oversized-table negative controls must
+expect the source reader's fixed `SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE`
+`step=mountinfo-read errno=75 reason=per-table-byte-limit` marker before
+the coordinator failure record, with exact marker ordering and without
+admitting arbitrary or host-private sideband data. Preserve the 64 MiB
 aggregate gate and surface fixed, host-private-ID-free reasons
 `per-table-byte-limit`, `read-overflow` or `aggregate-byte-limit` with
 errno 75 on `mountinfo-read` or `mountinfo-aggregate` steps. Revalidate each task's namespace identity
