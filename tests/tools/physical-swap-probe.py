@@ -243,6 +243,27 @@ def _verify_open_block_device(fd, target):
         raise ProbeError("opened partition geometry differs from reviewed size")
 
 
+def _read_exact_block0(fd):
+    """Read the bounded 4 KiB header even if pread returns a short fragment."""
+    header = bytearray(PAGE_BYTES)
+    offset = 0
+    while offset < PAGE_BYTES:
+        try:
+            fragment = os.pread(fd, PAGE_BYTES - offset, offset)
+        except OSError as exc:
+            raise ProbeError(
+                f"operation=header_read offset={offset} original_errno={exc.errno} "
+                "safe_next_step=inspect_saved_header_read_only") from exc
+        if not fragment or len(fragment) > PAGE_BYTES - offset:
+            raise ProbeError(
+                f"operation=header_read offset={offset} expected=4096_bytes "
+                "observed=short_or_invalid_read "
+                "safe_next_step=inspect_saved_header_read_only")
+        header[offset:offset + len(fragment)] = fragment
+        offset += len(fragment)
+    return bytes(header)
+
+
 def _read_block0(device, target):
     try:
         fd = os.open(device, os.O_RDONLY | os.O_CLOEXEC | os.O_NOCTTY)
@@ -250,14 +271,16 @@ def _read_block0(device, target):
         raise ProbeError(f"cannot open selected block device for reading: {exc}") from exc
     try:
         _verify_open_block_device(fd, target)
-        data = os.pread(fd, PAGE_BYTES, 0)
-    except OSError as exc:
-        raise ProbeError("failed to read selected partition header") from exc
+        return _read_exact_block0(fd)
     finally:
-        os.close(fd)
-    if len(data) != PAGE_BYTES:
-        raise ProbeError("short read of the selected partition header")
-    return data
+        # A secondary close error must not hide the first identity/I/O fault.
+        if sys.exc_info()[0] is None:
+            os.close(fd)
+        else:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def swapz_header_valid(header, size_bytes):
@@ -1237,7 +1260,8 @@ def _release_partition_ownership(state):
         # Persisted state is untrusted; name only known stages in diagnostics.
         observed_stage = (
             stage if type(stage) is str and stage in {
-                "BACKED_UP", "SWAP_OFF", "HEADER_CLEARED", "SWZ_FORMATTED",
+                "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
+                "HEADER_CLEARED", "SWZ_FORMATTED",
                 "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS",
                 "RECOVERY_REQUIRED", "PRE_DESTRUCTIVE_FAILED",
             } else "invalid_or_unknown")
@@ -1871,24 +1895,46 @@ def _allocate_dm_identity():
 def _write_block0(device, data, target, expected_current=None):
     if len(data) != PAGE_BYTES:
         raise ProbeError("recovery header has the wrong length")
+    if expected_current is not None and len(expected_current) != PAGE_BYTES:
+        raise ProbeError("expected partition header has the wrong length")
     try:
         fd = os.open(device, os.O_RDWR | os.O_CLOEXEC | os.O_EXCL | os.O_SYNC)
     except OSError as exc:
         raise ProbeError(f"cannot exclusively open selected partition: {exc}") from exc
     try:
         _verify_open_block_device(fd, target)
-        if expected_current is not None and os.pread(
-                fd, PAGE_BYTES, 0) != expected_current:
+        if expected_current is not None and (
+                _read_exact_block0(fd) != expected_current):
             raise ProbeError("partition header changed before exclusive update")
-        written = os.pwrite(fd, data, 0)
-        if written != PAGE_BYTES:
-            raise ProbeError("short write while updating partition header")
+        offset = 0
+        while offset < PAGE_BYTES:
+            remaining_bytes = PAGE_BYTES - offset
+            try:
+                written = os.pwrite(fd, data[offset:], offset)
+            except OSError as exc:
+                raise ProbeError(
+                    f"operation=header_write offset={offset} "
+                    f"original_errno={exc.errno} "
+                    "safe_next_step=recover_with_durable_state") from exc
+            if not 0 < written <= remaining_bytes:
+                raise ProbeError(
+                    f"operation=header_write offset={offset} "
+                    "expected=remaining_4096_byte_range "
+                    "observed=short_or_invalid_write "
+                    "safe_next_step=recover_with_durable_state")
+            offset += written
         os.fsync(fd)
-        verify = os.pread(fd, PAGE_BYTES, 0)
-        if verify != data:
+        if _read_exact_block0(fd) != data:
             raise ProbeError("partition header readback did not match")
     finally:
-        os.close(fd)
+        # Preserve the first failure, including a partial-write errno.
+        if sys.exc_info()[0] is None:
+            os.close(fd)
+        else:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _active_swap_for(major, minor):
@@ -2137,11 +2183,23 @@ def _mapper_exists(state):
 
 
 def _validate_recovery_header(current_header, backup, state, size_bytes):
+    if len(current_header) != PAGE_BYTES or len(backup) != PAGE_BYTES:
+        raise ProbeError("recovery header must be exactly 4096 bytes")
     if current_header == backup:
         return
     stage = state.get("stage_before_recovery", state.get("stage"))
+    if stage == "HEADER_CLEAR_PENDING":
+        # A short write leaves only a zero prefix of the original header.
+        # Any other changed byte is foreign or ambiguous: do not overwrite.
+        changed_prefix_bytes = next((
+            offset + 1 for offset in range(PAGE_BYTES - 1, -1, -1)
+            if current_header[offset] != backup[offset]), 0)
+        if (not any(current_header[:changed_prefix_bytes]) and
+                current_header[changed_prefix_bytes:] ==
+                backup[changed_prefix_bytes:]):
+            return
     if current_header == bytes(PAGE_BYTES) and stage in {
-            "SWAP_OFF", "HEADER_CLEARED"}:
+            "SWAP_OFF", "HEADER_CLEAR_PENDING", "HEADER_CLEARED"}:
         return
     digest = state.get("formatted_header_sha256")
     if stage in {"SWZ_FORMATTED", "MODULE_PENDING", "MODULE_OWNED",
@@ -2846,6 +2904,9 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             _save_state(state_dir, state)
 
             _verify_target_identity(target)
+            # Durable mutation intent precedes even the first partial pwrite.
+            state["stage"] = "HEADER_CLEAR_PENDING"
+            _save_state(state_dir, state)
             _write_block0(target["device"], bytes(PAGE_BYTES), target,
                           expected_current=target["header"])
             state["stage"] = "HEADER_CLEARED"
@@ -2959,7 +3020,20 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     state["stage_before_recovery"] = state["stage"]
                     state["stage"] = "RECOVERY_REQUIRED"
                 state["recovery_error"] = str(cleanup_exc)
-                _save_state(state_dir, state)
+                state_save_failed = False
+                state_save_errno = None
+                try:
+                    _save_state(state_dir, state)
+                except (OSError, ProbeError) as state_exc:
+                    # The last durable state can differ from this in-memory
+                    # marker. Never let this secondary error hide the worker.
+                    state_save_failed = True
+                    state_save_errno = getattr(state_exc, "errno", None)
+                    print(
+                        "RECOVERY_STATE_DURABILITY=UNCERTAIN "
+                        f"original_errno={state_save_errno} "
+                        "safe_next_step=inspect_owner_and_state_read_only",
+                        file=sys.stderr)
                 results["end_timestamp"] = _utc_timestamp()
                 try:
                     saved_results = _load_unique_json(
@@ -2968,26 +3042,43 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                         results = saved_results
                 except (OSError, ValueError):
                     pass
+                if state_save_failed:
+                    results["recovery_state_durability"] = "UNCERTAIN"
+                    results["recovery_state_save_errno"] = state_save_errno
                 results["final_recovery_state"] = state["stage"]
                 results["recovery_error"] = _bounded_text(cleanup_exc)
                 results["end_timestamp"] = _utc_timestamp()
                 try:
                     _save_results(state_dir, results)
-                except ProbeError:
-                    pass
-                print(f"RECOVERY_REQUIRED: state preserved at {state_dir}",
+                except (OSError, ProbeError) as results_exc:
+                    print(
+                        "PHYSICAL_RESULTS_DURABILITY=UNCERTAIN "
+                        f"original_errno={getattr(results_exc, 'errno', None)} "
+                        "safe_next_step=inspect_owner_and_state_read_only",
+                        file=sys.stderr)
+                print(f"RECOVERY_REQUIRED: owner retained at {state_dir}",
                       file=sys.stderr)
                 if failure is None:
                     failure = cleanup_exc
         elif failure is not None:
             state["stage"] = "PRE_DESTRUCTIVE_FAILED"
             state["recovery_error"] = str(failure)
-            _save_state(state_dir, state)
+            try:
+                _save_state(state_dir, state)
+            except (OSError, ProbeError) as state_exc:
+                results["recovery_state_durability"] = "UNCERTAIN"
+                results["recovery_state_save_errno"] = getattr(
+                    state_exc, "errno", None)
+                print(
+                    "RECOVERY_STATE_DURABILITY=UNCERTAIN "
+                    f"original_errno={getattr(state_exc, 'errno', None)} "
+                    "safe_next_step=inspect_owner_and_state_read_only",
+                    file=sys.stderr)
             results["final_recovery_state"] = "PRE_DESTRUCTIVE_FAILED"
             results["recovery_error"] = _bounded_text(failure)
             try:
                 _final_observations(results, state_dir, state, target)
-            except ProbeError as result_exc:
+            except (OSError, ProbeError) as result_exc:
                 results["results_save_error"] = _bounded_text(result_exc)
         if state.get("stage") == "COMPLETE":
             try:
