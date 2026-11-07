@@ -875,11 +875,17 @@ next action. The real-swap helper must recheck the admitted selector inode
 **after** independent target inspection, preserving the first descriptor I/O
 errno on cleanup failure. Revalidate the same source-bound partition, physical
 parent and geometry after each completed cycle and again at final publication.
+The source-bound partition comparison must include the committed target
+`major_minor` as well as PARTUUID and byte geometry; matching only the live
+plan, parent, PARTUUID and size is insufficient. A rootless injected-control
+fixture must execute the real target verifier and refuse a source/live target
+device mismatch, stale geometry and failed identity read before the simulated
+primary mutation; unchanged source/live identity remains the positive control.
 A rootless two-cycle control must reject simulated post-cycle selector drift
-before the second prepare, with zero intercepted primary mutations and BLOCKED
-evidence; unchanged selector identity remains the positive control. Identical
-bytes at a substituted inode or protected-directory replacement are not
-identity proof. Two snapshots do not exclude a completely hidden selector
+before the second prepare. The already completed first cycle is allowed to
+have performed its simulated prepare, but drift must permit no additional or
+resumed primary mutation and must produce BLOCKED evidence. Identical bytes at
+a substituted inode or protected-directory replacement are not identity proof. Two snapshots do not exclude a completely hidden selector
 ABA, make the last-use interval kernel-atomic, or identify a unique physical
 card and reader; physical admission stays BLOCKED without those guarantees.
 

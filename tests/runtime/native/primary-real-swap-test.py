@@ -555,6 +555,157 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify._require_selector_at_policy_use(
                         admitted, {}, contract, (8, 1), (8, 0))
 
+    def test_real_target_verifier_binds_source_device_geometry_before_prepare(self):
+        target_size_bytes = 124_787_884_032
+        geometry = qualify.maximum_primary_geometry(target_size_bytes)
+
+        def synthetic_inputs(live_minor, authorized_minor):
+            plan = {
+                "target_config_read": True,
+                "target_device_preflight": True,
+                "target_not_mounted": True,
+                "target_device_chain_checked": True,
+                "recovery_directory_safe": True,
+                "recovery_filesystem_supported": True,
+                "recovery_source_chain_checked": True,
+                "recovery_active_marker_clear": True,
+                "root_mount_source_chain_checked": True,
+                "root_same_physical_disk_as_target": False,
+                "recovery_same_physical_disk_as_target": False,
+                "target_partuuid": "aaaaaaaa",
+                "target_device_major": 8,
+                "target_device_minor": live_minor,
+                "target_device_bytes": target_size_bytes,
+                "target_physical_parent_major": 8,
+                "target_physical_parent_minor": 0,
+                "logical_pages": geometry["logical_pages"],
+                "logical_bytes": geometry["logical_bytes"],
+                "linux_swap_kib": geometry["linux_swap_kib"],
+                "gc_reserve_blocks": geometry["gc_reserve_blocks"],
+            }
+            snapshot = {
+                "authorized_target": {
+                    "partuuid": "aaaaaaaa",
+                    "major_minor": f"8:{authorized_minor}",
+                    "size_bytes": target_size_bytes,
+                    "parent_major_minor": "8:0",
+                    "transport": "usb",
+                    "parent_model": "Synthetic Reader",
+                }
+            }
+            target_row = {
+                "path": "/dev/synthetic1",
+                "type": "part",
+                "maj:min": f"8:{live_minor}",
+                "size": target_size_bytes,
+                "partuuid": "aaaaaaaa",
+                "pkname": "synthetic",
+            }
+            topology = {
+                "blockdevices": [{
+                    "path": "/dev/synthetic",
+                    "type": "disk",
+                    "maj:min": "8:0",
+                    "size": target_size_bytes + qualify.MIB,
+                    "rm": 1,
+                    "tran": "usb",
+                    "model": "Synthetic Reader",
+                    "children": [target_row],
+                }]
+            }
+            return plan, snapshot, json.dumps(topology)
+
+        for scenario, live_minor, authorized_minor, observed_size, stat_error in (
+                ("source_device_mismatch", 2, 1, target_size_bytes, None),
+                ("stale_geometry", 1, 1, target_size_bytes - 4096, None),
+                ("failed_identity_read", 1, 1, target_size_bytes,
+                 OSError(errno.EIO, "/private/target"))):
+            with self.subTest(scenario=scenario), \
+                    tempfile.TemporaryDirectory() as directory:
+                selector = Path(directory) / "selector"
+                selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+                selector.chmod(0o600)
+                plan, snapshot, topology = synthetic_inputs(
+                    live_minor, authorized_minor)
+                with self._selector_fixture(selector):
+                    admitted = qualify._read_selector_evidence()
+                    admission = mock.Mock()
+                    stat_patch = (
+                        mock.patch.object(Path, "stat", side_effect=stat_error)
+                        if stat_error is not None else
+                        mock.patch.object(
+                            Path, "stat",
+                            return_value=FakeStat(8, live_minor)))
+                    with mock.patch.object(
+                            qualify, "read_swap_rows", return_value=[]), \
+                            mock.patch.object(
+                                qualify, "_validate_precycle_state"), \
+                            mock.patch.object(
+                                qualify, "_kernel_log_snapshot",
+                                return_value=[]), \
+                            mock.patch.object(
+                                Path, "resolve",
+                                return_value=Path("/dev/synthetic1")), \
+                            stat_patch, \
+                            mock.patch.object(
+                                qualify, "_block_size",
+                                return_value=observed_size), \
+                            mock.patch.object(
+                                qualify, "_run",
+                                return_value=subprocess.CompletedProcess(
+                                    args=[], returncode=0, stdout=topology,
+                                    stderr="")), \
+                            mock.patch.object(
+                                qualify, "_primary",
+                                side_effect=AssertionError(
+                                    "simulated primary mutation reached")
+                            ) as primary, \
+                            self.assertRaises(qualify.Blocked) as refused:
+                        qualify.run_cycle(
+                            1, swapzctl=Path("/synthetic/swapzctl"),
+                            oracle_path=Path("/synthetic/oracle"),
+                            validated_source="2" * 40, plan=plan,
+                            selector_partuuid="aaaaaaaa",
+                            selector_evidence=admitted,
+                            authorization_snapshot=snapshot,
+                            target_device=(8, live_minor),
+                            target_parent_device=(8, 0),
+                            workload_mib=384, resident_mib=128,
+                            swap_limit_mib=384, timeout_seconds=60,
+                            prior_run_ids=set(), prior_swap_uuids=set(),
+                            admission=admission)
+                    primary.assert_not_called()
+                    admission.require.assert_called_once_with("cycle-1")
+                    self.assertIn("phase=policy_use", str(refused.exception))
+                    self.assertIn(
+                        "action=BLOCK-before-prepare", str(refused.exception))
+                    self.assertNotIn("/private", str(refused.exception))
+                    if scenario == "failed_identity_read":
+                        self.assertIn("errno=5", str(refused.exception))
+
+        plan, snapshot, topology = synthetic_inputs(1, 1)
+        with tempfile.TemporaryDirectory() as directory:
+            selector = Path(directory) / "selector"
+            selector.write_bytes(b"PARTUUID=aaaaaaaa\n")
+            selector.chmod(0o600)
+            with self._selector_fixture(selector):
+                admitted = qualify._read_selector_evidence()
+                with mock.patch.object(
+                        Path, "resolve",
+                        return_value=Path("/dev/synthetic1")), \
+                        mock.patch.object(
+                            Path, "stat", return_value=FakeStat(8, 1)), \
+                        mock.patch.object(
+                            qualify, "_block_size",
+                            return_value=target_size_bytes), \
+                        mock.patch.object(
+                            qualify, "_run",
+                            return_value=subprocess.CompletedProcess(
+                                args=[], returncode=0, stdout=topology,
+                                stderr="")):
+                    qualify._require_selector_at_policy_use(
+                        admitted, plan, snapshot, (8, 1), (8, 0))
+
     def test_rootless_cycle_last_use_rejects_stale_target_without_primary_mutation(self):
         for scenario in ("selector_during_target", "parent_replaced",
                          "stale_geometry", "failed_identity_io",
@@ -1466,10 +1617,13 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     {"run_id": "2" * 32, "linux_swap_uuid": "2" * 32},
                 ])
 
+                simulated_prepare = mock.Mock()
+
                 def fake_cycle(index, **kwargs):
                     self.assertIn("0" * 32, kwargs["prior_run_ids"])
                     if index == 2:
                         self.assertIn("1" * 32, kwargs["prior_run_ids"])
+                    simulated_prepare(index)
                     return next(cycle_results)
                 selector_gate = mock.Mock(
                     side_effect=qualify.Blocked(
@@ -1580,8 +1734,6 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "run_cycle", cycle_runner))
-                    intercepted_primary = stack.enter_context(
-                        mock.patch.object(qualify, "_primary"))
                     stack.enter_context(
                         mock.patch.object(
                             qualify, "_require_selector_at_policy_use",
@@ -1612,7 +1764,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertEqual(
                     cycle_runner.call_count,
                     1 if failure_point == "postcycle selector drift" else 2)
-                intercepted_primary.assert_not_called()
+                self.assertEqual(
+                    simulated_prepare.call_args_list,
+                    [mock.call(1)] if failure_point == "postcycle selector drift"
+                    else [mock.call(1), mock.call(2)])
                 if failure_point == "postcycle selector drift":
                     self.assertEqual(workspace_cleanup_calls, [True])
                     self.assertEqual(terminal_cleanup_calls, [])

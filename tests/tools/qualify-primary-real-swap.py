@@ -2374,8 +2374,10 @@ def verify_authorized_target(
             authorization_snapshot, _snapshot_digest = \
                 _read_readiness_snapshot()
         authorized = authorization_snapshot["authorized_target"]
+        expected_target = f"{major}:{minor}"
         expected_parent = f"{parent_major}:{parent_minor}"
         if str(authorized.get("partuuid", "")).lower() != selector_partuuid or \
+                str(authorized.get("major_minor", "")) != expected_target or \
                 int(authorized.get("size_bytes", -1)) != size_bytes or \
                 str(authorized.get("parent_major_minor", "")) != expected_parent or \
                 str(authorized.get("transport", "")).lower() != "usb" or \
