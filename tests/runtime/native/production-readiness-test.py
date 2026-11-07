@@ -3692,6 +3692,39 @@ class ProductionReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(complete["DEPLOYMENT_PRODUCTION_READY"], "PASS")
         self.assertEqual(complete["release_verdict"], "BLOCKED")
 
+    def test_physical_target_parent_must_be_distinct_from_partition(self):
+        # The sealed summary must not authenticate a partition as its own
+        # physical whole-device parent, even when both copies agree.
+        policy = acceptance_policy()
+        policy_raw = encoded(policy)
+        for campaign_factory, baseline in (
+                (physical_campaign_evidence, "PASS"),
+                (physical_campaign_failure_evidence, "FAIL")):
+            with self.subTest(campaign=campaign_factory.__name__):
+                campaign = campaign_factory(policy_raw)
+                original = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(
+                    original["CODE_PRODUCTION_READY"],
+                    "PASS" if baseline == "PASS" else "BLOCKED")
+                self.assertEqual(
+                    original["release_verdict"],
+                    "BLOCKED" if baseline == "PASS" else "FAIL")
+
+                binding = campaign["qualification_target_binding"]
+                partition_major_minor = binding["expected"]["lower_major_minor"]
+                for identity in ("expected", "observed"):
+                    binding[identity]["parent_major_minor"] = (
+                        partition_major_minor)
+                result = evaluate(policy=policy, campaign=campaign)
+                self.assertEqual(result["CODE_PRODUCTION_READY"], "BLOCKED")
+                self.assertEqual(result["release_verdict"], "BLOCKED")
+                diagnostic = "\n".join(result["code_blockers"])
+                self.assertIn(
+                    "first_failed_phase=qualification_target_binding",
+                    diagnostic)
+                self.assertNotIn(TARGET["partuuid"], diagnostic)
+                self.assertNotIn(SOURCE, diagnostic)
+
     def test_physical_host_and_boundary_witnesses_are_complete(self):
         policy = acceptance_policy()
         policy_raw = encoded(policy)
