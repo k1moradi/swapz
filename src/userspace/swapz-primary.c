@@ -8,6 +8,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+#include <linux/btrfs.h>
+#endif
 #include <linux/dm-ioctl.h>
 #include <linux/fs.h>
 #include <linux/magic.h>
@@ -3601,6 +3604,11 @@ static int swapz_primary_persistent_fs_magic(long type)
 	case XFS_SUPER_MAGIC:
 	case F2FS_SUPER_MAGIC:
 		return 1;
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	/* Btrfs is eligible only in the private RAM-backed rehearsal. */
+	case BTRFS_SUPER_MAGIC:
+		return 1;
+#endif
 	default:
 		return 0;
 	}
@@ -5100,6 +5108,124 @@ static int swapz_primary_owned_nullblk_parent(
 }
 #endif
 
+
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+/*
+ * Btrfs reports a virtual st_dev rather than its underlying block partition.
+ * Resolve it only for the private RAM-backed lifecycle, and only after proving
+ * exactly one live Btrfs member tied to an ordinary physical sysfs block node.
+ * Production and physical admission must continue rejecting Btrfs.
+ */
+static int swapz_primary_owned_nullblk_btrfs_partition(
+	dev_t filesystem_device, dev_t *partition_device)
+{
+	static const char hexadecimal[] = "0123456789abcdef";
+	struct btrfs_ioctl_fs_info_args filesystem = {0};
+	struct btrfs_ioctl_fs_info_args rechecked_filesystem = {0};
+	struct btrfs_ioctl_dev_info_args backing = {.devid = 1U};
+	struct btrfs_ioctl_dev_info_args rechecked_backing = {.devid = 1U};
+	struct stat directory_info;
+	struct stat checked_directory;
+	struct stat node_info;
+	struct stat link_info;
+	struct statfs filesystem_info;
+	char backing_path[BTRFS_DEVICE_PATH_NAME_MAX];
+	char filesystem_uuid[37];
+	char sysfs_link[PATH_MAX];
+	char device_link[PATH_MAX];
+	char resolved_sysfs_device[PATH_MAX];
+	char resolved_device_link[PATH_MAX];
+	const char *device_basename;
+	size_t uuid_offset = 0;
+	size_t index;
+	int recovery_fd = -1;
+	int device_fd = -1;
+	int valid = 0;
+
+	if (!partition_device || major(filesystem_device) != 0U)
+		return 0;
+	recovery_fd = swapz_primary_recovery_base_open(
+		SWAPZ_PRIMARY_RECOVERY_BASE, 0);
+	if (recovery_fd < 0)
+		return 0;
+	if (fstat(recovery_fd, &directory_info) < 0 ||
+	    directory_info.st_dev != filesystem_device ||
+	    fstatfs(recovery_fd, &filesystem_info) < 0 ||
+	    (unsigned long)filesystem_info.f_type != BTRFS_SUPER_MAGIC ||
+	    ioctl(recovery_fd, BTRFS_IOC_FS_INFO, &filesystem) < 0 ||
+	    filesystem.num_devices != 1U || filesystem.max_id != 1U ||
+	    ioctl(recovery_fd, BTRFS_IOC_DEV_INFO, &backing) < 0 ||
+	    backing.devid != 1U ||
+	    memcmp(filesystem.fsid, backing.fsid, BTRFS_FSID_SIZE))
+		goto out;
+
+	/* Do not follow a mutable /dev alias supplied by the kernel path. */
+	memcpy(backing_path, backing.path, sizeof(backing_path));
+	if (!memchr(backing_path, '\0', sizeof(backing_path)) ||
+	    strncmp(backing_path, "/dev/", sizeof("/dev/") - 1U))
+		goto out;
+	device_basename = backing_path + sizeof("/dev/") - 1U;
+	if (!device_basename[0] || strchr(device_basename, '/'))
+		goto out;
+	device_fd = open(backing_path, O_PATH | O_CLOEXEC | O_NOFOLLOW);
+	if (device_fd < 0 || fstat(device_fd, &node_info) < 0 ||
+	    !S_ISBLK(node_info.st_mode) ||
+	    (major(node_info.st_rdev) == 0U && minor(node_info.st_rdev) == 0U))
+		goto out;
+
+	/* The Btrfs membership symlink must resolve to that very block node. */
+	for (index = 0; index < BTRFS_FSID_SIZE; ++index) {
+		if (index == 4U || index == 6U || index == 8U || index == 10U)
+			filesystem_uuid[uuid_offset++] = '-';
+		filesystem_uuid[uuid_offset++] =
+			hexadecimal[filesystem.fsid[index] >> 4U];
+		filesystem_uuid[uuid_offset++] =
+			hexadecimal[filesystem.fsid[index] & 0x0fU];
+	}
+	filesystem_uuid[uuid_offset] = '\0';
+	if (uuid_offset != 36U ||
+	    swapz_primary_path_format(
+		    sysfs_link, sizeof(sysfs_link),
+		    "/sys/fs/btrfs/%s/devices/%s", filesystem_uuid,
+		    device_basename) < 0 ||
+	    swapz_primary_path_format(
+		    device_link, sizeof(device_link),
+		    "/sys/dev/block/%u:%u", major(node_info.st_rdev),
+		    minor(node_info.st_rdev)) < 0 ||
+	    lstat(sysfs_link, &link_info) < 0 ||
+	    !S_ISLNK(link_info.st_mode) ||
+	    !realpath(sysfs_link, resolved_sysfs_device) ||
+	    !realpath(device_link, resolved_device_link) ||
+	    strcmp(resolved_sysfs_device, resolved_device_link))
+		goto out;
+
+	/* A second kernel snapshot must still identify the same sole member. */
+	if (fstat(recovery_fd, &checked_directory) < 0 ||
+	    checked_directory.st_dev != directory_info.st_dev ||
+	    checked_directory.st_ino != directory_info.st_ino ||
+	    ioctl(recovery_fd, BTRFS_IOC_FS_INFO,
+		  &rechecked_filesystem) < 0 ||
+	    rechecked_filesystem.num_devices != 1U ||
+	    rechecked_filesystem.max_id != 1U ||
+	    memcmp(filesystem.fsid, rechecked_filesystem.fsid,
+		   BTRFS_FSID_SIZE) ||
+	    ioctl(recovery_fd, BTRFS_IOC_DEV_INFO, &rechecked_backing) < 0 ||
+	    rechecked_backing.devid != backing.devid ||
+	    memcmp(rechecked_backing.fsid, backing.fsid, BTRFS_FSID_SIZE) ||
+	    memcmp(rechecked_backing.uuid, backing.uuid, BTRFS_UUID_SIZE) ||
+	    memcmp(rechecked_backing.path, backing.path, sizeof(backing.path)))
+		goto out;
+	*partition_device = node_info.st_rdev;
+	valid = 1;
+out:
+	if (device_fd >= 0 && close(device_fd) < 0)
+		valid = 0;
+	if (close(recovery_fd) < 0)
+		valid = 0;
+	return valid;
+}
+#endif
+
 static int swapz_primary_recovery_source_chain(
 	const char *sysfs_root, dev_t source_device, dev_t target_device,
 	dev_t *physical_parent_device)
@@ -5130,6 +5256,13 @@ static int swapz_primary_recovery_source_chain(
 		errno = EINVAL;
 		return 0;
 	}
+#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST
+	/* Resolve Btrfs virtual st_dev only after its sole-member identity proof. */
+	if (major(source_device) == 0U &&
+	    !swapz_primary_owned_nullblk_btrfs_partition(
+		    source_device, &source_device))
+		return 0;
+#endif
 	if (swapz_primary_path_format(devices_root, sizeof(devices_root),
 				      "%s/devices", sysfs_root) < 0 ||
 	    swapz_primary_path_format(block_root, sizeof(block_root),

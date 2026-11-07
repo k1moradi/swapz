@@ -156,6 +156,45 @@ mapper_absence_proven() { return 0; }
         self.assertIn('[[ "$(mapper_swap_entry_count)" == 0 ]]', self.script)
         self.assertIn('dmsetup remove "$DMNAME"', self.script)
 
+    def test_private_btrfs_recovery_resolves_only_one_verified_member(self):
+        # The physical/production parser must retain its Btrfs exclusion.
+        source = self.primary
+        begin = source.index(
+            "static int swapz_primary_owned_nullblk_btrfs_partition(")
+        end = source.index(
+            "static int swapz_primary_recovery_source_chain(", begin)
+        private = source[
+            source.rfind("#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST", 0, begin):
+            end]
+        for marker in (
+                "BTRFS_IOC_FS_INFO",
+                "BTRFS_IOC_DEV_INFO",
+                "filesystem.num_devices != 1U",
+                "filesystem.max_id != 1U",
+                "memcmp(filesystem.fsid, backing.fsid, BTRFS_FSID_SIZE)",
+                "O_PATH | O_CLOEXEC | O_NOFOLLOW",
+                "S_ISBLK(node_info.st_mode)",
+                '"/sys/fs/btrfs/%s/devices/%s"',
+                '"/sys/dev/block/%u:%u"',
+                "rechecked_filesystem.num_devices != 1U",
+                "rechecked_filesystem.max_id != 1U",
+                "memcmp(rechecked_backing.uuid, backing.uuid,",
+                "close(recovery_fd)",
+                "close(device_fd)",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, private)
+        self.assertIn(
+            "#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST\n"
+            "\t/* Resolve Btrfs virtual st_dev", source)
+        magic = source[
+            source.index("static int swapz_primary_persistent_fs_magic("):
+            source.index("static int swapz_primary_path_format(")]
+        self.assertIn("case BTRFS_SUPER_MAGIC:", magic)
+        self.assertNotIn(
+            "case BTRFS_SUPER_MAGIC:",
+            magic.split("#ifdef SWAPZ_PRIMARY_OWNED_NULLBLK_TEST")[0])
+
     def test_qualifier_never_targets_the_authorized_physical_card(self):
         for forbidden in ("/dev/sda", "/dev/mmcblk", "/dev/nvme"):
             self.assertNotIn(forbidden, self.script)

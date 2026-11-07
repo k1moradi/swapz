@@ -7434,8 +7434,17 @@ Separate recovery-source and
 target-source gates must resolve each device through `/sys/dev/block`, match
 the recorded major:minor, prove a direct physical partition with a physical
 parent device, and reject holders, stacked slaves, virtual devices and the
-selected swap partition in the recovery chain. Keep Btrfs excluded until
-multi-device backing can be enumerated and checked. Report whether recovery
+selected swap partition in the recovery chain. Keep Btrfs excluded from production and physical admission until
+multi-device backing can be enumerated and checked. In the exclusively
+compiled private owned-RAM null_blk rehearsal, Btrfs recovery may be
+admitted only after reading the mounted filesystem's authoritative kernel
+FS_INFO and DEV_INFO records: exactly one member with device ID 1, matching
+filesystem IDs, an opened non-symlink /dev block node, and a matching
+/sys/fs/btrfs/<filesystem-id>/devices member resolved against /sys/dev/block.
+Recheck the filesystem and member identity before passing the real partition
+major:minor through the existing physical sysfs parent-chain validation.
+Any missing, changing or multidevice identity must remain BLOCKED; this
+private relaxation does not apply to production or physical qualification. Report whether recovery
 storage shares the target's physical disk; that is a relevant failure-domain
 limitation even when it is a different partition. Rootless tests must use
 synthetic sysfs trees and cover malformed device numbers, target identity,
