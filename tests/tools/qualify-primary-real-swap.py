@@ -2452,15 +2452,14 @@ def verify_authorized_target(
             if (not isinstance(reader_serial_value, str) or
                     not isinstance(authorized_serial_value, str)):
                 raise TargetProofFailed("reader_identity")
-            reader_serial = reader_serial_value.strip()
-            authorized_serial = authorized_serial_value.strip()
-            if (not reader_serial or len(reader_serial) > 128 or
+            reader_serial = reader_serial_value
+            authorized_serial = authorized_serial_value
+            if (not reader_serial.strip() or len(reader_serial) > 128 or
                     reader_serial != authorized_serial):
                 raise TargetProofFailed("reader_identity")
             if sum(
                     row.get("type") == "disk" and
-                    isinstance(row.get("serial"), str) and
-                    row["serial"].strip() == reader_serial
+                    row.get("serial") == reader_serial
                     for row in rows) != 1:
                 raise TargetProofFailed("unique_reader_identity")
         except (KeyError, TypeError, ValueError) as exc:

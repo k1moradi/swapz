@@ -925,7 +925,7 @@ reader binding, the attempt BLOCKS; synthetic serial agreement is not physical
 PASS. Rootless injected-control fixtures must use only intercepted descriptor,
 topology and subprocess operations. They must exercise legitimate renumbering,
 duplicate PARTUUID, missing/mismatched reader identity, a valid low-character-
-diversity serial, missing parent path, substituted target or parent block inode
+diversity exact serial, missing parent path, substituted target or parent block inode
 (even with unchanged dev_t), changed target geometry, live-name replacement,
 campaign identity drift and first I/O errno retained over descriptor close
 errors. All rejected identities must reach BLOCKED with

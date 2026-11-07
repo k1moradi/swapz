@@ -699,9 +699,9 @@ PARTUUID target with `O_NOFOLLOW|O_EXCL`, record the opened block inode,
 device number and geometry, and pin a separately opened no-follow physical
 parent descriptor. Require exactly one matching live partition, matching
 reader topology and a unique source-bound stable reader serial; an absent
-serial or conflicting reader is BLOCKED. The serial comparison is exact after
-trimming surrounding whitespace and has no invented entropy or character-
-diversity threshold. A reader serial remains only a consistency signal and
+serial or conflicting reader is BLOCKED. The source-bound/live serial
+comparison is byte-for-byte exact; reject an empty/whitespace-only or oversized
+value, but do not invent an entropy or character-diversity threshold. A reader serial remains only a consistency signal and
 does not prove a particular SD card or permit physical acceptance by itself. The historical snapshot's observed `/dev/sd*` pathname
 and `major:minor` describe an earlier boot, not the live target: renumbering
 may be accepted only when the live plan, exclusive descriptor, parent inode,
