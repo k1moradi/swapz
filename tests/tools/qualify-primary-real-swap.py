@@ -2366,7 +2366,7 @@ def verify_authorized_target(
 
         target_phase = "geometry"
         if _block_size(target_descriptor) != size_bytes:
-            raise Blocked("authorized partition size changed")
+            raise TargetProofFailed("target_geometry")
 
         target_phase = "topology"
         result = _run([
@@ -2399,10 +2399,12 @@ def verify_authorized_target(
         if parent_row.get("type") != "disk" or \
                 removable != 1 or \
                 str(parent_row.get("tran", "")).lower() != "usb":
-            raise Blocked(
-                "physical parent is not the authorized removable USB topology")
-        require_sole_partition_topology(
-            target_row, parent_row, f"{major}:{minor}")
+            raise TargetProofFailed("removable_usb_parent")
+        try:
+            require_sole_partition_topology(
+                target_row, parent_row, f"{major}:{minor}")
+        except Blocked as exc:
+            raise TargetProofFailed("sole_partition_topology") from exc
 
         target_phase = "open-parent"
         parent_path = Path(parent_row["path"])
@@ -2442,17 +2444,24 @@ def verify_authorized_target(
                     str(authorized.get("parent_model", "")).strip() != \
                     str(parent_row.get("model", "")).strip():
                 raise TargetProofFailed("authorized_target_attributes")
-            reader_serial = parent_row.get("serial")
-            authorized_serial = authorized.get("parent_serial")
-            # Reader serial is a separate consistency gate, not SD-card CID.
-            if (not isinstance(reader_serial, str) or
-                    not isinstance(authorized_serial, str) or
-                    len(reader_serial) < 6 or len(reader_serial) > 128 or
-                    len(set(reader_serial)) < 3 or
+            reader_serial_value = parent_row.get("serial")
+            authorized_serial_value = authorized.get("parent_serial")
+            # Reader serial is a source-bound consistency gate, not SD-card
+            # identity and not an entropy test. Exact normalized equality plus
+            # live uniqueness is what this helper can prove.
+            if (not isinstance(reader_serial_value, str) or
+                    not isinstance(authorized_serial_value, str)):
+                raise TargetProofFailed("reader_identity")
+            reader_serial = reader_serial_value.strip()
+            authorized_serial = authorized_serial_value.strip()
+            if (not reader_serial or len(reader_serial) > 128 or
                     reader_serial != authorized_serial):
                 raise TargetProofFailed("reader_identity")
-            if sum(row.get("type") == "disk" and
-                   row.get("serial") == reader_serial for row in rows) != 1:
+            if sum(
+                    row.get("type") == "disk" and
+                    isinstance(row.get("serial"), str) and
+                    row["serial"].strip() == reader_serial
+                    for row in rows) != 1:
                 raise TargetProofFailed("unique_reader_identity")
         except (KeyError, TypeError, ValueError) as exc:
             raise Blocked(
@@ -2467,10 +2476,10 @@ def verify_authorized_target(
                  final_info.st_rdev, final_info.st_ctime_ns) != target_inode:
             raise TargetProofFailed("target_inode")
         if _block_size(target_descriptor) != size_bytes:
-            raise Blocked("authorized partition size changed")
+            raise TargetProofFailed("target_geometry")
         final_target = by_partuuid.resolve(strict=True)
         if final_target != target:
-            raise Blocked("authorized PARTUUID path changed")
+            raise TargetProofFailed("partuuid_path")
         final_named_info = final_target.lstat()
         if not stat.S_ISBLK(final_named_info.st_mode) or \
                 (final_named_info.st_dev, final_named_info.st_ino,
@@ -2493,8 +2502,12 @@ def verify_authorized_target(
         if observed_identity is not None:
             observed_identity.append(identity)
         return target, (major, minor), (parent_major, parent_minor)
-    except OSError as exc:
-        error_number = exc.errno if exc.errno is not None else "none"
+    except Blocked:
+        raise
+    except (OSError, ValueError, RuntimeError, struct.error) as exc:
+        error_number = (
+            exc.errno
+            if isinstance(exc, OSError) and exc.errno is not None else "none")
         raise Blocked(
             f"authorized target phase={target_phase} "
             "expected=stable-opened-block-device observed=io-error "
@@ -4535,6 +4548,9 @@ def _execute_admitted(
         _target_path, target_device, target_parent_device = verify_authorized_target(
             plan, selector_partuuid, authorization_snapshot,
             observed_identity=admitted_target_identities)
+        if len(admitted_target_identities) != 1:
+            raise Blocked(
+                "live target verifier did not publish exactly one bound identity")
         target_identity = admitted_target_identities[0]
         # The verifier has already matched this value against live block
         # geometry, lsblk and the authorized target snapshot.

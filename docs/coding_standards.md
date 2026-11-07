@@ -699,16 +699,21 @@ PARTUUID target with `O_NOFOLLOW|O_EXCL`, record the opened block inode,
 device number and geometry, and pin a separately opened no-follow physical
 parent descriptor. Require exactly one matching live partition, matching
 reader topology and a unique source-bound stable reader serial; an absent
-serial or conflicting reader is BLOCKED. A reader serial remains only a
-consistency signal and does not prove a particular SD card or permit physical
-acceptance by itself. The historical snapshot's observed `/dev/sd*` pathname
+serial or conflicting reader is BLOCKED. The serial comparison is exact after
+trimming surrounding whitespace and has no invented entropy or character-
+diversity threshold. A reader serial remains only a consistency signal and
+does not prove a particular SD card or permit physical acceptance by itself. The historical snapshot's observed `/dev/sd*` pathname
 and `major:minor` describe an earlier boot, not the live target: renumbering
 may be accepted only when the live plan, exclusive descriptor, parent inode,
 geometry and independently bound reader identity agree. Recheck both opened
 and named block inodes after policy/topology inspection, retain the campaign's
-original live target/parent proof and compare it at every precycle, postcycle
-and terminal check. Changed parent, substituted inode, stale geometry,
-unprovable reader or lost descriptor continuity BLOCK before mutation.
+original descriptor-derived target/parent identity snapshot and compare it at
+every precycle, postcycle and terminal check. The helper closes each verifier
+descriptor before invoking the coordinator, so this is not continuous file-
+descriptor ownership across a lifecycle command and must never be described as
+such. Changed parent, substituted inode, stale geometry or unprovable reader
+BLOCK before mutation; the production coordinator's own last-use descriptor
+binding remains a separate mutation gate.
 The existing `cycle-N` source approval occurs before `prepare`; the
 parent's phase contract must not be extended by this helper. Between a
 successful `prepare` and `start`, recheck the already authenticated parent's

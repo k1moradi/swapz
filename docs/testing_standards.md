@@ -909,18 +909,20 @@ errno on cleanup failure. Revalidate the same source-bound partition, physical
 parent and geometry after each completed cycle and again at final publication.
 Historical authorized-target `major_minor` and `observed_path` are
 observational, not live identity: a renumbered `/dev/sdb1` may pass the
-*rootless verifier* only when the same source-bound reader serial, exclusive
-opened target descriptor, live sole-partition/parent topology and exact
-geometry prove the independently authorized target. A matching PARTUUID,
+*rootless consistency verifier* only when the same source-bound reader serial,
+O_EXCL-requested opened target descriptor, live sole-partition/parent topology
+and exact geometry match. This synthetic verifier result is not independent
+card/reader authorization and does not establish kernel O_EXCL exclusion. A matching PARTUUID,
 model, size or historical pathname alone must never admit a different disk or
 claim physical-card uniqueness. If the historical snapshot lacks a stable
 reader binding, the attempt BLOCKS; synthetic serial agreement is not physical
 PASS. Rootless injected-control fixtures must use only intercepted descriptor,
 topology and subprocess operations. They must exercise legitimate renumbering,
-duplicate PARTUUID, missing/mismatched reader identity, substituted target
-or parent block inode (even with unchanged dev_t), changed target geometry,
-live-name replacement, campaign identity drift and first I/O errno retained
-over descriptor close errors. All rejected identities must reach BLOCKED with
+duplicate PARTUUID, missing/mismatched reader identity, a valid low-character-
+diversity serial, missing parent path, substituted target or parent block inode
+(even with unchanged dev_t), changed target geometry, live-name replacement,
+campaign identity drift and first I/O errno retained over descriptor close
+errors. All rejected identities must reach BLOCKED with
 zero mocked prepare/start/write calls. The verifier must open the resolved
 target once with `O_NOFOLLOW|O_EXCL`, derive device and geometry from the
 opened target descriptor, open and bind the parent block descriptor separately,

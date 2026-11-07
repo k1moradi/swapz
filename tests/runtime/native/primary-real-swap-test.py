@@ -651,6 +651,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
              (target_size_bytes, target_size_bytes), 1, None, True),
             ("reader_identity_mismatch", 1, 1,
              (target_size_bytes, target_size_bytes), 1, None, True),
+            ("low_diversity_reader_serial", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, False),
+            ("missing_parent_path", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
             ("campaign_device_continuity", 1, 1,
              (target_size_bytes, target_size_bytes), 1, None, True),
             ("unchanged", 1, 1,
@@ -685,6 +689,18 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     del snapshot["authorized_target"]["parent_serial"]
                 if scenario == "reader_identity_mismatch":
                     snapshot["authorized_target"]["parent_serial"] = "UnknownReaderB98"
+                if scenario == "low_diversity_reader_serial":
+                    low_diversity_serial = "000000000001"
+                    snapshot["authorized_target"]["parent_serial"] = (
+                        low_diversity_serial)
+                    topology_object = json.loads(topology)
+                    topology_object["blockdevices"][0]["serial"] = (
+                        low_diversity_serial)
+                    topology = json.dumps(topology_object)
+                if scenario == "missing_parent_path":
+                    topology_object = json.loads(topology)
+                    del topology_object["blockdevices"][0]["path"]
+                    topology = json.dumps(topology_object)
                 admitted = qualify.SelectorEvidence("aaaaaaaa", (1,))
                 size_reads = iter(sizes)
                 parent_size_reads = iter((target_size_bytes + qualify.MIB,
@@ -789,6 +805,27 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                         self.assertIn("phase=policy_use", message)
                         self.assertIn("action=BLOCK-before-prepare", message)
                         self.assertNotIn("/private", message)
+                        expected_proof = {
+                            "stale_geometry": "failed-target_geometry",
+                            "parent_path_inode_replaced": "failed-parent_inode",
+                            "parent_geometry_changed": "failed-parent_geometry",
+                            "target_same_rdev_new_inode":
+                                "failed-target_path_inode",
+                            "duplicate_partuuid":
+                                "failed-unique_partition_and_parent",
+                            "malformed_partition_size":
+                                "failed-live_topology_fields",
+                            "malformed_parent_rm":
+                                "failed-live_topology_fields",
+                            "reader_identity_missing": "failed-reader_identity",
+                            "reader_identity_mismatch": "failed-reader_identity",
+                            "missing_parent_path":
+                                "failed-sole_partition_topology",
+                            "campaign_device_continuity":
+                                "failed-campaign_device_continuity",
+                        }.get(scenario)
+                        if expected_proof is not None:
+                            self.assertIn(expected_proof, message)
                         if scenario == "failed_identity_read":
                             self.assertIn("errno=5", message)
                             self.assertNotIn("errno=9", message)
@@ -802,9 +839,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertTrue(flags_seen[0] & os.O_EXCL)
                 self.assertTrue(flags_seen[0] & os.O_CLOEXEC)
                 self.assertEqual(close_calls[-1], target_descriptor)
-                if scenario not in ("failed_identity_read", "duplicate_partuuid",
-                                    "malformed_partition_size", "malformed_parent_rm"):
-                    self.assertEqual(close_calls, [parent_descriptor, target_descriptor])
+                if scenario not in (
+                        "failed_identity_read", "duplicate_partuuid",
+                        "malformed_partition_size", "malformed_parent_rm",
+                        "missing_parent_path"):
+                    self.assertEqual(
+                        close_calls, [parent_descriptor, target_descriptor])
 
     def test_rootless_cycle_last_use_rejects_stale_target_without_primary_mutation(self):
         for scenario in ("selector_during_target", "parent_replaced",
