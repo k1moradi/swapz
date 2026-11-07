@@ -106,7 +106,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "parent_size_bytes": None,
             "parent_removable": None,
             "card_identity_sha256": None,
-            "ownership_phase": "ACTIVE_RECOVERY",
+            "ownership_phase": probe.RECOVERY_OWNERSHIP_PHASE,
         }
         (state_dir / probe.RESULTS_NAME).write_text("{}")
         self.save_recovery_fixture(state_dir, state)
@@ -372,6 +372,64 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertFalse(any(command[0] == "swapon" for command in commands))
         self.assertFalse(any(command[:2] == ("dmsetup", "remove")
                              for command in commands))
+
+    def test_claimed_pre_mutation_recovery_uses_immutable_pair_binding(self):
+        # Model power loss immediately after the durable active marker is
+        # created, before swapoff or any block-zero write. Recovery authority
+        # comes from that marker; the paired JSON ownership binding must not
+        # require a second independently published phase transition.
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory) / "state"
+            state, backup = self.make_recovery_state(state_dir)
+            state.update({
+                "stage": "BACKED_UP",
+                "swap_was_active": False,
+                "swap_path": None,
+                "swap_size_kib": None,
+                "swap_priority": None,
+                "swap_used_kib": None,
+                "development_only": True,
+                "development_scope": probe.DEVELOPMENT_SCOPE,
+            })
+            self.save_recovery_fixture(state_dir, state)
+            owner_marker = (
+                self.recovery_base / f"partition-{state['partuuid']}.active")
+            self.assertTrue(owner_marker.is_file())
+            results = json.loads(
+                (state_dir / probe.RESULTS_NAME).read_text())
+            self.assertEqual(
+                state["ownership_phase"], probe.RECOVERY_OWNERSHIP_PHASE)
+            self.assertEqual(
+                results["ownership_phase"], probe.RECOVERY_OWNERSHIP_PHASE)
+
+            target = {
+                "device": state["device"], "major": state["major"],
+                "minor": state["minor"], "size_bytes": state["size_bytes"],
+                "partuuid": state["partuuid"],
+            }
+            with mock.patch.object(probe, "_validate_state_dir"), \
+                    mock.patch.object(
+                        probe, "inspect_target_identity_for_recovery",
+                        return_value=target), \
+                    mock.patch.object(probe.Path, "exists",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_mapper_exists",
+                                      return_value=False), \
+                    mock.patch.object(probe, "_active_swap_for",
+                                      return_value=None), \
+                    mock.patch.object(probe, "_read_block0",
+                                      return_value=backup), \
+                    mock.patch.object(probe, "_holder_names", return_value=[]), \
+                    mock.patch.object(probe, "_mountinfo_has_device",
+                                      return_value=False):
+                recovered = probe.recover(
+                    state_dir, state["device_arg"], state["device_arg"])
+
+            self.assertEqual(recovered["stage"], "COMPLETE")
+            self.assertFalse(owner_marker.exists())
+            self.assertTrue(
+                (self.recovery_base /
+                 f"consumed-{state['run_id']}.json").is_file())
 
     def test_development_recovery_final_swap_uncertainty_retains_ownership(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2075,7 +2133,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "dm_name": f"swapz-demo-physical-{token}",
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
             "stage": "BACKED_UP", "module_ownership": "NOT_STARTED",
-            "ownership_phase": "RECOVERY_PREPARED",
+            "ownership_phase": probe.RECOVERY_OWNERSHIP_PHASE,
         }
         review = {
             "reviewer": None if development_only else probe.VERBAL_REVIEWER,
@@ -2947,7 +3005,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
              "binding mismatch: original_header_sha256"),
             ("mapper", "dm_uuid", "SWAPZ-FOREIGN",
              "binding mismatch: dm_uuid"),
-            ("claim", "ownership_phase", "RECOVERY_PREPARED",
+            ("claim", "ownership_phase", "FOREIGN_RECOVERY_OWNERSHIP",
              "binding mismatch: ownership_phase"),
             ("stage", "final_recovery_state", "RECOVERY_REQUIRED",
              "publication phases disagree"),
@@ -3071,18 +3129,22 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     (state_dir / probe.BACKUP_NAME).read_bytes(), backup)
                 self.assertEqual(owner_path.read_bytes(), owner_before)
                 failure_records.append({
-                    "original_errno": injected_errno,
+                    "record_type": record_type,
+                    "original_errno_or_exit": injected_errno,
                     "publication_phase": (
                         "post_rename_directory_sync" if replaced
                         else "pre_rename"),
                     "header_bytes_possibly_changed": 0,
-                    "observed_recovery_state": actual_state,
+                    "exact_recovery_state": actual_state,
+                    "owner_marker_retained": (
+                        owner_path.read_bytes() == owner_before),
                     "safe_next_step": "inspect_owner_state_results_header_read_only",
                 })
         self.assertEqual(len(failure_records), len(cases))
         self.assertTrue(all(
             record["safe_next_step"].endswith("_read_only") and
-            record["header_bytes_possibly_changed"] == 0
+            record["header_bytes_possibly_changed"] == 0 and
+            record["owner_marker_retained"] is True
             for record in failure_records))
 
     def test_cleanup_keeps_substituted_state_or_results_instead_of_rewriting(self):

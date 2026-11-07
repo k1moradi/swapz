@@ -39,6 +39,7 @@ DEVELOPMENT_SCOPE = (
 STATE_NAME = "state.json"
 BACKUP_NAME = "block0.bin"
 RESULTS_NAME = "results.json"
+RECOVERY_OWNERSHIP_PHASE = "ONE_USE_RECOVERY_BOUND"
 CANONICAL_MAIN_REMOTE = "https://github.com/k1moradi/swapz.git"
 VERBAL_REVIEWER = "openai-chatgpt-external-reviewer"
 VERBAL_APPROVAL_TEXT = (
@@ -2376,7 +2377,7 @@ def _require_recovery_results_binding(state, results):
             f"{state['major']}:{state['minor']}" or
             results.get("development_only") is not (
                 state.get("development_only") is True) or
-            state["ownership_phase"] != "ACTIVE_RECOVERY"):
+            state["ownership_phase"] != RECOVERY_OWNERSHIP_PHASE):
         raise ProbeError(
             "saved physical results/state identity or ownership phase "
             "is incomplete; safe_next_step=inspect_records_read_only")
@@ -2729,7 +2730,7 @@ def _prepare_state(target, state_dir, evidence, review):
         "reviewer": review.get("reviewer"),
         "run_id": review["run_id"],
         "module_ownership": "NOT_STARTED",
-        "ownership_phase": "RECOVERY_PREPARED",
+        "ownership_phase": RECOVERY_OWNERSHIP_PHASE,
         "dm_name": dm_name,
         "dm_uuid": dm_uuid,
         "stage": "BACKED_UP",
@@ -3105,13 +3106,10 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             _save_results(state_dir, results)
             partition_claim_attempted = True
             _consume_review(target, review["run_id"], preburned=True)
-            # Publish the same claim phase in both records before swapoff or
-            # even the first header pwrite. A failed second publication leaves
-            # a retained owner for read-only reconciliation, not a replay.
-            state["ownership_phase"] = "ACTIVE_RECOVERY"
-            _save_state(state_dir, state)
-            results["ownership_phase"] = "ACTIVE_RECOVERY"
-            _save_results(state_dir, results)
+            # Ownership binding is immutable across both JSON records. The
+            # separately durable active marker is the authority that this
+            # one-use run currently owns recovery, avoiding a two-file claim
+            # publication window that a crash could split.
             # The consumed one-use run claim, active partition marker and
             # original-header backup are durable before block-zero mutation.
             _verify_target_identity(target)

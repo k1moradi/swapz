@@ -6469,10 +6469,14 @@ single recovery-evidence pair: recovery must reject a missing, unreadable,
 stale or cross-run results record before mapper cleanup or device writes.
 Both records must bind the same source/helper, run ID, canonical partition
 and physical parent/card identity, exact size and original-header SHA-256,
-mapper identity, swap-activity fact and current one-use ownership claim phase.
-Publish matching active-claim phases in both records before swapoff or a
-header clear; fsync/rename errors between publications are inspection-only
-uncertainty, not permission to replay. A `RECOVERY_REQUIRED` record requires
+mapper identity, swap-activity fact and immutable one-use recovery ownership
+class. The separately durable partition-active marker is the sole authority
+that the run currently owns recovery. Do not publish a mutable claim phase by
+independently rewriting both JSON records: a crash between those publications
+would manufacture the stale pair this contract is intended to reject. A crash
+after active-marker creation but before swapoff or any block-zero write must
+remain safely recoverable from the unchanged bound pair plus that exact marker.
+A `RECOVERY_REQUIRED` record requires
 the paired result to retain the same recovery-required publication status and
 an authenticated prior recovery phase. Reconcile uncertain persisted bytes
 and the exact active/consumed marker read-only; do not delete stale records,
