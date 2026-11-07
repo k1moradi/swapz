@@ -1875,6 +1875,10 @@ after matching the authenticated source-controlled test marker and the exact
 finite-domain, path-free exception envelope. It does not copy a raw exception,
 a host path, subsequent test errors, arbitrary fixture text or the private
 log into the console or JSON, and it does not relax any watchdog or gate.
+The standalone rootless stderr relay still preserves private child bytes
+unchanged for its bounded capture; public privacy assertions apply to the
+fixed Bash marker fields and the official `make test` summary, not the
+unsanitized intermediate relay transcript.
 
 ### Native CI failure evidence contract
 

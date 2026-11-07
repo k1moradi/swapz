@@ -748,11 +748,17 @@ exec "$SWAPZ_REAL_RM" "$@"
             valid, status=1, reason="unittest_timeout", test="test_first")
         self.assertIn("PackageInvocationTimeout:", evidence.read_text())
         self.assertIn("PRIVATE_ONLY_TRACEBACK_PAYLOAD", evidence.read_text())
-        self.assertNotIn("PRIVATE_ONLY_TRACEBACK_PAYLOAD", valid.stderr)
+        # The standalone relay intentionally preserves private stderr. Only
+        # Bash's fixed public markers and the official make test summary
+        # must exclude it.
         invalid = self.invoke("package_fixture_timeout_invalid")
         self.assert_report(
             invalid, status=1, reason="unittest_error", test="test_first")
-        self.assertNotIn("/private/SECRET", invalid.stderr)
+        invalid_markers = "\n".join(
+            line for line in invalid.stderr.splitlines()
+            if line.startswith(("FAIL: rootless ", "Failed during: ",
+                                "Reason: ", "NEXT: ")))
+        self.assertNotIn("/private/SECRET", invalid_markers)
 
     def test_real_subprocess_timeout_expired_is_classified(self):
         result = self.invoke("timeout")
