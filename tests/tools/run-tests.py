@@ -2570,13 +2570,19 @@ def failure_context(output, *, loaded=True, default_phase=None,
                 r"mount-list|listed-mount|root-revalidation) errno=(11)"
                 r"(?: reason=(init-root-statx-race|"
                 r"process-root-not-directory|init-root-not-directory|"
-                r"root-inode-mismatch|process-root-device-mismatch|"
-                r"init-root-device-mismatch))?"
+                r"root-inode-mismatch|root-device-mismatch|"
+                r"process-root-device-mismatch|init-root-device-mismatch|"
+                r"root-superblock-device-mismatch))?"
                 r"(?: peer_root=(matches-process|differs-process))?",
                 line.strip())
             if (mount_match and mount_inventory_failure is None and
                     (mount_match.group(3) is None or
-                     mount_match.group(1) == "init-root") and
+                     (mount_match.group(1) == "init-root" and
+                      mount_match.group(3) !=
+                      "root-superblock-device-mismatch") or
+                     (mount_match.group(1) == "root-walk" and
+                      mount_match.group(3) ==
+                      "root-superblock-device-mismatch")) and
                     (mount_match.group(4) is None or
                      (mount_match.group(1) == "init-root" and
                       mount_match.group(3) ==

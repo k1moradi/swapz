@@ -2430,12 +2430,18 @@ int main(int argc, char **argv)
         for cause in (
                 "init-root-statx-race", "process-root-not-directory",
                 "init-root-not-directory", "root-inode-mismatch",
-                "process-root-device-mismatch", "init-root-device-mismatch"):
+                "process-root-device-mismatch", "init-root-device-mismatch",
+                "root-device-mismatch"):
             check(
                 mount_marker.replace("step=root-revalidation",
                                      "step=init-root") +
                 f" reason={cause}\n" +
                 command_output(mount_initial, mount_eagain), True)
+
+        check(
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-walk errno=11 reason=root-superblock-device-mismatch\n" +
+            command_output(mount_initial, mount_eagain), True)
 
         for peer_root in ("matches-process", "differs-process"):
             check(
@@ -2472,6 +2478,18 @@ int main(int argc, char **argv)
             " reason=root-inode-mismatch peer_root=matches-process\n" +
             command_output(mount_initial, mount_eagain),
             mount_marker + " peer_root=matches-process\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=init-root") +
+            " reason=root-superblock-device-mismatch\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=mount-list") +
+            " reason=root-superblock-device-mismatch\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=root-walk") +
+            " reason=root-device-mismatch\n" +
             command_output(mount_initial, mount_eagain),
             mount_marker.replace("step=root-revalidation",
                                  "step=init-root") +

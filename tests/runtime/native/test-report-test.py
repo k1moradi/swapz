@@ -4768,6 +4768,26 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("peer_root=", safe_reason)
                 self.assertNotIn("SECRET", safe_reason)
 
+    def test_root_superblock_mismatch_retains_first_fail_closed_diagnostic(self):
+        transcript = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=root-walk errno=11 reason=root-superblock-device-mismatch\n"
+            "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
+            "errno=11 error=Resource temporarily unavailable\n"
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: preparation blocked\n"
+        )
+        phase, reason = runner.failure_context(transcript)
+        self.assertEqual(phase, "owned RAM primary lifecycle prepare")
+        self.assertIn("mount_step=root-walk", reason)
+        self.assertIn("mount_cause=root-superblock-device-mismatch", reason)
+        for invalid_step in ("init-root", "mount-list", "listed-mount"):
+            with self.subTest(step=invalid_step):
+                _, rejected = runner.failure_context(
+                    transcript.replace("step=root-walk", f"step={invalid_step}"))
+                self.assertNotIn("mount_step=", rejected)
+                self.assertNotIn("mount_cause=", rejected)
+
     def test_loaded_root_device_disagreement_explains_safe_read_only_next_step(self):
         from unittest import mock
 

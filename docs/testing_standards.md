@@ -289,6 +289,19 @@ permission to relax admission. The `make test` stage summary must include
 that bounded root comparison and a non-mutating next step when PID 1 agrees
 with the coordinator but mountinfo disagrees. No additional host identifiers,
 syscalls, retries, or alternate test commands are authorized.
+Root admission distinguishes two independent identities: the root mount
+superblock device from mountinfo must match the seeded `statmount` SB_BASIC
+device, and the coordinator and PID 1 root `statx` inode/device must match
+each other at both observations. These device-number classes may legitimately
+differ on a Btrfs subvolume. The full pinned namespace inventory, target/
+parent checks and stable root mount ID remain mandatory; mismatched root
+objects, mismatched superblocks, or changes during the scan refuse admission.
+A root superblock inconsistency emits only the fixed
+`root-superblock-device-mismatch` reason at `root-walk`. Rootless production-C
+regressions must cover the Btrfs-style stable case and the negative cases of
+a hidden mounted target, mismatched root objects, mismatched superblock, and
+root changes after inventory.
+
 
 
 The direct-C mount reader fixture must exercise the actual production reader

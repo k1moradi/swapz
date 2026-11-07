@@ -2113,6 +2113,79 @@ static void test_nested_coordinator_root_identity(void)
 		++fixture_failures;
 	}
 
+	/*
+	 * Btrfs subvolume inode st_dev may differ from the root mount's
+	 * superblock device, while the coordinator and PID 1 root objects agree.
+	 * This must still complete the pinned mount inventory.
+	 */
+	fixture_reset();
+	fixture_self_process_root_device = makedev(0U, 42U);
+	fixture_init_root_device = makedev(0U, 42U);
+	fixture_self_process_root_inode = 206U;
+	fixture_init_root_inode = 206U;
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - btrfs /root rw\n");
+	expect_mount_identity_admission(
+		"btrfs subvolume st_dev differs from superblock",
+		makedev(259U, 0U), makedev(8U, 0U), 1, 0,
+		"coordinator-root-superblock-identity");
+	if (!fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_SELF]) {
+		fprintf(stderr,
+			"FAIL: phase=namespace-inventory case=btrfs-subvolume "
+			"expected=complete-direct-inventory observed=no-listmount "
+			"safe_action=retain-inactive-target\n");
+		++fixture_failures;
+	}
+
+	/* Hidden selected mounts remain busy with Btrfs-style inode devices. */
+	fixture_reset();
+	fixture_self_process_root_device = makedev(0U, 42U);
+	fixture_init_root_device = makedev(0U, 42U);
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_hidden_namespace_device = makedev(8U, 1U);
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - btrfs /root rw\n");
+	expect_mount_identity_admission(
+		"btrfs hidden target still refuses",
+		makedev(259U, 0U), makedev(8U, 0U), 0, 0,
+		"complete-coordinator-namespace-inventory");
+
+	/* Matching inode numbers on different root devices are not identity. */
+	fixture_reset();
+	fixture_self_process_root_device = makedev(0U, 42U);
+	fixture_init_root_device = makedev(0U, 43U);
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - btrfs /root rw\n");
+	expect_mount_identity_admission(
+		"btrfs process and init root device mismatch refuses",
+		makedev(259U, 0U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator-init-root-identity");
+
+	/* A wrong seeded statmount superblock is not a valid root mount. */
+	fixture_reset();
+	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;
+	fixture_namespace_root_override_device = makedev(0U, 2U);
+	fixture_self_process_root_device = makedev(0U, 42U);
+	fixture_init_root_device = makedev(0U, 42U);
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - btrfs /root rw\n");
+	expect_mount_identity_admission(
+		"btrfs seeded mount superblock differs from mountinfo",
+		makedev(259U, 0U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator-root-superblock-identity");
+
+	/* A root change during the direct inventory still refuses. */
+	fixture_reset();
+	fixture_self_process_root_device = makedev(0U, 42U);
+	fixture_init_root_device = makedev(0U, 42U);
+	fixture_process_root_changes_on_confirmation = 1;
+	fixture_file("self/mountinfo",
+		     "36 25 259:0 / / rw - btrfs /root rw\n");
+	expect_mount_identity_admission(
+		"btrfs process root changed during namespace scan",
+		makedev(259U, 0U), makedev(8U, 0U), 0, EAGAIN,
+		"coordinator-root-revalidation");
+
 	/* A different PID 1 root object on the same device remains ambiguous. */
 	fixture_reset();
 	fixture_namespace_root_override_kind = FIXTURE_NAMESPACE_SELF;

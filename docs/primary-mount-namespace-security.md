@@ -92,14 +92,18 @@ also reports `/` after a process chroots to a child mount. The coordinator
 therefore pins its own namespace, seeds the walk with
 `statx(STATX_MNT_ID_UNIQUE)`, follows `statmount` parents to the self-parent
 namespace root, and enumerates from that root with `listmount`/`statmount`.
-The process-root `statx` device and the seeded mount's `statmount` superblock
-device must both equal the root `dev_t` captured by self mountinfo. The
-process-root directory's device and inode must also match `/proc/1/root` at the
-initial and final observations, and the process root's unique mount ID and
-directory identity must remain stable across inventory. This admits a stable
-switched-root layout only when the coordinator and PID 1 use the same root
-object; a distinct chroot, root ABA inconsistent with mountinfo, or a root
-change during the scan refuses with `EAGAIN`. The process-root seed need not be
+The seeded mount's `statmount` superblock device must equal the root
+superblock `dev_t` captured by self mountinfo. The root inode's
+`statx` device need not equal that superblock device: Btrfs subvolumes can
+report a distinct `st_dev`. Instead the process-root directory's `statx`
+device and inode must match `/proc/1/root` at the initial and final
+observations, and the process root's unique mount ID and root object
+identities must remain stable across inventory. This still refuses a
+mismatched superblock, root change or distinct root object; no shortcut
+replaces the pinned namespace inventory or physical-parent safety gates.
+This admits a stable switched-root layout only when the coordinator and PID 1
+use the same root object; a distinct chroot, inconsistent root mount views,
+or a root change during the scan refuses with `EAGAIN`. The process-root seed need not be
 the namespace-root mount ID because the complete direct inventory is walked
 from the discovered namespace root. Only after that inventory and the root
 identity checks can the same-namespace peer shortcut apply. Leader
@@ -152,9 +156,10 @@ alone proves the required refusal-before-mutation contract.
 | Synthetic observation | Expected result |
 | --- | --- |
 | Local root only; unrelated PID or sibling `8:2` | Admit; preserve root `259:0` |
-| Stable switched-root process root on a child mount, identical to PID 1's root object | Directly enumerate from the namespace root and admit only if process-root, PID 1, mountinfo, and seeded `statmount` device identities agree |
+| Stable switched-root process root on a child mount, identical to PID 1's root object | Directly enumerate from the namespace root and admit only if coordinator/PID 1 root object and mountinfo/`statmount` superblock identities agree |
+| Stable Btrfs-style inode `statx` device differs from mountinfo/`statmount` superblock device | Admit only after complete pinned namespace inventory and remaining safety gates |
 | Coordinator root is a different object from PID 1's root, even on the same filesystem | Refuse with `EAGAIN` |
-| Mountinfo root and later `statx` root identify different devices, or root identity changes during inventory | Refuse with `EAGAIN`; do not publish a clean mount inventory |
+| Mountinfo and `statmount` root superblock devices differ, or root identity changes during inventory | Refuse with `EAGAIN`; do not publish a clean mount inventory |
 | Selected partition `8:1` only in PID `3031` | Refuse |
 | Selected parent `8:0` only in PID `3031` | Refuse |
 | Local or other PID mountinfo malformed, empty or missing while namespace lives | Refuse |

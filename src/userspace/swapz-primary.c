@@ -4098,7 +4098,6 @@ static int swapz_primary_mountinfo_full_root(
 	int saved_errno = 0;
 	const char *failure_step = "namespace-fd";
 	const char *failure_reason = NULL;
-	const char *failure_peer_root = NULL;
 
 	_Static_assert(sizeof(struct mount_id_request) == mount_id_request_bytes,
 		       "mount ID request ABI size changed");
@@ -4172,11 +4171,8 @@ static int swapz_primary_mountinfo_full_root(
 		if (!S_ISDIR(root_info.stx_mode) ||
 		    !S_ISDIR(init_root_info.stx_mode) ||
 		    root_info.stx_ino != init_root_info.stx_ino ||
-		    makedev(root_info.stx_dev_major, root_info.stx_dev_minor) !=
-			expected_process_root_device ||
-		    makedev(init_root_info.stx_dev_major,
-			    init_root_info.stx_dev_minor) !=
-			expected_process_root_device) {
+		    root_info.stx_dev_major != init_root_info.stx_dev_major ||
+		    root_info.stx_dev_minor != init_root_info.stx_dev_minor) {
 			/* Classify only the first failed fixed identity predicate.
 			 * Do not log inode/device numbers or weaken admission.
 			 */
@@ -4186,21 +4182,8 @@ static int swapz_primary_mountinfo_full_root(
 				failure_reason = "init-root-not-directory";
 			else if (root_info.stx_ino != init_root_info.stx_ino)
 				failure_reason = "root-inode-mismatch";
-			else if (makedev(root_info.stx_dev_major,
-					 root_info.stx_dev_minor) !=
-				 expected_process_root_device) {
-				failure_reason = "process-root-device-mismatch";
-				/* Inode equality was checked above. Report only
-				 * whether PID 1 and our root devices also agree.
-				 */
-				failure_peer_root =
-					root_info.stx_dev_major ==
-					    init_root_info.stx_dev_major &&
-					root_info.stx_dev_minor ==
-					    init_root_info.stx_dev_minor ?
-					"matches-process" : "differs-process";
-			} else
-				failure_reason = "init-root-device-mismatch";
+			else
+				failure_reason = "root-device-mismatch";
 			errno = EAGAIN;
 			goto out;
 		}
@@ -4237,6 +4220,12 @@ static int swapz_primary_mountinfo_full_root(
 		if (require_process_root_matches_init &&
 		    current_mount_id == root_mount_id &&
 		    mounted_device != expected_process_root_device) {
+			/*
+			 * mountinfo and statmount identify the same superblock.
+			 * Inode st_dev can instead identify a Btrfs subvolume,
+			 * so retain this independent superblock identity check.
+			 */
+			failure_reason = "root-superblock-device-mismatch";
 			errno = EAGAIN;
 			goto out;
 		}
@@ -4347,10 +4336,7 @@ static int swapz_primary_mountinfo_full_root(
 		    confirmed_root_info.stx_dev_major !=
 			    confirmed_init_root_info.stx_dev_major ||
 		    confirmed_root_info.stx_dev_minor !=
-			    confirmed_init_root_info.stx_dev_minor ||
-		    makedev(confirmed_root_info.stx_dev_major,
-			    confirmed_root_info.stx_dev_minor) !=
-			expected_process_root_device) {
+			    confirmed_init_root_info.stx_dev_minor) {
 			errno = EAGAIN;
 			goto out;
 		}
@@ -4373,12 +4359,10 @@ out:
 		if (saved_errno == EAGAIN)
 			(void)fprintf(stderr,
 				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
-				      "step=%s errno=%d%s%s%s%s\n",
+				      "step=%s errno=%d%s%s\n",
 				      failure_step, saved_errno,
 				      failure_reason ? " reason=" : "",
-				      failure_reason ? failure_reason : "",
-				      failure_peer_root ? " peer_root=" : "",
-				      failure_peer_root ? failure_peer_root : "");
+				      failure_reason ? failure_reason : "");
 		errno = saved_errno;
 	}
 	return result;

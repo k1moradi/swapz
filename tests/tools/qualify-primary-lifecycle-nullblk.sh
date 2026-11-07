@@ -116,14 +116,22 @@ verify_prepare_failure_diagnostic() {
 		if [[ "$line" == "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE"* ]]; then
 			mount_diagnostic_count=$((mount_diagnostic_count + 1))
 			# Source-controlled fields only: no PID, path, namespace or device.
-			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=11([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|process-root-device-mismatch|init-root-device-mismatch))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
+			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=11([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|root-device-mismatch|process-root-device-mismatch|init-root-device-mismatch|root-superblock-device-mismatch))?([[:space:]]peer_root=(matches-process|differs-process))?$ ]]; then
 				fail "prepare refusal has a malformed mount-inventory diagnostic"
 			fi
 			mount_step="${BASH_REMATCH[1]}"
 			mount_reason="${BASH_REMATCH[3]:-}"
 			mount_peer_root="${BASH_REMATCH[5]:-}"
-			if [[ -n "$mount_reason" && "$mount_step" != init-root ]]; then
-				fail "prepare refusal mount-inventory reason does not match step"
+			# A root-object reason belongs to init-root; a superblock
+			# reason belongs only to the seeded statmount root-walk.
+			if [[ -n "$mount_reason" ]]; then
+				if [[ "$mount_reason" == root-superblock-device-mismatch ]]; then
+					[[ "$mount_step" == root-walk ]] ||
+						fail "prepare refusal mount-inventory reason does not match step"
+				else
+					[[ "$mount_step" == init-root ]] ||
+						fail "prepare refusal mount-inventory reason does not match step"
+				fi
 			fi
 			if [[ -n "$mount_peer_root" &&
 			      ( "$mount_step" != init-root ||
