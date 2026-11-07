@@ -45,6 +45,35 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
+    def save_recovery_fixture(self, state_dir, state):
+        """Keep both synthetic records tied to their edited state identity."""
+        (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+        results_path = state_dir / probe.RESULTS_NAME
+        results = json.loads(results_path.read_text())
+        for state_field, result_field in (
+                ("source_sha", "source_commit_sha"),
+                ("helper_git_sha", "helper_git_sha"),
+                ("helper_sha256", "helper_sha256"),
+                ("device_arg", "device_uuid_path"),
+                ("device", "canonical_device"),
+                ("partuuid", "partuuid"),
+                ("size_bytes", "device_size_bytes"),
+                ("header_sha256", "original_header_sha256"),
+                ("dm_name", "dm_name"),
+                ("dm_uuid", "dm_uuid"),
+                ("parent_major_minor", "parent_major_minor"),
+                ("parent_model", "parent_model"),
+                ("parent_transport", "parent_transport"),
+                ("parent_size_bytes", "parent_size_bytes"),
+                ("parent_removable", "parent_removable"),
+                ("card_identity_sha256", "card_identity_sha256"),
+                ("swap_was_active", "swap_was_active"),
+                ("ownership_phase", "ownership_phase")):
+            results[result_field] = state[state_field]
+        results["major_minor"] = f"{state['major']}:{state['minor']}"
+        results["development_only"] = state.get("development_only") is True
+        results_path.write_text(json.dumps(results))
+
     def make_recovery_state(self, state_dir):
         state_dir.mkdir(mode=0o700)
         header = bytearray(probe.PAGE_BYTES)
@@ -68,9 +97,39 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "module_loaded_by_us": False,
             "dm_name": f"swapz-demo-physical-{token}",
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
+            "source_sha": "a" * 40,
+            "helper_git_sha": "b" * 40,
+            "helper_sha256": "c" * 64,
+            "parent_major_minor": None,
+            "parent_model": None,
+            "parent_transport": None,
+            "parent_size_bytes": None,
+            "parent_removable": None,
+            "card_identity_sha256": None,
+            "ownership_phase": "ACTIVE_RECOVERY",
         }
-        (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+        (state_dir / probe.RESULTS_NAME).write_text("{}")
+        self.save_recovery_fixture(state_dir, state)
+        results_path = state_dir / probe.RESULTS_NAME
+        results = json.loads(results_path.read_text())
+        results["final_recovery_state"] = "BACKED_UP"
+        results_path.write_text(json.dumps(results))
         (state_dir / probe.BACKUP_NAME).write_bytes(header)
+        # Other recovery tests intercept device and kernel operations. Provide
+        # only a synthetic cleanup observation; production code is unmodified.
+        clean_observation = {
+            "errors": [], "original_header_matches_final": True,
+            "restored_swap_verified": True,
+            "mapper_removal_succeeded": True,
+            "module_cleanup_succeeded": True,
+            "unrelated_mapper_inventory_unchanged": True,
+            "active_partition_marker_present": True,
+            "run_claim_consumed": True,
+        }
+        cleanup_patch = mock.patch.object(
+            probe, "_final_observations", return_value=clean_observation)
+        cleanup_patch.start()
+        self.addCleanup(cleanup_patch.stop)
         marker = {"run_id": state["run_id"], "partuuid": state["partuuid"],
                   "major": state["major"], "minor": state["minor"]}
         (self.recovery_base / f"partition-{state['partuuid']}.active").write_text(
@@ -274,7 +333,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "development_only": True,
                 "development_scope": probe.DEVELOPMENT_SCOPE,
             })
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            self.save_recovery_fixture(state_dir, state)
             commands = []
 
             def run(command, **kwargs):
@@ -328,11 +387,14 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "development_only": True,
                 "development_scope": probe.DEVELOPMENT_SCOPE,
             })
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
-            (state_dir / probe.RESULTS_NAME).write_text(json.dumps({
+            self.save_recovery_fixture(state_dir, state)
+            results_path = state_dir / probe.RESULTS_NAME
+            saved_results = json.loads(results_path.read_text())
+            saved_results.update({
                 "start_timestamp": "2026-11-06T00:00:00Z",
                 "oracle_suite": "PHASES_PASS_RECOVERY_PENDING",
-            }))
+            })
+            results_path.write_text(json.dumps(saved_results))
 
             target = {
                 "device": state["device"], "major": state["major"],
@@ -441,7 +503,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     "development_scope": probe.DEVELOPMENT_SCOPE,
                 })
                 state[field] = value
-                (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+                self.save_recovery_fixture(state_dir, state)
                 with mock.patch.object(probe, "_validate_state_dir"), \
                         mock.patch.object(
                             probe, "inspect_target_identity_for_recovery") as inspect, \
@@ -1981,7 +2043,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               teardown_oracle_metadata=None,
                               oracle_evidence_fault=None,
                               recovery_state_save_failure=False,
-                              recovery_results_save_failure=False):
+                              recovery_results_save_failure=False,
+                              recovery_record_substitution=None):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         if development_only:
@@ -2012,6 +2075,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             "dm_name": f"swapz-demo-physical-{token}",
             "dm_uuid": f"SWAPZ-TEST-PHYSICAL-{token}",
             "stage": "BACKED_UP", "module_ownership": "NOT_STARTED",
+            "ownership_phase": "RECOVERY_PREPARED",
         }
         review = {
             "reviewer": None if development_only else probe.VERBAL_REVIEWER,
@@ -2357,15 +2421,33 @@ class PhysicalSwapProbeTests(unittest.TestCase):
 
         def checked_recovery(saved_state, saved_state_dir):
             events.append(("recover",))
+            if recovery_record_substitution is not None:
+                record_name = (probe.STATE_NAME
+                               if recovery_record_substitution == "state"
+                               else probe.RESULTS_NAME)
+                record_path = saved_state_dir / record_name
+                substituted = json.loads(record_path.read_text())
+                substituted["run_id"] = "f" * 32
+                record_path.write_text(json.dumps(substituted))
+                raise probe.ProbeError("injected substituted recovery record")
             if recovery_failure:
                 raise probe.ProbeError("injected recovery uncertainty")
             return remove_test_objects(saved_state, saved_state_dir)
+
+        actual_save_state = probe._save_state
 
         def record_state_save(_state_dir, saved_state):
             events.append(("save", saved_state["stage"]))
             if (recovery_state_save_failure and
                     saved_state["stage"] == "RECOVERY_REQUIRED"):
                 raise OSError(errno.ENOSPC, "injected recovery fsync failure")
+            return actual_save_state(_state_dir, saved_state)
+
+        def prepare_fake_state(*_args):
+            state_dir = Path(directory)
+            actual_save_state(state_dir, state)
+            (state_dir / probe.BACKUP_NAME).write_bytes(target["header"])
+            return state, state_dir
 
         actual_save_results = probe._save_results
         attempted_recovery_results = []
@@ -2419,7 +2501,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 mock.patch.object(probe, "block_identity",
                                   return_value=(253, 1 if fault == "node" else 0)),
                 mock.patch.object(probe, "_prepare_state",
-                                  return_value=(state, Path(directory))),
+                                  side_effect=prepare_fake_state),
                 mock.patch.object(probe, "_snapshot_reviewed_artifacts",
                                   return_value={
                                       "formatter_sha256": "/reviewed/swapzctl",
@@ -2491,6 +2573,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         teardown_missing_gate or teardown_fabricated_lower or \
                         source_drift is not None or helper_sha_mismatch or \
                         artifact_drift_before_mutation or recovery_failure or \
+                        recovery_record_substitution is not None or \
                         oracle_evidence_fault is not None:
                     with self.assertRaisesRegex(
                             probe.ProbeError,
@@ -2501,7 +2584,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 else:
                     execute()
                 if (source_drift is not None or helper_sha_mismatch or
-                        artifact_drift_before_mutation or recovery_failure):
+                        artifact_drift_before_mutation or recovery_failure or
+                        recovery_record_substitution is not None):
                     state["_test_results"] = json.loads(
                         (Path(directory) / probe.RESULTS_NAME).read_text())
                 if state.get("stage") == "COMPLETE":
@@ -2517,6 +2601,12 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     Path(directory) / f"consumed-{review['run_id']}.json")
                 state["_test_attempted_recovery_results"] = (
                     attempted_recovery_results)
+                if recovery_record_substitution is not None:
+                    record_name = (probe.STATE_NAME
+                                   if recovery_record_substitution == "state"
+                                   else probe.RESULTS_NAME)
+                    state["_test_substituted_record"] = json.loads(
+                        (Path(directory) / record_name).read_text())
         return events, state, target
 
     def test_short_header_io_retains_exact_offsets_and_original_errno(self):
@@ -2611,7 +2701,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                         "swap_size_kib": None, "swap_used_kib": None,
                     })
                     (saved_dir / probe.BACKUP_NAME).write_bytes(original)
-                    (saved_dir / probe.STATE_NAME).write_text(json.dumps(state))
+                    self.save_recovery_fixture(saved_dir, state)
                     header = bytearray(bytes(257) + original[257:])
                     if foreign_change:
                         header[600] = 0x99
@@ -2694,7 +2784,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 "development_only": True,
                 "development_scope": probe.DEVELOPMENT_SCOPE,
             })
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            self.save_recovery_fixture(state_dir, state)
             current_header = bytearray(probe.PAGE_BYTES)
             write_attempts = 0
             target = {
@@ -2843,6 +2933,175 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                 self.assertEqual(rejected.exception.errno, errno.ENOSPC)
                 self.assertFalse((state_dir / filename).exists())
 
+    def test_recovery_refuses_unbound_pair_and_wrong_input_before_device_access(self):
+        # A partial clear is not authority to replay an unbound recovery.
+        cases = (
+            ("run", "run_id", "f" * 32, "binding mismatch: run_id"),
+            ("source", "source_commit_sha", "f" * 40,
+             "binding mismatch: source_commit_sha"),
+            ("device", "canonical_device", "/dev/foreign",
+             "binding mismatch: canonical_device"),
+            ("parent", "parent_major_minor", "8:99",
+             "binding mismatch: parent_major_minor"),
+            ("header", "original_header_sha256", "f" * 64,
+             "binding mismatch: original_header_sha256"),
+            ("mapper", "dm_uuid", "SWAPZ-FOREIGN",
+             "binding mismatch: dm_uuid"),
+            ("claim", "ownership_phase", "RECOVERY_PREPARED",
+             "binding mismatch: ownership_phase"),
+            ("stage", "final_recovery_state", "RECOVERY_REQUIRED",
+             "publication phases disagree"),
+            ("missing", None, None, "missing or unreadable"),
+            ("wrong-input", None, None, "exact originally confirmed"),
+            ("incomplete-origin", None, None, "origin is incomplete"),
+        )
+        for label, field, value, expected in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory) / "state"
+                state, backup = self.make_recovery_state(state_dir)
+                state["stage"] = "HEADER_CLEAR_PENDING"
+                self.save_recovery_fixture(state_dir, state)
+                results_path = state_dir / probe.RESULTS_NAME
+                if field is not None:
+                    results = json.loads(results_path.read_text())
+                    results[field] = value
+                    results_path.write_text(json.dumps(results))
+                elif label == "missing":
+                    results_path.unlink()
+                elif label == "incomplete-origin":
+                    state["stage"] = "RECOVERY_REQUIRED"
+                    self.save_recovery_fixture(state_dir, state)
+                    results = json.loads(results_path.read_text())
+                    results["final_recovery_state"] = "RECOVERY_REQUIRED"
+                    results_path.write_text(json.dumps(results))
+
+                owner_path = (self.recovery_base /
+                              f"partition-{state['partuuid']}.active")
+                owner_before = owner_path.read_bytes()
+                saved_header_before = (state_dir / probe.BACKUP_NAME).read_bytes()
+                device_arg = ("/dev/disk/by-uuid/wrong" if label == "wrong-input"
+                              else state["device_arg"])
+                with mock.patch.object(probe, "_validate_state_dir"), \
+                        mock.patch.object(
+                            probe, "inspect_target_identity_for_recovery"
+                        ) as inspect, \
+                        mock.patch.object(probe, "_mapper_exists") as mapper, \
+                        mock.patch.object(probe, "_write_block0") as write:
+                    with self.assertRaisesRegex(probe.ProbeError, expected):
+                        probe.recover(state_dir, device_arg, device_arg)
+                inspect.assert_not_called()
+                mapper.assert_not_called()
+                write.assert_not_called()
+                self.assertEqual(owner_path.read_bytes(), owner_before)
+                self.assertEqual(
+                    (state_dir / probe.BACKUP_NAME).read_bytes(),
+                    saved_header_before)
+                self.assertEqual(len(backup), probe.PAGE_BYTES)
+
+    def test_recovery_publication_faults_preserve_exact_file_and_owner(self):
+        # Before rename: old bytes remain. After rename but failed directory
+        # sync: either durable generation is possible, so inspect only.
+        cases = (
+            ("state", "file_fsync", errno.ENOSPC, False),
+            ("state", "rename", errno.EIO, False),
+            ("state", "directory_fsync", errno.EIO, True),
+            ("results", "file_fsync", errno.ENOSPC, False),
+            ("results", "rename", errno.EIO, False),
+            ("results", "directory_fsync", errno.EIO, True),
+        )
+        failure_records = []
+        for record_type, phase, injected_errno, replaced in cases:
+            with self.subTest(record_type=record_type, phase=phase), \
+                    tempfile.TemporaryDirectory() as directory:
+                state_dir = Path(directory) / "state"
+                state, backup = self.make_recovery_state(state_dir)
+                owner_path = (self.recovery_base /
+                              f"partition-{state['partuuid']}.active")
+                owner_before = owner_path.read_bytes()
+                filename = (probe.STATE_NAME if record_type == "state"
+                            else probe.RESULTS_NAME)
+                record_path = state_dir / filename
+                previous_bytes = record_path.read_bytes()
+                if record_type == "state":
+                    new_record = {**state, "stage": "HEADER_CLEAR_PENDING"}
+                    publish = lambda: probe._save_state(state_dir, new_record)
+                else:
+                    new_record = json.loads(previous_bytes)
+                    new_record["final_recovery_state"] = "RECOVERY_REQUIRED"
+                    publish = lambda: probe._save_results(state_dir, new_record)
+
+                with ExitStack() as stack:
+                    if phase == "rename":
+                        stack.enter_context(mock.patch.object(
+                            probe.os, "replace",
+                            side_effect=OSError(injected_errno, "rename fault")))
+                    elif phase == "file_fsync":
+                        stack.enter_context(mock.patch.object(
+                            probe.os, "fsync",
+                            side_effect=OSError(injected_errno, "file sync fault")))
+                    elif record_type == "results":
+                        stack.enter_context(mock.patch.object(
+                            probe, "_fsync_directory",
+                            side_effect=OSError(injected_errno, "directory sync fault")))
+                    else:
+                        real_fsync = os.fsync
+                        sync_calls = 0
+
+                        def fail_second_sync(file_descriptor):
+                            nonlocal sync_calls
+                            sync_calls += 1
+                            if sync_calls == 2:
+                                raise OSError(injected_errno, "directory sync fault")
+                            return real_fsync(file_descriptor)
+
+                        stack.enter_context(mock.patch.object(
+                            probe.os, "fsync", side_effect=fail_second_sync))
+                    with self.assertRaises(OSError) as rejected:
+                        publish()
+                self.assertEqual(rejected.exception.errno, injected_errno)
+                published_bytes = record_path.read_bytes()
+                self.assertEqual(published_bytes == previous_bytes, not replaced)
+                actual_state = json.loads(
+                    (state_dir / probe.STATE_NAME).read_bytes())["stage"]
+                self.assertEqual(
+                    actual_state,
+                    "HEADER_CLEAR_PENDING" if record_type == "state" and replaced
+                    else "HEADER_CLEARED")
+                self.assertEqual(
+                    (state_dir / probe.BACKUP_NAME).read_bytes(), backup)
+                self.assertEqual(owner_path.read_bytes(), owner_before)
+                failure_records.append({
+                    "original_errno": injected_errno,
+                    "publication_phase": (
+                        "post_rename_directory_sync" if replaced
+                        else "pre_rename"),
+                    "header_bytes_possibly_changed": 0,
+                    "observed_recovery_state": actual_state,
+                    "safe_next_step": "inspect_owner_state_results_header_read_only",
+                })
+        self.assertEqual(len(failure_records), len(cases))
+        self.assertTrue(all(
+            record["safe_next_step"].endswith("_read_only") and
+            record["header_bytes_possibly_changed"] == 0
+            for record in failure_records))
+
+    def test_cleanup_keeps_substituted_state_or_results_instead_of_rewriting(self):
+        for record_type in ("state", "results"):
+            with self.subTest(record_type=record_type):
+                events, state, _ = self.simulate_physical_run(
+                    development_only=True, oracle_failure_at=1,
+                    recovery_record_substitution=record_type)
+                self.assertEqual(
+                    state["_test_substituted_record"]["run_id"], "f" * 32)
+                self.assertIs(
+                    state["_test_failure_type"], probe.RecoveryRequiredError)
+                self.assertIn("physical oracle phase", state["_test_first_failure"])
+                self.assertTrue(state["_test_owner_marker"])
+                self.assertTrue(state["_test_consumed_claim"])
+                self.assertEqual(
+                    [event for event in events if event[0] == "write0"],
+                    [("write0",)])
+
     def test_terminal_status_separates_failure_block_and_recovery(self):
         self.assertEqual(
             probe._terminal_error_status(probe.ProbeError("blocked")),
@@ -2882,6 +3141,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         self.assertEqual(result["recovery_state_durability"], "UNCERTAIN")
         self.assertEqual(result["recovery_state_save_errno"], errno.ENOSPC)
         self.assertEqual(result["final_recovery_state"], "RECOVERY_REQUIRED")
+        self.assertEqual(result["recovery_failure_audit"], {
+            "first_errno": "unavailable",
+            "first_oracle_exit": 1,
+            "recovery_errno": "unavailable",
+            "publication_phase": "MAPPED",
+            "header_bytes_possibly_changed": probe.PAGE_BYTES,
+            "requested_recovery_state": "RECOVERY_REQUIRED",
+            "last_readable_saved_state": "MAPPED",
+            "state_durability": "UNCERTAIN",
+            "safe_next_step": "inspect_owner_state_results_header_read_only",
+        })
         diagnostic = "\n".join(
             str(call.args[0]) for call in printed.call_args_list
             if call.args)
@@ -3533,7 +3803,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             state, _ = self.make_recovery_state(state_dir)
             state["module_ownership"] = "MODULE_PENDING"
             state["stage"] = "MODULE_PENDING"
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            self.save_recovery_fixture(state_dir, state)
             with mock.patch.object(probe, "_validate_state_dir"), \
                     mock.patch.object(
                         probe, "inspect_target_identity_for_recovery",
@@ -3742,7 +4012,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             state, backup = self.make_recovery_state(state_dir)
             state["stage"] = "MODULE_OWNED"
             state["module_ownership"] = "MODULE_OWNED"
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            self.save_recovery_fixture(state_dir, state)
             target = {"device": state["device"], "major": 8, "minor": 4,
                       "size_bytes": state["size_bytes"],
                       "partuuid": state["partuuid"]}
@@ -3820,7 +4090,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             state_dir = Path(directory) / "state"
             state, backup = self.make_recovery_state(state_dir)
             state["swap_size_kib"] = state["size_bytes"] // 1024 - 4
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            self.save_recovery_fixture(state_dir, state)
             active = {"path": state["device"], "used_kib": 0,
                       "size_kib": state["swap_size_kib"] - 8,
                       "priority": state["swap_priority"] + 1}
@@ -3862,7 +4132,7 @@ class PhysicalSwapProbeTests(unittest.TestCase):
             state_dir = Path(directory) / "state"
             state, backup = self.make_recovery_state(state_dir)
             state["module_loaded_by_us"] = False
-            (state_dir / probe.STATE_NAME).write_text(json.dumps(state))
+            self.save_recovery_fixture(state_dir, state)
             with mock.patch.object(probe, "_validate_state_dir"), \
                     mock.patch.object(probe, "inspect_target_identity_for_recovery",
                                       return_value={"device": state["device"],

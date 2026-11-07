@@ -2321,6 +2321,83 @@ def _validate_recovery_header(current_header, backup, state, size_bytes):
     raise ProbeError(
         "partition header is not an expected recovery state; manual review required")
 
+RECOVERY_RECORD_BINDINGS = (
+    ("run_id", "run_id"),
+    ("source_sha", "source_commit_sha"),
+    ("helper_git_sha", "helper_git_sha"),
+    ("helper_sha256", "helper_sha256"),
+    ("device_arg", "device_uuid_path"),
+    ("device", "canonical_device"),
+    ("partuuid", "partuuid"),
+    ("size_bytes", "device_size_bytes"),
+    ("header_sha256", "original_header_sha256"),
+    ("dm_name", "dm_name"),
+    ("dm_uuid", "dm_uuid"),
+    ("parent_major_minor", "parent_major_minor"),
+    ("parent_model", "parent_model"),
+    ("parent_transport", "parent_transport"),
+    ("parent_size_bytes", "parent_size_bytes"),
+    ("parent_removable", "parent_removable"),
+    ("card_identity_sha256", "card_identity_sha256"),
+    ("swap_was_active", "swap_was_active"),
+    ("ownership_phase", "ownership_phase"),
+)
+
+
+def _recovery_state_identity_matches(expected, observed):
+    """Recovery stages may advance; their immutable ownership cannot change."""
+    return isinstance(observed, dict) and all(
+        field in expected and field in observed and
+        type(expected[field]) is type(observed[field]) and
+        expected[field] == observed[field]
+        for field, _ in RECOVERY_RECORD_BINDINGS)
+
+
+def _require_recovery_results_binding(state, results):
+    """Refuse stale or cross-run results before touching recovery resources."""
+    if not isinstance(results, dict):
+        raise ProbeError("saved physical results record is not an object")
+    for state_field, result_field in RECOVERY_RECORD_BINDINGS:
+        if state_field not in state or result_field not in results or (
+                type(state[state_field]) is not type(results[result_field]) or
+                state[state_field] != results[result_field]):
+            raise ProbeError(
+                "saved physical results/state binding mismatch: "
+                f"{result_field}; safe_next_step=inspect_records_read_only")
+    if (type(state.get("major")) is not int or
+            type(state.get("minor")) is not int or
+            type(state["source_sha"]) is not str or
+            re.fullmatch(r"[0-9a-f]{40}", state["source_sha"]) is None or
+            type(state["helper_git_sha"]) is not str or
+            re.fullmatch(r"[0-9a-f]{40}", state["helper_git_sha"]) is None or
+            type(state["helper_sha256"]) is not str or
+            re.fullmatch(r"[0-9a-f]{64}", state["helper_sha256"]) is None or
+            results.get("major_minor") !=
+            f"{state['major']}:{state['minor']}" or
+            results.get("development_only") is not (
+                state.get("development_only") is True) or
+            state["ownership_phase"] != "ACTIVE_RECOVERY"):
+        raise ProbeError(
+            "saved physical results/state identity or ownership phase "
+            "is incomplete; safe_next_step=inspect_records_read_only")
+    result_stage = results.get("final_recovery_state")
+    if result_stage not in {"BACKED_UP", "ORACLE_PASS",
+                            "RECOVERY_REQUIRED"} or (
+            (state.get("stage") == "RECOVERY_REQUIRED") != (
+                result_stage == "RECOVERY_REQUIRED")):
+        raise ProbeError(
+            "saved recovery publication phases disagree; "
+            "safe_next_step=inspect_records_read_only")
+    if state.get("stage") == "RECOVERY_REQUIRED" and (
+            state.get("stage_before_recovery") not in {
+                "BACKED_UP", "SWAP_OFF", "HEADER_CLEAR_PENDING",
+                "HEADER_CLEARED", "HEADER_RESTORE_PENDING", "SWZ_FORMATTED",
+                "MODULE_PENDING", "MODULE_OWNED", "MAPPED", "ORACLE_PASS"}):
+        raise ProbeError(
+            "saved RECOVERY_REQUIRED origin is incomplete; "
+            "safe_next_step=inspect_records_read_only")
+
+
 def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             module_owned_by_process=False):
     state_dir = Path(state_dir)
@@ -2334,9 +2411,23 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             r"[0-9a-f]{32}", str(state.get("run_id", ""))):
         raise ProbeError("saved recovery state lacks one-use run identity")
     _recovery_run_directory(state_dir, state["run_id"])
+    if device_arg != confirm_arg or device_arg != state.get("device_arg"):
+        raise ProbeError(
+            "recovery requires the exact originally confirmed device path; "
+            "safe_next_step=inspect_records_read_only")
     if len(backup) != PAGE_BYTES or hashlib.sha256(backup).hexdigest() != (
             state.get("header_sha256")):
         raise ProbeError("saved original header is missing or digest-mismatched")
+    if state.get("stage") == "COMPLETE":
+        raise ProbeError(
+            "saved recovery is already COMPLETE; "
+            "safe_next_step=inspect_records_read_only")
+    try:
+        results = _load_unique_json((state_dir / RESULTS_NAME).read_bytes())
+    except (OSError, ValueError) as exc:
+        raise ProbeError(
+            "saved physical results record missing or unreadable; "
+            "safe_next_step=inspect_records_read_only") from exc
     # Normal mode restores an originally active, zero-use swap partition.
     # The distinct development-only physical data-path smoke is admitted only
     # when the card was already inactive and recovery must leave it inactive.
@@ -2399,6 +2490,7 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
             "NOT_STARTED", "MODULE_PENDING", "MODULE_OWNED"}:
         raise ProbeError("saved module ownership is unknown; manual review required")
     _validate_owned_mapper_identity(state)
+    _require_recovery_results_binding(state, results)
     lock_fd = None if lock_held else _partition_lock(state["partuuid"])
     try:
         base = _recovery_base()
@@ -2489,43 +2581,33 @@ def recover(state_dir, device_arg, confirm_arg, lock_held=False,
         elif _active_swap_for(target["major"], target["minor"]) is not None:
             raise ProbeError(
                 "development recovery expected the partition to remain inactive")
-        results_path = state_dir / RESULTS_NAME
-        results = None
-        if results_path.is_file():
-            try:
-                results = _load_unique_json(results_path.read_bytes())
-            except (OSError, ValueError) as exc:
-                raise ProbeError("saved physical results record is unreadable") from exc
-            if not isinstance(results, dict):
-                raise ProbeError("saved physical results record is not an object")
-            # COMPLETE and marker release are cleanup claims. Keep ownership
-            # until one current restored-state sample verifies them.
-            cleanup_observation = _final_observations(
-                results, state_dir, state, target)
-            cleanup_error = _final_cleanup_evidence_error(cleanup_observation)
-            if cleanup_error is not None:
-                state["stage_before_recovery"] = state.get("stage")
-                state["stage"] = "RECOVERY_REQUIRED"
-                state["recovery_error"] = (
-                    "final cleanup evidence expected=verified observed="
-                    + cleanup_error)
-                _save_state(state_dir, state)
-                results["final_recovery_state"] = state["stage"]
-                results["recovery_error"] = state["recovery_error"]
-                results["end_timestamp"] = _utc_timestamp()
-                _save_results(state_dir, results)
-                raise ProbeError(state["recovery_error"])
+        # COMPLETE and marker release are cleanup claims. Keep ownership
+        # until one current restored-state sample verifies them.
+        cleanup_observation = _final_observations(
+            results, state_dir, state, target)
+        cleanup_error = _final_cleanup_evidence_error(cleanup_observation)
+        if cleanup_error is not None:
+            state["stage_before_recovery"] = state.get("stage")
+            state["stage"] = "RECOVERY_REQUIRED"
+            state["recovery_error"] = (
+                "final cleanup evidence expected=verified observed="
+                + cleanup_error)
+            _save_state(state_dir, state)
+            results["final_recovery_state"] = state["stage"]
+            results["recovery_error"] = state["recovery_error"]
+            results["end_timestamp"] = _utc_timestamp()
+            _save_results(state_dir, results)
+            raise ProbeError(state["recovery_error"])
         state["stage"] = "COMPLETE"
         _save_state(state_dir, state)
         _release_partition_ownership(state)
-        if results is not None:
-            # Marker unlink + directory fsync is the only state transition after
-            # the verified cleanup sample. Do not perform another fallible
-            # swap/header/mapper observation after ownership is released.
-            results["active_partition_marker_present"] = False
-            results["final_recovery_state"] = state["stage"]
-            results["end_timestamp"] = _utc_timestamp()
-            _save_results(state_dir, results)
+        # Marker unlink + directory fsync is the only state transition after
+        # the verified cleanup sample. Do not perform another fallible
+        # swap/header/mapper observation after ownership is released.
+        results["active_partition_marker_present"] = False
+        results["final_recovery_state"] = state["stage"]
+        results["end_timestamp"] = _utc_timestamp()
+        _save_results(state_dir, results)
         return state
     finally:
         if lock_fd is not None:
@@ -2647,6 +2729,7 @@ def _prepare_state(target, state_dir, evidence, review):
         "reviewer": review.get("reviewer"),
         "run_id": review["run_id"],
         "module_ownership": "NOT_STARTED",
+        "ownership_phase": "RECOVERY_PREPARED",
         "dm_name": dm_name,
         "dm_uuid": dm_uuid,
         "stage": "BACKED_UP",
@@ -2942,6 +3025,15 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             "approval_mode": review["approval_mode"],
             "reviewer": review["reviewer"],
             "device_uuid_path": device_arg,
+            "canonical_device": state["device"],
+            "parent_major_minor": state["parent_major_minor"],
+            "parent_model": state["parent_model"],
+            "parent_transport": state["parent_transport"],
+            "parent_size_bytes": state["parent_size_bytes"],
+            "parent_removable": state["parent_removable"],
+            "card_identity_sha256": state["card_identity_sha256"],
+            "swap_was_active": state["swap_was_active"],
+            "ownership_phase": state["ownership_phase"],
             "major_minor": f"{target['major']}:{target['minor']}",
             "partuuid": target["partuuid"],
             "device_size_bytes": target["size_bytes"],
@@ -3013,6 +3105,13 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             _save_results(state_dir, results)
             partition_claim_attempted = True
             _consume_review(target, review["run_id"], preburned=True)
+            # Publish the same claim phase in both records before swapoff or
+            # even the first header pwrite. A failed second publication leaves
+            # a retained owner for read-only reconciliation, not a replay.
+            state["ownership_phase"] = "ACTIVE_RECOVERY"
+            _save_state(state_dir, state)
+            results["ownership_phase"] = "ACTIVE_RECOVERY"
+            _save_results(state_dir, results)
             # The consumed one-use run claim, active partition marker and
             # original-header backup are durable before block-zero mutation.
             _verify_target_identity(target)
@@ -3131,56 +3230,108 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             try:
                 state = _remove_test_objects(state, state_dir)
             except BaseException as cleanup_exc:
+                # Preserve the worker's first recorded oracle exit even when
+                # the last durable results predate its failed publication.
+                worker_failed_phases = [
+                    phase for phase in results.get("physical_oracle_phases", [])
+                    if isinstance(phase, dict) and phase.get("status") == "FAIL"
+                ]
+                worker_oracle_exit = (worker_failed_phases[0].get("return_code")
+                                      if worker_failed_phases else None)
+                state_record_bound = False
                 try:
                     saved_state = _load_unique_json(
                         (state_dir / STATE_NAME).read_bytes())
-                    if isinstance(saved_state, dict):
+                    if _recovery_state_identity_matches(state, saved_state):
                         state = saved_state
+                        state_record_bound = True
                 except (OSError, ValueError):
                     pass
+                binding_state = dict(state)
                 if state.get("stage") != "RECOVERY_REQUIRED":
                     state["stage_before_recovery"] = state["stage"]
                     state["stage"] = "RECOVERY_REQUIRED"
-                state["recovery_error"] = str(cleanup_exc)
-                state_save_failed = False
+                state["recovery_error"] = _bounded_text(cleanup_exc)
+                state_save_failed = not state_record_bound
                 state_save_errno = None
-                try:
-                    _save_state(state_dir, state)
-                except (OSError, ProbeError) as state_exc:
-                    # The last durable state can differ from this in-memory
-                    # marker. Never let this secondary error hide the worker.
-                    state_save_failed = True
-                    state_save_errno = getattr(state_exc, "errno", None)
-                    first_error = failure if failure is not None else cleanup_exc
+                if state_record_bound:
+                    try:
+                        _save_state(state_dir, state)
+                    except (OSError, ProbeError) as state_exc:
+                        # A replacement may be visible without a durable
+                        # directory entry. Do not conceal the first failure.
+                        state_save_failed = True
+                        state_save_errno = getattr(state_exc, "errno", None)
+                        first_error = failure if failure is not None else cleanup_exc
+                        print(
+                            "RECOVERY_STATE_DURABILITY=UNCERTAIN "
+                            f"first_errno={_errno_text(first_error)} "
+                            f"recovery_errno={_errno_text(state_exc)} "
+                            "safe_next_step=inspect_owner_and_state_read_only",
+                            file=sys.stderr)
+                else:
                     print(
-                        "RECOVERY_STATE_DURABILITY=UNCERTAIN "
-                        f"first_errno={_errno_text(first_error)} "
-                        f"recovery_errno={_errno_text(state_exc)} "
-                        "safe_next_step=inspect_owner_and_state_read_only",
+                        "RECOVERY_STATE_IDENTITY=UNVERIFIED "
+                        "publication_phase=before_recovery_state_update "
+                        "safe_next_step=inspect_owner_state_results_read_only",
                         file=sys.stderr)
                 results["end_timestamp"] = _utc_timestamp()
-                try:
-                    saved_results = _load_unique_json(
-                        (state_dir / RESULTS_NAME).read_bytes())
-                    if isinstance(saved_results, dict):
+                results_record_bound = state_record_bound
+                if results_record_bound:
+                    try:
+                        saved_results = _load_unique_json(
+                            (state_dir / RESULTS_NAME).read_bytes())
+                        _require_recovery_results_binding(
+                            binding_state, saved_results)
                         results = saved_results
-                except (OSError, ValueError):
-                    pass
+                    except (OSError, ValueError, ProbeError):
+                        results_record_bound = False
                 if state_save_failed:
                     results["recovery_state_durability"] = "UNCERTAIN"
                     results["recovery_state_save_errno"] = state_save_errno
+                first_error = failure if failure is not None else cleanup_exc
+                failed_phases = [
+                    phase for phase in results.get("physical_oracle_phases", [])
+                    if isinstance(phase, dict) and phase.get("status") == "FAIL"
+                ]
+                first_exit = (failed_phases[0].get("return_code")
+                              if failed_phases else None)
+                results["recovery_failure_audit"] = {
+                    "first_errno": _errno_text(first_error),
+                    "first_oracle_exit": (worker_oracle_exit
+                                          if worker_oracle_exit is not None
+                                          else first_exit),
+                    "recovery_errno": _errno_text(cleanup_exc),
+                    "publication_phase": state.get("stage_before_recovery"),
+                    "header_bytes_possibly_changed": (
+                        PAGE_BYTES if destructive_execution_started else 0),
+                    "requested_recovery_state": "RECOVERY_REQUIRED",
+                    "last_readable_saved_state": (
+                        binding_state.get("stage") if state_record_bound
+                        else "UNVERIFIED_IDENTITY"),
+                    "state_durability": (
+                        "UNCERTAIN" if state_save_failed else "SYNCED"),
+                    "safe_next_step": "inspect_owner_state_results_header_read_only",
+                }
                 results["final_recovery_state"] = state["stage"]
                 results["recovery_error"] = _bounded_text(cleanup_exc)
                 results["end_timestamp"] = _utc_timestamp()
-                try:
-                    _save_results(state_dir, results)
-                except (OSError, ProbeError) as results_exc:
-                    first_error = failure if failure is not None else cleanup_exc
+                if results_record_bound:
+                    try:
+                        _save_results(state_dir, results)
+                    except (OSError, ProbeError) as results_exc:
+                        first_error = failure if failure is not None else cleanup_exc
+                        print(
+                            "PHYSICAL_RESULTS_DURABILITY=UNCERTAIN "
+                            f"first_errno={_errno_text(first_error)} "
+                            f"results_errno={_errno_text(results_exc)} "
+                            "safe_next_step=inspect_owner_and_state_read_only",
+                            file=sys.stderr)
+                else:
                     print(
-                        "PHYSICAL_RESULTS_DURABILITY=UNCERTAIN "
-                        f"first_errno={_errno_text(first_error)} "
-                        f"results_errno={_errno_text(results_exc)} "
-                        "safe_next_step=inspect_owner_and_state_read_only",
+                        "PHYSICAL_RESULTS_BINDING=UNVERIFIED "
+                        "publication_phase=before_recovery_results_update "
+                        "safe_next_step=inspect_owner_state_results_read_only",
                         file=sys.stderr)
                 print(
                     "RECOVERY_REQUIRED: inspect durable owner/state at "

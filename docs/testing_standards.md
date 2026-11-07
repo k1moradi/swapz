@@ -6438,6 +6438,25 @@ pre-restoration 4096 bytes, their SHA-256 and their prior recovery stage.
 A retry may accept only a single saved-header prefix plus authenticated-source
 suffix boundary (including either complete endpoint); any foreign byte remains
 manual-review recovery and receives no additional device write.
+The physical probe's retained `state.json` and `results.json` form a
+single recovery-evidence pair: recovery must reject a missing, unreadable,
+stale or cross-run results record before mapper cleanup or device writes.
+Both records must bind the same source/helper, run ID, canonical partition
+and physical parent/card identity, exact size and original-header SHA-256,
+mapper identity, swap-activity fact and current one-use ownership claim phase.
+Publish matching active-claim phases in both records before swapoff or a
+header clear; fsync/rename errors between publications are inspection-only
+uncertainty, not permission to replay. A `RECOVERY_REQUIRED` record requires
+the paired result to retain the same recovery-required publication status and
+an authenticated prior recovery phase. Reconcile uncertain persisted bytes
+and the exact active/consumed marker read-only; do not delete stale records,
+replace them with a clean retry, or treat `COMPLETE` as a new recovery input.
+Rootless regression injection must distinguish original errno/oracle exit,
+file-sync, rename and directory-sync publication phases, possible 4096-byte
+header mutation, observed state, owner retention and inspection-only action.
+The earlier first-host development-only mapper smoke proves no real anonymous
+Linux-swap activation, next-boot recovery or physical-media acceptance.
+
 The interrupted-restoration regression must read and validate the persisted
 partition-owner marker itself before retrying, then prove that retry releases
 it only after durable `COMPLETE`. If a fixture mocks `Path.exists()` to model
