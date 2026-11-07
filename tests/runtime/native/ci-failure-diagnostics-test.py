@@ -131,7 +131,9 @@ exec sleep 30
         reported_errno = self.diagnostics.diagnose_ci_failure(
             ["INFRASTRUCTURE: cannot start test: errno=28 No space left on device"],
             127, "ci-failure-diagnostics")
-        self.assertEqual(reported_errno["first_errno"], 28)
+        # Child output cannot authenticate a launch errno; _ci_run supplies
+        # one only when subprocess.run actually raises OSError.
+        self.assertIsNone(reported_errno["first_errno"])
         forged_errno = self.diagnostics.diagnose_ci_failure(
             ["FAIL: test_errno (__main__.Fixture)",
              "AssertionError: errno=9 attacker-supplied text"],
@@ -156,7 +158,7 @@ exec sleep 30
         self.assertNotIn("PRIVATE_DEVICE", safe)
         self.assertNotIn("FORGED_ARRAY", safe)
         self.assertIn("observed=123456", safe)
-        self.assertIn("<structured-evidence-redacted>", safe)
+        self.assertIn("[private exception detail omitted]", safe)
         numeric = self.diagnostics._ci_safe_line(
             "AssertionError: expected=4096 observed=8192")
         self.assertEqual(
@@ -170,6 +172,47 @@ exec sleep 30
             'AssertionError: mismatch {"campaign_id":"FORGED_CAMPAIGN"}')
         self.assertNotIn("FORGED_CAMPAIGN", exception_json)
         self.assertIn("<structured-evidence-redacted>", exception_json)
+
+    def test_unstructured_exceptions_and_hostile_unittest_names_stay_private(self):
+        # Before the fix an arbitrary Unicode exception message survived both
+        # the CI annotation and the sanitized retained log.
+        failure = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: test_inner (__main__.Outer.Inner.test_inner)",
+             "AssertionError: PRIVATE_DEVICE_ALIAS_雪☃"],
+            1, "ci-failure-diagnostics")
+        self.assertEqual(failure["status"], "FAIL")
+        self.assertEqual(failure["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(failure["test"], "__main__.Outer.Inner.test_inner")
+        self.assertEqual(failure["exit_code"], 1)
+        self.assertEqual(failure["first_errno"], None)
+        self.assertEqual(failure["first_error"],
+                         "AssertionError: [private exception detail omitted]")
+        self.assertEqual(failure["observed"], failure["first_error"])
+        self.assertEqual(failure["expected_contract"],
+                         "test assertions and runtime contracts hold")
+        self.assertNotIn("PRIVATE_DEVICE_ALIAS", json.dumps(failure))
+
+        hostile_header = (
+            "FAIL: test_inner (__main__.Nested." + "x" * 160 +
+            "PRIVATE_HEADER_雪.test_inner) injected_payload=PRIVATE_TAIL")
+        hostile = self.diagnostics.diagnose_ci_failure(
+            [hostile_header,
+             'RuntimeError: PRIVATE_JSON_雪 {"nested":{"id":"PRIVATE_CHILD"}}'],
+            1, "ci-failure-diagnostics")
+        self.assertEqual(hostile["test"], "ci-failure-diagnostics")
+        self.assertEqual(hostile["first_error"],
+                         "RuntimeError: [private exception detail omitted]")
+        for private_value in ("PRIVATE_HEADER", "PRIVATE_JSON", "PRIVATE_CHILD",
+                              "PRIVATE_TAIL", "雪"):
+            self.assertNotIn(private_value,
+                             json.dumps(hostile, ensure_ascii=False))
+        self.assertEqual(
+            self.diagnostics._ci_safe_line(hostile_header),
+            "FAIL: unittest identity withheld")
+        self.assertEqual(
+            self.diagnostics._ci_safe_line(
+                "subprocess.TimeoutExpired: PRIVATE_TIMEOUT_ARGUMENT"),
+            "subprocess.TimeoutExpired: [private exception detail omitted]")
 
     def test_contract_classification_survives_private_root_redaction(self):
         failure = self.diagnostics.diagnose_ci_failure(

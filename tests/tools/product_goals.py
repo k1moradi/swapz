@@ -318,6 +318,42 @@ def _ci_safe_line(line):
     line = re.sub(r"(?<!\w)/(?:tmp|var/tmp)/[^\s\x27\x22:]+",
                   "<temporary-path>", line)
     clean_line = re.sub(r"[\x00-\x1f\x7f]", " ", line).strip()
+    # Exception messages are child-owned; only bounded numerical evidence and
+    # already-redacted operands may enter public CI logs or annotations.
+    exception_match = re.match(
+        r"^(?:E\s+)?(?:[A-Za-z_][A-Za-z0-9_.]{0,95}"
+        r"(?:Error|Exception|Timeout)|SystemExit|"
+        r"subprocess\.(?:TimeoutExpired|CalledProcessError)):", clean_line)
+    if exception_match:
+        safe_operand = (
+            r"(?:expected|actual|observed)="
+            r"(?:[0-9]{1,12}|<private-path>|<structured-evidence-redacted>)"
+        )
+        exception_detail = clean_line[exception_match.end():].strip()
+        safe_assertion = (
+            exception_match.group(0) == "AssertionError:" and
+            re.fullmatch(safe_operand + r"(?: " + safe_operand + r"){0,3}",
+                         exception_detail) is not None
+        )
+        if not safe_assertion and clean_line != "ValueError: substring not found":
+            clean_line = (exception_match.group(0) +
+                          " [private exception detail omitted]")
+    # A child can also forge a unittest heading with private identifiers or
+    # extra trailing context. Keep only a bounded, dotted Python identity.
+    if re.match(r"^(?:FAIL|ERROR):\s+(?:test_|setUp|tearDown)", clean_line):
+        unittest_heading = re.match(
+            r"^(FAIL|ERROR):\s+(\S+)\s+\(([^)]*)\)", clean_line)
+        if (unittest_heading is not None and
+                re.fullmatch(
+                    r"test_[A-Za-z0-9_]{1,96}|(?:setUp|tearDown)"
+                    r"(?:Class|Module)?", unittest_heading.group(2)) and
+                re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]{0,95}"
+                    r"(?:\.[A-Za-z_][A-Za-z0-9_]{0,95}){1,8}",
+                    unittest_heading.group(3))):
+            clean_line = unittest_heading.group(0)
+        else:
+            clean_line = clean_line.split(":", 1)[0] + ": unittest identity withheld"
     if len(clean_line) > 320:
         return clean_line[:306] + " [truncated]"
     return clean_line
@@ -828,22 +864,9 @@ def diagnose_ci_failure(lines, exit_code, suite):
     if rootless_shell_syntax_check_failed:
         expected_contract = "source-controlled shell script passes bash -n"
 
-    exception_errno_match = re.match(
-        r"^(?:OSError|PermissionError|FileNotFoundError|TimeoutError|"
-        r"BlockingIOError|InterruptedError|IsADirectoryError|"
-        r"NotADirectoryError|FileExistsError|ChildProcessError|"
-        r"ConnectionAbortedError|ConnectionRefusedError|"
-        r"ConnectionResetError|BrokenPipeError|ProcessLookupError): "
-        r"\[Errno (?P<errno>[1-9][0-9]{0,3})\]",
-        causal_error or "")
-    launch_errno_match = re.match(
-        r"^INFRASTRUCTURE: cannot start test: errno="
-        r"(?P<errno>[1-9][0-9]{0,3})\b",
-        causal_error or "")
+    # A child can print plausible OSError or launch-error text. Only the
+    # runner's caught OSError or matching private rootless detail proves errno.
     first_errno = None
-    errno_match = exception_errno_match or launch_errno_match
-    if errno_match and int(errno_match.group("errno")) <= 4095:
-        first_errno = int(errno_match.group("errno"))
     cleanup_disposition = {
         "stderr_relay_failure": "relay_incomplete",
         "stderr_relay_cleanup_failure": "relay_cleanup_failed",
