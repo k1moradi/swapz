@@ -9248,7 +9248,11 @@ by HUP/INT/TERM must explicitly exit through this cleanup (an EXIT-only trap is
 insufficient for POSIX sh), report the signal exit status and unknown retention
 of partial evidence, and never claim PASS. During kernel-journal collection,
 the bounded timeout must be an owned background supervisor with an interruptible
-shell wait. Run GNU timeout in foreground-command mode so the supervisor remains
+shell wait. Rootless fixture discovery may check `timeout` and the Ubuntu GNU-
+prefixed `gnutimeout` under `/usr/bin:/bin`, but it must verify the selected
+binary identifies itself as GNU coreutils; uutils or another implementation
+must not satisfy this requirement. Run GNU timeout in foreground-command mode
+so the supervisor remains
 in the observer process group and can reap its direct journal child after
 kill-after escalation; do not put the supervisor in the child process group
 that escalation may kill. A signal received between asynchronous launch and

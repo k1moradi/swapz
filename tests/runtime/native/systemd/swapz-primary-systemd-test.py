@@ -1737,16 +1737,24 @@ class BootVerifierTests(unittest.TestCase):
         )
 
     def install_observation_timeout(self, test_deadline: str) -> tuple[Path, str]:
-        timeout_binary = shutil.which("timeout", path="/usr/bin:/bin")
+        timeout_binary = None
+        for command_name in ("timeout", "gnutimeout"):
+            candidate = shutil.which(command_name, path="/usr/bin:/bin")
+            if candidate is None:
+                continue
+            timeout_version = subprocess.run(
+                [candidate, "--version"],
+                check=False, text=True, capture_output=True,
+            )
+            if (timeout_version.returncode == 0
+                    and "GNU coreutils" in timeout_version.stdout):
+                timeout_binary = candidate
+                break
         if timeout_binary is None:
-            self.fail("GNU timeout is required for the observer timeout regression")
-        timeout_version = subprocess.run(
-            [timeout_binary, "--version"],
-            check=False, text=True, capture_output=True,
-        )
-        if (timeout_version.returncode != 0
-                or "GNU coreutils" not in timeout_version.stdout):
-            self.fail("GNU coreutils timeout is required for the observer timeout regression")
+            self.fail(
+                "GNU coreutils timeout is required for the observer timeout regression "
+                "(checked timeout and gnutimeout in /usr/bin:/bin)"
+            )
         requested_timeout = self.root / "observe-timeout-requested"
         write_executable(
             self.bin / "timeout",
