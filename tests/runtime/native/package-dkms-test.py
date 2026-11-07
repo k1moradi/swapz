@@ -1161,6 +1161,53 @@ exec "{flock_binary}" "$@"
         # accept a module under its active Secure Boot policy.
         self.assertIn("kernel acceptance is not claimed", verified.stdout)
 
+        # Cleanup failures must refuse an otherwise valid signature, and
+        # must not replace an earlier cryptographic verification failure.
+        real_rm = shutil.which("rm")
+        self.assertIsNotNone(real_rm)
+        cleanup_rm = crypto_bin / "rm"
+        cleanup_rm.write_text(
+            "#!/bin/sh\n"
+            f'"{real_rm}" "$@"\n'
+            "command_status=$?\n"
+            'if [ "${SWAPZ_TEST_FAIL_SIGNATURE_CLEANUP:-0}" = 1 ] &&\n'
+            '   [ "$#" -eq 3 ] && [ "$1" = -rf ] && [ "$2" = -- ]; then\n'
+            "  exit 76\n"
+            "fi\n"
+            'exit "$command_status"\n')
+        cleanup_rm.chmod(0o755)
+        cleanup_env = dict(verify_env, SWAPZ_TEST_FAIL_SIGNATURE_CLEANUP="1")
+        cleanup_only = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=cleanup_env, capture_output=True, text=True)
+        self.assertEqual(cleanup_only.returncode, 2, cleanup_only.stderr)
+        self.assertIn("phase=temporary_cleanup", cleanup_only.stderr)
+        self.assertIn("command_status=76", cleanup_only.stderr)
+        self.assertNotIn("cryptographic signature verified", cleanup_only.stdout)
+        self.assertNotIn(str(private_key), cleanup_only.stderr)
+
+        cleanup_tampered_module = bytearray(canonical_signed_module)
+        cleanup_tampered_module[0] ^= 1
+        signed_module.write_bytes(cleanup_tampered_module)
+        verify_and_cleanup_failed = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=cleanup_env, capture_output=True, text=True)
+        self.assertEqual(verify_and_cleanup_failed.returncode, 2)
+        self.assertIn("phase=detached_signature",
+                      verify_and_cleanup_failed.stderr)
+        self.assertIn("not cryptographically valid",
+                      verify_and_cleanup_failed.stderr)
+        self.assertIn("phase=temporary_cleanup",
+                      verify_and_cleanup_failed.stderr)
+        self.assertIn("command_status=76 primary_phase=detached_signature",
+                      verify_and_cleanup_failed.stderr)
+        self.assertRegex(verify_and_cleanup_failed.stderr,
+                         r"primary_command_status=[1-9][0-9]*")
+        self.assertNotIn(str(private_key), verify_and_cleanup_failed.stderr)
+        signed_module.write_bytes(canonical_signed_module)
+
         signed_module.write_bytes(payload.read_bytes())
         unsigned = subprocess.run(
             ["bash", str(ROOT / "packaging/sign-module.sh"),

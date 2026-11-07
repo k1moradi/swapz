@@ -8160,6 +8160,11 @@ ownership-read-only. Inject a failed signature-generation command while proving
 the unsigned module bytes remain unchanged; if ownership cleanup also fails,
 retain the signer command status as the primary failure and report the bounded
 cleanup status separately. No private-key path/content may reach diagnostics.
+Verifier temporary-directory cleanup is also checked: a cleanup-command failure
+must refuse an otherwise successful signature check (or unsigned pre-sign probe),
+while an earlier CMS/extraction failure retains its original phase and producer
+status and reports cleanup failure independently. Rootless `rm` mocks must
+exercise both combinations without leaking signing material or temporary paths.
 Raw signing-command stdout/stderr must not be replayed on failure;
 report only bounded phase/status context. Failure diagnostics must identify the true phase (including
 `phase=certificate_enrollment`, `phase=detached_signature`,

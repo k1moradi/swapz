@@ -33,6 +33,10 @@ blocked_phase() {
             expected_state=valid_build_time_module_signature
             observed_state=signing_failed
             next_action=inspect_signing_tool_status_without_key_material ;;
+        temporary_cleanup)
+            expected_state=removed_verification_temporary_directory
+            observed_state=cleanup_failed
+            next_action=inspect_signing_temporary_storage_read_only ;;
         module_presence)
             expected_state=regular_module_file
             observed_state=missing_or_unsafe
@@ -401,6 +405,25 @@ write_public_certificate_pem() {
     fi
 }
 
+finish_signature_verification() {
+    local temporary_directory="$1" verification_status="$2" primary_phase="$3"
+    local cleanup_status=0
+
+    # Cleanup is secondary to any original parser/CMS error. A failed
+    # cleanup after valid verification (or the unsigned signing precheck)
+    # cannot be treated as successful completion of this verification.
+    rm -rf -- "$temporary_directory" 2>/dev/null || cleanup_status=$?
+    if (( cleanup_status != 0 )); then
+        printf 'SWAPZ_SIGNING_DIAGNOSTIC artifact=dm-swapz.ko phase=temporary_cleanup check=verification_temporary_directory expected=removed observed=cleanup_failed command_status=%s primary_phase=%s primary_command_status=%s next=inspect_signing_temporary_storage_read_only\n' \
+            "$cleanup_status" "$primary_phase" "$signature_command_status" >&2
+        if (( verification_status == 0 || verification_status == 10 )); then
+            signature_command_status="$cleanup_status"
+            return 21
+        fi
+    fi
+    return "$verification_status"
+}
+
 verify_module_signature() {
     local temp_dir payload_path signature_path certificate_pem cms_description_path
     local extract_rc=0 command_rc=0
@@ -414,8 +437,8 @@ verify_module_signature() {
     chmod 0700 "$temp_dir" 2>/dev/null || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir" 2>/dev/null
-        return 20
+        finish_signature_verification "$temp_dir" 20 temporary_preparation
+        return $?
     fi
     payload_path="$temp_dir/module.payload"
     signature_path="$temp_dir/module.p7s"
@@ -425,16 +448,16 @@ verify_module_signature() {
         extract_rc=$?
     if (( extract_rc != 0 )); then
         signature_command_status="$extract_rc"
-        rm -rf -- "$temp_dir" 2>/dev/null
-        return "$extract_rc"
+        finish_signature_verification "$temp_dir" "$extract_rc" detached_signature
+        return $?
     fi
 
     command_rc=0
     write_public_certificate_pem "$certificate_pem" || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir" 2>/dev/null
-        return 20
+        finish_signature_verification "$temp_dir" 20 certificate_material
+        return $?
     fi
 
     # OpenSSL accepts encapsulated CMS when its eContent matches -content,
@@ -446,8 +469,8 @@ verify_module_signature() {
         > "$cms_description_path" 2>/dev/null || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir" 2>/dev/null
-        return 13
+        finish_signature_verification "$temp_dir" 13 cms_verification
+        return $?
     fi
     command_rc=0
     python3 -c '
@@ -473,8 +496,8 @@ raise SystemExit(0 if data_content_type and detached else 1)
 ' < "$cms_description_path" >/dev/null 2>&1 || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir" 2>/dev/null
-        return 13
+        finish_signature_verification "$temp_dir" 13 cms_verification
+        return $?
     fi
 
     # CMS may contain a foreign signer certificate. Ignore embedded certs:
@@ -485,12 +508,11 @@ raise SystemExit(0 if data_content_type and detached else 1)
         -out /dev/null >/dev/null 2>&1 || command_rc=$?
     if (( command_rc != 0 )); then
         signature_command_status="$command_rc"
-        rm -rf -- "$temp_dir" 2>/dev/null
-        return 12
+        finish_signature_verification "$temp_dir" 12 detached_signature
+        return $?
     fi
 
-    rm -rf -- "$temp_dir" 2>/dev/null
-    return 0
+    finish_signature_verification "$temp_dir" 0 detached_signature
 }
 signature_command_status=0
 signature_status=0
@@ -528,6 +550,10 @@ if [[ "$mode" == verify ]]; then
             blocked_phase cms_verification "$signature_command_status" \
                 "qualified module CMS content is not a detached pkcs7-data signature"
             ;;
+        21)
+            blocked_phase temporary_cleanup "$signature_command_status" \
+                "qualified module verification temporary cleanup failed"
+            ;;
         *)
             blocked_phase detached_signature "$signature_command_status" \
                 "qualified module signature verification failed"
@@ -539,6 +565,10 @@ if (( signature_status == 0 )); then
     printf '%s\n' \
         "Secure Boot: dm-swapz.ko already has a cryptographically valid signature from the enrolled configured MOK"
     exit 0
+fi
+if (( signature_status == 21 )); then
+    blocked_phase temporary_cleanup "$signature_command_status" \
+        "existing module verification temporary cleanup failed; refusing to sign"
 fi
 if (( signature_status == 13 )); then
     blocked_phase cms_verification "$signature_command_status" \
@@ -588,6 +618,10 @@ if verify_module_signature; then
     :
 else
     signature_status=$?
+    if (( signature_status == 21 )); then
+        blocked_phase temporary_cleanup "$signature_command_status" \
+            "new module verification temporary cleanup failed"
+    fi
     if (( signature_status == 13 )); then
         blocked_phase cms_verification "$signature_command_status" \
             "new module CMS content is not a detached pkcs7-data signature"
