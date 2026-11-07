@@ -1375,6 +1375,9 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     path.unlink(missing_ok=True)
                 else:
                     path.write_bytes(value)
+                    # The production identity reader rejects writable group
+                    # or other bits; fixture mode must not depend on umask.
+                    path.chmod(0o600)
             if metadata_fault == "symlink":
                 dmi_file.unlink()
                 dmi_file.symlink_to(installation_file)
@@ -1977,7 +1980,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                               recovery_failure=False,
                               teardown_oracle_metadata=None,
                               oracle_evidence_fault=None,
-                              recovery_state_save_failure=False):
+                              recovery_state_save_failure=False,
+                              recovery_results_save_failure=False):
         """Use actual helper checks with only device/command interfaces mocked."""
         target, evidence = self.physical_preparation_fixture()
         if development_only:
@@ -2363,6 +2367,17 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     saved_state["stage"] == "RECOVERY_REQUIRED"):
                 raise OSError(errno.ENOSPC, "injected recovery fsync failure")
 
+        actual_save_results = probe._save_results
+        attempted_recovery_results = []
+
+        def record_results_save(saved_state_dir, saved_results):
+            if (recovery_results_save_failure and
+                    saved_results.get("final_recovery_state") ==
+                    "RECOVERY_REQUIRED"):
+                attempted_recovery_results.append(dict(saved_results))
+                raise OSError(errno.EIO, "injected results fsync failure")
+            return actual_save_results(saved_state_dir, saved_results)
+
         # Isolate each synthetic attempt from one-use approvals claimed earlier.
         # Otherwise, an approval-replay failure can mask a mapper-identity bug.
         # ExitStack avoids Python's limit on statically nested with-blocks.
@@ -2427,6 +2442,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                                   side_effect=read_block0),
                 mock.patch.object(probe, "_save_state",
                                   side_effect=record_state_save),
+                mock.patch.object(probe, "_save_results",
+                                  side_effect=record_results_save),
                 mock.patch.object(probe, "_remove_test_objects",
                                   side_effect=checked_recovery),
                 mock.patch.object(probe, "_run", side_effect=run),
@@ -2495,6 +2512,8 @@ class PhysicalSwapProbeTests(unittest.TestCase):
                     Path(directory) / f"partition-{target['partuuid']}.active")
                 state["_test_consumed_claim"] = os.path.isfile(
                     Path(directory) / f"consumed-{review['run_id']}.json")
+                state["_test_attempted_recovery_results"] = (
+                    attempted_recovery_results)
         return events, state, target
 
     def test_short_header_io_retains_exact_offsets_and_original_errno(self):
@@ -2661,14 +2680,26 @@ class PhysicalSwapProbeTests(unittest.TestCase):
         with mock.patch("builtins.print") as printed:
             events, state, _ = self.simulate_physical_run(
                 development_only=True, oracle_failure_at=1,
-                recovery_failure=True, recovery_state_save_failure=True)
-        result = state["_test_results"]
+                recovery_failure=True, recovery_state_save_failure=True,
+                recovery_results_save_failure=True)
+        result = state["_test_attempted_recovery_results"][-1]
         self.assertIn("physical oracle phase", state["_test_first_failure"])
         self.assertEqual(result["physical_oracle_phases"][0]["return_code"], 1)
         self.assertEqual(result["physical_oracle_phases"][0]["status"], "FAIL")
         self.assertEqual(result["recovery_state_durability"], "UNCERTAIN")
         self.assertEqual(result["recovery_state_save_errno"], errno.ENOSPC)
         self.assertEqual(result["final_recovery_state"], "RECOVERY_REQUIRED")
+        diagnostic = "\n".join(
+            str(call.args[0]) for call in printed.call_args_list
+            if call.args)
+        self.assertIn(
+            "RECOVERY_STATE_DURABILITY=UNCERTAIN first_errno=unavailable "
+            "recovery_errno=28", diagnostic)
+        self.assertIn(
+            "PHYSICAL_RESULTS_DURABILITY=UNCERTAIN first_errno=unavailable "
+            "results_errno=5", diagnostic)
+        self.assertNotIn("original_errno=28", diagnostic)
+        self.assertNotIn("original_errno=5", diagnostic)
         self.assertTrue(state["_test_owner_marker"])
         self.assertTrue(state["_test_consumed_claim"])
         self.assertEqual(

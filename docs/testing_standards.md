@@ -6260,6 +6260,12 @@ must complete before the exact saved header is restored and reread. Final
 kernel swap inventory must prove the target remains inactive. Any uncertain
 state retains the durable recovery record and requires explicit recovery; do
 not force-remove anything or retry the same run.
+If recovery-state or final-results persistence fails after another operation
+has already failed, diagnostics must keep `first_errno` distinct from
+`recovery_errno` or `results_errno`. Use `unavailable` when the first failure
+has no numeric errno; never label the secondary persistence errno as original.
+Rootless coverage must fail both secondary writes and verify their separate
+errno attribution while retaining the first failure and owner state.
 
 A source-drift refusal before block-zero mutation is
 `PRE_DESTRUCTIVE_FAILED`, preserving the original reason and zero executed

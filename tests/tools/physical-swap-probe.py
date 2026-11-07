@@ -1359,6 +1359,13 @@ def _bounded_text(value, limit=MAX_RECORDED_OUTPUT_CHARS):
     return value[:limit - len(suffix)] + suffix
 
 
+def _errno_text(error):
+    value = getattr(error, "errno", None)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return "unavailable"
+
+
 def _save_results(state_dir, results):
     """Atomically persist bounded metadata/output and its directory entry."""
     state_dir = Path(state_dir)
@@ -3029,9 +3036,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                     # marker. Never let this secondary error hide the worker.
                     state_save_failed = True
                     state_save_errno = getattr(state_exc, "errno", None)
+                    first_error = failure if failure is not None else cleanup_exc
                     print(
                         "RECOVERY_STATE_DURABILITY=UNCERTAIN "
-                        f"original_errno={state_save_errno} "
+                        f"first_errno={_errno_text(first_error)} "
+                        f"recovery_errno={_errno_text(state_exc)} "
                         "safe_next_step=inspect_owner_and_state_read_only",
                         file=sys.stderr)
                 results["end_timestamp"] = _utc_timestamp()
@@ -3051,9 +3060,11 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
                 try:
                     _save_results(state_dir, results)
                 except (OSError, ProbeError) as results_exc:
+                    first_error = failure if failure is not None else cleanup_exc
                     print(
                         "PHYSICAL_RESULTS_DURABILITY=UNCERTAIN "
-                        f"original_errno={getattr(results_exc, 'errno', None)} "
+                        f"first_errno={_errno_text(first_error)} "
+                        f"results_errno={_errno_text(results_exc)} "
                         "safe_next_step=inspect_owner_and_state_read_only",
                         file=sys.stderr)
                 print(f"RECOVERY_REQUIRED: owner retained at {state_dir}",
@@ -3066,12 +3077,15 @@ def run_probe(device_arg, confirm_arg, state_dir_arg, review_path,
             try:
                 _save_state(state_dir, state)
             except (OSError, ProbeError) as state_exc:
+                first_errno_text = _errno_text(failure)
+                recovery_errno_text = _errno_text(state_exc)
                 results["recovery_state_durability"] = "UNCERTAIN"
                 results["recovery_state_save_errno"] = getattr(
                     state_exc, "errno", None)
                 print(
                     "RECOVERY_STATE_DURABILITY=UNCERTAIN "
-                    f"original_errno={getattr(state_exc, 'errno', None)} "
+                    f"first_errno={first_errno_text} "
+                    f"recovery_errno={recovery_errno_text} "
                     "safe_next_step=inspect_owner_and_state_read_only",
                     file=sys.stderr)
             results["final_recovery_state"] = "PRE_DESTRUCTIVE_FAILED"
