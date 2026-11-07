@@ -466,6 +466,22 @@ error; silent truncation is never evidence of a clear mount inventory. These
 reader-only controls do not prove zero destructive actions by the lifecycle
 coordinator or exclude privileged post-snapshot changes.
 
+For causal mount-inventory refusals, the production-extracted reader regression
+must attribute the first failing foreign namespace syscall by numeric
+syscall (statmount 457 or listmount 458), injected numeric errno,
+namespace class and listmount batch index. Test distinct EACCES
+versus EPERM denials, missing syscall ENOSYS, disappeared listed-ID
+ENOENT and a second-batch listmount EIO after the first clean
+batch. The reader must return a failure with the originating numeric errno;
+an incomplete inventory must never become a clean or mounted-target result.
+The lifecycle callers must separately handle a reader error (preserving its
+errno) and a completed inventory reporting the target mounted (policy denial).
+A combined error-or-mounted check that overwrites both branches with EPERM
+violates causal errno preservation, even when it still refuses admission.
+The rootless reader fixture has no physical mutation hooks and must report
+NOT_INTERCEPTED, not claim measured zero intercepted writes or kernel-atomic
+mount/swapon exclusion. Post-snapshot physical exclusion remains UNPROVEN.
+
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to
 the filtered table. The current foreign-namespace descriptor ABI requires

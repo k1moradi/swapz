@@ -137,6 +137,11 @@ static uint64_t fixture_stale_listed_mount_id;
 static int fixture_stale_listed_mount_injected;
 static int fixture_hidden_namespace_device_observed;
 static int fixture_namespace_capacity_overflow_injected;
+/* The first failing intercepted syscall is the causal inventory witness. */
+static long fixture_first_namespace_syscall_failure_number;
+static int fixture_first_namespace_syscall_failure_errno;
+static enum fixture_namespace_kind fixture_first_namespace_syscall_failure_kind;
+static unsigned int fixture_first_namespace_syscall_failure_listmount_call;
 
 static void fixture_file(const char *relative, const char *contents);
 
@@ -550,6 +555,14 @@ static long fixture_syscall(long number, ...)
 		errno = ENOSYS;
 	}
 out:
+	if (result < 0 && !fixture_first_namespace_syscall_failure_number &&
+	    (number == SYS_statmount || number == SYS_listmount)) {
+		fixture_first_namespace_syscall_failure_number = number;
+		fixture_first_namespace_syscall_failure_errno = errno;
+		fixture_first_namespace_syscall_failure_kind = fixture_namespace_fd_kind;
+		fixture_first_namespace_syscall_failure_listmount_call =
+			fixture_namespace_listmount_calls[fixture_namespace_fd_kind];
+	}
 	va_end(arguments);
 	return result;
 }
@@ -1116,6 +1129,10 @@ static void fixture_reset(void)
 	fixture_stale_listed_mount_injected = 0;
 	fixture_hidden_namespace_device_observed = 0;
 	fixture_namespace_capacity_overflow_injected = 0;
+	fixture_first_namespace_syscall_failure_number = 0;
+	fixture_first_namespace_syscall_failure_errno = 0;
+	fixture_first_namespace_syscall_failure_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_first_namespace_syscall_failure_listmount_call = 0U;
 	fixture_root_statx_error_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_root_statx_error = 0;
 	memset(fixture_namespace_inventory_scans, 0,
@@ -1417,6 +1434,39 @@ static void expect_mount_admission(const char *case_name, int should_allow,
 	expect_mount_identity_admission(
 		case_name, makedev(259U, 0U), makedev(8U, 0U),
 		should_allow, expected_errno, "selected target/sibling/root/namespace");
+}
+
+/*
+ * Check the syscall that failed, not just the reader's generic refusal.
+ * The production-extracted read must carry this exact errno to its callers.
+ * This reader-only fixture does not execute or intercept physical mutations.
+ */
+static void expect_first_namespace_syscall_failure(
+	const char *case_name, enum fixture_namespace_kind expected_namespace,
+	long expected_syscall, int expected_errno, unsigned int expected_listmount_call)
+{
+	if (fixture_first_namespace_syscall_failure_number == expected_syscall &&
+	    fixture_first_namespace_syscall_failure_errno == expected_errno &&
+	    fixture_first_namespace_syscall_failure_kind == expected_namespace &&
+	    fixture_first_namespace_syscall_failure_listmount_call ==
+		    expected_listmount_call)
+		return;
+	fprintf(stderr,
+		"FAIL: phase=first-namespace-syscall case=%s "
+		"expected_syscall=%ld observed_syscall=%ld "
+		"expected_errno=%d observed_errno=%d "
+		"expected_namespace=%d observed_namespace=%d "
+		"expected_listmount_call=%u observed_listmount_call=%u "
+		"inventory=INCOMPLETE safe_action=retain_inactive_target "
+		"header_write=NOT_INTERCEPTED mapper=NOT_INTERCEPTED "
+		"mkswap=NOT_INTERCEPTED swapon=NOT_INTERCEPTED\n",
+		case_name, expected_syscall,
+		fixture_first_namespace_syscall_failure_number,
+		expected_errno, fixture_first_namespace_syscall_failure_errno,
+		expected_namespace, fixture_first_namespace_syscall_failure_kind,
+		expected_listmount_call,
+		fixture_first_namespace_syscall_failure_listmount_call);
+	++fixture_failures;
 }
 
 static void expect_hidden_namespace_device_inspected(
@@ -2181,24 +2231,55 @@ static void test_root_filtered_foreign_mountinfo(void)
 	fixture_namespace_syscall_error_number = SYS_statmount;
 	fixture_namespace_syscall_error = ENOSYS;
 	expect_mount_admission("missing foreign statmount syscall", 0, ENOSYS);
+	expect_first_namespace_syscall_failure(
+		"missing foreign statmount syscall", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_statmount, ENOSYS, 0U);
 
 	fixture_reset();
 	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	fixture_namespace_syscall_error_number = SYS_listmount;
 	fixture_namespace_syscall_error = ENOSYS;
 	expect_mount_admission("missing foreign listmount syscall", 0, ENOSYS);
+	expect_first_namespace_syscall_failure(
+		"missing foreign listmount syscall", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_listmount, ENOSYS, 1U);
 
 	fixture_reset();
 	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	fixture_namespace_syscall_error_number = SYS_statmount;
 	fixture_namespace_syscall_error = EPERM;
 	expect_mount_admission("foreign statmount permission denied", 0, EPERM);
+	expect_first_namespace_syscall_failure(
+		"foreign statmount permission denied", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_statmount, EPERM, 0U);
 
 	fixture_reset();
 	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	fixture_namespace_syscall_error_number = SYS_listmount;
 	fixture_namespace_syscall_error = EPERM;
 	expect_mount_admission("foreign listmount permission denied", 0, EPERM);
+	expect_first_namespace_syscall_failure(
+		"foreign listmount permission denied", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_listmount, EPERM, 1U);
+
+	/* EACCES is not EPERM: masking this inventory failure loses its cause. */
+	fixture_reset();
+	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_namespace_syscall_error_number = SYS_statmount;
+	fixture_namespace_syscall_error = EACCES;
+	expect_mount_admission("foreign statmount access denied", 0, EACCES);
+	expect_first_namespace_syscall_failure(
+		"foreign statmount access denied", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_statmount, EACCES, 0U);
+
+	fixture_reset();
+	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_namespace_syscall_error_number = SYS_listmount;
+	fixture_namespace_syscall_error = EACCES;
+	expect_mount_admission("foreign listmount access denied", 0, EACCES);
+	expect_first_namespace_syscall_failure(
+		"foreign listmount access denied", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_listmount, EACCES, 1U);
 
 	/*
 	 * The root statmount succeeds, but a previously listed child ID can
@@ -2212,6 +2293,9 @@ static void test_root_filtered_foreign_mountinfo(void)
 	fixture_stale_listed_mount_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	expect_mount_admission("listed mount ID disappears before statmount", 0,
 			       ENOENT);
+	expect_first_namespace_syscall_failure(
+		"listed mount ID disappears before statmount", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_statmount, ENOENT, 1U);
 	if (!fixture_stale_listed_mount_injected ||
 	    fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] == 0U) {
 		fprintf(stderr,
@@ -2302,6 +2386,9 @@ static void test_root_filtered_foreign_mountinfo(void)
 	fixture_namespace_syscall_error = EIO;
 	fixture_namespace_syscall_error_after_call = 1U;
 	expect_mount_admission("second listmount batch read error", 0, EIO);
+	expect_first_namespace_syscall_failure(
+		"second listmount batch read error", FIXTURE_NAMESPACE_FOREIGN_LEADER,
+		SYS_listmount, EIO, 2U);
 	if (fixture_namespace_listmount_calls[
 		    FIXTURE_NAMESPACE_FOREIGN_LEADER] != 2U) {
 		fprintf(stderr,
