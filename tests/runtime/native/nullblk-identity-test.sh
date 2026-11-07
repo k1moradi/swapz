@@ -963,4 +963,270 @@ run_case internal_failure internal_failure FAIL unavailable
 # Early MemAvailable is observational only; later ID36 owns admission.
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
+
+# Exercise the unmodified native creator's configfs proof against private,
+# regular-file fixtures. A startup-only Python shim changes attribute inode
+# observations at each fstat, as configfs may do across attribute lookups;
+# the owning directory retains its real, stable identity. This is not a
+# synthetic claim that two ordinary files have the same inode.
+python3 - "$ROOT/tests/tools/qualify-primary-lifecycle-nullblk.sh" "$TMP" <<'PY'
+import os
+import pathlib
+import re
+import shlex
+import subprocess
+import sys
+
+native_source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+fixture_root = pathlib.Path(sys.argv[2]) / "creator-configfs-proof"
+fixture_root.mkdir()
+source_match = re.search(
+    r"(?ms)^owned_nullblk_configfs_proof\(\) \{\n.*?^\}\n",
+    native_source,
+)
+if source_match is None:
+    print("FAIL: phase=source_extract expected_proof=native_creator_proof "
+          "observed_proof=missing original_errno=unavailable "
+          "original_exit=unavailable ownership=retained", file=sys.stderr)
+    sys.exit(1)
+
+extracted_shell = fixture_root / "native-proof.sh"
+extracted_shell.write_text(source_match.group(0), encoding="utf-8")
+shim_directory = fixture_root / "shim"
+shim_directory.mkdir()
+(shim_directory / "sitecustomize.py").write_text(r'''
+import os
+import stat
+
+_original_open = os.open
+_original_fstat = os.fstat
+_original_close = os.close
+_original_write = os.write
+_attribute_descriptors = {}
+_lookup_number = 0
+_attribute_names = frozenset((
+    "index", "memory_backed", "size", "blocksize", "power"
+))
+
+
+class VolatileAttributeMetadata:
+    def __init__(self, metadata, inode):
+        self.metadata = metadata
+        self.st_ino = inode
+
+    def __getattr__(self, name):
+        return getattr(self.metadata, name)
+
+
+def tracked_open(path, flags, mode=0o777, *, dir_fd=None):
+    descriptor = _original_open(path, flags, mode, dir_fd=dir_fd)
+    if dir_fd is not None and path in _attribute_names:
+        _attribute_descriptors[descriptor] = path
+    return descriptor
+
+
+def volatile_fstat(descriptor):
+    global _lookup_number
+    metadata = _original_fstat(descriptor)
+    attribute = _attribute_descriptors.get(descriptor)
+    if attribute is None or not stat.S_ISREG(metadata.st_mode):
+        return metadata
+    _lookup_number += 1
+    synthetic_inode = metadata.st_ino + _lookup_number * 1000003
+    with open(os.environ["SWAPZ_INODE_TRACE"], "a", encoding="ascii") as trace:
+        trace.write(f"{attribute}:{synthetic_inode}\n")
+    return VolatileAttributeMetadata(metadata, synthetic_inode)
+
+
+def tracked_write(descriptor, data):
+    if _attribute_descriptors.get(descriptor) == "power":
+        with open(os.environ["SWAPZ_POWER_TRACE"], "a", encoding="ascii") as trace:
+            trace.write("power_write\n")
+    return _original_write(descriptor, data)
+
+
+def tracked_close(descriptor):
+    _original_close(descriptor)
+    _attribute_descriptors.pop(descriptor, None)
+
+
+os.open = tracked_open
+os.fstat = volatile_fstat
+os.write = tracked_write
+os.close = tracked_close
+''', encoding="ascii")
+
+config_name = "nullb-swapz-0123456789abcdef"
+attribute_values = {
+    "index": "7\n",
+    "memory_backed": "1\n",
+    "size": "256\n",
+    "blocksize": "4096\n",
+    "power": "1\n",
+}
+
+
+class AuditFailure(Exception):
+    def __init__(self, phase, observed, original_exit="unavailable"):
+        super().__init__(phase)
+        self.phase = phase
+        self.observed = observed
+        self.original_exit = original_exit
+
+
+def require(condition, phase, observed, original_exit="unavailable"):
+    if not condition:
+        raise AuditFailure(phase, observed, original_exit)
+
+
+def create_config(case):
+    case_root = fixture_root / case
+    configfs = case_root / "configfs"
+    configfs.mkdir(parents=True)
+    config = configfs / config_name
+    config.mkdir()
+    for name, value in attribute_values.items():
+        (config / name).write_text(value, encoding="ascii")
+    metadata = config.stat()
+    identity = f"{metadata.st_dev}:{metadata.st_ino}:{metadata.st_uid}"
+    return case_root, configfs, config, identity
+
+
+def run_proof(case_root, configfs, identity, power_off):
+    inode_trace = case_root / "attribute-inodes"
+    power_trace = case_root / "power-writes"
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(shim_directory)
+    environment["SWAPZ_INODE_TRACE"] = str(inode_trace)
+    environment["SWAPZ_POWER_TRACE"] = str(power_trace)
+    program = "\n".join((
+        f"CONFIGFS={shlex.quote(str(configfs))}",
+        f"CONFIGNAME={shlex.quote(config_name)}",
+        f"CONFIG={shlex.quote(str(configfs / config_name))}",
+        f"CONFIG_IDENTITY={shlex.quote(identity)}",
+        "INDEX=7",
+        "NULLBLK_SIZE_MIB=256",
+        f"source {shlex.quote(str(extracted_shell))}",
+        f"owned_nullblk_configfs_proof 1 {power_off}",
+    ))
+    result = subprocess.run(
+        ["bash", "-c", program],
+        env=environment, capture_output=True, text=True,
+        timeout=10, check=False,
+    )
+    require(not result.stdout and not result.stderr,
+            "native_source_execution", "unexpected_diagnostic", result.returncode)
+    return result.returncode, inode_trace, power_trace
+
+
+def assert_refused(case, edit):
+    case_root, configfs, config, identity = create_config(case)
+    edit(case_root, configfs, config)
+    status, _, power_trace = run_proof(case_root, configfs, identity, 1)
+    require(status == 1, case, "unproved_object_admitted", status)
+    require(not power_trace.exists(), case, "power_write_attempted", status)
+    require(configfs.is_dir(), case, "configfs_root_removed", status)
+    return case_root, configfs, config
+
+
+try:
+    case_root, configfs, config, identity = create_config("volatile_owned_read")
+    status, inode_trace, power_trace = run_proof(case_root, configfs, identity, 0)
+    require(status == 0 and not power_trace.exists(),
+            "volatile_owned_read", "stable_directory_rejected", status)
+    require((config / "power").read_text(encoding="ascii") == "1\n",
+            "volatile_owned_read", "read_only_probe_mutated_power")
+
+    case_root, configfs, config, identity = create_config("volatile_owned_poweroff")
+    status, inode_trace, power_trace = run_proof(case_root, configfs, identity, 1)
+    require(status == 0 and (config / "power").read_text(encoding="ascii") == "0\n",
+            "volatile_owned_poweroff", "owned_poweroff_rejected", status)
+    require(power_trace.read_text(encoding="ascii") == "power_write\n",
+            "volatile_owned_poweroff", "unexpected_power_write_count")
+    entries = inode_trace.read_text(encoding="ascii").splitlines()
+    power_inodes = [entry.split(":", 1)[1] for entry in entries
+                    if entry.startswith("power:")]
+    require(len(power_inodes) >= 3 and len(set(power_inodes)) == len(power_inodes),
+            "configfs_inode_model", "attribute_inodes_not_volatile")
+    # Negative control: persisting an attribute inode across these lookups
+    # would falsely reject this proven, unchanged creator-owned directory.
+    require(power_inodes[0] != power_inodes[-1],
+            "legacy_inode_negative_control", "old_attribute_comparison_not_rejected")
+
+    def replace_same_name(case_root, configfs, config):
+        original = case_root / "retained-created-directory"
+        config.rename(original)
+        config.mkdir()
+        for name, value in attribute_values.items():
+            (config / name).write_text(value, encoding="ascii")
+
+    case_root, configfs, config = assert_refused(
+        "same_name_foreign_replacement", replace_same_name)
+    require((config / "power").read_text(encoding="ascii") == "1\n" and
+            (case_root / "retained-created-directory/power").read_text(
+                encoding="ascii") == "1\n",
+            "same_name_foreign_replacement", "creator_or_foreign_power_changed")
+
+    def replace_with_foreign(case_root, configfs, config):
+        original = case_root / "retained-created-directory"
+        config.rename(original)
+        config.mkdir()
+        for name, value in attribute_values.items():
+            (config / name).write_text(value, encoding="ascii")
+        (original / "index").write_text("8\n", encoding="ascii")
+
+    _, _, foreign = assert_refused("foreign_matching_attributes", replace_with_foreign)
+    require((foreign / "power").read_text(encoding="ascii") == "1\n",
+            "foreign_matching_attributes", "foreign_power_changed")
+
+    _, _, missing_index = assert_refused(
+        "missing_index", lambda _root, _base, config: (config / "index").unlink())
+    require(not (missing_index / "index").exists(),
+            "missing_index", "missing_attribute_recreated")
+    _, _, malformed_index = assert_refused(
+        "malformed_index", lambda _root, _base, config:
+        (config / "index").write_text("07\n", encoding="ascii"))
+    require((malformed_index / "index").read_text(encoding="ascii") == "07\n",
+            "malformed_index", "malformed_attribute_rewritten")
+    _, _, missing_power = assert_refused(
+        "missing_power", lambda _root, _base, config: (config / "power").unlink())
+    require(not (missing_power / "power").exists(),
+            "missing_power", "missing_power_recreated")
+    _, _, invalid_power = assert_refused(
+        "unverifiable_power", lambda _root, _base, config:
+        (config / "power").write_text("unknown\n", encoding="ascii"))
+    require((invalid_power / "power").read_text(encoding="ascii") == "unknown\n",
+            "unverifiable_power", "unverified_power_written")
+
+    def power_symlink(case_root, _configfs, config):
+        (config / "power").unlink()
+        foreign_power = case_root / "foreign-power"
+        foreign_power.write_text("1\n", encoding="ascii")
+        (config / "power").symlink_to(foreign_power)
+
+    case_root, _, linked_power = assert_refused("linked_power", power_symlink)
+    require((case_root / "foreign-power").read_text(encoding="ascii") == "1\n" and
+            (linked_power / "power").is_symlink(),
+            "linked_power", "foreign_power_target_changed")
+    _, _, absent = assert_refused(
+        "identity_unavailable", lambda case_root, _base, config:
+        config.rename(case_root / "retained-unobservable-directory"))
+    require(not absent.exists(), "identity_unavailable", "absence_treated_as_ownership")
+except AuditFailure as failure:
+    print(f"FAIL: phase={failure.phase} "
+          "expected_proof=pinned_creator_config_directory_and_canonical_attributes "
+          f"observed_proof={failure.observed} original_errno=unavailable "
+          f"original_exit={failure.original_exit} ownership=retained",
+          file=sys.stderr)
+    sys.exit(1)
+except Exception as failure:
+    original_errno = failure.errno if isinstance(failure, OSError) else "unavailable"
+    print("FAIL: phase=isolated_source_control "
+          "expected_proof=source_execution_without_host_mutations "
+          "observed_proof=fixture_error "
+          f"original_errno={original_errno} original_exit=unavailable "
+          "ownership=retained", file=sys.stderr)
+    sys.exit(1)
+PY
+
 printf '%s\n' 'PASS: null_blk identity, legacy false admission and 66 isolated preflight fixtures (zero stale-resource cleanup)'
