@@ -104,6 +104,15 @@ navigation document.
 
 ## Evidence boundaries and failure triage
 
+**Distinguish hosts before reading PASS:** The dedicated first-host
+[`/dev/sda1` scope](AGENT_CONTEXT.md#current-production-mission), separately
+authorized but currently mutation-BLOCKED Codex 2
+[`/dev/sda4` scope](AGENT_CONTEXT.md#separate-lubuntu-host-scope-for-devsda4),
+and owner's ARM64/NEON VM ([development history](ROADMAP.md)) are three
+different environments. Paths alone are not identities, and no authorization,
+source qualification or loaded/physical PASS transfers between them.
+
+
 Read the current [test report](../test_results.json) before acting: bind
 `source_sha`/`tested_commit_sha`, qualification scope, the stages actually
 recorded and `qualified_artifacts` to the **same** source. A complete PASS
@@ -254,6 +263,9 @@ and all other admission gates are proven.
 - [handoff/README.md](handoff/README.md): index separating active supplementary
   handoff references, historical evidence, abandoned/rejected experiments and
   deferred optimization research.
+- [verified de-bloat register](handoff/verified-debloat-register.md): source-pinned
+  repeated logic, equivalence regressions and deferred kernel-owned changes;
+  it does not authorize a refactor.
 - [compile.md](compile.md): build/install/test interface and artifacts.
 - [benchmark.md](benchmark.md): current benchmark methodology and qualification
   interpretation; source-pinned experiment narratives are archived under

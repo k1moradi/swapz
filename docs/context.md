@@ -24,6 +24,12 @@ positively identified RAM-backed `null_blk`; dedicated physical-card
 authorization is governed by the current operating context. This technical
 reference grants no device-operation permission.
 
+For a current failure, use the [first-error triage](README.md#diagnose-the-first-record)
+rather than copying old host narratives. The
+[verified de-bloat register](handoff/verified-debloat-register.md) records
+overlap in BIO preparation, not proven dead code or a safe refactor.
+
+
 The upstream functions cited here were inspected on Linux master at
 `c339f4010dea8b0d754f84ace70cd1b089878ef8` and on tag `v7.0`; where the two
 differ, the text names the version. The historical audit host reported
