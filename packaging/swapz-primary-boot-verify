@@ -437,7 +437,7 @@ AUTH
 		authorization_commit_cleanup_exit_status=$authorization_revoke_exit_status
 	fi
 	printf 'swapz-primary-boot-verify: PRIMARY_BOOT_PREFLIGHT=BLOCKED phase=%s exit_status=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s action=inspect_runtime_authorization_before_retry\n' \
-		"$authorization_commit_phase" "$authorization_commit_exit_status" "$authorization_commit_token_disposition" "$authorization_commit_cleanup_phase" "$authorization_commit_cleanup_exit_status" >&2
+		"$authorization_commit_phase" "$authorization_commit_exit_status" "$authorization_commit_token_disposition" "$authorization_commit_cleanup_phase" "$authorization_commit_cleanup_exit_status" >&2 || :
 	return "$authorization_commit_exit_status"
 }
 

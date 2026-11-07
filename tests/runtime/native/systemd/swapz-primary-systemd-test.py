@@ -8,6 +8,7 @@ swapoff, a real mapper, or reboot.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import ast
 import os
 import re
 import shlex
@@ -40,6 +41,7 @@ SOURCE_SHA = "a" * 40
 MODULE_SHA = "b" * 64
 ACTIVE_RUN_ID = "0123456789abcdef0123456789abcdef"
 TARGET_BYTES = 124_787_884_032
+FIXTURE_SUBPROCESS_TIMEOUT_SECONDS = 30
 
 
 def read_text(path: Path) -> str:
@@ -125,6 +127,7 @@ class GeneratorTests(unittest.TestCase):
             text=True,
             capture_output=True,
             env=env or self.env,
+            timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
         )
 
     @property
@@ -340,10 +343,29 @@ class UnitContractTests(unittest.TestCase):
             )
             self.assertTrue(read_text(mock).startswith("#!/bin/sh\n"))
             result = subprocess.run(
-                [str(mock)], check=False, text=True, capture_output=True
+                [str(mock)], check=False, text=True, capture_output=True,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "mock-ok\n")
+
+    def test_fixture_subprocess_runs_are_time_bounded(self) -> None:
+        syntax_tree = ast.parse(read_text(Path(__file__)))
+        unbounded_lines = []
+        for node in ast.walk(syntax_tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "subprocess"
+                and node.func.attr == "run"
+                and not any(keyword.arg == "timeout" for keyword in node.keywords)
+            ):
+                unbounded_lines.append(node.lineno)
+        self.assertEqual(
+            unbounded_lines, [],
+            f"unbounded subprocess.run calls at lines {unbounded_lines}",
+        )
 
     def test_inherited_test_controls_are_removed_from_fixture_environment(self) -> None:
         inherited = {
@@ -399,6 +421,7 @@ class UnitContractTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
                 env=env,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -1275,6 +1298,7 @@ class EffectiveUnitContractTests(unittest.TestCase):
             result = subprocess.run(
                 [analyzer, "verify", *units], check=False,
                 capture_output=True, text=True, env=env,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             # Syntax is not evidence that the actual kernel and systemd
@@ -1312,6 +1336,7 @@ class EffectiveUnitContractTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 env=env,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("swapz-intentionally-missing.service", result.stderr)
@@ -1376,21 +1401,30 @@ class ControlledLifecycleTests(unittest.TestCase):
             ignore_failure = command.startswith("-")
             if ignore_failure:
                 command = command[1:]
-            result = subprocess.run(shlex.split(command), check=False, env=env)
+            result = subprocess.run(
+                shlex.split(command), check=False, env=env,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
+            )
             if result.returncode and not ignore_failure:
                 return result.returncode
         return 0
 
     def execute_stop_contract(self, env: dict[str, str]) -> int:
         line = next(line for line in self.service.splitlines() if line.startswith("ExecStop="))
-        return subprocess.run(shlex.split(line.split("=", 1)[1]), check=False, env=env).returncode
+        return subprocess.run(
+            shlex.split(line.split("=", 1)[1]), check=False, env=env,
+            timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
+        ).returncode
 
     def execute_stop_post_contract(self, env: dict[str, str]) -> int:
         line = next(line for line in self.service.splitlines() if line.startswith("ExecStopPost="))
         command = line.split("=", 1)[1]
         if command.startswith("-"):
             command = command[1:]
-        return subprocess.run(shlex.split(command), check=False, env=env).returncode
+        return subprocess.run(
+            shlex.split(command), check=False, env=env,
+            timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
+        ).returncode
 
     def test_recovery_probe_may_fail_but_prepare_start_still_run(self) -> None:
         env = self.env.copy()
@@ -1745,6 +1779,7 @@ class BootVerifierTests(unittest.TestCase):
             timeout_version = subprocess.run(
                 [candidate, "--version"],
                 check=False, text=True, capture_output=True,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
             )
             if (timeout_version.returncode == 0
                     and "GNU coreutils" in timeout_version.stdout):
@@ -1792,7 +1827,7 @@ class BootVerifierTests(unittest.TestCase):
 
     def run_verifier(
         self, action: str, *, env: dict[str, str] | None = None,
-        timeout: float = 30,
+        timeout: float = FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(self.sbin / "swapz-primary-boot-verify"), action],
@@ -1944,6 +1979,34 @@ class BootVerifierTests(unittest.TestCase):
                     )
                 self.assertNotIn(str(authorization), blocked.stderr)
                 self.assertNotIn("PRIMARY_BOOT_PREFLIGHT=PASS", blocked.stdout)
+
+        # Failure-only diagnostics are secondary to the publication error.
+        # A broken diagnostic sink must not replace the original sync status.
+        full_device = Path("/dev/full")
+        if full_device.exists():
+            failed_sync_marker.unlink(missing_ok=True)
+            env["MOCK_PREFLIGHT_CLEANUP_SYNC_EXIT"] = "0"
+            stderr_failure_wrapper = self.root / "preflight-stderr-failure"
+            write_executable(
+                stderr_failure_wrapper,
+                "#!/bin/sh\n"
+                f'exec {shlex.quote(str(self.sbin / "swapz-primary-boot-verify"))} '
+                '"$@" 2>/dev/full\n',
+            )
+            blocked = subprocess.run(
+                [str(stderr_failure_wrapper), "preflight"],
+                check=False,
+                text=True,
+                capture_output=True,
+                env=env,
+                timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+            self.assertEqual(
+                blocked.returncode, 74,
+                "diagnostic write failure replaced the original sync status",
+            )
+            self.assertFalse(authorization.exists())
+            self.assertNotIn("PRIMARY_BOOT_PREFLIGHT=PASS", blocked.stdout)
 
         # A later observer cannot turn a rejected preflight into authority.
         failed_sync_marker.unlink(missing_ok=True)
