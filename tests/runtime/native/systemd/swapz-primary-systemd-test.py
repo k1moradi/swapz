@@ -2017,6 +2017,61 @@ class BootVerifierTests(unittest.TestCase):
             (self.report / "latest.env").read_text(encoding="utf-8"),
         )
 
+    def test_preflight_success_diagnostic_failure_keeps_authorization_consistent(self) -> None:
+        if not Path("/dev/full").exists():
+            self.skipTest("/dev/full unavailable")
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        stdout_failure_wrapper = self.root / "preflight-stdout-failure"
+        write_executable(
+            stdout_failure_wrapper,
+            "#!/bin/sh\n"
+            f'exec {shlex.quote(str(self.sbin / "swapz-primary-boot-verify"))} '
+            '"$@" >/dev/full\n',
+        )
+        preflight = subprocess.run(
+            [str(stdout_failure_wrapper), "preflight"],
+            check=False, text=True, capture_output=True, env=self.env,
+            timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(
+            preflight.returncode, 0,
+            "successful preflight became a rejection after diagnostic output failed",
+        )
+        self.assertTrue(authorization.is_file())
+        self.assertEqual(authorization.stat().st_mode & 0o777, 0o600)
+        observed = self.run_verifier("observe")
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertFalse(authorization.exists())
+
+    def test_incomplete_observation_diagnostic_failure_preserves_verdict(self) -> None:
+        if not Path("/dev/full").exists():
+            self.skipTest("/dev/full unavailable")
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        stderr_failure_wrapper = self.root / "observe-stderr-failure"
+        write_executable(
+            stderr_failure_wrapper,
+            "#!/bin/sh\n"
+            f'exec {shlex.quote(str(self.sbin / "swapz-primary-boot-verify"))} '
+            '"$@" 2>/dev/full\n',
+        )
+        env = self.env.copy()
+        env["MOCK_JOURNAL_UNAVAILABLE"] = "1"
+        observed = subprocess.run(
+            [str(stderr_failure_wrapper), "observe"],
+            check=False, text=True, capture_output=True, env=env,
+            timeout=FIXTURE_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(
+            observed.returncode, 2,
+            "diagnostic write failure replaced the INCOMPLETE observer verdict",
+        )
+        self.assertFalse(authorization.exists())
+        report = (self.report / "latest.env").read_text(encoding="utf-8")
+        self.assertIn("status=INCOMPLETE", report)
+        self.assertIn("kernel_log_unavailable", report)
+
     def test_preflight_publication_rename_failure_retains_original_status(self) -> None:
         self.arm_then_reboot()
         authorization = self.report / "runtime" / "primary-execution.env"

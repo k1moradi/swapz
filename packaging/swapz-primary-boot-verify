@@ -253,13 +253,13 @@ clear_runtime_authorization()
 report_observation_revocation_failure()
 {
 	printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=FAIL phase=%s exit_status=%s reason=%s observed=authorization_cleanup_failed expected=both_runtime_token_paths_revoked token_consumption_state=unknown evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
-		"$authorization_revoke_phase" "$authorization_revoke_exit_status" "$authorization_revoke_reason" >&2
+		"$authorization_revoke_phase" "$authorization_revoke_exit_status" "$authorization_revoke_reason" >&2 || :
 }
 
 report_observation_claim_failure()
 {
 	printf 'swapz-primary-boot-verify: phase=%s exit_status=%s reason=%s observed=authorization_claim_failed expected=canonical_token_atomically_consumed token_consumption_state=unknown evidence_retained=unknown action=inspect_cold_boot_report_before_rearming\n' \
-		"$authorization_claim_phase" "$authorization_claim_exit_status" "$authorization_claim_reason" >&2
+		"$authorization_claim_phase" "$authorization_claim_exit_status" "$authorization_claim_reason" >&2 || :
 }
 
 claim_runtime_authorization()
@@ -1089,7 +1089,7 @@ preflight_boot()
 		"$boot_id" "$expected_source_sha" "$selected_partuuid" \
 		"$target_size_bytes" "$target_major_minor"
 	printf 'PRIMARY_BOOT_PREFLIGHT=PASS boot_id=%s armed_boot_id=%s partuuid=%s\n' \
-		"$boot_id" "$armed_boot_id" "$selected_partuuid"
+		"$boot_id" "$armed_boot_id" "$selected_partuuid" || :
 }
 
 maximum_logical_sectors()
@@ -1853,7 +1853,7 @@ REPORT
 	fi
 	if [ "$status" != PASS ]; then
 		printf 'swapz-primary-boot-verify: COLD_BOOT_OBSERVATION=%s failure_reasons=%s incomplete_reasons=%s action=inspect_cold_boot_report_before_rearming\n' \
-			"$status" "${failure_reasons:-none}" "${incomplete_reasons:-none}" >&2
+			"$status" "${failure_reasons:-none}" "${incomplete_reasons:-none}" >&2 || :
 	fi
 	printf 'COLD_BOOT_OBSERVATION=%s boot_id=%s armed_boot_id=%s report=%s\n' \
 		"$status" "$boot_id" "$armed_boot_id" "$report"
