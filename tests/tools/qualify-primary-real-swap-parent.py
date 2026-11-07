@@ -269,7 +269,13 @@ def _read_request(
             re.fullmatch(r"[0-9a-f]{32}", nonce) is None or
             not isinstance(phase, str) or
             re.fullmatch(r"(?:initial|final|cycle-[1-4])", phase) is None):
-        raise Blocked("source admission request identity is invalid")
+        raise Blocked(
+            "source admission request identity is invalid:"
+            "phase=request:check=request_identity:"
+            "expected=exact_source_only_schema:"
+            "observed=mismatched_or_untrusted_request_identity:"
+            "errno=none:authorization=BLOCKED:"
+            "next=inspect_source_admission_protocol_read_only")
     return request
 
 
@@ -604,17 +610,31 @@ def _serve_admission(server: socket.socket,
                     socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
                 peer_pid, peer_uid, _peer_gid = struct.unpack("3i", credentials)
             except (OSError, struct.error) as exc:
+                error_number = (
+                    exc.errno
+                    if isinstance(exc, OSError) and exc.errno is not None
+                    else "none")
                 failure = Blocked(
-                    "cannot authenticate privileged source admission peer")
+                    "cannot authenticate privileged source admission peer:"
+                    "phase=authenticated_channel:check=peer_credentials:"
+                    "expected=kernel_peer_credentials:"
+                    "observed=unavailable_or_malformed_peer_credentials:"
+                    f"errno={error_number}:authorization=BLOCKED:"
+                    "next=inspect_child_ownership_read_only")
+                print(
+                    "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(failure),
+                    file=sys.stderr)
                 _stop_unadmitted_child_preserving(child, failure)
                 raise failure from exc
             if peer_uid != 0:
-                failure = Blocked("source admission peer is not privileged")
-                print(
-                    "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
-                    f"{failure}:phase=authenticated_channel:"
+                failure = Blocked(
+                    "source admission peer is not privileged:"
+                    "phase=authenticated_channel:check=peer_credentials:"
                     "expected=uid_0:observed=nonprivileged_peer_uid:"
-                    "errno=none:authorization=BLOCKED",
+                    "errno=none:authorization=BLOCKED:"
+                    "next=inspect_child_ownership_read_only")
+                print(
+                    "BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(failure),
                     file=sys.stderr)
                 _stop_unadmitted_child_preserving(child, failure)
                 raise failure

@@ -2,6 +2,7 @@
 """Rootless adversarial process/run binding for the physical source parent."""
 
 import contextlib
+import errno
 import importlib.util
 import io
 import json
@@ -78,13 +79,17 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         }
 
     def run_exchange(self, peer_pid, requests, *, child=None,
-                     git_check=None, peer_uid=0):
+                     git_check=None, peer_uid=0,
+                     peer_credentials_error=None):
         stream = self.Stream(requests)
         connection = mock.MagicMock()
         # Kernel-returned SO_PEERCRED is modeled, not spoofed on a live socket.
         # No real root peer or privileged operation is ever created.
-        connection.getsockopt.return_value = struct.pack(
-            "3i", peer_pid, peer_uid, 0)
+        if peer_credentials_error is None:
+            connection.getsockopt.return_value = struct.pack(
+                "3i", peer_pid, peer_uid, 0)
+        else:
+            connection.getsockopt.side_effect = peer_credentials_error
         connection.makefile.return_value = stream
         server = mock.Mock()
         server.accept.return_value = connection, None
@@ -216,6 +221,13 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
                 self.assertFalse(responses)
                 self.assertIn("source admission request identity is invalid",
                               diagnostic)
+                for field in (
+                        "phase=request", "check=request_identity",
+                        "expected=exact_source_only_schema",
+                        "observed=mismatched_or_untrusted_request_identity",
+                        "errno=none", "authorization=BLOCKED",
+                        "next=inspect_source_admission_protocol_read_only"):
+                    self.assertIn(field, diagnostic)
                 self.assertNotIn("physical_admission_identity:", diagnostic)
                 self.assertNotIn("synthetic-", diagnostic)
                 check.assert_not_called()
@@ -226,6 +238,32 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertFalse(responses)
         self.assertIn("source admission peer is not privileged", diagnostic)
+        for field in (
+                "phase=authenticated_channel", "check=peer_credentials",
+                "expected=uid_0", "observed=nonprivileged_peer_uid",
+                "errno=none", "authorization=BLOCKED",
+                "next=inspect_child_ownership_read_only"):
+            self.assertIn(field, diagnostic)
+        self.assertNotIn("physical_admission_identity:", diagnostic)
+        child.terminate.assert_called_once_with()
+        check.assert_not_called()
+
+    def test_peer_credential_read_error_preserves_original_errno(self):
+        private_error = "private-synthetic-peer-credential-location"
+        result, responses, diagnostic, child, check = self.run_exchange(
+            os.getpid(), [self.request("initial")],
+            peer_credentials_error=OSError(errno.EBADF, private_error))
+        self.assertEqual(result, 2)
+        self.assertFalse(responses)
+        for field in (
+                "cannot authenticate privileged source admission peer",
+                "phase=authenticated_channel", "check=peer_credentials",
+                "expected=kernel_peer_credentials",
+                "observed=unavailable_or_malformed_peer_credentials",
+                f"errno={errno.EBADF}", "authorization=BLOCKED",
+                "next=inspect_child_ownership_read_only"):
+            self.assertIn(field, diagnostic)
+        self.assertNotIn(private_error, diagnostic)
         self.assertNotIn("physical_admission_identity:", diagnostic)
         child.terminate.assert_called_once_with()
         check.assert_not_called()

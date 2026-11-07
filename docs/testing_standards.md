@@ -789,9 +789,13 @@ request must refuse with `request_writer_identity=UNPROVEN`,
 wire-level inability to distinguish the colliding devices plus fail-closed
 behavior, not actual physical-device discrimination. Extra child-claimed
 target, reader, invented/unknown serial, or authorization-token fields must
-instead fail first at request parsing, before Git provenance or any reply.
-Missing live /proc peer identity retains its original numeric errno, while
-mismatched peer UID refuses before the request is read. These controls prove
+instead fail first at request parsing, before Git provenance or any reply, with
+the sanitized `check=request_identity` class, exact source-only-schema
+expectation, no private field value, and `errno=none`. Kernel peer-credential
+acquisition failure must retain its original numeric errno and report
+`check=peer_credentials`; mismatched peer UID uses that same first-gate class
+with `errno=none` and refuses before the request is read. Missing live /proc
+peer identity retains its original numeric errno. These controls prove
 only source-parent refusal: synthetic identity labels are not hardware serials
 and cannot serve as owner authorization. Independent owner-protected immutable
 card **and** reader binding, plus fresh observation tied to the exact opened
