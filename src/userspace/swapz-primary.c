@@ -4097,6 +4097,7 @@ static int swapz_primary_mountinfo_full_root(
 	int result = -1;
 	int saved_errno = 0;
 	const char *failure_step = "namespace-fd";
+	const char *failure_reason = NULL;
 
 	_Static_assert(sizeof(struct mount_id_request) == mount_id_request_bytes,
 		       "mount ID request ABI size changed");
@@ -4157,8 +4158,11 @@ static int swapz_primary_mountinfo_full_root(
 	if (require_process_root_matches_init) {
 		failure_step = "init-root";
 		if (statx(AT_FDCWD, "/proc/1/root", 0,
-			  statx_root_request_mask, &init_root_info) < 0)
+			  statx_root_request_mask, &init_root_info) < 0) {
+			if (errno == EAGAIN)
+				failure_reason = "init-root-statx-race";
 			goto out;
+		}
 		if ((init_root_info.stx_mask & statx_root_identity_mask) !=
 		    statx_root_identity_mask) {
 			errno = EOPNOTSUPP;
@@ -4172,6 +4176,21 @@ static int swapz_primary_mountinfo_full_root(
 		    makedev(init_root_info.stx_dev_major,
 			    init_root_info.stx_dev_minor) !=
 			expected_process_root_device) {
+			/* Classify only the first failed fixed identity predicate.
+			 * Do not log inode/device numbers or weaken admission.
+			 */
+			if (!S_ISDIR(root_info.stx_mode))
+				failure_reason = "process-root-not-directory";
+			else if (!S_ISDIR(init_root_info.stx_mode))
+				failure_reason = "init-root-not-directory";
+			else if (root_info.stx_ino != init_root_info.stx_ino)
+				failure_reason = "root-inode-mismatch";
+			else if (makedev(root_info.stx_dev_major,
+					 root_info.stx_dev_minor) !=
+				 expected_process_root_device)
+				failure_reason = "process-root-device-mismatch";
+			else
+				failure_reason = "init-root-device-mismatch";
 			errno = EAGAIN;
 			goto out;
 		}
@@ -4344,8 +4363,10 @@ out:
 		if (saved_errno == EAGAIN)
 			(void)fprintf(stderr,
 				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
-				      "step=%s errno=%d\n",
-				      failure_step, saved_errno);
+				      "step=%s errno=%d%s%s\n",
+				      failure_step, saved_errno,
+				      failure_reason ? " reason=" : "",
+				      failure_reason ? failure_reason : "");
 		errno = saved_errno;
 	}
 	return result;

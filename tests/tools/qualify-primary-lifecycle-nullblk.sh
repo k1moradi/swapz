@@ -49,6 +49,7 @@ verify_prepare_failure_diagnostic() {
 	local diagnostic=""
 	local wrapper=""
 	local mount_diagnostic=""
+	local mount_reason=""
 
 	while IFS= read -r line; do
 		[[ -n "$line" ]] ||
@@ -113,8 +114,12 @@ verify_prepare_failure_diagnostic() {
 		if [[ "$line" == "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE"* ]]; then
 			mount_diagnostic_count=$((mount_diagnostic_count + 1))
 			# Source-controlled fields only: no PID, path, namespace or device.
-			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=11$ ]]; then
+			if [[ ! "$line" =~ ^SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE[[:space:]]step=(namespace-fd|root-object|init-root|root-walk|mount-list|listed-mount|root-revalidation)[[:space:]]errno=11([[:space:]]reason=(init-root-statx-race|process-root-not-directory|init-root-not-directory|root-inode-mismatch|process-root-device-mismatch|init-root-device-mismatch))?$ ]]; then
 				fail "prepare refusal has a malformed mount-inventory diagnostic"
+			fi
+			mount_reason="${BASH_REMATCH[3]:-}"
+			if [[ -n "$mount_reason" && "${BASH_REMATCH[1]}" != init-root ]]; then
+				fail "prepare refusal mount-inventory reason does not match step"
 			fi
 			mount_diagnostic="$line"
 			continue

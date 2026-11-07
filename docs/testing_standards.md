@@ -275,6 +275,12 @@ record with the normal canonical prepare failure. Duplicate, malformed,
 unmatched or free-form sideband output remains FAIL; the original admission
 refusal remains BLOCKED. Rootless tests must cover both accepted scan phases
 and reject mismatched errno, duplicate markers and private values.
+At the coordinator's init-root step, an EAGAIN can include one fixed
+`reason=` classification identifying a failed root-type, inode, process-root
+device, init-root device, or init-root statx observation predicate. The verifier
+and report parser must allowlist only these cause labels with `step=init-root`,
+reject injected host values and unrelated steps, and preserve the original
+admission refusal without exposing the compared inode or device values.
 
 
 The direct-C mount reader fixture must exercise the actual production reader

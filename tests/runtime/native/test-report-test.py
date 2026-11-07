@@ -4731,24 +4731,29 @@ class ReportContract(unittest.TestCase):
         transcript = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
             "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
-            "step=root-revalidation errno=11\n"
+            "step=init-root errno=11 reason=root-inode-mismatch\n"
             "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
             "errno=11 error=Resource temporarily unavailable\n"
             "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: preparation blocked\n"
         )
         phase, reason = runner.failure_context(transcript)
         self.assertEqual(phase, "owned RAM primary lifecycle prepare")
-        self.assertIn("mount_step=root-revalidation", reason)
+        self.assertIn("mount_step=init-root", reason)
+        self.assertIn("mount_cause=root-inode-mismatch", reason)
         self.assertIn("errno=11", reason)
         for unsafe in (
-                transcript.replace("step=root-revalidation", "step=/proc/SECRET"),
-                transcript.replace("step=root-revalidation errno=11",
-                                   "step=root-revalidation errno=11 host=SECRET"),
+                transcript.replace("step=init-root", "step=/proc/SECRET"),
+                transcript.replace("step=init-root errno=11",
+                                   "step=init-root errno=11 host=SECRET"),
+                transcript.replace("reason=root-inode-mismatch",
+                                   "reason=PRIVATE_OVERRIDDEN"),
+                transcript.replace("step=init-root", "step=root-walk"),
                 transcript.replace("errno=11 error=Resource",
                                    "errno=1 error=Resource")):
             with self.subTest(unsafe=unsafe[-100:]):
                 _, safe_reason = runner.failure_context(unsafe)
                 self.assertNotIn("mount_step=", safe_reason)
+                self.assertNotIn("mount_cause=", safe_reason)
                 self.assertNotIn("SECRET", safe_reason)
 
     def test_loaded_failure_diagnostic_stays_with_current_phase(self):

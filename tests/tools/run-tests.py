@@ -2567,9 +2567,15 @@ def failure_context(output, *, loaded=True, default_phase=None,
             mount_match = re.fullmatch(
                 r"SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
                 r"step=(namespace-fd|root-object|init-root|root-walk|"
-                r"mount-list|listed-mount|root-revalidation) errno=(11)",
+                r"mount-list|listed-mount|root-revalidation) errno=(11)"
+                r"(?: reason=(init-root-statx-race|"
+                r"process-root-not-directory|init-root-not-directory|"
+                r"root-inode-mismatch|process-root-device-mismatch|"
+                r"init-root-device-mismatch))?",
                 line.strip())
-            if mount_match and mount_inventory_failure is None:
+            if (mount_match and mount_inventory_failure is None and
+                    (mount_match.group(3) is None or
+                     mount_match.group(1) == "init-root")):
                 mount_inventory_failure = mount_match.groups()
             prepare_match = re.fullmatch(
                 r"PRIMARY_PREPARE=FAILED phase=([a-z0-9-]{1,64}) "
@@ -2815,6 +2821,9 @@ def failure_context(output, *, loaded=True, default_phase=None,
                             mount_inventory_failure is not None and
                             mount_inventory_failure[1] == error_number):
                         reason += f"; mount_step={mount_inventory_failure[0]}"
+                        if mount_inventory_failure[2] is not None:
+                            reason += (
+                                f"; mount_cause={mount_inventory_failure[2]}")
                     reason = reason[:220]
                 elif primary_lifecycle_command_failure is not None:
                     operation, coordinator_error = (

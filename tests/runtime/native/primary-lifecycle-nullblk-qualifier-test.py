@@ -2427,6 +2427,15 @@ int main(int argc, char **argv)
               command_output(mount_initial, mount_eagain), True)
         check(mount_marker + "\n" +
               command_output(mount_repeated, mount_eagain), True)
+        for cause in (
+                "init-root-statx-race", "process-root-not-directory",
+                "init-root-not-directory", "root-inode-mismatch",
+                "process-root-device-mismatch", "init-root-device-mismatch"):
+            check(
+                mount_marker.replace("step=root-revalidation",
+                                     "step=init-root") +
+                f" reason={cause}\n" +
+                command_output(mount_initial, mount_eagain), True)
 
         for output in (
             "",
@@ -2444,6 +2453,15 @@ int main(int argc, char **argv)
             mount_marker.replace("root-revalidation", "invented-step") + "\n" +
             command_output(mount_initial, mount_eagain),
             mount_marker.replace("errno=11", "errno=5") + "\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=init-root") + " reason=private-data\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker + " reason=root-inode-mismatch\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=init-root") +
+            " reason=root-inode-mismatch private=/proc/hidden\n" +
             command_output(mount_initial, mount_eagain),
             mount_marker + " private=/proc/hidden\n" +
             command_output(mount_initial, mount_eagain),
