@@ -407,16 +407,21 @@ write_public_certificate_pem() {
 
 finish_signature_verification() {
     local temporary_directory="$1" verification_status="$2" primary_phase="$3"
-    local cleanup_status=0
+    local cleanup_status=0 cleanup_must_block=0
 
-    # Cleanup is secondary to any original parser/CMS error. A failed
-    # cleanup after valid verification (or the unsigned signing precheck)
-    # cannot be treated as successful completion of this verification.
+    # Cleanup is secondary to an existing verification error. Unsigned input
+    # is an error under --verify, but is the expected pre-sign state in sign
+    # mode; only the latter may be replaced by a cleanup failure.
+    if (( verification_status == 0 )); then
+        cleanup_must_block=1
+    elif [[ "$mode" == sign ]] && (( verification_status == 10 )); then
+        cleanup_must_block=1
+    fi
     rm -rf -- "$temporary_directory" 2>/dev/null || cleanup_status=$?
     if (( cleanup_status != 0 )); then
         printf 'SWAPZ_SIGNING_DIAGNOSTIC artifact=dm-swapz.ko phase=temporary_cleanup check=verification_temporary_directory expected=removed observed=cleanup_failed command_status=%s primary_phase=%s primary_command_status=%s next=inspect_signing_temporary_storage_read_only\n' \
             "$cleanup_status" "$primary_phase" "$signature_command_status" >&2
-        if (( verification_status == 0 || verification_status == 10 )); then
+        if (( cleanup_must_block == 1 )); then
             signature_command_status="$cleanup_status"
             return 21
         fi

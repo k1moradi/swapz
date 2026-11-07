@@ -1232,6 +1232,26 @@ exec "{flock_binary}" "$@"
         signed_module.write_bytes(canonical_signed_module)
 
         signed_module.write_bytes(payload.read_bytes())
+        unsigned_cleanup_failed = subprocess.run(
+            ["bash", str(ROOT / "packaging/sign-module.sh"),
+             "--verify", str(signed_module)],
+            cwd=ROOT, env=cleanup_env, capture_output=True, text=True)
+        self.assertEqual(unsigned_cleanup_failed.returncode, 2)
+        self.assertIn("qualified module is unsigned",
+                      unsigned_cleanup_failed.stderr)
+        self.assertIn("phase=detached_signature",
+                      unsigned_cleanup_failed.stderr)
+        self.assertIn("command_status=10",
+                      unsigned_cleanup_failed.stderr)
+        self.assertIn("phase=temporary_cleanup",
+                      unsigned_cleanup_failed.stderr)
+        self.assertIn(
+            "command_status=76 primary_phase=detached_signature "
+            "primary_command_status=10",
+            unsigned_cleanup_failed.stderr)
+        self.assertNotIn(str(private_key), unsigned_cleanup_failed.stderr)
+
+        signed_module.write_bytes(payload.read_bytes())
         unsigned = subprocess.run(
             ["bash", str(ROOT / "packaging/sign-module.sh"),
              "--verify", str(signed_module)],
