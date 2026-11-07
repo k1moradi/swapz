@@ -39,7 +39,8 @@ class TerminalEvidenceContracts(unittest.TestCase):
     def run_fixture(self, *, short_read=False, interrupted=False, corrupt=False,
                     corrupt_pages=(), corrupt_offsets=(), page_count=2,
                     read_errno=None, report_errno=None, close_fails=False,
-                    closed_output_at=None, verify_command="VERIFY"):
+                    closed_output_at=None, verify_command="VERIFY",
+                    verify_read_error=None):
         class AnonymousMemoryFixture:
             def __init__(self):
                 self.contents = bytearray(page_count * oracle.PAGE_BYTES)
@@ -67,10 +68,15 @@ class TerminalEvidenceContracts(unittest.TestCase):
 
         allocation = AnonymousMemoryFixture()
         commands = iter(("FILL", verify_command))
+        command_reads = 0
         standard_output = io.StringIO()
         standard_error = io.StringIO()
 
         def read_command():
+            nonlocal command_reads
+            command_reads += 1
+            if command_reads == 2 and verify_read_error is not None:
+                raise verify_read_error
             command = next(commands)
             if command == "VERIFY":
                 allocation.verify_started = True
@@ -145,6 +151,22 @@ class TerminalEvidenceContracts(unittest.TestCase):
                     stderr)
                 self.assertIn("cleanup_complete=true", stderr)
                 self.assertNotIn("ORACLE_VERIFIED=", stdout)
+
+    def test_closed_command_pipe_before_verify_never_emits_terminal_success(self):
+        status, stdout, stderr, allocation = self.run_fixture(
+            verify_read_error=RuntimeError(
+                "qualification controller closed the command pipe"))
+        self.assertEqual(status, 1)
+        self.assertTrue(allocation.closed)
+        self.assertEqual(
+            [record.partition("=")[0] for record in stdout.splitlines()],
+            ["ORACLE_WAITING", "ORACLE_FILLED"])
+        self.assertIn(
+            "phase=wait_verify verified_pages=0/2 verified_bytes=0/8192",
+            stderr)
+        self.assertIn(
+            "error=RuntimeError errno=none cleanup_complete=true", stderr)
+        self.assertNotIn("ORACLE_VERIFIED=", stdout)
 
     def test_success_shaped_record_is_withheld_until_unmap_succeeds(self):
         status, stdout, stderr, allocation = self.run_fixture(close_fails=True)
@@ -767,7 +789,6 @@ class TerminalEvidenceContracts(unittest.TestCase):
         for mutant in (
                 {"verified_pages": True},
                 {"verified_pages": "2"},
-                {"verified_pages": 1 << 128},
                 {"verified_bytes": float(2 * oracle.PAGE_BYTES)},
                 {"mismatched_pages": False},
                 {"mismatches": 1 << 128},
@@ -775,6 +796,28 @@ class TerminalEvidenceContracts(unittest.TestCase):
             with self.subTest(mutant=mutant), self.assertRaises(
                     qualify.QualificationFailure):
                 qualify.require_oracle_verification_details([{**valid, **mutant}])
+
+        # A self-consistent arbitrary-precision total is still impossible for
+        # the worker's admitted memory and must fail exact worker geometry.
+        unreasonable_pages = 1 << 128
+        assigned_memory_mib = 64
+        assigned_bytes = assigned_memory_mib * qualify.MIB
+        assigned_pages = assigned_bytes // qualify.PAGE_BYTES
+        with self.assertRaisesRegex(
+                qualify.QualificationFailure, "worker 0 verification"):
+            qualify.require_oracle_worker_geometry(
+                [
+                    {
+                        "verified_pages": unreasonable_pages,
+                        "verified_bytes": unreasonable_pages * qualify.PAGE_BYTES,
+                    },
+                    {
+                        "verified_pages": assigned_pages,
+                        "verified_bytes": assigned_bytes,
+                    },
+                ],
+                (assigned_memory_mib, assigned_memory_mib),
+                "verified_pages", "verified_bytes", "verification")
 
     def test_parent_rejects_duplicate_or_trailing_terminal_bytes(self):
         pending_tails = (
@@ -1304,6 +1347,62 @@ class TerminalEvidenceContracts(unittest.TestCase):
              "swapz target entered failed state during real-swap workload"),
         )
         for description, changes, first_failure in cases:
+            with self.subTest(description=description):
+                with self.assertRaises(qualify.QualificationFailure) as caught:
+                    qualify.evaluate_workload_evidence(**{**evidence, **changes})
+                self.assertEqual(str(caught.exception), first_failure)
+
+        precedence_cases = (
+            (
+                "cgroup before OOM",
+                {"cgroup_swap_bytes": 0, "oom_delta": 1},
+                "bounded cgroup never accumulated required real swap usage",
+            ),
+            (
+                "OOM before mapper",
+                {"oom_delta": 1, "mapper_used_delta_kib": 0},
+                "bounded real-swap workload encountered cgroup OOM",
+            ),
+            (
+                "mapper before target write",
+                {"mapper_used_delta_kib": 0, "fill_status_after": zero_counters},
+                "exact mapper /proc/swaps usage stayed below required real-swap floor",
+            ),
+            (
+                "target write before lower write",
+                {
+                    "fill_status_after": zero_counters,
+                    "lower_after_fill": qualify.BlockStats(0, 0),
+                },
+                "swapz target counters stay below required swap-out WRITE activity",
+            ),
+            (
+                "kernel swap-out before target read",
+                {
+                    "vm_after_fill": {"pswpout": 0},
+                    "verify_status_after": fill_counters,
+                },
+                "kernel vmstat shows no swap-out during admitted workload",
+            ),
+            (
+                "target read before lower read",
+                {
+                    "verify_status_after": fill_counters,
+                    "lower_after_verify":
+                        qualify.BlockStats(0, page_bytes // 512),
+                },
+                "swapz target counters stay below required swap-in READ activity",
+            ),
+            (
+                "kernel swap-in before byte oracle",
+                {
+                    "vm_after_verify": {"pswpin": 0},
+                    "oracle": {**verified, "digest": "cd" * 32},
+                },
+                "kernel vmstat shows no swap-in during byte verification",
+            ),
+        )
+        for description, changes, first_failure in precedence_cases:
             with self.subTest(description=description):
                 with self.assertRaises(qualify.QualificationFailure) as caught:
                     qualify.evaluate_workload_evidence(**{**evidence, **changes})

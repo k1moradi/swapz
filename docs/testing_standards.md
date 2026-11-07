@@ -1036,9 +1036,13 @@ an earlier byte/digest mismatch or its counts. Standalone oracle entry points
 must reject non-integer memory sizes and page indices outside the unsigned
 64-bit range before allocation or hashing. Rootless terminal fixtures must
 reject duplicate-key, non-finite, non-object and non-ASCII JSON, boolean or
-floating byte counters, and unreasonably large verification totals. They must
-assert the exact first failed cgroup, mapper, kernel, target, lower-device or
-byte-integrity observation rather than merely checking for some failure.
+floating byte counters, and self-consistent verification totals that exceed
+an assigned worker's exact page/byte geometry. Controller-pipe closure before
+VERIFY must remain a bounded wait-verify failure with no terminal VERIFIED
+record. Fixtures must assert the exact failure class for each independently
+mutated cgroup, mapper, kernel, target, lower-device or byte-integrity gate and
+must pair simultaneous defects to prove that the earliest evaluator gate is
+retained rather than replaced by a later failure.
 Diagnostic samples may contain
 page/byte offsets
 but not raw expected/observed values or seeds. Byte-exact comparison alone is
