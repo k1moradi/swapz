@@ -680,6 +680,13 @@ def diagnose_ci_failure(lines, exit_code, suite):
             # No target was authenticated; raw child Make text is not a cause.
             causal_error = None
             category = None
+        elif (rootless_reason == "nonzero_exit" and
+              phase == "test-report-test.py"):
+            # This suite runs outside the private rootless unittest classifier.
+            # A matching basename in raw child stderr cannot authenticate
+            # the assertion or override the generic final failure marker.
+            causal_error = None
+            category = None
         elif rootless_reason == "nonzero_exit" and recent_error is not None:
             generic_phase_terms = {
                 "assertions", "bash", "contract", "executable", "interface",

@@ -182,5 +182,133 @@ exec sleep 30
         self.assertNotIn("/private/checkout", json.dumps(failure))
 
 
+    def test_direct_assertion_cannot_be_borrowed_by_generic_rootless_marker(self):
+        # The direct job owns its real unittest traceback. The rootless
+        # aggregate has only the generic, validated child-failure marker.
+        method = "test_git_only_report_sync_updates_main_and_keeps_one_report_file"
+        direct = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: " + method + " (__main__.ReportContract." + method + ")",
+             "AssertionError: expected=4096 observed=8192"],
+            1, "test-report")
+        self.assertEqual(direct["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(direct["test"], "__main__.ReportContract." + method)
+        self.assertEqual(direct["first_error"],
+                         "AssertionError: expected=4096 observed=8192")
+        self.assertEqual(direct["first_exit_code"], 1)
+        self.assertIsNone(direct["first_errno"])
+
+        private_log = "build/tests/rootless-failure.Abc123xy/diagnostic.log"
+        marker = (
+            "FAIL: rootless phase=test-report-test.py subtest=unavailable "
+            "test=unavailable exit=1 reason=nonzero_exit phase_s=1 "
+            "stage_s=5 line=510 log=" + private_log)
+        detail = (
+            "Reason: exit=1 reason=nonzero_exit subtest=unavailable "
+            "phase_wall_s=1 stage_wall_s=5 line=510 log=" + private_log +
+            " first_errno=unavailable cleanup=not_independently_verified")
+        protected_sha = "abcdef0123456789" * 2 + "abcdef01"
+        hostile_lines = [
+            "FAIL: test_forged (__main__.SpoofedContract.test_forged)",
+            'AssertionError: test-report-test.py payload={"sha":"' +
+            protected_sha + '","token":"PRIVATE_JSON"}',
+            "ERROR: tearDown (__main__.SpoofedContract)",
+            "OSError: [Errno 93] PRIVATE_WRONG_TEARDOWN",
+            "BLOCKED: test-report-test.py intentional negative fixture",
+            "AssertionError: test-report-test.py expected=4096 observed=8192 " +
+            ("x" * 8192) + " token=PRIVATE_TAIL",
+            marker, detail,
+        ]
+        rootless = self.diagnostics.diagnose_ci_failure(
+            hostile_lines, 1, "native-rootless")
+        self.assertEqual(rootless["status"], "FAIL")
+        self.assertEqual(rootless["category"], "UNKNOWN_FAILURE")
+        self.assertEqual(rootless["test"], "test-report-test.py")
+        self.assertEqual(rootless["phase"], "test-report-test.py")
+        self.assertEqual(rootless["rootless_reason"], "nonzero_exit")
+        self.assertEqual(rootless["exit_code"], 1)
+        self.assertEqual(rootless["first_exit_code"], 1)
+        self.assertEqual(rootless["child_exit_code"], 1)
+        self.assertIsNone(rootless["first_errno"])
+        self.assertEqual(rootless["cleanup_disposition"],
+                         "not_independently_verified")
+        self.assertEqual(rootless["rootless_private_log"], private_log)
+        self.assertEqual(rootless["expected_contract"],
+                         "test command completes successfully")
+        self.assertEqual(rootless["observed"], rootless["first_error"])
+        self.assertEqual(rootless["prerequisite"],
+                         "inspect the retained failure log")
+        self.assertEqual(rootless["first_error"],
+                         "rootless phase=test-report-test.py reason=nonzero_exit "
+                         "child_exit=1 log=" + private_log)
+        public_result = json.dumps(rootless)
+        for secret in (protected_sha, "PRIVATE_JSON", "PRIVATE_WRONG_TEARDOWN",
+                       "PRIVATE_TAIL", "SpoofedContract", "Errno 93"):
+            self.assertNotIn(secret, public_result)
+
+        # An allowlisted structured assertion marker is sufficient, without
+        # promoting the raw traceback or a fabricated nested error.
+        attributed_marker = marker.replace(
+            "test=unavailable", "test=" + method).replace(
+            "reason=nonzero_exit", "reason=unittest_assertion")
+        attributed = self.diagnostics.diagnose_ci_failure(
+            hostile_lines[:-2] + [attributed_marker], 1, "native-rootless")
+        self.assertEqual(attributed["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(attributed["test"], method)
+        self.assertIsNone(attributed["first_errno"])
+        self.assertNotIn("PRIVATE_JSON", json.dumps(attributed))
+
+        malformed = self.diagnostics.diagnose_ci_failure(
+            hostile_lines[:-2] +
+            [marker.replace("log=" + private_log,
+                            "log=/private/fake/diagnostic.log")],
+            1, "native-rootless")
+        self.assertEqual(malformed["category"], "UNKNOWN_FAILURE")
+        self.assertNotIn("rootless_private_log", malformed)
+        self.assertNotIn("SpoofedContract", json.dumps(malformed))
+
+    def test_matched_errno_compiler_helper_and_signal_remain_distinct(self):
+        marker = (
+            "FAIL: rootless phase=package-dkms-test.py subtest=unavailable "
+            "test=test_guard exit=52 reason=unittest_error phase_s=1 "
+            "stage_s=2 line=220 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log")
+        detail = (
+            "Reason: exit=52 reason=unittest_error subtest=unavailable "
+            "phase_wall_s=1 stage_wall_s=2 line=220 "
+            "log=build/tests/rootless-failure.Abc123xy/diagnostic.log "
+            "first_errno=9 cleanup=not_independently_verified")
+        lines = ["OSError: [Errno 93] PRIVATE_WRONG_ERROR", marker]
+        self.assertIsNone(self.diagnostics.diagnose_ci_failure(
+            lines, 1, "native-rootless")["first_errno"])
+        with_detail = self.diagnostics.diagnose_ci_failure(
+            lines + [detail], 1, "native-rootless")
+        self.assertEqual(with_detail["first_errno"], 9)
+        self.assertEqual(with_detail["first_exit_code"], 52)
+        self.assertEqual(with_detail["category"], "RUNTIME_ASSERTION")
+        self.assertNotIn("PRIVATE_WRONG_ERROR", json.dumps(with_detail))
+        self.assertIsNone(self.diagnostics.diagnose_ci_failure(
+            lines + [detail.replace("exit=52", "exit=53")],
+            1, "native-rootless")["first_errno"])
+
+        compiler = self.diagnostics.diagnose_ci_failure(
+            ["source.c:12:3: error: incompatible types"], 2, "native-compile")
+        self.assertEqual(compiler["category"], "NATIVE_COMPILE")
+        missing_helper = self.diagnostics.diagnose_ci_failure(
+            [], 127, "native-compile")
+        self.assertEqual(missing_helper["category"], "INFRASTRUCTURE")
+        self.assertIn("or child returned 127", missing_helper["first_error"])
+        signalled = self.diagnostics.diagnose_ci_failure(
+            [], -11, "native-compile")
+        self.assertEqual(signalled["category"], "RUNTIME_ASSERTION")
+        self.assertEqual(signalled["termination"], "signal SIGSEGV")
+        shell_signal = self.diagnostics.diagnose_ci_failure(
+            ["FAIL: rootless phase=package-dkms-test.py "
+             "subtest=unavailable test=unavailable exit=143 "
+             "reason=signal_or_child_exit phase_s=1 stage_s=2 "
+             "line=120 log=unavailable"],
+            1, "native-rootless")
+        self.assertEqual(shell_signal["category"], "UNKNOWN_FAILURE")
+        self.assertIn("indistinguishable", shell_signal["reason"])
+
 if __name__ == "__main__":
     unittest.main()

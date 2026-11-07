@@ -1700,7 +1700,12 @@ rootless marker: when that marker carries an allowlisted test name, that name
 wins over earlier suite output and later teardown; when it carries
 `test=unavailable`, earlier transcript `FAIL:`/`ERROR:` lines must not be
 guessed as the cause. A directly invoked, unwrapped unittest may still use its
-first detailed failure block. The official stage record keeps the
+first detailed failure block. A generic rootless
+`reason=nonzero_exit` for `test-report-test.py` does not authenticate an
+assertion even if earlier stderr includes that phase name or an apparent
+traceback. Only the separately invoked unittest CI job may attribute its own
+direct assertion; it cannot authenticate rootless child output. The official
+stage record keeps the
 source-controlled rootless phase in `failed_phase` (the basename for a Python
 suite), not as an absolute or repository-prefixed path inside `diagnostic`.
 For a complete final marker whose exit matches the actual child, its bounded
