@@ -2534,6 +2534,39 @@ def verify_authorized_target(
             ) from close_failure
 
 
+def _admit_initial_target(
+        plan: dict, selector_partuuid: str,
+        authorization_snapshot: dict,
+) -> tuple[Path, tuple[int, int], tuple[int, int], tuple]:
+    """Classify the first live target proof before prepare/start/write."""
+    identities: list[tuple] = []
+    try:
+        target_path, target_device, parent_device = verify_authorized_target(
+            plan, selector_partuuid, authorization_snapshot,
+            observed_identity=identities)
+    except QualificationFailure as exc:
+        status = _qualification_failure_exit_status(exc)
+        status_detail = f" status={status}" if status is not None else ""
+        raise Blocked(
+            "initial target admission phase=live_target "
+            "expected=descriptor-topology-reader-proof "
+            "observed=authorization-command-failed errno=none"
+            f"{status_detail}; owned_state_may_have_changed=true; "
+            "target_mutation_reached=false; action=BLOCK-before-prepare") from exc
+    except Blocked as exc:
+        raise Blocked(
+            f"{exc}; owned_state_may_have_changed=true; "
+            "target_mutation_reached=false") from exc
+    if len(identities) != 1:
+        raise Blocked(
+            "initial target admission phase=live_target "
+            "expected=exactly-one-bound-target-identity "
+            "observed=missing-or-ambiguous-bound-identity errno=none; "
+            "owned_state_may_have_changed=true; "
+            "target_mutation_reached=false; action=BLOCK-before-prepare")
+    return target_path, target_device, parent_device, identities[0]
+
+
 def _kernel_log_snapshot() -> list[str]:
     result = _run(["dmesg", "--notime", "--level=emerg,alert,crit,err,warn"],
                   check=False, timeout=10)
@@ -4543,14 +4576,9 @@ def _execute_admitted(
                 "the installed qualified control")
         selector_evidence = _read_selector_evidence()
         selector_partuuid = selector_evidence.partuuid
-        admitted_target_identities: list[tuple] = []
-        _target_path, target_device, target_parent_device = verify_authorized_target(
-            plan, selector_partuuid, authorization_snapshot,
-            observed_identity=admitted_target_identities)
-        if len(admitted_target_identities) != 1:
-            raise Blocked(
-                "live target verifier did not publish exactly one bound identity")
-        target_identity = admitted_target_identities[0]
+        (_target_path, target_device, target_parent_device,
+         target_identity) = _admit_initial_target(
+            plan, selector_partuuid, authorization_snapshot)
         # The verifier has already matched this value against live block
         # geometry, lsblk and the authorized target snapshot.
         target_size_bytes = int(plan["target_device_bytes"])

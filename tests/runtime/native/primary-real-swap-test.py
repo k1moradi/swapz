@@ -558,6 +558,33 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                     qualify._require_selector_at_policy_use(
                         admitted, {}, contract, (8, 1), (8, 0))
 
+    def test_initial_target_admission_blocks_child_failure_and_redacts(self):
+        with mock.patch.object(
+                qualify, "verify_authorized_target",
+                side_effect=qualify.QualificationFailure(
+                    "command failed rc=23: /private/lsblk: hidden")):
+            with self.assertRaisesRegex(
+                    qualify.Blocked,
+                    "observed=authorization-command-failed.*status=23"
+                    ".*owned_state_may_have_changed=true"
+                    ".*target_mutation_reached=false") as refused:
+                qualify._admit_initial_target(
+                    {}, "aaaaaaaa", {"authorized_target": {}})
+        self.assertNotIn("/private", str(refused.exception))
+        self.assertNotIn("hidden", str(refused.exception))
+
+    def test_initial_target_admission_requires_one_published_identity(self):
+        with mock.patch.object(
+                qualify, "verify_authorized_target",
+                return_value=(Path("/synthetic"), (8, 1), (8, 0))), \
+                self.assertRaisesRegex(
+                    qualify.Blocked,
+                    "missing-or-ambiguous-bound-identity"
+                    ".*owned_state_may_have_changed=true"
+                    ".*target_mutation_reached=false"):
+            qualify._admit_initial_target(
+                {}, "aaaaaaaa", {"authorized_target": {}})
+
     def test_real_target_verifier_binds_source_device_geometry_before_prepare(self):
         target_size_bytes = 124_787_884_032
         geometry = qualify.maximum_primary_geometry(target_size_bytes)
@@ -4755,10 +4782,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             'pinned_source_root / "docs/handoff/production-readiness.json"',
             execute_source)
         self.assertIn(
-            "verify_authorized_target(\n"
-            "            plan, selector_partuuid, authorization_snapshot,\n"
-            "            observed_identity=admitted_target_identities)",
+            "_admit_initial_target(\n"
+            "            plan, selector_partuuid, authorization_snapshot)",
             execute_source)
+        initial_start = source.index("def _admit_initial_target(")
+        initial_end = source.index("\ndef _kernel_log_snapshot(", initial_start)
+        initial_source = source[initial_start:initial_end]
+        self.assertIn("verify_authorized_target(", initial_source)
+        self.assertIn("observed_identity=identities", initial_source)
         self.assertNotIn("acceptance_manifest_sha256()", execute_source)
 
     def test_authorization_snapshot_digest_is_of_exact_parsed_bytes(self):

@@ -702,7 +702,12 @@ reader topology and a unique source-bound stable reader serial; an absent
 serial or conflicting reader is BLOCKED. The source-bound/live serial
 comparison is byte-for-byte exact; reject an empty/whitespace-only or oversized
 value, but do not invent an entropy or character-diversity threshold. A reader serial remains only a consistency signal and
-does not prove a particular SD card or permit physical acceptance by itself. The historical snapshot's observed `/dev/sd*` pathname
+does not prove a particular SD card or permit physical acceptance by itself. The initial live-target proof occurs after the private
+`qualification-import`, so a refusal there reports
+`owned_state_may_have_changed=true` for package-owned qualification state but
+also `target_mutation_reached=false`; it must convert verifier child-command
+failure to BLOCKED, preserve only its numeric status, and never disclose command
+or private path text. The historical snapshot's observed `/dev/sd*` pathname
 and `major:minor` describe an earlier boot, not the live target: renumbering
 may be accepted only when the live plan, exclusive descriptor, parent inode,
 geometry and independently bound reader identity agree. Recheck both opened
