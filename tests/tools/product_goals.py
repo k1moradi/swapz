@@ -294,9 +294,15 @@ def _ci_safe_line(line):
         r"(?i)\b((?:payload|response|json)\s*[:=]\s*)"
         r"(?:" + json_object + r"|" + json_array + r"|" + json_scalar + r")",
         r"\1<structured-evidence-redacted>", line)
-    line = re.sub(
-        r"^(AssertionError:\s*)(?:" + json_object + r"|" + json_array + r")$",
-        r"\1<structured-evidence-redacted>", line)
+    exception_prefix = (
+        r"^(?:E\s+)?(?:AssertionError|RuntimeError|ValueError|TypeError|"
+        r"KeyError|IndexError|AttributeError|OSError|TimeoutError|"
+        r"FileNotFoundError|PermissionError|SystemExit):"
+    )
+    if re.match(exception_prefix, line):
+        line = re.sub(
+            json_object + r"|" + json_array,
+            "<structured-evidence-redacted>", line)
     # Preserve only the two source-controlled contract-suite basenames so
     # failure classification survives redaction of their containing host root.
     line = re.sub(

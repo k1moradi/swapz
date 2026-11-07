@@ -166,6 +166,10 @@ exec sleep 30
         self.assertEqual(
             source_context,
             'self.assertEqual(aborted["category"], "RUNTIME_ASSERTION")')
+        exception_json = self.diagnostics._ci_safe_line(
+            'AssertionError: mismatch {"campaign_id":"FORGED_CAMPAIGN"}')
+        self.assertNotIn("FORGED_CAMPAIGN", exception_json)
+        self.assertIn("<structured-evidence-redacted>", exception_json)
 
     def test_contract_classification_survives_private_root_redaction(self):
         failure = self.diagnostics.diagnose_ci_failure(

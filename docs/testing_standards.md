@@ -1831,8 +1831,10 @@ conditions. Redact structured child-supplied JSON only when it occupies an
 explicit diagnostic value field (or the complete AssertionError payload), plus
 token paths, UUID/PARTUUID, serial/WWN, campaign identifiers, device IDs, and
 absolute host paths before promoting first-error text; do not infer protected
-identities. Do not rewrite repository-controlled traceback source syntax merely
-because it contains brackets or braces. Preserve ordinary numeric expected/actual
+identities. Structured JSON embedded in a recognized exception line is also
+private diagnostic payload and must be redacted. Do not rewrite
+repository-controlled traceback source syntax merely because it contains
+brackets or braces. Preserve ordinary numeric expected/actual
 values because they are required causal diagnostics, not identity payloads. Keep
 only the allowlisted source-contract and make-interface script basenames
 visible after redacting their private containing root, so original source
