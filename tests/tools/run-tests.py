@@ -2879,6 +2879,67 @@ def loaded_progress_line(line):
     return stripped
 
 
+def safe_assertion_details(traceback):
+    """Expose bounded, allowlisted assertion facts without raw actual text.
+
+    The actual value can contain an entire document, host path, private
+    command output, partition identity or secret. Never print it. Only fixed
+    status types, short integers, controlled ownership/phase markers and
+    narrowly constrained human-readable expected text are permitted.
+    """
+    assertion = re.search(
+        r"(?m)^AssertionError: (['\"])([^'\"\r\n]{1,96})\1 "
+        r"(not found in|unexpectedly found in)\b", traceback)
+    if assertion:
+        expected_text = assertion.group(2)
+        condition = assertion.group(3)
+        structured = re.fullmatch(
+            r"(?:phase=[a-z]{2,16}(?:-[a-z]{2,16}){0,5}|"
+            r"ownership=(?:claimed|none|retained|released)|"
+            r"status=(?:PASS|FAIL|BLOCKED|INCOMPLETE|UNAVAILABLE))",
+            expected_text)
+        human_text = (
+            re.fullmatch(r"[A-Za-z][A-Za-z0-9 ,.()_-]{2,95}",
+                         expected_text) is not None and
+            len(expected_text.split()) >= 3 and
+            re.search(r"[A-Za-z0-9]{18,}", expected_text) is None)
+        if structured:
+            kind = ("Missing expected marker" if condition == "not found in"
+                    else "Unexpected marker")
+            details = [f"{kind}: {expected_text}"]
+        elif human_text:
+            kind = ("Missing expected text" if condition == "not found in"
+                    else "Unexpected text")
+            details = [f"{kind}: {expected_text}"]
+        else:
+            details = [
+                "Assertion detail: expected value withheld; inspect private log"]
+        # Identify Bash nounset without exposing a variable name, command,
+        # raw actual stderr or any host/device/private identity.
+        if (condition == "not found in" and
+                re.search(r"\bunbound variable\b",
+                          traceback[assertion.end():][:2048])):
+            details.append("Observed shell error: unset variable (set -u)")
+        return details
+
+    comparison = re.search(
+        r"(?m)^AssertionError: (?:(?:'(?P<actual_state>PASS|FAIL|BLOCKED|"
+        r"INCOMPLETE|UNAVAILABLE)' != '(?P<expected_state>PASS|FAIL|"
+        r"BLOCKED|INCOMPLETE|UNAVAILABLE)')|"
+        r"(?P<actual_number>[0-9]{1,3}) != (?P<expected_number>[0-9]{1,3}))"
+        r"(?:$|[ \t])", traceback)
+    if comparison:
+        observed = (comparison.group("actual_state") or
+                    comparison.group("actual_number"))
+        expected = (comparison.group("expected_state") or
+                    comparison.group("expected_number"))
+        return [f"Assertion mismatch: observed {observed}; expected {expected}"]
+    if re.search(r"(?m)^AssertionError: False is not true(?:$|[ \t])",
+                 traceback):
+        return ["Assertion mismatch: observed false; expected true"]
+    return []
+
+
 def first_unittest_failure_details(output):
     """Return only safe first-cause facts for a failed rootless unittest.
 
@@ -2938,14 +2999,10 @@ def first_unittest_failure_details(output):
         r"(?:Error|Exception|Failure))(?::|$)", traceback)
     if exception:
         details.append("Exception: " + exception.group(1))
-    # Only a short, human-readable expected assertIn literal is safe to show.
-    # Never print the actual value: it may be an entire document or secret.
-    expected = re.search(
-        r"(?m)^AssertionError: '([A-Za-z][A-Za-z0-9 ,.()_-]{2,95})' "
-        r"not found in\b", traceback)
-    if expected and len(expected.group(1).split()) >= 3 and not re.search(
-            r"[A-Za-z0-9]{18,}", expected.group(1)):
-        details.append("Missing expected text: " + expected.group(1))
+    # Only derive assertion specifics from a recognized first error.
+    # Raw expected/actual payloads remain in the existing private log.
+    if exception and exception.group(1) == "AssertionError":
+        details.extend(safe_assertion_details(traceback))
     return details
 
 

@@ -3563,6 +3563,67 @@ class ReportContract(unittest.TestCase):
             ["Compiler location: dm-target.c:42:7"])
         self.assertEqual(runner.first_compiler_failure_location("PASS: clean\n"), [])
 
+    def test_failure_console_assertions_show_safe_expected_and_observed(self):
+        # Reproduce the originally hidden nullblk fixture nounset failure.
+        # The actual stderr may contain private paths and keys.
+        transcript = (
+            "test_rootless_failed_owned_partition_write_is_fail "
+            "(__main__.PrimaryLifecycleQualification."
+            "test_rootless_failed_owned_partition_write_is_fail) ... FAIL\n"
+            "======================================================================\n"
+            "FAIL: test_rootless_failed_owned_partition_write_is_fail "
+            "(__main__.PrimaryLifecycleQualification."
+            "test_rootless_failed_owned_partition_write_is_fail)\n"
+            "----------------------------------------------------------------------\n"
+            "Traceback (most recent call last):\n"
+            "  File \"/home/private/primary-lifecycle-nullblk-qualifier-test.py\", "
+            "line 2826, in test_rootless_failed_owned_partition_write_is_fail\n"
+            "AssertionError: 'phase=partition-table-write' not found in "
+            "'bash: line 20: DISK_ID: unbound variable\\n"
+            "SECRET_TOKEN=/home/private/hidden-device'\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 138 tests in 10.1s\n"
+            "FAILED (failures=1)\n"
+            "FAIL: rootless phase=primary-lifecycle-nullblk-qualifier-test.py "
+            "subtest=unavailable test=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=12 stage_s=16 line=99 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        details = runner.first_unittest_failure_details(transcript)
+        self.assertEqual(details, [
+            "First failing unittest: test_rootless_failed_owned_partition_write_is_fail",
+            "Location: primary-lifecycle-nullblk-qualifier-test.py:2826",
+            "Exception: AssertionError",
+            "Missing expected marker: phase=partition-table-write",
+            "Observed shell error: unset variable (set -u)",
+        ])
+        public_details = "\n".join(details)
+        for private_value in ("SECRET_TOKEN", "/home/private", "hidden-device",
+                              "DISK_ID"):
+            self.assertNotIn(private_value, public_details)
+
+        for error, expected in (
+            ("AssertionError: 'ownership=claimed' unexpectedly found in "
+             "'PRIVATE_ACTUAL'\n", ["Unexpected marker: ownership=claimed"]),
+            ("AssertionError: 'FAIL' != 'PASS'\n",
+             ["Assertion mismatch: observed FAIL; expected PASS"]),
+            ("AssertionError: 1 != 0\n",
+             ["Assertion mismatch: observed 1; expected 0"]),
+            ("AssertionError: False is not true\n",
+             ["Assertion mismatch: observed false; expected true"]),
+            ("AssertionError: 'phase=abcdef123456789secret' not found in "
+             "'/private/device token=0123456789secret'\n",
+             ["Assertion detail: expected value withheld; inspect private log"]),
+            ("AssertionError: 123456789 != 123456780\n", []),
+            ("AssertionError: /private/device token=secret\n", []),
+        ):
+            with self.subTest(error_category=expected):
+                self.assertEqual(runner.safe_assertion_details(error), expected)
+        self.assertEqual(runner.first_unittest_failure_details(
+            transcript.replace("FAILED (failures=1)", "OK")), [])
+        self.assertEqual(runner.first_unittest_failure_details(
+            transcript.replace("FAIL: rootless phase=", "PASS: rootless phase=")), [])
+
     def test_rootless_unittest_failure_names_safe_test(self):
         phase, reason = runner.failure_context(
             "FAIL: test_fixture_schema (__main__.Contract.test_fixture_schema)\n"

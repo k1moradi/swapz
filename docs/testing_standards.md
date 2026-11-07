@@ -1738,7 +1738,12 @@ marker, including `line=unavailable`; a malformed or exit-mismatched marker
 cannot borrow an earlier suite's apparent test identity. Nested Make exits and
 private errno text are not independently authenticated. Secondary diagnostic
 failures must never replace the original child failure. Read retained evidence
-locally, never publish it.
+locally, never publish it. On a failed `make test`, the console may also show
+the first unittest name, basename/line and strictly allowlisted assertion
+expectations (bounded phase/ownership/status markers, short values and fixed
+failure categories). The raw actual assertion value, paths, device identities,
+private stderr and full traceback remain only in the local private log; no
+additional detail is printed on a passing run or published in the JSON report.
 
 ### Native CI failure evidence contract
 
