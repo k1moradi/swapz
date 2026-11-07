@@ -8187,6 +8187,14 @@ qualification before live activation.
 The generated header must be written atomically and keep its timestamp when
 its contents are unchanged; repeated `make test` invocations must retain the
 existing incremental-build contract.
+The root Make-interface fixture must distinguish a clean-to-dirty provenance
+transition from ordinary dependency incrementality: the first production
+source edit changes the embedded clean bit and must rebuild both
+`swapzctl` and `dm-swapz.ko`. Once the dirty provenance is stable, a further
+userspace-only edit must rebuild `swapzctl` without rebuilding the module, while
+a shared kernel/userspace header edit must rebuild both. The fake Kbuild output
+must include the staged build-provenance header and the kernel header exercised
+by that regression so these checks model the actual artifact dependencies.
 
 The rootless package lifecycle regression must install a deterministic private
 build-provenance header into its sandbox, compile `swapzctl` with that header,

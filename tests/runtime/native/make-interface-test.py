@@ -562,7 +562,9 @@ class PublicMakeContract(unittest.TestCase):
                 ".PHONY: modules\n"
                 "modules:\n"
                 "\t@printf 'kbuild:%s\\n' '$(W)' >> '$(M)/../../order.log'\n"
-                "\t@cat '$(M)/dm-target.c' '$(M)/swapz-version.h' > '$(M)/.module-candidate'\n"
+                "\t@cat '$(M)/dm-target.c' '$(M)/authority.h' "
+                "'$(M)/swapz-build-info.h' '$(M)/swapz-version.h' "
+                "> '$(M)/.module-candidate'\n"
                 "\t@if ! cmp -s '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; "
                 "then cp '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; fi\n"
                 "\t@rm -f '$(M)/.module-candidate'\n")
@@ -1448,18 +1450,22 @@ class PublicMakeContract(unittest.TestCase):
 
             module = fixture / "build/kernel/experimental/dm-swapz.ko"
             staged = fixture / "build/kernel/experimental/dm-target.c"
+            staged_authority = fixture / "build/kernel/experimental/authority.h"
             staged_make = fixture / "build/kernel/experimental/Makefile"
             w1_module = fixture / "build/kernel/w1/dm-swapz.ko"
             w2_module = fixture / "build/kernel/w2/dm-swapz.ko"
             w1_staged = fixture / "build/kernel/w1/dm-target.c"
             w2_staged = fixture / "build/kernel/w2/dm-target.c"
+            w1_authority = fixture / "build/kernel/w1/authority.h"
+            w2_authority = fixture / "build/kernel/w2/authority.h"
             device = fixture / "build/tests/device-roundtrip"
             direct_probe = fixture / "build/tests/direct-write-probe"
             direct_read_probe = fixture / "build/tests/direct-read-probe"
             cli_out = fixture / "build/userspace/swapzctl"
             execute("initial", expect_clean=True)
             tracked = (module, w1_module, w2_module, staged,
-                       w1_staged, w2_staged, staged_make, device,
+                       w1_staged, w2_staged, staged_authority,
+                       w1_authority, w2_authority, staged_make, device,
                        direct_probe, direct_read_probe, cli_out)
             first = {p: p.stat().st_mtime_ns for p in tracked}
             execute("unchanged", expect_clean=True)
@@ -1473,10 +1479,28 @@ class PublicMakeContract(unittest.TestCase):
             execute("cli-source", expect_clean=False)
             self.assertGreater(cli_out.stat().st_mtime_ns, first[cli_out],
                                "MAKE_INCREMENTAL_PHASE=cli-source")
-            for p in (module, w1_module, w2_module, staged,
-                      w1_staged, w2_staged, staged_make, device, direct_probe,
-                      direct_read_probe):
+            # The first source edit changes the embedded clean bit from 1 to
+            # 0. Every provenance-bound artifact must be rebuilt for that
+            # transition, even when the edited source is userspace-only.
+            self.assertGreater(module.stat().st_mtime_ns, first[module],
+                               str(module))
+            self.assertIn("#define SWAPZ_BUILD_SOURCE_CLEAN 0",
+                          module.read_text())
+            for p in (w1_module, w2_module, staged, w1_staged, w2_staged,
+                      staged_authority, w1_authority, w2_authority,
+                      staged_make, device, direct_probe, direct_read_probe):
                 self.assertEqual(first[p], p.stat().st_mtime_ns, str(p))
+
+            second = {p: p.stat().st_mtime_ns for p in tracked}
+            time.sleep(0.03)
+            cli.write_text("int main(void) { return 2; }\n")
+            execute("cli-source-still-dirty", expect_clean=False)
+            self.assertGreater(cli_out.stat().st_mtime_ns, second[cli_out],
+                               "MAKE_INCREMENTAL_PHASE=cli-source-still-dirty")
+            for p in (module, w1_module, w2_module, staged, w1_staged,
+                      w2_staged, staged_authority, w1_authority, w2_authority,
+                      staged_make, device, direct_probe, direct_read_probe):
+                self.assertEqual(second[p], p.stat().st_mtime_ns, str(p))
 
             second = {p: p.stat().st_mtime_ns for p in tracked}
             authority_header = fixture / "src/kernel/authority.h"
@@ -1488,9 +1512,11 @@ class PublicMakeContract(unittest.TestCase):
             self.assertGreater(
                 cli_out.stat().st_mtime_ns, second[cli_out],
                 "MAKE_INCREMENTAL_PHASE=authority-header")
-            for p in (module, w1_module, w2_module, staged,
-                      w1_staged, w2_staged, staged_make, device, direct_probe,
-                      direct_read_probe):
+            for p in (module, w1_module, w2_module, staged_authority,
+                      w1_authority, w2_authority):
+                self.assertGreater(p.stat().st_mtime_ns, second[p], str(p))
+            for p in (staged, w1_staged, w2_staged, staged_make, device,
+                      direct_probe, direct_read_probe):
                 self.assertEqual(second[p], p.stat().st_mtime_ns, str(p))
 
             second = {p: p.stat().st_mtime_ns for p in tracked}
