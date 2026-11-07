@@ -4731,7 +4731,8 @@ class ReportContract(unittest.TestCase):
         transcript = (
             "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
             "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
-            "step=init-root errno=11 reason=root-inode-mismatch\n"
+            "step=init-root errno=11 reason=process-root-device-mismatch "
+            "peer_root=matches-process\n"
             "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
             "errno=11 error=Resource temporarily unavailable\n"
             "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: preparation blocked\n"
@@ -4739,22 +4740,72 @@ class ReportContract(unittest.TestCase):
         phase, reason = runner.failure_context(transcript)
         self.assertEqual(phase, "owned RAM primary lifecycle prepare")
         self.assertIn("mount_step=init-root", reason)
-        self.assertIn("mount_cause=root-inode-mismatch", reason)
+        self.assertIn("mount_cause=process-root-device-mismatch", reason)
+        self.assertIn("peer_root=matches-process", reason)
         self.assertIn("errno=11", reason)
+        other_peer = transcript.replace(
+            "peer_root=matches-process", "peer_root=differs-process")
+        self.assertIn(
+            "peer_root=differs-process",
+            runner.failure_context(other_peer)[1])
         for unsafe in (
                 transcript.replace("step=init-root", "step=/proc/SECRET"),
                 transcript.replace("step=init-root errno=11",
                                    "step=init-root errno=11 host=SECRET"),
-                transcript.replace("reason=root-inode-mismatch",
+                transcript.replace("reason=process-root-device-mismatch",
                                    "reason=PRIVATE_OVERRIDDEN"),
                 transcript.replace("step=init-root", "step=root-walk"),
+                transcript.replace("peer_root=matches-process",
+                                   "peer_root=private-identity"),
+                transcript.replace("reason=process-root-device-mismatch",
+                                   "reason=root-inode-mismatch"),
                 transcript.replace("errno=11 error=Resource",
                                    "errno=1 error=Resource")):
             with self.subTest(unsafe=unsafe[-100:]):
                 _, safe_reason = runner.failure_context(unsafe)
                 self.assertNotIn("mount_step=", safe_reason)
                 self.assertNotIn("mount_cause=", safe_reason)
+                self.assertNotIn("peer_root=", safe_reason)
                 self.assertNotIn("SECRET", safe_reason)
+
+    def test_loaded_root_device_disagreement_explains_safe_read_only_next_step(self):
+        from unittest import mock
+
+        header = (
+            "START_LOADED_PRIMARY_NULLBLK_LIFECYCLE=prepare\n"
+            "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+            "step=init-root errno=11 reason=process-root-device-mismatch "
+            "peer_root={}\n"
+            "PRIMARY_PREPARE=FAILED phase=cross-namespace-mount-inventory "
+            "errno=11 error=Resource temporarily unavailable\n"
+            "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: preparation blocked\n"
+        )
+        for peer_root in ("matches-process", "differs-process"):
+            with self.subTest(peer_root=peer_root):
+                report = {"schema": "swapz-test-results-v1", "stages": [],
+                          "benchmarks": {"sessions": [], "verdicts": {}}}
+                fake_process = FakeStreamingProcess(
+                    header.format(peer_root), returncode=2)
+                with mock.patch.object(runner.subprocess, "Popen",
+                                       return_value=fake_process), \
+                     contextlib.redirect_stdout(io.StringIO()) as console:
+                    self.assertEqual(
+                        runner.run_stage("Owned RAM smoke + mixed/QD pilot",
+                                         ["unused"], report, parse_bench=True),
+                        2)
+                stage = report["stages"][-1]
+                self.assertEqual(stage["status"], "BLOCKED")
+                self.assertIn(f"peer_root={peer_root}", stage["diagnostic"])
+                output = console.getvalue()
+                self.assertIn("Reason: BLOCKED_PRIMARY_NULLBLK_LIFECYCLE",
+                              output)
+                self.assertEqual(
+                    "Root comparison:" in output,
+                    peer_root == "matches-process")
+                self.assertEqual(
+                    "Safe next step:" in output,
+                    peer_root == "matches-process")
+                self.assertNotIn("/proc/", output)
 
     def test_loaded_failure_diagnostic_stays_with_current_phase(self):
         log = (

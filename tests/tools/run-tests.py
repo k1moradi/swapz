@@ -2571,11 +2571,16 @@ def failure_context(output, *, loaded=True, default_phase=None,
                 r"(?: reason=(init-root-statx-race|"
                 r"process-root-not-directory|init-root-not-directory|"
                 r"root-inode-mismatch|process-root-device-mismatch|"
-                r"init-root-device-mismatch))?",
+                r"init-root-device-mismatch))?"
+                r"(?: peer_root=(matches-process|differs-process))?",
                 line.strip())
             if (mount_match and mount_inventory_failure is None and
                     (mount_match.group(3) is None or
-                     mount_match.group(1) == "init-root")):
+                     mount_match.group(1) == "init-root") and
+                    (mount_match.group(4) is None or
+                     (mount_match.group(1) == "init-root" and
+                      mount_match.group(3) ==
+                      "process-root-device-mismatch"))):
                 mount_inventory_failure = mount_match.groups()
             prepare_match = re.fullmatch(
                 r"PRIMARY_PREPARE=FAILED phase=([a-z0-9-]{1,64}) "
@@ -2824,7 +2829,10 @@ def failure_context(output, *, loaded=True, default_phase=None,
                         if mount_inventory_failure[2] is not None:
                             reason += (
                                 f"; mount_cause={mount_inventory_failure[2]}")
-                    reason = reason[:220]
+                        if mount_inventory_failure[3] is not None:
+                            reason += (
+                                f"; peer_root={mount_inventory_failure[3]}")
+                    reason = reason[:256]
                 elif primary_lifecycle_command_failure is not None:
                     operation, coordinator_error = (
                         primary_lifecycle_command_failure)
@@ -3659,6 +3667,17 @@ def run_stage(title, command, result, *, parse_bench=False):
     if rc and "diagnostic" in record:
         print(f"        Failed during: {record['failed_phase']}", flush=True)
         print(f"        Reason: {record['diagnostic']}", flush=True)
+        if (record["failed_phase"] == "owned RAM primary lifecycle prepare"
+                and record["diagnostic"].endswith(
+                    "; mount_cause=process-root-device-mismatch; "
+                    "peer_root=matches-process")):
+            # Fixed, source-derived interpretation; never print live paths
+            # or device/inode values from a failed admission.
+            print("        Root comparison: coordinator and PID 1 root "
+                  "objects agree; self mountinfo root device differs "
+                  "from statx.", flush=True)
+            print("        Safe next step: inspect the host root-mount "
+                  "snapshot; keep primary admission blocked.", flush=True)
         # The complete child output stays private. Give the operator enough
         # source-bound first-error detail to diagnose without a manual log tail.
         details = (first_unittest_failure_details(output)

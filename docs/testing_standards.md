@@ -281,6 +281,14 @@ device, init-root device, or init-root statx observation predicate. The verifier
 and report parser must allowlist only these cause labels with `step=init-root`,
 reject injected host values and unrelated steps, and preserve the original
 admission refusal without exposing the compared inode or device values.
+For `reason=process-root-device-mismatch`, the fail-only marker must also
+classify the already-observed PID 1 root device as
+`peer_root=matches-process` or `peer_root=differs-process`. The distinction
+is a single-snapshot observation, not proof of a stable host layout or
+permission to relax admission. The `make test` stage summary must include
+that bounded root comparison and a non-mutating next step when PID 1 agrees
+with the coordinator but mountinfo disagrees. No additional host identifiers,
+syscalls, retries, or alternate test commands are authorized.
 
 
 The direct-C mount reader fixture must exercise the actual production reader

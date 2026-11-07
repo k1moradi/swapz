@@ -2437,6 +2437,14 @@ int main(int argc, char **argv)
                 f" reason={cause}\n" +
                 command_output(mount_initial, mount_eagain), True)
 
+        for peer_root in ("matches-process", "differs-process"):
+            check(
+                "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
+                "step=init-root errno=11 "
+                "reason=process-root-device-mismatch "
+                f"peer_root={peer_root}\n" +
+                command_output(mount_initial, mount_eagain), True)
+
         for output in (
             "",
             "PRIMARY_PREPARE=FAILED",
@@ -2458,6 +2466,21 @@ int main(int argc, char **argv)
                                  "step=init-root") + " reason=private-data\n" +
             command_output(mount_initial, mount_eagain),
             mount_marker + " reason=root-inode-mismatch\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=init-root") +
+            " reason=root-inode-mismatch peer_root=matches-process\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker + " peer_root=matches-process\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=init-root") +
+            " reason=process-root-device-mismatch peer_root=unknown\n" +
+            command_output(mount_initial, mount_eagain),
+            mount_marker.replace("step=root-revalidation",
+                                 "step=init-root") +
+            " reason=process-root-device-mismatch "
+            "peer_root=matches-process host=/private\n" +
             command_output(mount_initial, mount_eagain),
             mount_marker.replace("step=root-revalidation",
                                  "step=init-root") +

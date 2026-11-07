@@ -4098,6 +4098,7 @@ static int swapz_primary_mountinfo_full_root(
 	int saved_errno = 0;
 	const char *failure_step = "namespace-fd";
 	const char *failure_reason = NULL;
+	const char *failure_peer_root = NULL;
 
 	_Static_assert(sizeof(struct mount_id_request) == mount_id_request_bytes,
 		       "mount ID request ABI size changed");
@@ -4187,9 +4188,18 @@ static int swapz_primary_mountinfo_full_root(
 				failure_reason = "root-inode-mismatch";
 			else if (makedev(root_info.stx_dev_major,
 					 root_info.stx_dev_minor) !=
-				 expected_process_root_device)
+				 expected_process_root_device) {
 				failure_reason = "process-root-device-mismatch";
-			else
+				/* Inode equality was checked above. Report only
+				 * whether PID 1 and our root devices also agree.
+				 */
+				failure_peer_root =
+					root_info.stx_dev_major ==
+					    init_root_info.stx_dev_major &&
+					root_info.stx_dev_minor ==
+					    init_root_info.stx_dev_minor ?
+					"matches-process" : "differs-process";
+			} else
 				failure_reason = "init-root-device-mismatch";
 			errno = EAGAIN;
 			goto out;
@@ -4363,10 +4373,12 @@ out:
 		if (saved_errno == EAGAIN)
 			(void)fprintf(stderr,
 				      "SWAPZ_PRIMARY_MOUNT_INVENTORY_FAILURE "
-				      "step=%s errno=%d%s%s\n",
+				      "step=%s errno=%d%s%s%s%s\n",
 				      failure_step, saved_errno,
 				      failure_reason ? " reason=" : "",
-				      failure_reason ? failure_reason : "");
+				      failure_reason ? failure_reason : "",
+				      failure_peer_root ? " peer_root=" : "",
+				      failure_peer_root ? failure_peer_root : "");
 		errno = saved_errno;
 	}
 	return result;
