@@ -3641,6 +3641,95 @@ class ReportContract(unittest.TestCase):
                     "Package fixture watchdog:",
                     "\n".join(runner.first_unittest_failure_details(unsafe)))
 
+    def test_failure_console_reports_safe_markers_and_crash_context(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        fixed_mismatch = (
+            "AssertionError: 'FAIL: unittest identity withheld' != "
+            "'RuntimeError: [private exception detail omitted]'")
+        self.assertEqual(runner.safe_assertion_details(fixed_mismatch), [
+            "Assertion mismatch: observed FAIL: unittest identity withheld; "
+            "expected RuntimeError: [private exception detail omitted]"])
+        self.assertEqual(runner.safe_assertion_details(
+            "AssertionError: 'PRIVATE_HOST_VALUE' != "
+            "'RuntimeError: [private exception detail omitted]'"), [])
+
+        method = "test_real_sigkill_phases_block_both_commands_not_cleanup"
+        phase = "primary-lifecycle-audit-test.py"
+        context = "(action='uninstall', phase='dkms-removed')"
+        crash = (
+            f"{method} (__main__.PackageCrashToPrimaryAdmissionTest.{method}) "
+            f"{context} ... ERROR\n"
+            "======================================================================\n"
+            f"ERROR: {method} "
+            f"(__main__.PackageCrashToPrimaryAdmissionTest.{method}) "
+            f"{context}\n"
+            "Traceback (most recent call last):\n"
+            f'  File "/PRIVATE/{phase}", line 1722, in {method}\n'
+            "subprocess.TimeoutExpired: PRIVATE_SUBPROCESS_COMMAND\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 4 tests in 10s\n"
+            "FAILED (errors=1)\n"
+            f"FAIL: rootless phase={phase} subtest=unavailable test={method} "
+            "exit=1 reason=unittest_error phase_s=10 stage_s=16 line=90 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        expected = [
+            "First failing unittest: " + method,
+            "Subtest: action=uninstall phase=dkms-removed",
+            "Location: primary-lifecycle-audit-test.py:1722",
+            "Exception: subprocess.TimeoutExpired",
+        ]
+        self.assertEqual(runner.first_unittest_failure_details(crash), expected)
+
+        diagnostic_method = (
+            "test_unstructured_exceptions_and_hostile_unittest_names_stay_private")
+        diagnostic_phase = "ci-failure-diagnostics-test.py"
+        private = (
+            f"{diagnostic_method} "
+            f"(__main__.FirstFailureDelivery.{diagnostic_method}) ... FAIL\n"
+            "======================================================================\n"
+            f"FAIL: {diagnostic_method} "
+            f"(__main__.FirstFailureDelivery.{diagnostic_method})\n"
+            "Traceback (most recent call last):\n"
+            f'  File "/PRIVATE/{diagnostic_phase}", line 205, '
+            f'in {diagnostic_method}\n'
+            + fixed_mismatch + "\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 20 tests in 1s\n"
+            "FAILED (failures=1)\n"
+            f"FAIL: rootless phase={diagnostic_phase} "
+            "subtest=unavailable test=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=1 stage_s=2 line=12 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n"
+        )
+        self.assertIn(
+            "Assertion mismatch: observed FAIL: unittest identity withheld; "
+            "expected RuntimeError: [private exception detail omitted]",
+            runner.first_unittest_failure_details(private))
+        for transcript, expected_detail in (
+            (crash, "Subtest: action=uninstall phase=dkms-removed"),
+            (private, "Assertion mismatch: observed FAIL: unittest identity withheld; "
+             "expected RuntimeError: [private exception detail omitted]"),
+        ):
+            with self.subTest(expected_detail=expected_detail):
+                console = io.StringIO()
+                with patch.object(runner.subprocess, "run",
+                                  return_value=SimpleNamespace(
+                                      stdout=transcript, returncode=1)), \
+                        patch.object(runner,
+                                     "retain_direct_rootless_first_failure"), \
+                        contextlib.redirect_stdout(console):
+                    self.assertEqual(runner.run_stage(
+                        "Native and rootless contracts", ["synthetic"],
+                        {"stages": []}), 1)
+                self.assertIn("        " + expected_detail,
+                              console.getvalue())
+                self.assertNotIn("/PRIVATE/", console.getvalue())
+                self.assertNotIn("PRIVATE_SUBPROCESS_COMMAND",
+                                 console.getvalue())
+
     def test_failure_console_assertions_show_safe_expected_and_observed(self):
         # Reproduce the originally hidden nullblk fixture nounset failure.
         # The actual stderr may contain private paths and keys.

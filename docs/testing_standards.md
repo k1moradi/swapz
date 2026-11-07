@@ -1956,7 +1956,14 @@ failures must never replace the original child failure. Read retained evidence
 locally, never publish it. On a failed `make test`, the console may also show
 the first unittest name, basename/line and strictly allowlisted assertion
 expectations (bounded phase/ownership/status markers, short values and fixed
-failure categories). The raw actual assertion value, paths, device identities,
+failure categories). Source-matched package crash subtests additionally
+report only the finite install/uninstall action and durable checkpoint phase,
+and name subprocess.TimeoutExpired by class without showing its command.
+Comparisons of two exact fixed sanitized markers (for example, a withheld
+unittest identity versus a private-exception omission marker) show both
+observed and expected fixed states without exposing arbitrary child text.
+Focused rootless regressions exercise the actual operator console for both
+failure types and require private operands to stay withheld. The raw actual assertion value, paths, device identities,
 private stderr and full traceback remain only in the local private log; no
 additional detail is printed on a passing run or published in the JSON report.
 For an authenticated first `PackageLifecycle` ERROR whose traceback carries

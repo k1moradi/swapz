@@ -2922,6 +2922,26 @@ def safe_assertion_details(traceback):
             details.append("Observed shell error: unset variable (set -u)")
         return details
 
+    # Only compare the fixed, already-sanitized status markers. Anything
+    # child-authored or otherwise unrecognized stays in the private log.
+    fixed_comparison = re.search(
+        r"(?m)^AssertionError: '([^'\r\n]{1,96})' != '([^'\r\n]{1,96})'$",
+        traceback)
+    allowed_markers = (
+        "FAIL: unittest identity withheld",
+        "ERROR: unittest identity withheld",
+        "AssertionError: [private exception detail omitted]",
+        "RuntimeError: [private exception detail omitted]",
+        "ValueError: [private exception detail omitted]",
+        "KeyError: [private exception detail omitted]",
+    )
+    if (fixed_comparison is not None and
+            all(value in allowed_markers
+                for value in fixed_comparison.groups())):
+        return [
+            "Assertion mismatch: observed " + fixed_comparison.group(1)
+            + "; expected " + fixed_comparison.group(2)]
+
     comparison = re.search(
         r"(?m)^AssertionError: (?:(?:'(?P<actual_state>PASS|FAIL|BLOCKED|"
         r"INCOMPLETE|UNAVAILABLE)' != '(?P<expected_state>PASS|FAIL|"
@@ -2982,6 +3002,18 @@ def first_unittest_failure_details(output):
         first_header.group(0))
     if subtest:
         details[0] += f" [naming_policy={subtest.group(1)}]"
+    # Emit only source-defined action/checkpoint names, never arbitrary
+    # subTest() values that may contain a host path or device identity.
+    crash_context = re.search(
+        r" \(action='(install|uninstall)', phase='"
+        r"(source-created|module-promoted|cli-published|dkms-removed|"
+        r"systemd-reload-complete|committed)'\)$",
+        first_header.group(0))
+    if (first_header.group(3) == "PackageCrashToPrimaryAdmissionTest"
+            and crash_context):
+        details.append(
+            f"Subtest: action={crash_context.group(1)} "
+            f"phase={crash_context.group(2)}")
 
     following = next((
         header.start() for header in headers
@@ -2996,6 +3028,7 @@ def first_unittest_failure_details(output):
             details.append(f"Location: {basename}:{location.group(2)}")
     exception = re.search(
         r"(?m)^(AssertionError|PackageInvocationTimeout|"
+        r"subprocess[.]TimeoutExpired|TimeoutExpired|"
         r"[A-Za-z][A-Za-z0-9_]{0,60}"
         r"(?:Error|Exception|Failure))(?::|$)", traceback)
     if exception:
