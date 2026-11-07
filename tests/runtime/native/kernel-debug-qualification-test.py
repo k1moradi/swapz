@@ -1607,7 +1607,9 @@ exit 0
         (fake_headers / "fake-build.py").write_text(mock_kbuild, encoding="utf-8")
 
         stage_names = {"W=1": "w1", "W=2": "w2", "": "experimental"}
-        def build(warning_level: str, *, explicit: bool = True) -> subprocess.CompletedProcess[str]:
+        def build(
+                warning_level: str, *, explicit: bool = True
+        ) -> subprocess.CompletedProcess[str]:
             command = ["make", "-s", "--no-print-directory", "-C",
                        str(kernel_source), f"KDIR={fake_headers}"]
             if warning_level:
@@ -1639,23 +1641,39 @@ exit 0
                 (image(warning_level).parent / "compile-count").read_text(), "1")
             candidate_images[warning_level] = first_image
 
-        # Source, included headers and canonical release must reach Kbuild.
+        # Independently invalidate candidates for each changed tracked input.
+        def require_new_candidate(phase: str) -> None:
+            for warning_level in stage_names:
+                previous_image = candidate_images[warning_level]
+                current_image = run_success(warning_level)
+                self.assertNotEqual(
+                    hashlib.sha256(current_image).hexdigest(),
+                    hashlib.sha256(previous_image).hexdigest(),
+                    f"phase={phase} variant={stage_names[warning_level]} "
+                    "stale candidate digest")
+                candidate_images[warning_level] = current_image
+
         original_version = (kernel_source / "VERSION").read_text().strip()
         match = re.fullmatch(r"3\.0\.0-alpha\.(\d+)", original_version)
         self.assertIsNotNone(match)
         next_version = f"3.0.0-alpha.{int(match.group(1)) + 1}"
+        stamp(SOURCE_SHA, 0)  # A dirty source must not claim clean metadata.
+        require_new_candidate("dirty-provenance")
+
         source.write_text('#include "dummy.h"\nint revision = 2;\n',
                           encoding="utf-8")
-        stamp(SOURCE_SHA, 0)  # A dirty source must not claim clean metadata.
+        require_new_candidate("source-c")
+
         included_header.write_text("#define DUMMY_REVISION 2\n", encoding="utf-8")
+        require_new_candidate("included-header")
+
         (kernel_source / "VERSION").write_text(next_version + "\n", encoding="utf-8")
+        require_new_candidate("canonical-version")
         for warning_level in stage_names:
-            current_image = run_success(warning_level)
-            self.assertNotEqual(current_image, candidate_images[warning_level])
             self.assertIn(f'SWAPZ_ALPHA_VERSION "{next_version}"'.encode(),
-                          current_image)
-            self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 0', current_image)
-            candidate_images[warning_level] = current_image
+                          candidate_images[warning_level])
+            self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 0',
+                          candidate_images[warning_level])
         blocked, reason = self.verify(module_evidence={
             "source_sha": SOURCE_SHA, "source_clean": "0",
             "sha256": MODULE_SHA256, "vermagic": KERNEL_RELEASE + " SMP",
