@@ -9619,8 +9619,14 @@ successful uninstall status, final absent state and empty uninstall journal.
 The wider compressed budget allows multiple durable transaction boundaries
 without weakening unrelated package tests; it is a test watchdog, not a
 production latency promise. The independently one-second nonterminating
-fixture must still SIGKILL its process group, and post-kill reaping is itself
-bounded to eight seconds so watchdog cleanup cannot wait indefinitely.
+fixture must still SIGKILL its process group, and post-kill direct-shell reaping
+is itself bounded to eight seconds so watchdog cleanup cannot wait indefinitely.
+Reap that direct shell with a bounded wait before depending on stdout/stderr EOF:
+a descendant blocked in uninterruptible filesystem I/O may retain inherited
+pipes after SIGKILL is pending, and pipe drainage must not turn a reaped shell
+into an apparent reap timeout. A synthetic test seam must keep a descendant pipe
+open while the direct shell is killed and prove that the shell is still reaped
+within the bound; the seam must clean its synthetic descendant afterward.
 Compressed SIGKILL recovery must carry its codec attribution into replay so
 the recovery invocation receives the same finite compressed-DKMS budget.
 Short-deadline SIGKILL recovery, failed transaction exits, mixed compressed-

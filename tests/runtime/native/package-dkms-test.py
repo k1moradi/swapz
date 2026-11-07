@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "build/tests/package-sandbox"
@@ -558,14 +559,19 @@ esac
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            # Reap the direct package shell independently of pipe drainage.
+            # A descendant blocked in uninterruptible filesystem I/O can retain
+            # inherited stdout/stderr after SIGKILL is pending; communicate()
+            # would wait for that pipe EOF before it reaches wait().
             try:
-                process.communicate(
+                process.wait(
                     timeout=PACKAGE_PROCESS_GROUP_REAP_TIMEOUT_SECONDS)
                 disposition = f"reaped_exit_{process.returncode}"
             except subprocess.TimeoutExpired:
                 disposition = "kill_sent_reap_timeout"
+            finally:
                 for stream in (process.stdout, process.stderr):
-                    if stream is not None:
+                    if stream is not None and not stream.closed:
                         stream.close()
             raise PackageInvocationTimeout(
                 action, codec_variant, timeout, budget_reason,
@@ -698,6 +704,56 @@ esac
         # Exceed the child's entire sleep even if startup reached the deadline.
         time.sleep(2.1)
         self.assertFalse(late_marker.exists(), "timed-out descendant survived")
+
+    def test_timeout_reaps_shell_without_waiting_for_descendant_pipe_eof(self):
+        # Model a descendant whose inherited pipe remains open after the direct
+        # shell receives SIGKILL. Direct-shell reaping must not depend on EOF.
+        child_pid_file = self.home / "stuck-pipe-child.pid"
+        fixture = self.home / "stuck-pipe-fixture.sh"
+        fixture.write_text(
+            "#!/bin/sh\n"
+            "python3 -c 'import time; time.sleep(30)' &\n"
+            "printf '%s\\n' \"$!\" > "
+            "\"$SWAPZ_PACKAGE_TEST_ROOT/stuck-pipe-child.pid\"\n"
+            "while :; do sleep 30; done\n")
+        original_script = self.script
+        child_pid = None
+
+        def kill_direct_shell_only(process_group_id, requested_signal):
+            # Test seam: leave the descendant alive with inherited pipes open.
+            os.kill(process_group_id, requested_signal)
+
+        try:
+            self.script = fixture
+            start_time = time.monotonic()
+            with mock.patch.object(
+                    os, "killpg", side_effect=kill_direct_shell_only):
+                with self.assertRaises(PackageInvocationTimeout) as caught:
+                    self.invoke("install", timeout=1)
+            elapsed = time.monotonic() - start_time
+            diagnostic = str(caught.exception)
+            self.assertLess(
+                elapsed, PACKAGE_PROCESS_GROUP_REAP_TIMEOUT_SECONDS,
+                "direct-shell reap waited for descendant pipe EOF")
+            self.assertIn(
+                "final_process_disposition=reaped_exit_-9", diagnostic)
+            self.assertIn(
+                "original_process_exit_status=still_running", diagnostic)
+            self.assertIn("fixture_phase=command_watchdog", diagnostic)
+            self.assertIn(
+                "recovery_disposition=journal_not_assessed", diagnostic)
+            self.assertNotIn(str(self.home), diagnostic)
+        finally:
+            self.script = original_script
+            if child_pid_file.exists():
+                child_pid_text = child_pid_file.read_text().strip()
+                if child_pid_text.isdecimal():
+                    child_pid = int(child_pid_text)
+            if child_pid is not None:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_package_exit_before_pipe_drain_preserves_original_failure(self):
         # A child retaining a pipe must not hide the package shell's exit 74.
