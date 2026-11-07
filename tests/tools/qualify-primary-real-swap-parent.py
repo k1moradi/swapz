@@ -44,6 +44,9 @@ PHYSICAL_CONTROL_INPUT_PATHS = (
     "docs/handoff/production-readiness.json",
 )
 MAX_LINE_BYTES = 4096
+# Linux 6.5 added SO_PEERPIDFD. Python may not expose the constant even when
+# the running kernel supports it; x86_64 and arm64 use the generic UAPI value.
+SO_PEERPIDFD = getattr(socket, "SO_PEERPIDFD", 77)
 MAX_COMMIT_SOURCE_INPUT_BYTES = 16 * 1024 * 1024
 MAX_CYCLES = 4
 SAFE_COMMAND_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
@@ -570,6 +573,56 @@ def _owned_peer_process_lineage(
     raise _peer_identity_refusal(phase, child, "unrelated_peer_run")
 
 
+def _connection_peer_pidfd(
+        connection: socket.socket, child: subprocess.Popen,
+        phase: str) -> int:
+    """Pin the process object that actually created the accepted connection."""
+    try:
+        peer_pidfd = connection.getsockopt(socket.SOL_SOCKET, SO_PEERPIDFD)
+    except OSError as exc:
+        raise _peer_identity_refusal(
+            phase, child, "unavailable_connection_peer_pidfd",
+            exc.errno if exc.errno is not None else "none") from exc
+    if type(peer_pidfd) is not int or peer_pidfd < 0:
+        raise _peer_identity_refusal(
+            phase, child, "malformed_connection_peer_pidfd")
+    return peer_pidfd
+
+
+def _require_connection_peer_pidfd_alive(
+        peer_pidfd: int, child: subprocess.Popen, phase: str) -> None:
+    """Require the kernel-pinned connection peer to still be live."""
+    if type(peer_pidfd) is not int or peer_pidfd < 0:
+        raise _peer_identity_refusal(
+            phase, child, "malformed_connection_peer_pidfd")
+    try:
+        os.fstat(peer_pidfd)
+        poller = select.poll()
+        poller.register(
+            peer_pidfd, select.POLLIN | select.POLLHUP | select.POLLERR)
+        events = poller.poll(0)
+    except OSError as exc:
+        raise _peer_identity_refusal(
+            phase, child, "unavailable_connection_peer_pidfd",
+            exc.errno if exc.errno is not None else "none") from exc
+    if any(event_mask & select.POLLNVAL for _descriptor, event_mask in events):
+        raise _peer_identity_refusal(
+            phase, child, "unavailable_connection_peer_pidfd")
+    if events:
+        raise _peer_identity_refusal(
+            phase, child, "exited_connection_peer")
+
+
+def _owned_live_connection_peer_lineage(
+        child: subprocess.Popen, peer_pid: int, peer_pidfd: int,
+        phase: str) -> tuple[tuple[int, int, int], ...]:
+    """Bracket numeric /proc lineage with the connection peer's kernel pin."""
+    _require_connection_peer_pidfd_alive(peer_pidfd, child, phase)
+    lineage = _owned_peer_process_lineage(child, peer_pid, phase)
+    _require_connection_peer_pidfd_alive(peer_pidfd, child, phase)
+    return lineage
+
+
 def _serve_admission(server: socket.socket,
                      child: subprocess.Popen,
                      validated_source: str,
@@ -604,6 +657,7 @@ def _serve_admission(server: socket.socket,
         raise failure from exc
 
     admission_boundary = "authenticated_channel"
+    peer_pidfd: int | None = None
     try:
         with connection:
             # A connected but silent peer must not hold admission indefinitely.
@@ -642,8 +696,10 @@ def _serve_admission(server: socket.socket,
                 _stop_unadmitted_child_preserving(child, failure)
                 raise failure
             try:
-                owned_peer_lineage = _owned_peer_process_lineage(
-                    child, peer_pid, admission_boundary)
+                peer_pidfd = _connection_peer_pidfd(
+                    connection, child, admission_boundary)
+                owned_peer_lineage = _owned_live_connection_peer_lineage(
+                    child, peer_pid, peer_pidfd, admission_boundary)
             except Blocked as exc:
                 print("BLOCKED_PRIMARY_REAL_SWAP_PARENT=" + str(exc),
                       file=sys.stderr)
@@ -684,15 +740,17 @@ def _serve_admission(server: socket.socket,
                             file=sys.stderr)
                         break
                     try:
-                        if _owned_peer_process_lineage(
-                                child, peer_pid, expected_phase) != owned_peer_lineage:
+                        if _owned_live_connection_peer_lineage(
+                                child, peer_pid, peer_pidfd,
+                                expected_phase) != owned_peer_lineage:
                             raise _peer_identity_refusal(
                                 expected_phase, child, "changed_peer_run")
                         _check_git_source(validated_source, git)
                         # Source queries may block: reprove process identity before
                         # any response can authorize or classify this phase.
-                        if _owned_peer_process_lineage(
-                                child, peer_pid, expected_phase) != owned_peer_lineage:
+                        if _owned_live_connection_peer_lineage(
+                                child, peer_pid, peer_pidfd,
+                                expected_phase) != owned_peer_lineage:
                             raise _peer_identity_refusal(
                                 expected_phase, child, "changed_peer_run")
                     except Blocked as exc:
@@ -733,6 +791,22 @@ def _serve_admission(server: socket.socket,
             f"{type(exc).__name__}:"
             f"errno={exc.errno if isinstance(exc, OSError) and exc.errno is not None else 'none'}",
             file=sys.stderr)
+    finally:
+        if peer_pidfd is not None:
+            try:
+                os.close(peer_pidfd)
+            except OSError as exc:
+                parent_rejected = True
+                print(
+                    "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+                    "source_admission_peer_identity:"
+                    "phase=peer_pidfd_cleanup:"
+                    "expected=owned_peer_pidfd_closed:"
+                    "observed=close_failed:"
+                    f"errno={exc.errno if exc.errno is not None else 'none'}:"
+                    "authorization=BLOCKED:"
+                    "next=inspect_child_ownership_read_only",
+                    file=sys.stderr)
 
     parent_stopped_child = False
     parent_cleaned_owned_processes = False

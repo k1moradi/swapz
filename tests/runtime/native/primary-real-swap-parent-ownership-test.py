@@ -80,16 +80,33 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
 
     def run_exchange(self, peer_pid, requests, *, child=None,
                      git_check=None, peer_uid=0,
-                     peer_credentials_error=None):
+                     peer_credentials_error=None, peer_pidfd_error=None,
+                     peer_pidfd_exited=False):
         stream = self.Stream(requests)
         connection = mock.MagicMock()
-        # Kernel-returned SO_PEERCRED is modeled, not spoofed on a live socket.
-        # No real root peer or privileged operation is ever created.
-        if peer_credentials_error is None:
-            connection.getsockopt.return_value = struct.pack(
-                "3i", peer_pid, peer_uid, 0)
-        else:
-            connection.getsockopt.side_effect = peer_credentials_error
+        # Kernel-returned peer identity is modeled, not spoofed on a live
+        # socket. A pipe supplies only pidfd-like poll lifetime semantics.
+        peer_pidfd, peer_liveness_writer = os.pipe()
+        if peer_pidfd_exited:
+            os.close(peer_liveness_writer)
+            peer_liveness_writer = None
+        peer_pidfd_handed_off = False
+
+        def get_socket_option(level, option, *_args):
+            nonlocal peer_pidfd_handed_off
+            self.assertEqual(level, socket.SOL_SOCKET)
+            if option == socket.SO_PEERCRED:
+                if peer_credentials_error is not None:
+                    raise peer_credentials_error
+                return struct.pack("3i", peer_pid, peer_uid, 0)
+            if option == parent.SO_PEERPIDFD:
+                if peer_pidfd_error is not None:
+                    raise peer_pidfd_error
+                peer_pidfd_handed_off = True
+                return peer_pidfd
+            raise AssertionError(f"unexpected socket option {option}")
+
+        connection.getsockopt.side_effect = get_socket_option
         connection.makefile.return_value = stream
         server = mock.Mock()
         server.accept.return_value = connection, None
@@ -99,15 +116,25 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             child.poll.return_value = None
             child.wait.return_value = 2
         stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr), mock.patch.object(
-                parent, "_check_git_source", side_effect=git_check) as check:
-            try:
-                result = parent._serve_admission(
-                    server, child, self.SOURCE, "/usr/bin/git",
-                    self.ORACLE_DIGEST, self.source_hashes,
-                    self.HELPER_DIGEST, 2)
-            except parent.Blocked:
-                result = 2
+        try:
+            with contextlib.redirect_stderr(stderr), mock.patch.object(
+                    parent, "_check_git_source", side_effect=git_check) as check:
+                try:
+                    result = parent._serve_admission(
+                        server, child, self.SOURCE, "/usr/bin/git",
+                        self.ORACLE_DIGEST, self.source_hashes,
+                        self.HELPER_DIGEST, 2)
+                except parent.Blocked:
+                    result = 2
+        finally:
+            if peer_liveness_writer is not None:
+                os.close(peer_liveness_writer)
+            if peer_pidfd_handed_off:
+                with self.assertRaises(OSError) as closed:
+                    os.fstat(peer_pidfd)
+                self.assertEqual(closed.exception.errno, errno.EBADF)
+            else:
+                os.close(peer_pidfd)
         return result, stream.responses(), stderr.getvalue(), child, check
 
     def test_unrelated_root_uid_peer_cannot_receive_initial_approval(self):
@@ -265,6 +292,40 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             self.assertIn(field, diagnostic)
         self.assertNotIn(private_error, diagnostic)
         self.assertNotIn("physical_admission_identity:", diagnostic)
+        child.terminate.assert_called_once_with()
+        check.assert_not_called()
+
+    def test_peer_pidfd_error_preserves_original_errno(self):
+        private_error = "private-synthetic-peer-pidfd-location"
+        result, responses, diagnostic, child, check = self.run_exchange(
+            os.getpid(), [self.request("initial")],
+            peer_pidfd_error=OSError(errno.ENOPROTOOPT, private_error))
+        self.assertEqual(result, 2)
+        self.assertFalse(responses)
+        for field in (
+                "source_admission_peer_identity:phase=authenticated_channel",
+                "observed=unavailable_connection_peer_pidfd",
+                f"errno={errno.ENOPROTOOPT}", "authorization=BLOCKED",
+                "next=inspect_child_ownership_read_only"):
+            self.assertIn(field, diagnostic)
+        self.assertNotIn(private_error, diagnostic)
+        child.terminate.assert_called_once_with()
+        check.assert_not_called()
+
+    def test_stale_so_peercred_pid_cannot_rebind_live_replacement(self):
+        # The numeric PID and /proc lineage still look live, modeling reuse
+        # after the original connection peer exited. The peer pidfd must win.
+        result, responses, diagnostic, child, check = self.run_exchange(
+            os.getpid(), [self.request("initial")],
+            peer_pidfd_exited=True)
+        self.assertEqual(result, 2)
+        self.assertFalse(responses)
+        for field in (
+                "source_admission_peer_identity:phase=authenticated_channel",
+                "observed=exited_connection_peer", "errno=none",
+                "authorization=BLOCKED",
+                "next=inspect_child_ownership_read_only"):
+            self.assertIn(field, diagnostic)
         child.terminate.assert_called_once_with()
         check.assert_not_called()
 

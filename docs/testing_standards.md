@@ -728,8 +728,14 @@ The same suite must model /proc states independently of cached socket peer
 credentials: an otherwise matching live peer-to-launch lineage must pass the
 process-ownership predicate, while Z, X and x states for either peer or launch
 ancestor must report `observed=exited_peer_process`, `errno=none` and
-`authorization=BLOCKED` before source verification. This does not attest to
-the message writer.
+`authorization=BLOCKED` before source verification. A separate synthetic
+stale-credential control must keep the numeric SO_PEERCRED PID and /proc
+lineage apparently live while the kernel-peer lifetime is ended; the parent
+must refuse with `observed=exited_connection_peer` before reading a request
+or checking source. Failure to obtain `SO_PEERPIDFD` must retain its numeric
+errno and BLOCK rather than fall back to PID/start-tick inspection, and the
+fixture must prove the handed-off peer descriptor is closed. These controls do
+not attest to the message writer.
 A rootless descendant that ignores SIGTERM is a required negative control: direct-
 child-only cleanup must not be accepted as complete. Exit observation for a
 marked session leader must use a non-reaping wait boundary until group-wide

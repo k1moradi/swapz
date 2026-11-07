@@ -724,11 +724,17 @@ owned state. Any source change after a granted phase remains a separate
 parent-owned admission boundary, not a reason to invent `cycle-N-start`. Recovery after such a refusal requires owner review
 and existing coordinator paths, never automatic authorization of another
 device. The parent must also reject an exited/zombie
-process at every hop of a purported live privileged peer lineage; matching
-PID, start ticks, session and cached connection credentials are insufficient
-to authenticate a departed sender or a transferred descriptor. Classify this
-as process-ownership BLOCKED, distinct from source-provenance failure and the
-still-missing independent physical-card/reader proof.
+process at every hop of a purported live privileged peer lineage. For the
+accepted AF_UNIX connection, retain Linux `SO_PEERPIDFD` and bracket each
+numeric /proc lineage proof with that kernel-pinned peer's liveness so cached
+`SO_PEERCRED` cannot be rebound to a reused PID. An unavailable peer pidfd
+is process-ownership BLOCKED with its original errno; it is not a fallback to
+numeric credentials or a project-wide minimum-kernel claim. Close the owned
+pidfd on every exit path. Matching PID, start ticks, session and cached
+connection credentials are still insufficient to authenticate a transferred
+descriptor or its later request writer. Classify this as process-ownership
+BLOCKED, distinct from source-provenance failure and the still-missing
+independent physical-card/reader proof.
 
 Primary userspace mapper sizing must exactly match kernel authority admission.
 After SWZ-header removal and 1MiB segment rounding, keep
