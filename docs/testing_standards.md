@@ -907,17 +907,30 @@ next action. The real-swap helper must recheck the admitted selector inode
 **after** independent target inspection, preserving the first descriptor I/O
 errno on cleanup failure. Revalidate the same source-bound partition, physical
 parent and geometry after each completed cycle and again at final publication.
-The source-bound partition comparison must include the committed target
-`major_minor` as well as PARTUUID and byte geometry; matching only the live
-plan, parent, PARTUUID and size is insufficient. A rootless injected-control
-fixture must execute the real target verifier and refuse a source/live target
-device mismatch, stale geometry, live-name replacement and failed identity read
-before the simulated primary mutation; unchanged source/live identity remains
-the positive control. The verifier must open the resolved target exactly once
-with `O_NOFOLLOW`, derive dev_t and geometry from that caller-owned descriptor,
-retain it across topology/source-policy inspection, then recheck descriptor
-geometry and the live PARTUUID resolution before close. A close failure must
-not replace an earlier identity/geometry errno. This remains snapshot-only
+Historical authorized-target `major_minor` and `observed_path` are
+observational, not live identity: a renumbered `/dev/sdb1` may pass the
+*rootless verifier* only when the same source-bound reader serial, exclusive
+opened target descriptor, live sole-partition/parent topology and exact
+geometry prove the independently authorized target. A matching PARTUUID,
+model, size or historical pathname alone must never admit a different disk or
+claim physical-card uniqueness. If the historical snapshot lacks a stable
+reader binding, the attempt BLOCKS; synthetic serial agreement is not physical
+PASS. Rootless injected-control fixtures must use only intercepted descriptor,
+topology and subprocess operations. They must exercise legitimate renumbering,
+duplicate PARTUUID, missing/mismatched reader identity, substituted target
+or parent block inode (even with unchanged dev_t), changed target geometry,
+live-name replacement, campaign identity drift and first I/O errno retained
+over descriptor close errors. All rejected identities must reach BLOCKED with
+zero mocked prepare/start/write calls. The verifier must open the resolved
+target once with `O_NOFOLLOW|O_EXCL`, derive device and geometry from the
+opened target descriptor, open and bind the parent block descriptor separately,
+and recheck both opened and named inodes after topology/source-policy
+inspection. A close failure must not replace an earlier identity/geometry
+errno. Source and target authorization must also be refreshed after a
+successful prepare and before start: revoked admission BLOCKS start, but the
+diagnostic explicitly says already-prepared owned state may have changed.
+Recovery uses only the existing coordinator-owned path after review; retain
+completed-cycle evidence on later refusal. This remains snapshot-only
 protection: it does not make the final check-to-mutation interval atomic or
 distinguish device-number reuse by a different physical card/reader.
 A rootless two-cycle control must reject simulated post-cycle selector drift

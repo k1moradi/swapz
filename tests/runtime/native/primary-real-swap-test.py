@@ -43,9 +43,12 @@ ORACLE_SPEC.loader.exec_module(oracle)
 
 
 class FakeStat:
-    def __init__(self, major=252, minor=1, block=True):
+    def __init__(self, major=252, minor=1, block=True, *, inode=None):
         self.st_mode = stat.S_IFBLK | 0o600 if block else stat.S_IFREG | 0o600
         self.st_rdev = os.makedev(major, minor) if block else 0
+        self.st_dev = 5
+        self.st_ino = 100 + minor if inode is None else inode
+        self.st_ctime_ns = 12345
 
 
 class PrimaryRealSwapContracts(unittest.TestCase):
@@ -559,8 +562,12 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         target_size_bytes = 124_787_884_032
         geometry = qualify.maximum_primary_geometry(target_size_bytes)
         target_descriptor = 731
+        parent_descriptor = 732
 
-        def synthetic_inputs(live_minor, authorized_minor):
+        def synthetic_inputs(live_minor, authorized_minor, renumbered=False):
+            live_target_path = "/dev/sdb1" if renumbered else "/dev/synthetic1"
+            live_parent_path = "/dev/sdb" if renumbered else "/dev/synthetic"
+            live_parent_minor = 16 if renumbered else 0
             plan = {
                 "target_config_read": True,
                 "target_device_preflight": True,
@@ -578,7 +585,7 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 "target_device_minor": live_minor,
                 "target_device_bytes": target_size_bytes,
                 "target_physical_parent_major": 8,
-                "target_physical_parent_minor": 0,
+                "target_physical_parent_minor": live_parent_minor,
                 "logical_pages": geometry["logical_pages"],
                 "logical_bytes": geometry["logical_bytes"],
                 "linux_swap_kib": geometry["linux_swap_kib"],
@@ -588,77 +595,129 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 "authorized_target": {
                     "partuuid": "aaaaaaaa",
                     "major_minor": f"8:{authorized_minor}",
+                    "observed_path": "/dev/sda1",
                     "size_bytes": target_size_bytes,
                     "parent_major_minor": "8:0",
                     "transport": "usb",
                     "parent_model": "Synthetic Reader",
+                    "parent_serial": "SyntheticReaderA12",
                 }
             }
             target_row = {
-                "path": "/dev/synthetic1",
+                "path": live_target_path,
                 "type": "part",
                 "maj:min": f"8:{live_minor}",
                 "size": target_size_bytes,
                 "partuuid": "aaaaaaaa",
-                "pkname": "synthetic",
+                "pkname": Path(live_parent_path).name,
             }
             topology = {
                 "blockdevices": [{
-                    "path": "/dev/synthetic",
+                    "path": live_parent_path,
                     "type": "disk",
-                    "maj:min": "8:0",
+                    "maj:min": f"8:{live_parent_minor}",
                     "size": target_size_bytes + qualify.MIB,
                     "rm": 1,
                     "tran": "usb",
                     "model": "Synthetic Reader",
+                    "serial": "SyntheticReaderA12",
                     "children": [target_row],
                 }]
             }
             return plan, snapshot, json.dumps(topology)
 
         scenarios = (
-            ("source_device_mismatch", 2, 1,
-             (target_size_bytes,), 2, None, True),
+            ("historical_path_renumbered", 2, 1,
+             (target_size_bytes, target_size_bytes), 2, None, False),
             ("stale_geometry", 1, 1,
              (target_size_bytes, target_size_bytes - 4096), 1, None, True),
             ("target_path_replaced", 1, 1,
              (target_size_bytes, target_size_bytes), 2, None, True),
             ("failed_identity_read", 1, 1, (), 1,
              OSError(errno.EIO, "/private/target"), True),
+            ("parent_path_inode_replaced", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
+            ("parent_geometry_changed", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
+            ("target_same_rdev_new_inode", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
+            ("duplicate_partuuid", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
+            ("reader_identity_missing", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
+            ("reader_identity_mismatch", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
+            ("campaign_device_continuity", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
             ("unchanged", 1, 1,
              (target_size_bytes, target_size_bytes), 1, None, False),
         )
         for (scenario, live_minor, authorized_minor, sizes, final_minor,
              identity_error, should_block) in scenarios:
             with self.subTest(scenario=scenario):
+                renumbered = scenario == "historical_path_renumbered"
+                live_target_path = Path("/dev/sdb1" if renumbered
+                                        else "/dev/synthetic1")
+                live_parent_path = Path("/dev/sdb" if renumbered
+                                        else "/dev/synthetic")
+                live_parent_minor = 16 if renumbered else 0
                 plan, snapshot, topology = synthetic_inputs(
-                    live_minor, authorized_minor)
+                    live_minor, authorized_minor, renumbered)
+                if scenario == "duplicate_partuuid":
+                    topology_object = json.loads(topology)
+                    topology_object["blockdevices"][0]["children"].append({
+                        "path": "/dev/unrelated1", "type": "part",
+                        "maj:min": "8:49", "size": target_size_bytes,
+                        "partuuid": "aaaaaaaa"})
+                    topology = json.dumps(topology_object)
+                if scenario == "reader_identity_missing":
+                    del snapshot["authorized_target"]["parent_serial"]
+                if scenario == "reader_identity_mismatch":
+                    snapshot["authorized_target"]["parent_serial"] = "UnknownReaderB98"
                 admitted = qualify.SelectorEvidence("aaaaaaaa", (1,))
                 size_reads = iter(sizes)
+                parent_size_reads = iter((target_size_bytes + qualify.MIB,
+                                          target_size_bytes + qualify.MIB - 512)
+                                         if scenario == "parent_geometry_changed"
+                                         else (target_size_bytes + qualify.MIB,)*2)
                 flags_seen = []
                 close_calls = []
 
                 def open_target(path, flags, *_args):
-                    self.assertEqual(Path(path), Path("/dev/synthetic1"))
-                    flags_seen.append(flags)
-                    return target_descriptor
+                    if Path(path) == live_target_path:
+                        flags_seen.append(flags)
+                        return target_descriptor
+                    self.assertEqual(Path(path), live_parent_path)
+                    return parent_descriptor
 
                 def target_fstat(descriptor):
+                    if descriptor == parent_descriptor:
+                        return FakeStat(8, live_parent_minor)
                     self.assertEqual(descriptor, target_descriptor)
                     if identity_error is not None:
                         raise identity_error
                     return FakeStat(8, live_minor)
 
                 def target_ioctl(descriptor, request, _argument):
-                    self.assertEqual(descriptor, target_descriptor)
                     self.assertEqual(request, qualify.BLKGETSIZE64)
+                    if descriptor == parent_descriptor:
+                        return struct.pack("=Q", next(parent_size_reads))
+                    self.assertEqual(descriptor, target_descriptor)
                     return struct.pack("=Q", next(size_reads))
 
                 def close_target(descriptor):
-                    self.assertEqual(descriptor, target_descriptor)
+                    self.assertIn(descriptor, (target_descriptor, parent_descriptor))
                     close_calls.append(descriptor)
-                    if scenario == "failed_identity_read":
+                    if scenario == "failed_identity_read" and descriptor == target_descriptor:
                         raise OSError(errno.EBADF, "/private/close")
+
+                def synthetic_node_lstat(path):
+                    if Path(path) == live_parent_path:
+                        changed = scenario == "parent_path_inode_replaced"
+                        return FakeStat(8, live_parent_minor,
+                                        inode=999 if changed else None)
+                    changed = scenario == "target_same_rdev_new_inode"
+                    return FakeStat(8, final_minor, inode=999 if changed else None)
 
                 admission = mock.Mock()
                 with mock.patch.object(
@@ -673,10 +732,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             return_value=[]), \
                         mock.patch.object(
                             Path, "resolve",
-                            return_value=Path("/dev/synthetic1")), \
+                            return_value=live_target_path), \
                         mock.patch.object(
-                            Path, "lstat",
-                            return_value=FakeStat(8, final_minor)), \
+                            Path, "lstat", autospec=True,
+                            side_effect=synthetic_node_lstat), \
                         mock.patch.object(
                             qualify.os, "open", side_effect=open_target), \
                         mock.patch.object(
@@ -705,11 +764,14 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                                 selector_evidence=admitted,
                                 authorization_snapshot=snapshot,
                                 target_device=(8, live_minor),
-                                target_parent_device=(8, 0),
+                                target_parent_device=(8, live_parent_minor),
                                 workload_mib=384, resident_mib=128,
                                 swap_limit_mib=384, timeout_seconds=60,
                                 prior_run_ids=set(), prior_swap_uuids=set(),
-                                admission=admission)
+                                admission=admission,
+                                expected_identity=(("stale",) if scenario ==
+                                                   "campaign_device_continuity"
+                                                   else None))
                         primary.assert_not_called()
                         admission.require.assert_called_once_with("cycle-1")
                         message = str(refused.exception)
@@ -721,12 +783,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                             self.assertNotIn("errno=9", message)
                     else:
                         qualify._require_selector_at_policy_use(
-                            admitted, plan, snapshot, (8, 1), (8, 0))
+                            admitted, plan, snapshot,
+                            (8, live_minor), (8, live_parent_minor))
                         primary.assert_not_called()
                 self.assertEqual(len(flags_seen), 1)
                 self.assertTrue(flags_seen[0] & os.O_NOFOLLOW)
+                self.assertTrue(flags_seen[0] & os.O_EXCL)
                 self.assertTrue(flags_seen[0] & os.O_CLOEXEC)
-                self.assertEqual(close_calls, [target_descriptor])
+                self.assertEqual(close_calls[-1], target_descriptor)
+                if scenario not in ("failed_identity_read", "duplicate_partuuid"):
+                    self.assertEqual(close_calls, [parent_descriptor, target_descriptor])
 
     def test_rootless_cycle_last_use_rejects_stale_target_without_primary_mutation(self):
         for scenario in ("selector_during_target", "parent_replaced",
@@ -3236,6 +3302,47 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         primary.assert_not_called()
 
 
+    def test_prestart_reauthorization_refusal_keeps_prepared_ownership(self):
+        # A valid cycle-1 admission does not authorize START after prepare.
+        run_id = "1" * 32
+        prepare = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=f"PRIMARY_PREPARE=READY run_id={run_id}\n", stderr="")
+        admission = mock.Mock()
+        admission.require.side_effect = [
+            "a" * 64,
+            qualify.Blocked("source admission revoked at cycle-1-start"),
+        ]
+        with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
+                mock.patch.object(qualify, "_validate_precycle_state"), \
+                mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
+                mock.patch.object(qualify, "_require_selector_at_policy_use"), \
+                mock.patch.object(qualify, "read_state",
+                                  return_value={"run_id": run_id, "stage": "READY"}), \
+                mock.patch.object(qualify, "read_manifest",
+                                  return_value={"run_id": run_id}), \
+                mock.patch.object(qualify, "_validate_prepared_manifest"), \
+                mock.patch.object(qualify, "_primary",
+                                  return_value=prepare) as primary, \
+                self.assertRaisesRegex(
+                    qualify.Blocked, "owned_state_may_have_changed=true") as refused:
+            qualify.run_cycle(
+                1, swapzctl=Path("/synthetic/swapzctl"),
+                oracle_path=Path("/synthetic/oracle"),
+                validated_source="2" * 40, plan={},
+                selector_partuuid="aaaaaaaa",
+                selector_evidence=qualify.SelectorEvidence("aaaaaaaa", (1,)),
+                authorization_snapshot={},
+                target_device=(8, 1), target_parent_device=(8, 0),
+                workload_mib=384, resident_mib=128, swap_limit_mib=384,
+                timeout_seconds=60, prior_run_ids=set(),
+                prior_swap_uuids=set(), admission=admission)
+        self.assertIn("source admission revoked", str(refused.exception))
+        self.assertEqual([call.args[0] for call in admission.require.call_args_list],
+                         ["cycle-1", "cycle-1-start"])
+        self.assertEqual([call.args[1] for call in primary.call_args_list],
+                         ["prepare"])
+
     def test_run_cycle_selector_revalidation_blocks_before_any_primary_operation(self):
         admission = mock.Mock()
         primary = mock.Mock()
@@ -4571,7 +4678,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             execute_source)
         self.assertIn(
             "verify_authorized_target(\n"
-            "            plan, selector_partuuid, authorization_snapshot)",
+            "            plan, selector_partuuid, authorization_snapshot,\n"
+            "            observed_identity=admitted_target_identities)",
             execute_source)
         self.assertNotIn("acceptance_manifest_sha256()", execute_source)
 

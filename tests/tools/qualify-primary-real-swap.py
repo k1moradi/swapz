@@ -116,6 +116,14 @@ class QualificationFailure(RuntimeError):
     pass
 
 
+class TargetProofFailed(Blocked):
+    """Bounded live identity proof class, without private paths."""
+
+    def __init__(self, proof: str):
+        self.proof = proof
+        super().__init__(f"live target proof failed: {proof}")
+
+
 class PsiStallWindow:
     """Bounded rolling detector for sustained cgroup memory-pressure stalls."""
 
@@ -1603,15 +1611,24 @@ def _read_selector() -> str:
 
 def _require_selector_at_policy_use(
         expected: SelectorEvidence, plan: dict, authorization_snapshot: dict,
-        target_device: tuple[int, int], parent_device: tuple[int, int]) -> None:
+        target_device: tuple[int, int], parent_device: tuple[int, int], *,
+        expected_identity: tuple | None = None) -> None:
     """Reject stale selector or target admission before coordinator prepare."""
     observed = _read_selector_evidence()
     if observed != expected:
         _reject_selector("policy_use", "admitted-selector-identity",
                          "changed-selector-identity")
     try:
-        _target_path, current_target, current_parent = verify_authorized_target(
-            plan, expected.partuuid, authorization_snapshot)
+        if expected_identity is None:
+            _target_path, current_target, current_parent = verify_authorized_target(
+                plan, expected.partuuid, authorization_snapshot)
+        else:
+            _target_path, current_target, current_parent = verify_authorized_target(
+                plan, expected.partuuid, authorization_snapshot,
+                expected_identity=expected_identity)
+    except TargetProofFailed as exc:
+        _reject_selector("policy_use", "pinned-target-parent-reader-proof",
+                         f"failed-{exc.proof}")
     except QualificationFailure as exc:
         _reject_selector(
             "policy_use", "frozen-authorized-target-and-parent",
@@ -2287,7 +2304,9 @@ def acceptance_manifest_sha256() -> str:
 
 def verify_authorized_target(
         plan: dict, selector_partuuid: str,
-        authorization_snapshot: dict | None = None,
+        authorization_snapshot: dict | None = None, *,
+        expected_identity: tuple | None = None,
+        observed_identity: list[tuple] | None = None,
 ) -> tuple[Path, tuple[int, int], tuple[int, int]]:
     required_true = (
         "target_config_read", "target_device_preflight", "target_not_mounted",
@@ -2328,19 +2347,22 @@ def verify_authorized_target(
 
     by_partuuid = Path("/dev/disk/by-partuuid") / selector_partuuid
     target_descriptor = -1
+    parent_descriptor = -1
     target_phase = "resolve"
     try:
         target = by_partuuid.resolve(strict=True)
-        target_phase = "open"
+        # The coordinator independently reopens O_EXCL for owned mutations.
+        target_phase = "open-exclusive"
         target_descriptor = os.open(
-            target,
-            os.O_RDONLY | os.O_CLOEXEC | os.O_NOCTTY | os.O_NOFOLLOW)
+            target, os.O_RDONLY | os.O_EXCL | os.O_CLOEXEC |
+            os.O_NOCTTY | os.O_NOFOLLOW)
         target_phase = "fstat"
         info = os.fstat(target_descriptor)
         if not stat.S_ISBLK(info.st_mode) or \
                 (os.major(info.st_rdev), os.minor(info.st_rdev)) != (major, minor):
-            raise Blocked(
-                "authorized PARTUUID resolves to a different block device")
+            raise TargetProofFailed("target_descriptor")
+        target_inode = (info.st_dev, info.st_ino, info.st_mode,
+                        info.st_rdev, info.st_ctime_ns)
 
         target_phase = "geometry"
         if _block_size(target_descriptor) != size_bytes:
@@ -2349,7 +2371,7 @@ def verify_authorized_target(
         target_phase = "topology"
         result = _run([
             "lsblk", "--json", "--bytes", "--output",
-            "PATH,TYPE,MAJ:MIN,SIZE,PARTUUID,PKNAME,RM,TRAN,MODEL",
+            "PATH,TYPE,MAJ:MIN,SIZE,PARTUUID,PKNAME,RM,TRAN,MODEL,SERIAL",
         ], timeout=15)
         rows = parse_lsblk_topology(result.stdout)
         target_rows = [
@@ -2357,14 +2379,18 @@ def verify_authorized_target(
         parent_rows = [
             row for row in rows
             if row.get("maj:min") == f"{parent_major}:{parent_minor}"]
-        if len(target_rows) != 1 or len(parent_rows) != 1:
-            raise Blocked(
-                "cannot identify unique target partition and physical parent")
+        selected_partuuid_rows = [
+            row for row in rows if row.get("type") == "part" and
+            str(row.get("partuuid", "")).lower() == selector_partuuid]
+        if (len(target_rows) != 1 or len(parent_rows) != 1 or
+                len(selected_partuuid_rows) != 1):
+            raise TargetProofFailed("unique_partition_and_parent")
         target_row, parent_row = target_rows[0], parent_rows[0]
         if target_row.get("type") != "part" or \
-                str(target_row.get("partuuid", "")).lower() != selector_partuuid or \
+                selected_partuuid_rows[0] is not target_row or \
+                target_row.get("path") != os.fspath(target) or \
                 int(target_row.get("size", -1)) != size_bytes:
-            raise Blocked("lsblk target identity differs from selector/plan")
+            raise TargetProofFailed("live_partition_path_and_geometry")
         if parent_row.get("type") != "disk" or \
                 int(parent_row.get("rm", 0)) != 1 or \
                 str(parent_row.get("tran", "")).lower() != "usb":
@@ -2373,23 +2399,56 @@ def verify_authorized_target(
         require_sole_partition_topology(
             target_row, parent_row, f"{major}:{minor}")
 
+        target_phase = "open-parent"
+        parent_path = Path(parent_row["path"])
+        parent_descriptor = os.open(
+            parent_path, os.O_RDONLY | os.O_CLOEXEC |
+            os.O_NOCTTY | os.O_NOFOLLOW)
+        target_phase = "parent-fstat"
+        parent_info = os.fstat(parent_descriptor)
+        if not stat.S_ISBLK(parent_info.st_mode) or \
+                (os.major(parent_info.st_rdev),
+                 os.minor(parent_info.st_rdev)) != (parent_major, parent_minor):
+            raise TargetProofFailed("parent_descriptor")
+        parent_inode = (parent_info.st_dev, parent_info.st_ino,
+                        parent_info.st_mode, parent_info.st_rdev,
+                        parent_info.st_ctime_ns)
+        target_phase = "parent-geometry"
+        try:
+            parent_topology_size = int(parent_row.get("size", -1))
+        except (TypeError, ValueError) as exc:
+            raise TargetProofFailed("parent_topology_geometry") from exc
+        parent_size_bytes = _block_size(parent_descriptor)
+        if (parent_size_bytes < size_bytes or
+                parent_size_bytes != parent_topology_size):
+            raise TargetProofFailed("parent_geometry")
+
         target_phase = "authorization"
         try:
             if authorization_snapshot is None:
                 authorization_snapshot, _snapshot_digest = \
                     _read_readiness_snapshot()
             authorized = authorization_snapshot["authorized_target"]
-            expected_target = f"{major}:{minor}"
-            expected_parent = f"{parent_major}:{parent_minor}"
+            # Historical /dev/sd* and major:minor observations are not a live
+            # identity. A renumbering requires independently bound reader proof.
             if str(authorized.get("partuuid", "")).lower() != selector_partuuid or \
-                    str(authorized.get("major_minor", "")) != expected_target or \
                     int(authorized.get("size_bytes", -1)) != size_bytes or \
-                    str(authorized.get("parent_major_minor", "")) != expected_parent or \
                     str(authorized.get("transport", "")).lower() != "usb" or \
                     str(authorized.get("parent_model", "")).strip() != \
                     str(parent_row.get("model", "")).strip():
-                raise Blocked(
-                    "live target differs from committed authorized-target snapshot")
+                raise TargetProofFailed("authorized_target_attributes")
+            reader_serial = parent_row.get("serial")
+            authorized_serial = authorized.get("parent_serial")
+            # Reader serial is a separate consistency gate, not SD-card CID.
+            if (not isinstance(reader_serial, str) or
+                    not isinstance(authorized_serial, str) or
+                    len(reader_serial) < 6 or len(reader_serial) > 128 or
+                    len(set(reader_serial)) < 3 or
+                    reader_serial != authorized_serial):
+                raise TargetProofFailed("reader_identity")
+            if sum(row.get("type") == "disk" and
+                   row.get("serial") == reader_serial for row in rows) != 1:
+                raise TargetProofFailed("unique_reader_identity")
         except (KeyError, TypeError, ValueError) as exc:
             raise Blocked(
                 f"committed authorized-target snapshot is malformed: {exc}") from exc
@@ -2399,9 +2458,9 @@ def verify_authorized_target(
         target_phase = "revalidate"
         final_info = os.fstat(target_descriptor)
         if not stat.S_ISBLK(final_info.st_mode) or \
-                (os.major(final_info.st_rdev), os.minor(final_info.st_rdev)) != \
-                (major, minor):
-            raise Blocked("authorized target descriptor identity changed")
+                (final_info.st_dev, final_info.st_ino, final_info.st_mode,
+                 final_info.st_rdev, final_info.st_ctime_ns) != target_inode:
+            raise TargetProofFailed("target_inode")
         if _block_size(target_descriptor) != size_bytes:
             raise Blocked("authorized partition size changed")
         final_target = by_partuuid.resolve(strict=True)
@@ -2409,9 +2468,25 @@ def verify_authorized_target(
             raise Blocked("authorized PARTUUID path changed")
         final_named_info = final_target.lstat()
         if not stat.S_ISBLK(final_named_info.st_mode) or \
-                (os.major(final_named_info.st_rdev),
-                 os.minor(final_named_info.st_rdev)) != (major, minor):
-            raise Blocked("authorized PARTUUID path changed")
+                (final_named_info.st_dev, final_named_info.st_ino,
+                 final_named_info.st_mode, final_named_info.st_rdev,
+                 final_named_info.st_ctime_ns) != target_inode:
+            raise TargetProofFailed("target_path_inode")
+        final_parent_info = os.fstat(parent_descriptor)
+        final_named_parent = parent_path.lstat()
+        if any(not stat.S_ISBLK(value.st_mode) or
+               (value.st_dev, value.st_ino, value.st_mode, value.st_rdev,
+                value.st_ctime_ns) != parent_inode
+               for value in (final_parent_info, final_named_parent)):
+            raise TargetProofFailed("parent_inode")
+        if _block_size(parent_descriptor) != parent_size_bytes:
+            raise TargetProofFailed("parent_geometry")
+        identity = (target, target_inode, parent_path, parent_inode,
+                    parent_size_bytes, reader_serial)
+        if expected_identity is not None and identity != expected_identity:
+            raise TargetProofFailed("campaign_device_continuity")
+        if observed_identity is not None:
+            observed_identity.append(identity)
         return target, (major, minor), (parent_major, parent_minor)
     except OSError as exc:
         error_number = exc.errno if exc.errno is not None else "none"
@@ -2422,20 +2497,24 @@ def verify_authorized_target(
             "action=BLOCK-before-prepare-and-inspect-target") from exc
     finally:
         first_error = sys.exc_info()[1]
-        if target_descriptor >= 0:
+        close_failure = None
+        for descriptor in (parent_descriptor, target_descriptor):
+            if descriptor < 0:
+                continue
             try:
-                os.close(target_descriptor)
+                os.close(descriptor)
             except OSError as close_error:
-                if first_error is None:
-                    error_number = (
-                        close_error.errno
-                        if close_error.errno is not None else "none")
-                    raise Blocked(
-                        "authorized target phase=close "
-                        "expected=closed-target-descriptor observed=io-error "
-                        f"errno={error_number}; "
-                        "action=BLOCK-before-prepare-and-inspect-target"
-                    ) from close_error
+                if first_error is None and close_failure is None:
+                    close_failure = close_error
+        if close_failure is not None:
+            error_number = (
+                close_failure.errno if close_failure.errno is not None else "none")
+            raise Blocked(
+                "authorized target phase=close "
+                "expected=closed-device-descriptor observed=io-error "
+                f"errno={error_number}; "
+                "action=BLOCK-before-prepare-and-inspect-target"
+            ) from close_failure
 
 
 def _kernel_log_snapshot() -> list[str]:
@@ -4151,7 +4230,8 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
               target_parent_device: tuple[int, int],
               workload_mib: int, resident_mib: int, swap_limit_mib: int,
               timeout_seconds: int, prior_run_ids: set[str], prior_swap_uuids: set[str],
-              admission: SourceAdmissionClient) -> dict:
+              admission: SourceAdmissionClient,
+              expected_identity: tuple | None = None) -> dict:
     baseline_rows = read_swap_rows()
     baseline_identity = _swap_identity(baseline_rows)
     _validate_precycle_state(
@@ -4163,7 +4243,8 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
     admission.require(f"cycle-{index}")
     _require_selector_at_policy_use(
         selector_evidence, plan, authorization_snapshot,
-        target_device, target_parent_device)
+        target_device, target_parent_device,
+        expected_identity=expected_identity)
 
     prepared = _primary(swapzctl, "prepare", timeout_seconds, admitted=True)
     if prepared.returncode != 0:
@@ -4181,6 +4262,19 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
         raise QualificationFailure("durable state is not READY for prepared run")
     manifest = read_manifest(run_id)
     _validate_prepared_manifest(manifest, plan, validated_source, selector_partuuid)
+
+    # Prepare may already have changed durable owned state. Never START using
+    # a stale source or target authorization; preserve READY for owner review.
+    try:
+        admission.require(f"cycle-{index}-start")
+        _require_selector_at_policy_use(
+            selector_evidence, plan, authorization_snapshot,
+            target_device, target_parent_device,
+            expected_identity=expected_identity)
+    except Blocked as exc:
+        raise Blocked(
+            f"{exc}; owned_state_may_have_changed=true; "
+            "next=inspect_prepared_ownership_before_recovery") from exc
 
     try:
         started = _primary(swapzctl, "start", timeout_seconds, admitted=True)
@@ -4430,8 +4524,11 @@ def _execute_admitted(
                 "the installed qualified control")
         selector_evidence = _read_selector_evidence()
         selector_partuuid = selector_evidence.partuuid
+        admitted_target_identities: list[tuple] = []
         _target_path, target_device, target_parent_device = verify_authorized_target(
-            plan, selector_partuuid, authorization_snapshot)
+            plan, selector_partuuid, authorization_snapshot,
+            observed_identity=admitted_target_identities)
+        target_identity = admitted_target_identities[0]
         # The verifier has already matched this value against live block
         # geometry, lsblk and the authorized target snapshot.
         target_size_bytes = int(plan["target_device_bytes"])
@@ -4515,6 +4612,7 @@ def _execute_admitted(
                 prior_run_ids=run_ids,
                 prior_swap_uuids=swap_uuids,
                 admission=admission,
+                expected_identity=target_identity,
             )
             # The completed cycle may already have mutated the target. Retain
             # that fact even if post-cycle identity blocks every later use.
@@ -4522,7 +4620,8 @@ def _execute_admitted(
             # Revalidate on completion before a later cycle or terminal PASS.
             _require_selector_at_policy_use(
                 selector_evidence, plan, authorization_snapshot,
-                target_device, target_parent_device)
+                target_device, target_parent_device,
+                expected_identity=target_identity)
             run_ids.add(result["run_id"])
             swap_uuids.add(result["linux_swap_uuid"])
             evidence.update(
@@ -4592,7 +4691,8 @@ def _execute_admitted(
         admission.require("final")
         _require_selector_at_policy_use(
             selector_evidence, plan, authorization_snapshot,
-            target_device, target_parent_device)
+            target_device, target_parent_device,
+            expected_identity=target_identity)
         if terminal_cleanup is not None:
             terminal_cleanup()
         evidence.finish("PASS", cycles=cycles, result=result)

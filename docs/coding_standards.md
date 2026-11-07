@@ -694,7 +694,27 @@ original command status when available. Diagnostics may report only phase,
 expected/observed identity category, original errno/status when present, and a
 safe BLOCK action; never payload or private pathname. This helper-level check
 does not establish a physical-card or reader identity lock across the
-coordinator's last-use boundary. The parent must also reject an exited/zombie
+coordinator's last-use boundary. Each live target check must open the resolved
+PARTUUID target with `O_NOFOLLOW|O_EXCL`, record the opened block inode,
+device number and geometry, and pin a separately opened no-follow physical
+parent descriptor. Require exactly one matching live partition, matching
+reader topology and a unique source-bound stable reader serial; an absent
+serial or conflicting reader is BLOCKED. A reader serial remains only a
+consistency signal and does not prove a particular SD card or permit physical
+acceptance by itself. The historical snapshot's observed `/dev/sd*` pathname
+and `major:minor` describe an earlier boot, not the live target: renumbering
+may be accepted only when the live plan, exclusive descriptor, parent inode,
+geometry and independently bound reader identity agree. Recheck both opened
+and named block inodes after policy/topology inspection, retain the campaign's
+original live target/parent proof and compare it at every precycle, postcycle
+and terminal check. Changed parent, substituted inode, stale geometry,
+unprovable reader or lost descriptor continuity BLOCK before mutation.
+Revalidate source and target again between successful `prepare` and `start`;
+a refusal at that boundary must prevent `start`, retain first error and
+completed-cycle evidence, and explicitly report that `prepare` may already
+have changed owned state. Recovery after such a refusal requires owner review
+and existing coordinator paths, never automatic authorization of another
+device. The parent must also reject an exited/zombie
 process at every hop of a purported live privileged peer lineage; matching
 PID, start ticks, session and cached connection credentials are insufficient
 to authenticate a departed sender or a transferred descriptor. Classify this
