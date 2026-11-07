@@ -7743,7 +7743,12 @@ classes (`PrimaryLifecycleBehaviorTest`, `PrimaryLifecycleSourceGuardTest`,
 `PackageCrashToPrimaryAdmissionTest`, and
 `PrimaryOwnerReleaseDurabilityTest`) form a phase-specific allowlist:
 only a matching first verbose failure and detailed FAIL/ERROR block may
-supply a public test name, failure kind, or genuine exception errno. Expected
+supply a public test name, failure kind, or genuine exception errno. The class
+captured by that first verbose progress record is part of the authenticated
+identity and must match the detailed block exactly; membership in the same
+suite allowlist is insufficient. Bounded oversized-log retention must use that
+same class, method, failure kind and validated phase context so a wrong-class
+block cannot donate errno or displace the first-cause excerpt. Expected
 negative output from another class and later cleanup exceptions must never
 replace the first cause or exit code. Subtest values and exception payloads
 remain in the mode-0600 private log, never the public marker. The rootless

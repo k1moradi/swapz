@@ -23,6 +23,7 @@ rootless_capture_failure_reason=
 rootless_classified_reason=nonzero_exit
 rootless_classified_subtest=unavailable
 rootless_classified_test=unavailable
+rootless_classified_unittest_class=unavailable
 rootless_classified_kind=unavailable
 rootless_classified_errno=unavailable
 
@@ -153,9 +154,11 @@ classify_rootless_private_unittest_failure() {
   local errno_candidate
   local expected_unittest_classes=
   local progress_context=
+  local first_progress_class=
   local first_progress_kind=
   local first_progress_test=
   local first_progress_subtest=unavailable
+  local header_class
   local header_kind
   local header_test
   local header_subtest
@@ -163,6 +166,7 @@ classify_rootless_private_unittest_failure() {
   rootless_classified_reason=nonzero_exit
   rootless_classified_subtest=unavailable
   rootless_classified_test=unavailable
+  rootless_classified_unittest_class=unavailable
   rootless_classified_kind=unavailable
   rootless_classified_errno=unavailable
   [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
@@ -192,6 +196,7 @@ classify_rootless_private_unittest_failure() {
       [[ ":$expected_unittest_classes:" == *":${BASH_REMATCH[2]}:"* &&
          ${BASH_REMATCH[3]} == "${BASH_REMATCH[1]}" ]] || continue
       first_progress_test=${BASH_REMATCH[1]}
+      first_progress_class=${BASH_REMATCH[2]}
       progress_context=${BASH_REMATCH[4]}
       first_progress_kind=${BASH_REMATCH[5]}
       # Arbitrary subtest keys remain private. Preserve the existing public
@@ -204,6 +209,7 @@ classify_rootless_private_unittest_failure() {
       [[ ${BASH_REMATCH[2]} == "${BASH_REMATCH[1]}" ]] || continue
       # Report only the allowlisted method; arbitrary subtest details stay private.
       first_progress_test=${BASH_REMATCH[1]}
+      first_progress_class=GeneratorPublicationTest
       first_progress_kind=${BASH_REMATCH[4]}
     else
       continue
@@ -218,7 +224,8 @@ classify_rootless_private_unittest_failure() {
       if [[ $line =~ $detailed_header_regex ]]; then
         header_kind=${BASH_REMATCH[1]}
         header_test=${BASH_REMATCH[2]}
-        [[ ":$expected_unittest_classes:" == *":${BASH_REMATCH[3]}:"* &&
+        header_class=${BASH_REMATCH[3]}
+        [[ ":$expected_unittest_classes:" == *":$header_class:"* &&
            ${BASH_REMATCH[4]} == "$header_test" ]] || continue
         header_subtest=unavailable
         if [[ $line =~ $subtest_regex ]]; then
@@ -226,7 +233,8 @@ classify_rootless_private_unittest_failure() {
         fi
         if [[ -n $first_progress_test ]]; then
           [[ $header_kind == "$first_progress_kind" &&
-             $header_test == "$first_progress_test" ]] || continue
+             $header_test == "$first_progress_test" &&
+             $header_class == "$first_progress_class" ]] || continue
           if [[ $first_progress_subtest != unavailable &&
                 $header_subtest != "$first_progress_subtest" ]]; then
             continue
@@ -234,10 +242,12 @@ classify_rootless_private_unittest_failure() {
         else
           # Synthetic/legacy controls without verbose progress retain the
           # previous first-detailed-block fallback.
+          first_progress_class=$header_class
           first_progress_subtest=$header_subtest
         fi
         # Authenticate identity only after a matching detailed failure block.
         rootless_classified_test=$header_test
+        rootless_classified_unittest_class=$header_class
         rootless_classified_kind=$header_kind
         # Real unittest phase labels may contain underscores. They are useful
         # for private execution-order matching, but the existing public marker
@@ -289,6 +299,7 @@ classify_rootless_private_make_failure() {
   rootless_classified_reason=nonzero_exit
   rootless_classified_subtest=unavailable
   rootless_classified_test=unavailable
+  rootless_classified_unittest_class=unavailable
   rootless_classified_kind=unavailable
   rootless_classified_errno=unavailable
   [[ -f $diagnostic_path && -r $diagnostic_path && ! -L $diagnostic_path ]] || return 0
@@ -350,6 +361,7 @@ report_rootless_failure() {
   local failed_unittest_kind=${6:-unavailable}
   local failed_errno=${7:-unavailable}
   local cleanup_disposition=${8:-not_independently_verified}
+  local failed_unittest_class=${9:-unavailable}
   if [[ $failed_errno != unavailable ]]; then
     if [[ ! $failed_errno =~ ^[1-9][0-9]{0,3}$ ]] ||
        (( 10#$failed_errno > 4095 )); then
@@ -359,6 +371,10 @@ report_rootless_failure() {
   case $cleanup_disposition in
     not_independently_verified|relay_incomplete|relay_cleanup_failed) ;;
     *) cleanup_disposition=not_independently_verified ;;
+  esac
+  case $failed_unittest_class in
+    PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest|unavailable) ;;
+    *) failed_unittest_class=unavailable ;;
   esac
   # ERR is inherited by command substitutions under -E. Their eventual
   # enclosing assertion, not an incidental internal command, owns the failure.
@@ -414,6 +430,7 @@ report_rootless_failure() {
       if LC_ALL=C awk -v target_reason="$failure_reason" \
            -v target_kind="$failed_unittest_kind" \
            -v target_test="$failed_test" \
+           -v target_class="$failed_unittest_class" \
            -v target_subtest="$failed_subtest" '
            BEGIN {
              compile_mode = (target_reason == "native_compile" &&
@@ -435,7 +452,11 @@ report_rootless_failure() {
              }
              if (target_test != "unavailable" &&
                  target_kind != "unavailable") {
-               pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\." target_test "\\)"
+               if (target_class != "unavailable") {
+                 pattern = "^" target_kind ": " target_test " \\(__main__\\." target_class "\\." target_test "\\)"
+               } else {
+                 pattern = "^" target_kind ": " target_test " \\(__main__\\.(PackageLifecycle|PrimaryRealSwapContracts|SourceAdmissionPeerOwnership|GeneratorPublicationTest|PrimaryLifecycleBehaviorTest|PrimaryLifecycleSourceGuardTest|PackageCrashToPrimaryAdmissionTest|PrimaryOwnerReleaseDurabilityTest)\\." target_test "\\)"
+               }
                if (text !~ pattern) return 0
                if (target_subtest != "unavailable" &&
                    text !~ "\\(phase=\047" target_subtest "\047\\)$") return 0
@@ -552,13 +573,15 @@ finish_and_report_rootless_unittest() {
     rootless_classified_reason=nonzero_exit
     rootless_classified_subtest=unavailable
     rootless_classified_test=unavailable
+    rootless_classified_unittest_class=unavailable
     rootless_classified_kind=unavailable
     rootless_classified_errno=unavailable
   fi
   report_rootless_failure "$original_exit_code" "$command_line" \
     "$rootless_classified_reason" "$rootless_classified_subtest" \
     "$rootless_classified_test" "$rootless_classified_kind" \
-    "$rootless_classified_errno" "$cleanup_disposition"
+    "$rootless_classified_errno" "$cleanup_disposition" \
+    "$rootless_classified_unittest_class"
 }
 
 rootless_unexpected_error() {
