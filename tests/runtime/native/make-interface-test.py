@@ -453,6 +453,10 @@ class PublicMakeContract(unittest.TestCase):
                 self.assertIn("Do not create, publish, recommend, or document "
                               "alternative test commands", content)
 
+        readme = (ROOT / "docs/README.md").read_text()
+        self.assertIn("[VISION.md](VISION.md)", readme)
+        self.assertIn("[root Make API](compile.md#root-make-api)", readme)
+
         context = (ROOT / "docs/context.md").read_text()
         self.assertIn("**Current contracts (linked rather than restated):**",
                       context)
@@ -564,6 +568,21 @@ class PublicMakeContract(unittest.TestCase):
                 "\t@rm -f '$(M)/.module-candidate'\n")
             (fixture / "tests/tools/run-tests.py").write_text(
                 (ROOT / "tests/tools/run-tests.py").read_text())
+            runner_path = fixture / "tests/tools/run-tests.py"
+            runner_source = runner_path.read_text()
+            runner_entrypoint = '\nif __name__ == "__main__":\n'
+            self.assertEqual(runner_source.count(runner_entrypoint), 1)
+            fixture_identity = (
+                "\n# Deterministic identity for the isolated Make-interface fixture.\n"
+                "def report_host_identity():\n"
+                "    return {\"schema\": \"swapz-host-v1\", "
+                "\"architecture\": \"fixture\", "
+                "\"id_sha256\": \"a\" * 64}\n\n"
+                "def refresh_history(host_identity):\n"
+                "    return \"NOT UPDATED: isolated Make-interface fixture\"\n")
+            runner_path.write_text(runner_source.replace(
+                runner_entrypoint,
+                fixture_identity + runner_entrypoint, 1))
             # The reporter imports the shared per-device-class goal module.
             (fixture / "tests/tools/product_goals.py").write_text(
                 (ROOT / "tests/tools/product_goals.py").read_text())
@@ -1349,8 +1368,9 @@ class PublicMakeContract(unittest.TestCase):
                     capture_output=True, text=True, timeout=5)
 
             # Give the copied Makefile and reporter one real, isolated source
-            # identity. The non-main branch also makes report publication inert.
-            fixture_git("init", "--initial-branch=fixture")
+            # identity. This synthetic main has no remote, so publication is
+            # inert while the canonical-main gate is still exercised.
+            fixture_git("init", "--initial-branch=main")
             fixture_git("config", "user.name", "swapz incremental fixture")
             fixture_git("config", "user.email",
                         "swapz-incremental-fixture@example.invalid")

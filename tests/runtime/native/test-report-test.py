@@ -4672,6 +4672,7 @@ class ReportContract(unittest.TestCase):
                                        side_effect=intercept):
                     original = {
                         "schema": "swapz-test-results-v1",
+                        "qualification": "RAM_BACKED_NULL_BLK_ONLY",
                         "source_sha": source_sha,
                         "tested_commit_sha": source_sha,
                         "overall": "BLOCKED",

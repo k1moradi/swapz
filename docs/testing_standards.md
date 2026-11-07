@@ -12,6 +12,17 @@ The root checkout has one supported testing interface:
 make test
 ~~~
 
+The isolated Make-interface fixture must use a temporary `main` checkout with
+no remote and a deterministic synthetic host identity. This exercises report
+binding without relying on CI host metadata or enabling publication; it must
+not add a production identity override or claim host qualification.
+
+Report-admission fixtures that target a later rejection must satisfy every
+earlier gate with valid synthetic values. In particular, a fixture testing
+incomplete qualification stages must provide the valid
+`RAM_BACKED_NULL_BLK_ONLY` scope and matching source identities, so the
+production gate order is exercised without weakening it.
+
 When the caller does not provide a GNU Make jobserver, the private reporter
 automatically chooses a bounded build width from the CPUs available to the
 process (maximum 16) and creates jobservers only for independent compilation.
