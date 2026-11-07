@@ -412,8 +412,33 @@ target_size_bytes=$target_size
 AUTH
 	chmod 0600 "$temporary"
 	sync -f "$temporary"
-	mv -f -- "$temporary" "$runtime_enable_file"
-	sync -f "$runtime_base"
+	# The token is activation authority as soon as its canonical pathname is
+	# published. If publication or its directory sync fails, keep the original
+	# command status and revoke even when subsequent cleanup also fails.
+	authorization_commit_phase=token_persist_rename
+	if mv -f -- "$temporary" "$runtime_enable_file"; then
+		authorization_commit_phase=token_persist_sync
+		if sync -f "$runtime_base"; then
+			return 0
+		else
+			authorization_commit_exit_status=$?
+		fi
+	else
+		authorization_commit_exit_status=$?
+	fi
+	rm -f -- "$temporary" 2>/dev/null || :
+	authorization_commit_token_disposition=unknown
+	authorization_commit_cleanup_phase=none
+	authorization_commit_cleanup_exit_status=0
+	if revoke_runtime_authorization; then
+		authorization_commit_token_disposition=revoked
+	else
+		authorization_commit_cleanup_phase=$authorization_revoke_phase
+		authorization_commit_cleanup_exit_status=$authorization_revoke_exit_status
+	fi
+	printf 'swapz-primary-boot-verify: PRIMARY_BOOT_PREFLIGHT=BLOCKED phase=%s exit_status=%s token_disposition=%s token_cleanup_phase=%s token_cleanup_exit_status=%s action=inspect_runtime_authorization_before_retry\n' \
+		"$authorization_commit_phase" "$authorization_commit_exit_status" "$authorization_commit_token_disposition" "$authorization_commit_cleanup_phase" "$authorization_commit_cleanup_exit_status" >&2
+	return "$authorization_commit_exit_status"
 }
 
 validate_arm_file()

@@ -1782,13 +1782,17 @@ class BootVerifierTests(unittest.TestCase):
             lines.append(f"{self.dev / 'mapper' / 'swapz-primary'} partition 108320764 0 -1")
         (self.proc / "swaps").write_text("\n".join(lines) + "\n", encoding="ascii")
 
-    def run_verifier(self, action: str, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    def run_verifier(
+        self, action: str, *, env: dict[str, str] | None = None,
+        timeout: float = 30,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(self.sbin / "swapz-primary-boot-verify"), action],
             check=False,
             text=True,
             capture_output=True,
             env=env or self.env,
+            timeout=timeout,
         )
 
     def arm_then_reboot(self) -> None:
@@ -1880,6 +1884,86 @@ class BootVerifierTests(unittest.TestCase):
         self.assertTrue((self.report / f"report-{BOOT_B}.kernel-errors.log").exists())
         self.assertTrue((self.report / f"report-{BOOT_B}.dm-status.txt").exists())
         self.assertEqual(observed.stderr, "")
+
+    def test_failed_preflight_publication_never_retains_activation_authority(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        failed_sync_marker = self.root / "preflight-sync-failed"
+        write_executable(
+            self.bin / "sync",
+            "#!/bin/sh\n"
+            'if [ "$1" = -f ] && '
+            '[ "$2" = "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime" ]; then\n'
+            '    if [ -f "$SWAPZ_PRIMARY_TEST_REPORT_BASE/runtime/primary-execution.env" ]; then\n'
+            '        : > "$MOCK_PREFLIGHT_SYNC_FAILED"\n'
+            "        exit 74\n"
+            "    fi\n"
+            '    if [ -f "$MOCK_PREFLIGHT_SYNC_FAILED" ] && '
+            '[ "$MOCK_PREFLIGHT_CLEANUP_SYNC_EXIT" != 0 ]; then\n'
+            '        exit "$MOCK_PREFLIGHT_CLEANUP_SYNC_EXIT"\n'
+            "    fi\n"
+            "fi\n"
+            "exit 0\n",
+        )
+        env = self.env.copy()
+        env["MOCK_PREFLIGHT_SYNC_FAILED"] = str(failed_sync_marker)
+        for cleanup_exit_status in (0, 75):
+            with self.subTest(cleanup_sync_exit=cleanup_exit_status):
+                failed_sync_marker.unlink(missing_ok=True)
+                env["MOCK_PREFLIGHT_CLEANUP_SYNC_EXIT"] = str(cleanup_exit_status)
+                blocked = self.run_verifier("preflight", env=env)
+                self.assertEqual(blocked.returncode, 74, blocked.stderr)
+                self.assertFalse(
+                    authorization.exists(),
+                    "failed preflight left reusable 0600 activation authority",
+                )
+                self.assertIn(
+                    "PRIMARY_BOOT_PREFLIGHT=BLOCKED phase=token_persist_sync "
+                    "exit_status=74",
+                    blocked.stderr,
+                )
+                self.assertIn(
+                    "token_disposition=" + (
+                        "revoked" if cleanup_exit_status == 0 else "unknown"
+                    ),
+                    blocked.stderr,
+                )
+                if cleanup_exit_status:
+                    self.assertIn(
+                        "token_cleanup_phase=token_revoke_sync "
+                        "token_cleanup_exit_status=75",
+                        blocked.stderr,
+                    )
+                self.assertNotIn(str(authorization), blocked.stderr)
+                self.assertNotIn("PRIMARY_BOOT_PREFLIGHT=PASS", blocked.stdout)
+
+        # A later observer cannot turn a rejected preflight into authority.
+        failed_sync_marker.unlink(missing_ok=True)
+        repeated = self.run_verifier("observe", env=env)
+        self.assertEqual(repeated.returncode, 1, repeated.stderr)
+        self.assertIn(
+            "runtime_preflight_authorization_missing_or_invalid",
+            (self.report / "latest.env").read_text(encoding="utf-8"),
+        )
+
+    def test_preflight_publication_rename_failure_retains_original_status(self) -> None:
+        self.arm_then_reboot()
+        authorization = self.report / "runtime" / "primary-execution.env"
+        write_executable(
+            self.bin / "mv",
+            "#!/bin/sh\n"
+            'if [ "${4##*/}" = primary-execution.env ]; then exit 75; fi\n'
+            'exec /usr/bin/mv "$@"\n',
+        )
+        blocked = self.run_verifier("preflight")
+        self.assertEqual(blocked.returncode, 75, blocked.stderr)
+        self.assertFalse(authorization.exists())
+        self.assertIn(
+            "PRIMARY_BOOT_PREFLIGHT=BLOCKED phase=token_persist_rename "
+            "exit_status=75 token_disposition=revoked",
+            blocked.stderr,
+        )
+        self.assertNotIn("PRIMARY_BOOT_PREFLIGHT=PASS", blocked.stdout)
 
     def test_observation_claimed_token_cleanup_failure_never_restores_authority(self) -> None:
         self.arm_then_reboot()
