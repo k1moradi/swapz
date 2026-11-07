@@ -449,13 +449,17 @@ return an unrelated covering mount ID before a covered selected-device ID and
 require the scanner to inspect both IDs exposed by `listmount`; this proves
 scanner traversal, not arbitrary stacked-filesystem backing ancestry. A listed
 mount ID that disappears before `statmount` must refuse with its original
-`ENOENT` rather than become a clean end-of-list result. Cover selected
-partition and physical-parent entries beyond the synthetic fixture's former
-512-entry ceiling, with a far-index unrelated sibling as a positive control.
-The fixture itself must return `EOVERFLOW` if its bounded synthetic namespace
-cannot be represented; silent truncation is never evidence of a clear mount
-inventory. These reader-only controls do not prove zero destructive actions by
-the lifecycle coordinator or exclude privileged post-snapshot changes.
+`ENOENT` rather than become a clean end-of-list result; inject that race
+against an ID actually returned by `listmount`, not an ordinal syscall count.
+Cover selected partition and physical-parent entries beyond the synthetic
+fixture's former 512-entry ceiling, with a far-index unrelated sibling as a
+positive control. Each far-index control must prove that its final synthetic
+mount ID reached `statmount`; a clean sibling result alone is not pagination
+evidence. The fixture itself must return `EOVERFLOW` if its bounded synthetic
+namespace cannot be represented and prove that its capacity path supplied that
+error; silent truncation is never evidence of a clear mount inventory. These
+reader-only controls do not prove zero destructive actions by the lifecycle
+coordinator or exclude privileged post-snapshot changes.
 
 If unique mount IDs, foreign-namespace statmount/listmount, namespace identity,
 or any listed mount cannot be proven, admission is BLOCKED; never fall back to

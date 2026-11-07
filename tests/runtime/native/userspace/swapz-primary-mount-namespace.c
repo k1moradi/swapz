@@ -124,8 +124,12 @@ static unsigned int
 	fixture_namespace_inventory_scans[FIXTURE_NAMESPACE_KIND_COUNT];
 static unsigned int
 	fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_KIND_COUNT];
-static unsigned int
-	fixture_namespace_statmount_calls[FIXTURE_NAMESPACE_KIND_COUNT];
+static enum fixture_namespace_kind fixture_stale_listed_mount_kind =
+	FIXTURE_NAMESPACE_NONE;
+static uint64_t fixture_stale_listed_mount_id;
+static int fixture_stale_listed_mount_injected;
+static int fixture_hidden_namespace_device_observed;
+static int fixture_namespace_capacity_overflow_injected;
 
 static void fixture_file(const char *relative, const char *contents);
 
@@ -261,6 +265,7 @@ static size_t fixture_namespace_devices(
 		while (fgets(line, sizeof(line), stream)) {
 			if (count == capacity) {
 				(void)fclose(stream);
+				fixture_namespace_capacity_overflow_injected = 1;
 				errno = EOVERFLOW;
 				return SIZE_MAX;
 			}
@@ -281,6 +286,7 @@ static size_t fixture_namespace_devices(
 		if (fixture_hidden_namespace_padding_mounts > capacity - count ||
 		    (fixture_hidden_namespace_device &&
 		     fixture_hidden_namespace_padding_mounts == capacity - count)) {
+			fixture_namespace_capacity_overflow_injected = 1;
 			errno = EOVERFLOW;
 			return SIZE_MAX;
 		}
@@ -361,12 +367,20 @@ static long fixture_syscall(long number, ...)
 		assert(status_size >= sizeof(*status));
 		assert(request->namespace_fd == (uint32_t)fixture_namespace_fd);
 		assert(kind != FIXTURE_NAMESPACE_NONE);
-		++fixture_namespace_statmount_calls[kind];
+		/*
+		 * Model a mount that was returned by listmount and then vanished.
+		 * Bind the failure to that exact returned ID, not to syscall order.
+		 */
+		if (fixture_stale_listed_mount_kind == kind &&
+		    fixture_stale_listed_mount_id &&
+		    request->mount_id == fixture_stale_listed_mount_id) {
+			fixture_stale_listed_mount_injected = 1;
+			errno = ENOENT;
+			goto out;
+		}
 		if (fixture_namespace_syscall_error_kind == kind &&
 		    fixture_namespace_syscall_error_number == SYS_statmount &&
-		    fixture_namespace_syscall_error &&
-		    fixture_namespace_statmount_calls[kind] >
-			    fixture_namespace_syscall_error_after_call) {
+		    fixture_namespace_syscall_error) {
 			errno = fixture_namespace_syscall_error;
 			goto out;
 		}
@@ -387,6 +401,11 @@ static long fixture_syscall(long number, ...)
 			errno = ENOENT;
 			goto out;
 		}
+		if (fixture_hidden_namespace_kind == kind &&
+		    fixture_hidden_namespace_device &&
+		    index + 1U == device_count &&
+		    devices[index] == fixture_hidden_namespace_device)
+			fixture_hidden_namespace_device_observed = 1;
 		memset(status, 0, sizeof(*status));
 		status->size = (uint32_t)sizeof(*status);
 		status->mask = 0x00000003ULL;
@@ -446,6 +465,9 @@ static long fixture_syscall(long number, ...)
 			mount_ids[written++] = base + 1U + start;
 			++start;
 		}
+		if (fixture_stale_listed_mount_kind == kind &&
+		    !fixture_stale_listed_mount_id && written)
+			fixture_stale_listed_mount_id = mount_ids[0];
 		result = (long)written;
 	} else {
 		errno = ENOSYS;
@@ -1005,14 +1027,17 @@ static void fixture_reset(void)
 	fixture_namespace_syscall_error_number = 0;
 	fixture_namespace_syscall_error = 0;
 	fixture_namespace_syscall_error_after_call = 0U;
+	fixture_stale_listed_mount_kind = FIXTURE_NAMESPACE_NONE;
+	fixture_stale_listed_mount_id = 0;
+	fixture_stale_listed_mount_injected = 0;
+	fixture_hidden_namespace_device_observed = 0;
+	fixture_namespace_capacity_overflow_injected = 0;
 	fixture_root_statx_error_kind = FIXTURE_NAMESPACE_NONE;
 	fixture_root_statx_error = 0;
 	memset(fixture_namespace_inventory_scans, 0,
 	       sizeof(fixture_namespace_inventory_scans));
 	memset(fixture_namespace_listmount_calls, 0,
 	       sizeof(fixture_namespace_listmount_calls));
-	memset(fixture_namespace_statmount_calls, 0,
-	       sizeof(fixture_namespace_statmount_calls));
 	fixture_unlink_if_present("self/ns/mnt");
 	fixture_unlink_if_present("3031/ns/mnt");
 	fixture_file("self/ns/mnt", "coordinator mount namespace\n");
@@ -1308,6 +1333,27 @@ static void expect_mount_admission(const char *case_name, int should_allow,
 	expect_mount_identity_admission(
 		case_name, makedev(259U, 0U), makedev(8U, 0U),
 		should_allow, expected_errno, "selected target/sibling/root/namespace");
+}
+
+static void expect_hidden_namespace_device_inspected(
+	const char *case_name, enum fixture_namespace_kind kind,
+	unsigned int minimum_listmount_calls)
+{
+	unsigned int calls = fixture_namespace_listmount_calls[kind];
+
+	if (fixture_hidden_namespace_device_observed &&
+	    calls >= minimum_listmount_calls)
+		return;
+	fprintf(stderr,
+		"FAIL: phase=namespace-pagination case=%s "
+		"expected=far-index-device-inspected observed=%s "
+		"listmount_calls=%u required_calls=%u "
+		"safe_action=retain_inactive_target\n",
+		case_name,
+		fixture_hidden_namespace_device_observed ? "inspected-too-early" :
+							 "not-inspected",
+		calls, minimum_listmount_calls);
+	++fixture_failures;
 }
 
 /*
@@ -2017,21 +2063,19 @@ static void test_root_filtered_foreign_mountinfo(void)
 	fixture_file("3031/mountinfo",
 		     "36 25 259:9 / / rw - ext4 /foreign-root rw\n"
 		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
-	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
-	fixture_namespace_syscall_error_number = SYS_statmount;
-	fixture_namespace_syscall_error = ENOENT;
-	fixture_namespace_syscall_error_after_call = 1U;
+	fixture_stale_listed_mount_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	expect_mount_admission("listed mount ID disappears before statmount", 0,
 			       ENOENT);
-	if (fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] != 1U ||
-	    fixture_namespace_statmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] != 2U) {
+	if (!fixture_stale_listed_mount_injected ||
+	    fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] == 0U) {
 		fprintf(stderr,
 			"FAIL: phase=stale-listed-mount-ID "
-			"expected=listmount-then-statmount-refusal "
-			"listmount_calls=%u statmount_calls=%u errno=%d "
+			"expected=returned-ID-statmount-refusal "
+			"listed_id_captured=%d injected=%d listmount_calls=%u errno=%d "
 			"safe_action=retain_inactive_target\n",
+			fixture_stale_listed_mount_id != 0,
+			fixture_stale_listed_mount_injected,
 			fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER],
-			fixture_namespace_statmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER],
 			errno);
 		++fixture_failures;
 	}
@@ -2067,26 +2111,24 @@ static void test_root_filtered_foreign_mountinfo(void)
 	fixture_hidden_namespace_padding_mounts = 640U;
 	fixture_hidden_namespace_device = makedev(8U, 1U);
 	expect_mount_admission("post-512 selected device is still enumerated", 0, 0);
-	if (fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] < 3U) {
-		fprintf(stderr,
-			"FAIL: phase=namespace-pagination case=post-512-selected "
-			"expected_calls>=3 observed_calls=%u "
-			"safe_action=retain_inactive_target\n",
-			fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER]);
-		++fixture_failures;
-	}
+	expect_hidden_namespace_device_inspected(
+		"post-512-selected", FIXTURE_NAMESPACE_FOREIGN_LEADER, 3U);
 
 	fixture_reset();
 	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	fixture_hidden_namespace_padding_mounts = 640U;
 	fixture_hidden_namespace_device = makedev(8U, 0U);
 	expect_mount_admission("post-512 physical parent is still enumerated", 0, 0);
+	expect_hidden_namespace_device_inspected(
+		"post-512-parent", FIXTURE_NAMESPACE_FOREIGN_LEADER, 3U);
 
 	fixture_reset();
 	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
 	fixture_hidden_namespace_padding_mounts = 640U;
 	fixture_hidden_namespace_device = makedev(8U, 3U);
 	expect_mount_admission("post-512 unrelated sibling remains clear", 1, 0);
+	expect_hidden_namespace_device_inspected(
+		"post-512-unrelated-sibling", FIXTURE_NAMESPACE_FOREIGN_LEADER, 3U);
 
 	/* Exhausting fixture storage must not turn the table into an empty view. */
 	fixture_reset();
@@ -2096,6 +2138,14 @@ static void test_root_filtered_foreign_mountinfo(void)
 	fixture_hidden_namespace_device = makedev(8U, 1U);
 	expect_mount_admission("fixture namespace inventory capacity exceeded", 0,
 			       EOVERFLOW);
+	if (!fixture_namespace_capacity_overflow_injected) {
+		fprintf(stderr,
+			"FAIL: phase=namespace-capacity "
+			"case=fixture-namespace-inventory-capacity-exceeded "
+			"expected=synthetic-capacity-refusal observed=other-EOVERFLOW "
+			"safe_action=retain_inactive_target\n");
+		++fixture_failures;
+	}
 
 	/* A later batch error is incomplete visibility, never an empty inventory. */
 	fixture_reset();
