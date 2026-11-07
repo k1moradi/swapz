@@ -1417,6 +1417,7 @@ wait "$parent"
         source = PREFLIGHT.read_text(encoding="utf-8")
         helper = (shell_function(PREFLIGHT, "refuse")
                   + shell_function(PREFLIGHT, "is_uint")
+                  + shell_function(PREFLIGHT, "is_kernel_release")
                   + shell_function(PREFLIGHT, "check_loaded_runtime_identity"))
         accepted_id = "id() { printf '0\n'; }\n"
         accepted_release = "uname() { printf '6.8.0-test+arm64\n'; }\n"
@@ -1461,6 +1462,26 @@ wait "$parent"
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
         self.assertEqual(accepted.stdout, "ADMITTED:6.8.0-test+arm64\n")
         self.assertEqual(accepted.stderr, "")
+
+        release_validator = shell_function(PREFLIGHT, "is_kernel_release")
+        for release, expected_status in (
+                ("6.8.0-101-generic", 0),
+                ("6.6.51+rpt-rpi-v8", 0),
+                ("../other-kernel", 1),
+                (".hidden", 1),
+                ("-leading", 1),
+                ("abc/def", 1),
+                ("abc def", 1),
+                ("é", 1),
+                ("a" * 129, 1)):
+            with self.subTest(release=release):
+                result = self.run_shell(
+                    release_validator + 'is_kernel_release "$1"\n', release)
+                self.assertEqual(result.returncode, expected_status,
+                                 result.stderr)
+
+        self.assertNotIn("=~", source)
+        self.assertIn("local value=\"$1\" LC_ALL=C", source)
         self.assertLess(
             source.index("\ncheck_loaded_runtime_identity\n"),
             source.index("capability_status="))

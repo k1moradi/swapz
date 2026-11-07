@@ -66,6 +66,14 @@ is_hex16() {
     esac
     return 0
 }
+is_kernel_release() {
+    local value="$1" LC_ALL=C
+    [[ -n $value && ${#value} -le 128 ]] || return 1
+    case "$value" in
+        [!0-9A-Za-z]*|*[!-0-9A-Za-z._+~]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
 preflight_internal_error() {
     local rc="$1" line="$2"
     trap - ERR
@@ -106,7 +114,7 @@ check_loaded_runtime_identity() {
         release_status=$?
         refuse BLOCKED running_kernel_release unavailable "uname_r_exit=$release_status; original_errno_or_exit=$release_status; inspect running kernel identity read-only"
     fi
-    [[ $running_kernel_release =~ ^[a-zA-Z0-9][a-zA-Z0-9._+~-]{0,127}$ ]] ||
+    is_kernel_release "$running_kernel_release" ||
         refuse BLOCKED running_kernel_release unavailable "uname -r returned a malformed kernel release"
 }
 check_loaded_runtime_identity
