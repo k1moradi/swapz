@@ -610,6 +610,12 @@ def _serve_admission(server: socket.socket,
                 raise failure from exc
             if peer_uid != 0:
                 failure = Blocked("source admission peer is not privileged")
+                print(
+                    "BLOCKED_PRIMARY_REAL_SWAP_PARENT="
+                    f"{failure}:phase=authenticated_channel:"
+                    "expected=uid_0:observed=nonprivileged_peer_uid:"
+                    "errno=none:authorization=BLOCKED",
+                    file=sys.stderr)
                 _stop_unadmitted_child_preserving(child, failure)
                 raise failure
             try:
