@@ -2443,6 +2443,11 @@ int main(int argc, char **argv)
         self.assertIn('b"swapz-nullblk-arm64-v1\\0"', self.script)
         self.assertIn('defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && '
                       'defined(__aarch64__)', self.primary)
+        self.assertIn(
+            '#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && '
+            'defined(__aarch64__))\n'
+            '/* An ARM64 RAM-only rehearsal has no DMI UUID to normalize. */\n'
+            'static int swapz_primary_host_uuid_normalize(', self.primary)
         self.assertNotIn('b"swapz-host\\0"', self.script)
         self.assertIn(
             'static const unsigned char prefix[] = "swapz-host-v2";',

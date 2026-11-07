@@ -2947,7 +2947,10 @@ accept this machine-scoped digest. It is not a hardware identity: the
 installed/physical parser, DMI-bound production host digest, bare-metal
 x86_64 physical admission, and official history eligibility remain unchanged.
 The official ARM64 report with missing DMI stays `host_identity=UNAVAILABLE`
-and may not be treated as physical qualification.
+and may not be treated as physical qualification. The private ARM64 build
+must exclude its otherwise unused DMI UUID normalization helper so the
+`-Wall -Wextra -Werror` lifecycle binary compiles without weakening warnings;
+installed and x86_64 builds retain the existing normalization and checks.
 Each owned-null_blk lifecycle
 rehearsal must allocate
 a fresh root-owned evidence directory bound to the same

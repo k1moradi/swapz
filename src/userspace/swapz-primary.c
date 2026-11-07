@@ -6457,6 +6457,8 @@ static int swapz_primary_lower_uuid36(const char *value)
 	return 1;
 }
 
+#if !(defined(SWAPZ_PRIMARY_OWNED_NULLBLK_TEST) && defined(__aarch64__))
+/* An ARM64 RAM-only rehearsal has no DMI UUID to normalize. */
 static int swapz_primary_host_uuid_normalize(
 	const char *value, size_t length, char normalized[37])
 {
@@ -6494,6 +6496,7 @@ static int swapz_primary_host_uuid_normalize(
 	}
 	return 0;
 }
+#endif
 
 static unsigned int swapz_primary_lower_hex_nibble(char byte)
 {
