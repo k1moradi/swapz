@@ -2377,7 +2377,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
             subprocess.TimeoutExpired("qualifier", 5),
         ]
         stderr = io.StringIO()
-        with mock.patch.object(parent, "_check_git_source"):
+        with self._mock_owned_admission_peer(), \
+                mock.patch.object(parent, "_check_git_source"):
             with contextlib.redirect_stderr(stderr):
                 with self.assertRaisesRegex(
                         parent.Blocked,
