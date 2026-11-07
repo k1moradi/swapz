@@ -2911,7 +2911,10 @@ root-owned single-link non-group/world-writable regular files, no symlink
 following, stable metadata, bounded reads, and exactly zero or one trailing LF.
 A stale machine-ID-only digest, CRLF-normalized record, or otherwise untrusted
 input must not be silently accepted; native regression must keep the private
-report fixture aligned with production host identity. Only the digest may appear
+report fixture aligned with production host identity. The x86_64 private
+rehearsal's DMI fixture must accept the canonical five-group 8-4-4-4-12 UUID
+and reject a spurious sixth four-hex group; an overly long regex would refuse
+valid hosts and could incorrectly accept malformed records. Only the digest may appear
 in evidence, never either raw host identifier. On Linux aarch64, the private
 owned-null_blk test build alone may use a trusted root-owned single-link
 `/etc/machine-id` under the same strict grammar, hashed as

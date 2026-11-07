@@ -2390,6 +2390,7 @@ int main(int argc, char **argv)
         self.assertIn("def trusted_host_record(path, byte_limit, pattern):",
                       self.script)
         self.assertIn('"/sys/class/dmi/id/product_uuid"', self.script)
+        self.assertIn('rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"', self.script)
         self.assertIn('"/etc/machine-id"', self.script)
         self.assertIn('b"swapz-host-v2\\0"', self.script)
         self.assertIn('b"swapz-nullblk-arm64-v1\\0"', self.script)
