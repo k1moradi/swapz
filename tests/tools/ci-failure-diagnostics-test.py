@@ -530,6 +530,27 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertEqual(fake_marker["test"], "native-rootless")
         self.assertNotIn("child_exit_code", fake_marker)
 
+    def test_bounded_private_exception_keeps_sanitized_truncation_witness(self):
+        from io import BytesIO
+        from tempfile import TemporaryDirectory
+
+        # The first 4096 captured bytes end mid-line. The private suffix
+        # must be drained, but the fixed truncation witness must survive
+        # replacing unsafe exception detail with a sanitized placeholder.
+        output = (b"AssertionError: token=privatevalue " + b"x" * 5000 +
+                  b" token=tailprivate\n")
+        with TemporaryDirectory(prefix="swapz-ci-truncation-") as directory:
+            log = Path(directory) / "failure.log"
+            self.diagnostics._ci_retain_log(
+                BytesIO(output), log, {"status": "FAIL"})
+            retained = log.read_text()
+        self.assertIn("AssertionError:", retained)
+        self.assertIn("[private exception detail omitted]", retained)
+        self.assertIn("[truncated]", retained)
+        self.assertNotIn("privatevalue", retained)
+        self.assertNotIn("tailprivate", retained)
+        self.assertNotIn("x" * 100, retained)
+
     def test_real_synthetic_child_launch_failure_preserves_errno_and_artifact(self):
         # Only execute a deliberately absent command, never a device helper.
         source = subprocess.run(

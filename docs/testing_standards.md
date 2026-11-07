@@ -2076,6 +2076,12 @@ values because they are required causal diagnostics, not identity payloads. Keep
 only the allowlisted source-contract and make-interface script basenames
 visible after redacting their private containing root, so original source
 contract failures retain their existing classification.
+A captured logical line truncated by the bounded reader must retain the
+fixed `[truncated]` witness even when unsafe child exception detail is
+replaced by the sanitized `[private exception detail omitted]` placeholder.
+The witness must never reinstate drained suffix bytes or cause private
+tokens to enter public CI output or the retained failure log. Synthetic
+byte-stream regression must verify both retention and redaction.
 If sanitized-log retention itself fails, the original test exit and cause are
 still reported, while `log=unavailable` and the numeric diagnostic errno
 describe that secondary evidence failure. All promoted fields use the existing

@@ -253,6 +253,9 @@ def _ci_safe_line(line):
     import re
     from pathlib import Path
 
+    # The bounded reader's witness must outlive exception-detail redaction.
+    # Preserve only the fixed truncation fact, never private child bytes.
+    bounded_input_truncated = line.endswith(" [line truncated]\n")
     line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
     for name, replacement in (("GITHUB_WORKSPACE", "<workspace>"),
                               ("RUNNER_TEMP", "<runner-temp>"),
@@ -354,7 +357,7 @@ def _ci_safe_line(line):
             clean_line = unittest_heading.group(0)
         else:
             clean_line = clean_line.split(":", 1)[0] + ": unittest identity withheld"
-    if len(clean_line) > 320:
+    if len(clean_line) > 320 or bounded_input_truncated:
         return clean_line[:306] + " [truncated]"
     return clean_line
 
