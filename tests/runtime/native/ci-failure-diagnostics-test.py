@@ -248,7 +248,7 @@ exec sleep 30
         # An allowlisted structured assertion marker is sufficient, without
         # promoting the raw traceback or a fabricated nested error.
         attributed_marker = marker.replace(
-            "test=unavailable", "test=" + method).replace(
+            " test=unavailable", " test=" + method).replace(
             "reason=nonzero_exit", "reason=unittest_assertion")
         attributed = self.diagnostics.diagnose_ci_failure(
             hostile_lines[:-2] + [attributed_marker], 1, "native-rootless")
