@@ -31,7 +31,11 @@
 #endif
 _Static_assert(SYS_statmount == 457 && SYS_listmount == 458,
 	       "fixture syscall numbers must match Linux x86_64/arm64 UAPI");
-#define FIXTURE_NAMESPACE_DEVICE_CAPACITY 512U
+/*
+ * Synthetic listmount coverage must reach past the historical 512-device
+ * ceiling; excess fixture entries must fail rather than disappear.
+ */
+#define FIXTURE_NAMESPACE_DEVICE_CAPACITY 1024U
 
 /*
  * Compile the actual production manager, without SWAPZ_PRIMARY_ROOTLESS_TEST:
@@ -120,6 +124,8 @@ static unsigned int
 	fixture_namespace_inventory_scans[FIXTURE_NAMESPACE_KIND_COUNT];
 static unsigned int
 	fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_KIND_COUNT];
+static unsigned int
+	fixture_namespace_statmount_calls[FIXTURE_NAMESPACE_KIND_COUNT];
 
 static void fixture_file(const char *relative, const char *contents);
 
@@ -252,7 +258,12 @@ static size_t fixture_namespace_devices(
 	if (proc_path)
 		stream = fopen(fixture_path(proc_path, converted), "r");
 	if (stream) {
-		while (count < capacity && fgets(line, sizeof(line), stream)) {
+		while (fgets(line, sizeof(line), stream)) {
+			if (count == capacity) {
+				(void)fclose(stream);
+				errno = EOVERFLOW;
+				return SIZE_MAX;
+			}
 			unsigned int device_major;
 			unsigned int device_minor;
 
@@ -266,12 +277,17 @@ static size_t fixture_namespace_devices(
 	if (!count)
 		devices[count++] = fixture_namespace_default_root_device(kind);
 	if (fixture_hidden_namespace_kind == kind) {
+		/* An incomplete synthetic inventory cannot be valid clearance. */
+		if (fixture_hidden_namespace_padding_mounts > capacity - count ||
+		    (fixture_hidden_namespace_device &&
+		     fixture_hidden_namespace_padding_mounts == capacity - count)) {
+			errno = EOVERFLOW;
+			return SIZE_MAX;
+		}
 		for (size_t index = 0;
-		     index < fixture_hidden_namespace_padding_mounts &&
-		     count < capacity;
-		     ++index)
+		     index < fixture_hidden_namespace_padding_mounts; ++index)
 			devices[count++] = makedev(8U, 2U);
-		if (fixture_hidden_namespace_device && count < capacity)
+		if (fixture_hidden_namespace_device)
 			devices[count++] = fixture_hidden_namespace_device;
 	}
 	return count;
@@ -345,9 +361,12 @@ static long fixture_syscall(long number, ...)
 		assert(status_size >= sizeof(*status));
 		assert(request->namespace_fd == (uint32_t)fixture_namespace_fd);
 		assert(kind != FIXTURE_NAMESPACE_NONE);
+		++fixture_namespace_statmount_calls[kind];
 		if (fixture_namespace_syscall_error_kind == kind &&
 		    fixture_namespace_syscall_error_number == SYS_statmount &&
-		    fixture_namespace_syscall_error) {
+		    fixture_namespace_syscall_error &&
+		    fixture_namespace_statmount_calls[kind] >
+			    fixture_namespace_syscall_error_after_call) {
 			errno = fixture_namespace_syscall_error;
 			goto out;
 		}
@@ -359,6 +378,8 @@ static long fixture_syscall(long number, ...)
 		device_count =
 			fixture_namespace_devices(kind, devices,
 						 sizeof(devices) / sizeof(devices[0]));
+		if (device_count == SIZE_MAX)
+			goto out;
 		base = fixture_namespace_mount_id_base(kind);
 		assert(request->mount_id >= base + 1U);
 		index = request->mount_id - base - 1U;
@@ -410,6 +431,8 @@ static long fixture_syscall(long number, ...)
 		device_count =
 			fixture_namespace_devices(kind, devices,
 						 sizeof(devices) / sizeof(devices[0]));
+		if (device_count == SIZE_MAX)
+			goto out;
 		base = fixture_namespace_mount_id_base(kind);
 		assert(request->mount_id == base + 1U);
 		if (!request->parameter) {
@@ -988,6 +1011,8 @@ static void fixture_reset(void)
 	       sizeof(fixture_namespace_inventory_scans));
 	memset(fixture_namespace_listmount_calls, 0,
 	       sizeof(fixture_namespace_listmount_calls));
+	memset(fixture_namespace_statmount_calls, 0,
+	       sizeof(fixture_namespace_statmount_calls));
 	fixture_unlink_if_present("self/ns/mnt");
 	fixture_unlink_if_present("3031/ns/mnt");
 	fixture_file("self/ns/mnt", "coordinator mount namespace\n");
@@ -1984,6 +2009,34 @@ static void test_root_filtered_foreign_mountinfo(void)
 	expect_mount_admission("foreign listmount permission denied", 0, EPERM);
 
 	/*
+	 * The root statmount succeeds, but a previously listed child ID can
+	 * disappear before its statmount. ENOENT is a failed inventory, not EOF.
+	 * This injects failure into the actual production listmount/statmount path.
+	 */
+	fixture_reset();
+	fixture_file("3031/mountinfo",
+		     "36 25 259:9 / / rw - ext4 /foreign-root rw\n"
+		     "37 36 8:2 / /sibling rw - ext4 /dev/sda2 rw\n");
+	fixture_namespace_syscall_error_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_namespace_syscall_error_number = SYS_statmount;
+	fixture_namespace_syscall_error = ENOENT;
+	fixture_namespace_syscall_error_after_call = 1U;
+	expect_mount_admission("listed mount ID disappears before statmount", 0,
+			       ENOENT);
+	if (fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] != 1U ||
+	    fixture_namespace_statmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] != 2U) {
+		fprintf(stderr,
+			"FAIL: phase=stale-listed-mount-ID "
+			"expected=listmount-then-statmount-refusal "
+			"listmount_calls=%u statmount_calls=%u errno=%d "
+			"safe_action=retain_inactive_target\n",
+			fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER],
+			fixture_namespace_statmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER],
+			errno);
+		++fixture_failures;
+	}
+
+	/*
 	 * Production requests at most 256 mount IDs per listmount call. Put the
 	 * selected device beyond the first batch and require continued traversal.
 	 */
@@ -2003,6 +2056,46 @@ static void test_root_filtered_foreign_mountinfo(void)
 				FIXTURE_NAMESPACE_FOREIGN_LEADER]);
 		++fixture_failures;
 	}
+
+	/*
+	 * A prior 512-entry fixture ceiling silently omitted this final mount.
+	 * Verify selected and parent identities beyond that ceiling, while a
+	 * distant sibling remains a valid nonconflicting control.
+	 */
+	fixture_reset();
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_hidden_namespace_padding_mounts = 640U;
+	fixture_hidden_namespace_device = makedev(8U, 1U);
+	expect_mount_admission("post-512 selected device is still enumerated", 0, 0);
+	if (fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER] < 3U) {
+		fprintf(stderr,
+			"FAIL: phase=namespace-pagination case=post-512-selected "
+			"expected_calls>=3 observed_calls=%u "
+			"safe_action=retain_inactive_target\n",
+			fixture_namespace_listmount_calls[FIXTURE_NAMESPACE_FOREIGN_LEADER]);
+		++fixture_failures;
+	}
+
+	fixture_reset();
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_hidden_namespace_padding_mounts = 640U;
+	fixture_hidden_namespace_device = makedev(8U, 0U);
+	expect_mount_admission("post-512 physical parent is still enumerated", 0, 0);
+
+	fixture_reset();
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_hidden_namespace_padding_mounts = 640U;
+	fixture_hidden_namespace_device = makedev(8U, 3U);
+	expect_mount_admission("post-512 unrelated sibling remains clear", 1, 0);
+
+	/* Exhausting fixture storage must not turn the table into an empty view. */
+	fixture_reset();
+	fixture_hidden_namespace_kind = FIXTURE_NAMESPACE_FOREIGN_LEADER;
+	fixture_hidden_namespace_padding_mounts =
+		FIXTURE_NAMESPACE_DEVICE_CAPACITY;
+	fixture_hidden_namespace_device = makedev(8U, 1U);
+	expect_mount_admission("fixture namespace inventory capacity exceeded", 0,
+			       EOVERFLOW);
 
 	/* A later batch error is incomplete visibility, never an empty inventory. */
 	fixture_reset();
