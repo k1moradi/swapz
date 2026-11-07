@@ -625,19 +625,39 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             ('{"private":"' + private_marker + '","private":"duplicate"}\n'
              ).encode("ascii"))
         connection = mock.MagicMock()
-        connection.getsockopt.return_value = struct.pack("3i", child.pid, 0, 0)
+        # The test targets malformed request cleanup, not peer-pidfd
+        # acquisition. Provide a real disposable fd for the synthetic peer;
+        # the parent must acquire and close it before any cleanup can pass.
+        peer_pidfd, peer_liveness_writer = os.pipe()
+        peer_pidfd_handed_off = False
+
+        def get_socket_option(level, option, *_arguments):
+            nonlocal peer_pidfd_handed_off
+            self.assertEqual(level, socket.SOL_SOCKET)
+            if option == socket.SO_PEERCRED:
+                return struct.pack("3i", child.pid, 0, 0)
+            if option == parent.SO_PEERPIDFD:
+                peer_pidfd_handed_off = True
+                return peer_pidfd
+            self.fail("unexpected socket option")
+
+        connection.getsockopt.side_effect = get_socket_option
         connection.makefile.return_value = stream
         server = mock.Mock()
         server.accept.return_value = connection, None
         diagnostics = io.StringIO()
         try:
             with contextlib.redirect_stderr(diagnostics), mock.patch.object(
-                    parent, "_check_git_source") as check:
+                    parent, "_check_git_source") as check, mock.patch.object(
+                    parent, "_owned_live_connection_peer_lineage",
+                    return_value=((child.pid, os.getpid(), 1),)) as lineage:
                 result = parent._serve_admission(
                     server, child, self.SOURCE, "/usr/bin/git",
                     self.ORACLE_DIGEST, self.source_hashes,
                     self.HELPER_DIGEST, 2)
             self.assertEqual(result, 2)
+            self.assertTrue(peer_pidfd_handed_off)
+            lineage.assert_called_once()
             self.assertFalse(stream.responses())
             self.assertIsNotNone(child.poll())
             self.assertIn("source admission request is malformed",
@@ -645,7 +665,21 @@ class SourceAdmissionPeerOwnership(unittest.TestCase):
             self.assertIn("owned_cleanup=complete", diagnostics.getvalue())
             self.assertNotIn(private_marker, diagnostics.getvalue())
             check.assert_not_called()
+            with self.assertRaises(OSError) as closed:
+                os.fstat(peer_pidfd)
+            self.assertEqual(closed.exception.errno, errno.EBADF)
         finally:
+            os.close(peer_liveness_writer)
+            # The parent owns the handed-off fd; reclaim it on a failing
+            # assertion without hiding the earlier cleanup failure.
+            if not peer_pidfd_handed_off:
+                os.close(peer_pidfd)
+            else:
+                try:
+                    os.close(peer_pidfd)
+                except OSError as error:
+                    if error.errno != errno.EBADF:
+                        raise
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=5)
