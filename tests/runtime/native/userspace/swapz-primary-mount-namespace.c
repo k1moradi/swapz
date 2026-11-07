@@ -1019,6 +1019,12 @@ static void fixture_large_valid_mountinfo(const char *relative)
 	size_t bytes_written;
 	unsigned int mount_identifier = 1000U;
 	const char *root_entry = "36 25 259:0 / / rw - ext4 /dev/root rw\n";
+	/* Long valid mountpoints exercise byte growth without exceeding the
+	 * fixture's independent 1,024-mount synthetic inventory capacity.
+	 */
+	const char *mount_name_suffix =
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 	int length = snprintf(path, sizeof(path), "%s/%s",
 			      fixture_proc_root, relative);
 
@@ -1030,14 +1036,17 @@ static void fixture_large_valid_mountinfo(const char *relative)
 	while (bytes_written <= SWAPZ_PRIMARY_MOUNTINFO_INITIAL_BYTES + 4096U) {
 		char row[160];
 		int row_length = snprintf(row, sizeof(row),
-					  "%u 36 0:42 / /child%u rw - tmpfs tmpfs rw\n",
-					  mount_identifier, mount_identifier);
+					  "%u 36 0:42 / /child%u-%s rw - tmpfs tmpfs rw\n",
+					  mount_identifier, mount_identifier,
+					  mount_name_suffix);
 
 		assert(row_length > 0 && (size_t)row_length < sizeof(row));
 		assert(fwrite(row, 1U, (size_t)row_length, stream) ==
 		       (size_t)row_length);
 		bytes_written += (size_t)row_length;
 		++mount_identifier;
+		assert(mount_identifier - 1000U <
+		       FIXTURE_NAMESPACE_DEVICE_CAPACITY - 16U);
 	}
 	assert(bytes_written < SWAPZ_PRIMARY_MOUNTINFO_BUFFER_BYTES);
 	assert(fclose(stream) == 0);
