@@ -39,7 +39,7 @@ class TerminalEvidenceContracts(unittest.TestCase):
     def run_fixture(self, *, short_read=False, interrupted=False, corrupt=False,
                     corrupt_pages=(), corrupt_offsets=(), page_count=2,
                     read_errno=None, report_errno=None, close_fails=False,
-                    closed_output_at=None):
+                    closed_output_at=None, verify_command="VERIFY"):
         class AnonymousMemoryFixture:
             def __init__(self):
                 self.contents = bytearray(page_count * oracle.PAGE_BYTES)
@@ -66,7 +66,7 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 self.closed = True
 
         allocation = AnonymousMemoryFixture()
-        commands = iter(("FILL", "VERIFY"))
+        commands = iter(("FILL", verify_command))
         standard_output = io.StringIO()
         standard_error = io.StringIO()
 
@@ -105,6 +105,46 @@ class TerminalEvidenceContracts(unittest.TestCase):
                 contextlib.redirect_stderr(standard_error):
             status = oracle.run_workload("ab" * 16, 1)
         return status, standard_output.getvalue(), standard_error.getvalue(), allocation
+
+    def test_invalid_memory_size_and_page_index_fail_before_allocating(self):
+        invalid_memory_sizes = ("64", 64.0, True, None, 63, 513)
+        for memory_mib in invalid_memory_sizes:
+            with self.subTest(memory_mib=memory_mib):
+                stderr = io.StringIO()
+                with mock.patch.object(oracle, "_disable_dumps") as dumps, \
+                        mock.patch.object(oracle, "_emit") as emit, \
+                        mock.patch.object(oracle.mmap, "mmap") as allocate, \
+                        contextlib.redirect_stderr(stderr):
+                    status = oracle.run_workload("ab" * 16, memory_mib)
+                self.assertEqual(status, 2)
+                self.assertIn("FAIL: oracle memory must be", stderr.getvalue())
+                dumps.assert_not_called()
+                emit.assert_not_called()
+                allocate.assert_not_called()
+
+        for page_index in (-1, True, 1.5, "1", 1 << 64):
+            with self.subTest(page_index=page_index), self.assertRaisesRegex(
+                    ValueError, "page index must be a 64-bit unsigned integer"):
+                oracle.page_pattern("ab" * 16, page_index)
+        self.assertEqual(
+            len(oracle.page_pattern("ab" * 16, (1 << 64) - 1)),
+            oracle.PAGE_BYTES)
+
+    def test_early_verify_command_never_emits_terminal_success(self):
+        for command in ("", "STOP"):
+            with self.subTest(command=command):
+                status, stdout, stderr, allocation = self.run_fixture(
+                    verify_command=command)
+                self.assertEqual(status, 1)
+                self.assertTrue(allocation.closed)
+                self.assertEqual(
+                    [record.partition("=")[0] for record in stdout.splitlines()],
+                    ["ORACLE_WAITING", "ORACLE_FILLED"])
+                self.assertIn(
+                    "phase=wait_verify verified_pages=0/2 verified_bytes=0/8192",
+                    stderr)
+                self.assertIn("cleanup_complete=true", stderr)
+                self.assertNotIn("ORACLE_VERIFIED=", stdout)
 
     def test_success_shaped_record_is_withheld_until_unmap_succeeds(self):
         status, stdout, stderr, allocation = self.run_fixture(close_fails=True)
@@ -687,6 +727,55 @@ class TerminalEvidenceContracts(unittest.TestCase):
                     qualify.QualificationFailure):
                 qualify.require_oracle_verification_details([forged_record])
 
+    def test_parent_rejects_malformed_terminal_json_before_any_verdict(self):
+        invalid_records = (
+            (b'{"verified_pages":1,"verified_pages":1}', "malformed JSON"),
+            (b'{"verified_pages":NaN}', "malformed JSON"),
+            (b'{"verified_pages":1e999}', "malformed JSON"),
+            (b'{"verified_pages":1,\xff}', "malformed JSON"),
+            (b'[]', "not an object"),
+            (b'null', "not an object"),
+        )
+        for record, expected_error in invalid_records:
+            with self.subTest(record=record):
+                read_descriptor, write_descriptor = os.pipe()
+                try:
+                    os.write(write_descriptor, b"ORACLE_VERIFIED=" + record + b"\n")
+                    os.close(write_descriptor)
+                    write_descriptor = -1
+                    with os.fdopen(read_descriptor, "rb", buffering=0) as output:
+                        process = mock.Mock(stdout=output)
+                        process.poll.return_value = 0
+                        with self.assertRaisesRegex(
+                                qualify.QualificationFailure, expected_error):
+                            qualify._oracle_event(
+                                process, "ORACLE_VERIFIED=",
+                                qualify.time.monotonic() + 1,
+                                lambda: None, bytearray())
+                finally:
+                    if write_descriptor >= 0:
+                        os.close(write_descriptor)
+
+    def test_parent_rejects_noninteger_and_unreasonable_byte_counts(self):
+        valid = {
+            "verified_pages": 2,
+            "verified_bytes": 2 * oracle.PAGE_BYTES,
+            "mismatched_pages": 0,
+            "mismatches": 0,
+            "mismatch_samples": [],
+        }
+        for mutant in (
+                {"verified_pages": True},
+                {"verified_pages": "2"},
+                {"verified_pages": 1 << 128},
+                {"verified_bytes": float(2 * oracle.PAGE_BYTES)},
+                {"mismatched_pages": False},
+                {"mismatches": 1 << 128},
+                {"mismatch_samples": [{"page": 2, "byte": 0}]}):
+            with self.subTest(mutant=mutant), self.assertRaises(
+                    qualify.QualificationFailure):
+                qualify.require_oracle_verification_details([{**valid, **mutant}])
+
     def test_parent_rejects_duplicate_or_trailing_terminal_bytes(self):
         pending_tails = (
             bytearray(b'ORACLE_VERIFIED={"verified_pages":2}\n'),
@@ -1177,29 +1266,48 @@ class TerminalEvidenceContracts(unittest.TestCase):
         }
         qualify.evaluate_workload_evidence(**evidence)
         cases = (
-            ("no cgroup occupancy", {"cgroup_swap_bytes": 0}),
-            ("no swap peak", {"cgroup_swap_peak": 0}),
-            ("no mapper usage", {"mapper_used_delta_kib": 0}),
-            ("no target write", {"fill_status_after": zero_counters}),
-            ("no lower write", {"lower_after_fill": qualify.BlockStats(0, 0)}),
+            ("no cgroup occupancy", {"cgroup_swap_bytes": 0},
+             "bounded cgroup never accumulated required real swap usage"),
+            ("no swap peak", {"cgroup_swap_peak": 0},
+             "bounded cgroup never accumulated required real swap usage"),
+            ("no mapper usage", {"mapper_used_delta_kib": 0},
+             "exact mapper /proc/swaps usage stayed below required real-swap floor"),
+            ("no target write", {"fill_status_after": zero_counters},
+             "swapz target counters stay below required swap-out WRITE activity"),
+            ("no lower write", {"lower_after_fill": qualify.BlockStats(0, 0)},
+             "backing partition counters show no lower WRITE activity"),
             ("undercovered lower write", {
-                "lower_after_fill": qualify.BlockStats(0, 1)}),
-            ("no vmstat swapout", {"vm_after_fill": {"pswpout": 0}}),
-            ("no target read", {"verify_status_after": fill_counters}),
-            ("no lower read", {"lower_after_verify": qualify.BlockStats(0, page_bytes // 512)}),
+                "lower_after_fill": qualify.BlockStats(0, 1)},
+             "backing partition WRITE counters do not cover swapz target physical WRITE bytes"),
+            ("no vmstat swapout", {"vm_after_fill": {"pswpout": 0}},
+             "kernel vmstat shows no swap-out during admitted workload"),
+            ("no target read", {"verify_status_after": fill_counters},
+             "swapz target counters stay below required swap-in READ activity"),
+            ("no lower read", {
+                "lower_after_verify": qualify.BlockStats(0, page_bytes // 512)},
+             "backing partition counters show no lower READ activity"),
             ("undercovered lower read", {
-                "lower_after_verify": qualify.BlockStats(1, page_bytes // 512)}),
-            ("no vmstat swapin", {"vm_after_verify": {"pswpin": 0}}),
-            ("short oracle", {"oracle": {**verified, "verified_bytes": 0}}),
-            ("corrupt oracle", {"oracle": {**verified, "mismatches": 1}}),
-            ("wrong digest", {"oracle": {**verified, "digest": "cd" * 32}}),
-            ("kernel OOM", {"oom_delta": 1}),
-            ("target failed", {"verify_status_after": {**verify_counters, "failed": 1}}),
+                "lower_after_verify": qualify.BlockStats(1, page_bytes // 512)},
+             "backing partition READ counters do not cover swapz target physical READ bytes"),
+            ("no vmstat swapin", {"vm_after_verify": {"pswpin": 0}},
+             "kernel vmstat shows no swap-in during byte verification"),
+            ("short oracle", {"oracle": {**verified, "verified_bytes": 0}},
+             "real-swap byte oracle reported corruption or incomplete verification"),
+            ("corrupt oracle", {"oracle": {**verified, "mismatches": 1}},
+             "real-swap byte oracle reported corruption or incomplete verification"),
+            ("wrong digest", {"oracle": {**verified, "digest": "cd" * 32}},
+             "real-swap byte oracle reported corruption or incomplete verification"),
+            ("kernel OOM", {"oom_delta": 1},
+             "bounded real-swap workload encountered cgroup OOM"),
+            ("target failed", {
+                "verify_status_after": {**verify_counters, "failed": 1}},
+             "swapz target entered failed state during real-swap workload"),
         )
-        for description, changes in cases:
-            with self.subTest(description=description), self.assertRaises(
-                    qualify.QualificationFailure):
-                qualify.evaluate_workload_evidence(**{**evidence, **changes})
+        for description, changes, first_failure in cases:
+            with self.subTest(description=description):
+                with self.assertRaises(qualify.QualificationFailure) as caught:
+                    qualify.evaluate_workload_evidence(**{**evidence, **changes})
+                self.assertEqual(str(caught.exception), first_failure)
 
     def test_teardown_failure_keeps_original_oracle_reason(self):
         with self.assertRaisesRegex(

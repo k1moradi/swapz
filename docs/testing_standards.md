@@ -1003,7 +1003,14 @@ partial stderr and traceback/path text remain private, while the parent still
 reports the child exit and incomplete-evidence disposition. An interrupt while waiting for FILL or
 allocating must fail boundedly without a traceback or anonymous allocation.
 Later cleanup/reporting errors must not replace
-an earlier byte/digest mismatch or its counts. Diagnostic samples may contain
+an earlier byte/digest mismatch or its counts. Standalone oracle entry points
+must reject non-integer memory sizes and page indices outside the unsigned
+64-bit range before allocation or hashing. Rootless terminal fixtures must
+reject duplicate-key, non-finite, non-object and non-ASCII JSON, boolean or
+floating byte counters, and unreasonably large verification totals. They must
+assert the exact first failed cgroup, mapper, kernel, target, lower-device or
+byte-integrity observation rather than merely checking for some failure.
+Diagnostic samples may contain
 page/byte offsets
 but not raw expected/observed values or seeds. Byte-exact comparison alone is
 not evidence of actual target swap-out/in without the independent cgroup,

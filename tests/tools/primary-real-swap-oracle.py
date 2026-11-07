@@ -49,8 +49,8 @@ def _page_pattern_from_seed(seed: bytes, page_index: int) -> bytes:
 
 
 def page_pattern(seed_hex: str, page_index: int) -> bytes:
-    if page_index < 0:
-        raise ValueError("page index must be nonnegative")
+    if type(page_index) is not int or not 0 <= page_index < (1 << 64):
+        raise ValueError("page index must be a 64-bit unsigned integer")
     return _page_pattern_from_seed(_parse_seed(seed_hex), page_index)
 
 
@@ -66,7 +66,7 @@ def _emit(prefix: str, payload: dict) -> None:
 
 
 def run_workload(seed_hex: str, memory_mib: int) -> int:
-    if not MIN_MIB <= memory_mib <= MAX_MIB:
+    if type(memory_mib) is not int or not MIN_MIB <= memory_mib <= MAX_MIB:
         print(f"FAIL: oracle memory must be {MIN_MIB}..{MAX_MIB} MiB", file=sys.stderr)
         return 2
     allocation_bytes = memory_mib * MIB
