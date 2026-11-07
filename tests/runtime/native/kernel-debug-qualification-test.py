@@ -1539,6 +1539,178 @@ exit 0
         self.assertIn("step0 = (swapz_u64x8){", avx512)
         self.assertIn("step1 = (swapz_u64x8){", avx512)
 
+    def test_hermetic_kbuild_staging_preserves_candidate_identity(self) -> None:
+        """Exercise actual staging with inert Kbuild, no host kernel or loading."""
+        import textwrap
+
+        project_root = Path(__file__).resolve().parents[3]
+        fixture = Path(self.temporary_directory.name)
+        kernel_source = fixture / "src/kernel"
+        kernel_source.mkdir(parents=True)
+        for filename in ("Makefile", "VERSION", "swapz-build-info.h"):
+            (kernel_source / filename).write_bytes(
+                (project_root / "src/kernel" / filename).read_bytes())
+        source = kernel_source / "dm-target.c"
+        source.write_text('#include "dummy.h"\nint revision = 1;\n',
+                          encoding="utf-8")
+        included_header = kernel_source / "dummy.h"
+        included_header.write_text("#define DUMMY_REVISION 1\n", encoding="utf-8")
+
+        generated = fixture / "build/source-build-info.h"
+        generated.parent.mkdir(parents=True)
+        def stamp(source_sha: str, clean: int) -> None:
+            generated.write_text(
+                f'#define SWAPZ_BUILD_SOURCE_SHA "{source_sha}"\n'
+                f'#define SWAPZ_BUILD_SOURCE_CLEAN {clean}\n'
+                f'#define SWAPZ_BUILD_SOURCE_CLEAN_STRING "{clean}"\n',
+                encoding="utf-8")
+        stamp(SOURCE_SHA, 1)
+
+        fake_headers = fixture / "fake-headers"
+        fake_headers.mkdir()
+        (fake_headers / "Makefile").write_text(
+            ".PHONY: modules\n"
+            "modules:\n"
+            '\t@python3 "$(CURDIR)/fake-build.py" "$(M)"\n',
+            encoding="utf-8")
+        mock_kbuild = textwrap.dedent(r'''
+            import hashlib
+            from pathlib import Path
+            import sys
+
+            stage = Path(sys.argv[1])
+            if Path(__file__).with_name("fail-compile").exists():
+                print("dm-target.c:7:5: warning: synthetic compiler diagnostic",
+                      file=sys.stderr)
+                print("dm-target.c:8:5: error: synthetic compile failure",
+                      file=sys.stderr)
+                sys.exit(37)
+            # Model Kbuild dependency timestamps, including generated headers.
+            inputs = sorted((stage / "Makefile", *stage.glob("*.c"),
+                             *stage.glob("*.h")))
+            module = stage / "dm-swapz.ko"
+            counter = stage / "compile-count"
+            if (not module.exists() or
+                    max(item.stat().st_mtime_ns for item in inputs) >
+                    module.stat().st_mtime_ns):
+                count = int(counter.read_text()) + 1 if counter.exists() else 1
+                digest = hashlib.sha256()
+                for item in inputs:
+                    digest.update(item.name.encode() + b"\0" +
+                                  item.read_bytes() + b"\0")
+                module.write_text(
+                    f"compile={count} input_digest={digest.hexdigest()}\n" +
+                    (stage / "swapz-build-info.h").read_text() +
+                    (stage / "swapz-version.h").read_text())
+                counter.write_text(str(count))
+        ''').lstrip()
+        (fake_headers / "fake-build.py").write_text(mock_kbuild, encoding="utf-8")
+
+        stage_names = {"W=1": "w1", "W=2": "w2", "": "experimental"}
+        def build(warning_level: str, *, explicit: bool = True) -> subprocess.CompletedProcess[str]:
+            command = ["make", "-s", "--no-print-directory", "-C",
+                       str(kernel_source), f"KDIR={fake_headers}"]
+            if warning_level:
+                command.append(warning_level)
+            if explicit:
+                command.append(f"SWAPZ_BUILD_INFO={generated}")
+            command.append("all")
+            return subprocess.run(command, capture_output=True, text=True,
+                                  check=False, timeout=20)
+
+        def image(warning_level: str) -> Path:
+            return (fixture / "build/kernel" / stage_names[warning_level] /
+                    "dm-swapz.ko")
+
+        def run_success(warning_level: str, *, explicit: bool = True) -> bytes:
+            result = build(warning_level, explicit=explicit)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return image(warning_level).read_bytes()
+
+        # Byte-identical source and report-only rewrites must retain identity.
+        candidate_images: dict[str, bytes] = {}
+        for warning_level in stage_names:
+            first_image = run_success(warning_level)
+            self.assertIn(SOURCE_SHA.encode(), first_image)
+            self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 1', first_image)
+            stamp(SOURCE_SHA, 1)
+            self.assertEqual(run_success(warning_level), first_image)
+            self.assertEqual(
+                (image(warning_level).parent / "compile-count").read_text(), "1")
+            candidate_images[warning_level] = first_image
+
+        # Source, included headers and canonical release must reach Kbuild.
+        original_version = (kernel_source / "VERSION").read_text().strip()
+        match = re.fullmatch(r"3\.0\.0-alpha\.(\d+)", original_version)
+        self.assertIsNotNone(match)
+        next_version = f"3.0.0-alpha.{int(match.group(1)) + 1}"
+        source.write_text('#include "dummy.h"\nint revision = 2;\n',
+                          encoding="utf-8")
+        stamp(SOURCE_SHA, 0)  # A dirty source must not claim clean metadata.
+        included_header.write_text("#define DUMMY_REVISION 2\n", encoding="utf-8")
+        (kernel_source / "VERSION").write_text(next_version + "\n", encoding="utf-8")
+        for warning_level in stage_names:
+            current_image = run_success(warning_level)
+            self.assertNotEqual(current_image, candidate_images[warning_level])
+            self.assertIn(f'SWAPZ_ALPHA_VERSION "{next_version}"'.encode(),
+                          current_image)
+            self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 0', current_image)
+            candidate_images[warning_level] = current_image
+        blocked, reason = self.verify(module_evidence={
+            "source_sha": SOURCE_SHA, "source_clean": "0",
+            "sha256": MODULE_SHA256, "vermagic": KERNEL_RELEASE + " SMP",
+            "symbols": "__asan_load8 __tsan_read8",
+        })
+        self.assertEqual(blocked, "BLOCKED")
+        self.assertIn("clean validated source", reason)
+
+        # New source commits alter metadata; unknown histories cannot qualify.
+        stamp("b" * 40, 1)
+        for warning_level in stage_names:
+            changed_image = run_success(warning_level)
+            self.assertNotEqual(changed_image, candidate_images[warning_level])
+            self.assertIn(("b" * 40).encode(), changed_image)
+        stamp("unknown", 0)
+        for warning_level in stage_names:
+            unknown_image = run_success(warning_level)
+            self.assertIn(b'SWAPZ_BUILD_SOURCE_SHA "unknown"', unknown_image)
+            self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 0', unknown_image)
+        self.assertEqual(self.verify(module_evidence={
+            "source_sha": "unknown", "source_clean": "0",
+            "sha256": MODULE_SHA256, "vermagic": KERNEL_RELEASE + " SMP",
+            "symbols": "__asan_load8 __tsan_read8",
+        })[0], "BLOCKED")
+
+        # An explicitly missing generated header must destroy stale candidates.
+        generated.unlink()
+        missing = build("W=1")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("BLOCKED_KERNEL_STAGE: missing generated source-build-info.h",
+                      missing.stderr)
+        self.assertFalse(image("W=1").exists())
+        fallback_image = run_success("W=1", explicit=False)
+        self.assertIn(b'SWAPZ_BUILD_SOURCE_SHA "unknown"', fallback_image)
+        self.assertIn(b'#define SWAPZ_BUILD_SOURCE_CLEAN 0', fallback_image)
+
+        # Report the compiler warning, Kbuild's failed phase and original exit.
+        stamp(SOURCE_SHA, 1)
+        (fake_headers / "fail-compile").write_text("fail\n", encoding="utf-8")
+        failed = build("W=2")
+        self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+        self.assertIn("dm-target.c:7:5: warning:", failed.stderr)
+        self.assertIn("dm-target.c:8:5: error:", failed.stderr)
+        self.assertIn("Error 37", failed.stderr)
+        self.assertIn("FAIL_KERNEL_BUILD phase=Kbuild exit=2", failed.stderr)
+        self.assertFalse(image("W=2").exists())
+        (fake_headers / "fail-compile").unlink()
+
+        (kernel_source / "VERSION").write_text("invalid-release\n",
+                                                encoding="utf-8")
+        invalid = build("W=1")
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertIn("BLOCKED: invalid canonical VERSION", invalid.stderr)
+        self.assertFalse(image("W=1").exists())
+
     def test_static_required_sources_follow_kernel_architecture(self) -> None:
         headers = Path(self.temporary_directory.name) / "headers"
         headers.mkdir()

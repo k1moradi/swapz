@@ -30,6 +30,8 @@ endif
 else
 KDIR ?= /lib/modules/$(shell uname -r)/build
 SWAPZ_ROOT := $(abspath $(CURDIR)/../..)
+# Root builds pass a generated header; direct compile-only Kbuild may use unknown/0.
+SWAPZ_EXPLICIT_BUILD_INFO := $(if $(filter undefined,$(origin SWAPZ_BUILD_INFO)),,1)
 SWAPZ_BUILD_INFO ?= $(SWAPZ_ROOT)/build/source-build-info.h
 ifeq ($(W),1)
 SWAPZ_STAGE := $(SWAPZ_ROOT)/build/kernel/w1
@@ -41,22 +43,40 @@ endif
 .PHONY: all clean
 all:
 	@mkdir -p "$(SWAPZ_STAGE)"
+# Do not overwrite generated build provenance with the checked-in fallback.
 	@set -e; for src in "$(CURDIR)/Makefile" "$(CURDIR)"/*.c "$(CURDIR)"/*.h; do \
+		case "$${src##*/}" in swapz-build-info.h) continue ;; esac; \
 		dst="$(SWAPZ_STAGE)/$${src##*/}"; \
 		if ! cmp -s "$$src" "$$dst"; then cp -f "$$src" "$$dst"; fi; \
 	done
-	@if test -f "$(SWAPZ_BUILD_INFO)" && \
-	   ! cmp -s "$(SWAPZ_BUILD_INFO)" "$(SWAPZ_STAGE)/swapz-build-info.h"; then \
-		cp -f "$(SWAPZ_BUILD_INFO)" "$(SWAPZ_STAGE)/swapz-build-info.h"; \
+	@set -eu; if test -f "$(SWAPZ_BUILD_INFO)"; then \
+		build_info_source="$(SWAPZ_BUILD_INFO)"; \
+	elif test "$(SWAPZ_EXPLICIT_BUILD_INFO)" = 1; then \
+		echo "BLOCKED_KERNEL_STAGE: missing generated source-build-info.h: $(SWAPZ_BUILD_INFO)" >&2; \
+		rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; exit 1; \
+	else \
+		build_info_source="$(CURDIR)/swapz-build-info.h"; \
+	fi; \
+	if ! test -f "$$build_info_source"; then \
+		echo "BLOCKED_KERNEL_STAGE: missing build info header: $$build_info_source" >&2; \
+		rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; exit 1; \
+	fi; \
+	if ! cmp -s "$$build_info_source" "$(SWAPZ_STAGE)/swapz-build-info.h"; then \
+		cp -f "$$build_info_source" "$(SWAPZ_STAGE)/swapz-build-info.h"; \
 	fi
 	@set -e; version="$$(cat "$(CURDIR)/VERSION")"; \
 	  printf '%s\n' "$$version" | grep -Eq '^3[.]0[.]0-alpha[.][0-9]+$$' || \
-	    { echo "BLOCKED: invalid canonical VERSION" >&2; exit 1; }; \
+	    { echo "BLOCKED: invalid canonical VERSION" >&2; \
+	      rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; exit 1; }; \
 	  header="$(SWAPZ_STAGE)/swapz-version.h"; \
 	  if ! printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" | cmp -s - "$$header"; then \
 	    printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" > "$$header"; \
 	  fi
-	$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" modules
+	@$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" modules || { \
+		status=$$?; rm -f "$(SWAPZ_STAGE)/dm-swapz.ko"; \
+		printf 'FAIL_KERNEL_BUILD phase=Kbuild exit=%s\n' "$$status" >&2; \
+		exit "$$status"; \
+	}
 
 clean:
 	@if test -d "$(SWAPZ_STAGE)" && test -f "$(KDIR)/Makefile"; then \
