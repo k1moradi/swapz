@@ -16,7 +16,32 @@ cleanup() {
         rm -rf -- "$TMP"
 }
 trap cleanup EXIT
-die() { printf 'FAIL: rootless null_blk fixture: %s\n' "$*" >&2; exit 1; }
+# A failure can originate in a direct shell command, not an assertion. Print
+# only a source-controlled case, line and status; simulated device identities
+# and child stderr remain private. No extra work on a successful run.
+current_nullblk_case=setup
+nullblk_failure_reported=0
+report_nullblk_failure_marker() {
+    local failure_reason=$1 failure_status=$2 failure_line=$3
+    (( nullblk_failure_reported == 0 )) || return 0
+    nullblk_failure_reported=1
+    [[ $current_nullblk_case =~ ^[a-z][a-z0-9_-]{0,63}$ ]] ||
+        current_nullblk_case=unavailable
+    [[ $failure_line =~ ^[1-9][0-9]{0,6}$ ]] || failure_line=unavailable
+    [[ $failure_status =~ ^[1-9][0-9]{0,2}$ ]] || failure_status=1
+    printf 'FAIL: rootless nullblk fixture case=%s line=%s reason=%s status=%s\n' \
+        "$current_nullblk_case" "$failure_line" "$failure_reason" "$failure_status" >&2
+}
+report_nullblk_unexpected_error() {
+    local original_status=$1 failure_line=$2
+    report_nullblk_failure_marker command_exit "$original_status" "$failure_line"
+}
+trap 'report_nullblk_unexpected_error "$?" "$LINENO"' ERR
+die() {
+    report_nullblk_failure_marker fixture_assertion 1 "$BASH_LINENO"
+    printf 'FAIL: rootless null_blk fixture: %s\n' "$*" >&2
+    exit 1
+}
 refused_disk() {
     if swapz_resolve_owned_disk "$1" "$2" "$3" >/dev/null; then
         die "unproved null_blk name or dev telemetry accepted"
@@ -460,6 +485,7 @@ assert_private_safe_refusal() {
 run_case() {
     local case_name="$1" expected="$2" expected_result="$3" expected_errno="$4"
     local result=0 output unclaimed_config unclaimed_disk
+    current_nullblk_case=$case_name
     reset_fake
     case "$case_name" in
         missing_capability) printf 'CapEff:\t0000000000000000\n' > "$FIXTURE/proc/self/status" ;;
@@ -964,6 +990,7 @@ run_case internal_failure internal_failure FAIL unavailable
 run_case low_memory OBSERVED_ID36_EARLY_HOST_MEMORY PASS unavailable
 run_case unrelated_swap LOADED_PREFLIGHT_DM_SWAPZ=absent PASS unavailable
 
+current_nullblk_case=native_creator_source_proof
 # Exercise the unmodified native creator's configfs proof against private,
 # regular-file fixtures. A private Python launcher changes attribute inode
 # observations at each fstat, as configfs may do across attribute lookups;
@@ -997,6 +1024,7 @@ shim_directory.mkdir()
 (shim_directory / "volatile_inode_shim.py").write_text(r'''
 import os
 import stat
+import sys
 
 _original_open = os.open
 _original_fstat = os.fstat

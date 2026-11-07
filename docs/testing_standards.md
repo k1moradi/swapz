@@ -1959,6 +1959,17 @@ expectations (bounded phase/ownership/status markers, short values and fixed
 failure categories). Source-matched package crash subtests additionally
 report only the finite install/uninstall action and durable checkpoint phase,
 and name subprocess.TimeoutExpired by class without showing its command.
+The SIGKILL lifecycle audit may bound its setup install to 30 seconds under
+earlier full-suite host load; the general package fixture's 15-second
+watchdog is unchanged. An imported PackageInvocationTimeout must expose its
+verified class and only authenticated, path-free original operation, elapsed
+time, finite budget, first cause and process disposition on failure.
+The nullblk-identity-test.sh fixture must emit bounded source-owned
+case/line/reason/status evidence on both assertion and unexpected-command
+failures. The public make-test reporter validates the case against the
+current fixture source, and can display only its finite native configfs
+proof phase/status. Raw device identities, sandbox paths, exception messages
+and child stderr remain private.
 Authenticated PhysicalSwapProbeTests recovery failures additionally show the
 deepest source-controlled physical-swap-probe.py frame (basename and line),
 physical_swap_probe.ProbeError class, and allowlisted immutable binding field.

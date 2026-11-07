@@ -3057,12 +3057,14 @@ def first_unittest_failure_details(output):
                 f"Cause location: physical-swap-probe.py:{recovery_frames[-1]}")
     exception = re.search(
         r"(?m)^(AssertionError|PackageInvocationTimeout|"
+        r"swapz_package_crash_tests[.]PackageInvocationTimeout|"
         r"physical_swap_probe[.]ProbeError|"
         r"subprocess[.]TimeoutExpired|TimeoutExpired|"
         r"[A-Za-z][A-Za-z0-9_]{0,60}"
         r"(?:Error|Exception|Failure))(?::|$)", traceback)
     if exception:
-        details.append("Exception: " + exception.group(1))
+        details.append("Exception: " + exception.group(1).removeprefix(
+            "swapz_package_crash_tests."))
         # Field names are finite, source-controlled recovery binding keys.
         # Never print actual values, host paths or unrecognized child fields.
         if (first_header.group(3) == "PhysicalSwapProbeTests" and
@@ -3104,6 +3106,56 @@ def first_unittest_failure_details(output):
                     + recovery_comparison.group(1)
                     + "; expected " + recovery_comparison.group(2))
         details.extend(safe_assertion_details(traceback))
+    elif (exception and exception.group(1) ==
+          "swapz_package_crash_tests.PackageInvocationTimeout"
+          and first_header.group(3) == "PackageCrashToPrimaryAdmissionTest"):
+        # Only this source-matched unittest and a complete path-free timeout
+        # envelope may authorize extra diagnostic fields. Never print the
+        # exception's shell command or the sandbox identity.
+        final_marker_line = output[markers[-1].start():].splitlines()[0]
+        marker = re.fullmatch(
+            r"FAIL: rootless phase=primary-lifecycle-audit-test[.]py "
+            r"subtest=(?:unavailable|[a-z0-9-]{1,64}) "
+            r"test=(test_[A-Za-z0-9_]{1,96}) "
+            r"exit=[0-9]{1,3} reason=unittest_(?:timeout|error) "
+            r"phase_s=[0-9]+ stage_s=[0-9]+ "
+            r"line=(?:[0-9]+|unavailable) "
+            r"log=(?:unavailable|build/tests/rootless-failure[.]"
+            r"[A-Za-z0-9]{8}/diagnostic[.]log)",
+            final_marker_line)
+        timeout = re.search(
+            r"(?m)^swapz_package_crash_tests[.]PackageInvocationTimeout: "
+            r"SWAPZ_PACKAGE_TEST_TIMEOUT "
+            r"codec_variant=(uncompressed|unknown|mixed|[.](?:zst|xz|gz)) "
+            r"operation=(install|uninstall|recover) "
+            r"elapsed_seconds=([0-9]{1,5}[.][0-9]{3}) "
+            r"budget_seconds=([0-9]{1,5}(?:[.][0-9]{1,3})?) "
+            r"budget_reason=(ordinary_fixture_watchdog|"
+            r"compressed_dkms_durable_io|explicit_test_watchdog) "
+            r"final_process_disposition=(reaped_exit_-?[0-9]{1,3}|"
+            r"kill_sent_reap_timeout) "
+            r"original_process_exit_status=(still_running|-?[0-9]{1,3}) "
+            r"fixture_phase=(command_watchdog|pipe_drain) "
+            r"recovery_disposition=journal_not_assessed "
+            r"first_cause=(fixture_watchdog_expired|"
+            r"package_exit_before_pipe_drain)$",
+            traceback)
+        if marker and marker.group(1) == first_header.group(2) and timeout:
+            (codec, action, elapsed, budget, budget_reason, disposition,
+             original_status, phase, first_cause) = timeout.groups()
+            if ((phase == "command_watchdog" and
+                    first_cause == "fixture_watchdog_expired" and
+                    original_status == "still_running") or
+                    (phase == "pipe_drain" and
+                     first_cause == "package_exit_before_pipe_drain" and
+                     original_status != "still_running")):
+                details.append(
+                    f"Package watchdog: action={action} codec={codec} "
+                    f"elapsed={elapsed}s budget={budget}s "
+                    f"first_cause={first_cause} "
+                    f"budget_reason={budget_reason} "
+                    f"process_disposition={disposition} "
+                    "recovery=journal_not_assessed")
     elif (exception and exception.group(1) == "PackageInvocationTimeout"
           and first_header.group(3) == "PackageLifecycle"):
         # The outer Bash marker, not a preceding negative fixture, owns the
@@ -3142,6 +3194,79 @@ def first_unittest_failure_details(output):
                     f"elapsed={elapsed}s budget={budget}s codec={codec} "
                     f"budget_reason={budget_reason} "
                     f"process_disposition={disposition}")
+    return details
+
+
+
+def first_nullblk_fixture_failure_details(output):
+    """Report only a source-owned null_blk fixture case and safe cause."""
+    markers = list(re.finditer(r"(?m)^FAIL: rootless phase=", output))
+    if not markers:
+        return []
+    last_marker = markers[-1]
+    final_line = output[last_marker.start():].splitlines()[0]
+    failure = re.fullmatch(
+        r"FAIL: rootless phase=nullblk-identity-test[.]sh "
+        r"subtest=unavailable test=unavailable "
+        r"exit=([1-9][0-9]{0,2}) reason=nonzero_exit "
+        r"phase_s=[0-9]+ stage_s=[0-9]+ "
+        r"line=(?:[0-9]+|unavailable) "
+        r"log=(?:unavailable|build/tests/rootless-failure[.]"
+        r"[A-Za-z0-9]{8}/diagnostic[.]log)",
+        final_line)
+    if failure is None:
+        return []
+    fixture_output = output[max(0, last_marker.start() - 8192):
+                            last_marker.start()]
+    candidates = list(re.finditer(
+        r"(?m)^FAIL: rootless nullblk fixture "
+        r"case=([a-z][a-z0-9_-]{0,63}) "
+        r"line=([1-9][0-9]{0,6}|unavailable) "
+        r"reason=(fixture_assertion|command_exit) "
+        r"status=([1-9][0-9]{0,2})$",
+        fixture_output))
+    if not candidates:
+        return []
+    case_name, line, cause, status = candidates[-1].groups()
+    if status != failure.group(1):
+        return []
+    # Only actual source-defined cases can reach the console. This read
+    # happens after a failure, never on the normal passing path.
+    try:
+        source = (ROOT / "tests/runtime/native/nullblk-identity-test.sh"
+                  ).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    allowed_cases = set(re.findall(
+        r"(?m)^run_case ([a-z][a-z0-9_-]{0,63}) ", source))
+    allowed_cases.update(("setup", "native_creator_source_proof"))
+    if case_name not in allowed_cases:
+        return []
+    details = [f"First failing null_blk fixture: {case_name}"]
+    if line != "unavailable":
+        details.append(f"Location: nullblk-identity-test.sh:{line}")
+    details.append(f"Cause: {cause} (child_exit={status})")
+    if case_name == "native_creator_source_proof":
+        proof = re.search(
+            r"(?m)^FAIL: phase=([a-z_]{1,64}) "
+            r"expected_proof=(pinned_creator_config_directory_and_canonical_attributes|"
+            r"source_execution_without_host_mutations) "
+            r"observed_proof=([a-z_]{1,64}) "
+            r"original_errno=(unavailable|[0-9]{1,4}) "
+            r"original_exit=(unavailable|[0-9]{1,3}) "
+            r"ownership=retained$",
+            fixture_output)
+        if proof:
+            phase, expected, observed, error_number, original_exit = proof.groups()
+            # These two classifications must appear as literal source strings
+            # in the private fixture's own Python negative controls.
+            if ((f'"{phase}"' in source and f'"{observed}"' in source) or
+                    (phase == "isolated_source_control" and
+                     observed == "fixture_error")):
+                details.append(
+                    f"Native configfs proof: phase={phase} "
+                    f"observed={observed} original_exit={original_exit} "
+                    "ownership=retained")
     return details
 
 
@@ -3428,6 +3553,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         # source-bound first-error detail to diagnose without a manual log tail.
         details = (first_unittest_failure_details(output)
                    if title == "Native and rootless contracts" else [])
+        if not details and title == "Native and rootless contracts":
+            details = first_nullblk_fixture_failure_details(output)
         if not details:
             details = first_compiler_failure_location(output)
         for detail in details:

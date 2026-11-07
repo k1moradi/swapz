@@ -1719,7 +1719,10 @@ int swapz_primary_qualification_import_serialized(const char *report_path);
             with self.subTest(action=action, phase=phase):
                 package = self._package_fixture()
                 if install_first:
-                    installed = package.invoke("install")
+                    # Earlier rootless work can delay this setup install.
+                    # Use the existing finite durable-checkpoint budget only
+                    # here; the general package watchdog remains 15 seconds.
+                    installed = package.invoke("install", timeout=30)
                     self.assertEqual(installed.returncode, 0, installed.stderr)
                 self._crash_and_reacquire(package, action, phase)
 

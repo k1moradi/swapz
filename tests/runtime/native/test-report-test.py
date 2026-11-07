@@ -3846,6 +3846,119 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("secret_private_token", "\n".join(safe))
         self.assertNotIn("Recovery binding mismatch:", "\n".join(safe))
 
+    def test_nullblk_failure_console_reports_safe_case_and_native_cause(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        fixture = (
+            "FAIL: phase=volatile_owned_read "
+            "expected_proof=pinned_creator_config_directory_and_canonical_attributes "
+            "observed_proof=stable_directory_rejected original_errno=unavailable "
+            "original_exit=1 ownership=retained\n"
+            "FAIL: rootless nullblk fixture case=native_creator_source_proof "
+            "line=1198 reason=command_exit status=1\n"
+            "FAIL: rootless phase=nullblk-identity-test.sh "
+            "subtest=unavailable test=unavailable exit=1 reason=nonzero_exit "
+            "phase_s=12 stage_s=80 line=776 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n")
+        expected = [
+            "First failing null_blk fixture: native_creator_source_proof",
+            "Location: nullblk-identity-test.sh:1198",
+            "Cause: command_exit (child_exit=1)",
+            "Native configfs proof: phase=volatile_owned_read "
+            "observed=stable_directory_rejected original_exit=1 "
+            "ownership=retained",
+        ]
+        self.assertEqual(
+            runner.first_nullblk_fixture_failure_details(fixture), expected)
+        printed = io.StringIO()
+        with patch.object(runner.subprocess, "run",
+                          return_value=SimpleNamespace(
+                              stdout=fixture, returncode=1)), \
+                patch.object(runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(printed):
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"],
+                {"stages": []}), 1)
+        for detail in expected:
+            self.assertIn("        " + detail, printed.getvalue())
+        self.assertNotIn("rootless-failure.ABC12345", printed.getvalue().split(
+            "First failing null_blk fixture:")[1])
+        for hostile in (
+            fixture.replace("case=native_creator_source_proof",
+                            "case=private_host_name"),
+            fixture.replace("phase=nullblk-identity-test.sh",
+                            "phase=other-suite.sh"),
+            fixture.replace("status=1", "status=3"),
+        ):
+            self.assertEqual(
+                runner.first_nullblk_fixture_failure_details(hostile), [])
+
+    def test_imported_package_watchdog_explains_lifecycle_setup_failure(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        method = "test_real_sigkill_phases_block_both_commands_not_cleanup"
+        phase = "primary-lifecycle-audit-test.py"
+        envelope = (
+            "swapz_package_crash_tests.PackageInvocationTimeout: "
+            "SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant=uncompressed "
+            "operation=install elapsed_seconds=15.086 budget_seconds=15 "
+            "budget_reason=ordinary_fixture_watchdog "
+            "final_process_disposition=reaped_exit_-9 "
+            "original_process_exit_status=still_running "
+            "fixture_phase=command_watchdog "
+            "recovery_disposition=journal_not_assessed "
+            "first_cause=fixture_watchdog_expired")
+        fixture = (
+            f"{method} (__main__.PackageCrashToPrimaryAdmissionTest.{method}) "
+            "(action='uninstall', phase='dkms-removed') ... ERROR\n"
+            "======================================================================\n"
+            f"ERROR: {method} "
+            f"(__main__.PackageCrashToPrimaryAdmissionTest.{method}) "
+            "(action='uninstall', phase='dkms-removed')\n"
+            "Traceback (most recent call last):\n"
+            f'  File "/private/HOST/{phase}", line 1726, in {method}\n'
+            + envelope + "\n"
+            "----------------------------------------------------------------------\n"
+            "Ran 5 tests in 16s\n"
+            "FAILED (errors=1)\n"
+            f"FAIL: rootless phase={phase} subtest=unavailable "
+            f"test={method} exit=1 reason=unittest_error "
+            "phase_s=16 stage_s=40 line=690 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log\n")
+        expected = [
+            f"First failing unittest: {method}",
+            "Subtest: action=uninstall phase=dkms-removed",
+            f"Location: {phase}:1726",
+            "Exception: PackageInvocationTimeout",
+            "Package watchdog: action=install codec=uncompressed "
+            "elapsed=15.086s budget=15s "
+            "first_cause=fixture_watchdog_expired "
+            "budget_reason=ordinary_fixture_watchdog "
+            "process_disposition=reaped_exit_-9 "
+            "recovery=journal_not_assessed",
+        ]
+        self.assertEqual(runner.first_unittest_failure_details(fixture),
+                         expected)
+        printed = io.StringIO()
+        with patch.object(runner.subprocess, "run",
+                          return_value=SimpleNamespace(
+                              stdout=fixture, returncode=1)), \
+                patch.object(runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(printed):
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"],
+                {"stages": []}), 1)
+        for detail in expected:
+            self.assertIn("        " + detail, printed.getvalue())
+        self.assertNotIn("/private/HOST", printed.getvalue())
+        untrusted = fixture.replace(
+            "codec_variant=uncompressed", "codec_variant=PRIVATE_DEVICE")
+        self.assertFalse(any(
+            "Package watchdog:" in detail
+            for detail in runner.first_unittest_failure_details(untrusted)))
+
     def test_failure_console_assertions_show_safe_expected_and_observed(self):
         # Reproduce the originally hidden nullblk fixture nounset failure.
         # The actual stderr may contain private paths and keys.
