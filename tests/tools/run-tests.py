@@ -2995,7 +2995,8 @@ def first_unittest_failure_details(output):
         if re.fullmatch(r"[A-Za-z0-9_-]{1,100}\.py", basename):
             details.append(f"Location: {basename}:{location.group(2)}")
     exception = re.search(
-        r"(?m)^(AssertionError|[A-Za-z][A-Za-z0-9_]{0,60}"
+        r"(?m)^(AssertionError|PackageInvocationTimeout|"
+        r"[A-Za-z][A-Za-z0-9_]{0,60}"
         r"(?:Error|Exception|Failure))(?::|$)", traceback)
     if exception:
         details.append("Exception: " + exception.group(1))
@@ -3003,6 +3004,44 @@ def first_unittest_failure_details(output):
     # Raw expected/actual payloads remain in the existing private log.
     if exception and exception.group(1) == "AssertionError":
         details.extend(safe_assertion_details(traceback))
+    elif (exception and exception.group(1) == "PackageInvocationTimeout"
+          and first_header.group(3) == "PackageLifecycle"):
+        # The outer Bash marker, not a preceding negative fixture, owns the
+        # failing method. Only a complete, source-bound marker may authorize
+        # bounded fields from the private Python watchdog exception.
+        marker = re.fullmatch(
+            r"FAIL: rootless phase=package-dkms-test[.]py "
+            r"subtest=(?:unavailable|[a-z0-9-]{1,64}) "
+            r"test=(test_[A-Za-z0-9_]{1,96}) "
+            r"exit=[0-9]{1,3} reason=unittest_(?:timeout|error) "
+            r"phase_s=[0-9]+ stage_s=[0-9]+ "
+            r"line=(?:[0-9]+|unavailable) "
+            r"log=(?:unavailable|build/tests/rootless-failure[.]"
+            r"[A-Za-z0-9]{8}/diagnostic[.]log)",
+            output[markers[-1].start():].splitlines()[0])
+        if marker and marker.group(1) == first_header.group(2):
+            # Do not print an arbitrary exception message: only the exact
+            # finite-domain, numeric and path-free PackageInvocationTimeout
+            # envelope is eligible for automatic failure diagnostics.
+            timeout = re.search(
+                r"(?m)^PackageInvocationTimeout: SWAPZ_PACKAGE_TEST_TIMEOUT "
+                r"codec_variant=(uncompressed|unknown|mixed|[.](?:zst|xz|gz)) "
+                r"operation=(install|uninstall|recover) "
+                r"elapsed_seconds=([0-9]{1,5}[.][0-9]{3}) "
+                r"budget_seconds=([0-9]{1,5}(?:[.][0-9]{1,3})?) "
+                r"budget_reason=(ordinary_fixture_watchdog|"
+                r"compressed_dkms_durable_io|explicit_test_watchdog) "
+                r"final_process_disposition=(reaped_exit_-?[0-9]{1,3}|"
+                r"kill_sent_reap_timeout) "
+                r"first_cause=fixture_watchdog_expired$", traceback)
+            if timeout:
+                codec, operation, elapsed, budget, budget_reason, disposition = (
+                    timeout.groups())
+                details.append(
+                    f"Package fixture watchdog: action={operation} "
+                    f"elapsed={elapsed}s budget={budget}s codec={codec} "
+                    f"budget_reason={budget_reason} "
+                    f"process_disposition={disposition}")
     return details
 
 

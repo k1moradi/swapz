@@ -1865,6 +1865,16 @@ expectations (bounded phase/ownership/status markers, short values and fixed
 failure categories). The raw actual assertion value, paths, device identities,
 private stderr and full traceback remain only in the local private log; no
 additional detail is printed on a passing run or published in the JSON report.
+For an authenticated first `PackageLifecycle` ERROR whose traceback carries
+`PackageInvocationTimeout: SWAPZ_PACKAGE_TEST_TIMEOUT`, the rootless runner
+classifies the known bounded package-fixture watchdog as `unittest_timeout`
+rather than an unspecified unittest error. On failure, the official `make test`
+console prints the first matching package watchdog's fixed action, codec,
+elapsed/budget seconds, budget reason and owned-process disposition, only
+after matching the authenticated source-controlled test marker and the exact
+finite-domain, path-free exception envelope. It does not copy a raw exception,
+a host path, subsequent test errors, arbitrary fixture text or the private
+log into the console or JSON, and it does not relax any watchdog or gate.
 
 ### Native CI failure evidence contract
 

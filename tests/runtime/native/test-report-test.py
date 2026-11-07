@@ -3563,6 +3563,84 @@ class ReportContract(unittest.TestCase):
             ["Compiler location: dm-target.c:42:7"])
         self.assertEqual(runner.first_compiler_failure_location("PASS: clean\n"), [])
 
+    def test_package_timeout_is_reported_automatically_without_private_text(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        method = "test_dkms_status_nonzero_with_matching_stdout_cannot_authenticate"
+        marker = (
+            "FAIL: rootless phase=package-dkms-test.py "
+            f"subtest=unavailable test={method} exit=1 "
+            "reason=unittest_timeout phase_s=15 stage_s=1613 line=690 "
+            "log=build/tests/rootless-failure.ABC12345/diagnostic.log")
+        timeout_line = (
+            "PackageInvocationTimeout: SWAPZ_PACKAGE_TEST_TIMEOUT "
+            "codec_variant=uncompressed operation=install "
+            "elapsed_seconds=15.086 budget_seconds=15 "
+            "budget_reason=ordinary_fixture_watchdog "
+            "final_process_disposition=reaped_exit_-9 "
+            "first_cause=fixture_watchdog_expired")
+        transcript = (
+            "FAIL: test_expected (__main__.NegativeFixture.test_expected)\n"
+            f"{method} (__main__.PackageLifecycle.{method}) ... ERROR\n"
+            "test_later (__main__.PackageLifecycle.test_later) ... ERROR\n"
+            "======================================================================\n"
+            f"ERROR: {method} (__main__.PackageLifecycle.{method})\n"
+            "Traceback (most recent call last):\n"
+            f'  File "/private/SECRET/package-dkms-test.py", line 901, in {method}\n'
+            f"{timeout_line}\n"
+            "======================================================================\n"
+            "ERROR: test_later (__main__.PackageLifecycle.test_later)\n"
+            "RuntimeError: PRIVATE_LATER_FAILURE\n"
+            "======================================================================\n"
+            "FAILED (errors=2)\n"
+            f"{marker}\n")
+        expected = (
+            "Package fixture watchdog: action=install elapsed=15.086s "
+            "budget=15s codec=uncompressed "
+            "budget_reason=ordinary_fixture_watchdog "
+            "process_disposition=reaped_exit_-9")
+        details = runner.first_unittest_failure_details(transcript)
+        self.assertIn("Exception: PackageInvocationTimeout", details)
+        self.assertIn(expected, details)
+        self.assertEqual(details[0], "First failing unittest: " + method)
+        for private in ("/private/SECRET", "PRIVATE_LATER_FAILURE",
+                        "NegativeFixture"):
+            self.assertNotIn(private, "\n".join(details))
+
+        # Exercise the actual operator output, not just the parser's return.
+        stages = {"stages": []}
+        console = io.StringIO()
+        with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(
+                stdout=transcript, returncode=1)), \
+                patch.object(runner, "retain_direct_rootless_first_failure"), \
+                contextlib.redirect_stdout(console):
+            self.assertEqual(runner.run_stage(
+                "Native and rootless contracts", ["synthetic"], stages), 1)
+        self.assertIn("        " + expected, console.getvalue())
+        self.assertEqual(stages["stages"][0]["status"], "FAIL")
+        self.assertEqual(stages["stages"][0]["exit_code"], 1)
+        self.assertNotIn(expected, stages["stages"][0]["diagnostic"])
+        self.assertNotIn("/private/SECRET", console.getvalue())
+
+        # Untrusted exceptions, mismatched marker identity, and incomplete
+        # failure summaries must never print a synthetic watchdog payload.
+        for unsafe in (
+                transcript.replace("codec_variant=uncompressed",
+                                   "codec_variant=/private/SECRET"),
+                transcript.replace(" test=" + method,
+                                   " test=test_different"),
+                transcript.replace("reason=unittest_timeout",
+                                   "reason=nonzero_exit"),
+                transcript.replace("FAILED (errors=2)", "OK"),
+                transcript.replace(
+                    "first_cause=fixture_watchdog_expired",
+                    "first_cause=PRIVATE_OVERRIDDEN")):
+            with self.subTest(unsafe=unsafe[-120:]):
+                self.assertNotIn(
+                    "Package fixture watchdog:",
+                    "\n".join(runner.first_unittest_failure_details(unsafe)))
+
     def test_failure_console_assertions_show_safe_expected_and_observed(self):
         # Reproduce the originally hidden nullblk fixture nounset failure.
         # The actual stderr may contain private paths and keys.

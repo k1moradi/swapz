@@ -145,6 +145,11 @@ classify_rootless_private_unittest_failure() {
   local generator_progress_regex="^[[:space:]]*(test_[A-Za-z0-9_]{1,96}) \\(__main__\\.GeneratorPublicationTest\\.(test_[A-Za-z0-9_]{1,96})\\)( \\([^[:cntrl:]]{1,192}\\))? \\.\\.\\. (FAIL|ERROR)$"
   local subtest_regex="\\(phase='([a-z0-9_-]{1,64})'\\)$"
   local errno_regex='^(OSError|PermissionError|FileNotFoundError): \[Errno ([1-9][0-9]{0,3})\]'
+  # PackageInvocationTimeout subclasses subprocess.TimeoutExpired; unittest
+  # prints its custom class name rather than the base-class name.
+  # Accept only the fixed, path-free watchdog envelope from the matched
+  # first PackageLifecycle failure, never arbitrary child exception text.
+  local package_timeout_regex='^PackageInvocationTimeout: SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant=(uncompressed|unknown|mixed|[.](zst|xz|gz)) operation=(install|uninstall|recover) elapsed_seconds=[0-9]{1,5}[.][0-9]{3} budget_seconds=[0-9]{1,5}([.][0-9]{1,3})? budget_reason=(ordinary_fixture_watchdog|compressed_dkms_durable_io|explicit_test_watchdog) final_process_disposition=(reaped_exit_-?[0-9]{1,3}|kill_sent_reap_timeout) first_cause=fixture_watchdog_expired$'
   local errno_candidate
   local expected_unittest_class=
   local progress_context=
@@ -248,7 +253,9 @@ classify_rootless_private_unittest_failure() {
       continue
     fi
     [[ $line == '======================================================================' ]] && break
-    if [[ $line == *"subprocess.TimeoutExpired:"* ]]; then
+    if [[ $line == *"subprocess.TimeoutExpired:"* ]] ||
+       [[ $expected_unittest_class == PackageLifecycle &&
+          $line =~ $package_timeout_regex ]]; then
       rootless_classified_reason=unittest_timeout
     elif [[ $rootless_classified_errno == unavailable &&
             $line =~ $errno_regex ]]; then

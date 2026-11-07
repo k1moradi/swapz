@@ -153,6 +153,26 @@ PY
       head -c 307200 /dev/zero | tr '\0' 'z' >&2
       printf '\n' >&2
       return 43 ;;
+    package_fixture_timeout)
+      printf '%s\n' \
+        "test_first (__main__.PackageLifecycle.test_first) ... ERROR" \
+        "test_second (__main__.PackageLifecycle.test_second) ... ERROR" \
+        "======================================================================" \
+        "ERROR: test_first (__main__.PackageLifecycle.test_first)" \
+        'Traceback (most recent call last):' \
+        'PackageInvocationTimeout: SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant=uncompressed operation=install elapsed_seconds=15.086 budget_seconds=15 budget_reason=ordinary_fixture_watchdog final_process_disposition=reaped_exit_-9 first_cause=fixture_watchdog_expired' \
+        "======================================================================" \
+        "ERROR: test_second (__main__.PackageLifecycle.test_second)" \
+        'subprocess.TimeoutExpired: PRIVATE_ONLY_TRACEBACK_PAYLOAD' \
+        "======================================================================" >&2
+      return 1 ;;
+    package_fixture_timeout_invalid)
+      printf '%s\n' \
+        "test_first (__main__.PackageLifecycle.test_first) ... ERROR" \
+        "ERROR: test_first (__main__.PackageLifecycle.test_first)" \
+        'Traceback (most recent call last):' \
+        'PackageInvocationTimeout: SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant=/private/SECRET operation=install elapsed_seconds=15.086 budget_seconds=15 budget_reason=ordinary_fixture_watchdog final_process_disposition=reaped_exit_-9 first_cause=fixture_watchdog_expired' >&2
+      return 1 ;;
     ordered_timeout)
       printf '%s\n' \
         "ERROR: test_first (__main__.PackageLifecycle.test_first) (phase='prepare')" \
@@ -721,6 +741,18 @@ exec "$SWAPZ_REAL_RM" "$@"
         self.assertIn("subtest=unavailable test=test_first", marker)
         self.assertNotIn("case=", marker)
         self.assertNotIn("detached_signature", marker)
+
+    def test_package_fixture_watchdog_classifies_only_fixed_first_exception(self):
+        valid = self.invoke("package_fixture_timeout")
+        evidence = self.assert_report(
+            valid, status=1, reason="unittest_timeout", test="test_first")
+        self.assertIn("PackageInvocationTimeout:", evidence.read_text())
+        self.assertIn("PRIVATE_ONLY_TRACEBACK_PAYLOAD", evidence.read_text())
+        self.assertNotIn("PRIVATE_ONLY_TRACEBACK_PAYLOAD", valid.stderr)
+        invalid = self.invoke("package_fixture_timeout_invalid")
+        self.assert_report(
+            invalid, status=1, reason="unittest_error", test="test_first")
+        self.assertNotIn("/private/SECRET", invalid.stderr)
 
     def test_real_subprocess_timeout_expired_is_classified(self):
         result = self.invoke("timeout")
