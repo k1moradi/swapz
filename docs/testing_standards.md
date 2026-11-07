@@ -7735,7 +7735,15 @@ after fresh null_blk creation is FAIL, not preclaim BLOCKED. The rootless
 partition-write failure fixture must initialize its synthetic disk ID before
 expanding the real sfdisk here-document, so the injected command failure
 reaches the owned-operation FAIL classifier rather than an unrelated shell
-nounset/redirection failure. Missing exact udev
+nounset/redirection failure. A definite owned setup command failure must
+retain the immediate original shell exit status in a bounded
+`original_exit=<number>` diagnostic; shell exits are not errno and
+`original_errno=unavailable` must remain explicit unless a native errno was
+actually observed. In particular, avoid `if ! command` around a failing
+`sfdisk` when that inversion would discard its first exit. The rootless
+partition-write fixture injects exit 11, proves that exact first status
+survives the FAIL classifier, and verifies byte-for-byte unchanged foreign
+and owned test sentinels without publishing fixture identities. Missing exact udev
 publication after otherwise successful commands is not a proven owned-operation
 failure: it remains BLOCKED. Preserve its raw diagnostic only in private
 evidence, then allow normal identity-revalidated teardown of the positively

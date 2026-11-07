@@ -152,7 +152,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
         lower_node = self.script.index(
             'LOWER_NODE_DEVNO="$(block_node_devno "$LOWER")"', lower_sysfs)
         partition_write = self.script.index(
-            'if ! sfdisk --lock --wipe always "$LOWER"', lower_node)
+            'if sfdisk --lock --wipe always "$LOWER"', lower_node)
         self.assertLess(lower_sysfs, lower_node)
         self.assertLess(lower_node, partition_write)
         self.assertIn(
@@ -210,7 +210,7 @@ class PrimaryLifecycleNullblkQualifierContract(unittest.TestCase):
 
     def test_partition_reread_is_locked_and_not_duplicated_after_sfdisk(self):
         partition_write = self.script.index(
-            'if ! sfdisk --lock --wipe always "$LOWER"')
+            'if sfdisk --lock --wipe always "$LOWER"')
         partition_settle = self.script.index(
             'udevadm settle --timeout=10 >/dev/null 2>&1 || owned_setup_failed "partition-udev-settle"',
             partition_write,
@@ -2805,31 +2805,55 @@ CONTROL=/private-mock-only
 
     def test_rootless_failed_owned_partition_write_is_fail(self):
         ownership_claim = self.script.index("OWN_NULL=1")
-        start = self.script.index('if ! sfdisk --lock --wipe always "$LOWER"')
+        start = self.script.index('if sfdisk --lock --wipe always "$LOWER"')
         self.assertLess(ownership_claim, start)
         end = self.script.index("\nfi", start) + len("\nfi")
         helper_start = self.script.index("owned_setup_failed() {")
         helper_end = self.script.index("\n}", helper_start) + len("\n}")
         # The extracted sfdisk here-document needs its synthetic disk ID;
         # otherwise nounset exits during redirection before the failure handler.
-        shell = (
-            "set -Eeuo pipefail\n"
-            'LOWER=/fake-owned-only\n'
-            'DISK_ID=1a2b3c4d\n'
-            'fail() { printf "FAIL_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 1; }\n'
-            'blocked() { printf "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 2; }\n'
-            'sfdisk() { return 11; }\n'
-            + self.script[helper_start:helper_end] + "\n"
-            + self.script[start:end] + "\n"
-        )
-        result = subprocess.run(
-            ["bash", "-c", shell], capture_output=True,
-            text=True, timeout=5, check=False)
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("phase=partition-table-write", result.stderr)
-        self.assertIn("ownership=claimed", result.stderr)
-        self.assertNotIn("/fake-owned-only", result.stdout + result.stderr)
-        self.assertNotIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE", result.stderr)
+        with TemporaryDirectory(prefix="swapz-partition-first-exit-") as directory:
+            fixture = Path(directory)
+            owned_node = fixture / "owned-nullblk-fixture"
+            foreign_node = fixture / "foreign-nullblk-fixture"
+            owned_bytes = b"owned-header-unchanged\n"
+            foreign_bytes = b"foreign-header-unchanged\n"
+            owned_node.write_bytes(owned_bytes)
+            foreign_node.write_bytes(foreign_bytes)
+            shell = (
+                "set -Eeuo pipefail\n"
+                f"LOWER={shlex.quote(str(owned_node))}\n"
+                "DISK_ID=1a2b3c4d\n"
+                'fail() { printf "FAIL_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 1; }\n'
+                'blocked() { printf "BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\\n" "$*" >&2; exit 2; }\n'
+                'sfdisk() { [[ $# -eq 4 && "$1" == --lock && "$2" == --wipe && '
+                '"$3" == always && "$4" == "$LOWER" ]] || return 37; return 11; }\n'
+                + self.script[helper_start:helper_end] + "\n"
+                + self.script[start:end] + "\n"
+            )
+            result = subprocess.run(
+                ["bash", "-c", shell], capture_output=True,
+                text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn(
+                "phase=partition-table-write original_errno=unavailable "
+                "original_exit=11 expected=owned-setup-operation-success "
+                "observed=command-failed ownership=claimed "
+                "next=inspect-private-evidence", result.stderr)
+            self.assertNotIn("BLOCKED_PRIMARY_NULLBLK_LIFECYCLE", result.stderr)
+            self.assertNotIn(str(owned_node), result.stdout + result.stderr)
+            self.assertNotIn(str(foreign_node), result.stdout + result.stderr)
+            self.assertEqual(owned_node.read_bytes(), owned_bytes)
+            self.assertEqual(foreign_node.read_bytes(), foreign_bytes)
+
+        # Every other owned setup command must similarly capture its failing
+        # exit at the immediate branch, not after ! or a secondary probe.
+        setup_calls = re.findall(
+            r'owned_setup_failed "([^"]+)"([^\n]*)', self.script)
+        self.assertEqual(len(setup_calls), 9)
+        for phase, arguments in setup_calls:
+            with self.subTest(phase=phase):
+                self.assertEqual(arguments.strip(), '"$?"')
 
     def test_fault_results_require_exact_hit_evidence(self):
         self.assertIn("report_fault_hit", self.shim)

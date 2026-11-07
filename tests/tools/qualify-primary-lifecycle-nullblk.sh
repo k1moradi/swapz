@@ -18,7 +18,15 @@ fail() {
 # Command exit codes are not errno values; do not invent a Linux errno.
 owned_setup_failed() {
 	local failure_phase="$1"
-	fail "phase=$failure_phase original_errno=unavailable expected=owned-setup-operation-success observed=command-failed ownership=claimed next=inspect-private-evidence"
+	local original_exit="${2:-}"
+
+	# Shell command status is not a Linux errno. Preserve the observed exit
+	# instead of inventing errno, even if cleanup subsequently also fails.
+	if [[ ! "$original_exit" =~ ^[1-9][0-9]{0,2}$ ]] ||
+	   (( original_exit > 255 )); then
+		fail "phase=$failure_phase original_errno=unavailable original_exit=unavailable expected=owned-setup-operation-success observed=invalid-command-status ownership=claimed next=inspect-private-evidence"
+	fi
+	fail "phase=$failure_phase original_errno=unavailable original_exit=$original_exit expected=owned-setup-operation-success observed=command-failed ownership=claimed next=inspect-private-evidence"
 }
 blocked() {
 	printf 'BLOCKED_PRIMARY_NULLBLK_LIFECYCLE: %s\n' "$*" >&2
@@ -1721,7 +1729,7 @@ LOWER_NODE_DEVNO="$(block_node_devno "$LOWER")" ||
 
 DISK_ID="$(printf '%s' "$TOKEN" | cut -c1-8)"
 [[ "$DISK_ID" != 00000000 ]] || DISK_ID=1a2b3c4d
-if ! sfdisk --lock --wipe always "$LOWER" >/dev/null 2>&1 <<EOF
+if sfdisk --lock --wipe always "$LOWER" >/dev/null 2>&1 <<EOF
 label: dos
 label-id: 0x$DISK_ID
 unit: sectors
@@ -1729,9 +1737,12 @@ unit: sectors
 start=2048, type=82
 EOF
 then
-	owned_setup_failed "partition-table-write"
+	:
+else
+	# Negating the command with ! would destroy its first exit status.
+	owned_setup_failed "partition-table-write" "$?"
 fi
-udevadm settle --timeout=10 >/dev/null 2>&1 || owned_setup_failed "partition-udev-settle"
+udevadm settle --timeout=10 >/dev/null 2>&1 || owned_setup_failed "partition-udev-settle" "$?"
 
 partition_count=0
 for candidate in "/sys/block/$DISK/"*; do
@@ -1798,9 +1809,9 @@ udev_alias_verified() {
 # record the alias used by the production coordinator; the shell never
 # fabricates the symlink.
 udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" >/dev/null 2>&1 ||
-	owned_setup_failed "partition-udev-trigger"
+	owned_setup_failed "partition-udev-trigger" "$?"
 udevadm settle --timeout=10 >/dev/null 2>&1 ||
-	owned_setup_failed "partition-udev-add-settle"
+	owned_setup_failed "partition-udev-add-settle" "$?"
 for ignored in {1..20}; do
 	if [[ -e "$BY_PARTUUID" || -L "$BY_PARTUUID" ]]; then
 		break
@@ -1814,7 +1825,7 @@ if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then
 		blocked "udev runtime directory is unavailable for the owned fixture rule"
 	if [[ ! -d "$UDEV_RULES_DIR" ]]; then
 		install -d -m 0755 -- "$UDEV_RULES_DIR" >/dev/null 2>&1 ||
-			owned_setup_failed "udev-rules-directory-create"
+			owned_setup_failed "udev-rules-directory-create" "$?"
 		UDEV_RULES_DIR_CREATED=1
 	fi
 	[[ -d "$UDEV_RULES_DIR" && ! -L "$UDEV_RULES_DIR" ]] ||
@@ -1838,13 +1849,13 @@ if [[ ! -e "$BY_PARTUUID" && ! -L "$BY_PARTUUID" ]]; then
 		blocked "cannot create the exact owned-null_blk udev rule"
 	fi
 	UDEV_RULE_CREATED=1
-	chmod 0644 "$UDEV_RULE" >/dev/null 2>&1 || owned_setup_failed "udev-rule-chmod"
+	chmod 0644 "$UDEV_RULE" >/dev/null 2>&1 || owned_setup_failed "udev-rule-chmod" "$?"
 	udevadm control --reload-rules >/dev/null 2>&1 ||
-		owned_setup_failed "udev-rule-reload"
+		owned_setup_failed "udev-rule-reload" "$?"
 	udevadm trigger --action=add --subsystem-match=block "$PART_SYSFS" >/dev/null 2>&1 ||
-		owned_setup_failed "udev-rule-trigger"
+		owned_setup_failed "udev-rule-trigger" "$?"
 	udevadm settle --timeout=10 >/dev/null 2>&1 ||
-		owned_setup_failed "udev-rule-settle"
+		owned_setup_failed "udev-rule-settle" "$?"
 	for ignored in {1..50}; do
 		udev_alias_verified && break
 		udevadm settle --timeout=1 >/dev/null 2>&1 || true
