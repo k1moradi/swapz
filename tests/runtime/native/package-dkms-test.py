@@ -79,11 +79,13 @@ class PackageInvocationTimeout(subprocess.TimeoutExpired):
         if self.original_exit_status is None:
             first_cause = "fixture_watchdog_expired"
             original_exit_status = "still_running"
+            fixture_phase = "command_watchdog"
         else:
             # A descendant can keep output pipes open after the package exits.
             # Never replace that original exit status with the pipe watchdog.
             first_cause = "package_exit_before_pipe_drain"
             original_exit_status = str(self.original_exit_status)
+            fixture_phase = "pipe_drain"
         return (
             f"SWAPZ_PACKAGE_TEST_TIMEOUT codec_variant={self.codec_variant} "
             f"operation={self.action} elapsed_seconds={self.elapsed:.3f} "
@@ -91,6 +93,8 @@ class PackageInvocationTimeout(subprocess.TimeoutExpired):
             f"budget_reason={self.budget_reason} "
             f"final_process_disposition={self.disposition} "
             f"original_process_exit_status={original_exit_status} "
+            f"fixture_phase={fixture_phase} "
+            f"recovery_disposition=journal_not_assessed "
             f"first_cause={first_cause}"
         )
 
@@ -682,6 +686,9 @@ esac
                     "budget_seconds=1",
                     "budget_reason=explicit_test_watchdog",
                     "final_process_disposition=reaped_exit_-9",
+                    "original_process_exit_status=still_running",
+                    "fixture_phase=command_watchdog",
+                    "recovery_disposition=journal_not_assessed",
                     "first_cause=fixture_watchdog_expired"):
                 self.assertIn(expected, diagnostic)
             self.assertNotIn(str(self.home), diagnostic)
@@ -712,6 +719,8 @@ esac
             diagnostic = str(caught.exception)
             self.assertIn("operation=uninstall", diagnostic)
             self.assertIn("original_process_exit_status=74", diagnostic)
+            self.assertIn("fixture_phase=pipe_drain", diagnostic)
+            self.assertIn("recovery_disposition=journal_not_assessed", diagnostic)
             self.assertIn("final_process_disposition=reaped_exit_74", diagnostic)
             self.assertIn("first_cause=package_exit_before_pipe_drain", diagnostic)
             self.assertNotIn("first_cause=fixture_watchdog_expired", diagnostic)

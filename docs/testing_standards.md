@@ -9580,11 +9580,16 @@ Compressed SIGKILL recovery must carry its codec attribution into replay so
 the recovery invocation receives the same finite compressed-DKMS budget.
 Short-deadline SIGKILL recovery, failed transaction exits, mixed compressed-
 image refusal, DKMS registration ownership and quarantine remain required.
-An unhandled watchdog expiry must use an allowlisted codec classification and
+An unhandled fixture timeout must use an allowlisted codec classification and
 identify operation, elapsed and budgeted seconds, budget reason, final process
-disposition and watchdog as first cause without exposing private sandbox paths.
-This synthetic timing witness does not replace a real F2FS durability trace or
-change production script behavior.
+disposition, original shell exit status if already known, and the fixture phase.
+A shell that has already exited while descendants hold output pipes must retain
+its original exit status and report pipe drainage, not watchdog expiry, as the
+first cause. The still-running-shell case must retain watchdog-first attribution.
+Both cases must mark recovery journal disposition as not assessed: bounded group
+termination and direct-shell reaping do not prove rollback safety. All timeout
+diagnostics must avoid private sandbox paths. This synthetic timing witness does
+not replace a real F2FS durability trace or change production script behavior.
 
 The systemd/package GitHub Actions gate is rootless exact-source evidence, not a
 privileged deployment gate. Its workflow-level concurrency group must contain
