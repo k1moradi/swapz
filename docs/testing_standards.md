@@ -934,7 +934,10 @@ target once with `O_NOFOLLOW|O_EXCL`, derive device and geometry from the
 opened target descriptor, open and bind the parent block descriptor separately,
 and recheck both opened and named inodes after topology/source-policy
 inspection. A close failure must not replace an earlier identity/geometry
-errno. Source approval uses only the parent's existing `cycle-N`
+errno. A verifier child-command `QualificationFailure` must propagate
+unchanged so the last-use wrapper can retain its original numeric exit status;
+generic path/runtime classification must not consume it. Source approval uses
+only the parent's existing `cycle-N`
 request before prepare; never invent `cycle-N-start`. After successful
 prepare, recheck the pinned parent-process/socket authority and target proof
 without sending another source request. A revoked parent-process authority

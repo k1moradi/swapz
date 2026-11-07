@@ -2502,7 +2502,7 @@ def verify_authorized_target(
         if observed_identity is not None:
             observed_identity.append(identity)
         return target, (major, minor), (parent_major, parent_minor)
-    except Blocked:
+    except (Blocked, QualificationFailure):
         raise
     except (OSError, ValueError, RuntimeError, struct.error) as exc:
         error_number = (
