@@ -6556,7 +6556,9 @@ int main(void)
         self.assertIn("is_uint()", preflight)
         self.assertIn('""|0*|*[!0-9]*) return 1', preflight)
         self.assertIn("is_hex16()", preflight)
-        self.assertNotIn("=~", preflight)
+        # Reject regex token parsing in the cleanup path; an earlier,
+        # anchored kernel-release validation is outside this recovery slice.
+        self.assertNotIn("=~", recovery)
         # This is the sole arithmetic comparison. Its operand is parsed from
         # /proc/meminfo only after strict decimal and width validation, so
         # signs, leading zeroes, and oversized values never reach Bash math.
