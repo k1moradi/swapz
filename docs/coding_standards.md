@@ -709,10 +709,14 @@ and named block inodes after policy/topology inspection, retain the campaign's
 original live target/parent proof and compare it at every precycle, postcycle
 and terminal check. Changed parent, substituted inode, stale geometry,
 unprovable reader or lost descriptor continuity BLOCK before mutation.
-Revalidate source and target again between successful `prepare` and `start`;
-a refusal at that boundary must prevent `start`, retain first error and
-completed-cycle evidence, and explicitly report that `prepare` may already
-have changed owned state. Recovery after such a refusal requires owner review
+The existing `cycle-N` source approval occurs before `prepare`; the
+parent's phase contract must not be extended by this helper. Between a
+successful `prepare` and `start`, recheck the already authenticated parent's
+pinned process/socket authority and live target identity. A refusal at that
+boundary must prevent `start`, retain first error and completed-cycle
+evidence, and explicitly report that `prepare` may already have changed
+owned state. Any source change after a granted phase remains a separate
+parent-owned admission boundary, not a reason to invent `cycle-N-start`. Recovery after such a refusal requires owner review
 and existing coordinator paths, never automatic authorization of another
 device. The parent must also reject an exited/zombie
 process at every hop of a purported live privileged peer lineage; matching

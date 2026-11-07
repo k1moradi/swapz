@@ -926,9 +926,12 @@ target once with `O_NOFOLLOW|O_EXCL`, derive device and geometry from the
 opened target descriptor, open and bind the parent block descriptor separately,
 and recheck both opened and named inodes after topology/source-policy
 inspection. A close failure must not replace an earlier identity/geometry
-errno. Source and target authorization must also be refreshed after a
-successful prepare and before start: revoked admission BLOCKS start, but the
-diagnostic explicitly says already-prepared owned state may have changed.
+errno. Source approval uses only the parent's existing `cycle-N`
+request before prepare; never invent `cycle-N-start`. After successful
+prepare, recheck the pinned parent-process/socket authority and target proof
+without sending another source request. A revoked parent-process authority
+or changed target BLOCKS start, and the diagnostic explicitly says that
+already-prepared owned state may have changed.
 Recovery uses only the existing coordinator-owned path after review; retain
 completed-cycle evidence on later refusal. This remains snapshot-only
 protection: it does not make the final check-to-mutation interval atomic or

@@ -2386,13 +2386,18 @@ def verify_authorized_target(
                 len(selected_partuuid_rows) != 1):
             raise TargetProofFailed("unique_partition_and_parent")
         target_row, parent_row = target_rows[0], parent_rows[0]
+        try:
+            partition_size = int(target_row.get("size", -1))
+            removable = int(parent_row.get("rm", 0))
+        except (TypeError, ValueError) as exc:
+            raise TargetProofFailed("live_topology_fields") from exc
         if target_row.get("type") != "part" or \
                 selected_partuuid_rows[0] is not target_row or \
                 target_row.get("path") != os.fspath(target) or \
-                int(target_row.get("size", -1)) != size_bytes:
+                partition_size != size_bytes:
             raise TargetProofFailed("live_partition_path_and_geometry")
         if parent_row.get("type") != "disk" or \
-                int(parent_row.get("rm", 0)) != 1 or \
+                removable != 1 or \
                 str(parent_row.get("tran", "")).lower() != "usb":
             raise Blocked(
                 "physical parent is not the authorized removable USB topology")
@@ -4263,10 +4268,12 @@ def run_cycle(index: int, *, swapzctl: Path, oracle_path: Path, validated_source
     manifest = read_manifest(run_id)
     _validate_prepared_manifest(manifest, plan, validated_source, selector_partuuid)
 
-    # Prepare may already have changed durable owned state. Never START using
-    # a stale source or target authorization; preserve READY for owner review.
+    # Cycle source admission occurred before prepare. The parent protocol
+    # permits one cycle-N request, not a new start phase; recheck its pinned
+    # process/socket authority and the live target before any START mutation.
+    # Prepare may already have changed owned READY state.
     try:
-        admission.require(f"cycle-{index}-start")
+        admission._require_parent_authority(f"cycle-{index}")
         _require_selector_at_policy_use(
             selector_evidence, plan, authorization_snapshot,
             target_device, target_parent_device,

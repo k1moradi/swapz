@@ -643,6 +643,10 @@ class PrimaryRealSwapContracts(unittest.TestCase):
              (target_size_bytes, target_size_bytes), 1, None, True),
             ("duplicate_partuuid", 1, 1,
              (target_size_bytes, target_size_bytes), 1, None, True),
+            ("malformed_partition_size", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
+            ("malformed_parent_rm", 1, 1,
+             (target_size_bytes, target_size_bytes), 1, None, True),
             ("reader_identity_missing", 1, 1,
              (target_size_bytes, target_size_bytes), 1, None, True),
             ("reader_identity_mismatch", 1, 1,
@@ -663,12 +667,19 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 live_parent_minor = 16 if renumbered else 0
                 plan, snapshot, topology = synthetic_inputs(
                     live_minor, authorized_minor, renumbered)
-                if scenario == "duplicate_partuuid":
+                if scenario in ("duplicate_partuuid", "malformed_partition_size",
+                                "malformed_parent_rm"):
                     topology_object = json.loads(topology)
-                    topology_object["blockdevices"][0]["children"].append({
-                        "path": "/dev/unrelated1", "type": "part",
-                        "maj:min": "8:49", "size": target_size_bytes,
-                        "partuuid": "aaaaaaaa"})
+                    parent_row = topology_object["blockdevices"][0]
+                    if scenario == "duplicate_partuuid":
+                        parent_row["children"].append({
+                            "path": "/dev/unrelated1", "type": "part",
+                            "maj:min": "8:49", "size": target_size_bytes,
+                            "partuuid": "aaaaaaaa"})
+                    elif scenario == "malformed_partition_size":
+                        parent_row["children"][0]["size"] = "invalid"
+                    else:
+                        parent_row["rm"] = "invalid"
                     topology = json.dumps(topology_object)
                 if scenario == "reader_identity_missing":
                     del snapshot["authorized_target"]["parent_serial"]
@@ -791,7 +802,8 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 self.assertTrue(flags_seen[0] & os.O_EXCL)
                 self.assertTrue(flags_seen[0] & os.O_CLOEXEC)
                 self.assertEqual(close_calls[-1], target_descriptor)
-                if scenario not in ("failed_identity_read", "duplicate_partuuid"):
+                if scenario not in ("failed_identity_read", "duplicate_partuuid",
+                                    "malformed_partition_size", "malformed_parent_rm"):
                     self.assertEqual(close_calls, [parent_descriptor, target_descriptor])
 
     def test_rootless_cycle_last_use_rejects_stale_target_without_primary_mutation(self):
@@ -3302,17 +3314,16 @@ class PrimaryRealSwapContracts(unittest.TestCase):
         primary.assert_not_called()
 
 
-    def test_prestart_reauthorization_refusal_keeps_prepared_ownership(self):
-        # A valid cycle-1 admission does not authorize START after prepare.
+    def test_prestart_parent_authority_refusal_keeps_prepared_ownership(self):
+        # A valid cycle-1 admission does not authorize a departed parent at START.
         run_id = "1" * 32
         prepare = subprocess.CompletedProcess(
             args=[], returncode=0,
             stdout=f"PRIMARY_PREPARE=READY run_id={run_id}\n", stderr="")
         admission = mock.Mock()
-        admission.require.side_effect = [
-            "a" * 64,
-            qualify.Blocked("source admission revoked at cycle-1-start"),
-        ]
+        admission.require.return_value = "a" * 64
+        admission._require_parent_authority.side_effect = qualify.Blocked(
+            "source parent peer changed after prepare")
         with mock.patch.object(qualify, "read_swap_rows", return_value=[]), \
                 mock.patch.object(qualify, "_validate_precycle_state"), \
                 mock.patch.object(qualify, "_kernel_log_snapshot", return_value=[]), \
@@ -3337,9 +3348,9 @@ class PrimaryRealSwapContracts(unittest.TestCase):
                 workload_mib=384, resident_mib=128, swap_limit_mib=384,
                 timeout_seconds=60, prior_run_ids=set(),
                 prior_swap_uuids=set(), admission=admission)
-        self.assertIn("source admission revoked", str(refused.exception))
-        self.assertEqual([call.args[0] for call in admission.require.call_args_list],
-                         ["cycle-1", "cycle-1-start"])
+        self.assertIn("source parent peer changed", str(refused.exception))
+        admission.require.assert_called_once_with("cycle-1")
+        admission._require_parent_authority.assert_called_once_with("cycle-1")
         self.assertEqual([call.args[1] for call in primary.call_args_list],
                          ["prepare"])
 
