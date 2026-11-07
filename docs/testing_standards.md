@@ -2087,7 +2087,13 @@ fixed `[truncated]` witness even when unsafe child exception detail is
 replaced by the sanitized `[private exception detail omitted]` placeholder.
 The witness must never reinstate drained suffix bytes or cause private
 tokens to enter public CI output or the retained failure log. Synthetic
-byte-stream regression must verify both retention and redaction.
+byte-stream regression must verify both retention and redaction. The native
+CI diagnostics tests must distinguish allowlisted numeric `expected=N
+observed=N` assertions (preserve exact numbers and first-cause identity)
+from arbitrary child-authored assertion/setup strings (retain the exception
+class and private-detail omission marker only). The log-retention failure
+fixture must likewise retain original exit and diagnostic errno without
+printing the child's private assertion text.
 If sanitized-log retention itself fails, the original test exit and cause are
 still reported, while `log=unavailable` and the numeric diagnostic errno
 describe that secondary evidence failure. All promoted fields use the existing

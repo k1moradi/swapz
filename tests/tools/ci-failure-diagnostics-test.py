@@ -50,14 +50,14 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
     def test_native_assertion_keeps_suite_test_and_first_diagnostic(self):
         failure = self.diagnose(
             "FAIL: test_extent (__main__.NativeCase)\n"
-            "AssertionError: expected bytes=4096 observed=8192\n"
+            "AssertionError: expected=4096 observed=8192\n"
             "ERROR: tearDown (__main__.NativeCase)\n"
             "RuntimeError: cleanup failed\n")
         self.assertEqual(failure["test"], "__main__.NativeCase.test_extent")
         self.assertEqual(failure["phase"], "native-rootless")
         self.assertEqual(failure["category"], "RUNTIME_ASSERTION")
         self.assertEqual(failure["first_error"],
-                         "AssertionError: expected bytes=4096 observed=8192")
+                         "AssertionError: expected=4096 observed=8192")
         self.assertEqual(failure["exit_code"], 1)
         self.assertIn("assertions", failure["expected_contract"])
         self.assertEqual(failure["observed"], failure["first_error"])
@@ -522,7 +522,9 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
             "FAIL: test_secret (__main__.NativeCase)\n"
             "AssertionError: token=privatevalue expected 1 observed 2")
         self.assertNotIn("privatevalue", json.dumps(failure))
-        self.assertIn("<redacted>", failure["first_error"])
+        self.assertEqual(failure["first_error"],
+                         "AssertionError: [private exception detail omitted]")
+        self.assertNotIn("expected 1 observed 2", failure["reason"])
         fake_marker = self.diagnose(
             "FAIL: rootless phase=../secret-path subtest=unavailable test=unavailable "
             "exit=4 reason=nonzero_exit phase_s=1 stage_s=1 "
@@ -609,7 +611,10 @@ class NativeCiFailureDiagnostics(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         diagnostic = json.loads(output.getvalue().split(
             "SWAPZ_CI_FAILURE=", 1)[1])
-        self.assertEqual(diagnostic["first_error"], "AssertionError: first cause")
+        self.assertEqual(
+            diagnostic["first_error"],
+            "AssertionError: [private exception detail omitted]")
+        self.assertNotIn("first cause", json.dumps(diagnostic))
         self.assertEqual(diagnostic["log"], "unavailable")
         self.assertEqual(diagnostic["diagnostic_errno"], 28)
 
